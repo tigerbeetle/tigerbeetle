@@ -1,3 +1,5 @@
 # tiger-beetle
 
-[DATA_STRUCTURES.md](DATA_STRUCTURES.md)
+## 10x faster, cheaper, safer.
+
+Reading [papers](PAPERS.md), sketching [data structures](DATA_STRUCTURES.md)...
