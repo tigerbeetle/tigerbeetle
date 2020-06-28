@@ -1,0 +1,9 @@
+capture what comes in for prepares - DONE
+see what logic is executed for these - DONE
+convert to efficient network format - DONE
+create sample from actual data - DONE
+validate transfer prepare - DONE
+read transfers into memory - DONE
+divide into batches - DONE
+write logic - DONE
+replay packets locally and see what we can do - DONE

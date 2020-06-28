@@ -1,0 +1,69 @@
+PREPARE-POSITION
+
+prepare duplicate check:
+1587309924652 "insert into `transferDuplicateCheck` (`hash`, `transferId`) values (?, ?)"
+
+validateFspiopSourceMatchesPayer(payload, headers) // asserts headers['fspiop-source'] matches payload.payerFsp
+validateParticipantByName(payload.payerFsp) // asserts payer participant exists by doing a lookup by name (discards result of lookup work)
+validatePositionAccountByNameAndCurrency(payload.payerFsp, payload.amount.currency) // asserts account exists for name-currency tuple (discards result of lookup work)
+validateParticipantByName(payload.payeeFsp) // asserts payee participant exists by doing a lookup by name (discards result of lookup work)
+validatePositionAccountByNameAndCurrency(payload.payeeFsp, payload.amount.currency) // asserts account exists for name-currency tuple (discards result of lookup work)
+validateAmount(payload.amount) // TODO: validates allowed scale of decimal places and allowed precision
+validateConditionAndExpiration(payload) // TODO: validates condition and expiration
+  assert(payload.condition)
+  assert(FiveBellsCondition.validateCondition('ni:///sha-256;' + payload.condition + '?fpt=preimage-sha-256&cost=0'))
+  assert(payload.expiration)
+  assert(Date.parse(payload.expiration) >= Date.parse(new Date().toDateString()))
+validateDifferentDfsp(payload) // asserts lowercase string comparison of payload.payerFsp and payload.payeeFsp is different
+
+write the transfer to the DB...AND attempt payer dfsp position adjustment at the same time:
+saveTransferPreparedChangePosition()
+
+1587309924656 "insert into `transfer` (`amount`, `currencyId`, `expirationDate`, `ilpCondition`, `transferId`) values (?, ?, ?, ?, ?)"
+1587309924656 "insert into `transferParticipant` (`amount`, `ledgerEntryTypeId`, `participantCurrencyId`, `transferId`, `transferParticipantRoleTypeId`) values (?, ?, ?, ?, ?)"
+1587309924656 "insert into `transferParticipant` (`amount`, `ledgerEntryTypeId`, `participantCurrencyId`, `transferId`, `transferParticipantRoleTypeId`) values (?, ?, ?, ?, ?)"
+1587309924656 "insert into `ilpPacket` (`transferId`, `value`) values (?, ?)"
+1587309924658 "insert into `transferStateChange` (`createdDate`, `reason`, `transferId`, `transferStateId`) values (?, ?, ?, ?)"
+1587309924660 "UPDATE participantPosition SET value = (value + 100), changedDate = '2020-04-19 15:25:24.655' WHERE participantPositionId = 3 AND (value + 100) < (SELECT value FROM participantLimit WHERE participantLimitId = 1)"
+1587309924661 "INSERT INTO participantPositionChange (participantPositionId, transferStateChangeId, value, reservedValue, createdDate) SELECT 3, 1253, value, reservedValue, '2020-04-19 15:25:24.655' FROM participantPosition WHERE participantPositionId = 3"
+
+const names = [payload.payeeFsp, payload.payerFsp]
+const participants = [] // filled out by doing lookups for both participants in names array
+
+const insert_transfer = {
+  amount: payload.amount.amount,
+  currencyId: payload.amount.currency,
+  expirationDate: Time.getUTCString(new Date(payload.expiration)),
+  ilpCondition: payload.condition,
+  transferId: payload.transferId
+}
+
+const payerTransferParticipantRecord = {
+  amount: payload.amount.amount,
+  ledgerEntryTypeId: Enum.Accounts.LedgerEntryType.PRINCIPLE_VALUE,
+  participantCurrencyId: participantCurrencyIds[payload.payerFsp],
+  transferId: payload.transferId,
+  transferParticipantRoleTypeId: Enum.Accounts.TransferParticipantRoleType.PAYER_DFSP
+}
+
+const payeeTransferParticipantRecord = {
+  amount: -payload.amount.amount,
+  ledgerEntryTypeId: Enum.Accounts.LedgerEntryType.PRINCIPLE_VALUE,
+  participantCurrencyId: participantCurrencyIds[payload.payeeFsp],
+  transferId: payload.transferId,
+  transferParticipantRoleTypeId: Enum.Accounts.TransferParticipantRoleType.PAYEE_DFSP
+}
+
+const insert_ilpPacket = {
+  transferId: payload.transferId,
+  value: payload.ilpPacket
+}
+
+const transferStateChangeRecord = {
+  createdDate: Time.getUTCString(now),
+  reason: stateReason = null,
+  transferId: payload.transferId,
+  transferStateId: Enum.Transfers.TransferInternalState.RESERVED
+}
+
+send notification to payee dfsp
