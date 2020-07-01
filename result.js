@@ -10,6 +10,7 @@ Result.TransferCreateTimestampReserved = result++;
 Result.TransferCommitTimestampReserved = result++;
 Result.PayerDoesNotExist = result++;
 Result.PayeeDoesNotExist = result++;
+Result.ParticipantsAreTheSame = result++;
 Result.NetDebitCap = result++;
 
 module.exports = Result;

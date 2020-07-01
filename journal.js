@@ -16,7 +16,7 @@ Journal.open = function(path) {
   self.fd = self.fs.openSync(self.path, 'r+');
 };
 
-Journal.write = function(buffer, end) {
+Journal.write = function(buffer) {
   const self = this;
   // TODO: Batch Records
   // TODO: Checksums
@@ -30,20 +30,17 @@ Journal.write = function(buffer, end) {
   self.writing = true;
   // Simulate CPU cost of checkum:
   Crypto.hash('sha256', buffer);
-  self.fs.write(self.fd, buffer, 0, buffer.length, self.position,
-    function(error, bytesWritten) {
-      assert(!error);
-      assert(bytesWritten === buffer.length);
-      self.fs.fsync(self.fd,
-        function(error) {
-          assert(!error);
-          self.position += buffer.length;
-          self.writing = false;
-          end();
-        }
-      );
-    }
+  var bytesWritten = self.fs.writeSync(
+    self.fd,
+    buffer,
+    0,
+    buffer.length,
+    self.position
   );
+  assert(bytesWritten === buffer.length);
+  self.fs.fsyncSync(self.fd);
+  self.position += buffer.length;
+  self.writing = false;
 };
 
 module.exports = Journal;

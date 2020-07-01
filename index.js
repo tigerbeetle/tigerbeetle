@@ -1,5 +1,7 @@
 const assert = require('assert');
 
+const PORT = 30000;
+
 const Node = {
   fs: require('fs'),
   net: require('net')
@@ -67,14 +69,23 @@ const PAYEE = Buffer.alloc(PARTICIPANT);
 
 const Logic = {};
 
+// Compare two buffers for equality without creating slices and associated GC:
+Logic.equal = function(a, aOffset, b, bOffset, size) {
+  // Node's buffer.equals() accepts no offsets, costing 100,000 TPS!!
+  while (size--) if (a[aOffset++] !== b[bOffset++]) return false;
+  return true;
+};
+
 Logic.createTransfer = function(state, buffer, offset) {
   assert(Number.isSafeInteger(offset));
   assert(offset >= 0 && offset % TRANSFER === 0);
   assert(offset + TRANSFER <= buffer.length);
 
   if (state.transfers.exist(buffer, offset + TRANSFER_ID_OFFSET) === 1) {
-    return Result.TransferExists;
+    // TODO Currently allowing duplicate results to make benchmarking easier.
+    // return Result.TransferExists;
   }
+
   if (
     state.participants.get(buffer, offset + TRANSFER_PAYER_OFFSET, PAYER, 0)
     !== 1
@@ -88,7 +99,18 @@ Logic.createTransfer = function(state, buffer, offset) {
     return Result.PayeeDoesNotExist;
   }
 
-  // TODO Assert payer and payee ids are different (byte-for-byte only).
+  if (
+    Logic.equal(
+      PAYER,
+      PARTICIPANT_ID_OFFSET,
+      PAYEE,
+      PARTICIPANT_ID_OFFSET,
+      PARTICIPANT_ID
+    )
+  ) {
+    return Result.ParticipantsAreTheSame;
+  }
+
   const amount = buffer.readUIntBE(
     offset + TRANSFER_AMOUNT_OFFSET,
     6 // TODO We have a 64-bit field but only use 48-bits because of JS limits.
@@ -133,7 +155,8 @@ Logic.createTransfer = function(state, buffer, offset) {
   
   // TODO Double-check that all validations are done (see BUSINESS_LOGIC.json).
 
-  assert(state.transfers.set(buffer, offset + 0, buffer, offset + 0) === 0);
+  // TODO Assert insert is unique.
+  state.transfers.set(buffer, offset + 0, buffer, offset + 0);
   return Result.OK;
 };
 
@@ -180,38 +203,62 @@ State.transfers = new HashTable(16, 64, 10000000, 256000000);
   );
 })();
 
-const transfers = Node.fs.readFileSync('transfers');
-assert(transfers.length % TRANSFER === 0);
-const count = transfers.length / TRANSFER;
-const batch_size = TRANSFER * 1000;
+const ProcessBatch = function(buffer) {
+  Journal.write(buffer);
+  var offset = 0;
+  while (offset < buffer.length) {
+    assert(Logic.createTransfer(State, buffer, offset) === Result.OK);
+    offset += TRANSFER;
+  }
+  assert(offset === buffer.length);
+};
 
-const start = Date.now();
-const queue = new Queue(1);
-queue.onData = function(buffer, end) {
-  Journal.write(buffer,
-    function(error) {
-      assert(!error);
-      var offset = 0;
-      while (offset < buffer.length) {
-        assert(Logic.createTransfer(State, buffer, offset) === Result.OK);
-        offset += TRANSFER;
+const Server = Node.net.createServer(
+  function(socket) {
+    console.log('client connected...');
+    var batchSize = 0;
+    var batchReceived = 0;
+    var batch = [];
+    socket.on('data',
+      function(buffer) {
+        // Quick and dirty parser:
+        while (buffer.length) {
+          if (batchSize === 0) {
+            batchSize = buffer.readUInt32BE(0);
+            // console.log(`batchSize=${batchSize}`);
+            if (batchSize === 0) return socket.end();
+            buffer = buffer.slice(4);
+            // console.log(`buffer has ${buffer.length} bytes remaining`);
+            if (buffer.length === 0) break;
+          }
+          var chunk = buffer.slice(0, batchSize - batchReceived);
+          // console.log(`received chunk of ${chunk.length} bytes`);
+          batch.push(chunk);
+          batchReceived += chunk.length;
+          buffer = buffer.slice(chunk.length);
+          // console.log(`buffer has ${buffer.length} bytes remaining`);
+          if (batchReceived === batchSize) {
+            var received = batch.length === 1 ? batch[0] : Buffer.concat(batch);
+            ProcessBatch(received);
+            // console.log(`batch receive completed`);
+            // console.log(`resetting receive state...`);
+            socket.write('1');
+            batchSize = 0;
+            batchReceived = 0;
+            batch = [];
+          }
+        }
       }
-      assert(offset === buffer.length);
-      end();
-    }
-  );
-};
-queue.onEnd = function(error) {
-  assert(!error);
-  const ms = Date.now() - start;
-  console.log(`persisted and prepared ${count} transfers in ${ms}ms`);
-  console.log(`${Math.floor(count / (ms / 1000))} transfers per second`);
-};
+    );
+    socket.on('end',
+      function() {
+        console.log('client disconnected.');
+      }
+    );
 
-var offset = 0;
-while (offset < transfers.length) {
-  var buffer = transfers.slice(offset, offset + batch_size);
-  queue.push(buffer);
-  offset += buffer.length;
-}
-queue.end();
+  }
+);
+
+Server.on('error', function(error) { console.error(error); });
+
+Server.listen(PORT, function() { console.log(`listening on ${PORT}...`); });
