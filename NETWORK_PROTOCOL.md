@@ -13,7 +13,10 @@ HEADER (64 bytes)
  8 bytes MAGIC (for protocol versioning)
  4 bytes COMMAND
  4 bytes SIZE (of DATA if any)
-DATA
+DATA (multiples of 64 bytes)
+................................................................................
+................................................................................
+................................................................................
 ```
 
 The header is a multiple of 64 bytes because we want to keep the subsequent data
