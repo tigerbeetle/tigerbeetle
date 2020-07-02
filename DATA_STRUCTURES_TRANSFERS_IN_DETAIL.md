@@ -1,3 +1,8 @@
+# Data Structures: Transfers In Detail
+
+We will move to Option C in future.
+
+```
 Option A: transfer {
                 id: 16 bytes (128-bit)
           payer_id:  6 bytes ( 48-bit)
@@ -8,7 +13,9 @@ Option A: transfer {
   accept_timestamp:  6 bytes ( 48-bit) [reserved]
        userdata_id:  6 bytes ( 48-bit) [reserved]
 } = 64 bytes (1 cpu cache line)
+```
 
+```
 Option B: transfer {
                 id: 16 bytes (128-bit)
           payer_id:  4 bytes ( 32-bit) (does not support random uuids, limits applications)
@@ -20,7 +27,9 @@ Option B: transfer {
           vector_0:  8 bytes ( 64-bit) (not enough entropy to be safe against collisions)
           vector_1:  8 bytes ( 64-bit) (not enough entropy to be safe against collisions)
 } = 64 bytes (1 cpu cache line)
+```
 
+```
 Option C: transfer {
                 id: 16 bytes (128-bit)
           payer_id: 16 bytes (128-bit)
@@ -34,6 +43,7 @@ Option C: transfer {
           vector_0: 16 bytes (128-bit) [reserved]
           vector_1: 16 bytes (128-bit) [reserved]
 } = 128 bytes (2 cpu cache lines)
+```
 
 The user can insert a batch of userdata in advance if they want to.
 When we see a non-zero userdata_id, we then do a hash table lookup to enforce the foreign key relation.
