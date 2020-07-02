@@ -1,6 +1,6 @@
 const assert = require('assert');
 
-const PORT = 30000;
+const PORT = process.env.PORT || 30000;
 
 const Node = {
   child: require('child_process'),
@@ -402,7 +402,7 @@ const Server = Node.net.createServer(
 
 Server.on('error', function(error) { console.error(error); });
 
-Server.listen(PORT,
+Server.listen(Number(PORT),
   function() {
     console.log(`listening on ${PORT}...`);
     if (!Node.process.argv[2]) {

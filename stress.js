@@ -8,7 +8,7 @@ const Node = {
 
 const Crypto = require('@ronomon/crypto-async');
 
-const HOST = '127.0.0.1';
+const HOST = 'tb.perf.openafrica.network';
 const PORT = 30000;
 
 const TRANSFER = 64;
