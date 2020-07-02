@@ -25,6 +25,7 @@ function sendBatch(socket) {
     const tps = Math.floor(count / (ms / 1000));
     console.log(new Array(30).join('='));
     console.log(`${tps.toString().padStart(7, ' ')} transfers per second`);
+    socket.write(Buffer.alloc(4)); // kill server
     return Node.process.exit();
   }
   var batch = transfers.slice(transfersOffset, transfersOffset + BATCH_SIZE);
@@ -34,7 +35,7 @@ function sendBatch(socket) {
   socket.write(batchSize);
   socket.write(batch);
   var sent = transfersOffset / TRANSFER;
-  if (sent % 10000 === 0) {
+  if (sent % 100000 === 0) {
     console.log(`${sent.toString().padStart(7, ' ')} transfers...`);
   }
 }

@@ -10,5 +10,18 @@ replay packets locally and see what we can do - DONE
 prepare validations - DONE
 do buffer comparison on payee and payer to assert different - DONE
 network - DONE
+adjust payer position - DONE
+set create timestamp - DONE
 
-fulfil
+can participant position ever be negative?
+how does mojaloop handle duplicate errors?
+who uses mojaloop's bulk functionality?
+would be cool to get ml-api-adaptor logs from a real deployment so we can gauge usage of apis and what we need to optimize
+config for idempotency failure mode (silent or fail)
+config for max batch size
+batches should have a type for the whole batch:
+  create participants if not exist
+  update participants if exist
+  create transfers
+  commit transfers
+  reject transfers

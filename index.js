@@ -3,8 +3,10 @@ const assert = require('assert');
 const PORT = 30000;
 
 const Node = {
+  child: require('child_process'),
   fs: require('fs'),
-  net: require('net')
+  net: require('net'),
+  process: process
 };
 
 const Crypto = require('@ronomon/crypto-async');
@@ -76,10 +78,37 @@ Logic.equal = function(a, aOffset, b, bOffset, size) {
   return true;
 };
 
+Logic.adjustParticipantPosition = function(amount, buffer, offset) {
+  assert(Number.isSafeInteger(amount));
+  assert(Number.isSafeInteger(offset));
+  assert(offset >= 0 && offset + PARTICIPANT <= buffer.length);
+  const position = buffer.readUIntBE(
+    offset + PARTICIPANT_POSITION_OFFSET,
+    6 // TODO 64-bit
+  );
+  const net_debit_cap = buffer.readUIntBE(
+    offset + PARTICIPANT_NET_DEBIT_CAP_OFFSET,
+    6 // TODO 64-bit
+  );
+  assert(position + amount >= 0);
+  assert(position + amount <= net_debit_cap);
+  buffer.writeUIntBE(
+    position + amount,
+    offset + PARTICIPANT_POSITION_OFFSET,
+    6 // TODO 64-bit
+  );
+};
+
+Logic.commitTransfer = function(state, buffer, offset) {
+  // 1587309924771 "insert into `transferFulfilment` (`completedDate`, `createdDate`, `ilpFulfilment`, `isValid`, `settlementWindowId`, `transferId`)"
+  // 1587309924775 "UPDATE participantPosition SET value = (value + -100), changedDate = '2020-04-19 15:25:24.769' WHERE participantPositionId = 5 "
+  // 1587309924776 "INSERT INTO participantPositionChange (participantPositionId, transferStateChangeId, value, reservedValue, createdDate) SELECT 5, 1254, value, reservedValue, '2020-04-19 15:25:24.769' FROM participantPosition WHERE participantPositionId = 5"
+};
+
 Logic.createTransfer = function(state, buffer, offset) {
   assert(Number.isSafeInteger(offset));
-  assert(offset >= 0 && offset % TRANSFER === 0);
-  assert(offset + TRANSFER <= buffer.length);
+  assert(offset >= 0 && offset + TRANSFER <= buffer.length);
+  assert(offset % TRANSFER === 0);
 
   if (state.transfers.exist(buffer, offset + TRANSFER_ID_OFFSET) === 1) {
     // TODO Currently allowing duplicate results to make benchmarking easier.
@@ -113,16 +142,16 @@ Logic.createTransfer = function(state, buffer, offset) {
 
   const amount = buffer.readUIntBE(
     offset + TRANSFER_AMOUNT_OFFSET,
-    6 // TODO We have a 64-bit field but only use 48-bits because of JS limits.
+    6 // TODO 64-bit
   );
   if (amount === 0) return Result.TransferAmountZero;
   const payer_net_debit_cap = PAYER.readUIntBE(
     PARTICIPANT_NET_DEBIT_CAP_OFFSET,
-    6 // TODO We have a 64-bit field but only use 48-bits because of JS limits.
+    6 // TODO 64-bit
   );
   const payer_position = PAYER.readUIntBE(
     PARTICIPANT_POSITION_OFFSET,
-    6 // TODO We have a 64-bit field but only use 48-bits because of JS limits.
+    6 // TODO 64-bit
   );
   // TODO Check if Mojaloop is correct in failing if position + amount >= NDC.
   if (payer_position + amount > payer_net_debit_cap) {
@@ -154,6 +183,17 @@ Logic.createTransfer = function(state, buffer, offset) {
   assert(userdata === 0); // Not yet supported.
   
   // TODO Double-check that all validations are done (see BUSINESS_LOGIC.json).
+  
+  // Set reserved create timestamp to indicate that transfer has been prepared:
+  buffer.writeUIntBE(
+    Date.now(), // TODO Use batch timestamp to amortize calls to Date.now().
+    offset + TRANSFER_CREATE_TIMESTAMP_OFFSET,
+    TRANSFER_CREATE_TIMESTAMP
+  );
+
+  // Adjust payer position:
+  Logic.adjustParticipantPosition(amount, PAYER, 0);
+  state.participants.set(PAYER, 0, PAYER, 0);
 
   // TODO Assert insert is unique.
   state.transfers.set(buffer, offset + 0, buffer, offset + 0);
@@ -204,7 +244,7 @@ State.transfers = new HashTable(16, 64, 10000000, 256000000);
 })();
 
 const ProcessBatch = function(buffer) {
-  Journal.write(buffer);
+  // Journal.write(buffer);
   var offset = 0;
   while (offset < buffer.length) {
     assert(Logic.createTransfer(State, buffer, offset) === Result.OK);
@@ -224,9 +264,15 @@ const Server = Node.net.createServer(
         // Quick and dirty parser:
         while (buffer.length) {
           if (batchSize === 0) {
+            // TODO We hack and assume buffer always has at least 4 bytes.
+            // This is not always true.
             batchSize = buffer.readUInt32BE(0);
             // console.log(`batchSize=${batchSize}`);
-            if (batchSize === 0) return socket.end();
+            if (batchSize === 0) {
+              socket.end();
+              Node.process.exit();
+              return;
+            }
             buffer = buffer.slice(4);
             // console.log(`buffer has ${buffer.length} bytes remaining`);
             if (buffer.length === 0) break;
@@ -261,4 +307,11 @@ const Server = Node.net.createServer(
 
 Server.on('error', function(error) { console.error(error); });
 
-Server.listen(PORT, function() { console.log(`listening on ${PORT}...`); });
+Server.listen(PORT,
+  function() {
+    console.log(`listening on ${PORT}...`);
+    if (!Node.process.argv[2]) {
+      const child = Node.child.fork('stress.js');
+    }
+  }
+);
