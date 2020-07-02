@@ -16,21 +16,13 @@ const Queue = require('@ronomon/queue');
 // You need to create and preallocate an empty journal using:
 // dd < /dev/zero bs=1048576 count=256 > journal
 
-// 10 Foot Overview:
+// 10,000 Foot Overview:
+//
 // 1. Receive a batch of transfers from the network.
 // 2. Write these sequentially to disk and fsync.
 // 3. Apply business logic and apply to in-memory state.
 
-// transfer {
-//                 id: 16 bytes (128-bit)
-//              payer:  8 bytes ( 64-bit)
-//              payee:  8 bytes ( 64-bit)
-//             amount:  8 bytes ( 64-bit)
-//   expire_timestamp:  6 bytes ( 48-bit)
-//   create_timestamp:  6 bytes ( 48-bit) [reserved]
-//   commit_timestamp:  6 bytes ( 48-bit) [reserved]
-//           userdata:  6 bytes ( 48-bit) [reserved]
-// }
+// See DATA_STRUCTURES.md:
 
 const TRANSFER                         = 64;
 
@@ -61,18 +53,43 @@ const PARTICIPANT_ID_OFFSET            = 0;
 const PARTICIPANT_NET_DEBIT_CAP_OFFSET = 0 + 8;
 const PARTICIPANT_POSITION_OFFSET      = 0 + 8 + 8;
 
+const COMMAND_CREATE_TRANSFERS = 1;
+const COMMAND_ACCEPT_TRANSFERS = 2;
+
+// See NETWORK_PROTOCOL.md:
+
+const MAGIC = Buffer.from('0a5ca1ab1ebee11e', 'hex'); // A scalable beetle...
+
+const NETWORK_HEADER                      = 64;
+const NETWORK_HEADER_CHECKSUM_META        = 16;
+const NETWORK_HEADER_CHECKSUM_DATA        = 16;
+const NETWORK_HEADER_ID                   = 16;
+const NETWORK_HEADER_MAGIC                = 8;
+const NETWORK_HEADER_COMMAND              = 4;
+const NETWORK_HEADER_SIZE                 = 4;
+
+const NETWORK_HEADER_CHECKSUM_META_OFFSET = 0;
+const NETWORK_HEADER_CHECKSUM_DATA_OFFSET = 0 + 16;
+const NETWORK_HEADER_ID_OFFSET            = 0 + 16 + 16;
+const NETWORK_HEADER_MAGIC_OFFSET         = 0 + 16 + 16 + 16;
+const NETWORK_HEADER_COMMAND_OFFSET       = 0 + 16 + 16 + 16 + 8;
+const NETWORK_HEADER_SIZE_OFFSET          = 0 + 16 + 16 + 16 + 8 + 4;
+
 const Result = require('./result.js');
 
 const Journal = require('./journal.js');
 Journal.open('./journal');
 
-const PAYER = Buffer.alloc(PARTICIPANT);
-const PAYEE = Buffer.alloc(PARTICIPANT);
+// We pre-allocate buffers outside of the critical path.
+// We reuse these when working with hash table values.
+const BUF_PAYER = Buffer.alloc(PARTICIPANT);
+const BUF_PAYEE = Buffer.alloc(PARTICIPANT);
+const BUF_TRANSFER = Buffer.alloc(TRANSFER);
 
 const Logic = {};
 
 // Compare two buffers for equality without creating slices and associated GC:
-Logic.equal = function(a, aOffset, b, bOffset, size) {
+const Equal = function(a, aOffset, b, bOffset, size) {
   // Node's buffer.equals() accepts no offsets, costing 100,000 TPS!!
   while (size--) if (a[aOffset++] !== b[bOffset++]) return false;
   return true;
@@ -100,15 +117,21 @@ Logic.adjustParticipantPosition = function(amount, buffer, offset) {
 };
 
 Logic.commitTransfer = function(state, buffer, offset) {
+  assert(Number.isSafeInteger(offset));
+  assert(offset >= 0 && offset + TRANSFER <= buffer.length);
   // 1587309924771 "insert into `transferFulfilment` (`completedDate`, `createdDate`, `ilpFulfilment`, `isValid`, `settlementWindowId`, `transferId`)"
   // 1587309924775 "UPDATE participantPosition SET value = (value + -100), changedDate = '2020-04-19 15:25:24.769' WHERE participantPositionId = 5 "
   // 1587309924776 "INSERT INTO participantPositionChange (participantPositionId, transferStateChangeId, value, reservedValue, createdDate) SELECT 5, 1254, value, reservedValue, '2020-04-19 15:25:24.769' FROM participantPosition WHERE participantPositionId = 5"
+
+  if (state.transfers.exist(buffer, offset + TRANSFER_ID_OFFSET) === 1) {
+    // TODO Currently allowing duplicate results to make benchmarking easier.
+    // return Result.TransferExists;
+  }
 };
 
 Logic.createTransfer = function(state, buffer, offset) {
   assert(Number.isSafeInteger(offset));
   assert(offset >= 0 && offset + TRANSFER <= buffer.length);
-  assert(offset % TRANSFER === 0);
 
   if (state.transfers.exist(buffer, offset + TRANSFER_ID_OFFSET) === 1) {
     // TODO Currently allowing duplicate results to make benchmarking easier.
@@ -116,23 +139,23 @@ Logic.createTransfer = function(state, buffer, offset) {
   }
 
   if (
-    state.participants.get(buffer, offset + TRANSFER_PAYER_OFFSET, PAYER, 0)
+    state.participants.get(buffer, offset + TRANSFER_PAYER_OFFSET, BUF_PAYER, 0)
     !== 1
   ) {
     return Result.PayerDoesNotExist;
   }
   if (
-    state.participants.get(buffer, offset + TRANSFER_PAYEE_OFFSET, PAYEE, 0)
+    state.participants.get(buffer, offset + TRANSFER_PAYEE_OFFSET, BUF_PAYEE, 0)
     !== 1
   ) {
     return Result.PayeeDoesNotExist;
   }
 
   if (
-    Logic.equal(
-      PAYER,
+    Equal(
+      BUF_PAYER,
       PARTICIPANT_ID_OFFSET,
-      PAYEE,
+      BUF_PAYEE,
       PARTICIPANT_ID_OFFSET,
       PARTICIPANT_ID
     )
@@ -145,11 +168,11 @@ Logic.createTransfer = function(state, buffer, offset) {
     6 // TODO 64-bit
   );
   if (amount === 0) return Result.TransferAmountZero;
-  const payer_net_debit_cap = PAYER.readUIntBE(
+  const payer_net_debit_cap = BUF_PAYER.readUIntBE(
     PARTICIPANT_NET_DEBIT_CAP_OFFSET,
     6 // TODO 64-bit
   );
-  const payer_position = PAYER.readUIntBE(
+  const payer_position = BUF_PAYER.readUIntBE(
     PARTICIPANT_POSITION_OFFSET,
     6 // TODO 64-bit
   );
@@ -192,8 +215,8 @@ Logic.createTransfer = function(state, buffer, offset) {
   );
 
   // Adjust payer position:
-  Logic.adjustParticipantPosition(amount, PAYER, 0);
-  state.participants.set(PAYER, 0, PAYER, 0);
+  Logic.adjustParticipantPosition(amount, BUF_PAYER, 0);
+  state.participants.set(BUF_PAYER, 0, BUF_PAYER, 0);
 
   // TODO Assert insert is unique.
   state.transfers.set(buffer, offset + 0, buffer, offset + 0);
@@ -243,56 +266,129 @@ State.transfers = new HashTable(16, 64, 10000000, 256000000);
   );
 })();
 
-const ProcessBatch = function(buffer) {
-  Journal.write(buffer);
+const ProcessRequest = function(header, data) {
+  const command = header.readUInt32BE(NETWORK_HEADER_COMMAND_OFFSET);
+  assert(
+    command === COMMAND_CREATE_TRANSFERS ||
+    command === COMMAND_ACCEPT_TRANSFERS
+  );
+  const size = header.readUInt32BE(NETWORK_HEADER_SIZE_OFFSET);
+  assert(data.length === size);
+  Journal.write(data);
+  var method;
+  if (command === COMMAND_CREATE_TRANSFERS) {
+    method = Logic.createTransfer;
+  } else if (command === COMMAND_ACCEPT_TRANSFERS) {
+    method = Logic.acceptTransfer;
+  } else {
+    throw new Error('unsupported command');
+  }
   var offset = 0;
-  while (offset < buffer.length) {
-    assert(Logic.createTransfer(State, buffer, offset) === Result.OK);
+  while (offset < data.length) {
+    assert(method(State, data, offset) === Result.OK);
     offset += TRANSFER;
   }
-  assert(offset === buffer.length);
+  assert(offset === data.length);
+  // TODO Error buffer
 };
 
 const Server = Node.net.createServer(
   function(socket) {
     console.log('client connected...');
-    var batchSize = 0;
-    var batchReceived = 0;
-    var batch = [];
+    // We truncate 256-bit checksums to 128-bit:
+    const checksum_meta = Buffer.alloc(32);
+    const checksum_data = Buffer.alloc(32);
+    assert(checksum_meta.length > NETWORK_HEADER_CHECKSUM_META);
+    assert(checksum_data.length > NETWORK_HEADER_CHECKSUM_DATA);
+    var header;
+    var headerBuffers = [];
+    var headerRemaining = NETWORK_HEADER;
+    var data;
+    var dataBuffers = [];
+    var dataRemaining = 0;
     socket.on('data',
       function(buffer) {
-        // Quick and dirty parser:
         while (buffer.length) {
-          if (batchSize === 0) {
-            // TODO We hack and assume buffer always has at least 4 bytes.
-            // This is not always true.
-            batchSize = buffer.readUInt32BE(0);
-            // console.log(`batchSize=${batchSize}`);
-            if (batchSize === 0) {
-              socket.end();
-              Node.process.exit();
+          if (headerRemaining) {
+            // We are expecting a header.
+            if (headerRemaining > buffer.length) {
+              // ...but buffer contains only a partial header buffer.
+              console.log(`received a partial header buffer ${buffer.length} bytes`);
+              headerBuffers.push(buffer);
+              headerRemaining -= buffer.length;
               return;
             }
-            buffer = buffer.slice(4);
-            // console.log(`buffer has ${buffer.length} bytes remaining`);
-            if (buffer.length === 0) break;
+            headerBuffers.push(buffer.slice(0, headerRemaining));
+            header = Buffer.concat(headerBuffers);
+            buffer = buffer.slice(headerRemaining);
+            headerRemaining = 0;
+            // Verify header MAGIC:
+            if (
+              !Equal(
+                header,
+                NETWORK_HEADER_MAGIC_OFFSET,
+                MAGIC,
+                0,
+                NETWORK_HEADER_MAGIC
+              )
+            ) {
+              // We don't speak the same language or something is really wrong.
+              console.log('error: wrong magic');
+              return socket.destroy(); // Prevent parsing more data events.
+            }
+            // Verify header CHECKSUM_META:
+            assert(
+              Crypto.hash(
+                'sha256',
+                header,
+                NETWORK_HEADER_CHECKSUM_DATA_OFFSET,
+                NETWORK_HEADER - NETWORK_HEADER_CHECKSUM_META,
+                checksum_meta,
+                0
+              ) === 32
+            );
+            if (
+              !Equal(
+                header,
+                NETWORK_HEADER_CHECKSUM_META_OFFSET,
+                checksum_meta,
+                0,
+                NETWORK_HEADER_CHECKSUM_META
+              )
+            ) {
+              // TODO We are treating corruption the same as a network error?
+              console.log('error: corrupt header');
+              return socket.destroy(); // Prevent parsing more data events.
+            }
+            dataBuffers = [];
+            dataRemaining = header.readUInt32BE(NETWORK_HEADER_SIZE_OFFSET);
+            // We are done receiving the header... onwards!
+            if (buffer.length === 0) return;
           }
-          var chunk = buffer.slice(0, batchSize - batchReceived);
-          // console.log(`received chunk of ${chunk.length} bytes`);
-          batch.push(chunk);
-          batchReceived += chunk.length;
-          buffer = buffer.slice(chunk.length);
-          // console.log(`buffer has ${buffer.length} bytes remaining`);
-          if (batchReceived === batchSize) {
-            var received = batch.length === 1 ? batch[0] : Buffer.concat(batch);
-            ProcessBatch(received);
-            // console.log(`batch receive completed`);
-            // console.log(`resetting receive state...`);
-            socket.write('1');
-            batchSize = 0;
-            batchReceived = 0;
-            batch = [];
+
+          // We are expecting data.
+          assert(dataRemaining >= 0);
+          if (dataRemaining > buffer.length) {
+            // ... but buffer contains only a partial data buffer.
+            dataBuffers.push(buffer);
+            dataRemaining -= buffer.length;
+            return;
           }
+          dataBuffers.push(buffer.slice(0, dataRemaining));
+          data = Buffer.concat(dataBuffers);
+          buffer = buffer.slice(dataRemaining);
+          
+          // TODO Parser needs to work with async calls.
+          ProcessRequest(header, data);
+          // TODO Implement replies.
+          socket.write('1');
+
+          header = undefined;
+          headerBuffers = [];
+          headerRemaining = NETWORK_HEADER;
+          data = undefined;
+          dataBuffers = [];
+          dataRemaining = 0;
         }
       }
     );
@@ -301,7 +397,6 @@ const Server = Node.net.createServer(
         console.log('client disconnected.');
       }
     );
-
   }
 );
 
