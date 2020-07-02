@@ -244,7 +244,7 @@ State.transfers = new HashTable(16, 64, 10000000, 256000000);
 })();
 
 const ProcessBatch = function(buffer) {
-  // Journal.write(buffer);
+  Journal.write(buffer);
   var offset = 0;
   while (offset < buffer.length) {
     assert(Logic.createTransfer(State, buffer, offset) === Result.OK);
