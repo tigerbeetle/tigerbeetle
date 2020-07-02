@@ -23,5 +23,7 @@ batches should have a type for the whole batch:
   create participants if not exist
   update participants if exist
   create transfers
-  commit transfers
+  accept transfers
   reject transfers
+
+do we need to store transfers in-memory that we can't process because of a validation error?
