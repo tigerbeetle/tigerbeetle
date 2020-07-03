@@ -226,7 +226,7 @@ Logic.createTransfer = function(state, buffer, offset) {
 const State = {};
 
 // TODO Set elementsMin and elementsMax according to deployment config.
-// TODO Iterate across hash table buffers and initialize to avoid page faults.
+// TODO Iterate across hash table buffers and initialize to preempt page faults.
 State.participants = new HashTable(8, 24, 1000, 10000);
 State.transfers = new HashTable(16, 64, 10000000, 256000000);
 
