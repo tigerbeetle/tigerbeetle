@@ -36,7 +36,7 @@ shutting down the whole TigerBeetle system. The MAGIC also lets us discard any
 obviously bad traffic without doing any checksum calculations.
 
 We use SHA256 as our checksum for the prototype. We will switch to BLAKE3 after
-the prototype for more than double the throughput.
+the prototype for more than double the hashing throughput, which is a real cost.
 
 The reason we use two checksums instead of only a single checksum across header
 and data is that we need a reliable way to know the size of the data to expect,
