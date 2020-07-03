@@ -2,7 +2,7 @@
 
 ## The collection of papers behind TigerBeetle:
 
-* [LMAX - How to Do 100K TPS at Less than 1ms Latency - 2010](https://www.infoq.com/presentations/LMAX/) - Why a relational database is not the right solution. *#mechanical-sympathy*
+* [LMAX - How to Do 100K TPS at Less than 1ms Latency - 2010](https://www.infoq.com/presentations/LMAX/) - Martin Thompson on mechanical sympathy, and why a relational database is not the right solution.
 
 * [The LMAX Exchange Architecture - High Throughput, Low Latency and Plain Old Java - 2014](https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java) - Sam Adams on the high-level design of LMAX.
 
