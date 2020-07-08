@@ -25,7 +25,6 @@ const Queue = require('@ronomon/queue');
 // See DATA_STRUCTURES.md:
 
 const TRANSFER                         = 64;
-
 const TRANSFER_ID                      = 16;
 const TRANSFER_PAYER                   = 8;
 const TRANSFER_PAYEE                   = 8;
@@ -44,6 +43,13 @@ const TRANSFER_CREATE_TIMESTAMP_OFFSET = 0 + 16 + 8 + 8 + 8 + 6;
 const TRANSFER_COMMIT_TIMESTAMP_OFFSET = 0 + 16 + 8 + 8 + 8 + 6 + 6;
 const TRANSFER_USERDATA_OFFSET         = 0 + 16 + 8 + 8 + 8 + 6 + 6 + 6;
 
+const COMMIT_TRANSFER                  = 48;
+const COMMIT_TRANSFER_ID               = 16;
+const COMMIT_TRANSFER_PREIMAGE         = 32;
+
+const COMMIT_TRANSFER_ID_OFFSET        = 0;
+const COMMIT_TRANSFER_PREIMAGE_OFFSET  = 0 + 16;
+
 const PARTICIPANT                      = 24;
 const PARTICIPANT_ID                   = 8;
 const PARTICIPANT_NET_DEBIT_CAP        = 8;
@@ -55,6 +61,8 @@ const PARTICIPANT_POSITION_OFFSET      = 0 + 8 + 8;
 
 const COMMAND_CREATE_TRANSFERS = 1;
 const COMMAND_ACCEPT_TRANSFERS = 2;
+const COMMAND_REJECT_TRANSFERS = 3;
+const COMMAND_ACK = 4;
 
 // See NETWORK_PROTOCOL.md:
 
@@ -74,6 +82,8 @@ const NETWORK_HEADER_ID_OFFSET            = 0 + 16 + 16;
 const NETWORK_HEADER_MAGIC_OFFSET         = 0 + 16 + 16 + 16;
 const NETWORK_HEADER_COMMAND_OFFSET       = 0 + 16 + 16 + 16 + 8;
 const NETWORK_HEADER_SIZE_OFFSET          = 0 + 16 + 16 + 16 + 8 + 4;
+
+const CHECKSUM = Buffer.alloc(32);
 
 const Result = require('./result.js');
 
@@ -116,17 +126,18 @@ Logic.adjustParticipantPosition = function(amount, buffer, offset) {
   );
 };
 
-Logic.commitTransfer = function(state, buffer, offset) {
+Logic.acceptTransfer = function(state, buffer, offset) {
   assert(Number.isSafeInteger(offset));
-  assert(offset >= 0 && offset + TRANSFER <= buffer.length);
-  // 1587309924771 "insert into `transferFulfilment` (`completedDate`, `createdDate`, `ilpFulfilment`, `isValid`, `settlementWindowId`, `transferId`)"
-  // 1587309924775 "UPDATE participantPosition SET value = (value + -100), changedDate = '2020-04-19 15:25:24.769' WHERE participantPositionId = 5 "
-  // 1587309924776 "INSERT INTO participantPositionChange (participantPositionId, transferStateChangeId, value, reservedValue, createdDate) SELECT 5, 1254, value, reservedValue, '2020-04-19 15:25:24.769' FROM participantPosition WHERE participantPositionId = 5"
-
-  if (state.transfers.exist(buffer, offset + TRANSFER_ID_OFFSET) === 1) {
-    // TODO Currently allowing duplicate results to make benchmarking easier.
-    // return Result.TransferExists;
+  assert(offset >= 0 && offset + COMMIT_TRANSFER <= buffer.length);
+  if (state.transfers.exist(buffer, offset + COMMIT_TRANSFER_ID_OFFSET) !== 1) {
+    return Result.TransferDoesNotExist;
   }
+
+  // TODO Check if transfer is committed.
+  // TODO Check if transfer is expired.
+  // TODO Update balances.
+  
+  return Result.OK;
 };
 
 Logic.createTransfer = function(state, buffer, offset) {
@@ -276,20 +287,72 @@ const ProcessRequest = function(header, data) {
   assert(data.length === size);
   Journal.write(data);
   var method;
+  var struct_size;
   if (command === COMMAND_CREATE_TRANSFERS) {
     method = Logic.createTransfer;
+    struct_size = TRANSFER;
   } else if (command === COMMAND_ACCEPT_TRANSFERS) {
     method = Logic.acceptTransfer;
+    struct_size = COMMIT_TRANSFER;
   } else {
     throw new Error('unsupported command');
   }
   var offset = 0;
   while (offset < data.length) {
     assert(method(State, data, offset) === Result.OK);
-    offset += TRANSFER;
+    offset += struct_size;
   }
   assert(offset === data.length);
   // TODO Error buffer
+};
+
+const AckHeader = function(request, header, data) {
+  // Copy request ID to response ID to match responses to requests:
+  request.copy(
+    header,
+    NETWORK_HEADER_ID_OFFSET,
+    NETWORK_HEADER_ID_OFFSET,
+    NETWORK_HEADER_ID_OFFSET + NETWORK_HEADER_ID
+  );
+  MAGIC.copy(header, NETWORK_HEADER_MAGIC_OFFSET);
+  header.writeUInt32BE(COMMAND_ACK, NETWORK_HEADER_COMMAND_OFFSET);
+  header.writeUInt32BE(data.length, NETWORK_HEADER_SIZE_OFFSET);
+  assert(
+    Crypto.hash(
+      'sha256',
+      data,
+      0,
+      data.length,
+      CHECKSUM,
+      0
+    ) === 32
+  );
+  assert(
+    CHECKSUM.copy(
+      header,
+      NETWORK_HEADER_CHECKSUM_DATA_OFFSET,
+      0,
+      NETWORK_HEADER_CHECKSUM_DATA
+    ) === 16
+  );
+  assert(
+    Crypto.hash(
+      'sha256',
+      header,
+      NETWORK_HEADER_CHECKSUM_DATA_OFFSET,
+      NETWORK_HEADER - NETWORK_HEADER_CHECKSUM_META,
+      CHECKSUM,
+      0
+    ) === 32
+  );
+  assert(
+    CHECKSUM.copy(
+      header,
+      NETWORK_HEADER_CHECKSUM_META_OFFSET,
+      0,
+      NETWORK_HEADER_CHECKSUM_META
+    ) === 16
+  );
 };
 
 const Server = Node.net.createServer(
@@ -380,8 +443,11 @@ const Server = Node.net.createServer(
           
           // TODO Parser needs to work with async calls.
           ProcessRequest(header, data);
-          // TODO Implement replies.
-          socket.write('1');
+          const reply_header = Buffer.alloc(NETWORK_HEADER);
+          const reply_data = Buffer.alloc(0); // TODO
+          AckHeader(header, reply_header, reply_data);
+          socket.write(reply_header);
+          if (reply_data.length) socket.write(reply_data);
 
           header = undefined;
           headerBuffers = [];

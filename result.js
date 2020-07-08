@@ -13,4 +13,6 @@ Result.PayeeDoesNotExist = result++;
 Result.ParticipantsAreTheSame = result++;
 Result.NetDebitCap = result++;
 
+Result.TransferDoesNotExist = result++;
+
 module.exports = Result;
