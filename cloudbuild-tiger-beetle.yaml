@@ -8,7 +8,7 @@ steps:
       - set
       - image
       - deployment
-      - tiger-beetle
+      - tiger-beetle-tigerbeetle
       - 'tigerbeetle=gcr.io/mojaloop-prod/tiger-beetle:$SHORT_SHA'
       - --namespace
       - mojaloop

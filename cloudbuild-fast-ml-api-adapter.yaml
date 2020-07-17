@@ -9,7 +9,7 @@ steps:
       - image
       - deployment
       - dev-ml-api-adapter-service
-      - 'dev-ml-api-adapter-service=gcr.io/mojaloop-prod/fast-ml-api-adapter:$SHORT_SHA'
+      - 'ml-api-adapter-service=gcr.io/mojaloop-prod/fast-ml-api-adapter:$SHORT_SHA'
       - --namespace
       - mojaloop
     env:
