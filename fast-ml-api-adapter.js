@@ -81,6 +81,9 @@ TigerBeetle.push = function(batch, request, callback) {
       },
       50
     );
+  } else if (batch.jobs.length > 200) {
+    clearTimeout(batch.timeout);
+    self.execute(batch);
   }
 };
 
