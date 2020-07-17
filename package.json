@@ -17,7 +17,8 @@
   },
   "homepage": "https://github.com/jorangreef/tiger-beetle#readme",
   "scripts": {
-    "start": "node index.js 1"
+    "start": "node index.js 1",
+    "start:fast-ml-api-adapter": "node fast-ml-api-adapter.js"
   },
   "dependencies": {
     "@ronomon/crypto-async": "^5.0.1",
