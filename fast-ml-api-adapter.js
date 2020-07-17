@@ -13,7 +13,7 @@ LEV.PORT = 4444;
 const NAMESPACE = 'fast-ml-api-adapter';
 
 const HOST = '0.0.0.0';
-const PORT = 3000; // TODO
+const PORT = 3000;
 
 // Preresolve TigerBeetle master IP address to avoid DNS overhead:
 const TIGER_BEETLE_HOST = '10.126.12.35';
@@ -116,11 +116,11 @@ function CreateServer() {
               // Send prepare notification:
               PostNotification(PAYEE_HOST, PAYEE_PORT, '/transfers', buffer,
                 function() {
-                  // Finally, ACK:
-                  response.statusCode = 202;
-                  response.end();
                 }
               );
+              // ACK:
+              response.statusCode = 202;
+              response.end();
             });
           } else if (request.url.length > 36) {
             const buffer = Buffer.concat(buffers);
@@ -130,11 +130,11 @@ function CreateServer() {
               const path = request.url;
               PostNotification(PAYER_HOST, PAYER_PORT, path, Buffer.from(JSON.stringify({ transferState: 'COMMITTED' })),
                 function() {
-                  // Finally, ACK:
-                  response.statusCode = 202;
-                  response.end();
                 }
               );
+              // ACK:
+              response.statusCode = 202;
+              response.end();
             });
           } else {
             console.log(`unknown request.url: ${request.url}`);
