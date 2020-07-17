@@ -79,7 +79,7 @@ TigerBeetle.push = function(batch, request, callback) {
       function() {
         self.execute(batch);
       },
-      100
+      50
     );
   }
 };
