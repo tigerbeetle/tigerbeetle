@@ -1,17 +1,9 @@
 steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ["build", "-t", "gcr.io/mojaloop-prod/tiger-beetle:$SHORT_SHA", "."]
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ["push", "gcr.io/mojaloop-prod/tiger-beetle:$SHORT_SHA"]
-  - name: 'gcr.io/cloud-builders/kubectl'
-    args:
-      - set
-      - image
-      - deployment
-      - tiger-beetle
-      - 'tigerbeetle=gcr.io/mojaloop-prod/tiger-beetle:$SHORT_SHA'
-      - --namespace
-      - mojaloop
-    env:
-      - 'CLOUDSDK_COMPUTE_ZONE=europe-west2-a'
-      - 'CLOUDSDK_CONTAINER_CLUSTER=performance'
+  - id: 'build tiger-beetle'
+    name: 'gcr.io/cloud-builders/gcloud'
+    args: ['builds', 'submit', '--config=cloudbuild-tiger-beetle.yaml', '--substitutions=SHORT_SHA=$SHORT_SHA']
+    waitFor: ['-'] #start in parallel
+  - id: 'build fast-ml-api-adapter'
+    name: 'gcr.io/cloud-builders/gcloud'
+    args: ['builds', 'submit', '--config=cloudbuild-fast-ml-api-adapter.yaml', '--substitutions=SHORT_SHA=$SHORT_SHA']
+    waitFor: ['-'] # start in parallel
