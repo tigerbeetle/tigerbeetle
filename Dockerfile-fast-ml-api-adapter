@@ -17,6 +17,7 @@ WORKDIR /opt/tiger-beetle
 COPY fast-ml-api-adapter.js .
 COPY log-event.js .
 COPY uuid4.js .
+COPY index.js .
 
 EXPOSE 30000
 
