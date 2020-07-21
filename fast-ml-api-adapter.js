@@ -159,6 +159,7 @@ function PostNotification(host, port, path, body, end) {
     'Content-Length': body.length
   };
   const options = {
+    agent: ConnectionPool,
     method: 'POST',
     host: host,
     port: port,
@@ -181,3 +182,11 @@ function PostNotification(host, port, path, body, end) {
 }
 
 CreateServer();
+
+// Create a keep-alive request connection pool:
+const ConnectionPool = new Node.http.Agent({
+  keepAlive: true,
+  maxSockets: 1000,
+  maxFreeSockets: 1000,
+  timeout: 60 * 1000
+});
