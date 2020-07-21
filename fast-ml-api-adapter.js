@@ -308,10 +308,10 @@ TigerBeetle.encodeAccept = function(transferId, object) {
 // TODO Reconnect on connection resets with exponential backoff and jitter.
 TigerBeetle.connect = function(host, port, end) {
   const self = this;
-  assert(self.socket === null);
+  LEV(`${NAMESPACE}: connecting to tiger beetle...`);
   self.socket = Node.net.createConnection(port, host,
     function() {
-      console.log('connected to tiger beetle master');
+      LEV(`${NAMESPACE}: connected to tiger beetle`);
       self.socket.on('data',
         function(buffer) {
           var length = buffer.length;
@@ -325,9 +325,20 @@ TigerBeetle.connect = function(host, port, end) {
           assert(length === 0);
         }
       );
+      self.socket.on('error',
+        function(error) {
+          LEV(`${NAMESPACE}: tiger beetle socket error: ${error}`);
+        }
+      );
       self.socket.on('end',
         function() {
-          throw new Error('disconnected from tiger beetle master');
+          LEV(`${NAMESPACE}: disconnected from tiger beetle master`);
+          setTimeout(
+            function() {
+              self.connect(host, post, function() {});
+            },
+            30 * 1000
+          );
         }
       );
       end();
