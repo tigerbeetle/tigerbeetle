@@ -1,3 +1,5 @@
+const NAMESPACE = 'fast-ml-api-adapter';
+
 const Node = {
   crypto: require('crypto'),
   http: require('http'),
@@ -5,17 +7,14 @@ const Node = {
 };
 
 const LEV = require('./log-event.js');
-const UUID4 = require('./uuid4.js');
 
 LEV.HOST = '197.242.94.138';
 LEV.PORT = 4444;
 
-const NAMESPACE = 'fast-ml-api-adapter';
-
 const HOST = '0.0.0.0';
 const PORT = 3000;
 
-// Preresolve TigerBeetle master IP address to avoid DNS overhead:
+// Preresolve TigerBeetle master IP address to avoid any DNS overhead:
 const TIGER_BEETLE_HOST = '10.126.12.35';
 const TIGER_BEETLE_PORT = 80;
 
@@ -89,7 +88,7 @@ TigerBeetle.push = function(batch, request, callback) {
 
 TigerBeetle.execute = function(batch) {
   const ms = Date.now() - batch.timestamp;
-  LEV(`batched ${batch.jobs.length} jobs in ${ms}ms`);
+  LEV(`${NAMESPACE}: batched ${batch.jobs.length} jobs in ${ms}ms`);
   batch.jobs.forEach(
     function(job) {
       job.callback();
@@ -113,6 +112,7 @@ function CreateServer() {
       request.on('end',
         function() {
           if (request.url === '/transfers') {
+            // Handle an incoming prepare:
             const buffer = Buffer.concat(buffers);
             const payload = JSON.parse(buffer.toString('ascii'));
             TigerBeetle.create(payload, function() {
@@ -126,12 +126,15 @@ function CreateServer() {
               response.end();
             });
           } else if (request.url.length > 36) {
+            // Handle an incoming fulfill:
             const buffer = Buffer.concat(buffers);
             const payload = JSON.parse(buffer.toString('ascii'));
             TigerBeetle.accept(payload, function() {
               // Send fulfill notification:
-              const path = request.url;
-              PostNotification(PAYER_HOST, PAYER_PORT, path, Buffer.from(JSON.stringify({ transferState: 'COMMITTED' })),
+              // We reuse the fulfill path as the notification path is the same.
+              // We reuse the fulfill payload to avoid any GC complications.
+              // This can always be optimized later without material overhead.
+              PostNotification(PAYER_HOST, PAYER_PORT, request.url, buffer,
                 function() {
                 }
               );
@@ -183,7 +186,8 @@ function PostNotification(host, port, path, body, end) {
 
 CreateServer();
 
-// Create a keep-alive request connection pool:
+// Create a keep-alive HTTP request connection pool:
+// We don't want each and every notification to do a TCP handshake...
 const ConnectionPool = new Node.http.Agent({
   keepAlive: true,
   maxSockets: 1000,
