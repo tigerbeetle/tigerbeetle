@@ -151,7 +151,7 @@ TigerBeetle.execute = function(batch) {
     function(error) {
       assert(!error);
       const ms = Date.now() - start;
-      console.log(`${ms}ms to send ${jobs.length} jobs to TigerBeetle`);
+      LEV(`fast-ml-api-adapter: ${ms}ms to send ${jobs.length} job(s) to TigerBeetle`);
       for (var index = 0; index < jobs.length; index++) {
         jobs[index].callback();
       }

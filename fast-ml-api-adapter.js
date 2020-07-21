@@ -9,6 +9,8 @@ const Node = {
 };
 
 const LEV = require('./log-event.js');
+global.LEV = LEV; // Expose to TigerBeetle client.
+
 const TigerBeetle = require('./client.js');
 
 LEV.HOST = '197.242.94.138';
