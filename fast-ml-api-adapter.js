@@ -59,31 +59,35 @@ const TigerBeetle = {};
 TigerBeetle.CREATE_TRANSFERS = { jobs: [], timestamp: 0, timeout: 0 };
 TigerBeetle.ACCEPT_TRANSFERS = { jobs: [], timestamp: 0, timeout: 0 };
 
-TigerBeetle.create = function(request, callback) {
+// Add an incoming prepare `payload`` to a batch of prepares.
+// `callback` will be called once persisted to TigerBeetle.
+TigerBeetle.create = function(payload, callback) {
   const self = this;
-  self.push(self.CREATE_TRANSFERS, request, callback);
+  self.push(self.CREATE_TRANSFERS, payload, callback);
 };
 
-TigerBeetle.accept = function(request, callback) {
+// Add an incoming fulfill `payload`` to a batch of fulfills.
+// `callback` will be called once persisted to TigerBeetle.
+TigerBeetle.accept = function(payload, callback) {
   const self = this;
-  self.push(self.ACCEPT_TRANSFERS, request, callback);
+  self.push(self.ACCEPT_TRANSFERS, payload, callback);
 };
 
-TigerBeetle.push = function(batch, request, callback) {
+TigerBeetle.push = function(batch, payload, callback) {
   const self = this;
-  batch.jobs.push(new TigerBeetle.Job(request, callback));
+  batch.jobs.push(new TigerBeetle.Job(payload, callback));
   if (batch.timeout === 0) {
     batch.timestamp = Date.now();
     batch.timeout = setTimeout(
       function() {
         self.execute(batch);
       },
-      50 // Wait up to Nms for a batch to be collected...
+      50 // Wait up to N ms for a batch to be collected...
     );
   } else if (batch.jobs.length > 200) {
     // ... and stop waiting as soon as we have at least N jobs ready to go.
     // This gives us a more consistent performance picture and lets us avoid
-    // any non-multiple tail latency spikes from the timeout.
+    // any non-multiple latency spikes from the timeout.
     clearTimeout(batch.timeout);
     self.execute(batch);
   }
@@ -92,7 +96,10 @@ TigerBeetle.push = function(batch, request, callback) {
 TigerBeetle.execute = function(batch) {
   const ms = Date.now() - batch.timestamp;
   LEV(`${NAMESPACE}: batched ${batch.jobs.length} jobs in ${ms}ms`);
+  // Cache reference to jobs array so we can reset the batch:
   const jobs = batch.jobs;
+  // Reset the batch to start collecting a new batch:
+  // We collect the new batch while commiting the previous batch to TigerBeetle.
   batch.jobs = [];
   batch.timestamp = 0;
   batch.timeout = 0;
@@ -109,8 +116,8 @@ TigerBeetle.execute = function(batch) {
   );
 };
 
-TigerBeetle.Job = function(request, callback) {
-  this.request = request;
+TigerBeetle.Job = function(payload, callback) {
+  this.payload = payload;
   this.callback = callback;
 };
 
@@ -194,13 +201,14 @@ function PostNotification(host, port, path, body, end) {
   request.end();
 }
 
-CreateServer();
-
 // Create a keep-alive HTTP request connection pool:
 // We don't want each and every notification to do a TCP handshake...
+// This is critical. The lack of this causes multi-second event loop blocks.
 const ConnectionPool = new Node.http.Agent({
   keepAlive: true,
   maxSockets: 1000,
   maxFreeSockets: 1000,
   timeout: 60 * 1000
 });
+
+CreateServer();
