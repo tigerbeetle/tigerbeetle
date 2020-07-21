@@ -1,5 +1,7 @@
 const NAMESPACE = 'fast-ml-api-adapter';
 
+const assert = require('assert');
+
 const Node = {
   crypto: require('crypto'),
   http: require('http'),
@@ -7,12 +9,15 @@ const Node = {
 };
 
 const LEV = require('./log-event.js');
+const TigerBeetle = require('./client.js');
 
 LEV.HOST = '197.242.94.138';
 LEV.PORT = 4444;
 
 const HOST = '0.0.0.0';
 const PORT = 3000;
+
+const LOCALHOST = '127.0.0.1';
 
 // Preresolve TigerBeetle master IP address to avoid any DNS overhead:
 const TIGER_BEETLE_HOST = '10.126.12.35';
@@ -28,6 +33,7 @@ const PAYER_PORT = 7777;
 
 Node.process.on('uncaughtException',
   function(error) {
+    console.log(error);
     LEV(`${NAMESPACE}: UNCAUGHT EXCEPTION: ${error}`);
   }
 );
@@ -54,72 +60,6 @@ Node.process.on('uncaughtException',
   );
 })();
 
-const TigerBeetle = {};
-
-TigerBeetle.CREATE_TRANSFERS = { jobs: [], timestamp: 0, timeout: 0 };
-TigerBeetle.ACCEPT_TRANSFERS = { jobs: [], timestamp: 0, timeout: 0 };
-
-// Add an incoming prepare `payload` to a batch of prepares.
-// `callback` will be called once persisted to TigerBeetle.
-TigerBeetle.create = function(payload, callback) {
-  const self = this;
-  self.push(self.CREATE_TRANSFERS, payload, callback);
-};
-
-// Add an incoming fulfill `payload` to a batch of fulfills.
-// `callback` will be called once persisted to TigerBeetle.
-TigerBeetle.accept = function(payload, callback) {
-  const self = this;
-  self.push(self.ACCEPT_TRANSFERS, payload, callback);
-};
-
-TigerBeetle.push = function(batch, payload, callback) {
-  const self = this;
-  batch.jobs.push(new TigerBeetle.Job(payload, callback));
-  if (batch.timeout === 0) {
-    batch.timestamp = Date.now();
-    batch.timeout = setTimeout(
-      function() {
-        self.execute(batch);
-      },
-      50 // Wait up to N ms for a batch to be collected...
-    );
-  } else if (batch.jobs.length > 200) {
-    // ... and stop waiting as soon as we have at least N jobs ready to go.
-    // This gives us a more consistent performance picture and lets us avoid
-    // any non-multiple latency spikes from the timeout.
-    clearTimeout(batch.timeout);
-    self.execute(batch);
-  }
-};
-
-TigerBeetle.execute = function(batch) {
-  const ms = Date.now() - batch.timestamp;
-  LEV(`${NAMESPACE}: batched ${batch.jobs.length} jobs in ${ms}ms`);
-  // Cache reference to jobs array so we can reset the batch:
-  const jobs = batch.jobs;
-  // Reset the batch to start collecting a new batch:
-  // We collect the new batch while commiting the previous batch to TigerBeetle.
-  batch.jobs = [];
-  batch.timestamp = 0;
-  batch.timeout = 0;
-  // Simulate 10ms network delay:
-  setTimeout(
-    function() {
-      jobs.forEach(
-        function(job) {
-          job.callback();
-        }
-      );
-    },
-    10
-  );
-};
-
-TigerBeetle.Job = function(payload, callback) {
-  this.payload = payload;
-  this.callback = callback;
-};
 
 function CreateServer() {
   const server = Node.http.createServer({},
@@ -130,11 +70,15 @@ function CreateServer() {
         function() {
           if (request.url === '/transfers') {
             // Handle an incoming prepare:
-            const buffer = Buffer.concat(buffers);
-            const payload = JSON.parse(buffer.toString('ascii'));
-            TigerBeetle.create(payload, function() {
+            const source = Buffer.concat(buffers);
+            const object = JSON.parse(source.toString('ascii'));
+            const target = TigerBeetle.encodeCreate(object);
+            TigerBeetle.create(target, function() {
               // Send prepare notification:
-              PostNotification(PAYEE_HOST, PAYEE_PORT, '/transfers', buffer,
+              // We reuse the request path as the notification path is the same.
+              // We reuse the request payload to avoid any GC complications.
+              // This can always be optimized later without material overhead.
+              PostNotification(PAYEE_HOST, PAYEE_PORT, request.url, source,
                 function() {
                 }
               );
@@ -143,15 +87,15 @@ function CreateServer() {
               response.end();
             });
           } else if (request.url.length > 36) {
+            // TODO Improve request.url validation and parsing.
             // Handle an incoming fulfill:
-            const buffer = Buffer.concat(buffers);
-            const payload = JSON.parse(buffer.toString('ascii'));
-            TigerBeetle.accept(payload, function() {
+            const id = request.url.split('/')[2];
+            const source = Buffer.concat(buffers);
+            const object = JSON.parse(source.toString('ascii'));
+            const target = TigerBeetle.encodeAccept(id, object);
+            TigerBeetle.accept(target, function() {
               // Send fulfill notification:
-              // We reuse the fulfill path as the notification path is the same.
-              // We reuse the fulfill payload to avoid any GC complications.
-              // This can always be optimized later without material overhead.
-              PostNotification(PAYER_HOST, PAYER_PORT, request.url, buffer,
+              PostNotification(PAYER_HOST, PAYER_PORT, request.url, source,
                 function() {
                 }
               );
@@ -211,3 +155,10 @@ const ConnectionPool = new Node.http.Agent({
 });
 
 CreateServer();
+
+TigerBeetle.connect(TIGER_BEETLE_HOST, TIGER_BEETLE_PORT,
+  function(error) {
+    if (error) throw error;
+    LEV(`${NAMESPACE}: Connected to Tiger Beetle...`);
+  }
+);
