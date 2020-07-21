@@ -92,14 +92,21 @@ TigerBeetle.push = function(batch, request, callback) {
 TigerBeetle.execute = function(batch) {
   const ms = Date.now() - batch.timestamp;
   LEV(`${NAMESPACE}: batched ${batch.jobs.length} jobs in ${ms}ms`);
-  batch.jobs.forEach(
-    function(job) {
-      job.callback();
-    }
-  );
+  const jobs = batch.jobs;
   batch.jobs = [];
   batch.timestamp = 0;
   batch.timeout = 0;
+  // Simulate 10ms network delay:
+  setTimeout(
+    function() {
+      jobs.forEach(
+        function(job) {
+          job.callback();
+        }
+      );
+    },
+    10
+  );
 };
 
 TigerBeetle.Job = function(request, callback) {
