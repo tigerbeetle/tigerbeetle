@@ -59,14 +59,14 @@ const TigerBeetle = {};
 TigerBeetle.CREATE_TRANSFERS = { jobs: [], timestamp: 0, timeout: 0 };
 TigerBeetle.ACCEPT_TRANSFERS = { jobs: [], timestamp: 0, timeout: 0 };
 
-// Add an incoming prepare `payload`` to a batch of prepares.
+// Add an incoming prepare `payload` to a batch of prepares.
 // `callback` will be called once persisted to TigerBeetle.
 TigerBeetle.create = function(payload, callback) {
   const self = this;
   self.push(self.CREATE_TRANSFERS, payload, callback);
 };
 
-// Add an incoming fulfill `payload`` to a batch of fulfills.
+// Add an incoming fulfill `payload` to a batch of fulfills.
 // `callback` will be called once persisted to TigerBeetle.
 TigerBeetle.accept = function(payload, callback) {
   const self = this;
@@ -179,7 +179,7 @@ function PostNotification(host, port, path, body, end) {
     'Content-Length': body.length
   };
   const options = {
-    // agent: ConnectionPool,
+    agent: ConnectionPool,
     method: 'POST',
     host: host,
     port: port,
