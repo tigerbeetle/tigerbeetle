@@ -179,7 +179,7 @@ function PostNotification(host, port, path, body, end) {
     'Content-Length': body.length
   };
   const options = {
-    agent: ConnectionPool,
+    // agent: ConnectionPool,
     method: 'POST',
     host: host,
     port: port,
