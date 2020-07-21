@@ -337,7 +337,15 @@ TigerBeetle.connect = function(host, port, end) {
             function() {
               self.connect(host, port, function() {});
             },
-            30 * 1000
+            10 * 1000
+          );
+          const callbacks = self.sending;
+          self.sending = [];
+          callbacks.forEach(
+            function(callback) {
+              // TODO Handle network errors in callbacks:
+              callback();
+            }
           );
         }
       );
@@ -493,7 +501,6 @@ const ConnectionPool = new Node.http.Agent({
   maxFreeSockets: 10000,
   timeout: 60 * 1000
 });
-
 
 CreateServer();
 
