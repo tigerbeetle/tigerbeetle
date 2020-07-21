@@ -26,7 +26,6 @@ Journal.write = function(buffer) {
   assert(self.position >= 0);
   assert(self.writing === false);
   assert(buffer.length > 0);
-  assert(buffer.length % 64 === 0);
   self.writing = true;
   // Simulate CPU cost of checkum:
   Crypto.hash('sha256', buffer);
