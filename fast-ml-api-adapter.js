@@ -206,8 +206,8 @@ function PostNotification(host, port, path, body, end) {
 // This is critical. The lack of this causes multi-second event loop blocks.
 const ConnectionPool = new Node.http.Agent({
   keepAlive: true,
-  maxSockets: 1000,
-  maxFreeSockets: 1000,
+  maxSockets: 10000,
+  maxFreeSockets: 10000,
   timeout: 60 * 1000
 });
 
