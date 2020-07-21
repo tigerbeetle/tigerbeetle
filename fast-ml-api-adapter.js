@@ -78,9 +78,12 @@ TigerBeetle.push = function(batch, request, callback) {
       function() {
         self.execute(batch);
       },
-      50
+      50 // Wait up to Nms for a batch to be collected...
     );
   } else if (batch.jobs.length > 200) {
+    // ... and stop waiting as soon as we have at least N jobs ready to go.
+    // This gives us a more consistent performance picture and lets us avoid
+    // any non-multiple tail latency spikes from the timeout.
     clearTimeout(batch.timeout);
     self.execute(batch);
   }
