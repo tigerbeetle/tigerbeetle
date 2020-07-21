@@ -8,6 +8,11 @@ const Node = {
 
 const Crypto = require('@ronomon/crypto-async');
 
+const LEV = require('./log-event.js');
+
+LEV.HOST = '197.242.94.138';
+LEV.PORT = 4444;
+
 const HOST = '127.0.0.1'; //'tb.perf.openafrica.network';
 const PORT = 30000;
 
@@ -151,7 +156,7 @@ TigerBeetle.execute = function(batch) {
     function(error) {
       assert(!error);
       const ms = Date.now() - start;
-      LEV(`fast-ml-api-adapter: ${ms}ms to send ${jobs.length} job(s) to TigerBeetle`);
+      LEV(`client: ${ms}ms to send ${jobs.length} job(s) to TigerBeetle`);
       for (var index = 0; index < jobs.length; index++) {
         jobs[index].callback();
       }
