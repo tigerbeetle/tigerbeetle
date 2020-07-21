@@ -6,15 +6,12 @@ const Node = {
   process: process
 };
 
-const Crypto = require('@ronomon/crypto-async');
-
 const LEV = require('./log-event.js');
 
 LEV.HOST = '197.242.94.138';
 LEV.PORT = 4444;
 
-const HOST = '127.0.0.1'; //'tb.perf.openafrica.network';
-const PORT = 30000;
+const Crypto = require('@ronomon/crypto-async');
 
 const TRANSFER                         = 64;
 const TRANSFER_ID                      = 16;
