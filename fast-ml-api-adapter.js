@@ -19,9 +19,8 @@ const PORT = 3000;
 
 const LOCALHOST = '127.0.0.1';
 
-// Preresolve TigerBeetle master IP address to avoid any DNS overhead:
-const TIGER_BEETLE_HOST = '10.126.12.35';
-const TIGER_BEETLE_PORT = 80;
+const TIGER_BEETLE_HOST = 'tb.perf.openafrica.network';
+const TIGER_BEETLE_PORT = 30000;
 
 // Test harness payee:
 const PAYEE_HOST = '10.126.10.139';
