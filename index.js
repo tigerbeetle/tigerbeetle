@@ -470,9 +470,6 @@ Server.on('error', function(error) { console.error(error); });
 
 Server.listen(Number(PORT),
   function() {
-    console.log(`listening on ${PORT}...`);
-    if (!Node.process.argv[2]) {
-      const child = Node.child.fork('stress.js');
-    }
+    console.log(`Listening on ${PORT}...`);
   }
 );
