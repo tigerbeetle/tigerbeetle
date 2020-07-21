@@ -335,7 +335,7 @@ TigerBeetle.connect = function(host, port, end) {
           LEV(`${NAMESPACE}: disconnected from tiger beetle master`);
           setTimeout(
             function() {
-              self.connect(host, post, function() {});
+              self.connect(host, port, function() {});
             },
             30 * 1000
           );
@@ -499,6 +499,5 @@ CreateServer();
 TigerBeetle.connect(TIGER_BEETLE_HOST, TIGER_BEETLE_PORT,
   function(error) {
     if (error) throw error;
-    LEV(`${NAMESPACE}: Connected to Tiger Beetle...`);
   }
 );
