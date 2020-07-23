@@ -1,4 +1,4 @@
-const NAMESPACE = 'tiger-beetle client';
+const NAMESPACE = 'tiger-beetle-client';
 
 const assert = require('assert');
 
@@ -95,14 +95,14 @@ TigerBeetle.ACCEPT_TRANSFERS = {
 // Add an incoming prepare `buffer` to a batch of prepares.
 // `callback` will be called once persisted to TigerBeetle.
 TigerBeetle.create = function(buffer, callback) {
-  const self = this;
+  const self = TigerBeetle;
   self.push(self.CREATE_TRANSFERS, buffer, callback);
 };
 
 // Add an incoming fulfill `buffer` to a batch of fulfills.
 // `callback` will be called once persisted to TigerBeetle.
 TigerBeetle.accept = function(buffer, callback) {
-  const self = this;
+  const self = TigerBeetle;
   self.push(self.ACCEPT_TRANSFERS, buffer, callback);
 };
 
@@ -178,7 +178,7 @@ TigerBeetle.encodeCreate = function(object) {
   //   "payerFsp":"payer",
   //   "payeeFsp":"payee",
   //   "amount":{"amount":"1","currency":"USD"},
-  //   "ilpPacket":"AQAAAAAAAADIEHByaXZhdGUucGF5ZWVmc3CCAiB7InRyYW5zYWN0aW9uSWQiOiIyZGY3NzRlMi1mMWRiLTRmZjctYTQ5NS0yZGRkMzdhZjdjMmMiLCJxdW90ZUlkIjoiMDNhNjA1NTAtNmYyZi00NTU2LThlMDQtMDcwM2UzOWI4N2ZmIiwicGF5ZWUiOnsicGFydHlJZEluZm8iOnsicGFydHlJZFR5cGUiOiJNU0lTRE4iLCJwYXJ0eUlkZW50aWZpZXIiOiIyNzcxMzgwMzkxMyIsImZzcElkIjoicGF5ZWVmc3AifSwicGVyc29uYWxJbmZvIjp7ImNvbXBsZXhOYW1lIjp7fX19LCJwYXllciI6eyJwYXJ0eUlkSW5mbyI6eyJwYXJ0eUlkVHlwZSI6Ik1TSVNETiIsInBhcnR5SWRlbnRpZmllciI6IjI3NzEzODAzOTExIiwiZnNwSWQiOiJwYXllcmZzcCJ9LCJwZXJzb25hbEluZm8iOnsiY29tcGxleE5hbWUiOnt9fX0sImFtb3VudCI6eyJjdXJyZW5jeSI6IlVTRCIsImFtb3VudCI6IjIwMCJ9LCJ0cmFuc2FjdGlvblR5cGUiOnsic2NlbmFyaW8iOiJERVBPU0lUIiwic3ViU2NlbmFyaW8iOiJERVBPU0lUIiwiaW5pdGlhdG9yIjoiUEFZRVIiLCJpbml0aWF0b3JUeXBlIjoiQ09OU1VNRVIiLCJyZWZ1bmRJbmZvIjp7fX19",
+  //   "ilpPacket":"AQAAAAAAAADIEHByaXZhdGUucGF5[...]",
   //   "condition":"HOr22-H3AfTDHrSkPjJtVPRdKouuMkDXTR4ejlQa8Ks",
   //   "expiration":"2022-02-02T02:02:02.020Z"
   // }
@@ -262,10 +262,10 @@ TigerBeetle.encodeAccept = function(transferId, object) {
 // TODO Reconnect on connection resets with exponential backoff and jitter.
 TigerBeetle.connect = function(host, port, end) {
   const self = this;
-  LEV(`${NAMESPACE}: connecting to tiger beetle...`);
+  LEV(`${NAMESPACE}: Connecting to Tiger Beetle...`);
   self.socket = Node.net.createConnection(port, host,
     function() {
-      LEV(`${NAMESPACE}: connected to tiger beetle`);
+      LEV(`${NAMESPACE}: Connected to Tiger Beetle`);
       self.socket.on('data',
         function(buffer) {
           var length = buffer.length;
@@ -281,17 +281,25 @@ TigerBeetle.connect = function(host, port, end) {
       );
       self.socket.on('error',
         function(error) {
-          LEV(`${NAMESPACE}: tiger beetle socket error: ${error}`);
+          LEV(`${NAMESPACE}: Tiger Beetle socket error: ${error}`);
         }
       );
       self.socket.on('end',
         function() {
-          LEV(`${NAMESPACE}: disconnected from tiger beetle master`);
+          LEV(`${NAMESPACE}: Disconnected from Tiger Beetle`);
           setTimeout(
             function() {
-              self.connect(host, post, function() {});
+              self.connect(host, port, function() {});
             },
-            30 * 1000
+            10 * 1000
+          );
+          const callbacks = self.sending;
+          self.sending = [];
+          callbacks.forEach(
+            function(callback) {
+              // TODO Handle network errors in callbacks:
+              callback();
+            }
           );
         }
       );
