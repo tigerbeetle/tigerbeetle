@@ -1,4 +1,8 @@
-# Running the very first ProtoBeetle benchmark...
+# ProtoBeetle
+
+ProtoBeetle is a performance sketch of the design components of TigerBeetle.
+
+## Benchmark
 
 This will:
 
@@ -24,4 +28,4 @@ time node stress
 
 For integration with Mojaloop, we also created `fast-ml-api-adapter.js` to
 transform individual Mojaloop HTTP transfer requests into batches and ship these
-to ProtoBeetle across the network.
+to ProtoBeetle across the network using `client.js`.
