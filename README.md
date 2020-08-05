@@ -6,17 +6,17 @@ In the month of July 2020, we developed a prototype of TigerBeetle in Node as a 
 
 We then integrated ProtoBeetle into Mojaloop and our reference minimum deployment cluster of **Mojaloop went from 76 TPS on MySQL to 1757 TPS on ProtoBeetle**. A single stateless Mojaloop pod was unable to saturate ProtoBeetle. Most of the throughput was spent converting Mojaloop's individual HTTP requests into TCP batches.
 
-**TigerBeetle is now under active development** in C/Zig and this README is intended as a design document showing our design decisions in terms of performance and safety, and where we want to go in terms of accounting features.
+**TigerBeetle is now under active development** in C/Zig and this README is intended as a design document showing our design decisions regarding performance and safety, and where we want to go regarding accounting features.
 
 ## Performance
 
-TigerBeetle provides more performance than a general-purpose relational such as MySQL or an in-memory database such as Redis:
+TigerBeetle provides more performance than a general-purpose relational database such as MySQL or an in-memory database such as Redis:
 
-* TigerBeetle **supports batching by design**. You can batch all prepares and commits you receive in a 50ms window and then send them all in a single network query to the database. This enables low-overhead networking, large sequential disk write patterns and amortized fsync across hundreds and thousands of transfers.
+* TigerBeetle **supports batching by design**. You can batch all the prepares you receive in a 50ms window and then send them all in a single network query to the database. This enables low-overhead networking, large sequential disk write patterns and amortized fsync across hundreds and thousands of transfers.
 
 * TigerBeetle **performs all balance tracking logic in the database**. This is a paradigm shift where we move the code to the data, not the data to the code, and eliminates the need for complex caching logic outside the database. You can keep your application layer simple, and completely stateless.
 
-* TigerBeetle **masks transient gray failure performance problems**. For example, if a disk write that typically takes 4ms suddenly starts taking 4 seconds because the disk is slowly failing, TigerBeetle will mask the gray failure automatically without the user seeing any 4 second latency spike. This is a relatively new performance technique known as "tail tolerance" in the literature and something not yet provided by many existing databases.
+* TigerBeetle **masks transient gray failure performance problems**. For example, if a disk write that typically takes 4ms suddenly starts taking 4 seconds because the disk is slowly failing, TigerBeetle will use redundancy to mask the gray failure automatically without the user seeing any 4 second latency spike. This is a relatively new performance technique known as "tail tolerance" in the literature and something not yet provided by most existing databases.
 
 > "The major availability breakdowns and performance anomalies we see in cloud environments tend to be caused by subtle underlying faults, i.e. gray failure (slowly failing hardware) rather than fail-stop failure."
 
@@ -83,7 +83,7 @@ The best way to understand TigerBeetle is through the data structures it provide
 
 ### Events
 
-Events are **immutable data structures** that may **change or become state data structures**:
+Events are **immutable data structures** that **instantiate or mutate state data structures**:
 
 * Events cannot be changed, not even by other events.
 * Events cannot be derived, and must therefore be recorded before being executed.
@@ -91,7 +91,7 @@ Events are **immutable data structures** that may **change or become state data 
 * Events may depend on past events (should they choose).
 * Events cannot depend on future events.
 * Events may depend on state data structures being at an exact version (should they choose).
-* Events may succeed or fail but the result of an event is never stored in the event, it is stored in the state.
+* Events may succeed or fail but the result of an event is never stored in the event, it is stored in the state instantiated by the event or mutated by the event.
 * Events only ever have one immutable version, which can be referenced directly by the event's unique id.
 * Events should be retained for auditing purposes. However, events may be drained into a separate cold storage system, once their effect has been captured in a state snapshot, to compact the log and improve startup times.
 
@@ -112,7 +112,7 @@ Events are **immutable data structures** that may **change or become state data 
 } = 128 bytes (2 CPU cache lines)
 ```
 
-At this point, it might look like we are using the `flags` field in the `create_transfer` event above to violate our invariant that "the result of an event is never stored in the event". However, the success/failure bit flag is reserved for the `create_transfer` event and you will understand why we do this when we start talking more a little later about how events transform into states.
+At this point, it might look like we are using the `flags` field in the `create_transfer` event above to violate our invariant that "the result of an event is never stored in the event". However, the success/failure bit flag is reserved for the `create_transfer` event and you will understand why we do this when we start talking more a little later about how events can instantiate states.
 
 **COMMIT_TRANSFER**: Commit a transfer between accounts (maps to a "fulfill"). A transfer can be accepted or rejected by toggling a bit in the `flags` field.
 
@@ -186,7 +186,7 @@ TigerBeetle provides three state data structures:
 
 However:
 
-* To simplify client-side implementations, to reduce memory copies and to reuse the wire format of event data structures as much as possible, we reuse our `create_transfer`, `create_account` and `create_blob` event structures as state structures, with the caveat that the success/failure bit flag in any `flags` field is reserved for the state equivalent only.
+* To simplify client-side implementations, to reduce memory copies and to reuse the wire format of event data structures as much as possible, we reuse our `create_transfer`, `create_account` and `create_blob` event structures to instantiate the correspondoing state structures, with the caveat that the success/failure bit flag in any `flags` field is reserved for the state equivalent only.
 * We use the `flags` field to track the created/committed/rejected state of a transfer state.
 
 To give you an idea of how this works in practice:
@@ -259,7 +259,7 @@ We order the header struct as we do to keep any future C implementations
 padding-free.
 
 The ID means we can switch to any reliable, unordered protocol in future. This
-is useful where you want to multiplex messages with different priorites. For
+is useful where you want to multiplex messages with different priorities. For
 example, huge batches would cause head-of-line blocking on a TCP connection,
 blocking critical control-plane messages.
 
@@ -292,8 +292,8 @@ After ProtoBeetle, our next step is to implement a single-threaded version of Ti
 We want:
 
 * **C ABI compatibility** to embed the TigerBeetle master library or TigerBeetle network client directly into any language without the overhead of FFI, to match the portability and ease of use of the [SQLite library](https://www.sqlite.org/index.html), the most used database engine in the world.
-* **Control of the memory layout, alignment, and padding of data structures** to avoid cache misses and unaligned accesses (more so than typical C structs) and to allow zero-copy parsing of data structures from off the network.
-* **Explicit static memory allocation** from network all the way to disk with **no hidden memory allocations**.
+* **Control of the memory layout, alignment, and padding of data structures** to avoid cache misses and unaligned accesses, and to allow zero-copy parsing of data structures from off the network.
+* **Explicit static memory allocation** from the network all the way to the disk with **no hidden memory allocations**.
 * **OOM safety** as the TigerBeetle master library needs to manage GBs of in-memory state without crashing the embedding process.
 * Direct access to **io_uring** for fast, simple networking and file system operations.
 * Direct access to **fast CPU instructions** such as `POPCNT`, which are essential for the hash table implementation we want to use.
@@ -303,7 +303,7 @@ We want:
 * **Compiler support for error sets** to enforce [fine-grained error handling](https://www.eecg.utoronto.ca/~yuan/papers/failure_analysis_osdi14.pdf).
 * A developer-friendly and fast build system.
 
-C is our natural choice, however Zig retains C ABI interoperability, offers relief from undefined behavior and makefiles, and provides an order of magnitude improvement in runtime safety and fine-grained error handling. Zig is a good fit with its emphasis on explicit memory allocation and OOM safety. Since Zig is pre-1.0.0 we plan to use only stable language features. It's a perfect time for TigerBeetle to adopt Zig since our 1.0.0 roadmaps will probably coincide, and we can catch and surf the swell as it breaks.
+C is a natural choice, however Zig retains C ABI interoperability, offers relief from undefined behavior and makefiles, and provides an order of magnitude improvement in runtime safety and fine-grained error handling. Zig is a good fit with its emphasis on explicit memory allocation and OOM safety. Since Zig is pre-1.0.0 we plan to use only stable language features. It's also the perfect time for TigerBeetle to adopt Zig since our 1.0.0 roadmaps will probably coincide, and we can catch and surf the swell as it breaks.
 
 ## What is a tiger beetle?
 
