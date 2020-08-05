@@ -1,0 +1,27 @@
+# Running the very first ProtoBeetle benchmark...
+
+This will:
+
+* Install and build dependencies.
+* Pre-allocate a contiguous 256 MB journal file.
+* Create a million transfers for the benchmark.
+* Run the benchmark!
+
+```shell
+git clone https://github.com/jorangreef/tiger-beetle.git
+cd tiger-beetle/proto-beetle
+npm install
+dd < /dev/zero bs=1048576 count=256 > journal
+scripts/create-transfers
+node server
+
+# In another tab:
+cd tiger-beetle/proto-beetle
+time node stress
+```
+
+## Mojaloop
+
+For integration with Mojaloop, we also created `fast-ml-api-adapter.js` to
+transform individual Mojaloop HTTP transfer requests into batches and ship these
+to ProtoBeetle across the network.
