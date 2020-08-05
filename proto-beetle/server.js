@@ -357,7 +357,7 @@ const AckHeader = function(request, header, data) {
 
 const Server = Node.net.createServer(
   function(socket) {
-    console.log('client connected...');
+    console.log('Client connected...');
     // We truncate 256-bit checksums to 128-bit:
     const checksum_meta = Buffer.alloc(32);
     const checksum_data = Buffer.alloc(32);
@@ -376,7 +376,7 @@ const Server = Node.net.createServer(
             // We are expecting a header.
             if (headerRemaining > buffer.length) {
               // ...but buffer contains only a partial header buffer.
-              console.log(`received a partial header buffer ${buffer.length} bytes`);
+              console.log(`Received a partial header buffer ${buffer.length} bytes`);
               headerBuffers.push(buffer);
               headerRemaining -= buffer.length;
               return;
@@ -396,7 +396,7 @@ const Server = Node.net.createServer(
               )
             ) {
               // We don't speak the same language or something is really wrong.
-              console.log('error: wrong magic');
+              console.log('Wrong network protocol magic!');
               return socket.destroy(); // Prevent parsing more data events.
             }
             // Verify header CHECKSUM_META:
@@ -420,7 +420,7 @@ const Server = Node.net.createServer(
               )
             ) {
               // TODO We are treating corruption the same as a network error?
-              console.log('error: corrupt header');
+              console.log('Corrupt network protocol header!');
               return socket.destroy(); // Prevent parsing more data events.
             }
             dataBuffers = [];
@@ -460,7 +460,7 @@ const Server = Node.net.createServer(
     );
     socket.on('end',
       function() {
-        console.log('client disconnected.');
+        console.log('Client disconnected.');
       }
     );
   }

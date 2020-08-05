@@ -8,7 +8,7 @@ const Node = {
 
 const Crypto = require('@ronomon/crypto-async');
 
-const HOST = 'tb.perf.openafrica.network';
+const HOST = '127.0.0.1';
 const PORT = 30000;
 
 const TRANSFER = 64;
@@ -172,11 +172,11 @@ function acceptTransfers(source, socket) {
   socket.write(data);
 }
 
-console.log(`connecting to ${HOST}:${PORT}...`);
+console.log(`Connecting to ${HOST}:${PORT}...`);
 
 const socket = Node.net.createConnection(PORT, HOST,
   function() {
-    console.log('connected to server');
+    console.log('Connected to server');
     socket.on('data',
       function(buffer) {
         // TODO Handle any server results for the batch.

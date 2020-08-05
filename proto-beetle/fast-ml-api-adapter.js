@@ -25,11 +25,11 @@ const TIGER_BEETLE_HOST = 'tb.perf.openafrica.network';
 const TIGER_BEETLE_PORT = 30000;
 
 // Test harness payee:
-const PAYEE_HOST = '10.126.10.139';
+const PAYEE_HOST = LOCALHOST; //'10.126.10.139';
 const PAYEE_PORT = 3333;
 
 // Test harness payer:
-const PAYER_HOST = '10.126.10.139';
+const PAYER_HOST = LOCALHOST; //'10.126.10.139';
 const PAYER_PORT = 7777;
 
 Node.process.on('uncaughtException',
