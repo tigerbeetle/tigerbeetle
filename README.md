@@ -291,7 +291,7 @@ After ProtoBeetle, our next step is to implement a single-threaded version of Ti
 
 We want:
 
-* **C ABI compatibility** to embed the TigerBeetle master library or TigerBeetle network client directly into any language without the overhead of FFI, to match the portability and ease of use of the [SQLite library](https://www.sqlite.org/index.html), the most used database engine in the world.
+* **C ABI compatibility** to embed the TigerBeetle master library or TigerBeetle network client directly into any language, to match the portability and ease of use of the [SQLite library](https://www.sqlite.org/index.html), the most used database engine in the world.
 * **Control of the memory layout, alignment, and padding of data structures** to avoid cache misses and unaligned accesses, and to allow zero-copy parsing of data structures from off the network.
 * **Explicit static memory allocation** from the network all the way to the disk with **no hidden memory allocations**.
 * **OOM safety** as the TigerBeetle master library needs to manage GBs of in-memory state without crashing the embedding process.
