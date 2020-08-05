@@ -324,7 +324,7 @@ The collection of papers behind TigerBeetle:
 * [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/files/Disruptor-1.0.pdf) - A high performance alternative to bounded queues for
 exchanging data between concurrent threads.
 
-* [Evolution of Financial Exchange Architectures](https://www.youtube.com/watch?v=qDhTjE0XmkE) - Martin Thompson looks at the evolution of financial exchanges and explores the state of the art today.
+* [Evolution of Financial Exchange Architectures - 2020](https://www.youtube.com/watch?v=qDhTjE0XmkE) - Martin Thompson looks at the evolution of financial exchanges and explores the state of the art today.
 
 * [Gray Failure](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf) - "The major availability breakdowns and performance anomalies we see in cloud environments tend to be caused by subtle underlying faults, i.e. gray failure rather than fail-stop failure."
 
