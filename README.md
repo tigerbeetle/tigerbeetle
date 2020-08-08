@@ -168,7 +168,7 @@ We thought it might be interesting to support accounts that `timeout` and close 
                   length:   8 bytes ( 64-bit)
                  timeout:   8 bytes ( 64-bit) [optional, a quantity of time, i.e. an offset in nanoseconds from timestamp]
                timestamp:   8 bytes ( 64-bit) [reserved]
-                   value: 960 bytes (128-bit)
+                   value: 960 bytes
 } = 1024 bytes
 ```
 
