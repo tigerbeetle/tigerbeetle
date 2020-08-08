@@ -10,7 +10,9 @@ const Node = {
 
 const LEV = require('./log-event.js');
 
-LEV.HOST = '197.242.94.138';
+// Provide the IP address of the log event server if you want to enable logging:
+LEV.ENABLED = false;
+LEV.HOST = '127.0.0.1';
 LEV.PORT = 4444;
 
 const Crypto = require('@ronomon/crypto-async');
