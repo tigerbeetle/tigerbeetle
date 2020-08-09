@@ -55,12 +55,15 @@ memory and auto-hydrate your JSON object without doing any parsing.
 This bit cast in itself is special, and one wouldn't normally feel comfortable
 doing the same thing in C.
 
-In C it's "mostly safe" (as Miracle Max would say) to hydrate structs from
-network bytes by casting a buffer to a struct (no deserialization overhead!)...
-but you have to pack structs carefully by hand to control alignment, field
-ordering and padding, otherwise the compiler may reorder your struct fields or
-add padding and your struct may end up larger than your network bytes and
-corrupt data. See this explanation: http://www.catb.org/esr/structure-packing
+In C it's "mostly safe"
+([as Miracle Max would say](https://www.youtube.com/watch?v=d4ftmOI5NnI)) to
+hydrate structs from network bytes by casting a buffer to a struct
+(no deserialization overhead!)... but you have to pack structs carefully by hand
+to control alignment, field ordering and padding, otherwise the compiler may
+reorder your struct fields or add padding and your struct may end up larger than
+your network bytes and corrupt data. See
+[The Lost Art of Structure Packing](http://www.catb.org/esr/structure-packing)
+for a great explanation.
 
 However, in Zig our struct is not only carefully ordered to work even in C, but
 it is also explicitly annotated as "packed". It's not just that this Zig
