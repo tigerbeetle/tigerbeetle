@@ -47,10 +47,10 @@ cuts. We want to process a few million events a second and you can see the
 unnecessary overhead that JavaScript is forcing simply for lack of language
 features.
 
-The Zig version simply does a bit cast, in one line of code, to point a struct
-to existing memory, without any deserialization or function calls. This is also
-better than JSON. Imagine you could point your JSON parser to a piece of memory
-and auto-hydrate your JSON object without doing any parsing.
+**The Zig version simply does a bit cast, in one line of code, to point a struct
+to existing memory, without any deserialization or function calls.** This is
+also better than JSON. Imagine you could point your JSON parser to a piece of
+memory and auto-hydrate your JSON object without doing any parsing.
 
 This bit cast in itself is special, and one wouldn't normally feel comfortable
 doing the same thing in C.
