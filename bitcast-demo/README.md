@@ -93,6 +93,6 @@ node bench-encode.js && zig build-exe bench-decode.zig && node bench-decode.js &
 zig: sum of transfer amounts=16384 ns=215000
 ```
 
-To put this in perspective, the cost of deserialization in JavaScript can be
-more than the fsync latency for writing the same data to an HDD, let alone an
-SSD or NVMe SSD.
+To put this in perspective, the cost of deserializing a batch of transfers in
+JavaScript can be more than the fsync latency for writing the same data to an
+HDD, let alone an SSD or NVMe SSD.
