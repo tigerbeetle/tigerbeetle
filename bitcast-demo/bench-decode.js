@@ -32,24 +32,29 @@ function id(bytes, offset, size) {
   return bytes.slice(offset, offset + size);
 }
 
-var ms = Date.now();
-var sum = 0;
-var offset = 0;
-while (offset < bytes.length) {
-  const slice = bytes.slice(offset, offset + 128);
-  const transfer = {
-    id: id(slice, TRANSFER_ID_OFFSET, TRANSFER_ID),
-    debit_id: id(slice, TRANSFER_DEBIT_ID_OFFSET, TRANSFER_DEBIT_ID),
-    credit_id: id(slice, TRANSFER_CREDIT_ID_OFFSET, TRANSFER_CREDIT_ID),
-    custom_1: id(slice, TRANSFER_CUSTOM_1_OFFSET, TRANSFER_CUSTOM_1),
-    custom_2: id(slice, TRANSFER_CUSTOM_2_OFFSET, TRANSFER_CUSTOM_2),
-    custom_3: id(slice, TRANSFER_CUSTOM_3_OFFSET, TRANSFER_CUSTOM_3),
-    flags: slice.readUInt32LE(TRANSFER_FLAGS_OFFSET),
-    amount: slice.readUInt32LE(TRANSFER_AMOUNT_OFFSET),
-    timeout: slice.readUInt32LE(TRANSFER_TIMEOUT_OFFSET),
-    timestamp: slice.readUInt32LE(TRANSFER_TIMESTAMP_OFFSET)
-  };
-  sum += transfer.amount;
-  offset += 128;
+console.log('do this a few times to let v8 optimize...');
+
+var loops = 10;
+while (loops--) {
+  var ms = Date.now();
+  var sum = 0;
+  var offset = 0;
+  while (offset < bytes.length) {
+    var slice = bytes.slice(offset, offset + 128);
+    var transfer = {
+      id: id(slice, TRANSFER_ID_OFFSET, TRANSFER_ID),
+      debit_id: id(slice, TRANSFER_DEBIT_ID_OFFSET, TRANSFER_DEBIT_ID),
+      credit_id: id(slice, TRANSFER_CREDIT_ID_OFFSET, TRANSFER_CREDIT_ID),
+      custom_1: id(slice, TRANSFER_CUSTOM_1_OFFSET, TRANSFER_CUSTOM_1),
+      custom_2: id(slice, TRANSFER_CUSTOM_2_OFFSET, TRANSFER_CUSTOM_2),
+      custom_3: id(slice, TRANSFER_CUSTOM_3_OFFSET, TRANSFER_CUSTOM_3),
+      flags: slice.readUInt32LE(TRANSFER_FLAGS_OFFSET),
+      amount: slice.readUInt32LE(TRANSFER_AMOUNT_OFFSET),
+      timeout: slice.readUInt32LE(TRANSFER_TIMEOUT_OFFSET),
+      timestamp: slice.readUInt32LE(TRANSFER_TIMESTAMP_OFFSET)
+    };
+    sum += transfer.amount;
+    offset += 128;
+  }
+  console.log(` js: sum of transfer amounts=${sum} ms=${Date.now() - ms}`);
 }
-console.log(` js: sum of transfer amounts=${sum} ms=${Date.now() - ms}`);
