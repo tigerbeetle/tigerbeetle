@@ -3,12 +3,12 @@
 This is a simple demo to get you comfortable building Alpha-Beetle and show how
 low-level code can be easier than high-level code.
 
-## Download and install Zig master to your path:
+## Download and install Zig master to your path
 
 * Mac: https://ziglang.org/builds/zig-macos-x86_64-0.6.0+fd4783906.tar.xz
 * Linux: https://ziglang.org/builds/zig-linux-x86_64-0.6.0+fd4783906.tar.xz
 
-```
+```shell
 cd ~/Downloads
 tar -xf "zig-macos-x86_64-0.6.0+fd4783906.tar.xz"
 mv "zig-macos-x86_64-0.6.0+fd4783906" /usr/local/lib/zig
@@ -16,18 +16,18 @@ ln -s /usr/local/lib/zig/zig /usr/local/bin/zig
 # Nothing to compile here, move along...
 ```
 
-## Clone Alpha-Beetle or update:
+## Clone Alpha-Beetle or update
 
-```
+```shell
 git clone https://github.com/jorangreef/tiger-beetle
 cd tiger-beetle
 git pull
 cd bitcast-demo
 ```
 
-## Compile and run decode.zig vs decode.js:
+## Compile and run decode.zig vs decode.js
 
-```
+```shell
 zig build-exe decode.zig
 time ./decode # Do a throwaway run in case Catalina adds SIP latency.
 time ./decode
@@ -81,3 +81,17 @@ compile time with no runtime overhead... try changing
 Coming from C, this is fun.
 
 Coming from JavaScript, this is less code.
+
+## What's the performance impact?
+
+Deserializing 16,384 transfers takes 20ms in JavaScript and 0.21ms in Zig:
+
+```shell
+node bench-encode.js && zig build-exe bench-decode.zig && node bench-decode.js && ./bench-decode
+ js: sum of transfer amounts=16384 ms=20
+zig: sum of transfer amounts=16384 ns=215000
+```
+
+To put this in perspective, the cost of deserialization in JavaScript is more
+than double the fsync latency for writing the same data to an HDD, let alone an
+SSD or NVMe SSD.
