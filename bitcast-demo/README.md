@@ -84,14 +84,15 @@ Coming from JavaScript, this is less code.
 
 ## What's the performance impact?
 
-Deserializing 16,384 transfers takes 20ms in JavaScript and 0.21ms in Zig:
+Deserializing 16,384 transfers takes 5ms to 20ms in JavaScript and 0.21ms in
+Zig:
 
 ```shell
 node bench-encode.js && zig build-exe bench-decode.zig && node bench-decode.js && ./bench-decode
- js: sum of transfer amounts=16384 ms=20
+ js: sum of transfer amounts=16384 ms=5
 zig: sum of transfer amounts=16384 ns=215000
 ```
 
-To put this in perspective, the cost of deserialization in JavaScript is more
-than double the fsync latency for writing the same data to an HDD, let alone an
+To put this in perspective, the cost of deserialization in JavaScript can be
+more than the fsync latency for writing the same data to an HDD, let alone an
 SSD or NVMe SSD.
