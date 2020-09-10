@@ -56,7 +56,13 @@
       }
     },
     {
-      "files": "src/utils/encoding.ts",
+      "files": "src/utils/*.ts",
+      "rules": {
+        "no-multi-spaces": "off"
+      }
+    },
+    {
+      "files": "src/types/index.ts",
       "rules": {
         "no-multi-spaces": "off"
       }
