@@ -4,5 +4,6 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   clearMocks: true,
-  testPathIgnorePatterns: ['dist']
+  testPathIgnorePatterns: ['dist'],
+  resetMocks: true
 }
