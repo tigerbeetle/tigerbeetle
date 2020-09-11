@@ -145,7 +145,7 @@ pub const IO_Uring = struct {
 
     pub fn deinit(self: *IO_Uring) void {
         assert(self.fd >= 0);
-        // The mmap's depend on the fd, so the order is important:
+        // The mmaps depend on the fd, so the order of these calls is important:
         self.cq.deinit();
         self.sq.deinit();
         os.close(self.fd);
@@ -171,7 +171,7 @@ pub const IO_Uring = struct {
     }
 
     /// Submits the SQEs acquired via get_sqe() to the kernel. You can call this once after you have
-    /// called get_sqe() multiple times to set up multiple I/O requests.
+    /// called get_sqe() multiple times to setup multiple I/O requests.
     /// Returns the number of SQEs submitted.
     /// Matches the implementation of io_uring_submit() in liburing.
     pub fn submit(self: *IO_Uring) !u32 {
@@ -375,12 +375,40 @@ pub const IO_Uring = struct {
         };
     }
 
+    pub fn queue_writev(
+        self: *IO_Uring,
+        user_data: u64,
+        fd: os.fd_t,
+        iovecs: []const os.iovec_const,
+        offset: u64,
+        rw_flags: os.kernel_rwf
+    ) !void {
+        const sqe = try self.get_sqe();
+        sqe.* = .{
+            .opcode = .WRITEV,
+            .fd = fd,
+            .off = offset,
+            .addr = @ptrToInt(iovecs.ptr),
+            .len = @truncate(u32, iovecs.len),
+            .opflags = @as(u32, rw_flags),
+            .user_data = user_data
+        };
+    }
+
     pub fn queue_nop(self: *IO_Uring, user_data: u64) !void {
         const sqe = try self.get_sqe();
         sqe.* = .{
             .opcode = .NOP,
             .user_data = user_data
         };
+    }
+
+    // TODO Make clear that this copies.
+    pub fn wait_cqe(ring: *IO_Uring) !io_uring_cqe {
+        var cqes: [1]io_uring_cqe = undefined;
+        const count = try ring.copy_cqes(&cqes, 1);
+        assert(count == 1);
+        return cqes[0];
     }
 };
 
@@ -421,7 +449,7 @@ pub const SubmissionQueue = struct {
         assert(mmap.len == size);
 
         // The motivation for the `sqes` and `array` indirection is to make it possible for the
-        // application to preallocate static io_uring_sqe entries and then submit them when needed.
+        // application to preallocate static io_uring_sqe entries and then replay them when needed.
         const size_sqes = p.sq_entries * @sizeOf(io_uring_sqe);
         const mmap_sqes = try os.mmap(
             null,
@@ -495,14 +523,6 @@ pub const CompletionQueue = struct {
     }
 };
 
-// TODO Move this into the ring struct.
-fn wait_cqe(ring: *IO_Uring) !io_uring_cqe {
-    var cqes: [1]io_uring_cqe = undefined;
-    const count = try ring.copy_cqes(&cqes, 1);
-    assert(count == 1);
-    return cqes[0];
-}
-
 test "uring" {
     if (builtin.os.tag != .linux) return error.SkipZigTest;
     // TODO Add more tests when we get to BetaBeetle:
@@ -523,7 +543,7 @@ test "uring" {
         .user_data = 0xdeadbeef,
         .res = 0,
         .flags = 0
-    }, try wait_cqe(&ring));
+    }, try ring.wait_cqe());
     testing.expectEqual(ring.cq.head.*, 1);
 
     const zero = try os.openZ("/dev/zero", os.O_RDONLY | os.O_CLOEXEC, 0);
@@ -542,7 +562,7 @@ test "uring" {
             0
         );
         testing.expectEqual(@as(u32, 1), try ring.submit());
-        var cqe = try wait_cqe(&ring);
+        var cqe = try ring.wait_cqe();
         testing.expectEqual(linux.io_uring_cqe {
             .user_data = 0xcafebabe,
             .res = 100,
