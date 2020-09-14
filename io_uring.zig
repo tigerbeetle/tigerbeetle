@@ -188,16 +188,18 @@ pub const IO_Uring = struct {
             if (wait_nr > 0 or (self.flags & linux.IORING_SETUP_IOPOLL) > 0) {
                 flags |= linux.IORING_ENTER_GETEVENTS;
             }
-            try self.enter(submitted, wait_nr, flags);
+            return try self.enter(submitted, wait_nr, flags);
         }
         return submitted;
     }
 
     // Tell the kernel we have submitted SQEs and/or want to wait for CQEs.
-    fn enter(self: *IO_Uring, to_submit: u32, min_complete: u32, flags: u32) !void {
+    // Returns the number of SQEs submitted.
+    fn enter(self: *IO_Uring, to_submit: u32, min_complete: u32, flags: u32) !u32 {
         const res = linux.io_uring_enter(self.fd, to_submit, min_complete, flags, null);
         const errno = linux.getErrno(res);
         if (errno != 0) return os.unexpectedErrno(errno);
+        return @truncate(u32, res);
     }
 
     // Sync internal state with kernel ring state on the SQ side.
@@ -268,7 +270,7 @@ pub const IO_Uring = struct {
         const count = self.copy_cqes_ready(cqes, wait_nr);
         if (count > 0) return count;
         if (self.cq_ring_needs_flush() or wait_nr > 0) {
-            try self.enter(0, wait_nr, linux.IORING_ENTER_GETEVENTS);
+            _ = try self.enter(0, wait_nr, linux.IORING_ENTER_GETEVENTS);
             return self.copy_cqes_ready(cqes, wait_nr);
         }
         return 0;
