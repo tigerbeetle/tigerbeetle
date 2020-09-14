@@ -322,7 +322,7 @@ pub const IO_Uring = struct {
         addr: *os.sockaddr,
         addrlen: *os.socklen_t,
         accept_flags: u32
-    ) !void {
+    ) !*io_uring_sqe {
         // "sqe->fd is the file descriptor, sqe->addr holds a pointer to struct sockaddr,
         // sqe->addr2 holds a pointer to socklen_t, and finally sqe->accept_flags holds the flags
         // for accept(4)." - https://lwn.net/ml/linux-block/20191025173037.13486-1-axboe@kernel.dk/
@@ -330,20 +330,34 @@ pub const IO_Uring = struct {
         sqe.* = .{
             .opcode = .ACCEPT,
             .fd = fd,
-            .off = @ptrToInt(addrlen),
+            .off = @ptrToInt(addrlen), // `addr2` is a newer union member that maps to `off`.
             .addr = @ptrToInt(addr),
             .user_data = user_data,
             .opflags = accept_flags
         };
+        return sqe;
     }
 
+    pub fn queue_nop(self: *IO_Uring, user_data: u64) !*io_uring_sqe {
+        const sqe = try self.get_sqe();
+        sqe.* = .{
+            .opcode = .NOP,
+            .user_data = user_data
+        };
+        return sqe;
+    }
+
+    /// Queues (but does not submit) an SQE to perform a `preadv()`.
+    /// Returns a pointer to the SQE so that you can further modify the SQE for advanced use cases.
+    /// For example, if you want to do a `preadv2()` then set `opflags` in the returned SQE.
+    /// See https://linux.die.net/man/2/preadv.
     pub fn queue_readv(
         self: *IO_Uring,
         user_data: u64,
         fd: os.fd_t,
         iovecs: []const os.iovec,
         offset: u64
-    ) !void {
+    ) !*io_uring_sqe {
         const sqe = try self.get_sqe();
         sqe.* = .{
             .opcode = .READV,
@@ -351,19 +365,23 @@ pub const IO_Uring = struct {
             .off = offset,
             .addr = @ptrToInt(iovecs.ptr),
             .len = @truncate(u32, iovecs.len),
-            .opflags = 0,
             .user_data = user_data
         };
+        return sqe;
     }
 
+    /// Queues (but does not submit) an SQE to perform a `pwritev()`.
+    /// Returns a pointer to the SQE so that you can further modify the SQE for advanced use cases.
+    /// For example, if you want to do a `pwritev2()` then set `opflags` on the returned SQE.
+    /// Or if you want to link this write with an fsync then call `link_with_next_sqe()` on the SQE.
+    /// See https://linux.die.net/man/2/pwritev.
     pub fn queue_writev(
         self: *IO_Uring,
         user_data: u64,
         fd: os.fd_t,
         iovecs: []const os.iovec_const,
-        offset: u64,
-        rw_flags: os.kernel_rwf
-    ) !void {
+        offset: u64
+    ) !*io_uring_sqe {
         const sqe = try self.get_sqe();
         sqe.* = .{
             .opcode = .WRITEV,
@@ -371,9 +389,9 @@ pub const IO_Uring = struct {
             .off = offset,
             .addr = @ptrToInt(iovecs.ptr),
             .len = @truncate(u32, iovecs.len),
-            .opflags = @as(u32, rw_flags),
             .user_data = user_data
         };
+        return sqe;
     }
 
     pub fn queue_nop(self: *IO_Uring, user_data: u64) !void {
@@ -511,7 +529,7 @@ test "uring" {
     var ring = try IO_Uring.init(16, 0);
     defer ring.deinit();
 
-    try ring.queue_nop(@intCast(u64, 0xdeadbeef));
+    _ = try ring.queue_nop(@intCast(u64, 0xdeadbeef));
     testing.expectEqual(ring.sq.sqe_head, 0);
     testing.expectEqual(ring.sq.sqe_tail, 1);
     testing.expectEqual(ring.cq.head.*, 0);
@@ -536,7 +554,7 @@ test "uring" {
             .iov_base = &buf,
             .iov_len = buf.len,
         }};
-        try ring.queue_readv(
+        _ = try ring.queue_readv(
             0xcafebabe,
             zero,
             iovecs[0..],
