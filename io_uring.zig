@@ -315,27 +315,6 @@ pub const IO_Uring = struct {
         }
     }
 
-    /// Matches the implementation of io_uring_prep_rw() in liburing, used for many prep_* methods.
-    pub fn prep_rw(
-        op: linux.IORING_OP, sqe: *io_uring_sqe, fd: i32, addr: u64, len: u32, offset: u64
-    ) void {
-        sqe.* = .{
-            .opcode = op,
-            .flags = 0,
-            .ioprio = 0,
-            .fd = fd,
-            .off = offset,
-            .addr = addr,
-            .len = len,
-            .opflags = 0,
-            .user_data = 0,
-            .buffer = 0,
-            .personality = 0,
-            .splice_fd_in = 0,
-            .options = [2]u64{ 0, 0 }
-        };
-    }
-
     pub fn queue_accept(
         self: *IO_Uring,
         user_data: u64,
