@@ -394,12 +394,33 @@ pub const IO_Uring = struct {
         return sqe;
     }
 
-    pub fn queue_nop(self: *IO_Uring, user_data: u64) !void {
-        const sqe = try self.get_sqe();
-        sqe.* = .{
-            .opcode = .NOP,
-            .user_data = user_data
-        };
+    /// The next SQE will not be started until this one completes.
+    /// This can be used to chain causally dependent SQEs, and the chain can be arbitrarily long.
+    /// The tail of the chain is denoted by the first SQE that does not have this flag set.
+    /// This flag has no effect on previous SQEs, nor does it impact SQEs outside the chain.
+    /// This means that multiple chains can be executing in parallel, along with individual SQEs.
+    /// Only members inside the chain are serialized.
+    /// A chain will be broken if any SQE in the chain ends in error, where any unexpected result is
+    /// considered an error. For example, a short read will terminate the remainder of the chain.
+    pub fn link_with_next_sqe(self: *IO_Uring, sqe: *io_uring_sqe) void {
+        sqe.*.flags |= linux.IOSQE_IO_LINK;
+    }
+    
+    /// Like link_with_next_sqe() but stronger.
+    /// For when you don't want the chain to fail in the event of a completion result error.
+    /// For example, you may know that some commands will fail and may want the chain to continue.
+    /// Hard links are resilient to completion results, but are not resilient to submission errors.
+    pub fn hardlink_with_next_sqe(self: *IO_Uring, sqe: *io_uring_sqe) void {
+        sqe.*.flags |= linux.IOSQE_IO_HARDLINK;
+    }
+    
+    /// This creates a full pipeline barrier in the submission queue.
+    /// This SQE will not be started until previous SQEs complete.
+    /// Subsequent SQEs will not be started until this SQE completes.
+    /// In other words, this stalls the entire submission queue.
+    /// You should first consider using link_with_next_sqe() for more granular SQE sequence control.
+    pub fn drain_previous_sqes(self: *IO_Uring, sqe: *io_uring_sqe) void {
+        sqe.*.flags |= linux.IOSQE_IO_DRAIN;
     }
 
     // TODO Make clear that this copies.
