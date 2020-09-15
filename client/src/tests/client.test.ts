@@ -47,7 +47,7 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
-      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      id: Buffer.from(v4().replace(/[^a-fA-F0-9]/g, ''), 'hex'),
       source_account_id: sourceAccountId,
       target_account_id: targeteAccountId,
       amount: BigInt(10000),
@@ -67,7 +67,7 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: CommitCommand = {
-      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      id: Buffer.from(v4().replace(/[^a-fA-F0-9]/g, ''), 'hex'),
       flags: Buffer.from([1, 0, 1, 1, 0, 0, 1, 1])
     }
 
@@ -84,7 +84,7 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: CreateAccountCommand = {
-      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      id: Buffer.from(v4().replace(/[^a-fA-F0-9]/g, ''), 'hex'),
       debit_accepted: BigInt(10013),
       debit_reserved: BigInt(10017),
       credit_accepted: BigInt(9973),
@@ -104,7 +104,7 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
-      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      id: Buffer.from(v4().replace(/[^a-fA-F0-9]/g, ''), 'hex'),
       source_account_id: sourceAccountId,
       target_account_id: targeteAccountId,
       amount: BigInt(10000)
@@ -127,7 +127,7 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
-      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      id: Buffer.from(v4().replace(/[^a-fA-F0-9]/g, ''), 'hex'),
       source_account_id: sourceAccountId,
       target_account_id: targeteAccountId,
       amount: BigInt(10000)
@@ -135,7 +135,7 @@ describe('Client', (): void => {
 
     const promises = []
     for (let i = 0; i < 10; i++) {
-      promises.push(client.encodeReserveCommand({ ...command, id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']) }))
+      promises.push(client.encodeReserveCommand({ ...command, id: Buffer.from(v4().replace(/[^a-fA-F0-9]/g, ''), 'hex') }))
     }
     await Promise.all(promises)
 
@@ -159,7 +159,7 @@ describe('Client', (): void => {
 
     const promises = []
     for (let i = 0; i < 5; i++) {
-      promises.push(client.encodeReserveCommand({ ...command, id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']) }))
+      promises.push(client.encodeReserveCommand({ ...command, id: Buffer.from(v4().replace(/[^a-fA-F0-9]/g, ''), 'hex') }))
     }
 
     jest.runTimersToTime(51)
