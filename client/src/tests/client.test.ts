@@ -5,6 +5,10 @@ import { TigerBeetle } from '../client'
 import { ReserveCommand, CreateAccountCommand, CommitCommand } from '../types'
 
 describe('Client', (): void => {
+  const sourceAccountId = Buffer.alloc(8)
+  const targeteAccountId = Buffer.alloc(8)
+  sourceAccountId.writeBigUInt64BE(BigInt(1))
+  targeteAccountId.writeBigUInt64BE(BigInt(2))
   const logger = createLogger({
     name: 'Test Tiger-Beetle client',
     level: process.env.LOG_LEVEL || 'error'
@@ -43,9 +47,9 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
-      id: v4(),
-      source_account_id: v4(),
-      target_account_id: v4(),
+      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      source_account_id: sourceAccountId,
+      target_account_id: targeteAccountId,
       amount: BigInt(10000),
       custom_1: Buffer.from([1, 0, 1, 1, 0, 0, 1, 1])
     }
@@ -63,7 +67,7 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: CommitCommand = {
-      id: v4(),
+      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
       flags: Buffer.from([1, 0, 1, 1, 0, 0, 1, 1])
     }
 
@@ -80,7 +84,7 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: CreateAccountCommand = {
-      id: v4(),
+      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
       debit_accepted: BigInt(10013),
       debit_reserved: BigInt(10017),
       credit_accepted: BigInt(9973),
@@ -100,9 +104,9 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
-      id: v4(),
-      source_account_id: v4(),
-      target_account_id: v4(),
+      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      source_account_id: sourceAccountId,
+      target_account_id: targeteAccountId,
       amount: BigInt(10000)
     }
 
@@ -123,15 +127,15 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
-      id: v4(),
-      source_account_id: v4(),
-      target_account_id: v4(),
+      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      source_account_id: sourceAccountId,
+      target_account_id: targeteAccountId,
       amount: BigInt(10000)
     }
 
     const promises = []
     for (let i = 0; i < 10; i++) {
-      promises.push(client.encodeReserveCommand({ ...command, id: v4() }))
+      promises.push(client.encodeReserveCommand({ ...command, id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']) }))
     }
     await Promise.all(promises)
 
@@ -147,15 +151,15 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
-      id: v4(),
-      source_account_id: v4(),
-      target_account_id: v4(),
+      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      source_account_id: sourceAccountId,
+      target_account_id: targeteAccountId,
       amount: BigInt(10000)
     }
 
     const promises = []
     for (let i = 0; i < 5; i++) {
-      promises.push(client.encodeReserveCommand({ ...command, id: v4() }))
+      promises.push(client.encodeReserveCommand({ ...command, id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']) }))
     }
 
     jest.runTimersToTime(51)

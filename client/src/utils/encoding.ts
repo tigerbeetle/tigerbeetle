@@ -58,37 +58,30 @@ export const CREATE_ACCOUNT_TIMESTAMP_OFFSET             = CREATE_ACCOUNT_TIMEOU
 
 export function encodeReserveCommand (reserveCommand: ReserveCommand): Buffer {
   const buffer = Buffer.alloc(TRANSFER)
-  let toEncode: string = ''
 
-  toEncode = reserveCommand.id.replace(/[^a-fA-F0-9]/g, '')
-  assert(toEncode.length === 32, 'Reserve command ID is not 16 bytes') // assuming the id is a UUID
-  buffer.write(
-    toEncode,
+  assert(reserveCommand.id.length <= ID, 'Reserve command id is not 16 bytes or less.')
+  buffer.fill(
+    reserveCommand.id,
     TRANSFER_ID_OFFSET,
-    ID,
-    'hex'
+    TRANSFER_SOURCE_ACCOUNT_ID_OFFSET
   )
 
-  toEncode = reserveCommand.source_account_id.replace(/[^a-fA-F0-9]/g, '') // TODO: assume the source account id is a UUID?
-  assert(toEncode.length === 32)
-  buffer.write(
-    toEncode,
+  assert(reserveCommand.source_account_id.length <= SOURCE_ACCOUNT_ID, 'Reserve command source account id is not 16 bytes or less.')
+  buffer.fill(
+    reserveCommand.source_account_id,
     TRANSFER_SOURCE_ACCOUNT_ID_OFFSET,
-    SOURCE_ACCOUNT_ID,
-    'hex'
+    TRANSFER_TARGET_ACCOUNT_ID_OFFSET
   )
 
-  toEncode = reserveCommand.target_account_id.replace(/[^a-fA-F0-9]/g, '') // TODO: assume the target account id is a UUID?
-  assert(toEncode.length === 32)
-  buffer.write(
-    toEncode,
+  assert(reserveCommand.target_account_id.length <= TARGET_ACCOUNT_ID, 'Reserve command target account id is not 16 bytes or less.')
+  buffer.fill(
+    reserveCommand.target_account_id,
     TRANSFER_TARGET_ACCOUNT_ID_OFFSET,
-    TARGET_ACCOUNT_ID,
-    'hex'
+    TRANSFER_CUSTOM_1_OFFSET
   )
 
   if (reserveCommand.custom_1) {
-    assert(reserveCommand.custom_1.length <= CUSTOM, 'Reserve command custom slot 1 is not 16 bytes')
+    assert(reserveCommand.custom_1.length <= CUSTOM, 'Reserve command custom slot 1 is not 16 bytes or less')
     buffer.fill(
       reserveCommand.custom_1,
       TRANSFER_CUSTOM_1_OFFSET,
@@ -97,7 +90,7 @@ export function encodeReserveCommand (reserveCommand: ReserveCommand): Buffer {
   }
 
   if (reserveCommand.custom_2) {
-    assert(reserveCommand.custom_2.length <= CUSTOM, 'Reserve command custom slot 2 is not 16 bytes')
+    assert(reserveCommand.custom_2.length <= CUSTOM, 'Reserve command custom slot 2 is not 16 bytes or less')
     buffer.fill(
       reserveCommand.custom_2,
       TRANSFER_CUSTOM_2_OFFSET,
@@ -106,7 +99,7 @@ export function encodeReserveCommand (reserveCommand: ReserveCommand): Buffer {
   }
 
   if (reserveCommand.custom_3) {
-    assert(reserveCommand.custom_3.length <= CUSTOM, 'Reserve command custom slot 3 is not 16 bytes')
+    assert(reserveCommand.custom_3.length <= CUSTOM, 'Reserve command custom slot 3 is not 16 bytes or less')
     buffer.fill(
       reserveCommand.custom_3,
       TRANSFER_CUSTOM_3_OFFSET,
@@ -142,19 +135,16 @@ export function encodeReserveCommand (reserveCommand: ReserveCommand): Buffer {
 
 export function encodeCommitCommand (commitCommand: CommitCommand): Buffer {
   const buffer = Buffer.alloc(COMMIT_TRANSFER)
-  let toEncode: string = ''
 
-  toEncode = commitCommand.id.replace(/[^a-fA-F0-9]/g, '')
-  assert(toEncode.length === 32, 'Commit command ID is not 16 bytes') // assuming the id is a UUID
-  buffer.write(
-    toEncode,
+  assert(commitCommand.id.length, 'Commit command ID is not 16 bytes or less')
+  buffer.fill(
+    commitCommand.id,
     COMMIT_TRANSFER_ID_OFFSET,
-    ID,
-    'hex'
+    COMMIT_TRANSFER_CUSTOM_1_OFFSET
   )
 
   if (commitCommand.custom_1) {
-    assert(commitCommand.custom_1.length <= CUSTOM, 'Commit command custom slot 1 is not 16 bytes')
+    assert(commitCommand.custom_1.length <= CUSTOM, 'Commit command custom slot 1 is not 16 bytes or less')
     buffer.fill(
       commitCommand.custom_1,
       COMMIT_TRANSFER_CUSTOM_1_OFFSET,
@@ -163,7 +153,7 @@ export function encodeCommitCommand (commitCommand: CommitCommand): Buffer {
   }
 
   if (commitCommand.custom_2) {
-    assert(commitCommand.custom_2.length <= CUSTOM, 'Commit command custom slot 2 is not 16 bytes')
+    assert(commitCommand.custom_2.length <= CUSTOM, 'Commit command custom slot 2 is not 16 bytes or less')
     buffer.fill(
       commitCommand.custom_2,
       COMMIT_TRANSFER_CUSTOM_2_OFFSET,
@@ -172,7 +162,7 @@ export function encodeCommitCommand (commitCommand: CommitCommand): Buffer {
   }
 
   if (commitCommand.custom_3) {
-    assert(commitCommand.custom_3.length <= CUSTOM, 'Commit command custom slot 3 is not 16 bytes')
+    assert(commitCommand.custom_3.length <= CUSTOM, 'Commit command custom slot 3 is not 16 bytes or less')
     buffer.fill(
       commitCommand.custom_3,
       COMMIT_TRANSFER_CUSTOM_3_OFFSET,
@@ -192,19 +182,16 @@ export function encodeCommitCommand (commitCommand: CommitCommand): Buffer {
 
 export function encodeCreateAccountCommand (createAccountCommand: CreateAccountCommand): Buffer {
   const buffer = Buffer.alloc(CREATE_ACCOUNT)
-  let toEncode: string = ''
 
-  toEncode = createAccountCommand.id.replace(/[^a-fA-F0-9]/g, '')
-  assert(toEncode.length === 32, 'Create account command ID is not 16 bytes') // assuming the id is a UUID
-  buffer.write(
-    toEncode,
+  assert(createAccountCommand.id.length <= 16, 'Create account command ID is not 16 bytes or less') // assuming the id is a UUID
+  buffer.fill(
+    createAccountCommand.id,
     CREATE_ACCOUNT_ID_OFFSET,
-    ID,
-    'hex'
+    CREATE_ACCOUNT_CUSTOM_OFFSET
   )
 
   if (createAccountCommand.custom) {
-    assert(createAccountCommand.custom.length <= CUSTOM, 'Create account command custom slot is not 16 bytes')
+    assert(createAccountCommand.custom.length <= CUSTOM, 'Create account command custom slot is not 16 bytes or less')
     buffer.fill(
       createAccountCommand.custom,
       CREATE_ACCOUNT_CUSTOM_OFFSET,
