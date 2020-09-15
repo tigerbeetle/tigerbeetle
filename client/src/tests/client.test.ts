@@ -7,7 +7,7 @@ import { ReserveCommand, CreateAccountCommand, CommitCommand } from '../types'
 describe('Client', (): void => {
   const logger = createLogger({
     name: 'Test Tiger-Beetle client',
-    level: 'error'
+    level: process.env.LOG_LEVEL || 'error'
   })
   const dataHandler = jest.fn()
   const server = createMockServer(dataHandler)
@@ -40,7 +40,7 @@ describe('Client', (): void => {
     dataHandler.mockImplementationOnce((data: Buffer): Buffer => {
       dataReceivedByServer = data
       // TODO: test server responses
-      return Buffer.from('can send a reserve command')
+      return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
       id: v4(),
@@ -60,7 +60,7 @@ describe('Client', (): void => {
     dataHandler.mockImplementationOnce((data: Buffer): Buffer => {
       dataReceivedByServer = data
       // TODO: test server responses
-      return Buffer.from('can send a commit command')
+      return Buffer.alloc(64)
     })
     const command: CommitCommand = {
       id: v4(),
@@ -77,7 +77,7 @@ describe('Client', (): void => {
     dataHandler.mockImplementationOnce((data: Buffer): Buffer => {
       dataReceivedByServer = data
       // TODO: test server responses
-      return Buffer.from('can send a create account command')
+      return Buffer.alloc(64)
     })
     const command: CreateAccountCommand = {
       id: v4(),
@@ -97,7 +97,7 @@ describe('Client', (): void => {
     dataHandler.mockImplementationOnce((data: Buffer): Buffer => {
       dataReceivedByServer = data
       // TODO: test server responses
-      return Buffer.from('batches commands')
+      return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
       id: v4(),
@@ -120,7 +120,7 @@ describe('Client', (): void => {
     dataHandler.mockImplementationOnce((data: Buffer): Buffer => {
       dataReceivedByServer = data
       // TODO: test server responses
-      return Buffer.from('batches commands')
+      return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
       id: v4(),
@@ -130,12 +130,12 @@ describe('Client', (): void => {
     }
 
     const promises = []
-    for (let i = 0; i < 11; i++) {
-      promises.push(client.encodeReserveCommand(command))
+    for (let i = 0; i < 10; i++) {
+      promises.push(client.encodeReserveCommand({ ...command, id: v4() }))
     }
     await Promise.all(promises)
 
-    expect(dataReceivedByServer.length).toBe(64 + 11 * 128)
+    expect(dataReceivedByServer.length).toBe(64 + 10 * 128)
   })
 
   test('sends batch when timeout window has been reached', async (): Promise<void> => {
@@ -144,7 +144,7 @@ describe('Client', (): void => {
     dataHandler.mockImplementationOnce((data: Buffer): Buffer => {
       dataReceivedByServer = data
       // TODO: test server responses
-      return Buffer.from('batches commands')
+      return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
       id: v4(),
@@ -155,7 +155,7 @@ describe('Client', (): void => {
 
     const promises = []
     for (let i = 0; i < 5; i++) {
-      promises.push(client.encodeReserveCommand(command))
+      promises.push(client.encodeReserveCommand({ ...command, id: v4() }))
     }
 
     jest.runTimersToTime(51)
