@@ -51,7 +51,7 @@ export class TigerBeetle extends EventEmitter {
   private _batchTimeoutWindow: number
   private _socket: Socket
   private _checksum = Buffer.alloc(32)
-  private _inFlight = new Array<(data: Buffer) => void>()
+  private _inFlight = new Array<() => void>()
   private _reserveCommands = new Batch(COMMAND_CREATE_TRANSFERS)
   private _commitCommands = new Batch(COMMAND_COMMIT_TRANSFERS)
   private _createAccountCommands = new Batch(COMMAND_CREATE_ACCOUNTS)
@@ -68,15 +68,19 @@ export class TigerBeetle extends EventEmitter {
   async connect (): Promise<void> {
     this._socket = new Socket()
     this._socket.on('data', (data: Buffer): void => {
-      this.logger.debug('received data from server %o', data)
-      // TODO: use Tiger Beetle request id to match callbacks
-      const callback = this._inFlight.shift()
-      if (callback) {
-        callback(data)
-        return
+      this.logger.debug('received data from server %o length %d', data, data.length)
+      let length = data.length
+      while (length >= 64) {
+        // TODO Process server result codes for the batch.
+        const callback = this._inFlight.shift()
+        if (callback) {
+          callback()
+        } else {
+          this.logger.error('Received data but no inflight callback registered.')
+        }
+        length -= 64
       }
-
-      this.logger.error('Received data but no inflight callback registered. data: %o', data)
+      // TODO Concatenate partial buffers.
     })
     this._socket.on('error', (error): void => {
       this.logger.error('Socket error: %o', error)
@@ -130,7 +134,7 @@ export class TigerBeetle extends EventEmitter {
         }.bind(this),
         this._batchTimeoutWindow // Wait up to N ms for a batch to be collected...
       )
-    } else if (batch.jobs.length > this._batchSize) {
+    } else if (batch.jobs.length >= this._batchSize) {
       clearTimeout(batch.timeout as NodeJS.Timeout)
       this._execute(batch)
     }
@@ -161,11 +165,10 @@ export class TigerBeetle extends EventEmitter {
       offset += copied
     }
     assert(offset === buffer.length)
-    const callback = (response: Buffer): void => {
+    const callback = (): void => {
       // TODO: handle server response. assuming success for now. response will contain an array with only command ids that had errors
       this.logger.debug('Received response from Tiger Beetle Server')
       jobs.forEach((job): void => {
-        this.logger.debug('emitting job id: ', job.id)
         this.emit(job.id)
       })
     }
@@ -173,6 +176,7 @@ export class TigerBeetle extends EventEmitter {
   }
 
   private _send (command: number, data: Buffer, callback: () => void): void{
+    this.logger.debug('sending batch command=%d', command)
     assert(this._socket, 'not connected.')
     const header = Buffer.alloc(NETWORK_HEADER)
     // TODO Use a stream cipher CPRNG to write a random header ID instead of 0:
