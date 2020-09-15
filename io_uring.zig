@@ -188,16 +188,18 @@ pub const IO_Uring = struct {
             if (wait_nr > 0 or (self.flags & linux.IORING_SETUP_IOPOLL) > 0) {
                 flags |= linux.IORING_ENTER_GETEVENTS;
             }
-            try self.enter(submitted, wait_nr, flags);
+            return try self.enter(submitted, wait_nr, flags);
         }
         return submitted;
     }
 
     // Tell the kernel we have submitted SQEs and/or want to wait for CQEs.
-    fn enter(self: *IO_Uring, to_submit: u32, min_complete: u32, flags: u32) !void {
+    // Returns the number of SQEs submitted.
+    fn enter(self: *IO_Uring, to_submit: u32, min_complete: u32, flags: u32) !u32 {
         const res = linux.io_uring_enter(self.fd, to_submit, min_complete, flags, null);
         const errno = linux.getErrno(res);
         if (errno != 0) return os.unexpectedErrno(errno);
+        return @truncate(u32, res);
     }
 
     // Sync internal state with kernel ring state on the SQ side.
@@ -268,7 +270,7 @@ pub const IO_Uring = struct {
         const count = self.copy_cqes_ready(cqes, wait_nr);
         if (count > 0) return count;
         if (self.cq_ring_needs_flush() or wait_nr > 0) {
-            try self.enter(0, wait_nr, linux.IORING_ENTER_GETEVENTS);
+            _ = try self.enter(0, wait_nr, linux.IORING_ENTER_GETEVENTS);
             return self.copy_cqes_ready(cqes, wait_nr);
         }
         return 0;
@@ -313,27 +315,6 @@ pub const IO_Uring = struct {
         }
     }
 
-    /// Matches the implementation of io_uring_prep_rw() in liburing, used for many prep_* methods.
-    pub fn prep_rw(
-        op: linux.IORING_OP, sqe: *io_uring_sqe, fd: i32, addr: u64, len: u32, offset: u64
-    ) void {
-        sqe.* = .{
-            .opcode = op,
-            .flags = 0,
-            .ioprio = 0,
-            .fd = fd,
-            .off = offset,
-            .addr = addr,
-            .len = len,
-            .opflags = 0,
-            .user_data = 0,
-            .buffer = 0,
-            .personality = 0,
-            .splice_fd_in = 0,
-            .options = [2]u64{ 0, 0 }
-        };
-    }
-
     pub fn queue_accept(
         self: *IO_Uring,
         user_data: u64,
@@ -341,7 +322,7 @@ pub const IO_Uring = struct {
         addr: *os.sockaddr,
         addrlen: *os.socklen_t,
         accept_flags: u32
-    ) !void {
+    ) !*io_uring_sqe {
         // "sqe->fd is the file descriptor, sqe->addr holds a pointer to struct sockaddr,
         // sqe->addr2 holds a pointer to socklen_t, and finally sqe->accept_flags holds the flags
         // for accept(4)." - https://lwn.net/ml/linux-block/20191025173037.13486-1-axboe@kernel.dk/
@@ -349,20 +330,34 @@ pub const IO_Uring = struct {
         sqe.* = .{
             .opcode = .ACCEPT,
             .fd = fd,
-            .off = @ptrToInt(addrlen),
+            .off = @ptrToInt(addrlen), // `addr2` is a newer union member that maps to `off`.
             .addr = @ptrToInt(addr),
             .user_data = user_data,
             .opflags = accept_flags
         };
+        return sqe;
     }
 
+    pub fn queue_nop(self: *IO_Uring, user_data: u64) !*io_uring_sqe {
+        const sqe = try self.get_sqe();
+        sqe.* = .{
+            .opcode = .NOP,
+            .user_data = user_data
+        };
+        return sqe;
+    }
+
+    /// Queues (but does not submit) an SQE to perform a `preadv()`.
+    /// Returns a pointer to the SQE so that you can further modify the SQE for advanced use cases.
+    /// For example, if you want to do a `preadv2()` then set `opflags` in the returned SQE.
+    /// See https://linux.die.net/man/2/preadv.
     pub fn queue_readv(
         self: *IO_Uring,
         user_data: u64,
         fd: os.fd_t,
         iovecs: []const os.iovec,
         offset: u64
-    ) !void {
+    ) !*io_uring_sqe {
         const sqe = try self.get_sqe();
         sqe.* = .{
             .opcode = .READV,
@@ -370,19 +365,23 @@ pub const IO_Uring = struct {
             .off = offset,
             .addr = @ptrToInt(iovecs.ptr),
             .len = @truncate(u32, iovecs.len),
-            .opflags = 0,
             .user_data = user_data
         };
+        return sqe;
     }
 
+    /// Queues (but does not submit) an SQE to perform a `pwritev()`.
+    /// Returns a pointer to the SQE so that you can further modify the SQE for advanced use cases.
+    /// For example, if you want to do a `pwritev2()` then set `opflags` on the returned SQE.
+    /// Or if you want to link this write with an fsync then call `link_with_next_sqe()` on the SQE.
+    /// See https://linux.die.net/man/2/pwritev.
     pub fn queue_writev(
         self: *IO_Uring,
         user_data: u64,
         fd: os.fd_t,
         iovecs: []const os.iovec_const,
-        offset: u64,
-        rw_flags: os.kernel_rwf
-    ) !void {
+        offset: u64
+    ) !*io_uring_sqe {
         const sqe = try self.get_sqe();
         sqe.* = .{
             .opcode = .WRITEV,
@@ -390,17 +389,38 @@ pub const IO_Uring = struct {
             .off = offset,
             .addr = @ptrToInt(iovecs.ptr),
             .len = @truncate(u32, iovecs.len),
-            .opflags = @as(u32, rw_flags),
             .user_data = user_data
         };
+        return sqe;
     }
 
-    pub fn queue_nop(self: *IO_Uring, user_data: u64) !void {
-        const sqe = try self.get_sqe();
-        sqe.* = .{
-            .opcode = .NOP,
-            .user_data = user_data
-        };
+    /// The next SQE will not be started until this one completes.
+    /// This can be used to chain causally dependent SQEs, and the chain can be arbitrarily long.
+    /// The tail of the chain is denoted by the first SQE that does not have this flag set.
+    /// This flag has no effect on previous SQEs, nor does it impact SQEs outside the chain.
+    /// This means that multiple chains can be executing in parallel, along with individual SQEs.
+    /// Only members inside the chain are serialized.
+    /// A chain will be broken if any SQE in the chain ends in error, where any unexpected result is
+    /// considered an error. For example, a short read will terminate the remainder of the chain.
+    pub fn link_with_next_sqe(self: *IO_Uring, sqe: *io_uring_sqe) void {
+        sqe.*.flags |= linux.IOSQE_IO_LINK;
+    }
+    
+    /// Like link_with_next_sqe() but stronger.
+    /// For when you don't want the chain to fail in the event of a completion result error.
+    /// For example, you may know that some commands will fail and may want the chain to continue.
+    /// Hard links are resilient to completion results, but are not resilient to submission errors.
+    pub fn hardlink_with_next_sqe(self: *IO_Uring, sqe: *io_uring_sqe) void {
+        sqe.*.flags |= linux.IOSQE_IO_HARDLINK;
+    }
+    
+    /// This creates a full pipeline barrier in the submission queue.
+    /// This SQE will not be started until previous SQEs complete.
+    /// Subsequent SQEs will not be started until this SQE completes.
+    /// In other words, this stalls the entire submission queue.
+    /// You should first consider using link_with_next_sqe() for more granular SQE sequence control.
+    pub fn drain_previous_sqes(self: *IO_Uring, sqe: *io_uring_sqe) void {
+        sqe.*.flags |= linux.IOSQE_IO_DRAIN;
     }
 
     // TODO Make clear that this copies.
@@ -530,7 +550,7 @@ test "uring" {
     var ring = try IO_Uring.init(16, 0);
     defer ring.deinit();
 
-    try ring.queue_nop(@intCast(u64, 0xdeadbeef));
+    _ = try ring.queue_nop(@intCast(u64, 0xdeadbeef));
     testing.expectEqual(ring.sq.sqe_head, 0);
     testing.expectEqual(ring.sq.sqe_tail, 1);
     testing.expectEqual(ring.cq.head.*, 0);
@@ -555,7 +575,7 @@ test "uring" {
             .iov_base = &buf,
             .iov_len = buf.len,
         }};
-        try ring.queue_readv(
+        _ = try ring.queue_readv(
             0xcafebabe,
             zero,
             iovecs[0..],
