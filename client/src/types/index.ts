@@ -1,7 +1,7 @@
 export interface ReserveCommand {
-  id: string
-  source_account_id: string
-  target_account_id: string
+  id: Buffer
+  source_account_id: Buffer
+  target_account_id: Buffer
   custom_1?: Buffer
   custom_2?: Buffer
   custom_3?: Buffer
@@ -11,7 +11,7 @@ export interface ReserveCommand {
 }
 
 export interface CommitCommand {
-  id: string
+  id: Buffer
   custom_1?: Buffer
   custom_2?: Buffer
   custom_3?: Buffer
@@ -19,7 +19,7 @@ export interface CommitCommand {
 }
 
 export interface CreateAccountCommand {
-  id: string
+  id: Buffer
   custom?: Buffer
   flags?: Buffer
   unit?: bigint

@@ -2,12 +2,12 @@ import { encodeReserveCommand, encodeCommitCommand, encodeCreateAccountCommand }
 import { ReserveCommand, CommitCommand, CreateAccountCommand } from '../types'
 
 // TODO: assume the below will be UUIDS?
-const sourceAccountId = 'c7bc8682-b28d-4ec5-ad9a-cf8a52e17c6c'
-const targetAccountId = 'db72fe7f-4aa2-48e7-88f6-c0be94c4b9b5'
-const id = '312053cb-a548-4793-95ea-ca67e4f69ab4'
+const sourceAccountId = Buffer.from('c7bc8682-b28d-4ec5-ad9a-cf8a52e17c6c'.replace(/[^a-fA-F0-9]/g, ''), 'hex')
+const targetAccountId = Buffer.from('db72fe7f-4aa2-48e7-88f6-c0be94c4b9b5'.replace(/[^a-fA-F0-9]/g, ''), 'hex')
+const id = Buffer.from('312053cb-a548-4793-95ea-ca67e4f69ab4'.replace(/[^a-fA-F0-9]/g, ''), 'hex')
 
 describe('Encode reserve command', (): void => {
-  test('strips - from id, source account id and target account id', async (): Promise<void> => {
+  test('encodes id, source account id and target account id', async (): Promise<void> => {
     const command: ReserveCommand = {
       id,
       source_account_id: sourceAccountId,
@@ -116,7 +116,7 @@ describe('Encode reserve command', (): void => {
 })
 
 describe('Encode accept command', (): void => {
-  test('strips - from id', async (): Promise<void> => {
+  test('encodes id', async (): Promise<void> => {
     const commitCommand: CommitCommand = {
       id,
       flags: Buffer.from([1, 0, 1, 1, 0, 0, 1, 1])
@@ -182,7 +182,7 @@ describe('Encode accept command', (): void => {
 })
 
 describe('Encode create account command', (): void => {
-  test('strips - from id', async (): Promise<void> => {
+  test('encodes id', async (): Promise<void> => {
     const command: CreateAccountCommand = {
       id,
       debit_accepted: BigInt(10013),

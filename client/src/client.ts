@@ -100,17 +100,17 @@ export class TigerBeetle extends EventEmitter {
 
   async encodeReserveCommand (command: ReserveCommand): Promise<void> {
     const data = encodeReserveCommand(command)
-    return this._push(command.id, data, this._reserveCommands)
+    return this._push(command.id.toString('hex'), data, this._reserveCommands)
   }
 
   async encodeCommitCommand (command: CommitCommand): Promise<void> {
     const data = encodeCommitCommand(command)
-    return this._push(command.id, data, this._commitCommands)
+    return this._push(command.id.toString('hex'), data, this._commitCommands)
   }
 
   async encodeCreateAccountCommand (command: CreateAccountCommand): Promise<void> {
     const data = encodeCreateAccountCommand(command)
-    return this._push(command.id, data, this._createAccountCommands)
+    return this._push(command.id.toString('hex'), data, this._createAccountCommands)
   }
 
   private async _push (id: string, data: Buffer, batch: Batch): Promise<void> {
