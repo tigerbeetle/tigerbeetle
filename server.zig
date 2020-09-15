@@ -106,7 +106,7 @@ pub fn main() !void {
 
     // Setup server to listen on localhost only (not exposed to the Internet):
     std.debug.print("initializing tcp server...\n", .{});
-    var addr = try net.Address.parseIp4("127.0.0.1", 3001);
+    var addr = try net.Address.parseIp4("0.0.0.0", 3001);
     var fd = try setup_tcp_server(addr);
     std.debug.print("listening on {}...\n", .{ addr });
 
