@@ -53,12 +53,12 @@ fn setup_event_loop(ring: *IO_Uring, server_socket: os.fd_t) !void {
     }};
 
     // Start accepting a connection:
-    _= try ring.queue_accept(event_accept, server_socket, &accept_addr, &accept_addr_len, 0);
+    _ = try ring.queue_accept(event_accept, server_socket, &accept_addr, &accept_addr_len, 0);
     _ = try ring.submit();
     
     // Start the event loop to process CQEs and submit SQEs:
     while (true) {
-        const cqe = try ring.wait_cqe();
+        const cqe = try ring.copy_cqe();
         if (cqe.res < 0) {
             std.debug.print("cqe failed, user_data={} res={} \n", .{ cqe.user_data, cqe.res });
             os.exit(1);
@@ -68,14 +68,14 @@ fn setup_event_loop(ring: *IO_Uring, server_socket: os.fd_t) !void {
         if (cqe.user_data == event_accept) {
             std.debug.print("accepted a connection\n", .{});
             // Listen for another connection:
-            _= try ring.queue_accept(event_accept, server_socket, &accept_addr, &accept_addr_len, 0);
+            _ = try ring.queue_accept(event_accept, server_socket, &accept_addr, &accept_addr_len, 0);
             // Read from this connection:
             client_fd = cqe.res; // TODO This races if another connection comes in.
-            _= try ring.queue_readv(event_read, client_fd, read_iovecs[0..], 0);
+            _ = try ring.queue_readv(event_read, client_fd, read_iovecs[0..], 0);
         } else if (cqe.user_data == event_read) {
             std.debug.print("read {} bytes from connection\n", .{ cqe.res });
             // Now ack back to the client (as if we had processed their command):
-            _= try ring.queue_writev(event_write, client_fd, write_iovecs[0..], 0);
+            _ = try ring.queue_writev(event_write, client_fd, write_iovecs[0..], 0);
         } else if (cqe.user_data == event_write) {
             std.debug.print("wrote {} bytes to connection\n", .{ cqe.res });
             // We have now done a read-write for this connection using static read/write buffers.
@@ -83,7 +83,7 @@ fn setup_event_loop(ring: *IO_Uring, server_socket: os.fd_t) !void {
             // We don't want to queue reads before we have acked a batch, because otherwise a client
             // could run ahead of us and exhaust resources.
             // This gives us nice flow control.
-            _= try ring.queue_readv(event_read, client_fd, read_iovecs[0..], 0);
+            _ = try ring.queue_readv(event_read, client_fd, read_iovecs[0..], 0);
         } else {
             std.debug.print("unexpected user_data={}\n", .{ cqe.user_data });
             os.exit(1);
