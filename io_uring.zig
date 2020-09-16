@@ -34,7 +34,7 @@ pub const io_uring_sqe = extern struct {
 };
 
 // TODO Add to zig/std/os/bits/linux.zig:
-const IORING_SQ_CQ_OVERFLOW     = 1 << 1;
+const IORING_SQ_CQ_OVERFLOW = 1 << 1;
 
 comptime {
     assert(@sizeOf(io_uring_params) == 120);
@@ -774,7 +774,7 @@ test "queue_writev/queue_fsync" {
     
     var sqe_fsync = try ring.queue_fsync(0xeeeeeeee, fd);
     testing.expectEqual(fd, sqe_fsync.*.fd);
-    
+
     testing.expectEqual(@as(u32, 2), ring.sq_ready());
     testing.expectEqual(@as(u32, 2), try ring.submit_and_wait(2));
     testing.expectEqual(@as(u32, 0), ring.sq_ready());
