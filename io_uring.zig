@@ -16,7 +16,7 @@ pub const io_uring_cqe = linux.io_uring_cqe;
 // support assignment by any union member directly as in C, without going through the union, so the
 // kernel adding new unions would also break existing Zig code.
 // We therefore use a flat struct without unions to avoid these two issues.
-// See https://github.com/ziglang/zig/issues/6349.
+// Pending https://github.com/ziglang/zig/issues/6349.
 pub const io_uring_sqe = extern struct {
     opcode: linux.IORING_OP,
     flags: u8 = 0,
@@ -403,8 +403,8 @@ pub const IO_Uring = struct {
             .opcode = .READ,
             .fd = fd,
             .off = offset,
-            .addr = @ptrToInt(buf.ptr),
-            .len = @truncate(u32, buf.len),
+            .addr = @ptrToInt(buffer.ptr),
+            .len = @truncate(u32, buffer.len),
             .user_data = user_data
         };
         return sqe;
@@ -416,7 +416,7 @@ pub const IO_Uring = struct {
         self: *IO_Uring,
         user_data: u64,
         fd: os.fd_t,
-        buffer: []u8,
+        buffer: []const u8,
         offset: u64
     ) !*io_uring_sqe {
         const sqe = try self.get_sqe();
@@ -424,8 +424,8 @@ pub const IO_Uring = struct {
             .opcode = .WRITE,
             .fd = fd,
             .off = offset,
-            .addr = @ptrToInt(buf.ptr),
-            .len = @truncate(u32, buf.len),
+            .addr = @ptrToInt(buffer.ptr),
+            .len = @truncate(u32, buffer.len),
             .user_data = user_data
         };
         return sqe;
@@ -527,56 +527,15 @@ pub const IO_Uring = struct {
         try check_errno(res);
     }
 
-    /// Maps buffers into the kernel in advance for more efficient IO.
-    /// The buffers associated with the iovecs will be locked in memory and charged against the
-    /// user's RLIMIT_MEMLOCK resource limit, and there is a size limit of 1 GiB per buffer.
-    /// The buffers must be anonymous, non-file-backed memory, such as that returned by malloc(3) or
-    /// mmap(2) with the MAP_ANONYMOUS flag set.
-    /// To use a registered buffer, the application must use IORING_OP_READ_FIXED or
-    /// IORING_OP_WRITE_FIXED as the SQE's `opcode`, and set the SQE's `buffer` index to the desired
-    /// buffer index. The memory range described by the SQE's `addr` and `len` fields must fall
-    /// within the buffer.
-    /// Registering buffers will wait for the ring to idle.
-    /// Buffers are automatically unregistered by the kernel when the ring is torn down.
-    /// An application need unregister only if it wants to register a new array of buffers.
-    pub fn register_buffers(self: *IO_Uring, iovecs: []const linux.iovec) !void {
-        assert(self.fd >= 0);
-        const res = linux.io_uring_register(self.fd, .REGISTER_BUFFERS, iovecs.ptr, iovecs.len);
-        try check_errno(res);
-    }
-
     /// Changes the semantics of the SQE's `fd` to refer to a pre-registered file descriptor.
     pub fn use_registered_fd(self: *IO_Uring, sqe: *io_uring_sqe) void {
         sqe.*.flags |= linux.IOSQE_FIXED_FILE;
-    }
-
-    /// Upgrades an SQE with a READ or WRITE opcode to a READ_FIXED or WRITE_FIXED respectively.
-    /// Sets the SQE's `buffer` index to read from or write to a pre-mapped buffer.
-    /// For example, you can call `use_registered_buffer()` on an SQE returned by `queue_read()` or
-    /// `queue_write()` with the index of the pre-mapped buffer encompassing the buffer passed to
-    /// `queue_read()` or `queue_write()`.
-    pub fn use_registered_buffer(self: *IO_Uring, sqe: *io_uring_sqe, buffer_index: u16) void {
-        const op = sqe.*.opcode;
-        assert(op == .READ or op == .WRITE or op == .READ_FIXED or op == .WRITE_FIXED);
-        sqe.*.opcode = switch (op) {
-            .READ => .READ_FIXED,
-            .WRITE => .WRITE_FIXED,
-            else => op
-        };
-        sqe.*.buffer = buffer_index;
     }
 
     /// Unregisters all registered file descriptors previously associated with the ring.
     pub fn unregister_files(self: *IO_Uring) !void {
         assert(self.fd >= 0);
         const res = linux.io_uring_register(self.fd, .UNREGISTER_FILES, null, 0);
-        try check_errno(res);
-    }
-
-    /// Unregisters all registered buffers previously associated with the ring.
-    pub fn unregister_buffers(self: *IO_Uring) !void {
-        assert(self.fd >= 0);
-        const res = linux.io_uring_register(self.fd, .UNREGISTER_BUFFERS, null, 0);
         try check_errno(res);
     }
 };
@@ -700,49 +659,168 @@ inline fn check_errno(res: usize) !void {
 
 test "queue_nop" {
     if (builtin.os.tag != .linux) return error.SkipZigTest;
-    // TODO Add more tests when we get to BetaBeetle:
 
-    var ring = try IO_Uring.init(16, 0);
-    defer ring.deinit();
+    var ring = try IO_Uring.init(1, 0);
+    defer {
+        ring.deinit();
+        testing.expectEqual(@as(i32, -1), ring.fd);
+    }
 
-    _ = try ring.queue_nop(@intCast(u64, 0xdeadbeef));
-    testing.expectEqual(ring.sq.sqe_head, 0);
-    testing.expectEqual(ring.sq.sqe_tail, 1);
-    testing.expectEqual(ring.cq.head.*, 0);
-    
-    testing.expectEqual(try ring.submit(), 1);
-    testing.expectEqual(ring.sq.sqe_head, 1);
-    testing.expectEqual(ring.sq.sqe_tail, 1);
-    
-    testing.expectEqual(io_uring_cqe{
-        .user_data = 0xdeadbeef,
+    var sqe = try ring.queue_nop(@intCast(u64, 0xaaaaaaaa));
+    testing.expectEqual(io_uring_sqe {
+        .opcode = .NOP,
+        .flags = 0,
+        .ioprio = 0,
+        .fd = 0,
+        .off = 0,
+        .addr = 0,
+        .len = 0,
+        .opflags = 0,
+        .user_data = @intCast(u64, 0xaaaaaaaa),
+        .buffer = 0,
+        .personality = 0,
+        .splice_fd_in = 0,
+        .options = [2]u64{ 0, 0 }
+    }, sqe.*);
+
+    testing.expectEqual(@as(u32, 0), ring.sq.sqe_head);
+    testing.expectEqual(@as(u32, 1), ring.sq.sqe_tail);
+    testing.expectEqual(@as(u32, 0), ring.sq.tail.*);
+    testing.expectEqual(@as(u32, 0), ring.cq.head.*);
+    testing.expectEqual(@as(u32, 1), ring.sq_ready());
+    testing.expectEqual(@as(u32, 0), ring.cq_ready());
+
+    testing.expectEqual(@as(u32, 1), try ring.submit());
+    testing.expectEqual(@as(u32, 1), ring.sq.sqe_head);
+    testing.expectEqual(@as(u32, 1), ring.sq.sqe_tail);
+    testing.expectEqual(@as(u32, 1), ring.sq.tail.*);
+    testing.expectEqual(@as(u32, 0), ring.cq.head.*);
+    testing.expectEqual(@as(u32, 0), ring.sq_ready());
+
+    testing.expectEqual(io_uring_cqe {
+        .user_data = 0xaaaaaaaa,
         .res = 0,
         .flags = 0
-    }, try ring.wait_cqe());
-    testing.expectEqual(ring.cq.head.*, 1);
+    }, try ring.copy_cqe());
+    testing.expectEqual(@as(u32, 1), ring.cq.head.*);
+    testing.expectEqual(@as(u32, 0), ring.cq_ready());
 
-    const zero = try os.openZ("/dev/zero", os.O_RDONLY | os.O_CLOEXEC, 0);
-    defer os.close(zero);
+    var sqe_barrier = try ring.queue_nop(@intCast(u64, 0xbbbbbbbb));
+    ring.drain_previous_sqes(sqe_barrier);
+    testing.expectEqual(@as(u8, linux.IOSQE_IO_DRAIN), sqe_barrier.*.flags);
+    testing.expectEqual(@as(u32, 1), try ring.submit());
+    testing.expectEqual(io_uring_cqe {
+        .user_data = 0xbbbbbbbb,
+        .res = 0,
+        .flags = 0
+    }, try ring.copy_cqe());
+    testing.expectEqual(@as(u32, 2), ring.sq.sqe_head);
+    testing.expectEqual(@as(u32, 2), ring.sq.sqe_tail);
+    testing.expectEqual(@as(u32, 2), ring.sq.tail.*);
+    testing.expectEqual(@as(u32, 2), ring.cq.head.*);
+}
 
-    { // read some 0 bytes from /dev/zero
-        var buf: [100]u8 = undefined;
-        var iovecs = [1]os.iovec{os.iovec{
-            .iov_base = &buf,
-            .iov_len = buf.len,
-        }};
-        _ = try ring.queue_readv(
-            0xcafebabe,
-            zero,
-            iovecs[0..],
-            0
-        );
-        testing.expectEqual(@as(u32, 1), try ring.submit());
-        var cqe = try ring.wait_cqe();
-        testing.expectEqual(linux.io_uring_cqe {
-            .user_data = 0xcafebabe,
-            .res = 100,
-            .flags = 0,
-        }, cqe);
-        //testing.expectEqualSlices(u8, [_]u8{0} ** 100, buf[0..]);
-    }
+test "queue_readv" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
+
+    var ring = try IO_Uring.init(1, 0);
+    defer ring.deinit();
+
+    const fd = try os.openZ("/dev/zero", os.O_RDONLY | os.O_CLOEXEC, 0);
+    defer os.close(fd);
+    
+    var registered_fds = [_]i32{-1} ** 10;
+    const fd_index = 9;
+    registered_fds[fd_index] = fd;
+    try ring.register_files(registered_fds[0..]);
+
+    var buffer = [_]u8{42} ** 128;
+    var iovecs = [_]os.iovec{ os.iovec { .iov_base = &buffer, .iov_len = buffer.len } };
+    var sqe = try ring.queue_readv(0xcccccccc, fd_index, iovecs[0..], 0);
+    ring.use_registered_fd(sqe);
+    testing.expectEqual(@as(u8, linux.IOSQE_FIXED_FILE), sqe.*.flags);
+
+    testing.expectError(error.IO_UringSubmissionQueueFull, ring.queue_nop(0));
+    testing.expectEqual(@as(u32, 1), try ring.submit());
+    testing.expectEqual(linux.io_uring_cqe {
+        .user_data = 0xcccccccc,
+        .res = buffer.len,
+        .flags = 0,
+    }, try ring.copy_cqe());
+    testing.expectEqualSlices(u8, &([_]u8{0} ** buffer.len), buffer[0..]);
+
+    try ring.unregister_files();
+}
+
+test "queue_writev/queue_fsync" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
+
+    var ring = try IO_Uring.init(2, 0);
+    defer ring.deinit();
+    
+    const path = "test_io_uring_queue_writev";
+    const file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+    defer file.close();
+    defer std.fs.cwd().deleteFile(path) catch {};
+    const fd = file.handle;
+
+    var buffer = [_]u8{42} ** 128;
+    var iovecs = [_]os.iovec_const {
+        os.iovec_const { .iov_base = &buffer, .iov_len = buffer.len }
+    };
+    var sqe_writev = try ring.queue_writev(0xdddddddd, fd, iovecs[0..], 0);
+    ring.link_with_next_sqe(sqe_writev);
+    testing.expectEqual(@as(u8, linux.IOSQE_IO_LINK), sqe_writev.*.flags);
+    
+    var sqe_fsync = try ring.queue_fsync(0xeeeeeeee, fd);
+    testing.expectEqual(fd, sqe_fsync.*.fd);
+    
+    testing.expectEqual(@as(u32, 2), ring.sq_ready());
+    testing.expectEqual(@as(u32, 2), try ring.submit_and_wait(2));
+    testing.expectEqual(@as(u32, 0), ring.sq_ready());
+    testing.expectEqual(@as(u32, 2), ring.cq_ready());
+    testing.expectEqual(linux.io_uring_cqe {
+        .user_data = 0xdddddddd,
+        .res = buffer.len,
+        .flags = 0,
+    }, try ring.copy_cqe());
+    testing.expectEqual(@as(u32, 1), ring.cq_ready());
+    testing.expectEqual(linux.io_uring_cqe {
+        .user_data = 0xeeeeeeee,
+        .res = 0,
+        .flags = 0,
+    }, try ring.copy_cqe());
+    testing.expectEqual(@as(u32, 0), ring.cq_ready());
+}
+
+test "queue_write/queue_read" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
+    // This test may require newer kernel versions.
+
+    var ring = try IO_Uring.init(2, 0);
+    defer ring.deinit();
+    
+    const path = "test_io_uring_queue_write";
+    const file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = true });
+    defer file.close();
+    defer std.fs.cwd().deleteFile(path) catch {};
+    const fd = file.handle;
+
+    var buffer_write = [_]u8{97} ** 20;
+    var buffer_read = [_]u8{98} ** 20;
+    var sqe_write = try ring.queue_write(123, fd, buffer_write[0..], 10);
+    ring.link_with_next_sqe(sqe_write);
+    var sqe_read = try ring.queue_read(456, fd, buffer_read[0..], 10);
+    testing.expectEqual(@as(u32, 2), try ring.submit());
+    testing.expectEqual(linux.io_uring_cqe {
+        .user_data = 123,
+        .res = buffer_write.len,
+        .flags = 0,
+    }, try ring.copy_cqe());
+    testing.expectEqual(linux.io_uring_cqe {
+        .user_data = 456,
+        .res = buffer_read.len,
+        .flags = 0,
+    }, try ring.copy_cqe());
+    testing.expectEqualSlices(u8, buffer_write[0..], buffer_read[0..]);
 }
