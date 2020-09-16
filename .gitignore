@@ -1,0 +1,14 @@
+node_modules/
+
+.vscode
+
+yarn-error.log
+
+journal
+
+dist/
+
+# zig cache from testing and build object files
+zig-cache
+*.o
+server
