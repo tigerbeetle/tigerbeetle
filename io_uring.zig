@@ -506,14 +506,81 @@ pub const IO_Uring = struct {
         sqe.*.flags |= linux.IOSQE_IO_DRAIN;
     }
 
-    // TODO Make clear that this copies.
-    pub fn wait_cqe(ring: *IO_Uring) !io_uring_cqe {
-        var cqes: [1]io_uring_cqe = undefined;
-        const count = try ring.copy_cqes(&cqes, 1);
-        assert(count == 1);
-        return cqes[0];
+    /// Registers an array of file descriptors.
+    /// Every time a file descriptor is put in an SQE and submitted to the kernel, the kernel must
+    /// retrieve a reference to the file, and once I/O has completed the file reference must be
+    /// dropped. The atomic nature of this file reference can be a slowdown for high IOPS workloads.
+    /// This slowdown can be avoided by pre-registering file descriptors.
+    /// To refer to a registered file descriptor, IOSQE_FIXED_FILE must be set in the SQE's flags,
+    /// and the SQE's fd must be set to the index of the file descriptor in the registered array.
+    /// Registering file descriptors will wait for the ring to idle.
+    /// Files are automatically unregistered by the kernel when the ring is torn down.
+    /// An application need unregister only if it wants to register a new array of file descriptors.
+    pub fn register_files(self: *IO_Uring, fds: []const i32) !void {
+        assert(self.fd >= 0);
+        const res = linux.io_uring_register(
+            self.fd,
+            .REGISTER_FILES,
+            fds.ptr,
+            @truncate(u32, fds.len)
+        );
+        try check_errno(res);
+    }
+
+    /// Maps buffers into the kernel in advance for more efficient IO.
+    /// The buffers associated with the iovecs will be locked in memory and charged against the
+    /// user's RLIMIT_MEMLOCK resource limit, and there is a size limit of 1 GiB per buffer.
+    /// The buffers must be anonymous, non-file-backed memory, such as that returned by malloc(3) or
+    /// mmap(2) with the MAP_ANONYMOUS flag set.
+    /// To use a registered buffer, the application must use IORING_OP_READ_FIXED or
+    /// IORING_OP_WRITE_FIXED as the SQE's `opcode`, and set the SQE's `buffer` index to the desired
+    /// buffer index. The memory range described by the SQE's `addr` and `len` fields must fall
+    /// within the buffer.
+    /// Registering buffers will wait for the ring to idle.
+    /// Buffers are automatically unregistered by the kernel when the ring is torn down.
+    /// An application need unregister only if it wants to register a new array of buffers.
+    pub fn register_buffers(self: *IO_Uring, iovecs: []const linux.iovec) !void {
+        assert(self.fd >= 0);
+        const res = linux.io_uring_register(self.fd, .REGISTER_BUFFERS, iovecs.ptr, iovecs.len);
+        try check_errno(res);
+    }
+
+    /// Changes the semantics of the SQE's `fd` to refer to a pre-registered file descriptor.
+    pub fn use_registered_fd(self: *IO_Uring, sqe: *io_uring_sqe) void {
+        sqe.*.flags |= linux.IOSQE_FIXED_FILE;
+    }
+
+    /// Upgrades an SQE with a READ or WRITE opcode to a READ_FIXED or WRITE_FIXED respectively.
+    /// Sets the SQE's `buffer` index to read from or write to a pre-mapped buffer.
+    /// For example, you can call `use_registered_buffer()` on an SQE returned by `queue_read()` or
+    /// `queue_write()` with the index of the pre-mapped buffer encompassing the buffer passed to
+    /// `queue_read()` or `queue_write()`.
+    pub fn use_registered_buffer(self: *IO_Uring, sqe: *io_uring_sqe, buffer_index: u16) void {
+        const op = sqe.*.opcode;
+        assert(op == .READ or op == .WRITE or op == .READ_FIXED or op == .WRITE_FIXED);
+        sqe.*.opcode = switch (op) {
+            .READ => .READ_FIXED,
+            .WRITE => .WRITE_FIXED,
+            else => op
+        };
+        sqe.*.buffer = buffer_index;
+    }
+
+    /// Unregisters all registered file descriptors previously associated with the ring.
+    pub fn unregister_files(self: *IO_Uring) !void {
+        assert(self.fd >= 0);
+        const res = linux.io_uring_register(self.fd, .UNREGISTER_FILES, null, 0);
+        try check_errno(res);
+    }
+
+    /// Unregisters all registered buffers previously associated with the ring.
+    pub fn unregister_buffers(self: *IO_Uring) !void {
+        assert(self.fd >= 0);
+        const res = linux.io_uring_register(self.fd, .UNREGISTER_BUFFERS, null, 0);
+        try check_errno(res);
     }
 };
+
 
 pub const SubmissionQueue = struct {
     head: *u32,
