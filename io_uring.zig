@@ -261,16 +261,16 @@ pub const IO_Uring = struct {
         return @atomicLoad(u32, self.cq.tail, .Acquire) -% self.cq.head.*;
     }
 
-    /// Copy as many CQEs as are ready, and that can fit into the destination `cqes` slice.
-    /// If none are available, enter into the kernel to wait for at most `wait_nr` CQEs.
-    /// Returns the number of CQEs copied.
+    /// Copies as many CQEs as are ready, and that can fit into the destination `cqes` slice.
+    /// If none are available, enters into the kernel to wait for at most `wait_nr` CQEs.
+    /// Returns the number of CQEs copied, advancing the CQ ring.
     /// Provides all the wait/peek methods found in liburing, but with batching and a single method.
     /// The rationale for copying CQEs rather than copying pointers is that pointers are 8 bytes
     /// whereas CQEs are not much more at only 16 bytes, and this provides a safer faster interface.
-    /// Safer because you no longer need to call cqe_seen() exactly once, avoiding idempotency bugs.
-    /// Faster because we can now amortize the atomic store release to `cq.head` across the batch.
+    /// Safer, because you no longer need to call cqe_seen(), avoiding idempotency bugs.
+    /// Faster, because we can now amortize the atomic store release to `cq.head` across the batch.
     /// See https://github.com/axboe/liburing/issues/103#issuecomment-686665007.
-    /// Matches the implementation of io_uring_peek_batch_cqe() in liburing, but allows waiting.
+    /// Matches the implementation of io_uring_peek_batch_cqe() in liburing, but supports waiting.
     pub fn copy_cqes(self: *IO_Uring, cqes: []io_uring_cqe, wait_nr: u32) !u32 {
         const count = self.copy_cqes_ready(cqes, wait_nr);
         if (count > 0) return count;
@@ -304,14 +304,16 @@ pub const IO_Uring = struct {
         return (@atomicLoad(u32, self.sq.flags, .Unordered) & IORING_SQ_CQ_OVERFLOW) > 0;
     }
 
-    /// If you use copy_cqes() you do not need to (and must not) call cqe_seen() or cq_advance().
-    /// Must be called EXACTLY ONCE after a zero-copy CQE has been processed by your application.
+    /// For advanced use cases only that implement custom completion queue methods.
+    /// If you use copy_cqes() or copy_cqe() you must not call cqe_seen() or cq_advance().
+    /// Must be called exactly once after a zero-copy CQE has been processed by your application.
     /// Not idempotent, calling more than once will result in other CQEs being lost.
     /// Matches the implementation of cqe_seen() in liburing.
     pub fn cqe_seen(self: *IO_Uring, cqe: *io_uring_cqe) void {
         self.cq_advance(1);
     }
 
+    /// For advanced use cases only that implement custom completion queue methods.
     /// Matches the implementation of cq_advance() in liburing.
     pub fn cq_advance(self: *IO_Uring, count: u32) void {
         if (count > 0) {
@@ -320,6 +322,8 @@ pub const IO_Uring = struct {
         }
     }
 
+    /// Queues (but does not submit) an SQE to perform an `accept4(2)` on a socket.
+    /// Returns a pointer to the SQE.
     pub fn queue_accept(
         self: *IO_Uring,
         user_data: u64,
@@ -343,6 +347,30 @@ pub const IO_Uring = struct {
         return sqe;
     }
 
+    /// Queues (but does not submit) an SQE to perform an `fsync(2)`.
+    /// Returns a pointer to the SQE so that you can further modify the SQE for advanced use cases.
+    /// For example, for `fdatasync()` you can set `IORING_FSYNC_DATASYNC` in the SQE's `opflags`.
+    /// N.B. While SQEs are initiated in the order in which they appear in the submission queue,
+    /// operations execute in parallel and completions are unordered. Therefore, an application that
+    /// submits a write followed by an fsync in the submission queue cannot expect the fsync to
+    /// apply to the write, since the fsync may complete before the write is issued to the disk.
+    /// You should preferably use `link_with_next_sqe()` on a write's SQE to link it with an fsync,
+    /// or else insert a full write barrier using `drain_previous_sqes()` when queueing an fsync.
+    pub fn queue_fsync(self: *IO_Uring, user_data: u64, fd: os.fd_t) !*io_uring_sqe {
+        const sqe = try self.get_sqe();
+        sqe.* = .{
+            .opcode = .FSYNC,
+            .fd = fd,
+            .user_data = user_data
+        };
+        return sqe;
+    }
+
+    /// Queues (but does not submit) an SQE to perform a no-op.
+    /// Returns a pointer to the SQE so that you can further modify the SQE for advanced use cases.
+    /// A no-op is more useful than may appear at first glance.
+    /// For example, you could call `drain_previous_sqes()` on the returned SQE, to use the no-op to
+    /// know when the ring is idle before acting on a kill signal.
     pub fn queue_nop(self: *IO_Uring, user_data: u64) !*io_uring_sqe {
         const sqe = try self.get_sqe();
         sqe.* = .{
@@ -352,9 +380,51 @@ pub const IO_Uring = struct {
         return sqe;
     }
 
+    /// Queues (but does not submit) an SQE to perform a `read(2)`.
+    /// Returns a pointer to the SQE.
+    pub fn queue_read(
+        self: *IO_Uring,
+        user_data: u64,
+        fd: os.fd_t,
+        buffer: []u8,
+        offset: u64
+    ) !*io_uring_sqe {
+        const sqe = try self.get_sqe();
+        sqe.* = .{
+            .opcode = .READ,
+            .fd = fd,
+            .off = offset,
+            .addr = @ptrToInt(buf.ptr),
+            .len = @truncate(u32, buf.len),
+            .user_data = user_data
+        };
+        return sqe;
+    }
+
+    /// Queues (but does not submit) an SQE to perform a `write(2)`.
+    /// Returns a pointer to the SQE.
+    pub fn queue_write(
+        self: *IO_Uring,
+        user_data: u64,
+        fd: os.fd_t,
+        buffer: []u8,
+        offset: u64
+    ) !*io_uring_sqe {
+        const sqe = try self.get_sqe();
+        sqe.* = .{
+            .opcode = .WRITE,
+            .fd = fd,
+            .off = offset,
+            .addr = @ptrToInt(buf.ptr),
+            .len = @truncate(u32, buf.len),
+            .user_data = user_data
+        };
+        return sqe;
+    }
+
     /// Queues (but does not submit) an SQE to perform a `preadv()`.
     /// Returns a pointer to the SQE so that you can further modify the SQE for advanced use cases.
-    /// For example, if you want to do a `preadv2()` then set `opflags` in the returned SQE.
+    /// For example, if you want to do a `preadv2()` then set `opflags` on the returned SQE.
     /// See https://linux.die.net/man/2/preadv.
     pub fn queue_readv(
         self: *IO_Uring,
@@ -378,7 +448,6 @@ pub const IO_Uring = struct {
     /// Queues (but does not submit) an SQE to perform a `pwritev()`.
     /// Returns a pointer to the SQE so that you can further modify the SQE for advanced use cases.
     /// For example, if you want to do a `pwritev2()` then set `opflags` on the returned SQE.
-    /// Or if you want to link this write with an fsync then call `link_with_next_sqe()` on the SQE.
     /// See https://linux.die.net/man/2/pwritev.
     pub fn queue_writev(
         self: *IO_Uring,
@@ -411,7 +480,7 @@ pub const IO_Uring = struct {
         sqe.*.flags |= linux.IOSQE_IO_LINK;
     }
     
-    /// Like link_with_next_sqe() but stronger.
+    /// Like `link_with_next_sqe()` but stronger.
     /// For when you don't want the chain to fail in the event of a completion result error.
     /// For example, you may know that some commands will fail and may want the chain to continue.
     /// Hard links are resilient to completion results, but are not resilient to submission errors.
