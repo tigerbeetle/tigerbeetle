@@ -299,6 +299,15 @@ pub const IO_Uring = struct {
         return count;
     }
 
+    /// Returns a copy of an I/O completion, waiting for it if necessary, and advancing the CQ ring.
+    /// A convenience method for `copy_cqes()` for when you don't need to batch or peek.
+    pub fn copy_cqe(ring: *IO_Uring) !io_uring_cqe {
+        var cqes: [1]io_uring_cqe = undefined;
+        const count = try ring.copy_cqes(&cqes, 1);
+        assert(count == 1);
+        return cqes[0];
+    }
+
     // Matches the implementation of cq_ring_needs_flush() in liburing.
     fn cq_ring_needs_flush(self: *IO_Uring) bool {
         return (@atomicLoad(u32, self.sq.flags, .Unordered) & IORING_SQ_CQ_OVERFLOW) > 0;
