@@ -33,8 +33,8 @@ pub const io_uring_sqe = extern struct {
     options: [2]u64 = [2]u64{ 0, 0 }
 };
 
-// TODO Add this to zig/std/os/bits/linux.zig:
-pub const IORING_SQ_CQ_OVERFLOW = 1 << 1;
+// TODO Add to zig/std/os/bits/linux.zig:
+const IORING_SQ_CQ_OVERFLOW     = 1 << 1;
 
 comptime {
     assert(@sizeOf(io_uring_params) == 120);
@@ -91,10 +91,9 @@ pub const IO_Uring = struct {
         assert(p.*.resv[1] == 0);
         assert(p.*.resv[2] == 0);
 
-        const result = linux.io_uring_setup(entries, p);
-        const errno = linux.getErrno(result);
-        if (errno != 0) return os.unexpectedErrno(errno);
-        const fd = @intCast(i32, result);
+        const res = linux.io_uring_setup(entries, p);
+        try check_errno(res);
+        const fd = @intCast(i32, res);
         assert(fd >= 0);
         errdefer os.close(fd);
 
@@ -202,9 +201,9 @@ pub const IO_Uring = struct {
     // Tell the kernel we have submitted SQEs and/or want to wait for CQEs.
     // Returns the number of SQEs submitted.
     fn enter(self: *IO_Uring, to_submit: u32, min_complete: u32, flags: u32) !u32 {
+        assert(self.fd >= 0);
         const res = linux.io_uring_enter(self.fd, to_submit, min_complete, flags, null);
-        const errno = linux.getErrno(res);
-        if (errno != 0) return os.unexpectedErrno(errno);
+        try check_errno(res);
         return @truncate(u32, res);
     }
 
@@ -549,7 +548,12 @@ pub const CompletionQueue = struct {
     }
 };
 
-test "uring" {
+inline fn check_errno(res: usize) !void {
+    const errno = linux.getErrno(res);
+    if (errno != 0) return os.unexpectedErrno(errno);
+}
+
+test "queue_nop" {
     if (builtin.os.tag != .linux) return error.SkipZigTest;
     // TODO Add more tests when we get to BetaBeetle:
 
