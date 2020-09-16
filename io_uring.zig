@@ -10,7 +10,13 @@ const testing = std.testing;
 pub const io_uring_params = linux.io_uring_params;
 pub const io_uring_cqe = linux.io_uring_cqe;
 
-// TODO Patch linux.zig to refine and expand the struct definition of io_uring_sqe.
+// TODO Update linux.zig's definition of linux.io_uring_sqe:
+// linux.io_uring_sqe uses numbered unions, i.e. `union1` etc. that are not future-proof and need to
+// be re-numbered whenever new unions are interposed by the kernel. Furthermore, Zig's unions do not
+// support assignment by any union member directly as in C, without going through the union, so the
+// kernel adding new unions would also break existing Zig code.
+// We therefore use a flat struct without unions to avoid these two issues.
+// See https://github.com/ziglang/zig/issues/6349.
 pub const io_uring_sqe = extern struct {
     opcode: linux.IORING_OP,
     flags: u8 = 0,
