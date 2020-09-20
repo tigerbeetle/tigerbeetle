@@ -30,6 +30,16 @@ pub const io_uring_sqe = extern struct {
 };
 
 pub const IORING_SQ_CQ_OVERFLOW = 1 << 1;
+ 
+comptime {
+    assert(@sizeOf(io_uring_params) == 120);
+    assert(@sizeOf(io_uring_sqe) == 64);
+    assert(@sizeOf(io_uring_cqe) == 16);
+
+    assert(linux.IORING_OFF_SQ_RING == 0);
+    assert(linux.IORING_OFF_CQ_RING == 0x8000000);
+    assert(linux.IORING_OFF_SQES == 0x10000000);
+}
 
 pub const IO_Uring = struct {
     fd: os.fd_t = -1,
@@ -199,9 +209,9 @@ pub const IO_Uring = struct {
         return submitted;
     }
 
-    // Tell the kernel we have submitted SQEs and/or want to wait for CQEs.
-    // Returns the number of SQEs submitted.
-    fn enter(self: *IO_Uring, to_submit: u32, min_complete: u32, flags: u32) !u32 {
+    /// Tell the kernel we have submitted SQEs and/or want to wait for CQEs.
+    /// Returns the number of SQEs submitted.
+    pub fn enter(self: *IO_Uring, to_submit: u32, min_complete: u32, flags: u32) !u32 {
         assert(self.fd >= 0);
         const res = linux.io_uring_enter(self.fd, to_submit, min_complete, flags, null);
         switch (linux.getErrno(res)) {
@@ -232,12 +242,12 @@ pub const IO_Uring = struct {
         return @truncate(u32, res);
     }
 
-    // Sync internal state with kernel ring state on the SQ side.
-    // Returns the number of all pending events in the SQ ring, for the shared ring.
-    // This return value includes previously flushed SQEs, as per liburing.
-    // The reasoning for this is to suggest that an io_uring_enter() call is needed rather than not.
-    // Matches the implementation of __io_uring_flush_sq() in liburing.
-    fn flush_sq(self: *IO_Uring) u32 {
+    /// Sync internal state with kernel ring state on the SQ side.
+    /// Returns the number of all pending events in the SQ ring, for the shared ring.
+    /// This return value includes previously flushed SQEs, as per liburing.
+    /// The rationale is to suggest that an io_uring_enter() call is needed rather than not.
+    /// Matches the implementation of __io_uring_flush_sq() in liburing.
+    pub fn flush_sq(self: *IO_Uring) u32 {
         if (self.sq.sqe_head != self.sq.sqe_tail) {
             // Fill in SQEs that we have queued up, adding them to the kernel ring.
             const to_submit = self.sq.sqe_tail -% self.sq.sqe_head;
@@ -259,7 +269,7 @@ pub const IO_Uring = struct {
     /// or if IORING_SQ_NEED_WAKEUP is set and the SQ thread must be explicitly awakened.
     /// For the latter case, we set the SQ thread wakeup flag.
     /// Matches the implementation of sq_ring_needs_enter() in liburing.
-    fn sq_ring_needs_enter(self: *IO_Uring, submitted: u32, flags: *u32) bool {
+    pub fn sq_ring_needs_enter(self: *IO_Uring, submitted: u32, flags: *u32) bool {
         assert(flags.* == 0);
         if ((self.flags & linux.IORING_SETUP_SQPOLL) == 0 and submitted > 0) return true;
         if ((@atomicLoad(u32, self.sq.flags, .Unordered) & linux.IORING_SQ_NEED_WAKEUP) != 0) {
@@ -333,8 +343,8 @@ pub const IO_Uring = struct {
         return cqes[0];
     }
 
-    // Matches the implementation of cq_ring_needs_flush() in liburing.
-    fn cq_ring_needs_flush(self: *IO_Uring) bool {
+    /// Matches the implementation of cq_ring_needs_flush() in liburing.
+    pub fn cq_ring_needs_flush(self: *IO_Uring) bool {
         return (@atomicLoad(u32, self.sq.flags, .Unordered) & IORING_SQ_CQ_OVERFLOW) != 0;
     }
 
@@ -573,7 +583,6 @@ pub const IO_Uring = struct {
         }
     }
 };
-
 
 pub const SubmissionQueue = struct {
     head: *u32,
@@ -865,8 +874,10 @@ test "queue_write/queue_read" {
 
     var cqe1 = try ring.copy_cqe();
     var cqe2 = try ring.copy_cqe();
-    if (cqe1.res == -linux.EOPNOTSUPP) return error.SkipZigTest;
-    if (cqe2.res == -linux.EOPNOTSUPP) return error.SkipZigTest;
+    // Prior to Linux Kernel 5.6 this is the only way to test for read/write support:
+    // https://lwn.net/Articles/809820/
+    if (cqe1.res == -linux.EINVAL) return error.SkipZigTest;
+    if (cqe2.res == -linux.EINVAL) return error.SkipZigTest;
     testing.expectEqual(linux.io_uring_cqe {
         .user_data = 123,
         .res = buffer_write.len,
