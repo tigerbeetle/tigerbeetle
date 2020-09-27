@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 const std = @import("std");
-const network = @import("net_echo_server_blocking_network.zig");
+const network = @import("net_blocking_network.zig");
 
 // Simple TCP echo server:
 // Accepts a single incoming connection and will echo any received data back to the
