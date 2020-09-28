@@ -35,7 +35,7 @@ pub fn main() !void {
     const event_f = 2;
     const event_r = 3;
 
-    var cqes: [1024]io_uring_cqe = undefined;
+    var cqes: [128]io_uring_cqe = undefined;
     var ring = try IO_Uring.init(cqes.len, 0);
 
     var run: usize = 0;
