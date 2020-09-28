@@ -37,7 +37,7 @@ pub fn main() !void {
     try os.listen(server, kernel_backlog);
     std.debug.print("net: echo server: io_uring: listening on {}...\n", .{ address });
 
-    var ring = try IO_Uring.init(4096, 0);
+    var ring = try IO_Uring.init(128, 0);
     defer ring.deinit();
 
     var cqes: [128]io_uring_cqe = undefined;
