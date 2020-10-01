@@ -37,7 +37,7 @@ For details of how to upgrade the kernel on Ubuntu see [this document](./UPGRADE
 
 ## Progress
 
-[client](./client) is a TigerBeetle client written in Typescript
-[io_uring.zig](./io_uring.zig) is a Zig implementation of IO URing which has been submitted for addition to the Zig standard library
-[demos/io_uring](./demos/io_uring) are some demos of the io_uring implementation
-[proto-beetle](./proto-beetle) is the initial prototype of TigerBeetle written entirely in Javascript
+- [client](./client) is a TigerBeetle client written in Typescript
+- [io_uring.zig](./io_uring.zig) is a Zig implementation of io_uring which has been [submitted](https://github.com/ziglang/zig/pull/6356) for addition to the Zig standard library
+- [demos/io_uring](./demos/io_uring) are some demos of the io_uring implementation
+- [proto-beetle](./proto-beetle) is the initial prototype of TigerBeetle written entirely in Javascript
