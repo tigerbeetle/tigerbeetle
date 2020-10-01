@@ -8,7 +8,7 @@ Uses blocking syscalls to write a page of 4096 bytes, fsync the write, read the 
 
 ### fs_io_uring.zig
 
-Uses `io_uring` syscalls to write a page of 4096 bytes, fsync the write, read the page back in, and repeats to iterate across a large file of 256 MB. This is all non-blocking, with a pure single-threaded event loop, something that is not otherwise possible on Linux for I/O apart from `O_DIRECT`. This is how we solve [#1908](https://github.com/ziglang/zig/issues/1908) and [#5962](https://github.com/ziglang/zig/issues/5962) for Zig.
+Uses `io_uring` syscalls to write a page of 4096 bytes, fsync the write, read the page back in, and repeats to iterate across a large file of 256 MB. This is all non-blocking, with a pure single-threaded event loop, something that is not otherwise possible on Linux for file system I/O apart from `O_DIRECT`. This is how we solve [#1908](https://github.com/ziglang/zig/issues/1908) and [#5962](https://github.com/ziglang/zig/issues/5962) for Zig.
 
 There are also further `io_uring` optimizations that we don't take advantage of here in this benchmark:
 
