@@ -52,7 +52,7 @@ Uses blocking syscalls to `accept` at most one TCP connection and then `recv`/`s
 
 Uses `io_uring` syscalls to `accept` one or more TCP connections and then `recv`/`send` up to 1000 bytes per message on these connections as an echo server. This server is non-blocking and takes advantage of kernel 5.6 or higher with support for `IORING_FEAT_FAST_POLL`.
 
-**Note that kernel 5.7.16 and up introduces a [network performance regression](https://github.com/axboe/liburing/issues/215) that is being patched. If you can't reproduce these network performance results then check that you are on kernel 5.7.15.
+**Note that kernel 5.7.16 and up introduces a [network performance regression](https://github.com/axboe/liburing/issues/215) that is being patched. If you can't reproduce these network performance results then make sure that you are on kernel 5.7.15.**
 
 ### C Contenders (and a Node.js candidate)
 
