@@ -4,7 +4,7 @@
 
 ### fs_blocking.zig
 
-Uses blocking syscalls to write a page of 4096 bytes, fsync the write, read the page back in, and repeats to iterate across a large file of 256 MB. This benchmark, while obviously artificial, and while using the minimum [Advanced Format](https://en.wikipedia.org/wiki/Advanced_Format) sector size instead of a larger block size, is not too far removed from what some storage systems in paranoid mode might do to protect against misdirected writes or LSEs for critical data. This should be the fastest candidate for the task on Linux, faster than Zig's evented I/O since that incurs additional context switches to the userspace I/O thread.
+Uses blocking syscalls to write a page of 4096 bytes, fsync the write, read the page back in, and repeats to iterate across a large file of 256 MB. This benchmark, while obviously artificial and stressing the absolute minimum [Advanced Format](https://en.wikipedia.org/wiki/Advanced_Format) sector size of 4 KB instead of a larger more efficient block size of 64 KB, is otherwise not too far removed from what some storage systems in paranoid mode might do to protect against misdirected writes or LSEs for critical data. This should be the fastest candidate for the task on Linux, faster than Zig's evented I/O since that incurs additional context switches to the userspace I/O thread.
 
 ### fs_io_uring.zig
 
