@@ -35,7 +35,7 @@ pub fn main() !void {
     const event_f = 2;
     const event_r = 3;
 
-    var cqes: [128]io_uring_cqe = undefined;
+    var cqes: [512]io_uring_cqe = undefined;
     var ring = try IO_Uring.init(cqes.len, 0);
 
     var run: usize = 0;
@@ -94,7 +94,7 @@ pub fn main() !void {
         }
 
         std.debug.print(
-            "fs io_uring: write({})/fsync/read({}) * {} pages = {} bytes = {} syscalls in {}ms\n",
+            "fs io_uring: write({})/fsync/read({}) * {} pages = {} syscalls in {}ms\n",
             .{ page, page, pages, size, syscalls, std.time.milliTimestamp() - start }
         );
     }

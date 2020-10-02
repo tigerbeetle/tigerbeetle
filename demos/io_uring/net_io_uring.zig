@@ -37,10 +37,10 @@ pub fn main() !void {
     try os.listen(server, kernel_backlog);
     std.debug.print("net: echo server: io_uring: listening on {}...\n", .{ address });
 
-    var ring = try IO_Uring.init(128, 0);
+    var ring = try IO_Uring.init(512, 0);
     defer ring.deinit();
 
-    var cqes: [128]io_uring_cqe = undefined;
+    var cqes: [512]io_uring_cqe = undefined;
     var accept_addr: os.sockaddr = undefined;
     var accept_addr_len: os.socklen_t = @sizeOf(@TypeOf(accept_addr));
     for (buffers) |b, index| {

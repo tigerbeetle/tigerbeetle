@@ -4,7 +4,7 @@
 
 ### fs_blocking.zig
 
-Uses blocking syscalls to write a page of 4096 bytes, fsync the write, read the page back in, and then rinse and repeat to iterate across a large file of 256 MB. This should be the fastest candidate for the task on Linux, faster than Zig's evented I/O since that incurs additional context switches to the userspace I/O thread.
+Uses blocking syscalls to write a page of 4096 bytes, fsync the write, read the page back in, and repeats to iterate across a large file of 256 MB. This benchmark, while obviously artificial, and while using the minimum [Advanced Format](https://en.wikipedia.org/wiki/Advanced_Format) sector size instead of a larger block size, is not too far removed from what some storage systems in paranoid mode might do to protect against misdirected writes or LSEs for critical data. This should be the fastest candidate for the task on Linux, faster than Zig's evented I/O since that incurs additional context switches to the userspace I/O thread.
 
 ### fs_io_uring.zig
 
@@ -18,7 +18,7 @@ There are also further `io_uring` optimizations that we don't take advantage of 
 
 ### File system results
 
-These were taken on a 2020 MacBook Air running Ubuntu with a 5.8 kernel:
+These were taken on a 2020 MacBook Air running Ubuntu with a 5.7.15 kernel. Some Linux machines may further show an order of magnitude worse performance for `fs_blocking.zig`:
 
 ```bash
 $ zig run fs_blocking.zig --release-fast
@@ -38,7 +38,7 @@ fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 193 syscalls in 2890ms
 fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 193 syscalls in 2513ms
 ```
 
-As you can see, `io_uring` wins simply by amortizing the cost of syscalls. What you don't see here, though, is that your single-threaded application is now also non-blocking, so you could spend the I/O time doing CPU-intensive work such as encrypting your next write, or authenticating your last read, while you wait for I/O to complete. **This is cycles for jam.**
+As you can see, `io_uring` wins by amortizing the cost of syscalls. What you don't see here, though, is that your single-threaded application is now also non-blocking, so you could spend the I/O time doing CPU-intensive work such as encrypting your next write, or authenticating your last read, while you wait for I/O to complete. **This is cycles for jam.**
 
 ## Network benchmarks
 
@@ -52,6 +52,8 @@ Uses blocking syscalls to `accept` at most one TCP connection and then `recv`/`s
 
 Uses `io_uring` syscalls to `accept` one or more TCP connections and then `recv`/`send` 1000 bytes on these connections as an echo server. This server is non-blocking and takes advantage of kernel 5.6 or higher with support for `IORING_FEAT_FAST_POLL`.
 
+**Note that kernel 5.7.16 and up introduces a [network performance regression](https://github.com/axboe/liburing/issues/215) that is being patched. If you can't reproduce these network performance results then check that you are on kernel 5.7.15.
+
 ### C Contenders (and a Node.js candidate)
 
 We also throw two C contenders in the ring:
@@ -59,7 +61,7 @@ We also throw two C contenders in the ring:
 * [`epoll.c`](https://github.com/frevib/epoll-echo-server)
 * [`io_uring.c`](https://github.com/frevib/io_uring-echo-server/tree/master)
 
-...and a Node.js candidate that simply does `socket.pipe(socket)`.
+...and a Node.js candidate that simply does `socket.pipe(socket)`. The Node.js candidate is intended for those coming from Node.js, and is provided only to show the full range of the spectrum, so that we can have low-level and high-level echo-server candidates. JavaScript is not a slow language in itself, and [major network performance improvements for Node.js are still possible](https://github.com/nodejs/node/pull/6923).
 
 ### Network results
 
@@ -86,18 +88,20 @@ We use [`rust_echo_bench`](https://github.com/haraldh/rust_echo_bench) to send a
   </tr>
 </table>
 
-An echo server benchmark is a tough benchmark for `io_uring` because it's read-then-write, read-then-write, so for a single connection there's no opportunity for `io_uring` to amortize syscalls across connections. Nevertheless, as concurrency increases, `io_uring` outperforms `epoll`.
+An echo server benchmark is a tough benchmark for `io_uring` because it's read-then-write, read-then-write, so for a single connection there's no opportunity for `io_uring` to amortize syscalls across connections. However, as the number of connections increases, `io_uring` should outperform `epoll`.
+
+Bear in mind that these network benchmarks are not as stable as the file system benchmarks and that the performance of networking stacks on Linux is already heavily optimized. What is unique about `io_uring` is that the same simple interface can be used for all file system and networking I/O on Linux without resorting to user-space thread pools to emulate async I/O.
 
 ## What this means for the future of event loops
 
-Benchmarks aside, more importantly, `io_uring` optimizations such as registered fds, registered buffers enable **a whole new way of doing I/O syscalls not possible with the blocking syscall alternatives**, allowing the kernel to take long term references to internal data structures or create long term mappings of application memory, greatly reducing per-I/O overhead.
+Rough benchmarks aside, more importantly, `io_uring` optimizations such as registered fds, registered buffers enable **a whole new way of doing I/O syscalls not possible with the blocking syscall alternatives**, allowing the kernel to take long term references to internal data structures or create long term mappings of application memory, greatly reducing per-I/O overhead.
 
 In the past, event loops took existing interfaces for blocking syscalls and made them asynchronous. But now, the `io_uring` interfaces are more powerful than the blocking alternatives, so this changes everything.
 
-This means that future event loop designs will need to:
+This means that future event loop designs may need to:
 
 1. Design for `io_uring` first, and fallback to older polling methods and blocking syscall threadpools second.
 
 2. Use shims for advanced `io_uring` features such as [automatic buffer selection](https://lwn.net/Articles/815491/) as fallbacks where `io_uring` is not available, to ensure that the event loop abstraction can expose the full interface of `io_uring` without compromising performance for platforms where `io_uring` is available.
 
-In other words, if you want to know what an I/O interface should look like, start with `io_uring`, don't retrofit `io_uring` onto an existing event loop design, and think of how your event loop or networking library will expose features such as [automatic buffer selection](https://lwn.net/Articles/815491/).
+In other words, if you want to know what an I/O interface on Linux should look like, start with `io_uring`, don't retrofit `io_uring` onto an existing event loop design, and think of how your event loop or networking library will expose features such as [automatic buffer selection](https://lwn.net/Articles/815491/).
