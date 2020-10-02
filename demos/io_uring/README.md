@@ -21,24 +21,24 @@ There are also further `io_uring` optimizations that we don't take advantage of 
 These were taken on a 2020 MacBook Air running Ubuntu 20.04 with a 5.7.15 kernel. Some Linux machines may further show an order of magnitude worse performance for `fs_blocking.zig`:
 
 ```bash
-$ zig run fs_blocking.zig --release-fast
-fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 4138ms
-fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 3626ms
-fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 4428ms
-fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 3693ms
-fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 4153ms
+$ zig run fs_blocking.zig -O ReleaseFast
+fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 7018ms
+fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 7082ms
+fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 7050ms
+fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 7305ms
+fs blocking: write(4096)/fsync/read(4096) * 65536 pages = 196608 syscalls in 7961ms
 ```
 
 ```bash
-$ zig run fs_io_uring.zig --release-fast
-fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 193 syscalls in 3024ms
-fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 193 syscalls in 3261ms
-fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 193 syscalls in 2482ms
-fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 193 syscalls in 2890ms
-fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 193 syscalls in 2513ms
+$ zig run fs_io_uring.zig -O ReleaseFast
+fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 386 syscalls in 3755ms
+fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 386 syscalls in 3469ms
+fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 386 syscalls in 3656ms
+fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 386 syscalls in 3881ms
+fs io_uring: write(4096)/fsync/read(4096) * 65536 pages = 386 syscalls in 4196ms
 ```
 
-As you can see, `io_uring` wins by amortizing the cost of syscalls. What you don't see here, though, is that your single-threaded application is now also non-blocking, so you could spend the I/O time doing CPU-intensive work such as encrypting your next write, or authenticating your last read, while you wait for I/O to complete. **This is cycles for jam.**
+As you can see, `io_uring` can drastically amortize the cost of syscalls. What you don't see here, though, is that your single-threaded application is now also non-blocking, so you could spend the I/O time doing CPU-intensive work such as encrypting your next write, or authenticating your last read, while you wait for I/O to complete. **This is cycles for jam.**
 
 ## Network benchmarks
 
@@ -65,12 +65,12 @@ We also throw two C contenders in the ring:
 
 ### Network results
 
-We use [`rust_echo_bench`](https://github.com/haraldh/rust_echo_bench) to send and receive 512-byte payloads for 20 seconds, varying the number of connections, doing several runs per benchmark and taking the best of each run:
+We use [`rust_echo_bench`](https://github.com/haraldh/rust_echo_bench) to send and receive 64-byte messages for 20 seconds, varying the number of connections, doing several runs per benchmark and taking the best of each run:
 
 ```bash
-cargo run --release -- --address "localhost:3001" --number  1 --duration 20 --length 512
-cargo run --release -- --address "localhost:3001" --number  2 --duration 20 --length 512
-cargo run --release -- --address "localhost:3001" --number 50 --duration 20 --length 512
+cargo run --release -- --address "localhost:3001" --number  1 --duration 20 --length 64
+cargo run --release -- --address "localhost:3001" --number  2 --duration 20 --length 64
+cargo run --release -- --address "localhost:3001" --number 50 --duration 20 --length 64
 ```
 
 These were taken on a 2020 MacBook Air running Ubuntu 20.04 with a 5.7.15 kernel:
@@ -80,25 +80,25 @@ These were taken on a 2020 MacBook Air running Ubuntu 20.04 with a 5.7.15 kernel
     <td><strong>Connections</strong></td><td><strong>1</strong></td><td><strong>2</strong></td><td><strong>50</strong></td>
   </tr>
   <tr>
-    <td>epoll.c</td><td>75775</td><td>119451</td><td>111572</td>
+    <td>epoll.c</td><td>31210</td><td>99696</td><td>120420</td>
   </tr>
   <tr>
-    <td>io_uring.c</td><td>68717</td><td>121236</td><td>140814</td>
+    <td>io_uring.c</td><td>30025</td><td>87950</td><td>140668</td>
   </tr>
   <tr>
     <td>node.js</td><td>43694</td><td>52635</td><td>52977</td>
   </tr>
   <tr>
-    <td>blocking.zig</td><td>77588</td><td>N/A</td><td>N/A</td>
+    <td>blocking.zig</td><td>32149</td><td>N/A</td><td>N/A</td>
   </tr>
   <tr>
-    <td>io_uring.zig</td><td>74770</td><td>121432</td><td>135685</td>
+    <td>io_uring.zig</td><td>31754</td><td>94731</td><td>144332</td>
   </tr>
 </table>
 
-An echo server benchmark is a tough benchmark for `io_uring` because it's read-then-write, read-then-write, so for a single connection there's no opportunity for `io_uring` to amortize syscalls across connections. However, as the number of connections increases, `io_uring` should outperform `epoll`.
+An echo server benchmark is a tough benchmark for `io_uring` because it's read-then-write, read-then-write, so for a single connection there's no opportunity for `io_uring` to amortize syscalls across connections. However, as your server becomes more busy and the number of connections increases, `io_uring` should outperform `epoll` in most cases.
 
-Bear in mind that these network benchmarks are not as stable across machines as the file system benchmarks, so you may get different numbers. The performance of networking stacks on Linux is also heavily optimized.
+Bear in mind that these network benchmarks are not as stable across machines as the file system benchmarks, so you may get different numbers.
 
 What is unique about `io_uring` here is that the same simple interface can be used for both file system and networking I/O on Linux without resorting to user-space thread pools to emulate async file system I/O. We are also relying on the kernel to do fast polling for us thanks to `IORING_FEAT_FAST_POLL`, without having to use `epoll`.
 
