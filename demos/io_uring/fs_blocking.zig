@@ -42,7 +42,7 @@ pub fn main() !void {
         }
 
         std.debug.print(
-            "fs blocking: write({})/fsync/read({}) * {} pages = {} bytes = {} syscalls in {}ms\n",
+            "fs blocking: write({})/fsync/read({}) * {} pages = {} syscalls in {}ms\n",
             .{ page, page, pages, size, syscalls, std.time.milliTimestamp() - start }
         );
     }
