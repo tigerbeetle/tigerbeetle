@@ -18,7 +18,7 @@ There are also further `io_uring` optimizations that we don't take advantage of 
 
 ### File system results
 
-These were taken on a 2020 MacBook Air running Ubuntu with a 5.7.15 kernel. Some Linux machines may further show an order of magnitude worse performance for `fs_blocking.zig`:
+These were taken on a 2020 MacBook Air running Ubuntu 20.04 with a 5.7.15 kernel. Some Linux machines may further show an order of magnitude worse performance for `fs_blocking.zig`:
 
 ```bash
 $ zig run fs_blocking.zig --release-fast
@@ -44,13 +44,13 @@ As you can see, `io_uring` wins by amortizing the cost of syscalls. What you don
 
 ### net_blocking.zig
 
-Uses blocking syscalls to `accept` at most one TCP connection and then `recv`/`send` 1000 bytes on this connection as an echo server. This should be the fastest candidate for the task on Linux, since it does not use `epoll` or any async methods.
+Uses blocking syscalls to `accept` at most one TCP connection and then `recv`/`send` up to 1000 bytes per message on this connection as an echo server. This should be the fastest candidate for the task on Linux, since it does not use `epoll` or any async methods.
 
 *This was designed by [MasterQ32](https://github.com/MasterQ32), Felix (xq) Queißner, who wrote [zig-network](https://github.com/MasterQ32/zig-network). Thanks for jumping in and creating this echo server candidate!*
 
 ### net_io_uring.zig
 
-Uses `io_uring` syscalls to `accept` one or more TCP connections and then `recv`/`send` 1000 bytes on these connections as an echo server. This server is non-blocking and takes advantage of kernel 5.6 or higher with support for `IORING_FEAT_FAST_POLL`.
+Uses `io_uring` syscalls to `accept` one or more TCP connections and then `recv`/`send` up to 1000 bytes per message on these connections as an echo server. This server is non-blocking and takes advantage of kernel 5.6 or higher with support for `IORING_FEAT_FAST_POLL`.
 
 **Note that kernel 5.7.16 and up introduces a [network performance regression](https://github.com/axboe/liburing/issues/215) that is being patched. If you can't reproduce these network performance results then check that you are on kernel 5.7.15.
 
@@ -65,7 +65,15 @@ We also throw two C contenders in the ring:
 
 ### Network results
 
-We use [`rust_echo_bench`](https://github.com/haraldh/rust_echo_bench) to send and receive 1000-byte payloads for 20 seconds, varying the number of connections, doing several runs per benchmark and taking the best of each run:
+We use [`rust_echo_bench`](https://github.com/haraldh/rust_echo_bench) to send and receive 512-byte payloads for 20 seconds, varying the number of connections, doing several runs per benchmark and taking the best of each run:
+
+```bash
+cargo run --release -- --address "localhost:3001" --number  1 --duration 20 --length 512
+cargo run --release -- --address "localhost:3001" --number  2 --duration 20 --length 512
+cargo run --release -- --address "localhost:3001" --number 50 --duration 20 --length 512
+```
+
+These were taken on a 2020 MacBook Air running Ubuntu 20.04 with a 5.7.15 kernel:
 
 <table>
   <tr>
@@ -90,7 +98,9 @@ We use [`rust_echo_bench`](https://github.com/haraldh/rust_echo_bench) to send a
 
 An echo server benchmark is a tough benchmark for `io_uring` because it's read-then-write, read-then-write, so for a single connection there's no opportunity for `io_uring` to amortize syscalls across connections. However, as the number of connections increases, `io_uring` should outperform `epoll`.
 
-Bear in mind that these network benchmarks are not as stable as the file system benchmarks and that the performance of networking stacks on Linux is already heavily optimized. What is unique about `io_uring` is that the same simple interface can be used for all file system and networking I/O on Linux without resorting to user-space thread pools to emulate async I/O.
+Bear in mind that these network benchmarks are not as stable across machines as the file system benchmarks, so you may get different numbers. The performance of networking stacks on Linux is also heavily optimized.
+
+What is unique about `io_uring` here is that the same simple interface can be used for both file system and networking I/O on Linux without resorting to user-space thread pools to emulate async file system I/O. We are also relying on the kernel to do fast polling for us thanks to `IORING_FEAT_FAST_POLL`, without having to use `epoll`.
 
 ## What this means for the future of event loops
 
