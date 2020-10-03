@@ -100,7 +100,9 @@ An echo server benchmark is a tough benchmark for `io_uring` because it's read-t
 
 Bear in mind that these network benchmarks are not as stable across machines as the file system benchmarks, so you may get different numbers.
 
-What is unique about `io_uring` here is that the same simple interface can be used for both file system and networking I/O on Linux without resorting to user-space thread pools to emulate async file system I/O. We are also relying on the kernel to do fast polling for us thanks to `IORING_FEAT_FAST_POLL`, without having to use `epoll`.
+What is unique about `io_uring` here is that the same simple interface can be used for both file system and networking I/O on Linux without resorting to user-space thread pools to emulate async file system I/O.
+
+We are also relying on the kernel to do fast polling for us thanks to `IORING_FEAT_FAST_POLL`, without having to use `epoll`. `IORING_FEAT_FAST_POLL` effectively combines two syscalls into a single syscall. It's more efficient to perform a single truly asynchronous read/write instead of monitoring file descriptor activity and then calling read/write.
 
 ## What this means for the future of event loops
 
