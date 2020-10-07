@@ -25,6 +25,8 @@ In the month of July 2020, we developed a prototype of TigerBeetle in Node as a 
 
 We then integrated ProtoBeetle into Mojaloop and our reference minimum deployment cluster of **Mojaloop went from 76 TPS on MySQL to 1757 TPS on ProtoBeetle**. A single stateless Mojaloop pod was unable to saturate ProtoBeetle. Most of the throughput was spent converting Mojaloop's individual HTTP requests into TCP batches.
 
+You can watch [our 10-minute talk introducing ProtoBeetle](https://youtu.be/QOC6PHFPtAM?t=324).
+
 The alpha version of **TigerBeetle is now under active development** in C/Zig and the [DESIGN](./DESIGN.md) document is intended as a design document showing our design decisions regarding performance and safety, and where we want to go regarding accounting features.
 
 ## Usage
