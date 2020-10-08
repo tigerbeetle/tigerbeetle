@@ -75,11 +75,11 @@ pub fn main() !void {
             // Enqueue groups of read/fsync/write calls within the event loop:
             var events: u32 = 0;
             while (offset_submitted < size and events + 3 <= cqes.len) {
-                var w = try ring.queue_write(event_w, fd, buffer_w[0..], offset_submitted);
+                var w = try ring.write(event_w, fd, buffer_w[0..], offset_submitted);
                 w.flags |= std.os.linux.IOSQE_IO_LINK;
-                var f = try ring.queue_fsync(event_f, fd, 0);
+                var f = try ring.fsync(event_f, fd, 0);
                 f.flags |= std.os.linux.IOSQE_IO_LINK;
-                var r = try ring.queue_read(event_r, fd, buffer_r[0..], offset_submitted);
+                var r = try ring.read(event_r, fd, buffer_r[0..], offset_submitted);
                 offset_submitted += page;
                 events += 3;
             }

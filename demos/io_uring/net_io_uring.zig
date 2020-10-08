@@ -85,17 +85,17 @@ pub fn main() !void {
 
 fn accept(ring: *IO_Uring, fd: os.fd_t, addr: *os.sockaddr, addr_len: *os.socklen_t) !void {
     var user_data = get_user_data(fd, .Accept);
-    _ = try ring.queue_accept(user_data, fd, addr, addr_len, 0);
+    _ = try ring.accept(user_data, fd, addr, addr_len, 0);
 }
 
 fn recv(ring: *IO_Uring, fd: os.fd_t) !void {
     var user_data = get_user_data(fd, .Recv);
-    _ = try ring.queue_recv(user_data, fd, get_buffer(fd)[0..], os.MSG_NOSIGNAL);
+    _ = try ring.recv(user_data, fd, get_buffer(fd)[0..], os.MSG_NOSIGNAL);
 }
 
 fn send(ring: *IO_Uring, fd: os.fd_t, size: usize) !void {
     var user_data = get_user_data(fd, .Send);
-    _ = try ring.queue_send(user_data, fd, get_buffer(fd)[0..size], os.MSG_NOSIGNAL);
+    _ = try ring.send(user_data, fd, get_buffer(fd)[0..size], os.MSG_NOSIGNAL);
 }
 
 fn get_buffer(fd: os.fd_t) []u8 {
