@@ -261,6 +261,7 @@ fn event_loop(ring: *IO_Uring, server: os.fd_t) !void {
         if (!connections.accepting and connections.available()) {
             try accept(ring, server, &accept_addr, &accept_addr_len);
         }
+        // Submit all queued syscalls and wait for at least one completion event before looping.
         _ = try ring.submit_and_wait(1);
     }
 }
@@ -273,7 +274,6 @@ fn tcp_server_init(address: net.Address) !os.fd_t {
 
     if (config.tcp_keepalive) {
         try set_socket_option(fd, os.SOL_SOCKET, os.SO_KEEPALIVE, 1);
-        try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_KEEPIDLE, config.tcp_keepidle);
         try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_KEEPIDLE, config.tcp_keepidle);
         try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_KEEPINTVL, config.tcp_keepintvl);
         try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_KEEPCNT, config.tcp_keepcnt);
@@ -288,6 +288,7 @@ fn tcp_server_init(address: net.Address) !os.fd_t {
     return fd;
 }
 
+// We use a u31 for the option value to keep the sign bit clear when we cast to c_int.
 fn set_socket_option(fd: os.fd_t, level: u32, option: u32, value: u31) !void {
     try os.setsockopt(fd, level, option, &mem.toBytes(@as(c_int, value)));
 }
