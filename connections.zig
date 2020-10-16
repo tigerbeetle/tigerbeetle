@@ -13,6 +13,7 @@ pub const Connection = struct {
     fd: os.fd_t,
     references: usize,
     recv_size: usize,
+    send_offset: usize,
     send_size: usize,
     recv: [buffer_max]u8 = undefined,
     send: [buffer_max]u8 = undefined,
@@ -39,6 +40,7 @@ pub const Connections = struct {
                 .fd = -1,
                 .references = 0,
                 .recv_size = 0,
+                .send_offset = 0,
                 .send_size = 0,
             };
             @memset(connection.recv[0..], 0, connection.recv.len);
@@ -83,6 +85,7 @@ pub const Connections = struct {
                 assert(connection.id == 0);
                 assert(connection.fd == -1);
                 assert(connection.recv_size == 0);
+                assert(connection.send_offset == 0);
                 assert(connection.send_size == 0);
                 connection.id = @intCast(u32, index);
                 connection.fd = fd;
@@ -103,6 +106,7 @@ pub const Connections = struct {
             .fd = -1,
             .references = 0,
             .recv_size = 0,
+            .send_offset = 0,
             .send_size = 0
         };
         assert(self.active > 0);
@@ -131,6 +135,7 @@ test "connections" {
         testing.expectEqual(@as(os.fd_t, -1), connection.fd);
         testing.expectEqual(@as(usize, 0), connection.references);
         testing.expectEqual(@as(usize, 0), connection.recv_size);
+        testing.expectEqual(@as(usize, 0), connection.send_offset);
         testing.expectEqual(@as(usize, 0), connection.send_size);
         testing.expectEqualSlices(u8, zeroes[0..], connection.recv[0..]);
         testing.expectEqualSlices(u8, zeroes[0..], connection.send[0..]);
@@ -145,6 +150,7 @@ test "connections" {
     testing.expectEqual(id0, co0.id);
     testing.expectEqual(fd0, co0.fd);
     co0.recv_size = 100;
+    co0.send_offset = 0;
     co0.send_size = 100;
 
     const fd1: os.fd_t = 8;
@@ -202,6 +208,7 @@ test "connections" {
     testing.expectEqual(fd4, co4.fd);
     testing.expectEqual(@as(usize, 1), co4.references);
     testing.expectEqual(@as(usize, 0), co4.recv_size);
+    testing.expectEqual(@as(usize, 0), co4.send_offset);
     testing.expectEqual(@as(usize, 0), co4.send_size);
     try connections.unset(id4);
 }
