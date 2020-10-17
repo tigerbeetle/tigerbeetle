@@ -10,6 +10,12 @@ pub const tcp_backlog = 64;
 /// The maximum number of connections that can be accepted and held open by the server at any time:
 pub const tcp_connections_max = 32;
 
+/// The maximum size of a connection recv or send buffer.
+/// This impacts the amount of memory allocated at initialization by the server.
+/// e.g. tcp_connections_max * tcp_connection_buffer_max * 2
+/// 4 MiB is enough for a batch of 32,768 transfers, and good for sequential disk write throughput.
+pub const tcp_connection_buffer_max = 4 * 1024 * 1024;
+
 /// Whether to enable TCP keepalive:
 pub const tcp_keepalive = true;
 
