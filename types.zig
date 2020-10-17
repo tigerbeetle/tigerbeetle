@@ -11,12 +11,45 @@ comptime {
     if (builtin.endian != builtin.Endian.Little) @compileError("big-endian systems not supported");
 }
 
-const Command = packed enum(u32) {
+pub const Command = packed enum(u32) {
     reserved,
     ack,
     create_accounts,
     create_transfers,
     commit_transfers,
+};
+
+pub const Transfer = packed struct {
+                   id: u128,
+    source_account_id: u128,
+    target_account_id: u128,
+             custom_1: u128,
+             custom_2: u128,
+             custom_3: u128,
+                flags: u64,
+               amount: u64,
+              timeout: u64,
+            timestamp: u64,
+};
+
+pub const TransferFlag = packed enum(u64) {
+    accept,
+    reject,
+    auto_commit,
+};
+
+pub const Commit = packed struct {
+           id: u128,
+     custom_1: u128,
+     custom_2: u128,
+     custom_3: u128,
+        flags:  u64,
+    timestamp:  u64,
+};
+
+pub const CommitFlag = packed enum(u64) {
+    accept,
+    reject,
 };
 
 pub const NetworkMagic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."

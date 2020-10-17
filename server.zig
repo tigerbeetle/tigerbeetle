@@ -294,6 +294,8 @@ fn set_socket_option(fd: os.fd_t, level: u32, option: u32, value: u31) !void {
 }
 
 pub fn main() !void {
+    // TODO Log all config variables at debug level at startup.
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     var allocator = &arena.allocator;
