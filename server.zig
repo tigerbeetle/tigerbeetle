@@ -312,3 +312,14 @@ pub fn main() !void {
 
     try event_loop(&ring, server);
 }
+
+comptime {
+    switch (config.deployment_environment) {
+        .development => {},
+        .staging => {},
+        .production => {},
+        else => @compileError("unsupported deployment environment")
+    }
+    // TODO Add safety checks on all config variables and interactions between them.
+    // TODO Move this to types.zig or somewhere common to all code.
+}
