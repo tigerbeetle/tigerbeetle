@@ -5,8 +5,7 @@ const os = std.os;
 const testing = std.testing;
 const Allocator = mem.Allocator;
 
-/// This is large enough for a batch of 32768 transfers, and good for disk write throughput.
-pub const buffer_max = 4 * 1024 * 1024;
+const config = @import("config.zig");
 
 pub const Connection = struct {
     id: u32,
@@ -15,8 +14,9 @@ pub const Connection = struct {
     recv_size: usize,
     send_offset: usize,
     send_size: usize,
-    recv: [buffer_max]u8 = undefined,
-    send: [buffer_max]u8 = undefined,
+    // TODO See if we can get away with a single recv/send buffer using stack memory.
+    recv: [config.tcp_connection_buffer_max]u8 = undefined,
+    send: [config.tcp_connection_buffer_max]u8 = undefined,
 };
 
 /// This abstracts all our server connection management logic and static allocation.
@@ -129,7 +129,7 @@ test "connections" {
     testing.expectEqual(count, connections.array.len);
     testing.expectEqual(true, connections.available());
 
-    const zeroes = [_]u8{0} ** buffer_max;
+    const zeroes = [_]u8{0} ** config.tcp_connection_buffer_max;
     for (connections.array) |*connection, index| {
         testing.expectEqual(@as(u32, 0), connection.id);
         testing.expectEqual(@as(os.fd_t, -1), connection.fd);
