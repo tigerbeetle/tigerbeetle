@@ -30,7 +30,7 @@ $ node benchmark.js
 On the same development machine, not a production server, Zig's std lib HashMap can insert **12.6 million transfers per second**:
 
 ```bash
-$ zig run benchmark.zig --release-safe
+$ zig run benchmark.zig -O ReleaseSafe
 1000000 hash table insertions in 90ms
 1000000 hash table insertions in 79ms
 1000000 hash table insertions in 82ms
