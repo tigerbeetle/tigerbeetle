@@ -272,6 +272,21 @@ fn tcp_server_init(address: net.Address) !os.fd_t {
 
     try set_socket_option(fd, os.SOL_SOCKET, os.SO_REUSEADDR, 1);
 
+    if (config.tcp_rcvbuf > 0) {
+        // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in the event of an EPERM):
+        set_socket_option(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, config.tcp_rcvbuf) catch |err| {
+            if (err != error.PermissionDenied) return err;
+            try set_socket_option(fd, os.SOL_SOCKET, os.SO_RCVBUF, config.tcp_rcvbuf);
+        };
+    }
+    if (config.tcp_sndbuf > 0) {
+        // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in the event of an EPERM):
+        set_socket_option(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, config.tcp_sndbuf) catch |err| {
+            if (err != error.PermissionDenied) return err;
+            try set_socket_option(fd, os.SOL_SOCKET, os.SO_SNDBUF, config.tcp_sndbuf);
+        };
+    }
+
     if (config.tcp_keepalive) {
         try set_socket_option(fd, os.SOL_SOCKET, os.SO_KEEPALIVE, 1);
         try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_KEEPIDLE, config.tcp_keepidle);
@@ -286,6 +301,8 @@ fn tcp_server_init(address: net.Address) !os.fd_t {
         try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_NODELAY, 1);
     }
 
+    // TODO Use getsockopt to log the final value of these socket options.
+
     try os.bind(fd, &address.any, address.getOsSockLen());
     try os.listen(fd, config.tcp_backlog);
     return fd;
@@ -293,7 +310,20 @@ fn tcp_server_init(address: net.Address) !os.fd_t {
 
 // We use a u31 for the option value to keep the sign bit clear when we cast to c_int.
 fn set_socket_option(fd: os.fd_t, level: u32, option: u32, value: u31) !void {
-    try os.setsockopt(fd, level, option, &mem.toBytes(@as(c_int, value)));
+    // TODO Submit a PR to handle EPERM in os.zig's definition of setsockopt().
+    var value_bytes = mem.toBytes(@as(c_int, value));
+    var value_bytes_len = @intCast(linux.socklen_t, value_bytes.len);
+    const res = linux.setsockopt(fd, level, option, &value_bytes, value_bytes_len);
+    switch (linux.getErrno(res)) {
+        0 => {},
+        linux.EPERM => return error.PermissionDenied,
+        linux.EDOM => return error.TimeoutTooBig,
+        linux.EISCONN => return error.AlreadyConnected,
+        linux.ENOPROTOOPT => return error.InvalidProtocolOption,
+        linux.ENOMEM => return error.SystemResources,
+        linux.ENOBUFS => return error.SystemResources,
+        else => |errno| return os.unexpectedErrno(errno),
+    }
 }
 
 pub fn main() !void {
