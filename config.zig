@@ -21,11 +21,26 @@ pub const tcp_backlog = 64;
 /// The maximum number of connections that can be accepted and held open by the server at any time:
 pub const tcp_connections_max = 32;
 
-/// The maximum size of a connection recv or send buffer.
+/// The maximum size of a connection recv or send buffer in bytes:
 /// This impacts the amount of memory allocated at initialization by the server.
 /// e.g. tcp_connections_max * tcp_connection_buffer_max * 2
 /// 4 MiB is enough for a batch of 32,768 transfers, and good for sequential disk write throughput.
 pub const tcp_connection_buffer_max = 4 * 1024 * 1024;
+
+/// The maximum size of a kernel socket receive buffer in bytes (or 0 to use the system default):
+/// This sets SO_RCVBUF as an alternative to the auto-tuning range in /proc/sys/net/ipv4/tcp_rmem.
+/// The value is limited by /proc/sys/net/core/rmem_max, unless the CAP_NET_ADMIN privilege exists.
+/// The kernel doubles this value to allow space for packet bookkeeping overhead.
+/// Be careful not to increase this beyond 4 MiB as the kernel may merge small TCP packets,
+/// causing considerable latency spikes for large buffer sizes:
+/// https://blog.cloudflare.com/the-story-of-one-latency-spike/
+pub const tcp_rcvbuf = 4 * 1024 * 1024;
+
+/// The maximum size of a kernel socket send buffer in bytes (or 0 to use the system default):
+/// This sets SO_SNDBUF as an alternative to the auto-tuning range in /proc/sys/net/ipv4/tcp_wmem.
+/// The value is limited by /proc/sys/net/core/wmem_max, unless the CAP_NET_ADMIN privilege exists.
+/// The kernel doubles this value to allow space for packet bookkeeping overhead.
+pub const tcp_sndbuf = 4 * 1024 * 1024;
 
 /// Whether to enable TCP keepalive:
 pub const tcp_keepalive = true;
