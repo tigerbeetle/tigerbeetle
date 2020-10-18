@@ -31,7 +31,8 @@ pub const tcp_connection_buffer_max = 4 * 1024 * 1024;
 /// This sets SO_RCVBUF as an alternative to the auto-tuning range in /proc/sys/net/ipv4/tcp_rmem.
 /// The value is limited by /proc/sys/net/core/rmem_max, unless the CAP_NET_ADMIN privilege exists.
 /// The kernel doubles this value to allow space for packet bookkeeping overhead.
-/// Be careful not to increase this beyond 4 MiB as the kernel may merge small TCP packets,
+/// The receive buffer should ideally exceed the Bandwidth-Delay Product for maximum throughput.
+/// At the same time, be careful going beyond 4 MiB as the kernel may merge many small TCP packets,
 /// causing considerable latency spikes for large buffer sizes:
 /// https://blog.cloudflare.com/the-story-of-one-latency-spike/
 pub const tcp_rcvbuf = 4 * 1024 * 1024;
