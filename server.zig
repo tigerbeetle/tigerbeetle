@@ -278,6 +278,9 @@ fn tcp_server_init(address: net.Address) !os.fd_t {
         try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_KEEPINTVL, config.tcp_keepintvl);
         try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_KEEPCNT, config.tcp_keepcnt);
     }
+    if (config.tcp_user_timeout > 0) {
+        try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_USER_TIMEOUT, config.tcp_user_timeout);
+    }
 
     if (config.tcp_nodelay) {
         try set_socket_option(fd, os.IPPROTO_TCP, os.TCP_NODELAY, 1);
@@ -320,7 +323,13 @@ comptime {
         .development => {},
         .staging => {},
         .production => {},
-        else => @compileError("unsupported deployment environment")
+        else => @compileError("config: unknown deployment_environment")
+    }
+    if (
+        config.tcp_user_timeout >
+        (config.tcp_keepidle + config.tcp_keepintvl * config.tcp_keepcnt) * 1000
+    ) {
+        @compileError("config: tcp_user_timeout would cause tcp_keepcnt to be extended");
     }
     // TODO Add safety checks on all config variables and interactions between them.
     // TODO Move this to types.zig or somewhere common to all code.
