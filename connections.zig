@@ -101,6 +101,7 @@ pub const Connections = struct {
     pub fn unset(self: *Connections, id: u32) !void {
         const connection = try self.get(id);
         if (connection.references > 1) return error.ConnectionHasLiveReferences;
+        // In release safe mode, 0xaa will also be written to the receive and send buffers:
         connection.* = .{
             .id = 0,
             .fd = -1,
@@ -109,6 +110,8 @@ pub const Connections = struct {
             .send_offset = 0,
             .send_size = 0
         };
+        @memset(connection.recv[0..], 0, connection.recv.len);
+        @memset(connection.send[0..], 0, connection.send.len);
         assert(self.active > 0);
         assert(self.active <= self.array.len);
         self.active -= 1;
