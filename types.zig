@@ -19,6 +19,23 @@ pub const Command = packed enum(u32) {
     commit_transfers,
 };
 
+pub const Account = packed struct {
+                       id: u128,
+                   custom: u128,
+                    flags: u64,
+                     unit: u64,
+           debit_reserved: u64,
+           debit_accepted: u64,
+          credit_reserved: u64,
+          credit_accepted: u64,
+     limit_debit_reserved: u64,
+     limit_debit_accepted: u64,
+    limit_credit_reserved: u64,
+    limit_credit_accepted: u64,
+                  padding: u64,
+                timestamp: u64,
+};
+
 pub const Transfer = packed struct {
                    id: u128,
     source_account_id: u128,
@@ -32,7 +49,7 @@ pub const Transfer = packed struct {
             timestamp: u64,
 };
 
-pub const TransferFlag = packed enum(u64) {
+pub const TransferFlag = enum(u64) {
     accept,
     reject,
     auto_commit,
@@ -47,7 +64,7 @@ pub const Commit = packed struct {
     timestamp:  u64,
 };
 
-pub const CommitFlag = packed enum(u64) {
+pub const CommitFlag = enum(u64) {
     accept,
     reject,
 };
