@@ -15,6 +15,14 @@ usingnamespace @import("connections.zig");
 usingnamespace @import("io_uring.zig");
 usingnamespace @import("types.zig");
 
+const Accounts = std.AutoHashMap(u128, Account);
+const Transfers = std.AutoHashMap(u128, Transfer);
+
+var accounts: Accounts = undefined;
+var transfers: Transfers = undefined;
+
+var connections: Connections = undefined;
+
 const Event = packed struct {
     op: enum(u32) {
         Accept,
@@ -24,14 +32,6 @@ const Event = packed struct {
     },
     connection_id: u32
 };
-
-var connections: Connections = undefined;
-
-const Accounts = std.AutoHashMap(u128, Account);
-const Transfers = std.AutoHashMap(u128, Transfer);
-
-var accounts: Accounts = undefined;
-var transfers: Transfers = undefined;
 
 fn accept(ring: *IO_Uring, fd: os.fd_t, addr: *os.sockaddr, addr_len: *os.socklen_t) !void {
     assert(connections.accepting == false);
