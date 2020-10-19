@@ -7,6 +7,13 @@ pub const port = 3001;
 /// Whether development, staging or production:
 pub const deployment_environment = .development;
 
+/// The maximum number of accounts to store in memory:
+/// This impacts the amount of memory allocated at initialization by the server.
+pub const accounts_max = switch (deployment_environment) {
+    .production => 1_000_000,
+    else => 100_000
+};
+
 /// The maximum number of transfers to store in memory before requiring cold data to be drained:
 /// This impacts the amount of memory allocated at initialization by the server.
 /// We allocate more capacity than the number of transfers for a safe hash table load factor.

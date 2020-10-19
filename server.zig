@@ -128,6 +128,7 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
         );
         if (header.magic != NetworkMagic) return try close(ring, connection, "corrupt magic");
         if (!header.valid_checksum_meta()) return try close(ring, connection, "corrupt header");
+        if (!header.valid_data_size()) return try close(ring, connection, "wrong data size");
     }
 
     // We can only trust `data_size` here after `checksum_meta` has been verified above:
