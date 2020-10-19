@@ -16,35 +16,54 @@ pub fn main() !void {
     var connection = try net.tcpConnectToAddress(addr);
     errdefer os.close(connection.handle);
 
-    // Disable Nagle's delay:
-    const enable = &mem.toBytes(@as(c_int, 1));
-    try os.setsockopt(connection.handle, os.IPPROTO_TCP, os.TCP_NODELAY, enable);
-
-    var header = NetworkHeader {
-        .id = 7000,
-        .command = .create_transfers,
-        .data_size = 128
+    var accounts = [_]Account {
+        Account {
+            .id = 1,
+            .custom = 0,
+            .flags = 0,
+            .unit = 2,
+            .debit_accepted = 1_000_000_000,
+            .debit_reserved = 0,
+            .credit_accepted = 10_000,
+            .credit_reserved = 0,
+            .limit_debit_accepted = 0,
+            .limit_debit_reserved = 0,
+            .limit_credit_accepted = 1_000_000,
+            .limit_credit_reserved = 1_000,
+            .padding = 0,
+            .timestamp = 0,
+        },
+        Account {
+            .id = 2,
+            .custom = 0,
+            .flags = 0,
+            .unit = 2,
+            .debit_accepted = 0,
+            .debit_reserved = 0,
+            .credit_accepted = 0,
+            .credit_reserved = 0,
+            .limit_debit_accepted = 1_000_000,
+            .limit_debit_reserved = 1_000,
+            .limit_credit_accepted = 0,
+            .limit_credit_reserved = 0,
+            .padding = 0,
+            .timestamp = 0,
+        }
     };
-    var data = [_]u8{0} ** 128;
+
+    var data = mem.asBytes(accounts[0..]);
+    var header = NetworkHeader {
+        .id = 0,
+        .command = .create_accounts,
+        .data_size = data.len
+    };
     header.set_checksum_data(data[0..]);
     header.set_checksum_meta();
+    const meta = mem.asBytes(&header);
 
-    std.debug.print("{x}\n", .{ mem.asBytes(&header) });
-    const meta = @bitCast([@sizeOf(NetworkHeader)]u8, header);
-
-    _ = try os.sendto(connection.handle, meta[0..32], 0, null, 0);
-    os.nanosleep(1, 0);
-    _ = try os.sendto(connection.handle, meta[32..], 0, null, 0);
-    os.nanosleep(1, 0);
-    _ = try os.sendto(connection.handle, data[0..1], 0, null, 0);
-    os.nanosleep(1, 0);
-    _ = try os.sendto(connection.handle, data[1..], 0, null, 0);
-    // Pipeline another request:
     _ = try os.sendto(connection.handle, meta[0..], 0, null, 0);
-    _ = try os.sendto(connection.handle, data[0..], 0, null, 0);
+    if (data.len > 0) _ = try os.sendto(connection.handle, data[0..], 0, null, 0);
     var recv: [64]u8 = undefined;
-    _ = try os.recvfrom(connection.handle, recv[0..], 0, null, null);
-    std.debug.print("ack: {x}\n", .{ recv });
     _ = try os.recvfrom(connection.handle, recv[0..], 0, null, null);
     std.debug.print("ack: {x}\n", .{ recv });
     os.close(connection.handle);
