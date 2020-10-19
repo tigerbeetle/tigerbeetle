@@ -152,7 +152,24 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     if (!header.valid_checksum_data(data)) return try close(ring, connection, "corrupt data");
     
     // TODO Journal to disk
-    // TODO Apply to state machine
+    
+    // TODO State machine logic:
+    if (header.command == .create_accounts) {
+        var batch = mem.bytesAsSlice(Account, data);
+        for (batch) |account| {
+            std.debug.print("{}\n", .{account});
+        }
+    } else if (header.command == .create_transfers) {
+        var batch = mem.bytesAsSlice(Transfer, data);
+        for (batch) |transfer| {
+            std.debug.print("{}\n", .{transfer});
+        }
+    } else if (header.command == .commit_transfers) {
+        var batch = mem.bytesAsSlice(Commit, data);
+        for (batch) |commit| {
+            std.debug.print("{}\n", .{commit});
+        }
+    }
 
     // Move any pipelined requests to the front of the receive buffer:
     // This allows the client to have requests inflight up to the size of the receive buffer, and to
@@ -335,7 +352,7 @@ fn set_socket_option(fd: os.fd_t, level: u32, option: u32, value: u31) !void {
 
 pub fn main() !void {
     // TODO Log all config variables at debug level at startup.
-    
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     var allocator = &arena.allocator;
