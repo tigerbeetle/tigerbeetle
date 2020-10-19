@@ -27,6 +27,12 @@ const Event = packed struct {
 
 var connections: Connections = undefined;
 
+const Accounts = std.AutoHashMap(u128, Account);
+const Transfers = std.AutoHashMap(u128, Transfer);
+
+var accounts: Accounts = undefined;
+var transfers: Transfers = undefined;
+
 fn accept(ring: *IO_Uring, fd: os.fd_t, addr: *os.sockaddr, addr_len: *os.socklen_t) !void {
     assert(connections.accepting == false);
     assert(connections.available());
@@ -329,10 +335,18 @@ fn set_socket_option(fd: os.fd_t, level: u32, option: u32, value: u31) !void {
 
 pub fn main() !void {
     // TODO Log all config variables at debug level at startup.
-
+    
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     var allocator = &arena.allocator;
+
+    accounts = Accounts.init(allocator);
+    defer accounts.deinit();
+    try accounts.ensureCapacity(config.accounts_max);
+
+    transfers = Transfers.init(allocator);
+    defer transfers.deinit();
+    try transfers.ensureCapacity(config.transfers_max);
 
     connections = try Connections.init(allocator, config.tcp_connections_max);
     defer connections.deinit();
