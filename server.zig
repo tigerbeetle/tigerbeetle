@@ -14,13 +14,9 @@ const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 usingnamespace @import("connections.zig");
 usingnamespace @import("io_uring.zig");
 usingnamespace @import("types.zig");
+usingnamespace @import("state.zig");
 
-const Accounts = std.AutoHashMap(u128, Account);
-const Transfers = std.AutoHashMap(u128, Transfer);
-
-var accounts: Accounts = undefined;
-var transfers: Transfers = undefined;
-
+var state: State = undefined;
 var connections: Connections = undefined;
 
 const Event = packed struct {
@@ -153,23 +149,7 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     
     // TODO Journal to disk
     
-    // TODO State machine logic:
-    if (header.command == .create_accounts) {
-        var batch = mem.bytesAsSlice(Account, data);
-        for (batch) |account| {
-            std.debug.print("{}\n", .{account});
-        }
-    } else if (header.command == .create_transfers) {
-        var batch = mem.bytesAsSlice(Transfer, data);
-        for (batch) |transfer| {
-            std.debug.print("{}\n", .{transfer});
-        }
-    } else if (header.command == .commit_transfers) {
-        var batch = mem.bytesAsSlice(Commit, data);
-        for (batch) |commit| {
-            std.debug.print("{}\n", .{commit});
-        }
-    }
+    state.apply(header.command, data);
 
     // Move any pipelined requests to the front of the receive buffer:
     // This allows the client to have requests inflight up to the size of the receive buffer, and to
@@ -357,13 +337,8 @@ pub fn main() !void {
     defer arena.deinit();
     var allocator = &arena.allocator;
 
-    accounts = Accounts.init(allocator);
-    defer accounts.deinit();
-    try accounts.ensureCapacity(config.accounts_max);
-
-    transfers = Transfers.init(allocator);
-    defer transfers.deinit();
-    try transfers.ensureCapacity(config.transfers_max);
+    state = try State.init(allocator, config.accounts_max, config.transfers_max);
+    defer state.deinit();
 
     connections = try Connections.init(allocator, config.tcp_connections_max);
     defer connections.deinit();
