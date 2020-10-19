@@ -112,6 +112,27 @@ pub const NetworkHeader = packed struct {
     pub fn valid_checksum_data(self: *NetworkHeader, data: []const u8) bool {
         return self.checksum_data == self.calculate_checksum_data(data);
     }
+
+    pub fn valid_data_size(self: *NetworkHeader) bool {
+        const type_size: usize = switch (self.command) {
+            .reserved => unreachable,
+            .ack => unreachable,
+            .create_accounts => @sizeOf(Account),
+            .create_transfers => @sizeOf(Transfer),
+            .commit_transfers => @sizeOf(Commit)
+        };
+        const min_count: usize = switch (self.command) {
+            .reserved => 0,
+            .ack => 0,
+            .create_accounts => 1,
+            .create_transfers => 1,
+            .commit_transfers => 1
+        };
+        return (
+            @mod(self.data_size, type_size) == 0 and
+            @divExact(self.data_size, type_size) >= min_count
+        );
+    }
 };
 
 test "NetworkMagic" {
