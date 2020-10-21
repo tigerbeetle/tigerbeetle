@@ -28,12 +28,27 @@ pub const Account = packed struct {
            debit_accepted: u64,
           credit_reserved: u64,
           credit_accepted: u64,
-     limit_debit_reserved: u64,
-     limit_debit_accepted: u64,
-    limit_credit_reserved: u64,
-    limit_credit_accepted: u64,
+     debit_reserved_limit: u64,
+     debit_accepted_limit: u64,
+    credit_reserved_limit: u64,
+    credit_accepted_limit: u64,
                   padding: u64,
                 timestamp: u64,
+};
+
+pub const AccountResult = packed enum(u32) {
+    ok,
+    already_exists,
+    reserved_field_custom,
+    reserved_field_flags,
+    reserved_field_padding,
+    reserved_field_timestamp,
+    debit_reserved_exceeds_debit_reserved_limit,
+    debit_accepted_exceeds_debit_accepted_limit,
+    credit_reserved_exceeds_credit_reserved_limit,
+    credit_accepted_exceeds_credit_accepted_limit,
+    debit_reserved_limit_exceeds_debit_accepted_limit,
+    credit_reserved_limit_exceeds_credit_accepted_limit,
 };
 
 pub const Transfer = packed struct {
@@ -69,18 +84,23 @@ pub const CommitFlag = enum(u64) {
     reject,
 };
 
-pub const NetworkMagic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."
+pub const AccountResults = packed struct {
+     index: u32,
+    result: AccountResult,
+};
 
-pub const NetworkHeader = packed struct {
+pub const Magic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."
+
+pub const Header = packed struct {
     checksum_meta: u128 = undefined,
     checksum_data: u128 = undefined,
                id: u128,
-            magic: u64 = NetworkMagic,
+            magic: u64 = Magic,
           command: Command,
-        data_size: u32,
+             size: u32,
 
-    pub fn calculate_checksum_meta(self: *NetworkHeader) u128 {
-        const meta = @bitCast([@sizeOf(NetworkHeader)]u8, self.*);
+    pub fn calculate_checksum_meta(self: *Header) u128 {
+        const meta = @bitCast([@sizeOf(Header)]u8, self.*);
         var target: [32]u8 = undefined;
         const checksum_size = @sizeOf(@TypeOf(self.checksum_meta));
         assert(checksum_size == 16);
@@ -88,8 +108,8 @@ pub const NetworkHeader = packed struct {
         return @bitCast(u128, target[0..checksum_size].*);
     }
 
-    pub fn calculate_checksum_data(self: *NetworkHeader, data: []const u8) u128 {
-        assert(data.len == self.data_size);
+    pub fn calculate_checksum_data(self: *Header, data: []const u8) u128 {
+        assert(@sizeOf(Header) + data.len == self.size);
         var target: [32]u8 = undefined;
         const checksum_size = @sizeOf(@TypeOf(self.checksum_data));
         assert(checksum_size == 16);
@@ -97,26 +117,28 @@ pub const NetworkHeader = packed struct {
         return @bitCast(u128, target[0..checksum_size].*);
     }
 
-    pub fn set_checksum_meta(self: *NetworkHeader) void {
+    pub fn set_checksum_meta(self: *Header) void {
         self.checksum_meta = self.calculate_checksum_meta();
     }
 
-    pub fn set_checksum_data(self: *NetworkHeader, data: []const u8) void {
+    pub fn set_checksum_data(self: *Header, data: []const u8) void {
         self.checksum_data = self.calculate_checksum_data(data);
     }
 
-    pub fn valid_checksum_meta(self: *NetworkHeader) bool {
+    pub fn valid_checksum_meta(self: *Header) bool {
         return self.checksum_meta == self.calculate_checksum_meta();
     }
 
-    pub fn valid_checksum_data(self: *NetworkHeader, data: []const u8) bool {
+    pub fn valid_checksum_data(self: *Header, data: []const u8) bool {
         return self.checksum_data == self.calculate_checksum_data(data);
     }
 
-    pub fn valid_data_size(self: *NetworkHeader) bool {
+    pub fn valid_size(self: *Header) bool {
+        if (self.size < @sizeOf(Header)) return false;
+        const data_size = self.size - @sizeOf(Header);
         const type_size: usize = switch (self.command) {
             .reserved => unreachable,
-            .ack => unreachable,
+            .ack => @sizeOf(AccountResult),
             .create_accounts => @sizeOf(Account),
             .create_transfers => @sizeOf(Transfer),
             .commit_transfers => @sizeOf(Commit)
@@ -129,20 +151,20 @@ pub const NetworkHeader = packed struct {
             .commit_transfers => 1
         };
         return (
-            @mod(self.data_size, type_size) == 0 and
-            @divExact(self.data_size, type_size) >= min_count
+            @mod(data_size, type_size) == 0 and
+            @divExact(data_size, type_size) >= min_count
         );
     }
 };
 
-test "NetworkMagic" {
+test "Magic" {
     testing.expectEqualSlices(
         u8,
         ([_]u8{ 0x0a, 0x5c, 0xa1, 0xab, 0x1e, 0xbe, 0xe1, 0x1e })[0..],
-        mem.toBytes(NetworkMagic)[0..]
+        mem.toBytes(Magic)[0..]
     );
 }
 
-test "NetworkHeader" {
-    testing.expectEqual(@as(usize, 64), @sizeOf(NetworkHeader));
+test "Header" {
+    testing.expectEqual(@as(usize, 64), @sizeOf(Header));
 }
