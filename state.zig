@@ -133,9 +133,9 @@ pub const State = struct {
             if (t.timeout != 0) return .auto_commit_cannot_timeout;
         }
 
-        if (t.debit_account_id == t.credit_account_id) return .accounts_are_the_same;
-
         if (t.amount == 0) return .amount_is_zero;
+        
+        if (t.debit_account_id == t.credit_account_id) return .accounts_are_the_same;
 
         var d = self.get_account(t.debit_account_id) orelse return .debit_account_does_not_exist;
         var c = self.get_account(t.credit_account_id) orelse return .credit_account_does_not_exist;
