@@ -9,7 +9,7 @@ const linux = os.linux;
 
 const config = @import("config.zig");
 
-const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
+pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 
 usingnamespace @import("connections.zig");
 usingnamespace @import("io_uring.zig");
