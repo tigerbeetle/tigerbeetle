@@ -139,8 +139,6 @@ pub const State = struct {
 
         var d = self.get_account(t.debit_account_id) orelse return .debit_account_does_not_exist;
         var c = self.get_account(t.credit_account_id) orelse return .credit_account_does_not_exist;
-        log.debug("debit_account: {}", .{ d });
-        log.debug("credit_account: {}", .{ c });
         
         if (d.unit != c.unit) return .accounts_have_different_units;
 
@@ -161,10 +159,6 @@ pub const State = struct {
             c.credit_reserved += t.amount;
         }
         self.timestamp = t.timestamp;
-
-        if (self.transfers.get(t.id)) |transfer| {
-            std.debug.print("transfer={}\n", .{ transfer });
-        }
 
         return .ok;
     }
