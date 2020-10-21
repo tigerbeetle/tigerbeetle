@@ -42,7 +42,7 @@ pub const State = struct {
             .reserved => unreachable,
             .ack => unreachable,
             .create_accounts => self.apply_create_accounts(input, output),
-            .create_transfers => unreachable, // TODO
+            .create_transfers => self.apply_create_transfers(input, output),
             .commit_transfers => unreachable, // TODO
         };
     }
@@ -59,17 +59,33 @@ pub const State = struct {
                 results[results_count] = .{ .index = @intCast(u32, index), .result = result };
                 results_count += 1;
             }
-
         }
         return results_count * @sizeOf(AccountResults);
+    }
+
+    pub fn apply_create_transfers(self: *State, input: []const u8, output: []u8) usize {
+        const batch = mem.bytesAsSlice(Transfer, input);
+        var results = mem.bytesAsSlice(TransferResults, output);
+        var results_count: usize = 0;
+        for (batch) |transfer, index| {
+            log.debug("create_transfers {}/{}: {}", .{ index + 1, batch.len, transfer });
+            const result = self.create_transfer(transfer);
+            log.debug("{}", .{ result });
+            if (result != .ok) {
+                results[results_count] = .{ .index = @intCast(u32, index), .result = result };
+                results_count += 1;
+            }
+        }
+        return results_count * @sizeOf(TransferResults);
     }
 
     pub fn create_account(self: *State, a: Account) AccountResult {
         assert(a.timestamp > self.timestamp);
 
         if (a.custom != 0) return .reserved_field_custom;
-        if (a.flags != 0) return .reserved_field_flags;
         if (a.padding != 0) return .reserved_field_padding;
+
+        if (a.flags.reserved != 0) return .reserved_flag;
 
         // Amounts may never exceed limits:
         if (a.debit_reserved_limit > 0 and a.debit_reserved > a.debit_reserved_limit) {
@@ -93,13 +109,77 @@ pub const State = struct {
             return .credit_reserved_limit_exceeds_credit_accepted_limit;
         }
 
+        // Insert:
         var hash_map_result = self.accounts.getOrPutAssumeCapacity(a.id);
         if (hash_map_result.found_existing) return .already_exists;
-
-        // Insert:
         hash_map_result.entry.value = a;
         self.timestamp = a.timestamp;
 
         return .ok;
+    }
+
+    pub fn create_transfer(self: *State, t: Transfer) TransferResult {
+        assert(t.timestamp > self.timestamp);
+
+        if (t.custom_1 != 0) return .reserved_field_custom;
+        if (t.custom_2 != 0) return .reserved_field_custom;
+        if (t.custom_2 != 0) return .reserved_field_custom;
+
+        if (t.flags.reserved != 0) return .reserved_flag;
+        if (t.flags.accept and !t.flags.auto_commit) return .reserved_flag_accept;
+        if (t.flags.reject) return .reserved_flag_reject;
+        if (t.flags.auto_commit) {
+            if (!t.flags.accept) return .auto_commit_must_accept;
+            if (t.timeout != 0) return .auto_commit_cannot_timeout;
+        }
+
+        if (t.debit_account_id == t.credit_account_id) return .accounts_are_the_same;
+
+        if (t.amount == 0) return .amount_is_zero;
+
+        var d = self.get_account(t.debit_account_id) orelse return .debit_account_does_not_exist;
+        var c = self.get_account(t.credit_account_id) orelse return .credit_account_does_not_exist;
+        log.debug("debit_account: {}", .{ d });
+        log.debug("credit_account: {}", .{ c });
+        
+        if (d.unit != c.unit) return .accounts_have_different_units;
+
+        if (d.exceeds_debit_reserved_limit(t.amount)) return .exceeds_debit_reserved_limit;
+        if (d.exceeds_debit_accepted_limit(t.amount)) return .exceeds_debit_accepted_limit;
+        if (c.exceeds_credit_reserved_limit(t.amount)) return .exceeds_credit_reserved_limit;
+        if (c.exceeds_credit_accepted_limit(t.amount)) return .exceeds_credit_accepted_limit;
+        
+        // Insert:
+        var hash_map_result = self.transfers.getOrPutAssumeCapacity(t.id);
+        if (hash_map_result.found_existing) return .already_exists;
+        hash_map_result.entry.value = t;
+        if (t.flags.auto_commit) {
+            d.debit_accepted += t.amount;
+            c.credit_accepted += t.amount;
+        } else {
+            d.debit_reserved += t.amount;
+            c.credit_reserved += t.amount;
+        }
+        self.timestamp = t.timestamp;
+
+        if (self.transfers.get(t.id)) |transfer| {
+            std.debug.print("transfer={}\n", .{ transfer });
+        }
+
+        return .ok;
+    }
+
+    /// This is our core private method for changing balances.
+    /// Returns a live pointer to an Account entry in the accounts hash map.
+    /// This is intended to lookup an Account and modify balances directly by reference.
+    /// This pointer is invalidated if the hash map is resized by another insert, e.g. if we get a
+    /// pointer, insert another account without capacity, and then modify this pointer... BOOM!
+    /// This is a sharp tool but replaces a lookup, copy and update with a single lookup.
+    fn get_account(self: *State, id: u128) ?*Account {
+        if (self.accounts.getEntry(id)) |entry| {
+            return &entry.value;
+        } else {
+            return null;
+        }
     }
 };
