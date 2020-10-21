@@ -68,6 +68,7 @@ fn recv(ring: *IO_Uring, connection: *Connection) !void {
     connection.references += 1;
     const offset = connection.recv_size;
     log.debug("connection {}: recv[{}..]", .{ connection.id, offset });
+    assert(offset < connection.recv.len);
     _ = try ring.recv(user_data, connection.fd, connection.recv[offset..], os.MSG_NOSIGNAL);
 }
 
@@ -103,64 +104,70 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     assert(connection.send_size == 0);
     assert(prev_recv_size < connection.recv_size);
 
-    // Header is incomplete, read more...
-    if (connection.recv_size < @sizeOf(NetworkHeader)) {
+    // The request header is incomplete, read more...
+    if (connection.recv_size < @sizeOf(Header)) {
         // The receive buffer must be able to accommodate a header:
         // Otherwise we might enter an infinite recv loop.
-        assert(connection.recv.len >= @sizeOf(NetworkHeader));
+        assert(connection.recv.len >= @sizeOf(Header));
         return try recv(ring, connection);
     }
 
-    // Slice the receive buffer, then dereference the slice pointer to an array before casting:
-    var header = @bitCast(NetworkHeader, connection.recv[0..@sizeOf(NetworkHeader)].*);
+    // Deserialize the request header with a single cast:
+    const request = mem.bytesAsValue(Header, connection.recv[0..@sizeOf(Header)]);
 
-    // This is the first time we have the complete header, verify magic and header:
-    if (prev_recv_size < @sizeOf(NetworkHeader)) {
-        log.debug(
-            "connection {}: parse: meta={x} data={x} id={} magic={x} command={} data_size={}",
-            .{
-                connection.id,
-                header.checksum_meta,
-                header.checksum_data,
-                header.id,
-                header.magic,
-                header.command,
-                header.data_size
-            }
-        );
-        if (header.magic != NetworkMagic) return try close(ring, connection, "corrupt magic");
-        if (!header.valid_checksum_meta()) return try close(ring, connection, "corrupt header");
-        if (!header.valid_data_size()) return try close(ring, connection, "wrong data size");
+    // This is the first time we have received the complete request header, verify magic and header:
+    if (prev_recv_size < @sizeOf(Header)) {
+        log.debug("connection {}: parse: request: {}", .{ connection.id, request });
+        if (request.magic != Magic) return try close(ring, connection, "corrupt magic");
+        if (!request.valid_checksum_meta()) return try close(ring, connection, "corrupt header");
+        // We can only trust `size` here after `checksum_meta` has been verified above:
+        // We must be sure that `size` is not corrupt, since this influences our calls to recv().
+        if (!request.valid_size()) return try close(ring, connection, "invalid size");
     }
 
-    // We can only trust `data_size` here after `checksum_meta` has been verified above:
-    // We must be sure that `data_size` is not corrupt, since this influences our calls to recv().
-    const request_size: usize = @sizeOf(NetworkHeader) + header.data_size;
-
-    // The peer is attempting to overflow the receive buffer (and `data_size` is not corrupt):
-    if (request_size > connection.recv.len) return try close(ring, connection, "excess request");
+    // The peer is attempting to overflow the receive buffer (and `size` is not corrupt):
+    if (request.size > connection.recv.len) return try close(ring, connection, "excess request");
 
     // Data is incomplete, read more (we know this can fit in the receive buffer)...
-    if (connection.recv_size < request_size) return try recv(ring, connection);
+    if (connection.recv_size < request.size) return try recv(ring, connection);
 
-    // We have the complete header and corresponding data, verify data:
-    const data = connection.recv[@sizeOf(NetworkHeader)..request_size];
-    if (!header.valid_checksum_data(data)) return try close(ring, connection, "corrupt data");
+    // We have the complete request header and corresponding data, verify data:
+    const request_data = connection.recv[@sizeOf(Header)..request.size];
+    if (!request.valid_checksum_data(request_data)) {
+        return try close(ring, connection, "corrupt data");
+    }
     
     // TODO Journal to disk
-    
-    state.apply(header.command, data);
+
+    // Apply as input to state machine, writing any response data directly to the send buffer:
+    const response_data_size = state.apply(
+        request.command,
+        request_data,
+        connection.send[@sizeOf(Header)..]
+    );
+
+    // Write the response header to the send buffer:
+    var response = mem.bytesAsValue(Header, connection.send[0..@sizeOf(Header)]);
+    response.* = .{
+        .id = request.id,
+        .command = .ack,
+        .size = @sizeOf(Header) + @intCast(u32, response_data_size)
+    };
+    assert(response.valid_size());
+    response.set_checksum_data(connection.send[@sizeOf(Header)..response.size]);
+    response.set_checksum_meta();
+    log.debug("connection {}: parse: response: {}", .{ connection.id, response });
 
     // Move any pipelined requests to the front of the receive buffer:
     // This allows the client to have requests inflight up to the size of the receive buffer, and to
     // submit another request as each request is acked, without waiting for all inflight requests
     // to be acked. This costs a memcpy but a copy is simpler than the alternative of a ring buffer.
-    const pipe_size = connection.recv_size - request_size;
+    const pipe_size = connection.recv_size - request.size;
     if (pipe_size > 0) {
         // The source and target slices may overlap and care must therefore be taken to use a
         // forward loop and not a reverse loop so that the source slice is not overwritten when
         // copied to the target slice.
-        const source = connection.recv[request_size..connection.recv_size];
+        const source = connection.recv[request.size..connection.recv_size];
         var target = connection.recv[0..pipe_size];
         assert(@ptrToInt(target.ptr) <= @ptrToInt(source.ptr));
         assert(target.len == source.len);
@@ -171,9 +178,9 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     connection.recv_size = pipe_size;
     log.debug("connection {}: parse: pipe_size={}", .{ connection.id, pipe_size });
     
-    // Ack (with zeroes only at present):
+    // Ack:
     connection.send_offset = 0;
-    connection.send_size = 64;
+    connection.send_size = response.size;
     try send(ring, connection);
 }
 
@@ -186,6 +193,7 @@ fn send(ring: *IO_Uring, connection: *Connection) !void {
     const offset = connection.send_offset;
     const size = connection.send_size;
     log.debug("connection {}: send[{}..{}]", .{ connection.id, offset, size });
+    assert(size > 0);
     _ = try ring.send(user_data, connection.fd, connection.send[offset..size], os.MSG_NOSIGNAL);
 }
 
