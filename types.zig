@@ -5,12 +5,6 @@ const crypto = std.crypto;
 const mem = std.mem;
 const testing = std.testing;
 
-comptime {
-    if (builtin.os.tag != .linux) @compileError("linux required for io_uring");
-    // We require little-endian architectures everywhere for efficient network deserialization:
-    if (builtin.endian != builtin.Endian.Little) @compileError("big-endian systems not supported");
-}
-
 pub const Command = packed enum(u32) {
     reserved,
     ack,
@@ -22,7 +16,7 @@ pub const Command = packed enum(u32) {
 pub const Account = packed struct {
                        id: u128,
                    custom: u128,
-                    flags: u64,
+                    flags: AccountFlags,
                      unit: u64,
            debit_reserved: u64,
            debit_accepted: u64,
@@ -34,15 +28,39 @@ pub const Account = packed struct {
     credit_accepted_limit: u64,
                   padding: u64,
                 timestamp: u64,
+
+    pub inline fn exceeds(balance: u64, amount: u64, limit: u64) bool {
+        return limit > 0 and balance + amount > limit;
+    }
+
+    pub inline fn exceeds_debit_reserved_limit(self: *Account, amount: u64) bool {
+        return Account.exceeds(self.debit_reserved, amount, self.debit_reserved_limit);
+    }
+
+    pub inline fn exceeds_debit_accepted_limit(self: *Account, amount: u64) bool {
+        return Account.exceeds(self.debit_accepted, amount, self.debit_accepted_limit);
+    }
+
+    pub inline fn exceeds_credit_reserved_limit(self: *Account, amount: u64) bool {
+        return Account.exceeds(self.credit_reserved, amount, self.credit_reserved_limit);
+    }
+
+    pub inline fn exceeds_credit_accepted_limit(self: *Account, amount: u64) bool {
+        return Account.exceeds(self.credit_accepted, amount, self.credit_accepted_limit);
+    }
+};
+
+pub const AccountFlags = packed struct {
+    reserved: u64 = 0,
 };
 
 pub const AccountResult = packed enum(u32) {
     ok,
     already_exists,
     reserved_field_custom,
-    reserved_field_flags,
     reserved_field_padding,
     reserved_field_timestamp,
+    reserved_flag,
     debit_reserved_exceeds_debit_reserved_limit,
     debit_accepted_exceeds_debit_accepted_limit,
     credit_reserved_exceeds_credit_reserved_limit,
@@ -51,23 +69,55 @@ pub const AccountResult = packed enum(u32) {
     credit_reserved_limit_exceeds_credit_accepted_limit,
 };
 
+pub const AccountResults = packed struct {
+     index: u32,
+    result: AccountResult,
+};
+
 pub const Transfer = packed struct {
                    id: u128,
-    source_account_id: u128,
-    target_account_id: u128,
+     debit_account_id: u128,
+    credit_account_id: u128,
              custom_1: u128,
              custom_2: u128,
              custom_3: u128,
-                flags: u64,
+                flags: TransferFlags,
                amount: u64,
               timeout: u64,
             timestamp: u64,
 };
 
-pub const TransferFlag = enum(u64) {
-    accept,
-    reject,
-    auto_commit,
+pub const TransferFlags = packed struct {
+         accept: bool = false,
+         reject: bool = false,
+    auto_commit: bool = false,
+       reserved: u61 = 0,
+};
+
+pub const TransferResult = packed enum(u32) {
+    ok,
+    already_exists,
+    reserved_field_custom,
+    reserved_field_timestamp,
+    reserved_flag,
+    reserved_flag_accept,
+    reserved_flag_reject,
+    debit_account_does_not_exist,
+    credit_account_does_not_exist,
+    accounts_are_the_same,
+    accounts_have_different_units,
+    amount_is_zero,
+    exceeds_debit_reserved_limit,
+    exceeds_debit_accepted_limit,
+    exceeds_credit_reserved_limit,
+    exceeds_credit_accepted_limit,
+    auto_commit_must_accept,
+    auto_commit_cannot_timeout,
+};
+
+pub const TransferResults = packed struct {
+     index: u32,
+    result: TransferResult,
 };
 
 pub const Commit = packed struct {
@@ -75,18 +125,14 @@ pub const Commit = packed struct {
      custom_1: u128,
      custom_2: u128,
      custom_3: u128,
-        flags:  u64,
-    timestamp:  u64,
+        flags: CommitFlags,
+    timestamp: u64,
 };
 
-pub const CommitFlag = enum(u64) {
-    accept,
-    reject,
-};
-
-pub const AccountResults = packed struct {
-     index: u32,
-    result: AccountResult,
+pub const CommitFlags = packed struct {
+      accept: bool = false,
+      reject: bool = false,
+    reserved: u62 = 0,
 };
 
 pub const Magic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."
@@ -138,7 +184,7 @@ pub const Header = packed struct {
         const data_size = self.size - @sizeOf(Header);
         const type_size: usize = switch (self.command) {
             .reserved => unreachable,
-            .ack => @sizeOf(AccountResult),
+            .ack => std.math.min(@sizeOf(AccountResult), @sizeOf(TransferResult)),
             .create_accounts => @sizeOf(Account),
             .create_transfers => @sizeOf(Transfer),
             .commit_transfers => @sizeOf(Commit)
@@ -156,6 +202,18 @@ pub const Header = packed struct {
         );
     }
 };
+
+comptime {
+    if (builtin.os.tag != .linux) @compileError("linux required for io_uring");
+    
+    // We require little-endian architectures everywhere for efficient network deserialization:
+    if (builtin.endian != builtin.Endian.Little) @compileError("big-endian systems not supported");
+
+    if (@sizeOf(Account) != 128) unreachable;
+    if (@sizeOf(TransferFlags) != 8) unreachable;
+    if (@sizeOf(Transfer) != 128) unreachable;
+    if (@sizeOf(Header) != 64) unreachable;
+}
 
 test "Magic" {
     testing.expectEqualSlices(
