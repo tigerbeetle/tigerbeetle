@@ -134,7 +134,7 @@ pub const State = struct {
         }
 
         if (t.amount == 0) return .amount_is_zero;
-        
+
         if (t.debit_account_id == t.credit_account_id) return .accounts_are_the_same;
 
         var d = self.get_account(t.debit_account_id) orelse return .debit_account_does_not_exist;
@@ -142,9 +142,11 @@ pub const State = struct {
         
         if (d.unit != c.unit) return .accounts_have_different_units;
 
-        if (d.exceeds_debit_reserved_limit(t.amount)) return .exceeds_debit_reserved_limit;
+        if (!t.flags.auto_commit) {
+            if (d.exceeds_debit_reserved_limit(t.amount)) return .exceeds_debit_reserved_limit;
+            if (c.exceeds_credit_reserved_limit(t.amount)) return .exceeds_credit_reserved_limit;
+        }
         if (d.exceeds_debit_accepted_limit(t.amount)) return .exceeds_debit_accepted_limit;
-        if (c.exceeds_credit_reserved_limit(t.amount)) return .exceeds_credit_reserved_limit;
         if (c.exceeds_credit_accepted_limit(t.amount)) return .exceeds_credit_accepted_limit;
         
         // Insert:
