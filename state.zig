@@ -43,7 +43,7 @@ pub const State = struct {
             .ack => unreachable,
             .create_accounts => self.apply_create_accounts(input, output),
             .create_transfers => self.apply_create_transfers(input, output),
-            .commit_transfers => unreachable, // TODO
+            .commit_transfers => self.apply_commit_transfers(input, output),
         };
     }
 
@@ -77,6 +77,22 @@ pub const State = struct {
             }
         }
         return results_count * @sizeOf(CreateTransferResults);
+    }
+
+    pub fn apply_commit_transfers(self: *State, input: []const u8, output: []u8) usize {
+        const batch = mem.bytesAsSlice(Commit, input);
+        var results = mem.bytesAsSlice(CommitTransferResults, output);
+        var results_count: usize = 0;
+        for (batch) |commit, index| {
+            log.debug("commit_transfers {}/{}: {}", .{ index + 1, batch.len, commit });
+            const result = self.commit_transfer(commit);
+            log.debug("{}", .{ result });
+            if (result != .ok) {
+                results[results_count] = .{ .index = @intCast(u32, index), .result = result };
+                results_count += 1;
+            }
+        }
+        return results_count * @sizeOf(CommitTransferResults);
     }
 
     pub fn create_account(self: *State, a: Account) CreateAccountResult {
@@ -201,6 +217,52 @@ pub const State = struct {
         }
     }
 
+    pub fn commit_transfer(self: *State, c: Commit) CommitTransferResult {
+        assert(c.timestamp > self.timestamp);
+
+        if (c.custom_1 != 0) return .reserved_field_custom;
+        if (c.custom_2 != 0) return .reserved_field_custom;
+        if (c.custom_3 != 0) return .reserved_field_custom;
+
+        if (c.flags.reserved != 0) return .reserved_flag;
+        if (!c.flags.accept and !c.flags.reject) return .commit_must_accept_or_reject;
+        if (c.flags.accept and c.flags.reject) return .commit_cannot_accept_and_reject;
+
+        var t = self.get_transfer(c.id) orelse return .transfer_not_found;
+
+        if (t.flags.accept or t.flags.reject) {
+            if (t.flags.auto_commit) return .already_auto_committed;
+            if (t.flags.accept and c.flags.reject) return .already_committed_but_accepted;
+            if (t.flags.reject and c.flags.accept) return .already_committed_but_rejected;
+            return .already_committed;
+        }
+
+        if (t.timeout > 0 and t.timestamp + t.timeout <= self.timestamp) return .transfer_expired;
+        
+        var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
+        var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
+
+        assert(!t.flags.auto_commit);
+        if (dr.debit_reserved < t.amount) return .debit_amount_was_not_reserved;
+        if (cr.credit_reserved < t.amount) return .credit_amount_was_not_reserved;
+
+        if (dr.exceeds_debit_accepted_limit(t.amount)) return .exceeds_debit_accepted_limit;
+        if (dr.exceeds_credit_accepted_limit(t.amount)) return .exceeds_credit_accepted_limit;
+
+        dr.debit_reserved -= t.amount;
+        cr.credit_reserved -= t.amount;
+        if (c.flags.accept) {
+            t.flags.accept = true;
+            dr.debit_accepted += t.amount;
+            cr.credit_accepted += t.amount;
+        } else {
+            assert(c.flags.reject);
+            t.flags.reject = true;
+        }
+        assert(t.flags.accept or t.flags.reject);
+        return .ok;
+    }
+
     /// This is our core private method for changing balances.
     /// Returns a live pointer to an Account entry in the accounts hash map.
     /// This is intended to lookup an Account and modify balances directly by reference.
@@ -209,6 +271,15 @@ pub const State = struct {
     /// This is a sharp tool but replaces a lookup, copy and update with a single lookup.
     fn get_account(self: *State, id: u128) ?*Account {
         if (self.accounts.getEntry(id)) |entry| {
+            return &entry.value;
+        } else {
+            return null;
+        }
+    }
+
+    /// See the above comment for get_account().
+    fn get_transfer(self: *State, id: u128) ?*Transfer {
+        if (self.transfers.getEntry(id)) |entry| {
             return &entry.value;
         } else {
             return null;
