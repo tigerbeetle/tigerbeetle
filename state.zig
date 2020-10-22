@@ -103,7 +103,23 @@ pub const State = struct {
 
         // Insert:
         var hash_map_result = self.accounts.getOrPutAssumeCapacity(a.id);
-        if (hash_map_result.found_existing) return .already_exists;
+        if (hash_map_result.found_existing) {
+            const exists = hash_map_result.entry.value;
+            if (exists.unit != a.unit) return .exists_with_different_unit;
+            if (
+                exists.debit_reserved_limit != a.debit_reserved_limit or
+                exists.debit_accepted_limit != a.debit_accepted_limit or
+                exists.credit_reserved_limit != a.credit_reserved_limit or
+                exists.credit_accepted_limit != a.credit_accepted_limit
+            ) {
+                return .exists_with_different_limits;
+            }
+            if (exists.custom != a.custom) return .exists_with_different_custom;
+            if (@bitCast(u64, exists.flags) != @bitCast(u64, a.flags)) {
+                return .exists_with_different_flags;
+            }
+            return .exists;
+        }
         hash_map_result.entry.value = a;
         self.timestamp = a.timestamp;
 

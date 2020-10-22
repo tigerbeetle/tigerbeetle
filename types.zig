@@ -91,7 +91,11 @@ pub const CommitFlags = packed struct {
 
 pub const CreateAccountResult = packed enum(u32) {
     ok,
-    already_exists,
+    exists,
+    exists_with_different_unit,
+    exists_with_different_limits,
+    exists_with_different_custom,
+    exists_with_different_flags,
     reserved_field_custom,
     reserved_field_padding,
     reserved_field_timestamp,
