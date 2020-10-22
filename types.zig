@@ -94,7 +94,7 @@ pub const CreateAccountResult = packed enum(u32) {
     exists,
     exists_with_different_unit,
     exists_with_different_limits,
-    exists_with_different_custom,
+    exists_with_different_custom_field,
     exists_with_different_flags,
     reserved_field_custom,
     reserved_field_padding,
@@ -110,7 +110,13 @@ pub const CreateAccountResult = packed enum(u32) {
 
 pub const CreateTransferResult = packed enum(u32) {
     ok,
-    already_exists,
+    exists,
+    exists_with_different_debit_account_id,
+    exists_with_different_credit_account_id,
+    exists_with_different_custom_fields,
+    exists_with_different_amount,
+    exists_with_different_timeout,
+    exists_with_different_flags,
     reserved_field_custom,
     reserved_field_timestamp,
     reserved_flag,
