@@ -101,7 +101,6 @@ pub const State = struct {
             return .credit_reserved_limit_exceeds_credit_accepted_limit;
         }
 
-        // Insert:
         var hash_map_result = self.accounts.getOrPutAssumeCapacity(a.id);
         if (hash_map_result.found_existing) {
             const exists = hash_map_result.entry.value;
@@ -119,11 +118,11 @@ pub const State = struct {
                 return .exists_with_different_flags;
             }
             return .exists;
+        } else {
+            hash_map_result.entry.value = a;
+            self.timestamp = a.timestamp;
+            return .ok;
         }
-        hash_map_result.entry.value = a;
-        self.timestamp = a.timestamp;
-
-        return .ok;
     }
 
     pub fn create_transfer(self: *State, t: Transfer) CreateTransferResult {
@@ -157,7 +156,6 @@ pub const State = struct {
         if (d.exceeds_debit_accepted_limit(t.amount)) return .exceeds_debit_accepted_limit;
         if (c.exceeds_credit_accepted_limit(t.amount)) return .exceeds_credit_accepted_limit;
         
-        // Insert:
         var hash_map_result = self.transfers.getOrPutAssumeCapacity(t.id);
         if (hash_map_result.found_existing) {
             const exists = hash_map_result.entry.value;
@@ -180,18 +178,18 @@ pub const State = struct {
                 return .exists_with_different_flags;
             }
             return .exists;
-        }
-        hash_map_result.entry.value = t;
-        if (t.flags.auto_commit) {
-            d.debit_accepted += t.amount;
-            c.credit_accepted += t.amount;
         } else {
-            d.debit_reserved += t.amount;
-            c.credit_reserved += t.amount;
+            hash_map_result.entry.value = t;
+            if (t.flags.auto_commit) {
+                d.debit_accepted += t.amount;
+                c.credit_accepted += t.amount;
+            } else {
+                d.debit_reserved += t.amount;
+                c.credit_reserved += t.amount;
+            }
+            self.timestamp = t.timestamp;
+            return .ok;
         }
-        self.timestamp = t.timestamp;
-
-        return .ok;
     }
 
     /// This is our core private method for changing balances.
