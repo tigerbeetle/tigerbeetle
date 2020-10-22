@@ -54,26 +54,6 @@ pub const AccountFlags = packed struct {
     reserved: u64 = 0,
 };
 
-pub const AccountResult = packed enum(u32) {
-    ok,
-    already_exists,
-    reserved_field_custom,
-    reserved_field_padding,
-    reserved_field_timestamp,
-    reserved_flag,
-    exceeds_debit_reserved_limit,
-    exceeds_debit_accepted_limit,
-    exceeds_credit_reserved_limit,
-    exceeds_credit_accepted_limit,
-    debit_reserved_limit_exceeds_debit_accepted_limit,
-    credit_reserved_limit_exceeds_credit_accepted_limit,
-};
-
-pub const AccountResults = packed struct {
-     index: u32,
-    result: AccountResult,
-};
-
 pub const Transfer = packed struct {
                    id: u128,
      debit_account_id: u128,
@@ -94,7 +74,37 @@ pub const TransferFlags = packed struct {
        reserved: u61 = 0,
 };
 
-pub const TransferResult = packed enum(u32) {
+pub const Commit = packed struct {
+           id: u128,
+     custom_1: u128,
+     custom_2: u128,
+     custom_3: u128,
+        flags: CommitFlags,
+    timestamp: u64,
+};
+
+pub const CommitFlags = packed struct {
+      accept: bool = false,
+      reject: bool = false,
+    reserved: u62 = 0,
+};
+
+pub const CreateAccountResult = packed enum(u32) {
+    ok,
+    already_exists,
+    reserved_field_custom,
+    reserved_field_padding,
+    reserved_field_timestamp,
+    reserved_flag,
+    exceeds_debit_reserved_limit,
+    exceeds_debit_accepted_limit,
+    exceeds_credit_reserved_limit,
+    exceeds_credit_accepted_limit,
+    debit_reserved_limit_exceeds_debit_accepted_limit,
+    credit_reserved_limit_exceeds_credit_accepted_limit,
+};
+
+pub const CreateTransferResult = packed enum(u32) {
     ok,
     already_exists,
     reserved_field_custom,
@@ -115,24 +125,14 @@ pub const TransferResult = packed enum(u32) {
     auto_commit_cannot_timeout,
 };
 
-pub const TransferResults = packed struct {
+pub const CreateAccountResults = packed struct {
      index: u32,
-    result: TransferResult,
+    result: CreateAccountResult,
 };
 
-pub const Commit = packed struct {
-           id: u128,
-     custom_1: u128,
-     custom_2: u128,
-     custom_3: u128,
-        flags: CommitFlags,
-    timestamp: u64,
-};
-
-pub const CommitFlags = packed struct {
-      accept: bool = false,
-      reject: bool = false,
-    reserved: u62 = 0,
+pub const CreateTransferResults = packed struct {
+     index: u32,
+    result: CreateTransferResult,
 };
 
 pub const Magic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."
@@ -184,7 +184,7 @@ pub const Header = packed struct {
         const data_size = self.size - @sizeOf(Header);
         const type_size: usize = switch (self.command) {
             .reserved => unreachable,
-            .ack => std.math.min(@sizeOf(AccountResult), @sizeOf(TransferResult)),
+            .ack => std.math.min(@sizeOf(CreateAccountResult), @sizeOf(CreateTransferResult)),
             .create_accounts => @sizeOf(Account),
             .create_transfers => @sizeOf(Transfer),
             .commit_transfers => @sizeOf(Commit)

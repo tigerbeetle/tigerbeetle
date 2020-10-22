@@ -92,7 +92,7 @@ pub fn main() !void {
         },
     };
 
-    try send(fd, .create_accounts, mem.asBytes(accounts[0..]), AccountResults);
+    try send(fd, .create_accounts, mem.asBytes(accounts[0..]), CreateAccountResults);
     
     var transfers = [_]Transfer {
         Transfer {
@@ -109,5 +109,5 @@ pub fn main() !void {
         }
     };
 
-    try send(fd, .create_transfers, mem.asBytes(transfers[0..]), TransferResults);
+    try send(fd, .create_transfers, mem.asBytes(transfers[0..]), CreateTransferResults);
 }

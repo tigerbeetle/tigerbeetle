@@ -49,7 +49,7 @@ pub const State = struct {
 
     pub fn apply_create_accounts(self: *State, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(Account, input);
-        var results = mem.bytesAsSlice(AccountResults, output);
+        var results = mem.bytesAsSlice(CreateAccountResults, output);
         var results_count: usize = 0;
         for (batch) |account, index| {
             log.debug("create_accounts {}/{}: {}", .{ index + 1, batch.len, account });
@@ -60,12 +60,12 @@ pub const State = struct {
                 results_count += 1;
             }
         }
-        return results_count * @sizeOf(AccountResults);
+        return results_count * @sizeOf(CreateAccountResults);
     }
 
     pub fn apply_create_transfers(self: *State, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(Transfer, input);
-        var results = mem.bytesAsSlice(TransferResults, output);
+        var results = mem.bytesAsSlice(CreateTransferResults, output);
         var results_count: usize = 0;
         for (batch) |transfer, index| {
             log.debug("create_transfers {}/{}: {}", .{ index + 1, batch.len, transfer });
@@ -76,10 +76,10 @@ pub const State = struct {
                 results_count += 1;
             }
         }
-        return results_count * @sizeOf(TransferResults);
+        return results_count * @sizeOf(CreateTransferResults);
     }
 
-    pub fn create_account(self: *State, a: Account) AccountResult {
+    pub fn create_account(self: *State, a: Account) CreateAccountResult {
         assert(a.timestamp > self.timestamp);
 
         if (a.custom != 0) return .reserved_field_custom;
@@ -110,7 +110,7 @@ pub const State = struct {
         return .ok;
     }
 
-    pub fn create_transfer(self: *State, t: Transfer) TransferResult {
+    pub fn create_transfer(self: *State, t: Transfer) CreateTransferResult {
         assert(t.timestamp > self.timestamp);
 
         if (t.custom_1 != 0) return .reserved_field_custom;
