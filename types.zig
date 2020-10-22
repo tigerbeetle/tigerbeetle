@@ -208,21 +208,9 @@ comptime {
     
     // We require little-endian architectures everywhere for efficient network deserialization:
     if (builtin.endian != builtin.Endian.Little) @compileError("big-endian systems not supported");
-
-    if (@sizeOf(Command) != 4) unreachable;
-    if (@sizeOf(AccountFlags) != 8) unreachable;
-    if (@sizeOf(Account) != 128) unreachable;
-    if (@sizeOf(TransferFlags) != 8) unreachable;
-    if (@sizeOf(Transfer) != 128) unreachable;
-    if (@sizeOf(CommitFlags) != 8) unreachable;
-    if (@sizeOf(Commit) != 80) unreachable;
-    if (@sizeOf(CreateAccountResults) != 8) unreachable;
-    if (@sizeOf(CreateTransferResults) != 8) unreachable;
-    if (@sizeOf(@TypeOf(Magic)) != 8) unreachable;
-    if (@sizeOf(Header) != 64) unreachable;
 }
 
-test "Magic" {
+test "magic" {
     testing.expectEqualSlices(
         u8,
         ([_]u8{ 0x0a, 0x5c, 0xa1, 0xab, 0x1e, 0xbe, 0xe1, 0x1e })[0..],
@@ -230,6 +218,16 @@ test "Magic" {
     );
 }
 
-test "Header" {
+test "data structure sizes" {
+    testing.expectEqual(@as(usize, 4), @sizeOf(Command));
+    testing.expectEqual(@as(usize, 8), @sizeOf(AccountFlags));
+    testing.expectEqual(@as(usize, 128), @sizeOf(Account));
+    testing.expectEqual(@as(usize, 8), @sizeOf(TransferFlags));
+    testing.expectEqual(@as(usize, 128), @sizeOf(Transfer));
+    testing.expectEqual(@as(usize, 8), @sizeOf(CommitFlags));
+    testing.expectEqual(@as(usize, 80), @sizeOf(Commit));
+    testing.expectEqual(@as(usize, 8), @sizeOf(CreateAccountResults));
+    testing.expectEqual(@as(usize, 8), @sizeOf(CreateTransferResults));
+    testing.expectEqual(@as(usize, 9), @sizeOf(@TypeOf(Magic)));
     testing.expectEqual(@as(usize, 64), @sizeOf(Header));
 }
