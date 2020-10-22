@@ -209,9 +209,16 @@ comptime {
     // We require little-endian architectures everywhere for efficient network deserialization:
     if (builtin.endian != builtin.Endian.Little) @compileError("big-endian systems not supported");
 
+    if (@sizeOf(Command) != 4) unreachable;
+    if (@sizeOf(AccountFlags) != 8) unreachable;
     if (@sizeOf(Account) != 128) unreachable;
     if (@sizeOf(TransferFlags) != 8) unreachable;
     if (@sizeOf(Transfer) != 128) unreachable;
+    if (@sizeOf(CommitFlags) != 8) unreachable;
+    if (@sizeOf(Commit) != 80) unreachable;
+    if (@sizeOf(CreateAccountResults) != 8) unreachable;
+    if (@sizeOf(CreateTransferResults) != 8) unreachable;
+    if (@sizeOf(@TypeOf(Magic)) != 8) unreachable;
     if (@sizeOf(Header) != 64) unreachable;
 }
 
