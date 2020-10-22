@@ -33,19 +33,19 @@ pub const Account = packed struct {
         return limit > 0 and balance + amount > limit;
     }
 
-    pub inline fn exceeds_debit_reserved_limit(self: *Account, amount: u64) bool {
+    pub inline fn exceeds_debit_reserved_limit(self: *const Account, amount: u64) bool {
         return Account.exceeds(self.debit_reserved, amount, self.debit_reserved_limit);
     }
 
-    pub inline fn exceeds_debit_accepted_limit(self: *Account, amount: u64) bool {
+    pub inline fn exceeds_debit_accepted_limit(self: *const Account, amount: u64) bool {
         return Account.exceeds(self.debit_accepted, amount, self.debit_accepted_limit);
     }
 
-    pub inline fn exceeds_credit_reserved_limit(self: *Account, amount: u64) bool {
+    pub inline fn exceeds_credit_reserved_limit(self: *const Account, amount: u64) bool {
         return Account.exceeds(self.credit_reserved, amount, self.credit_reserved_limit);
     }
 
-    pub inline fn exceeds_credit_accepted_limit(self: *Account, amount: u64) bool {
+    pub inline fn exceeds_credit_accepted_limit(self: *const Account, amount: u64) bool {
         return Account.exceeds(self.credit_accepted, amount, self.credit_accepted_limit);
     }
 };
@@ -61,10 +61,10 @@ pub const AccountResult = packed enum(u32) {
     reserved_field_padding,
     reserved_field_timestamp,
     reserved_flag,
-    debit_reserved_exceeds_debit_reserved_limit,
-    debit_accepted_exceeds_debit_accepted_limit,
-    credit_reserved_exceeds_credit_reserved_limit,
-    credit_accepted_exceeds_credit_accepted_limit,
+    exceeds_debit_reserved_limit,
+    exceeds_debit_accepted_limit,
+    exceeds_credit_reserved_limit,
+    exceeds_credit_accepted_limit,
     debit_reserved_limit_exceeds_debit_accepted_limit,
     credit_reserved_limit_exceeds_credit_accepted_limit,
 };

@@ -87,19 +87,11 @@ pub const State = struct {
 
         if (a.flags.reserved != 0) return .reserved_flag;
 
-        // Amounts may never exceed limits:
-        if (a.debit_reserved_limit > 0 and a.debit_reserved > a.debit_reserved_limit) {
-            return .debit_reserved_exceeds_debit_reserved_limit;
-        }
-        if (a.debit_accepted_limit > 0 and a.debit_accepted > a.debit_accepted_limit) {
-            return .debit_accepted_exceeds_debit_accepted_limit;
-        }
-        if (a.credit_reserved_limit > 0 and a.credit_reserved > a.credit_reserved_limit) {
-            return .credit_reserved_exceeds_credit_reserved_limit;
-        }
-        if (a.credit_accepted_limit > 0 and a.credit_accepted > a.credit_accepted_limit) {
-            return .credit_accepted_exceeds_credit_accepted_limit;
-        }
+        // Opening balances may never exceed limits:
+        if (a.exceeds_debit_reserved_limit(0)) return .exceeds_debit_reserved_limit;
+        if (a.exceeds_debit_accepted_limit(0)) return .exceeds_debit_accepted_limit;
+        if (a.exceeds_credit_reserved_limit(0)) return .exceeds_credit_reserved_limit;
+        if (a.exceeds_credit_accepted_limit(0)) return .exceeds_credit_accepted_limit;
 
         // Accounts may never reserve more than they could possibly accept:
         if (a.debit_accepted_limit > 0 and a.debit_reserved_limit > a.debit_accepted_limit) {
