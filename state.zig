@@ -130,7 +130,7 @@ pub const State = struct {
 
         if (t.custom_1 != 0) return .reserved_field_custom;
         if (t.custom_2 != 0) return .reserved_field_custom;
-        if (t.custom_2 != 0) return .reserved_field_custom;
+        if (t.custom_3 != 0) return .reserved_field_custom;
 
         if (t.flags.reserved != 0) return .reserved_flag;
         if (t.flags.accept and !t.flags.auto_commit) return .reserved_flag_accept;
