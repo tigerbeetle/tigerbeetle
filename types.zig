@@ -137,6 +137,27 @@ pub const CreateTransferResult = packed enum(u32) {
     auto_commit_cannot_timeout,
 };
 
+pub const CommitTransferResult = packed enum(u32) {
+    ok,
+    reserved_field_custom,
+    reserved_field_timestamp,
+    reserved_flag,
+    commit_must_accept_or_reject,
+    commit_cannot_accept_and_reject,
+    transfer_not_found,
+    transfer_expired,
+    already_auto_committed,
+    already_committed,
+    already_committed_but_accepted,
+    already_committed_but_rejected,
+    debit_account_not_found,
+    credit_account_not_found,
+    debit_amount_was_not_reserved,
+    credit_amount_was_not_reserved,
+    exceeds_debit_accepted_limit,
+    exceeds_credit_accepted_limit,
+};
+
 pub const CreateAccountResults = packed struct {
      index: u32,
     result: CreateAccountResult,
@@ -145,6 +166,11 @@ pub const CreateAccountResults = packed struct {
 pub const CreateTransferResults = packed struct {
      index: u32,
     result: CreateTransferResult,
+};
+
+pub const CommitTransferResults = packed struct {
+     index: u32,
+    result: CommitTransferResult,
 };
 
 pub const Magic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."

@@ -102,7 +102,7 @@ pub fn main() !void {
             .custom_1 = 0,
             .custom_2 = 0,
             .custom_3 = 0,
-            .flags = .{ .accept = true, .auto_commit = true },
+            .flags = .{ .accept = false, .auto_commit = false },
             .amount = 100,
             .timeout = 0,
             .timestamp = timestamp + 2,
@@ -110,4 +110,17 @@ pub fn main() !void {
     };
 
     try send(fd, .create_transfers, mem.asBytes(transfers[0..]), CreateTransferResults);
+
+    var commits = [_]Commit {
+        Commit {
+            .id = 4,
+            .custom_1 = 0,
+            .custom_2 = 0,
+            .custom_3 = 0,
+            .flags = .{ .accept = true },
+            .timestamp = timestamp + 3,
+        }
+    };
+
+    try send(fd, .commit_transfers, mem.asBytes(commits[0..]), CommitTransferResults);
 }
