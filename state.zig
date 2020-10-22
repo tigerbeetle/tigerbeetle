@@ -237,7 +237,7 @@ pub const State = struct {
             return .already_committed;
         }
 
-        if (t.timeout > 0 and t.timestamp + t.timeout <= self.timestamp) return .transfer_expired;
+        if (t.timeout > 0 and t.timestamp + t.timeout <= c.timestamp) return .transfer_expired;
         
         var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
         var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
