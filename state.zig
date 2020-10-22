@@ -114,7 +114,7 @@ pub const State = struct {
             ) {
                 return .exists_with_different_limits;
             }
-            if (exists.custom != a.custom) return .exists_with_different_custom;
+            if (exists.custom != a.custom) return .exists_with_different_custom_field;
             if (@bitCast(u64, exists.flags) != @bitCast(u64, a.flags)) {
                 return .exists_with_different_flags;
             }
@@ -159,7 +159,28 @@ pub const State = struct {
         
         // Insert:
         var hash_map_result = self.transfers.getOrPutAssumeCapacity(t.id);
-        if (hash_map_result.found_existing) return .already_exists;
+        if (hash_map_result.found_existing) {
+            const exists = hash_map_result.entry.value;
+            if (exists.debit_account_id != t.debit_account_id) {
+                return .exists_with_different_debit_account_id;
+            }
+            if (exists.credit_account_id != t.credit_account_id) {
+                return .exists_with_different_credit_account_id;
+            }
+            if (
+                exists.custom_1 != t.custom_1 or
+                exists.custom_2 != t.custom_2 or
+                exists.custom_3 != t.custom_3
+            ) {
+                return .exists_with_different_custom_fields;
+            }
+            if (exists.amount != t.amount) return .exists_with_different_amount;
+            if (exists.timeout != t.timeout) return .exists_with_different_timeout;
+            if (@bitCast(u64, exists.flags) != @bitCast(u64, t.flags)) {
+                return .exists_with_different_flags;
+            }
+            return .exists;
+        }
         hash_map_result.entry.value = t;
         if (t.flags.auto_commit) {
             d.debit_accepted += t.amount;
