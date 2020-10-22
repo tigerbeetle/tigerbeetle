@@ -167,7 +167,9 @@ pub const State = struct {
         // We use them to distinguish between `cr` (credit account), and `c` (commit).
         var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
         var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
-        
+        assert(t.timestamp > dr.timestamp);
+        assert(t.timestamp > cr.timestamp);
+
         if (dr.unit != cr.unit) return .accounts_have_different_units;
 
         if (!t.flags.auto_commit) {
@@ -229,6 +231,7 @@ pub const State = struct {
         if (c.flags.accept and c.flags.reject) return .commit_cannot_accept_and_reject;
 
         var t = self.get_transfer(c.id) orelse return .transfer_not_found;
+        assert(c.timestamp > t.timestamp);
 
         if (t.flags.accept or t.flags.reject) {
             if (t.flags.auto_commit) return .already_auto_committed;
@@ -237,11 +240,12 @@ pub const State = struct {
             return .already_committed;
         }
 
-        assert(c.timestamp > t.timestamp);
         if (t.timeout > 0 and t.timestamp + t.timeout <= c.timestamp) return .transfer_expired;
         
         var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
         var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
+        assert(t.timestamp > dr.timestamp);
+        assert(t.timestamp > cr.timestamp);
 
         assert(!t.flags.auto_commit);
         if (dr.debit_reserved < t.amount) return .debit_amount_was_not_reserved;
