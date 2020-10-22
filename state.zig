@@ -237,6 +237,7 @@ pub const State = struct {
             return .already_committed;
         }
 
+        assert(c.timestamp > t.timestamp);
         if (t.timeout > 0 and t.timestamp + t.timeout <= c.timestamp) return .transfer_expired;
         
         var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
@@ -260,6 +261,7 @@ pub const State = struct {
             t.flags.reject = true;
         }
         assert(t.flags.accept or t.flags.reject);
+        self.timestamp = c.timestamp;
         return .ok;
     }
 
