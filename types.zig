@@ -228,6 +228,6 @@ test "data structure sizes" {
     testing.expectEqual(@as(usize, 80), @sizeOf(Commit));
     testing.expectEqual(@as(usize, 8), @sizeOf(CreateAccountResults));
     testing.expectEqual(@as(usize, 8), @sizeOf(CreateTransferResults));
-    testing.expectEqual(@as(usize, 9), @sizeOf(@TypeOf(Magic)));
+    testing.expectEqual(@as(usize, 8), @sizeOf(@TypeOf(Magic)));
     testing.expectEqual(@as(usize, 64), @sizeOf(Header));
 }
