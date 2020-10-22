@@ -144,17 +144,22 @@ pub const State = struct {
 
         if (t.debit_account_id == t.credit_account_id) return .accounts_are_the_same;
 
-        var d = self.get_account(t.debit_account_id) orelse return .debit_account_does_not_exist;
-        var c = self.get_account(t.credit_account_id) orelse return .credit_account_does_not_exist;
+        // The etymology of the DR and CR abbreviations for debit and credit is interesting, either:
+        // 1. derived from the Latin past participles of debitum and creditum, debere and credere,
+        // 2. standing for debit record and credit record, or
+        // 3. relating to debtor and creditor.
+        // We use them to distinguish between `cr` (credit account), and `c` (commit).
+        var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
+        var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
         
-        if (d.unit != c.unit) return .accounts_have_different_units;
+        if (dr.unit != cr.unit) return .accounts_have_different_units;
 
         if (!t.flags.auto_commit) {
-            if (d.exceeds_debit_reserved_limit(t.amount)) return .exceeds_debit_reserved_limit;
-            if (c.exceeds_credit_reserved_limit(t.amount)) return .exceeds_credit_reserved_limit;
+            if (dr.exceeds_debit_reserved_limit(t.amount)) return .exceeds_debit_reserved_limit;
+            if (cr.exceeds_credit_reserved_limit(t.amount)) return .exceeds_credit_reserved_limit;
         }
-        if (d.exceeds_debit_accepted_limit(t.amount)) return .exceeds_debit_accepted_limit;
-        if (c.exceeds_credit_accepted_limit(t.amount)) return .exceeds_credit_accepted_limit;
+        if (dr.exceeds_debit_accepted_limit(t.amount)) return .exceeds_debit_accepted_limit;
+        if (cr.exceeds_credit_accepted_limit(t.amount)) return .exceeds_credit_accepted_limit;
         
         var hash_map_result = self.transfers.getOrPutAssumeCapacity(t.id);
         if (hash_map_result.found_existing) {
@@ -181,11 +186,11 @@ pub const State = struct {
         } else {
             hash_map_result.entry.value = t;
             if (t.flags.auto_commit) {
-                d.debit_accepted += t.amount;
-                c.credit_accepted += t.amount;
+                dr.debit_accepted += t.amount;
+                cr.credit_accepted += t.amount;
             } else {
-                d.debit_reserved += t.amount;
-                c.credit_reserved += t.amount;
+                dr.debit_reserved += t.amount;
+                cr.credit_reserved += t.amount;
             }
             self.timestamp = t.timestamp;
             return .ok;
