@@ -180,6 +180,10 @@ pub const State = struct {
             if (exists.amount != t.amount) return .exists_with_different_amount;
             if (exists.timeout != t.timeout) return .exists_with_different_timeout;
             if (@bitCast(u64, exists.flags) != @bitCast(u64, t.flags)) {
+                if (!exists.flags.auto_commit and !t.flags.auto_commit) {
+                    if (exists.flags.accept) return .exists_and_already_committed_and_accepted;
+                    if (exists.flags.reject) return .exists_and_already_committed_and_rejected;
+                }
                 return .exists_with_different_flags;
             }
             return .exists;
