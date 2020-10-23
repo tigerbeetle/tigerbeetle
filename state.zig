@@ -12,7 +12,7 @@ const HashMapTransfers = std.AutoHashMap(u128, Transfer);
 pub const State = struct {
     allocator: *Allocator,
     timestamp: u64,
-    accounts: HashMapAccounts,
+     accounts: HashMapAccounts,
     transfers: HashMapTransfers,
 
     pub fn init(allocator: *Allocator, accounts_max: usize, transfers_max: usize) !State {

@@ -14,9 +14,11 @@ pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level)
 usingnamespace @import("connections.zig");
 usingnamespace @import("io_uring.zig");
 usingnamespace @import("types.zig");
+usingnamespace @import("journal.zig");
 usingnamespace @import("state.zig");
 
 var state: State = undefined;
+var journal: Journal = undefined;
 var connections: Connections = undefined;
 
 const Event = packed struct {
@@ -105,18 +107,21 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     assert(prev_recv_size < connection.recv_size);
 
     // The request header is incomplete, read more...
-    if (connection.recv_size < @sizeOf(Header)) {
+    if (connection.recv_size < @sizeOf(NetworkHeader)) {
         // The receive buffer must be able to accommodate a header:
         // Otherwise we might enter an infinite recv loop.
-        assert(connection.recv.len >= @sizeOf(Header));
+        assert(connection.recv.len >= @sizeOf(NetworkHeader));
         return try recv(ring, connection);
     }
 
-    // Deserialize the request header with a single cast:
-    const request = mem.bytesAsValue(Header, connection.recv[0..@sizeOf(Header)]);
+    // Deserialize the request header with a single cast and a copy to stack allocated memory:
+    // We use bytesToValue() and not bytesAsValue() because we want a copy of the network header to
+    // survive the header's memory being reused by Journal.append() for the journal header.
+    // We also have a double-check for this in Journal.append().
+    const request = mem.bytesToValue(NetworkHeader, connection.recv[0..@sizeOf(NetworkHeader)]);
 
     // This is the first time we have received the complete request header, verify magic and header:
-    if (prev_recv_size < @sizeOf(Header)) {
+    if (prev_recv_size < @sizeOf(NetworkHeader)) {
         log.debug("connection {}: parse: request: {}", .{ connection.id, request });
         if (request.magic != Magic) return try close(ring, connection, "corrupt magic");
         if (!request.valid_checksum_meta()) return try close(ring, connection, "corrupt header");
@@ -132,29 +137,29 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     if (connection.recv_size < request.size) return try recv(ring, connection);
 
     // We have the complete request header and corresponding data, verify data:
-    const request_data = connection.recv[@sizeOf(Header)..request.size];
+    const request_data = connection.recv[@sizeOf(NetworkHeader)..request.size];
     if (!request.valid_checksum_data(request_data)) {
         return try close(ring, connection, "corrupt data");
     }
     
-    // TODO Journal to disk
+    try journal.append(&request, connection.recv[0..]);
 
     // Apply as input to state machine, writing any response data directly to the send buffer:
     const response_data_size = state.apply(
         request.command,
         request_data,
-        connection.send[@sizeOf(Header)..]
+        connection.send[@sizeOf(NetworkHeader)..]
     );
 
     // Write the response header to the send buffer:
-    var response = mem.bytesAsValue(Header, connection.send[0..@sizeOf(Header)]);
+    var response = mem.bytesAsValue(NetworkHeader, connection.send[0..@sizeOf(NetworkHeader)]);
     response.* = .{
         .id = request.id,
         .command = .ack,
-        .size = @sizeOf(Header) + @intCast(u32, response_data_size)
+        .size = @sizeOf(NetworkHeader) + @intCast(u32, response_data_size)
     };
     assert(response.valid_size());
-    response.set_checksum_data(connection.send[@sizeOf(Header)..response.size]);
+    response.set_checksum_data(connection.send[@sizeOf(NetworkHeader)..response.size]);
     response.set_checksum_meta();
     log.debug("connection {}: parse: response: {}", .{ connection.id, response });
 
@@ -347,6 +352,9 @@ pub fn main() !void {
 
     state = try State.init(allocator, config.accounts_max, config.transfers_max);
     defer state.deinit();
+
+    journal = try Journal.init();
+    defer journal.deinit();
 
     connections = try Connections.init(allocator, config.tcp_connections_max);
     defer connections.deinit();

@@ -16,10 +16,10 @@ var id: u128 = 0;
 fn send(fd: os.fd_t, command: Command, data: []u8, Result: anytype) !void {
     id += 1;
 
-    var request = Header {
+    var request = NetworkHeader {
         .id = id,
         .command = command,
-        .size = @intCast(u32, @sizeOf(Header) + data.len)
+        .size = @intCast(u32, @sizeOf(NetworkHeader) + data.len)
     };
     request.set_checksum_data(data[0..]);
     request.set_checksum_meta();
@@ -32,16 +32,16 @@ fn send(fd: os.fd_t, command: Command, data: []u8, Result: anytype) !void {
 
     var recv: [1024 * 1024]u8 = undefined;
     const recv_bytes = try os.recvfrom(fd, recv[0..], 0, null, null);
-    assert(recv_bytes >= @sizeOf(Header));
+    assert(recv_bytes >= @sizeOf(NetworkHeader));
     
-    var response = mem.bytesAsValue(Header, recv[0..@sizeOf(Header)]);
+    var response = mem.bytesAsValue(NetworkHeader, recv[0..@sizeOf(NetworkHeader)]);
     std.debug.print("{}\n", .{ response });
     assert(response.magic == Magic);
     assert(response.valid_checksum_meta());
     assert(response.valid_size());
     assert(recv_bytes >= response.size);
 
-    const response_data = recv[@sizeOf(Header)..response.size];
+    const response_data = recv[@sizeOf(NetworkHeader)..response.size];
     assert(response.valid_checksum_data(response_data));
 
     for (mem.bytesAsSlice(Result, response_data)) |result| {

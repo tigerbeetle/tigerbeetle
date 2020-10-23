@@ -43,8 +43,8 @@ pub const Connections = struct {
                 .send_offset = 0,
                 .send_size = 0,
             };
-            @memset(connection.recv[0..], 0, connection.recv.len);
-            @memset(connection.send[0..], 0, connection.send.len);
+            mem.set(u8, connection.recv[0..], 0);
+            mem.set(u8, connection.send[0..], 0);
         }
         return Connections {
             .allocator = allocator,
@@ -110,8 +110,8 @@ pub const Connections = struct {
             .send_offset = 0,
             .send_size = 0
         };
-        @memset(connection.recv[0..], 0, connection.recv.len);
-        @memset(connection.send[0..], 0, connection.send.len);
+        mem.set(u8, connection.recv[0..], 0);
+        mem.set(u8, connection.send[0..], 0);
         assert(self.active > 0);
         assert(self.active <= self.array.len);
         self.active -= 1;
