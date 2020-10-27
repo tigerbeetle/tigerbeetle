@@ -14,8 +14,8 @@ pub const Connection = struct {
     recv_size: usize,
     send_offset: usize,
     send_size: usize,
-    // TODO See if we can get away with a single recv/send buffer using stack memory.
-    recv: [config.tcp_connection_buffer_max]u8 = undefined,
+    // The connection receive buffer needs to be sector-aligned for zero-copy direct I/O to disk:
+    recv: [config.tcp_connection_buffer_max]u8 align(config.sector_size) = undefined,
     send: [config.tcp_connection_buffer_max]u8 = undefined,
 };
 
@@ -45,6 +45,7 @@ pub const Connections = struct {
             };
             mem.set(u8, connection.recv[0..], 0);
             mem.set(u8, connection.send[0..], 0);
+            assert(@mod(@ptrToInt(&connection.recv), config.sector_size) == 0);
         }
         return Connections {
             .allocator = allocator,
