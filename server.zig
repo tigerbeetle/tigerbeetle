@@ -384,6 +384,15 @@ comptime {
     ) {
         @compileError("config: tcp_user_timeout would cause tcp_keepcnt to be extended");
     }
+    if (config.sector_size < 4096) {
+        @compileError("config: sector_size must be at least 4096 bytes for Advanced Format disks");
+    }
+    if (!std.math.isPowerOfTwo(config.sector_size)) {
+        @compileError("config: sector_size must be a power of two");
+    }
+    if (@mod(config.tcp_connection_buffer_max, config.sector_size) != 0) {
+        @compileError("config: tcp_connection_buffer_max must be a multiple of sector_size");
+    }
     // TODO Add safety checks on all config variables and interactions between them.
     // TODO Move this to types.zig or somewhere common to all code.
 }
