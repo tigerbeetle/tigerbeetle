@@ -28,8 +28,10 @@ pub const tcp_backlog = 64;
 /// The maximum number of connections that can be accepted and held open by the server at any time:
 pub const tcp_connections_max = 32;
 
-/// The maximum size of a connection recv or send buffer in bytes:
-/// This impacts the amount of memory allocated at initialization by the server.
+/// The maximum size of a connection recv or send buffer (and a request or response) in bytes:
+/// This impacts bufferbloat and head-of-line blocking latency for pipelined requests.
+/// e.g. For a 1 Gbps NIC = 125 MiB/s throughput: 4 MiB / 125 * 1000ms = 32ms for the next request.
+/// This also impacts the amount of memory allocated at initialization by the server.
 /// e.g. tcp_connections_max * tcp_connection_buffer_max * 2
 /// 4 MiB is enough for a batch of 32,768 transfers, and good for sequential disk write throughput.
 pub const tcp_connection_buffer_max = 4 * 1024 * 1024;
