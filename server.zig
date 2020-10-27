@@ -117,7 +117,6 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     // Deserialize the request header with a single cast and a copy to stack allocated memory:
     // We use bytesToValue() and not bytesAsValue() because we want a copy of the network header to
     // survive the header's memory being reused by Journal.append() for the journal header.
-    // We also have a double-check for this in Journal.append().
     const request = mem.bytesToValue(NetworkHeader, connection.recv[0..@sizeOf(NetworkHeader)]);
 
     // This is the first time we have received the complete request header, verify magic and header:
@@ -141,8 +140,26 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     if (!request.valid_checksum_data(request_data)) {
         return try close(ring, connection, "corrupt data");
     }
-    
-    try journal.append(&request, connection.recv[0..]);
+
+    // Zero pad the request out to a sector multiple, required by the journal for direct I/O:
+    const request_sector_multiple = Journal.round_up_to_sector(request.size, config.sector_size);
+    if (request.size != request_sector_multiple) {
+        assert(request_sector_multiple > request.size);
+        // Don't overwrite any pipelined data, shift the pipeline to the right:
+        if (connection.recv_size - request.size > 0) {
+            // These slices overlap, with dest.ptr > src.ptr, so we must use a reverse loop:
+            mem.copyBackwards(
+                u8,
+                connection.recv[request_sector_multiple..],
+                connection.recv[request.size..connection.recv_size]
+            );
+        }
+        // Zero the last sector's padding:
+        mem.set(u8, connection.recv[request.size..request_sector_multiple], 0);
+        connection.recv_size += request_sector_multiple - request.size;
+    }
+
+    try journal.append(request.command, request.size, connection.recv[0..request_sector_multiple]);
 
     // Apply as input to state machine, writing any response data directly to the send buffer:
     const response_data_size = state.apply(
@@ -166,22 +183,20 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     // Move any pipelined requests to the front of the receive buffer:
     // This allows the client to have requests inflight up to the size of the receive buffer, and to
     // submit another request as each request is acked, without waiting for all inflight requests
-    // to be acked. This costs a memcpy but a copy is simpler than the alternative of a ring buffer.
-    const pipe_size = connection.recv_size - request.size;
-    if (pipe_size > 0) {
-        // The source and target slices may overlap and care must therefore be taken to use a
-        // forward loop and not a reverse loop so that the source slice is not overwritten when
-        // copied to the target slice.
-        const source = connection.recv[request.size..connection.recv_size];
-        var target = connection.recv[0..pipe_size];
-        assert(@ptrToInt(target.ptr) <= @ptrToInt(source.ptr));
-        assert(target.len == source.len);
-        mem.copy(u8, target, source);
+    // to be acked. This costs a copy, but that is justified by the network performance gain.
+    const pipeline_size = connection.recv_size - request_sector_multiple;
+    if (pipeline_size > 0) {
+        // These slices overlap, with dest.ptr < src.ptr, so we must use a forward loop:
+        mem.copy(
+            u8,
+            connection.recv[0..],
+            connection.recv[request_sector_multiple..connection.recv_size]
+        );
     }
 
     // When send() completes it will call parse() instead of recv() if `recv_size` is non-zero:
-    connection.recv_size = pipe_size;
-    log.debug("connection {}: parse: pipe_size={}", .{ connection.id, pipe_size });
+    connection.recv_size = pipeline_size;
+    log.debug("connection {}: parse: pipeline_size={}", .{ connection.id, pipeline_size });
     
     // Ack:
     connection.send_offset = 0;

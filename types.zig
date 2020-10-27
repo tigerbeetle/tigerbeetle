@@ -175,90 +175,72 @@ pub const CommitTransferResults = packed struct {
 pub const Magic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."
 
 pub const JournalHeader = packed struct {
-                          // This hash chain root covers all entry checksums in the journal:
-                          // 1. to protect against journal tampering, and
-                          // 2. to show our exact history when determining consensus across nodes.
-         hash_chain_root: u128 = undefined,
-                          // This binds this journal entry with the previous journal entry:
-                          // 1. to protect against misdirected reads/writes by hardware, and
-                          // 2. to enable "relaxed lock step" quorum across the cluster, enabling
-                          //    nodes to form a quorum provided their hash chain roots can be
-                          //    linked together in a directed acyclic graph by a topological sort,
-                          //    i.e. a node can be one hash chain root behind another to accomodate
-                          //    crashes without losing quorum.
-    prev_hash_chain_root: u128,
-                          // This checksum covers this entry's magic, command, size and data:
-                          // 1. to protect against torn writes and provide crash safety, and
-                          // 2. to protect against eventual disk corruption.
-                checksum: u128 = undefined,
-                   magic: u64 = Magic,
-                 command: Command,
-                          // This is the size of this entry's header and data:
-                          // 1. also covered by the checksum, and
-                          // 2. excluding additional zero byte padding for disk sector alignment,
-                          //    which is necessary for direct I/O, to reduce copies in the kernel,
-                          //    and improve write throughput by up to 10%.
-                          //    e.g. If we write a journal entry for a single transfer of 192 bytes
-                          //    (64 + 128), we will actually write 4096 bytes, which is the minimum
-                          //    sector size to work with Advanced Format disks. The size will be 192
-                          //    bytes, covered by the checksum, and the rest will be zero bytes.
-                    size: u32,
+                        // TODO Move these comments to the design doc:
+                        // This checksum covers this entry's header and becomes the hash chain root.
+                        // The hash chain root covers all entry checksums in the journal:
+                        // 1. to protect against journal tampering, and
+                        // 2. to prove knowledge of history when determining consensus across nodes.
+         checksum_meta: u128 = undefined,
+                        // This checksum covers this entry's data, excluding sector padding:
+                        // 1. to protect against torn writes and provide crash safety, and
+                        // 2. to protect against eventual disk corruption.
+         checksum_data: u128 = undefined,
+                        // This binds this entry with the previous journal entry:
+                        // 1. to protect against misdirected reads/writes by hardware, and
+                        // 2. to enable "relaxed lock step" quorum across the cluster, enabling
+                        //    nodes to form a quorum provided their hash chain roots can be
+                        //    linked together in a directed acyclic graph by a topological sort,
+                        //    i.e. a node can be one hash chain root behind another to accomodate
+                        //    crashes without losing quorum.
+    prev_checksum_meta: u128,
+                        // Since entries can be variable length, and since intermediate entries can
+                        // be corrupted, the entry offset provides a way to repair the journal at
+                        // the granularity of a single entry:
+                offset: u64,
+               command: Command,
+                        // This is the size of this entry's header and data:
+                        // 1. also covered by checksum_meta and checksum_data respectively, and
+                        // 2. excluding additional zero byte padding for disk sector alignment,
+                        //    which is necessary for direct I/O, to reduce copies in the kernel,
+                        //    and improve write throughput by up to 10%.
+                        //    e.g. If we write a journal entry for a single transfer of 192 bytes
+                        //    (64 + 128), we will actually write 4096 bytes, which is the minimum
+                        //    sector size to work with Advanced Format disks. The size will be 192
+                        //    bytes, covered by the checksums, and the rest will be zero bytes.
+                  size: u32,
 
-    pub fn calculate_checksum(self: *const JournalHeader, entry: []const u8) u128 {
-        assert(entry.len >= @sizeOf(JournalHeader));
-        assert(entry.len == self.size);
-
-        const checksum_offset = @byteOffsetOf(JournalHeader, "checksum");
-        const checksum_size = @sizeOf(@TypeOf(self.checksum));
-        assert(checksum_offset == 0 + 16 + 16);
+    pub fn calculate_checksum_meta(self: *const JournalHeader) u128 {
+        const meta = @bitCast([@sizeOf(JournalHeader)]u8, self.*);
+        const checksum_size = @sizeOf(@TypeOf(self.checksum_meta));
         assert(checksum_size == 16);
-
         var target: [32]u8 = undefined;
-        crypto.hash.Blake3.hash(entry[checksum_offset + checksum_size..], target[0..], .{});
+        crypto.hash.Blake3.hash(meta[checksum_size..], target[0..], .{});
         return @bitCast(u128, target[0..checksum_size].*);
     }
 
-    pub fn calculate_hash_chain_root(self: *const JournalHeader) u128 {
-        const hash_chain_root_size = @sizeOf(@TypeOf(self.hash_chain_root));
-        assert(hash_chain_root_size == 16);
-
-        const prev_hash_chain_root_offset = @byteOffsetOf(JournalHeader, "prev_hash_chain_root");
-        const prev_hash_chain_root_size = @sizeOf(@TypeOf(self.prev_hash_chain_root));
-        assert(prev_hash_chain_root_offset == 0 + 16);
-        assert(prev_hash_chain_root_size == 16);
-
-        const checksum_offset = @byteOffsetOf(JournalHeader, "checksum");
-        const checksum_size = @sizeOf(@TypeOf(self.checksum));
-        assert(checksum_offset == 0 + 16 + 16);
+    pub fn calculate_checksum_data(self: *const JournalHeader, data: []const u8) u128 {
+        assert(@sizeOf(JournalHeader) + data.len == self.size);
+        const checksum_size = @sizeOf(@TypeOf(self.checksum_data));
         assert(checksum_size == 16);
-
-        assert(prev_hash_chain_root_offset + prev_hash_chain_root_size == checksum_offset);
-        
-        const header = @bitCast([@sizeOf(JournalHeader)]u8, self.*);
-        const source = header[prev_hash_chain_root_offset..checksum_offset + checksum_size];
-        assert(source.len == prev_hash_chain_root_size + checksum_size);
         var target: [32]u8 = undefined;
-        crypto.hash.Blake3.hash(source, target[0..], .{});
-        // TODO This is a workaround for a compiler bug, where passing the array in place segfaults:
-        // https://github.com/ziglang/zig/issues/6781
-        var array = target[0..hash_chain_root_size].*;
-        return @bitCast(u128, array);
+        crypto.hash.Blake3.hash(data[0..], target[0..], .{});
+        return @bitCast(u128, target[0..checksum_size].*);
     }
 
-    pub fn set_checksum_and_hash_chain_root(self: *JournalHeader, entry: []const u8) void {
-        self.checksum = self.calculate_checksum(entry);
-        // The hash_chain_root below depends on:
-        // 1. the prev_hash_chain_root having been set, and
-        // 2. the checksum having been calculated and set (above).
-        self.hash_chain_root = self.calculate_hash_chain_root();
+    pub fn set_checksum_meta(self: *JournalHeader) void {
+        self.checksum_meta = self.calculate_checksum_meta();
     }
 
-    pub fn valid_checksum(self: *const JournalHeader, entry: []const u8) bool {
-        return self.checksum == self.calculate_checksum(entry);
+    pub fn set_checksum_data(self: *JournalHeader, data: []const u8) void {
+        self.checksum_data = self.calculate_checksum_data(data);
     }
 
-    pub fn valid_hash_chain_root(self: *const JournalHeader) bool {
-        return self.hash_chain_root == self.calculate_hash_chain_root();
+    pub fn valid_checksum_meta(self: *const JournalHeader) bool {
+        return self.checksum_meta == self.calculate_checksum_meta();
+    }
+
+    pub fn valid_checksum_data(self: *const JournalHeader, data: []const u8) bool {
+        return self.checksum_data == self.calculate_checksum_data(data);
     }
 };
 

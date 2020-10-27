@@ -13,7 +13,7 @@ pub const Journal = struct {
                     file: fs.File,
          hash_chain_root: u128,
     prev_hash_chain_root: u128,
-                    size: u64,
+                  offset: u64,
 
     pub fn init() !Journal {
         const path = "journal";
@@ -24,7 +24,7 @@ pub const Journal = struct {
             .file = file,
             .hash_chain_root = 0,
             .prev_hash_chain_root = 0,
-            .size = 0,
+            .offset = 0,
         };
 
         log.debug("opened fd={}", .{ self.file.handle });
@@ -41,53 +41,52 @@ pub const Journal = struct {
         return self;
     }
 
-    pub fn append(self: *Journal, request: *const NetworkHeader, buffer: []u8) !void {
-        // TODO After AlphaBeetle, move fs syscalls to io_uring.
-
+    /// Append a batch of events to the journal:
+    /// The journal will overwrite the 64-byte header in place at the front of the buffer.
+    /// The buffer pointer address must be aligned to config.sector_size for direct I/O.
+    /// The buffer length must similarly be a multiple of config.sector_size.
+    /// `size` may be less than the sector multiple, but the remainder must be zero padded.
+    pub fn append(self: *Journal, command: Command, size: u32, buffer: []u8) !void {
+        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
         assert(@sizeOf(JournalHeader) == @sizeOf(NetworkHeader));
-        assert(buffer.len >= @sizeOf(NetworkHeader));
-        assert(buffer.len >= request.size);
+        assert(size >= @sizeOf(JournalHeader));
+        assert(@mod(buffer.len, config.sector_size) == 0);
+        assert(buffer.len == Journal.round_up_to_sector(size, config.sector_size));
+        assert(buffer.len >= size);
+        assert(buffer.len < size + config.sector_size);
 
-        // Copy the request header checksum so that we can detect use-after-free:
-        // This can happen if the caller deserialized with a cast by reference instead of by value.
-        const checksum_meta = request.checksum_meta;
-
-        // Now reuse the request header memory for the journal header:
+        // Write the entry header to the front of the buffer:
         var entry = mem.bytesAsValue(JournalHeader, buffer[0..@sizeOf(JournalHeader)]);
         entry.* = .{
-            .prev_hash_chain_root = self.hash_chain_root,
-            .command = request.command,
-            .size = request.size
+            .prev_checksum_meta = self.hash_chain_root,
+            .offset = self.offset,
+            .command = command,
+            .size = size
         };
-        entry.set_checksum_and_hash_chain_root(buffer[0..entry.size]);
+        entry.set_checksum_data(buffer[@sizeOf(JournalHeader)..size]);
+        entry.set_checksum_meta();
 
-        // Guard against the request header being a pointer to the same memory:
-        assert(request.checksum_meta == checksum_meta);
-        
-        // Round up to next sector size for sector-aligned disk writes:
-        const entry_sector_size = Journal.round_up_to_sector(entry.size, config.sector_size);
-        assert(entry_sector_size >= entry.size);
-        assert(entry_sector_size < entry.size + config.sector_size);
-
-        // Zero the padding after the entry:
-        // TODO Does mem.set fail if slice range is 0 bytes?
-        mem.set(u8, buffer[entry.size..entry_sector_size], 0);
-        assert(entry.valid_checksum(buffer[0..entry.size]));
+        if (std.builtin.mode == .Debug) {
+            // Assert that the last sector's padding (if any) is already zeroed:
+            var sum_of_sector_padding_bytes: usize = 0;
+            for (buffer[size..]) |byte| sum_of_sector_padding_bytes += byte;
+            assert(sum_of_sector_padding_bytes == 0);
+        }
 
         // Write the journal entry to the end of the journal:
-        log.debug("writing {} bytes to offset {}: {}", .{
-            entry_sector_size,
-            self.size,
+        // TODO Move these syscalls into io_uring:
+        log.debug("appending {} bytes at offset {}: {}", .{
+            buffer.len,
+            self.offset,
             entry
         });
-        try self.file.pwriteAll(buffer[0..entry_sector_size], self.size);
-
-        // TODO Fsync and panic on fsync failure.
+        try self.file.pwriteAll(buffer, self.offset);
+        try os.fsync(self.file.handle);
 
         // Update journal state:
-        self.hash_chain_root = entry.hash_chain_root;
-        self.prev_hash_chain_root = entry.prev_hash_chain_root;
-        self.size += entry_sector_size;
+        self.hash_chain_root = entry.checksum_meta;
+        self.prev_hash_chain_root = entry.prev_checksum_meta;
+        self.offset += buffer.len;
     }
 
     pub fn deinit(self: *Journal) void {
@@ -116,7 +115,7 @@ pub const Journal = struct {
         };
     }
 
-    fn round_up_to_sector(entry_size: u64, sector_size: u64) u64 {
+    pub fn round_up_to_sector(entry_size: u64, sector_size: u64) u64 {
         assert(entry_size > 0);
         assert(sector_size > 0);
         assert(std.math.isPowerOfTwo(sector_size));
