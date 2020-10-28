@@ -1,11 +1,26 @@
+/// Whether development, staging or production:
+pub const deployment_environment = .development;
+
 /// The minimum log level in increasing order of verbosity (emergency=0, debug=7):
 pub const log_level = 7;
 
-/// The server port to listen on:
+/// The default server port to listen on:
 pub const port = 3001;
 
-/// Whether development, staging or production:
-pub const deployment_environment = .development;
+/// Whether to bind to successive port numbers if a port is already bound:
+/// This improves the user experience of launching a local cluster.
+pub const port_hopping = switch (deployment_environment) {
+    .development => true,
+    else => false
+};
+
+/// The network interface address to listen on:
+/// WARNING: Binding to all interfaces with "0.0.0.0" is dangerous and opens the server to anyone.
+/// In development, bind to the "127.0.0.1" loopback address to accept local connections only.
+pub const bind_address = switch (deployment_environment) {
+    .production => "0.0.0.0",
+    else => "127.0.0.1"
+};
 
 /// The maximum number of accounts to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
