@@ -298,7 +298,9 @@ fn event_loop(ring: *IO_Uring, server: os.fd_t) !void {
     }
 }
 
-fn tcp_server_init(address: net.Address) !os.fd_t {
+fn tcp_server_init() !os.fd_t {
+    var address = try net.Address.parseIp4(config.bind_address, config.port);
+
     const fd = try os.socket(address.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, os.IPPROTO_TCP);
     errdefer os.close(fd);
 
@@ -335,9 +337,25 @@ fn tcp_server_init(address: net.Address) !os.fd_t {
 
     // TODO Use getsockopt to log the final value of these socket options.
 
-    try os.bind(fd, &address.any, address.getOsSockLen());
-    try os.listen(fd, config.tcp_backlog);
-    return fd;
+    var port: u16 = address.getPort();
+    var attempts: usize = if (config.port_hopping) 32 else 1;
+    while (attempts > 0) {
+        attempts -= 1;
+        if (os.bind(fd, &address.any, address.getOsSockLen())) {
+            try os.listen(fd, config.tcp_backlog);
+            log.info("listening on {}", .{ address });
+            return fd;
+        } else |err| switch (err) {
+            error.AddressInUse => {
+                if (attempts == 0 or port == 65535) return err;
+                port += 1;
+                log.info("port {} is in use, port hopping to {}...", .{ address.getPort(), port });
+                address.setPort(port);
+            },
+            else => return err
+        }
+    }
+    unreachable;
 }
 
 // We use a u31 for the option value to keep the sign bit clear when we cast to c_int.
@@ -378,10 +396,8 @@ pub fn main() !void {
     var ring = try IO_Uring.init(128, 0);
     defer ring.deinit();
 
-    var addr = try net.Address.parseIp4("0.0.0.0", config.port);
-    var server = try tcp_server_init(addr);
+    var server = try tcp_server_init();
     defer os.close(server);
-    log.info("listening on {}...", .{ addr });
 
     try event_loop(&ring, server);
 }
