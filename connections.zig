@@ -15,8 +15,9 @@ pub const Connection = struct {
     send_offset: usize,
     send_size: usize,
     // The connection receive buffer needs to be sector-aligned for zero-copy direct I/O to disk:
-    recv: [config.tcp_connection_buffer_max]u8 align(config.sector_size) = undefined,
-    send: [config.tcp_connection_buffer_max]u8 = undefined,
+    // We add a sector to ensure there is space for requests to be padded out to a sector multiple.
+    recv: [config.request_size_max + config.sector_size]u8 align(config.sector_size) = undefined,
+    send: [config.response_size_max]u8 = undefined,
 };
 
 /// This abstracts all our server connection management logic and static allocation.
@@ -133,7 +134,8 @@ test "connections" {
     testing.expectEqual(count, connections.array.len);
     testing.expectEqual(true, connections.available());
 
-    const zeroes = [_]u8{0} ** config.tcp_connection_buffer_max;
+    const zeroes_recv = [_]u8{0} ** (config.request_size_max + config.sector_size);
+    const zeroes_send = [_]u8{0} ** config.response_size_max;
     for (connections.array) |*connection, index| {
         testing.expectEqual(@as(u32, 0), connection.id);
         testing.expectEqual(@as(os.fd_t, -1), connection.fd);
@@ -141,8 +143,8 @@ test "connections" {
         testing.expectEqual(@as(usize, 0), connection.recv_size);
         testing.expectEqual(@as(usize, 0), connection.send_offset);
         testing.expectEqual(@as(usize, 0), connection.send_size);
-        testing.expectEqualSlices(u8, zeroes[0..], connection.recv[0..]);
-        testing.expectEqualSlices(u8, zeroes[0..], connection.send[0..]);
+        testing.expectEqualSlices(u8, zeroes_recv[0..], connection.recv[0..]);
+        testing.expectEqualSlices(u8, zeroes_send[0..], connection.send[0..]);
     }
 
     const fd0: os.fd_t = 9;

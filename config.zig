@@ -37,19 +37,23 @@ pub const transfers_max = switch (deployment_environment) {
     else => 1_000_000
 };
 
+/// The maximum number of connections that can be accepted and held open by the server at any time:
+pub const connections_max = 32;
+
+/// The maximum size of a request or response in bytes:
+/// This is also the limit of all inflight data across multiple pipelined requests per connection.
+/// We may have one request of up to 4 MiB inflight or 4 pipelined requests of up to 1 MiB inflight.
+/// This impacts sequential disk write throughput, the larger the buffer the better.
+/// 4 MiB is 32,768 transfers, and a reasonable choice for sequential disk write throughput.
+/// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
+/// For a 1 Gbps NIC = 125 MiB/s throughput: 4 MiB / 125 * 1000ms = 32ms for the next request.
+/// This also impacts the amount of memory allocated at initialization by the server.
+/// e.g. connections_max * (request_size_max + response_size_max) = 32 * (4 + 4) = 256 MiB
+pub const request_size_max = 4 * 1024 * 1024;
+pub const response_size_max = 4 * 1024 * 1024;
+
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
 pub const tcp_backlog = 64;
-
-/// The maximum number of connections that can be accepted and held open by the server at any time:
-pub const tcp_connections_max = 32;
-
-/// The maximum size of a connection recv or send buffer (and a request or response) in bytes:
-/// This impacts bufferbloat and head-of-line blocking latency for pipelined requests.
-/// e.g. For a 1 Gbps NIC = 125 MiB/s throughput: 4 MiB / 125 * 1000ms = 32ms for the next request.
-/// This also impacts the amount of memory allocated at initialization by the server.
-/// e.g. tcp_connections_max * tcp_connection_buffer_max * 2
-/// 4 MiB is enough for a batch of 32,768 transfers, and good for sequential disk write throughput.
-pub const tcp_connection_buffer_max = 4 * 1024 * 1024;
 
 /// The maximum size of a kernel socket receive buffer in bytes (or 0 to use the system default):
 /// This sets SO_RCVBUF as an alternative to the auto-tuning range in /proc/sys/net/ipv4/tcp_rmem.

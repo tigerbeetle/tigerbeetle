@@ -70,8 +70,14 @@ fn recv(ring: *IO_Uring, connection: *Connection) !void {
     connection.references += 1;
     const offset = connection.recv_size;
     log.debug("connection {}: recv[{}..]", .{ connection.id, offset });
-    assert(offset < connection.recv.len);
-    _ = try ring.recv(user_data, connection.fd, connection.recv[offset..], os.MSG_NOSIGNAL);
+    // We limit requests (as well as all inflight data) to request_size_max and not recv.len:
+    // The difference between recv.len and request_size_max is reserved for sector padding.
+    _ = try ring.recv(
+        user_data,
+        connection.fd,
+        connection.recv[offset..config.request_size_max],
+        os.MSG_NOSIGNAL
+    );
 }
 
 fn recv_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Connection) !void {
@@ -101,18 +107,14 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
 
     assert(connection.references == 1);
     assert(connection.recv_size > 0);
-    assert(connection.recv_size <= connection.recv.len);
+    assert(connection.recv_size <= config.request_size_max);
+    assert(connection.recv.len == config.request_size_max + config.sector_size);
     assert(connection.send_offset == 0);
     assert(connection.send_size == 0);
     assert(prev_recv_size < connection.recv_size);
 
     // The request header is incomplete, read more...
-    if (connection.recv_size < @sizeOf(NetworkHeader)) {
-        // The receive buffer must be able to accommodate a header:
-        // Otherwise we might enter an infinite recv loop.
-        assert(connection.recv.len >= @sizeOf(NetworkHeader));
-        return try recv(ring, connection);
-    }
+    if (connection.recv_size < @sizeOf(NetworkHeader)) return try recv(ring, connection);
 
     // Deserialize the request header with a single cast and a copy to stack allocated memory:
     // We use bytesToValue() and not bytesAsValue() because we want a copy of the network header to
@@ -129,8 +131,10 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
         if (!request.valid_size()) return try close(ring, connection, "invalid size");
     }
 
-    // The peer is attempting to overflow the receive buffer (and `size` is not corrupt):
-    if (request.size > connection.recv.len) return try close(ring, connection, "excess request");
+    // The peer would exceed limits or even overflow the receive buffer (and `size` is not corrupt):
+    if (request.size > config.request_size_max) {
+        return try close(ring, connection, "request exceeded config.request_size_max");
+    }
 
     // Data is incomplete, read more (we know this can fit in the receive buffer)...
     if (connection.recv_size < request.size) return try recv(ring, connection);
@@ -142,24 +146,27 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     }
 
     // Zero pad the request out to a sector multiple, required by the journal for direct I/O:
-    const request_sector_multiple = Journal.round_up_to_sector(request.size, config.sector_size);
-    if (request.size != request_sector_multiple) {
-        assert(request_sector_multiple > request.size);
+    const request_sector_size = Journal.round_up_to_sector(request.size, config.sector_size);
+    if (request.size != request_sector_size) {
+        assert(request_sector_size > request.size);
+        const padding_size = request_sector_size - request.size;
+        assert(padding_size < config.sector_size);
+        assert(connection.recv_size + padding_size <= connection.recv.len);
         // Don't overwrite any pipelined data, shift the pipeline to the right:
         if (connection.recv_size - request.size > 0) {
             // These slices overlap, with dest.ptr > src.ptr, so we must use a reverse loop:
             mem.copyBackwards(
                 u8,
-                connection.recv[request_sector_multiple..],
+                connection.recv[request_sector_size..],
                 connection.recv[request.size..connection.recv_size]
             );
         }
         // Zero the last sector's padding:
-        mem.set(u8, connection.recv[request.size..request_sector_multiple], 0);
-        connection.recv_size += request_sector_multiple - request.size;
+        mem.set(u8, connection.recv[request.size..request_sector_size], 0);
+        connection.recv_size += padding_size;
     }
 
-    try journal.append(request.command, request.size, connection.recv[0..request_sector_multiple]);
+    try journal.append(request.command, request.size, connection.recv[0..request_sector_size]);
 
     // Apply as input to state machine, writing any response data directly to the send buffer:
     const response_data_size = state.apply(
@@ -184,13 +191,13 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     // This allows the client to have requests inflight up to the size of the receive buffer, and to
     // submit another request as each request is acked, without waiting for all inflight requests
     // to be acked. This costs a copy, but that is justified by the network performance gain.
-    const pipeline_size = connection.recv_size - request_sector_multiple;
+    const pipeline_size = connection.recv_size - request_sector_size;
     if (pipeline_size > 0) {
         // These slices overlap, with dest.ptr < src.ptr, so we must use a forward loop:
         mem.copy(
             u8,
             connection.recv[0..],
-            connection.recv[request_sector_multiple..connection.recv_size]
+            connection.recv[request_sector_size..connection.recv_size]
         );
     }
 
@@ -389,10 +396,10 @@ pub fn main() !void {
     journal = try Journal.init();
     defer journal.deinit();
 
-    connections = try Connections.init(allocator, config.tcp_connections_max);
+    connections = try Connections.init(allocator, config.connections_max);
     defer connections.deinit();
 
-    // TODO Formalize the relation between `config.tcp_connections_max` and ring entries:
+    // TODO Formalize the relation between `config.connections_max` and ring entries:
     var ring = try IO_Uring.init(128, 0);
     defer ring.deinit();
 
@@ -421,8 +428,11 @@ comptime {
     if (!std.math.isPowerOfTwo(config.sector_size)) {
         @compileError("config: sector_size must be a power of two");
     }
-    if (@mod(config.tcp_connection_buffer_max, config.sector_size) != 0) {
-        @compileError("config: tcp_connection_buffer_max must be a multiple of sector_size");
+    if (config.request_size_max <= @sizeOf(NetworkHeader)) {
+        @compileError("config: request_size_max must be more than a network header");
+    }
+    if (@mod(config.request_size_max, config.sector_size) != 0) {
+        @compileError("config: request_size_max must be a multiple of sector_size");
     }
     // TODO Add safety checks on all config variables and interactions between them.
     // TODO Move this to types.zig or somewhere common to all code.
