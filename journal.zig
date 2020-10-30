@@ -45,13 +45,13 @@ pub const Journal = struct {
     /// The journal will overwrite the 64-byte header in place at the front of the buffer.
     /// The buffer pointer address must be aligned to config.sector_size for direct I/O.
     /// The buffer length must similarly be a multiple of config.sector_size.
-    /// `size` may be less than the sector multiple, but the remainder must be zero padded.
+    /// `size` may be less than the sector multiple, but the remainder must already be zero padded.
     pub fn append(self: *Journal, command: Command, size: u32, buffer: []u8) !void {
         assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
         assert(@sizeOf(JournalHeader) == @sizeOf(NetworkHeader));
         assert(size >= @sizeOf(JournalHeader));
         assert(@mod(buffer.len, config.sector_size) == 0);
-        assert(buffer.len == Journal.round_up_to_sector(size, config.sector_size));
+        assert(buffer.len == Journal.sector_multiple(size, config.sector_size));
         assert(buffer.len >= size);
         assert(buffer.len < size + config.sector_size);
 
@@ -63,6 +63,8 @@ pub const Journal = struct {
             .command = command,
             .size = size
         };
+        // Zero padding is not included in the checksum since it is not material except to prevent
+        // buffer bleeds, which we assert against next in Debug mode:
         entry.set_checksum_data(buffer[@sizeOf(JournalHeader)..size]);
         entry.set_checksum_meta();
 
@@ -74,7 +76,6 @@ pub const Journal = struct {
         }
 
         // Write the journal entry to the end of the journal:
-        // TODO Move these syscalls into io_uring:
         log.debug("appending {} bytes at offset {}: {}", .{
             buffer.len,
             self.offset,
@@ -115,7 +116,7 @@ pub const Journal = struct {
         };
     }
 
-    pub fn round_up_to_sector(entry_size: u64, sector_size: u64) u64 {
+    pub fn sector_multiple(entry_size: u64, sector_size: u64) u64 {
         assert(entry_size > 0);
         assert(sector_size > 0);
         assert(std.math.isPowerOfTwo(sector_size));
@@ -130,10 +131,10 @@ pub const Journal = struct {
 
 const testing = std.testing;
 
-test "round_up_to_sector()" {
+test "sector_multiple()" {
     const sector_size: u64 = 4096;
-    testing.expectEqual(sector_size, Journal.round_up_to_sector(1, sector_size));
-    testing.expectEqual(sector_size, Journal.round_up_to_sector(sector_size - 1, sector_size));
-    testing.expectEqual(sector_size, Journal.round_up_to_sector(sector_size, sector_size));
-    testing.expectEqual(sector_size * 2, Journal.round_up_to_sector(sector_size + 1, sector_size));
+    testing.expectEqual(sector_size, Journal.sector_multiple(1, sector_size));
+    testing.expectEqual(sector_size, Journal.sector_multiple(sector_size - 1, sector_size));
+    testing.expectEqual(sector_size, Journal.sector_multiple(sector_size, sector_size));
+    testing.expectEqual(sector_size * 2, Journal.sector_multiple(sector_size + 1, sector_size));
 }

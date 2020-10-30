@@ -146,7 +146,7 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     }
 
     // Zero pad the request out to a sector multiple, required by the journal for direct I/O:
-    const request_sector_size = Journal.round_up_to_sector(request.size, config.sector_size);
+    const request_sector_size = Journal.sector_multiple(request.size, config.sector_size);
     if (request.size != request_sector_size) {
         assert(request_sector_size > request.size);
         const padding_size = request_sector_size - request.size;
