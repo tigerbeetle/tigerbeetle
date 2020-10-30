@@ -15,8 +15,10 @@ usingnamespace @import("connections.zig");
 usingnamespace @import("io_uring.zig");
 usingnamespace @import("types.zig");
 usingnamespace @import("journal.zig");
+usingnamespace @import("master.zig");
 usingnamespace @import("state.zig");
 
+var master: Master = undefined;
 var state: State = undefined;
 var journal: Journal = undefined;
 var connections: Connections = undefined;
@@ -140,9 +142,14 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     if (connection.recv_size < request.size) return try recv(ring, connection);
 
     // We have the complete request header and corresponding data, verify data:
-    const request_data = connection.recv[@sizeOf(NetworkHeader)..request.size];
+    var request_data = connection.recv[@sizeOf(NetworkHeader)..request.size];
     if (!request.valid_checksum_data(request_data)) {
         return try close(ring, connection, "corrupt data");
+    }
+
+    // Assign strictly increasing event timestamps according to the master's clock:
+    if (!master.assign_timestamps(request.command, request_data)) {
+        return try close(ring, connection, "reserved timestamp not zero");
     }
 
     // Zero pad the request out to a sector multiple, required by the journal for direct I/O:
@@ -390,10 +397,13 @@ pub fn main() !void {
     defer arena.deinit();
     var allocator = &arena.allocator;
 
+    master = try Master.init();
+    defer master.deinit();
+
     state = try State.init(allocator, config.accounts_max, config.transfers_max);
     defer state.deinit();
 
-    journal = try Journal.init();
+    journal = try Journal.init(&state);
     defer journal.deinit();
 
     connections = try Connections.init(allocator, config.connections_max);

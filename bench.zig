@@ -55,8 +55,6 @@ pub fn main() !void {
     const fd = connection.handle;
     defer os.close(fd);
 
-    var timestamp = @intCast(u64, std.time.nanoTimestamp());
-
     var accounts = [_]Account {
         Account {
             .id = 1,
@@ -72,7 +70,7 @@ pub fn main() !void {
             .credit_reserved_limit = 0,
             .credit_accepted_limit = 0,
             .padding = 0,
-            .timestamp = timestamp + 0,
+            .timestamp = 0,
         },
         Account {
             .id = 2,
@@ -88,7 +86,7 @@ pub fn main() !void {
             .credit_reserved_limit = 1_000_000,
             .credit_accepted_limit = 1_000_000,
             .padding = 0,
-            .timestamp = timestamp + 1,
+            .timestamp = 0,
         },
     };
 
@@ -105,7 +103,7 @@ pub fn main() !void {
             .flags = .{ .accept = false, .auto_commit = false },
             .amount = 100,
             .timeout = 0,
-            .timestamp = timestamp + 2,
+            .timestamp = 0,
         }
     };
 
@@ -118,7 +116,7 @@ pub fn main() !void {
             .custom_2 = 0,
             .custom_3 = 0,
             .flags = .{ .accept = true },
-            .timestamp = timestamp + 3,
+            .timestamp = 0,
         }
     };
 
