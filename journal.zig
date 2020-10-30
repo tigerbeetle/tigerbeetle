@@ -8,19 +8,22 @@ const os = std.os;
 const config = @import("config.zig");
 
 usingnamespace @import("types.zig");
+usingnamespace @import("state.zig");
 
 pub const Journal = struct {
+                   state: *State,
                     file: fs.File,
          hash_chain_root: u128,
     prev_hash_chain_root: u128,
                   offset: u64,
 
-    pub fn init() !Journal {
+    pub fn init(state: *State) !Journal {
         const path = "journal";
         const file = try Journal.open(path);
         errdefer file.close();
 
         var self = Journal {
+            .state = state,
             .file = file,
             .hash_chain_root = 0,
             .prev_hash_chain_root = 0,
@@ -28,17 +31,12 @@ pub const Journal = struct {
         };
 
         log.debug("opened fd={}", .{ self.file.handle });
-
-        var buffer = [_]u8{0} ** 4194304;
-        var offset: u64 = 0;
-        while (true) {
-            var bytes_read = try file.preadAll(buffer[0..], offset);
-            log.debug("read[0..{}]={}", .{ buffer.len, bytes_read });
-            // TODO Apply to state machine.
-            if (bytes_read < buffer.len) break;
-        }
-
+        try self.read();
         return self;
+    }
+
+    pub fn deinit(self: *Journal) void {
+        self.file.close();
     }
 
     /// Append a batch of events to the journal:
@@ -90,8 +88,52 @@ pub const Journal = struct {
         self.offset += buffer.len;
     }
 
-    pub fn deinit(self: *Journal) void {
-        self.file.close();
+    pub fn read(self: *Journal) !void {
+        var buffer: [config.request_size_max]u8 align(config.sector_size) = undefined;
+        var output: [16384]u8 = undefined;
+        assert(@mod(@ptrToInt(&buffer), config.sector_size) == 0);
+        assert(@mod(buffer.len, config.sector_size) == 0);
+
+        while (true) {
+            var bytes_read = try self.file.preadAll(buffer[0..], self.offset);
+            log.debug("read[0..{}]={}", .{ buffer.len, bytes_read });
+
+            var buffer_offset: usize = 0;
+            while (buffer_offset < bytes_read) {
+                const entry = mem.bytesAsValue(
+                    JournalHeader,
+                    buffer[buffer_offset..][0..@sizeOf(JournalHeader)]
+                );
+                log.debug("{}", .{ entry });
+
+                if (!entry.valid_checksum_meta()) return error.JournalEntryHeaderCorrupt;
+                const entry_data = buffer[buffer_offset..][@sizeOf(JournalHeader)..entry.size];
+                if (!entry.valid_checksum_data(entry_data)) return error.JournalEntryDataCorrupt;
+                if (entry.prev_checksum_meta != self.hash_chain_root) {
+                    return error.JournalEntryMisdirectedWrite;
+                }
+
+                _ = self.state.apply(entry.command, entry_data, output[0..]);
+
+                self.hash_chain_root = entry.checksum_meta;
+                self.prev_hash_chain_root = entry.prev_checksum_meta;
+                buffer_offset += Journal.sector_multiple(entry.size, config.sector_size);
+            }
+            assert(buffer_offset == bytes_read);
+
+            self.offset += buffer_offset;
+            if (bytes_read < buffer.len) break;
+        }
+    }
+
+    fn create(path: []const u8) !fs.File {
+        try std.fs.cwd().createFile(path, .{
+            .read = true,
+            .exclusive = true,
+            .truncate = false,
+            .lock = .Exclusive,
+            .mode = 0o666,
+        });
     }
 
     fn open(path: []const u8) !fs.File {
@@ -104,7 +146,7 @@ pub const Journal = struct {
         }) catch |err| switch (err) {
             error.FileNotFound => {
                 log.debug("creating {}...", .{ path });
-                return std.fs.cwd().createFile(path, .{
+                return try std.fs.cwd().createFile(path, .{
                     .read = true,
                     .exclusive = true,
                     .truncate = false,
