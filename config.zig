@@ -52,6 +52,20 @@ pub const connections_max = 32;
 pub const request_size_max = 4 * 1024 * 1024;
 pub const response_size_max = 4 * 1024 * 1024;
 
+/// The maximum size of the journal file:
+/// This is pre-allocated and zeroed for performance when initialized.
+/// Writes within this file never extend the filesystem inode size reducing the cost of fdatasync().
+/// This also enables us to detect filesystem inode corruption that would change the journal size.
+pub const journal_size_max = switch (deployment_environment) {
+    .production => 128 * 1024 * 1024 * 1024,
+    else => 1024 * 1024 * 1024
+};
+
+/// The maximum number of batch entries in the journal file:
+/// We need this limit to allocate space for copies of entry headers at the start of the journal.
+/// These header copies enable us to disentangle corruption from crashes and recover accordingly.
+pub const journal_entries_max = 1_000_000;
+
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
 pub const tcp_backlog = 64;
 

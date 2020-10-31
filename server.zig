@@ -444,6 +444,11 @@ comptime {
     if (@mod(config.request_size_max, config.sector_size) != 0) {
         @compileError("config: request_size_max must be a multiple of sector_size");
     }
+    if (@mod(config.journal_size_max, config.sector_size) != 0) {
+        @compileError("config: journal_size_max must be a multiple of sector_size");
+    }
     // TODO Add safety checks on all config variables and interactions between them.
     // TODO Move this to types.zig or somewhere common to all code.
+    // TODO Persist critical config variables (e.g. sector_size, request_size_max) to metainfo.
+    // TODO Detect changes in critical config variables (check these against metainfo at runtime).
 }
