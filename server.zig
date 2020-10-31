@@ -422,30 +422,36 @@ pub fn main() !void {
 comptime {
     switch (config.deployment_environment) {
         .development => {},
-        .staging => {},
         .production => {},
         else => @compileError("config: unknown deployment_environment")
     }
+
     if (
         config.tcp_user_timeout >
         (config.tcp_keepidle + config.tcp_keepintvl * config.tcp_keepcnt) * 1000
     ) {
         @compileError("config: tcp_user_timeout would cause tcp_keepcnt to be extended");
     }
+
     if (config.sector_size < 4096) {
         @compileError("config: sector_size must be at least 4096 bytes for Advanced Format disks");
     }
     if (!std.math.isPowerOfTwo(config.sector_size)) {
         @compileError("config: sector_size must be a power of two");
     }
+
     if (config.request_size_max <= @sizeOf(NetworkHeader)) {
         @compileError("config: request_size_max must be more than a network header");
     }
     if (@mod(config.request_size_max, config.sector_size) != 0) {
         @compileError("config: request_size_max must be a multiple of sector_size");
     }
+
     if (@mod(config.journal_size_max, config.sector_size) != 0) {
         @compileError("config: journal_size_max must be a multiple of sector_size");
+    }
+    if (@mod(config.journal_size_max, config.request_size_max) != 0) {
+        @compileError("config: journal_size_max must be a multiple of request_size_max");
     }
     // TODO Add safety checks on all config variables and interactions between them.
     // TODO Move this to types.zig or somewhere common to all code.
