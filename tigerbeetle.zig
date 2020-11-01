@@ -110,7 +110,7 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     assert(connection.references == 1);
     assert(connection.recv_size > 0);
     assert(connection.recv_size <= config.request_size_max);
-    assert(connection.recv.len == config.request_size_max + config.sector_size);
+    assert(connection.recv.len == config.request_size_max + (config.sector_size * 2));
     assert(connection.send_offset == 0);
     assert(connection.send_size == 0);
     assert(prev_recv_size < connection.recv_size);
@@ -153,27 +153,27 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     }
 
     // Zero pad the request out to a sector multiple, required by the journal for direct I/O:
-    const request_sector_size = Journal.sector_multiple(request.size, config.sector_size);
-    if (request.size != request_sector_size) {
-        assert(request_sector_size > request.size);
-        const padding_size = request_sector_size - request.size;
-        assert(padding_size < config.sector_size);
+    // The journal also adds another sector for the EOF entry.
+    const request_entry_size = Journal.entry_size(request.size, config.sector_size);
+    if (request.size != request_entry_size) {
+        assert(request_entry_size > request.size);
+        const padding_size = request_entry_size - request.size;
         assert(connection.recv_size + padding_size <= connection.recv.len);
         // Don't overwrite any pipelined data, shift the pipeline to the right:
         if (connection.recv_size - request.size > 0) {
             // These slices overlap, with dest.ptr > src.ptr, so we must use a reverse loop:
             mem.copyBackwards(
                 u8,
-                connection.recv[request_sector_size..],
+                connection.recv[request_entry_size..],
                 connection.recv[request.size..connection.recv_size]
             );
         }
-        // Zero the last sector's padding:
-        mem.set(u8, connection.recv[request.size..request_sector_size], 0);
+        // Zero the padding:
+        mem.set(u8, connection.recv[request.size..request_entry_size], 0);
         connection.recv_size += padding_size;
     }
 
-    try journal.append(request.command, request.size, connection.recv[0..request_sector_size]);
+    try journal.append(request.command, request.size, connection.recv[0..request_entry_size]);
 
     // Apply as input to state machine, writing any response data directly to the send buffer:
     const response_data_size = state.apply(
@@ -198,13 +198,13 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     // This allows the client to have requests inflight up to the size of the receive buffer, and to
     // submit another request as each request is acked, without waiting for all inflight requests
     // to be acked. This costs a copy, but that is justified by the network performance gain.
-    const pipeline_size = connection.recv_size - request_sector_size;
+    const pipeline_size = connection.recv_size - request_entry_size;
     if (pipeline_size > 0) {
         // These slices overlap, with dest.ptr < src.ptr, so we must use a forward loop:
         mem.copy(
             u8,
             connection.recv[0..],
-            connection.recv[request_sector_size..connection.recv_size]
+            connection.recv[request_entry_size..connection.recv_size]
         );
     }
 

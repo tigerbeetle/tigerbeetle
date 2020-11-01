@@ -7,6 +7,13 @@ const Allocator = mem.Allocator;
 
 const config = @import("config.zig");
 
+// The connection receive buffer needs to be sector-aligned for zero-copy direct I/O to disk:
+// We add a sector to ensure there is space for a request to be padded out to a sector multiple.
+// We also add another sector for the EOF journal entry.
+const recv_len = config.request_size_max + config.sector_size + config.sector_size;
+
+const send_len = config.response_size_max;
+
 pub const Connection = struct {
     id: u32,
     fd: os.fd_t,
@@ -14,10 +21,8 @@ pub const Connection = struct {
     recv_size: usize,
     send_offset: usize,
     send_size: usize,
-    // The connection receive buffer needs to be sector-aligned for zero-copy direct I/O to disk:
-    // We add a sector to ensure there is space for requests to be padded out to a sector multiple.
-    recv: [config.request_size_max + config.sector_size]u8 align(config.sector_size) = undefined,
-    send: [config.response_size_max]u8 = undefined,
+    recv: [recv_len]u8 align(config.sector_size) = undefined,
+    send: [send_len]u8 = undefined,
 };
 
 /// This abstracts all our server connection management logic and static allocation.
@@ -134,8 +139,8 @@ test "connections" {
     testing.expectEqual(count, connections.array.len);
     testing.expectEqual(true, connections.available());
 
-    const zeroes_recv = [_]u8{0} ** (config.request_size_max + config.sector_size);
-    const zeroes_send = [_]u8{0} ** config.response_size_max;
+    const zeroes_recv = [_]u8{0} ** recv_len;
+    const zeroes_send = [_]u8{0} ** send_len;
     for (connections.array) |*connection, index| {
         testing.expectEqual(@as(u32, 0), connection.id);
         testing.expectEqual(@as(os.fd_t, -1), connection.fd);

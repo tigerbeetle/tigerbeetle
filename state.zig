@@ -39,11 +39,10 @@ pub const State = struct {
 
     pub fn apply(self: *State, command: Command, input: []const u8, output: []u8) usize {
         return switch (command) {
-            .reserved => unreachable,
-            .ack => unreachable,
             .create_accounts => self.apply_create_accounts(input, output),
             .create_transfers => self.apply_create_transfers(input, output),
             .commit_transfers => self.apply_commit_transfers(input, output),
+            else => unreachable
         };
     }
 

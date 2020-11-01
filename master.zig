@@ -21,11 +21,10 @@ pub const Master = struct {
     /// Returns true if all reserved timestamps were zero before being assigned, else false.
     pub fn assign_timestamps(self: *Master, command: Command, batch: []u8) bool {
         return switch (command) {
-            .reserved => unreachable,
-            .ack => unreachable,
             .create_accounts  => self.assign_timestamps_for_type(Account, batch),
             .create_transfers => self.assign_timestamps_for_type(Transfer, batch),
             .commit_transfers => self.assign_timestamps_for_type(Commit, batch),
+            else => unreachable
         };
     }
 

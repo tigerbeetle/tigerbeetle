@@ -5,7 +5,7 @@ const crypto = std.crypto;
 const mem = std.mem;
 
 pub const Command = packed enum(u32) {
-    reserved,
+    eof,
     ack,
     create_accounts,
     create_transfers,
@@ -290,18 +290,18 @@ pub const NetworkHeader = packed struct {
         if (self.size < @sizeOf(NetworkHeader)) return false;
         const data_size = self.size - @sizeOf(NetworkHeader);
         const type_size: usize = switch (self.command) {
-            .reserved => unreachable,
             .ack => 8,
             .create_accounts => @sizeOf(Account),
             .create_transfers => @sizeOf(Transfer),
-            .commit_transfers => @sizeOf(Commit)
+            .commit_transfers => @sizeOf(Commit),
+            else => unreachable,
         };
         const min_count: usize = switch (self.command) {
-            .reserved => unreachable,
             .ack => 0,
             .create_accounts => 1,
             .create_transfers => 1,
-            .commit_transfers => 1
+            .commit_transfers => 1,
+            else => unreachable,
         };
         return (
             @mod(data_size, type_size) == 0 and

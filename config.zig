@@ -1,4 +1,4 @@
-/// Whether development, staging or production:
+/// Whether development or production:
 pub const deployment_environment = .development;
 
 /// The minimum log level in increasing order of verbosity (emergency=0, debug=7):
@@ -55,16 +55,21 @@ pub const response_size_max = 4 * 1024 * 1024;
 /// The maximum size of the journal file:
 /// This is pre-allocated and zeroed for performance when initialized.
 /// Writes within this file never extend the filesystem inode size reducing the cost of fdatasync().
+/// This enables static allocation of disk space so that appends cannot fail with ENOSPC.
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
 pub const journal_size_max = switch (deployment_environment) {
     .production => 128 * 1024 * 1024 * 1024,
-    else => 1024 * 1024 * 1024
+    else => 128 * 1024 * 1024
 };
 
 /// The maximum number of batch entries in the journal file:
-/// We need this limit to allocate space for copies of entry headers at the start of the journal.
+/// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
+/// We need this limit to allocate space for copies of batch headers at the start of the journal.
 /// These header copies enable us to disentangle corruption from crashes and recover accordingly.
-pub const journal_entries_max = 1_000_000;
+pub const journal_entries_max = switch (deployment_environment) {
+    .production => 1_000_000,
+    else => 100_000
+};
 
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
 pub const tcp_backlog = 64;
@@ -118,3 +123,15 @@ pub const tcp_nodelay = true;
 /// The new Advanced Format sector size is backwards compatible with the old 512 byte sector size.
 /// This should therefore never be less than 4 KiB to be future-proof when server disks are swapped.
 pub const sector_size = 4096;
+
+/// Whether to perform direct I/O to the underlying disk device:
+/// This enables several performance optimizations:
+/// * A memory copy to the kernel's page cache can be eliminated for reduced CPU utilization.
+/// * I/O can be issued immediately to the disk device without buffering delay for improved latency.
+/// This also enables several safety features:
+/// * Disk data can be scrubbed to repair latent sector errors and checksum errors proactively.
+/// * Fsync failures can be recovered from correctly.
+/// WARNING: Disabling direct I/O is unsafe; the page cache cannot be trusted after an fsync error,
+/// even after an application panic, since the kernel will mark dirty pages as clean, even
+/// when they were never written to disk.
+pub const direct_io = true;
