@@ -44,11 +44,11 @@ pub const Journal = struct {
     }
 
     /// Append a batch of events to the journal:
-    /// The journal will overwrite the 64-byte header in place at the front of the buffer.
-    /// The journal will also write the 64-byte eof header to the last sector of the buffer.
-    /// The buffer pointer address must be aligned to config.sector_size for direct I/O.
-    /// The buffer length must similarly be a multiple of config.sector_size.
-    /// `size` may be less than a sector multiple, but the remainder must already be zero padded.
+    /// - The journal will overwrite the 64-byte header in place at the front of the buffer.
+    /// - The journal will also write the 64-byte EOF header to the last sector of the buffer.
+    /// - The buffer pointer address must be aligned to `config.sector_size` for direct I/O.
+    /// - The buffer length must similarly be a multiple of `config.sector_size`.
+    /// - `size` may be less than a sector multiple, but the remainder must already be zero padded.
     pub fn append(self: *Journal, command: Command, size: u32, buffer: []u8) !void {
         assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
         assert(@sizeOf(JournalHeader) == @sizeOf(NetworkHeader));
@@ -78,13 +78,13 @@ pub const Journal = struct {
 
         if (std.builtin.mode == .Debug) {
             // Assert that the sector padding is already zeroed:
-            // There should be at least one sector for the eof header.
+            // There should be at least one sector for the EOF header.
             var sum_of_sector_padding_bytes: u32 = 0;
             for (buffer[size..]) |byte| sum_of_sector_padding_bytes += byte;
             assert(sum_of_sector_padding_bytes == 0);
         }
 
-        // Write the eof header to the last sector of the buffer:
+        // Write the EOF header to the last sector of the buffer:
         var eof_buffer = buffer[buffer.len - config.sector_size..][0..@sizeOf(JournalHeader)];
         const eof = mem.bytesAsValue(JournalHeader, eof_buffer);
         eof.* = .{
@@ -125,7 +125,7 @@ pub const Journal = struct {
         const rounded = sectors * sector_size;
         assert(rounded >= request_size);
         assert(rounded < request_size + sector_size);
-        // Now add another sector for the eof journal entry:
+        // Now add another sector for the EOF journal entry:
         return rounded + sector_size;
     }
 
@@ -263,7 +263,7 @@ pub const Journal = struct {
         }
         assert(zeroing_offset == config.journal_size_max);
 
-        // Write the eof header:
+        // Write the EOF header:
         const eof = mem.bytesAsValue(JournalHeader, buffer[0..@sizeOf(JournalHeader)]);
         eof.* = .{
             .prev_checksum_meta = 0, // TODO Use unique initialization state.
@@ -362,6 +362,9 @@ pub const Journal = struct {
         
         const path_c = try os.toPosixPath(path);
         const fd = try os.openatZ(dir_fd, &path_c, flags, mode);
+        errdefer os.close(fd);
+
+        try os.flock(fd, os.LOCK_EX);
 
         return fs.File {
             .handle = fd,
