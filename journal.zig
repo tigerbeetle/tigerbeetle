@@ -116,6 +116,7 @@ pub const Journal = struct {
         assert(self.offset <= config.journal_size_max);
     }
 
+    /// Returns the sector multiple size of a batch, including additional space for the EOF entry.
     pub fn entry_size(request_size: u64, sector_size: u64) u64 {
         assert(request_size > 0);
         assert(sector_size > 0);
@@ -125,10 +126,12 @@ pub const Journal = struct {
         const rounded = sectors * sector_size;
         assert(rounded >= request_size);
         assert(rounded < request_size + sector_size);
-        // Now add another sector for the EOF journal entry:
+        // Now add another sector for the EOF entry:
         return rounded + sector_size;
     }
 
+    /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
+    /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
     pub fn fs_supports_direct_io(dir_fd: os.fd_t) !bool {
         if (!@hasDecl(os, "O_DIRECT")) return false;
 
@@ -222,6 +225,10 @@ pub const Journal = struct {
         }
     }
 
+    /// Creates an empty journal file:
+    /// - Calls fallocate() to allocate contiguous disk sectors (if possible).
+    /// - Zeroes the entire file to force allocation and improve performance (e.g. on EBS volumes).
+    /// - Writes an EOF entry.
     fn create(path: []const u8) !fs.File {
         log.debug("creating {}...", .{ path });
 
@@ -288,6 +295,7 @@ pub const Journal = struct {
         return file;
     }
 
+    /// Pending https://github.com/ziglang/zig/pull/6895
     fn fallocate(fd: os.fd_t, mode: i32, offset: u64, len: u64) !void {
         switch (linux.getErrno(Journal.fallocate_syscall(fd, mode, offset, len))) {
             0 => {},
@@ -328,15 +336,21 @@ pub const Journal = struct {
         }
     }
 
+    /// Opens an existing journal file.
     fn open(path: []const u8) !fs.File {
         // TODO Figure out absolute path to journal file regardless of the server's cwd.
         log.debug("opening {}...", .{ path });
         return Journal.openat(std.fs.cwd().fd, path, false) catch |err| switch (err) {
+            // TODO Fail if FileNotFound, when we start explicitly initializing the cluster:
             error.FileNotFound => return try Journal.create(path),
             else => return err,
         };
     }
 
+    /// Opens or creates a journal file:
+    /// - For reading and writing.
+    /// - For Direct I/O (if possible in development mode, but required in production mode).
+    /// - Obtains an advisory exclusive lock to the file descriptor.
     fn openat(dir_fd: os.fd_t, path: []const u8, creating: bool) !fs.File {
         var flags: u32 = os.O_CLOEXEC | os.O_RDWR;
         var mode: fs.File.Mode = 0;
