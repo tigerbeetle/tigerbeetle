@@ -5,6 +5,7 @@ const crypto = std.crypto;
 const mem = std.mem;
 
 pub const Command = packed enum(u32) {
+    reserved,
     eof,
     ack,
     create_accounts,
