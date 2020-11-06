@@ -5,8 +5,8 @@ const crypto = std.crypto;
 const mem = std.mem;
 
 pub const Command = packed enum(u32) {
-    reserved,
-    eof,
+    // We reserve command "0" to detect any accidental zero byte being interpreted as a command:
+    eof = 1,
     ack,
     create_accounts,
     create_transfers,
@@ -26,8 +26,8 @@ pub const Account = packed struct {
      debit_accepted_limit: u64,
     credit_reserved_limit: u64,
     credit_accepted_limit: u64,
-                  padding: u64,
-                timestamp: u64,
+                  padding: u64 = 0,
+                timestamp: u64 = 0,
 
     pub inline fn exceeds(balance: u64, amount: u64, limit: u64) bool {
         return limit > 0 and balance + amount > limit;
@@ -51,7 +51,7 @@ pub const Account = packed struct {
 };
 
 pub const AccountFlags = packed struct {
-    reserved: u64 = 0,
+    padding: u64 = 0,
 };
 
 pub const Transfer = packed struct {
@@ -64,14 +64,14 @@ pub const Transfer = packed struct {
                 flags: TransferFlags,
                amount: u64,
               timeout: u64,
-            timestamp: u64,
+            timestamp: u64 = 0,
 };
 
 pub const TransferFlags = packed struct {
          accept: bool = false,
          reject: bool = false,
     auto_commit: bool = false,
-       reserved: u61 = 0,
+        padding: u61 = 0,
 };
 
 pub const Commit = packed struct {
@@ -86,7 +86,7 @@ pub const Commit = packed struct {
 pub const CommitFlags = packed struct {
       accept: bool = false,
       reject: bool = false,
-    reserved: u62 = 0,
+     padding: u62 = 0,
 };
 
 pub const CreateAccountResult = packed enum(u32) {
@@ -99,7 +99,7 @@ pub const CreateAccountResult = packed enum(u32) {
     reserved_field_custom,
     reserved_field_padding,
     reserved_field_timestamp,
-    reserved_flag,
+    reserved_flag_padding,
     exceeds_debit_reserved_limit,
     exceeds_debit_accepted_limit,
     exceeds_credit_reserved_limit,
@@ -121,7 +121,7 @@ pub const CreateTransferResult = packed enum(u32) {
     exists_and_already_committed_and_rejected,
     reserved_field_custom,
     reserved_field_timestamp,
-    reserved_flag,
+    reserved_flag_padding,
     reserved_flag_accept,
     reserved_flag_reject,
     debit_account_not_found,
@@ -141,7 +141,7 @@ pub const CommitTransferResult = packed enum(u32) {
     ok,
     reserved_field_custom,
     reserved_field_timestamp,
-    reserved_flag,
+    reserved_flag_padding,
     commit_must_accept_or_reject,
     commit_cannot_accept_and_reject,
     transfer_not_found,
