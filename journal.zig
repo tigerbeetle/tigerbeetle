@@ -137,7 +137,9 @@ pub const Journal = struct {
             headers_end_up,
             self.entries,
         });
-        try self.file.pwriteAll(mem.sliceAsBytes(self.headers)[headers_start_down..headers_end_up], headers_start_down);
+
+        // TODO Fix Direct I/O alignment:
+        //try self.file.pwriteAll(mem.sliceAsBytes(self.headers)[headers_start_down..headers_end_up], headers_start_down);
 
         try os.fsync(self.file.handle);
 
@@ -351,11 +353,18 @@ pub const Journal = struct {
             else => return err
         };
 
+        // TODO Use Journal allocator:
         // Dynamically allocate a buffer to zero the file:
         // This is done only at cluster initialization and not in the critical path.
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
-        var buffer = try arena.allocator.alloc(u8, config.request_size_max);
+        var buffer = try arena.allocator.allocAdvanced(
+            u8,
+            config.sector_size,
+            config.request_size_max,
+            .exact
+        );
+        defer arena.allocator.free(buffer);
         mem.set(u8, buffer[0..], 0);
         
         // Write zeroes to the disk to improve performance:
@@ -366,6 +375,9 @@ pub const Journal = struct {
         var zeroing_progress: u64 = 0;
         var zeroing_offset: u64 = 0;
         while (zeroing_offset < config.journal_size_max) {
+            assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
+            assert(@mod(buffer.len, config.sector_size) == 0);
+            assert(@mod(zeroing_offset, config.sector_size) == 0);
             try file.pwriteAll(buffer, zeroing_offset);
             zeroing_offset += buffer.len;
 
