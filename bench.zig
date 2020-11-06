@@ -7,17 +7,104 @@ const os = std.os;
 const linux = os.linux;
 const testing = std.testing;
 
+const config = @import("config.zig");
+
 usingnamespace @import("types.zig");
 
-const port = 3001;
+var accounts = [_]Account {
+    Account {
+        .id = 1,
+        .custom = 0,
+        .flags = .{},
+        .unit = 2,
+        .debit_reserved = 0,
+        .debit_accepted = 0,
+        .credit_reserved = 0,
+        .credit_accepted = 0,
+        .debit_reserved_limit = 1000_000_000,
+        .debit_accepted_limit = 1000_000_000,
+        .credit_reserved_limit = 0,
+        .credit_accepted_limit = 0,
+    },
+    Account {
+        .id = 2,
+        .custom = 0,
+        .flags = .{},
+        .unit = 2,
+        .debit_reserved = 0,
+        .debit_accepted = 0,
+        .credit_reserved = 0,
+        .credit_accepted = 0,
+        .debit_reserved_limit = 0,
+        .debit_accepted_limit = 0,
+        .credit_reserved_limit = 1000_000_000,
+        .credit_accepted_limit = 1000_000_000,
+    },
+};
 
-var id: u128 = 0;
+pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-fn send(fd: os.fd_t, command: Command, data: []u8, Result: anytype) !void {
-    id += 1;
+    // Pre-allocate a million transfers:
+    var transfers = try arena.allocator.alloc(Transfer, 1_000_000);
+    for (transfers) |*transfer, index| {
+        transfer.* = .{
+            .id = index,
+            .debit_account_id = accounts[0].id,
+            .credit_account_id = accounts[1].id,
+            .custom_1 = 0,
+            .custom_2 = 0,
+            .custom_3 = 0,
+            .flags = .{},
+            .amount = 1,
+            .timeout = 0,
+        };
+    }
 
+    var addr = try net.Address.parseIp4("127.0.0.1", config.port);
+    std.debug.print("connecting to {}...\n", .{ addr });
+    var connection = try net.tcpConnectToAddress(addr);
+    const fd = connection.handle;
+    defer os.close(fd);
+    std.debug.print("connected to tigerbeetle\n", .{});
+
+    // Create our two accounts if necessary:
+    std.debug.print("creating accounts...\n", .{});
+    try send(fd, .create_accounts, mem.asBytes(accounts[0..]), CreateAccountResults);
+
+    // Start the benchmark:
+    const start = std.time.milliTimestamp();
+    var offset: u64 = 0;
+    while (offset < transfers.len) {
+        // Create a batch of 10,000 transfers:
+        var batch = transfers[offset..][0..10000];
+        try send(fd, .create_transfers, mem.asBytes(batch[0..]), CreateTransferResults);
+        // Commit this batch:
+
+        // TODO
+
+        offset += batch.len;
+        if (@mod(offset, 100000) == 0) {
+            var space = if (offset == 1000000) "" else " ";
+            std.debug.print("{}{} transfers...\n", .{ space, offset });
+        }
+    }
+
+    const ms = std.time.milliTimestamp() - start;
+    std.debug.print("=============================\n", .{});
+    std.debug.print(
+        "{} transfers per second\n",
+        .{ @divFloor(@intCast(i64, transfers.len * 500), ms) }
+    );
+}
+
+var request_id: u128 = 0;
+
+fn send(fd: os.fd_t, command: Command, data: []u8, comptime Result: anytype) !void {
+    request_id += 1;
     var request = NetworkHeader {
-        .id = id,
+        .id = request_id,
         .command = command,
         .size = @intCast(u32, @sizeOf(NetworkHeader) + data.len)
     };
@@ -31,94 +118,33 @@ fn send(fd: os.fd_t, command: Command, data: []u8, Result: anytype) !void {
     }
 
     var recv: [1024 * 1024]u8 = undefined;
-    const recv_bytes = try os.recvfrom(fd, recv[0..], 0, null, null);
-    assert(recv_bytes >= @sizeOf(NetworkHeader));
+    var recv_size: u64 = 0;
+    while (recv_size < @sizeOf(NetworkHeader)) {
+        var recv_bytes = try os.recvfrom(fd, recv[recv_size..], 0, null, null);
+        if (recv_bytes == 0) @panic("server closed the connection (while waiting for header)");
+        recv_size += recv_bytes;
+    }
     
     var response = mem.bytesAsValue(NetworkHeader, recv[0..@sizeOf(NetworkHeader)]);
-    std.debug.print("{}\n", .{ response });
+    var print_response = response.size > @sizeOf(NetworkHeader);
+    if (print_response) std.debug.print("{}\n", .{ response });
     assert(response.magic == Magic);
     assert(response.valid_checksum_meta());
     assert(response.valid_size());
-    assert(recv_bytes >= response.size);
 
+    while (recv_size < response.size) {
+        var recv_bytes = try os.recvfrom(fd, recv[recv_size..], 0, null, null);
+        if (recv_bytes == 0) @panic("server closed the connection (while waiting for data)");
+        recv_size += recv_bytes;
+    }
+    
     const response_data = recv[@sizeOf(NetworkHeader)..response.size];
     assert(response.valid_checksum_data(response_data));
 
-    for (mem.bytesAsSlice(Result, response_data)) |result| {
-        std.debug.print("{}\n", .{ result });
+    if (print_response) {
+        for (mem.bytesAsSlice(Result, response_data)) |result| {
+            std.debug.print("{}\n", .{ result });
+        }
+        @panic("run 'rm -rf journal' and restart the server to do a fresh benchmark");
     }
-}
-
-pub fn main() !void {
-    var addr = try net.Address.parseIp4("127.0.0.1", port);
-    var connection = try net.tcpConnectToAddress(addr);
-    const fd = connection.handle;
-    defer os.close(fd);
-
-    var accounts = [_]Account {
-        Account {
-            .id = 1,
-            .custom = 0,
-            .flags = .{},
-            .unit = 2,
-            .debit_reserved = 0,
-            .debit_accepted = 0,
-            .credit_reserved = 0,
-            .credit_accepted = 0,
-            .debit_reserved_limit = 1_000_000,
-            .debit_accepted_limit = 1_000_000,
-            .credit_reserved_limit = 0,
-            .credit_accepted_limit = 0,
-            .padding = 0,
-            .timestamp = 0,
-        },
-        Account {
-            .id = 2,
-            .custom = 0,
-            .flags = .{},
-            .unit = 2,
-            .debit_reserved = 0,
-            .debit_accepted = 1_000_000_000,
-            .credit_reserved = 0,
-            .credit_accepted = 900_000,
-            .debit_reserved_limit = 0,
-            .debit_accepted_limit = 0,
-            .credit_reserved_limit = 1_000_000,
-            .credit_accepted_limit = 1_000_000,
-            .padding = 0,
-            .timestamp = 0,
-        },
-    };
-
-    try send(fd, .create_accounts, mem.asBytes(accounts[0..]), CreateAccountResults);
-    
-    var transfers = [_]Transfer {
-        Transfer {
-            .id = 4,
-            .debit_account_id = accounts[0].id,
-            .credit_account_id = accounts[1].id,
-            .custom_1 = 0,
-            .custom_2 = 0,
-            .custom_3 = 0,
-            .flags = .{ .accept = false, .auto_commit = false },
-            .amount = 100,
-            .timeout = 0,
-            .timestamp = 0,
-        }
-    };
-
-    try send(fd, .create_transfers, mem.asBytes(transfers[0..]), CreateTransferResults);
-
-    var commits = [_]Commit {
-        Commit {
-            .id = 4,
-            .custom_1 = 0,
-            .custom_2 = 0,
-            .custom_3 = 0,
-            .flags = .{ .accept = true },
-            .timestamp = 0,
-        }
-    };
-
-    try send(fd, .commit_transfers, mem.asBytes(commits[0..]), CommitTransferResults);
 }
