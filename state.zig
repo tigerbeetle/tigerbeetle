@@ -100,7 +100,7 @@ pub const State = struct {
         if (a.custom != 0) return .reserved_field_custom;
         if (a.padding != 0) return .reserved_field_padding;
 
-        if (a.flags.reserved != 0) return .reserved_flag;
+        if (a.flags.padding != 0) return .reserved_flag_padding;
 
         // Opening balances may never exceed limits:
         if (a.exceeds_debit_reserved_limit(0)) return .exceeds_debit_reserved_limit;
@@ -147,7 +147,7 @@ pub const State = struct {
         if (t.custom_2 != 0) return .reserved_field_custom;
         if (t.custom_3 != 0) return .reserved_field_custom;
 
-        if (t.flags.reserved != 0) return .reserved_flag;
+        if (t.flags.padding != 0) return .reserved_flag_padding;
         if (t.flags.accept and !t.flags.auto_commit) return .reserved_flag_accept;
         if (t.flags.reject) return .reserved_flag_reject;
         if (t.flags.auto_commit) {
@@ -225,7 +225,7 @@ pub const State = struct {
         if (c.custom_2 != 0) return .reserved_field_custom;
         if (c.custom_3 != 0) return .reserved_field_custom;
 
-        if (c.flags.reserved != 0) return .reserved_flag;
+        if (c.flags.padding != 0) return .reserved_flag_padding;
         if (!c.flags.accept and !c.flags.reject) return .commit_must_accept_or_reject;
         if (c.flags.accept and c.flags.reject) return .commit_cannot_accept_and_reject;
 
