@@ -62,6 +62,18 @@ pub fn main() !void {
         };
     }
 
+    // Pre-allocate a million commits:
+    var commits = try arena.allocator.alloc(Commit, 1_000_000);
+    for (commits) |*commit, index| {
+        commit.* = .{
+            .id = index,
+            .custom_1 = 0,
+            .custom_2 = 0,
+            .custom_3 = 0,
+            .flags = .{ .accept = true },
+        };
+    }
+
     var addr = try net.Address.parseIp4("127.0.0.1", config.port);
     std.debug.print("connecting to {}...\n", .{ addr });
     var connection = try net.tcpConnectToAddress(addr);
@@ -78,13 +90,13 @@ pub fn main() !void {
     var offset: u64 = 0;
     while (offset < transfers.len) {
         // Create a batch of 10,000 transfers:
-        var batch = transfers[offset..][0..10000];
-        try send(fd, .create_transfers, mem.asBytes(batch[0..]), CreateTransferResults);
+        var batch_transfers = transfers[offset..][0..10000];
+        try send(fd, .create_transfers, mem.asBytes(batch_transfers[0..]), CreateTransferResults);
         // Commit this batch:
+        var batch_commits = commits[offset..][0..10000];
+        try send(fd, .commit_transfers, mem.asBytes(batch_commits[0..]), CommitTransferResults);
 
-        // TODO
-
-        offset += batch.len;
+        offset += batch_transfers.len;
         if (@mod(offset, 100000) == 0) {
             var space = if (offset == 1000000) "" else " ";
             std.debug.print("{}{} transfers...\n", .{ space, offset });
@@ -95,7 +107,7 @@ pub fn main() !void {
     std.debug.print("=============================\n", .{});
     std.debug.print(
         "{} transfers per second\n",
-        .{ @divFloor(@intCast(i64, transfers.len * 500), ms) }
+        .{ @divFloor(@intCast(i64, transfers.len * 1000), ms) }
     );
 }
 

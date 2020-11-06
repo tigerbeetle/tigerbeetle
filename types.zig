@@ -80,7 +80,7 @@ pub const Commit = packed struct {
      custom_2: u128,
      custom_3: u128,
         flags: CommitFlags,
-    timestamp: u64,
+    timestamp: u64 = 0,
 };
 
 pub const CommitFlags = packed struct {
