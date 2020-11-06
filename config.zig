@@ -2,7 +2,7 @@
 pub const deployment_environment = .development;
 
 /// The minimum log level in increasing order of verbosity (emergency=0, debug=7):
-pub const log_level = 7;
+pub const log_level = 6;
 
 /// The default server port to listen on:
 pub const port = 3001;
@@ -59,7 +59,7 @@ pub const response_size_max = 4 * 1024 * 1024;
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
 pub const journal_size_max = switch (deployment_environment) {
     .production => 128 * 1024 * 1024 * 1024,
-    else => 128 * 1024 * 1024
+    else => 256 * 1024 * 1024
 };
 
 /// The maximum number of batch entries in the journal file:
@@ -67,8 +67,8 @@ pub const journal_size_max = switch (deployment_environment) {
 /// We need this limit to allocate space for copies of batch headers at the start of the journal.
 /// These header copies enable us to disentangle corruption from crashes and recover accordingly.
 pub const journal_entries_max = switch (deployment_environment) {
-    .production => 1_000_000,
-    else => 100_000
+    .production => 1024 * 1024,
+    else => 128 * 1024
 };
 
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
