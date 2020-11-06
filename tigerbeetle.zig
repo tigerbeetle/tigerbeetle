@@ -403,7 +403,7 @@ pub fn main() !void {
     state = try State.init(allocator, config.accounts_max, config.transfers_max);
     defer state.deinit();
 
-    journal = try Journal.init(&state);
+    journal = try Journal.init(allocator, &state);
     defer journal.deinit();
 
     connections = try Connections.init(allocator, config.connections_max);
@@ -452,6 +452,13 @@ comptime {
     }
     if (@mod(config.journal_size_max, config.request_size_max) != 0) {
         @compileError("config: journal_size_max must be a multiple of request_size_max");
+    }
+
+    if (@mod(config.sector_size, @sizeOf(JournalHeader)) != 0) {
+        @compileError("config: sector_size must be a multiple of @sizeOf(JournalHeader)");
+    }
+    if (@mod(config.journal_entries_max * @sizeOf(JournalHeader), config.sector_size) != 0) {
+        @compileError("config: journal_entries_max must be a multiple of headers per sector");
     }
     // TODO Add safety checks on all config variables and interactions between them.
     // TODO Move this to types.zig or somewhere common to all code.

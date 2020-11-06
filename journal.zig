@@ -4,6 +4,7 @@ const fs = std.fs;
 const linux = std.os.linux;
 const log = std.log.scoped(.journal);
 const mem = std.mem;
+const Allocator = mem.Allocator;
 const os = std.os;
 
 const config = @import("config.zig");
@@ -12,30 +13,45 @@ usingnamespace @import("types.zig");
 usingnamespace @import("state.zig");
 
 pub const Journal = struct {
+               allocator: *Allocator,
                    state: *State,
                     file: fs.File,
          hash_chain_root: u128,
     prev_hash_chain_root: u128,
+                 headers: []JournalHeader align(config.sector_size),
                  entries: u64,
                   offset: u64,
 
-    pub fn init(state: *State) !Journal {
+    pub fn init(allocator: *Allocator, state: *State) !Journal {
         const path = "journal";
         const file = try Journal.open(path);
         errdefer file.close();
 
+        var headers = try allocator.allocAdvanced(
+            JournalHeader,
+            config.sector_size,
+            config.journal_entries_max,
+            .exact
+        );
+        errdefer allocator.free(headers);
+        mem.set(u8, mem.sliceAsBytes(headers), 0);
+        
         var self = Journal {
+            .allocator = allocator,
             .state = state,
             .file = file,
             .hash_chain_root = 0,
             .prev_hash_chain_root = 0,
+            .headers = headers,
             .entries = 0,
-            .offset = 0,
+            .offset = @sizeOf(JournalHeader) * headers.len,
         };
+        assert(@mod(self.offset, config.sector_size) == 0);
+        assert(@mod(@ptrToInt(&headers[0]), config.sector_size) == 0);
 
         log.debug("fd={}", .{ self.file.handle });
 
-        try self.read();
+        try self.recover();
         return self;
     }
 
@@ -45,7 +61,7 @@ pub const Journal = struct {
 
     /// Append a batch of events to the journal:
     /// - The journal will overwrite the 64-byte header in place at the front of the buffer.
-    /// - The journal will also write the 64-byte EOF header to the last sector of the buffer.
+    /// - The journal will also write the 64-byte EOF entry to the last sector of the buffer.
     /// - The buffer pointer address must be aligned to `config.sector_size` for direct I/O.
     /// - The buffer length must similarly be a multiple of `config.sector_size`.
     /// - `size` may be less than a sector multiple, but the remainder must already be zero padded.
@@ -60,8 +76,8 @@ pub const Journal = struct {
 
         // TODO Snapshot before the journal file can overflow in entries or size.
         // TODO Wrap around the journal file when appending and parsing.
-        if (self.entries + 1 > config.journal_entries_max) return error.JournalEntriesMax;
-        if (self.offset + buffer.len > config.journal_size_max) return error.JournalSizeMax;
+        if (self.entries + 2 > config.journal_entries_max) @panic("journal entries full");
+        if (self.offset + buffer.len > config.journal_size_max) @panic("journal size full");
 
         // Write the entry header to the front of the buffer:
         var entry = mem.bytesAsValue(JournalHeader, buffer[0..@sizeOf(JournalHeader)]);
@@ -78,13 +94,12 @@ pub const Journal = struct {
 
         if (std.builtin.mode == .Debug) {
             // Assert that the sector padding is already zeroed:
-            // There should be at least one sector for the EOF header.
             var sum_of_sector_padding_bytes: u32 = 0;
             for (buffer[size..]) |byte| sum_of_sector_padding_bytes += byte;
             assert(sum_of_sector_padding_bytes == 0);
         }
 
-        // Write the EOF header to the last sector of the buffer:
+        // Write the EOF entry to the last sector of the buffer:
         var eof_buffer = buffer[buffer.len - config.sector_size..][0..@sizeOf(JournalHeader)];
         const eof = mem.bytesAsValue(JournalHeader, eof_buffer);
         eof.* = .{
@@ -96,7 +111,7 @@ pub const Journal = struct {
         eof.set_checksum_data(eof_buffer[0..0]);
         eof.set_checksum_meta();
 
-        // Write the journal entry to the end of the journal:
+        // Write the request entry and EOF entry to the tail of the journal:
         log.debug("appending {} bytes at offset {}: {} {}", .{
             buffer.len,
             self.offset,
@@ -104,6 +119,26 @@ pub const Journal = struct {
             eof
         });
         try self.file.pwriteAll(buffer, self.offset);
+
+        // Write the request entry and EOF entry headers to the head of the journal:
+        // TODO Use a temporary buffer to avoid dirtying the buffer before it's on disk.
+        assert(self.headers[self.entries].prev_checksum_meta == entry.prev_checksum_meta);
+        assert(self.headers[self.entries].command == .eof);
+        self.headers[self.entries] = entry.*;
+        self.headers[self.entries + 1] = eof.*;
+
+        var headers_start = self.entries * @sizeOf(JournalHeader);
+        var headers_start_down = @divFloor(headers_start, config.sector_size);
+        var headers_end = headers_start + @sizeOf(JournalHeader) + @sizeOf(JournalHeader);
+        var headers_end_up = try std.math.divCeil(u64, headers_end, config.sector_size);
+        headers_end_up = headers_end_up * config.sector_size;
+        log.debug("headers_start={} headers_end={} entries={}", .{
+            headers_start_down,
+            headers_end_up,
+            self.entries,
+        });
+        try self.file.pwriteAll(mem.sliceAsBytes(self.headers)[headers_start_down..headers_end_up], headers_start_down);
+
         try os.fsync(self.file.handle);
 
         // Update journal state:
@@ -112,11 +147,11 @@ pub const Journal = struct {
         self.entries += 1;
         self.offset += buffer.len - config.sector_size;
 
-        assert(self.entries <= config.journal_entries_max);
-        assert(self.offset <= config.journal_size_max);
+        assert(self.entries < config.journal_entries_max);
+        assert(self.offset < config.journal_size_max);
     }
 
-    /// Returns the sector multiple size of a batch, including additional space for the EOF entry.
+    /// Returns the sector multiple size of a batch, plus a sector for the EOF entry.
     pub fn entry_size(request_size: u64, sector_size: u64) u64 {
         assert(request_size > 0);
         assert(sector_size > 0);
@@ -155,38 +190,106 @@ pub const Journal = struct {
         }
     }
 
-    pub fn read(self: *Journal) !void {
+    pub fn read(self: *Journal, buffer: []u8, offset: u64) void {
+        log.debug("read[{}..{}]", .{ offset, offset + buffer.len });
+
+        assert(buffer.len > 0);
+        assert(offset + buffer.len <= config.journal_size_max);
+        // Ensure that the read is aligned correctly for Direct I/O:
+        // If this is not the case, the underlying read(2) syscall will return EINVAL.
+        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
+        assert(@mod(buffer.len, config.sector_size) == 0);
+        assert(@mod(offset, config.sector_size) == 0);
+
+        if (self.file.preadAll(buffer, offset)) |bytes_read| {
+            if (bytes_read != buffer.len) {
+                log.debug("short read: bytes_read={} buffer_len={}", .{ bytes_read, buffer.len });
+                @panic("fs corruption: journal file size truncated");
+            }
+        } else |err| {
+            if (err == error.InputOutput) {
+                // The disk was unable to read some sectors (an internal crc or hardware failure):
+                if (buffer.len > config.sector_size) {
+                    log.warn("latent sector error, subdividing read...", .{});
+                    // Subdivide the read into sectors to read around the faulty sector(s):
+                    // This is considerably slower than doing a bulk read.
+                    // By now we might also have experienced the disk's read timeout (in seconds).
+                    var position = offset;
+                    const length = offset + buffer.len;
+                    while (position < length) : (position += config.sector_size) {
+                        self.read(buffer[position..][0..config.sector_size], position);
+                    }
+                } else {
+                    // Zero any remaining sectors that cannot be read:
+                    // We treat these EIO errors the same as a checksum failure.
+                    log.warn("latent sector error at offset {}, zeroing sector...", .{ offset });
+                    mem.set(u8, buffer, 0);
+                }
+            } else {
+                log.emerg("impossible read: err={}", .{ err });
+                @panic("impossible read");
+            }
+        }
+    }
+
+    pub fn recover(self: *Journal) !void {
         assert(self.hash_chain_root == 0);
         assert(self.prev_hash_chain_root == 0);
         assert(self.entries == 0);
-        assert(self.offset == 0);
+        assert(self.offset == config.journal_entries_max * @sizeOf(JournalHeader));
 
         var buffer: [config.request_size_max]u8 align(config.sector_size) = undefined;
         // TODO Allocate bigger output buffer:
         var output: [16384]u8 = undefined;
         assert(@mod(@ptrToInt(&buffer), config.sector_size) == 0);
         assert(@mod(buffer.len, config.sector_size) == 0);
+        assert(@mod(config.journal_size_max, buffer.len) == 0);
 
-        while (true) {
-            // TODO Handle entries that straddle the buffer.
-            var bytes_read = try self.file.preadAll(buffer[0..], self.offset);
-            log.debug("read[0..{}]={}", .{ buffer.len, bytes_read });
+        // Read redundant entry headers from the head of the journal:
+        self.read(mem.sliceAsBytes(self.headers), 0);
 
+        // Read entry headers and data from the body of the journal:        
+        while (self.offset < config.journal_size_max) {
+            self.read(buffer[0..], self.offset);
+
+            var offset = self.offset;
             var buffer_offset: u64 = 0;
-            while (buffer_offset < bytes_read) {
+            while (buffer_offset < buffer.len) {
+                if (buffer_offset + @sizeOf(JournalHeader) > buffer.len) break;
+
+                var header = &self.headers[self.entries];
+                log.debug("header = {}", .{ header });
+
                 const entry = mem.bytesAsValue(
                     JournalHeader,
                     buffer[buffer_offset..][0..@sizeOf(JournalHeader)]
                 );
-                log.debug("{}", .{ entry });
+                log.debug("entry = {}", .{ entry });
 
-                if (!entry.valid_checksum_meta()) return error.JournalEntryHeaderCorrupt;
-                const entry_data = buffer[buffer_offset..][@sizeOf(JournalHeader)..entry.size];
-                if (!entry.valid_checksum_data(entry_data)) return error.JournalEntryDataCorrupt;
-                if (entry.prev_checksum_meta != self.hash_chain_root) {
-                    return error.JournalEntryMisdirected;
+                if (!header.valid_checksum_meta()) @panic("corrupt header");
+                if (self.entries > 0) {
+                    const prev_header = self.headers[self.entries - 1];
+                    if (header.prev_checksum_meta != prev_header.checksum_meta) {
+                        @panic("misdirected header");
+                    }
+                    const prev_size = Journal.entry_size(prev_header.size, config.sector_size);
+                    if (header.offset != prev_header.offset + prev_size - config.sector_size) {
+                        @panic("invalid header offset");
+                    }
                 }
-                if (entry.offset != self.offset) return error.JournalEntryOffsetInvalid;
+                if (header.prev_checksum_meta != self.hash_chain_root) @panic("misdirected header");
+                if (header.offset != self.offset) @panic("invalid header offset");
+
+                if (!entry.valid_checksum_meta()) @panic("corrupt entry");
+                if (entry.prev_checksum_meta != self.hash_chain_root) @panic("misdirected entry");
+                if (entry.offset != self.offset) @panic("invalid entry offset");
+
+                if (entry.checksum_meta != header.checksum_meta) @panic("different headers");
+
+                if (buffer_offset + entry.size > buffer.len) break;
+
+                const entry_data = buffer[buffer_offset..][@sizeOf(JournalHeader)..entry.size];
+                if (!entry.valid_checksum_data(entry_data)) @panic("corrupt entry data");
 
                 if (entry.command == .eof) {
                     assert(entry.size == @sizeOf(JournalHeader));
@@ -210,19 +313,23 @@ pub const Journal = struct {
                 self.hash_chain_root = entry.checksum_meta;
                 self.prev_hash_chain_root = entry.prev_checksum_meta;
 
-                // TODO
-                buffer_offset += Journal.entry_size(entry.size, config.sector_size) - config.sector_size;
+                // TODO Do not include EOF size in entry_size() calculation:
+                const advance = (
+                    Journal.entry_size(entry.size, config.sector_size) - config.sector_size
+                );
 
                 self.entries += 1;
-                self.offset += Journal.entry_size(entry.size, config.sector_size) - config.sector_size;
+                assert(self.entries < config.journal_entries_max);
+                
+                self.offset += advance;
+                assert(self.offset < config.journal_size_max);
 
-                assert(self.entries <= config.journal_entries_max);
-                assert(self.offset <= config.journal_size_max);
+                buffer_offset += advance;
             }
-
-            self.offset += buffer_offset;
-            if (bytes_read < buffer.len) break;
+            if (self.offset == offset) @panic("offset was not advanced");
         }
+        assert(self.offset == config.journal_size_max);
+        @panic("eof entry not found");
     }
 
     /// Creates an empty journal file:
@@ -230,16 +337,16 @@ pub const Journal = struct {
     /// - Zeroes the entire file to force allocation and improve performance (e.g. on EBS volumes).
     /// - Writes an EOF entry.
     fn create(path: []const u8) !fs.File {
-        log.debug("creating {}...", .{ path });
+        log.info("creating {}...", .{ path });
 
         const file = try Journal.openat(std.fs.cwd().fd, path, true);
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
-        // Some virtual file systems will not support fallocate(), and that's fine.
+        // Some file systems will not support fallocate(), that's fine, but could mean more seeks.
         log.debug("pre-allocating {} bytes...", .{ config.journal_size_max });
         Journal.fallocate(file.handle, 0, 0, config.journal_size_max) catch |err| switch (err) {
             error.OperationNotSupported => {
-                log.notice("fs does not support fallocate(), file may be non-contiguous", .{});
+                log.notice("file system does not support fallocate()", .{});
             },
             else => return err
         };
@@ -262,35 +369,46 @@ pub const Journal = struct {
             try file.pwriteAll(buffer, zeroing_offset);
             zeroing_offset += buffer.len;
 
-            const percent: u64 = @divTrunc(zeroing_offset * 100, config.journal_size_max);
-            if (percent - zeroing_progress >= 20 or percent == 100) {
-                log.debug("zeroing... {}%", .{ percent });
-                zeroing_progress = percent;
+            const zeroing_percent: u64 = @divTrunc(zeroing_offset * 100, config.journal_size_max);
+            if (zeroing_percent - zeroing_progress >= 20 or zeroing_percent == 100) {
+                log.debug("zeroing... {}%", .{ zeroing_percent });
+                zeroing_progress = zeroing_percent;
             }
         }
         assert(zeroing_offset == config.journal_size_max);
 
-        // Write the EOF header:
+        // Write the EOF entry to the head of the journal, and to the body of the journal:
+        const eof_head_offset = 0;
+        const eof_body_offset = config.journal_entries_max * @sizeOf(JournalHeader);
+        assert(@mod(eof_body_offset, config.sector_size) == 0);
         const eof = mem.bytesAsValue(JournalHeader, buffer[0..@sizeOf(JournalHeader)]);
         eof.* = .{
             .prev_checksum_meta = 0, // TODO Use unique initialization state.
-            .offset = 0,
+            .offset = eof_body_offset,
             .command = .eof,
             .size = @sizeOf(JournalHeader),
         };
         eof.set_checksum_data(buffer[0..0]);
         eof.set_checksum_meta();
 
-        log.debug("appending {} bytes at offset {}: {}", .{
+        log.debug("writing {} bytes at offset {}: {}", .{
             config.sector_size,
-            0,
+            eof_body_offset,
             eof
         });
-        try file.pwriteAll(buffer[0..config.sector_size], 0);
+        try file.pwriteAll(buffer[0..config.sector_size], eof_body_offset);
+        
+        log.debug("writing {} bytes at offset {}: {}", .{
+            config.sector_size,
+            eof_head_offset,
+            eof
+        });
+        try file.pwriteAll(buffer[0..config.sector_size], eof_head_offset);
         
         log.debug("fsyncing...", .{});
         try os.fsync(file.handle);
-        // TODO Open parent directory to fsync the directory inode.
+
+        // TODO Open parent directory to fsync the directory inode (and recurse for all ancestors).
 
         return file;
     }
