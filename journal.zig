@@ -117,13 +117,8 @@ pub const Journal = struct {
         eof.set_checksum_meta();
 
         // Write the request entry and EOF entry to the tail of the journal:
-        log.debug("appending {} bytes at offset {}: {} {}", .{
-            buffer.len,
-            self.offset,
-            entry,
-            eof
-        });
-        self.write(buffer, self.offset);
+        log.debug("appending: {}", .{ entry });
+        log.debug("appending: {}", .{ eof });
 
         // Write the request entry and EOF entry headers to the head of the journal:
         assert(self.headers[self.entries].command == .eof);
@@ -133,7 +128,17 @@ pub const Journal = struct {
 
         var headers_offset = Journal.sector_floor(self.entries * @sizeOf(JournalHeader));
         var headers_length = Journal.sector_ceil((self.entries + 2) * @sizeOf(JournalHeader));
-        self.write(mem.sliceAsBytes(self.headers)[headers_offset..headers_length], headers_offset);
+        const headers = mem.sliceAsBytes(self.headers)[headers_offset..headers_length];
+
+        // Submit these writes according to where the last write took place:
+        // e.g. If the disk last wrote the headers then write the headers first for better locality.
+        if (config.journal_disk_scheduler == .elevator and (self.entries & 1) == 0) {
+            self.write(headers, headers_offset);
+            self.write(buffer, self.offset);
+        } else {
+            self.write(buffer, self.offset);
+            self.write(headers, headers_offset);
+        }
 
         // Update journal state:
         self.hash_chain_root = entry.checksum_meta;

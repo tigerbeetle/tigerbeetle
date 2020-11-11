@@ -135,3 +135,6 @@ pub const sector_size = 4096;
 /// even after an application panic, since the kernel will mark dirty pages as clean, even
 /// when they were never written to disk.
 pub const direct_io = true;
+
+/// Whether to order journal head/body writes to start from the last write (.elevator or .none):
+pub const journal_disk_scheduler = .elevator;
