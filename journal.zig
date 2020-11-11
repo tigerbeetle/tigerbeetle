@@ -246,6 +246,25 @@ pub const Journal = struct {
         }
     }
 
+    fn write(self: *Journal, buffer: []const u8, offset: u64) void {
+        log.debug("write(buffer.len={} offset={})", .{ buffer.len, offset });
+
+        assert(buffer.len > 0);
+        assert(offset + buffer.len <= config.journal_size_max);
+
+        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
+        assert(@mod(buffer.len, config.sector_size) == 0);
+        assert(@mod(offset, config.sector_size) == 0);
+
+        self.file.pwriteAll(buffer, offset) catch |err| switch (err) {
+            error.InputOutput => @panic("latent sector error: no spare sectors to reallocate"),
+            else => {
+                log.emerg("write: error={} buffer.len={} offset={}", .{ err, buffer.len, offset });
+                @panic("unrecoverable disk error");
+            }
+        };
+    }
+
     pub fn recover(self: *Journal) !void {
         assert(self.hash_chain_root == 0);
         assert(self.prev_hash_chain_root == 0);
