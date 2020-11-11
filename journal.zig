@@ -123,30 +123,17 @@ pub const Journal = struct {
             entry,
             eof
         });
-        try self.file.pwriteAll(buffer, self.offset);
+        self.write(buffer, self.offset);
 
         // Write the request entry and EOF entry headers to the head of the journal:
-        // TODO Use a temporary buffer to avoid dirtying the buffer before it's on disk.
-        assert(self.headers[self.entries].prev_checksum_meta == entry.prev_checksum_meta);
         assert(self.headers[self.entries].command == .eof);
-        self.headers[self.entries] = entry.*;
+        assert(self.headers[self.entries].prev_checksum_meta == entry.prev_checksum_meta);
+        self.headers[self.entries + 0] = entry.*;
         self.headers[self.entries + 1] = eof.*;
 
-        var headers_start = self.entries * @sizeOf(JournalHeader);
-        var headers_start_down = @divFloor(headers_start, config.sector_size);
-        var headers_end = headers_start + @sizeOf(JournalHeader) + @sizeOf(JournalHeader);
-        var headers_end_up = try std.math.divCeil(u64, headers_end, config.sector_size);
-        headers_end_up = headers_end_up * config.sector_size;
-        log.debug("headers_start={} headers_end={} entries={}", .{
-            headers_start_down,
-            headers_end_up,
-            self.entries,
-        });
-
-        // TODO Fix Direct I/O alignment:
-        //try self.file.pwriteAll(mem.sliceAsBytes(self.headers)[headers_start_down..headers_end_up], headers_start_down);
-
-        try os.fsync(self.file.handle);
+        var headers_offset = Journal.sector_floor(self.entries * @sizeOf(JournalHeader));
+        var headers_length = Journal.sector_ceil((self.entries + 2) * @sizeOf(JournalHeader));
+        self.write(mem.sliceAsBytes(self.headers)[headers_offset..headers_length], headers_offset);
 
         // Update journal state:
         self.hash_chain_root = entry.checksum_meta;
@@ -299,22 +286,19 @@ pub const Journal = struct {
                 );
                 log.debug("entry = {}", .{ entry });
 
-                // TODO Fix Direct I/O alignment when writing to re-enable this:
-                if (false) {
-                    if (!header.valid_checksum_meta()) @panic("corrupt header");
-                    if (self.entries > 0) {
-                        const prev_header = self.headers[self.entries - 1];
-                        if (header.prev_checksum_meta != prev_header.checksum_meta) {
-                            @panic("misdirected header");
-                        }
-                        const prev_size = Journal.entry_size(prev_header.size, config.sector_size);
-                        if (header.offset != prev_header.offset + prev_size - config.sector_size) {
-                            @panic("invalid header offset");
-                        }
+                if (!header.valid_checksum_meta()) @panic("corrupt header");
+                if (self.entries > 0) {
+                    const prev_header = self.headers[self.entries - 1];
+                    if (header.prev_checksum_meta != prev_header.checksum_meta) {
+                        @panic("misdirected header");
                     }
-                    if (header.prev_checksum_meta != self.hash_chain_root) @panic("misdirected header");
-                    if (header.offset != self.offset) @panic("invalid header offset");
+                    const prev_size = Journal.sector_ceil(prev_header.size);
+                    if (header.offset != prev_header.offset + prev_size) {
+                        @panic("invalid header offset");
+                    }
                 }
+                if (header.prev_checksum_meta != self.hash_chain_root) @panic("misdirected header");
+                if (header.offset != self.offset) @panic("invalid header offset");
 
                 if (!entry.valid_checksum_meta()) @panic("corrupt entry");
                 if (entry.prev_checksum_meta != self.hash_chain_root) @panic("misdirected entry");
