@@ -203,13 +203,14 @@ pub const Journal = struct {
         }
     }
 
-    pub fn read(self: *Journal, buffer: []u8, offset: u64) void {
-        log.debug("read[{}..{}]", .{ offset, offset + buffer.len });
+    fn read(self: *Journal, buffer: []u8, offset: u64) void {
+        log.debug("read(buffer.len={} offset={})", .{ buffer.len, offset });
 
         assert(buffer.len > 0);
         assert(offset + buffer.len <= config.journal_size_max);
+
         // Ensure that the read is aligned correctly for Direct I/O:
-        // If this is not the case, the underlying read(2) syscall will return EINVAL.
+        // If this is not the case, the underlying read syscall will return EINVAL.
         assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
         assert(@mod(buffer.len, config.sector_size) == 0);
         assert(@mod(offset, config.sector_size) == 0);
