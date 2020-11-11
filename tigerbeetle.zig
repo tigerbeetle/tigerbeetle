@@ -460,6 +460,12 @@ comptime {
     if (@mod(config.journal_entries_max * @sizeOf(JournalHeader), config.sector_size) != 0) {
         @compileError("config: journal_entries_max must be a multiple of headers per sector");
     }
+
+    switch (config.journal_disk_scheduler) {
+        .elevator => {},
+        .none => {},
+        else => @compileError("config: unknown journal_disk_scheduler")
+    }
     // TODO Add safety checks on all config variables and interactions between them.
     // TODO Move this to types.zig or somewhere common to all code.
     // TODO Persist critical config variables (e.g. sector_size, request_size_max) to metainfo.
