@@ -158,18 +158,24 @@ pub const Journal = struct {
         assert(self.offset < config.journal_size_max);
     }
 
+    fn sector_floor(offset: u64) u64 {
+        const sectors = std.math.divFloor(u64, offset, config.sector_size) catch unreachable;
+        return sectors * config.sector_size;
+    }
+
+    fn sector_ceil(offset: u64) u64 {
+        const sectors = std.math.divCeil(u64, offset, config.sector_size) catch unreachable;
+        return sectors * config.sector_size;
+    }
+
     /// Returns the sector multiple size of a batch, plus a sector for the EOF entry.
-    pub fn entry_size(request_size: u64, sector_size: u64) u64 {
+    pub fn append_size(request_size: u64) u64 {
         assert(request_size > 0);
-        assert(sector_size > 0);
-        assert(std.math.isPowerOfTwo(sector_size));
-        const sectors = std.math.divCeil(u64, request_size, sector_size) catch unreachable;
-        assert(sectors > 0);
-        const rounded = sectors * sector_size;
-        assert(rounded >= request_size);
-        assert(rounded < request_size + sector_size);
+        const sector_multiple = Journal.sector_ceil(request_size);
+        assert(sector_multiple >= request_size);
+        assert(sector_multiple < request_size + config.sector_size);
         // Now add another sector for the EOF entry:
-        return rounded + sector_size;
+        return sector_multiple + config.sector_size;
     }
 
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
@@ -323,10 +329,7 @@ pub const Journal = struct {
                 self.hash_chain_root = entry.checksum_meta;
                 self.prev_hash_chain_root = entry.prev_checksum_meta;
 
-                // TODO Do not include EOF size in entry_size() calculation:
-                const advance = (
-                    Journal.entry_size(entry.size, config.sector_size) - config.sector_size
-                );
+                const advance = Journal.sector_ceil(entry.size);
 
                 self.entries += 1;
                 assert(self.entries < config.journal_entries_max);
@@ -528,10 +531,10 @@ pub const Journal = struct {
 
 const testing = std.testing;
 
-test "entry_size()" {
-    const sector_size: u64 = 4096;
-    testing.expectEqual(sector_size * 2, Journal.entry_size(1, sector_size));
-    testing.expectEqual(sector_size * 2, Journal.entry_size(sector_size - 1, sector_size));
-    testing.expectEqual(sector_size * 2, Journal.entry_size(sector_size, sector_size));
-    testing.expectEqual(sector_size * 3, Journal.entry_size(sector_size + 1, sector_size));
+test "append_size()" {
+    const sector_size: u64 = config.sector_size;
+    testing.expectEqual(sector_size * 2, Journal.append_size(1));
+    testing.expectEqual(sector_size * 2, Journal.append_size(sector_size - 1));
+    testing.expectEqual(sector_size * 2, Journal.append_size(sector_size));
+    testing.expectEqual(sector_size * 3, Journal.append_size(sector_size + 1));
 }
