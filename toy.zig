@@ -68,7 +68,7 @@ pub fn main() !void {
 
     var commits = [_]Commit {
         Commit {
-            .id = 4,
+            .id = transfers[0].id,
             .custom_1 = 0,
             .custom_2 = 0,
             .custom_3 = 0,
