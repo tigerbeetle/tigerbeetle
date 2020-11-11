@@ -62,17 +62,22 @@ pub const Journal = struct {
     /// Append a batch of events to the journal:
     /// - The journal will overwrite the 64-byte header in place at the front of the buffer.
     /// - The journal will also write the 64-byte EOF entry to the last sector of the buffer.
+    /// - `size` may be less than a sector multiple, but the remainder must already be zero padded.
     /// - The buffer pointer address must be aligned to `config.sector_size` for direct I/O.
     /// - The buffer length must similarly be a multiple of `config.sector_size`.
-    /// - `size` may be less than a sector multiple, but the remainder must already be zero padded.
     pub fn append(self: *Journal, command: Command, size: u32, buffer: []u8) !void {
-        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
+        assert(command != .eof);
+        assert(command != .ack);
+
         assert(@sizeOf(JournalHeader) == @sizeOf(NetworkHeader));
         assert(size >= @sizeOf(JournalHeader));
-        assert(@mod(buffer.len, config.sector_size) == 0);
-        assert(buffer.len == Journal.entry_size(size, config.sector_size));
+        
+        assert(buffer.len == Journal.append_size(size));
         assert(buffer.len >= size + config.sector_size);
         assert(buffer.len < size + config.sector_size + config.sector_size);
+
+        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
+        assert(@mod(buffer.len, config.sector_size) == 0);
 
         // TODO Snapshot before the journal file can overflow in entries or size.
         // TODO Wrap around the journal file when appending and parsing.
