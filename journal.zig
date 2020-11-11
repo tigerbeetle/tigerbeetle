@@ -418,23 +418,20 @@ pub const Journal = struct {
         eof.set_checksum_data(buffer[0..0]);
         eof.set_checksum_meta();
 
-        log.debug("writing {} bytes at offset {}: {}", .{
+        log.debug("write(buffer.len={} offset={}): {}", .{
             config.sector_size,
             eof_body_offset,
             eof
         });
         try file.pwriteAll(buffer[0..config.sector_size], eof_body_offset);
         
-        log.debug("writing {} bytes at offset {}: {}", .{
+        log.debug("write(buffer.len={} offset={}): {}", .{
             config.sector_size,
             eof_head_offset,
             eof
         });
         try file.pwriteAll(buffer[0..config.sector_size], eof_head_offset);
         
-        log.debug("fsyncing...", .{});
-        try os.fsync(file.handle);
-
         // TODO Open parent directory to fsync the directory inode (and recurse for all ancestors).
 
         return file;
@@ -497,7 +494,7 @@ pub const Journal = struct {
     /// - For Direct I/O (if possible in development mode, but required in production mode).
     /// - Obtains an advisory exclusive lock to the file descriptor.
     fn openat(dir_fd: os.fd_t, path: []const u8, creating: bool) !fs.File {
-        var flags: u32 = os.O_CLOEXEC | os.O_RDWR;
+        var flags: u32 = os.O_CLOEXEC | os.O_RDWR | os.O_DSYNC;
         var mode: fs.File.Mode = 0;
 
         if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O_LARGEFILE;
@@ -519,6 +516,9 @@ pub const Journal = struct {
             mode = 0o666;
         }
         
+        // This is critical since we rely on O_DSYNC to fsync():
+        assert((flags & os.O_DSYNC) > 0);
+
         const path_c = try os.toPosixPath(path);
         const fd = try os.openatZ(dir_fd, &path_c, flags, mode);
         errdefer os.close(fd);
