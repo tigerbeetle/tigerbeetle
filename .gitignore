@@ -1,4 +1,7 @@
 .vscode
+demos/bitcast/bench-decode
+demos/bitcast/decode
+demos/bitcast/transfers
 dist/
 journal
 main
