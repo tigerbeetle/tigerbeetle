@@ -27,7 +27,7 @@ We then integrated ProtoBeetle into Mojaloop and our reference minimum deploymen
 
 You can watch [our 10-minute talk introducing ProtoBeetle](https://youtu.be/QOC6PHFPtAM?t=324).
 
-The alpha version of **TigerBeetle is now under active development** in C/Zig and the [DESIGN](./DESIGN.md) document is intended as a design document showing our design decisions regarding performance and safety, and where we want to go regarding accounting features.
+The alpha version of **TigerBeetle is now under active development** in C/Zig and the [DESIGN](./docs/DESIGN.md) document is intended as a design document showing our design decisions regarding performance and safety, and where we want to go regarding accounting features.
 
 ## Usage
 
@@ -35,19 +35,19 @@ The alpha version of TigerBeetle targets Linux and takes advantage of the latest
 
 Later portable versions of TigerBeetle can supplement io_uring with kqueue for macOS and FreeBSD support, or IOCP for Windows support.
 
-Once you have [upgraded the kernel on Ubuntu](./UPGRADE_UBUNTU_KERNEL.md) and [installed Zig](./INSTALL_ZIG.md), you can launch the AlphaBeetle server:
+Once you have [upgraded the kernel on Ubuntu](./docs/UPGRADE_UBUNTU_KERNEL.md) and [installed Zig](./docs/INSTALL_ZIG.md), you can launch the AlphaBeetle server:
 
 ```bash
-zig run server.zig
+./tigerbeetle
 ```
 
 ## Progress
 
 At present, the server will only ack transfer requests with an empty 64 byte header, without business logic or persistence. We are now building out the network protocol parsing, journalling and state machine logic:
 
-* [client](./client) is a TigerBeetle client written in Typescript.
-* [server.zig](./server.zig) is a TigerBeetle stub server with basic networking using only io_uring.
-* [io_uring.zig](./io_uring.zig) is a Zig implementation of io_uring which has been [submitted](https://github.com/ziglang/zig/pull/6356) for addition to the Zig standard library.
+* [client](./src/client) is a TigerBeetle client written in Typescript.
+* [main.zig](./src/main.zig) is a TigerBeetle stub server with basic networking using only io_uring.
+* [io_uring.zig](./src/io_uring.zig) is a Zig implementation of io_uring which has been [submitted](https://github.com/ziglang/zig/pull/6356) for addition to the Zig standard library.
 * [demos/io_uring](./demos/io_uring) is a performance demo of the io_uring implementation.
 * [demos/bitcast](./demos/bitcast) is a performance demo of zero-overhead transfer deserialization.
-* [proto-beetle](./proto-beetle) is the first prototype of TigerBeetle written entirely in Javascript.
+* [proto-beetle](./demos/proto-beetle) is the first prototype of TigerBeetle written entirely in Javascript.
