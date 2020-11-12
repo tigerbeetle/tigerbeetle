@@ -7,18 +7,16 @@ const net = std.net;
 const os = std.os;
 const linux = os.linux;
 
-const config = @import("config.zig");
+usingnamespace @import("tigerbeetle.zig");
+usingnamespace @import("connections.zig");
+usingnamespace @import("io_uring.zig");
+usingnamespace @import("journal.zig");
+usingnamespace @import("leader.zig");
+usingnamespace @import("state.zig");
 
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 
-usingnamespace @import("connections.zig");
-usingnamespace @import("io_uring.zig");
-usingnamespace @import("types.zig");
-usingnamespace @import("journal.zig");
-usingnamespace @import("master.zig");
-usingnamespace @import("state.zig");
-
-var master: Master = undefined;
+var leader: Leader = undefined;
 var state: State = undefined;
 var journal: Journal = undefined;
 var connections: Connections = undefined;
@@ -147,8 +145,8 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
         return try close(ring, connection, "corrupt data");
     }
 
-    // Assign strictly increasing event timestamps according to the master's clock:
-    if (!master.assign_timestamps(request.command, request_data)) {
+    // Assign strictly increasing event timestamps according to the leader's clock:
+    if (!leader.assign_timestamps(request.command, request_data)) {
         return try close(ring, connection, "reserved timestamp not zero");
     }
 
@@ -397,8 +395,8 @@ pub fn main() !void {
     defer arena.deinit();
     var allocator = &arena.allocator;
 
-    master = try Master.init();
-    defer master.deinit();
+    leader = try Leader.init();
+    defer leader.deinit();
 
     state = try State.init(allocator, config.accounts_max, config.transfers_max);
     defer state.deinit();
@@ -467,7 +465,7 @@ comptime {
         else => @compileError("config: unknown journal_disk_scheduler")
     }
     // TODO Add safety checks on all config variables and interactions between them.
-    // TODO Move this to types.zig or somewhere common to all code.
+    // TODO Move this to tigerbeetle.zig or somewhere common to all code.
     // TODO Persist critical config variables (e.g. sector_size, request_size_max) to metainfo.
     // TODO Detect changes in critical config variables (check these against metainfo at runtime).
 }

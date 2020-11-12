@@ -5,7 +5,7 @@ const os = std.os;
 const testing = std.testing;
 const Allocator = mem.Allocator;
 
-const config = @import("config.zig");
+const config = @import("tigerbeetle.zig").config;
 
 // The connection receive buffer needs to be sector-aligned for zero-copy direct I/O to disk:
 // We add a sector to ensure there is space for a request to be padded out to a sector multiple.

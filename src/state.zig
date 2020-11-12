@@ -4,7 +4,7 @@ const log = std.log.scoped(.state);
 const mem = std.mem;
 const Allocator = mem.Allocator;
 
-usingnamespace @import("types.zig");
+usingnamespace @import("tigerbeetle.zig");
 
 const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);

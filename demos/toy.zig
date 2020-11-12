@@ -7,9 +7,7 @@ const os = std.os;
 const linux = os.linux;
 const testing = std.testing;
 
-const config = @import("config.zig");
-
-usingnamespace @import("types.zig");
+usingnamespace @import("src/tigerbeetle.zig");
 
 pub fn main() !void {
     var addr = try net.Address.parseIp4("127.0.0.1", config.port);
