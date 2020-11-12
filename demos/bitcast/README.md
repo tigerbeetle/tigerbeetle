@@ -81,7 +81,7 @@ Zig:
 ```shell
 node bench-encode.js && zig build-exe bench-decode.zig -O ReleaseSafe && node bench-decode.js && ./bench-decode
  js: sum of transfer amounts=16384 ms=5
-zig: sum of transfer amounts=16384 ns=215000
+zig: sum of transfer amounts=16384 ns=36000
 ```
 
 To put this in perspective, the cost of deserializing a batch of transfers in
