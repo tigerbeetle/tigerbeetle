@@ -31,7 +31,9 @@ We then integrated ProtoBeetle into Mojaloop and our reference minimum deploymen
 
 ## AlphaBeetle - 400,000 transfers per second
 
-After ProtoBeetle, from September through October 2020, we knuckled down and rewrote TigerBeetle in C/Zig to create the alpha version of TigerBeetle.
+After ProtoBeetle, from September through October 2020, we knuckled down and rewrote TigerBeetle in C/Zig to create the alpha version of TigerBeetle, using io_uring as a foundation for fast I/O.
+
+TigerBeetle's Zig implementation of io_uring was [submitted](https://github.com/ziglang/zig/pull/6356) for addition to the Zig standard library.
 
 ## BetaBeetle (under active development)
 
@@ -39,7 +41,7 @@ The beta version of **TigerBeetle is now under active development** and [our des
 
 ## QuickStart
 
-The current alpha version of TigerBeetle targets Linux and takes advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via io_uring. As such it can only be used on recent versions of Linux with an updated kernel.
+The current beta version of TigerBeetle targets Linux and takes advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via io_uring. As such it can only be used on recent versions of Linux with an updated kernel.
 
 Later portable versions of TigerBeetle may supplement io_uring with kqueue for macOS and FreeBSD support, or IOCP for Windows support.
 
