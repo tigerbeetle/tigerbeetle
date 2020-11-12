@@ -136,5 +136,6 @@ pub const sector_size = 4096;
 /// when they were never written to disk.
 pub const direct_io = true;
 
-/// Whether to order journal head/body writes to start from the last write (.elevator or .none):
+/// Whether to re-order journal writes for better disk access locality (.elevator or .none):
+/// This can improve write throughput especially for spinning disks.
 pub const journal_disk_scheduler = .elevator;
