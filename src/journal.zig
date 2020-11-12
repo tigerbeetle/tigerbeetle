@@ -7,9 +7,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const os = std.os;
 
-const config = @import("config.zig");
-
-usingnamespace @import("types.zig");
+usingnamespace @import("tigerbeetle.zig");
 usingnamespace @import("state.zig");
 
 pub const Journal = struct {
@@ -270,62 +268,66 @@ pub const Journal = struct {
             .exact
         );
         defer self.allocator.free(buffer);
-
-        var output = try self.allocator.alloc(u8, config.response_size_max);
-        defer self.allocator.free(output);
-        
         assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
         assert(@mod(buffer.len, config.sector_size) == 0);
         assert(@mod(config.journal_size_max, buffer.len) == 0);
+        assert(buffer.len > @sizeOf(JournalHeader));
 
-        // Read redundant entry headers from the head of the journal:
+        var state_output = try self.allocator.alloc(u8, config.response_size_max);
+        defer self.allocator.free(state_output);
+
+        // Read entry headers from the head of the journal:
         self.read(mem.sliceAsBytes(self.headers), 0);
 
-        // Read entry headers and data from the body of the journal:        
+        // Read entry headers and entry data from the body of the journal:
         while (self.offset < config.journal_size_max) {
             self.read(buffer[0..], self.offset);
 
-            var offset = self.offset;
-            var buffer_offset: u64 = 0;
-            while (buffer_offset < buffer.len) {
-                if (buffer_offset + @sizeOf(JournalHeader) > buffer.len) break;
+            var offset: u64 = 0;
+            while (offset < buffer.len) {
+                if (offset + @sizeOf(JournalHeader) > buffer.len) break;
 
-                var header = &self.headers[self.entries];
-                log.debug("header = {}", .{ header });
-
-                const entry = mem.bytesAsValue(
+                // TODO Repair headers at the head of the journal in memory.
+                // TODO Repair headers at the head of the journal on disk.
+                const d = &self.headers[self.entries];
+                const e = mem.bytesAsValue(
                     JournalHeader,
-                    buffer[buffer_offset..][0..@sizeOf(JournalHeader)]
+                    buffer[offset..][0..@sizeOf(JournalHeader)]
                 );
-                log.debug("entry = {}", .{ entry });
 
-                if (!header.valid_checksum_meta()) @panic("corrupt header");
+                log.debug("d = {}", .{ d });
+                log.debug("e = {}", .{ e });
+
+                if (!d.valid_checksum_meta()) @panic("corrupt header");
+                if (d.prev_checksum_meta != self.hash_chain_root) @panic("misdirected");
+                if (d.offset != self.offset) @panic("bad offset");
+
                 if (self.entries > 0) {
-                    const prev_header = self.headers[self.entries - 1];
-                    if (header.prev_checksum_meta != prev_header.checksum_meta) {
-                        @panic("misdirected header");
-                    }
-                    const prev_size = Journal.sector_ceil(prev_header.size);
-                    if (header.offset != prev_header.offset + prev_size) {
-                        @panic("invalid header offset");
-                    }
+                    const p = self.headers[self.entries - 1];
+                    assert(d.prev_checksum_meta == p.checksum_meta);
+                    assert(d.offset == p.offset + Journal.sector_ceil(p.size));
                 }
-                if (header.prev_checksum_meta != self.hash_chain_root) @panic("misdirected header");
-                if (header.offset != self.offset) @panic("invalid header offset");
 
-                if (!entry.valid_checksum_meta()) @panic("corrupt entry");
-                if (entry.prev_checksum_meta != self.hash_chain_root) @panic("misdirected entry");
-                if (entry.offset != self.offset) @panic("invalid entry offset");
+                if (!e.valid_checksum_meta()) @panic("corrupt header");
+                if (e.prev_checksum_meta != self.hash_chain_root) @panic("misdirected");
+                if (e.offset != self.offset) @panic("bad offset");
 
-                //if (entry.checksum_meta != header.checksum_meta) @panic("different headers");
+                if (e.checksum_meta != d.checksum_meta) @panic("different headers");
+                assert(e.command == d.command);
+                assert(e.size == d.size);
 
-                if (buffer_offset + entry.size > buffer.len) break;
+                // Re-read the entry into the buffer, but starting from the beginning of the buffer:
+                if (offset + e.size > buffer.len) {
+                    // Assert that the buffer is sufficient for the entry to avoid an infinite loop:
+                    assert(buffer.len >= e.size);
+                    break;
+                }
 
-                const entry_data = buffer[buffer_offset..][@sizeOf(JournalHeader)..entry.size];
-                if (!entry.valid_checksum_data(entry_data)) @panic("corrupt entry data");
+                const entry_data = buffer[offset..][@sizeOf(JournalHeader)..e.size];
+                if (!e.valid_checksum_data(entry_data)) @panic("corrupt entry data");
 
-                if (entry.command == .eof) {
-                    assert(entry.size == @sizeOf(JournalHeader));
+                if (e.command == .eof) {
+                    assert(e.size == @sizeOf(JournalHeader));
                     log.info("hash_chain_root={} prev_hash_chain_root={}", .{
                         self.hash_chain_root,
                         self.prev_hash_chain_root,
@@ -338,25 +340,24 @@ pub const Journal = struct {
                         config.journal_size_max,
                         @divFloor(self.offset * 100, config.journal_size_max),
                     });
+                    // We exclude the EOF entry from self.entries and from self.offset:
+                    // This means the offset is ready for the next append, which overwrites the EOF.
                     return;
                 }
 
-                _ = self.state.apply(entry.command, entry_data, output[0..]);
+                _ = self.state.apply(e.command, entry_data, state_output[0..]);
 
-                self.hash_chain_root = entry.checksum_meta;
-                self.prev_hash_chain_root = entry.prev_checksum_meta;
-
-                const advance = Journal.sector_ceil(entry.size);
+                self.hash_chain_root = e.checksum_meta;
+                self.prev_hash_chain_root = e.prev_checksum_meta;
 
                 self.entries += 1;
-                assert(self.entries < config.journal_entries_max);
-                
-                self.offset += advance;
-                assert(self.offset < config.journal_size_max);
+                self.offset += Journal.sector_ceil(e.size);
+                offset += Journal.sector_ceil(e.size);
 
-                buffer_offset += advance;
+                // We have not yet encountered the EOF entry, so there must be free space remaining:
+                assert(self.entries < config.journal_entries_max);
+                assert(self.offset < config.journal_size_max);
             }
-            if (self.offset == offset) @panic("offset was not advanced");
         }
         assert(self.offset == config.journal_size_max);
         @panic("eof entry not found");

@@ -1,25 +1,25 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.master);
+const log = std.log.scoped(.leader);
 const mem = std.mem;
 
-usingnamespace @import("types.zig");
+usingnamespace @import("tigerbeetle.zig");
 
-pub const Master = struct {
+pub const Leader = struct {
     timestamp: u64,
 
-    pub fn init() !Master {
-        return Master {
+    pub fn init() !Leader {
+        return Leader {
             // TODO After recovery, take the max of wall clock and last replicated state timestamp:
             .timestamp = @intCast(u64, std.time.nanoTimestamp()),
         };
     }
 
-    pub fn deinit(self: *Master) void {}
+    pub fn deinit(self: *Leader) void {}
 
     /// Assigns strictly increasing timestamps, even if the wall clock runs backwards.
     /// Returns true if all reserved timestamps were zero before being assigned, else false.
-    pub fn assign_timestamps(self: *Master, command: Command, batch: []u8) bool {
+    pub fn assign_timestamps(self: *Leader, command: Command, batch: []u8) bool {
         return switch (command) {
             .create_accounts  => self.assign_timestamps_for_type(Account, batch),
             .create_transfers => self.assign_timestamps_for_type(Transfer, batch),
@@ -28,7 +28,7 @@ pub const Master = struct {
         };
     }
 
-    pub fn assign_timestamps_for_type(self: *Master, comptime T: type, batch: []u8) bool {
+    pub fn assign_timestamps_for_type(self: *Leader, comptime T: type, batch: []u8) bool {
         // Guard against the wall clock going backwards by taking the max with timestamps issued:
         self.timestamp = std.math.max(self.timestamp, @intCast(u64, std.time.nanoTimestamp()));
         var sum_reserved_timestamps: usize = 0;

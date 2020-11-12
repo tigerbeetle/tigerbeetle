@@ -4,6 +4,8 @@ const builtin = std.builtin;
 const crypto = std.crypto;
 const mem = std.mem;
 
+pub const config = @import("tigerbeetle.conf");
+
 pub const Command = packed enum(u32) {
     // We reserve command "0" to detect any accidental zero byte being interpreted as a command:
     eof = 1,
