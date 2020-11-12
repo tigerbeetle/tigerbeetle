@@ -263,10 +263,18 @@ pub const Journal = struct {
         assert(self.entries == 0);
         assert(self.offset == config.journal_entries_max * @sizeOf(JournalHeader));
 
-        var buffer: [config.request_size_max]u8 align(config.sector_size) = undefined;
-        // TODO Allocate bigger output buffer:
-        var output: [16384]u8 = undefined;
-        assert(@mod(@ptrToInt(&buffer), config.sector_size) == 0);
+        var buffer = try self.allocator.allocAdvanced(
+            u8,
+            config.sector_size,
+            config.request_size_max,
+            .exact
+        );
+        defer self.allocator.free(buffer);
+
+        var output = try self.allocator.alloc(u8, config.response_size_max);
+        defer self.allocator.free(output);
+        
+        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
         assert(@mod(buffer.len, config.sector_size) == 0);
         assert(@mod(config.journal_size_max, buffer.len) == 0);
 
@@ -373,18 +381,19 @@ pub const Journal = struct {
             else => return err
         };
 
-        // TODO Use Journal allocator:
         // Dynamically allocate a buffer to zero the file:
         // This is done only at cluster initialization and not in the critical path.
+        // TODO Use allocator passed to Journal.init() once we have support for cluster init.
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
-        var buffer = try arena.allocator.allocAdvanced(
+        var allocator = &arena.allocator;
+        var buffer = try allocator.allocAdvanced(
             u8,
             config.sector_size,
             config.request_size_max,
             .exact
         );
-        defer arena.allocator.free(buffer);
+        defer allocator.free(buffer);
         mem.set(u8, buffer[0..], 0);
         
         // Write zeroes to the disk to improve performance:
@@ -488,7 +497,6 @@ pub const Journal = struct {
         // TODO Figure out absolute path to journal file regardless of the server's cwd.
         log.debug("opening {}...", .{ path });
         return Journal.openat(std.fs.cwd().fd, path, false) catch |err| switch (err) {
-            // TODO Fail if FileNotFound, when we start explicitly initializing the cluster:
             error.FileNotFound => return try Journal.create(path),
             else => return err,
         };
