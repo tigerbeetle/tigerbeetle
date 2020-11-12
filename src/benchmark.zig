@@ -7,7 +7,7 @@ const os = std.os;
 const linux = os.linux;
 const testing = std.testing;
 
-usingnamespace @import("src/tigerbeetle.zig");
+usingnamespace @import("tigerbeetle.zig");
 
 var accounts = [_]Account {
     Account {
