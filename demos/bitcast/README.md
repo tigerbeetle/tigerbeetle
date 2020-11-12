@@ -1,34 +1,25 @@
-# Bit casting deserialization demo
+# `@bitCast` deserialization demo
 
-This is a simple demo to get you comfortable building Alpha-Beetle and show how
+This is a simple demo to get you comfortable building TigerBeetle and show how
 low-level code can be easier than high-level code.
 
-## Download and install Zig master to your path
+## Download and install Zig master into your path
 
-* Mac: https://ziglang.org/builds/zig-macos-x86_64-0.6.0+fd4783906.tar.xz
-* Linux: https://ziglang.org/builds/zig-linux-x86_64-0.6.0+fd4783906.tar.xz
+[Follow these instructions...](../../docs/INSTALL_ZIG.md)
 
-```shell
-cd ~/Downloads
-tar -xf "zig-macos-x86_64-0.6.0+fd4783906.tar.xz"
-mv "zig-macos-x86_64-0.6.0+fd4783906" /usr/local/lib/zig
-ln -s /usr/local/lib/zig/zig /usr/local/bin/zig
-# Nothing to compile here, move along...
-```
-
-## Clone Alpha-Beetle or update
+## Clone TigerBeetle or update
 
 ```shell
-git clone https://github.com/jorangreef/tiger-beetle
-cd tiger-beetle
+git clone https://github.com/coilhq/tigerbeetle
+cd tigerbeetle
 git pull
-cd bitcast-demo
+cd demos/bitcast
 ```
 
 ## Compile and run decode.zig vs decode.js
 
 ```shell
-zig build-exe decode.zig
+zig build-exe decode.zig -O ReleaseSafe
 time ./decode # Do a throwaway run in case Catalina adds SIP latency.
 time ./decode
 time node decode.js
@@ -88,7 +79,7 @@ Deserializing 16,384 transfers takes 5ms to 20ms in JavaScript and 0.21ms in
 Zig:
 
 ```shell
-node bench-encode.js && zig build-exe bench-decode.zig && node bench-decode.js && ./bench-decode
+node bench-encode.js && zig build-exe bench-decode.zig -O ReleaseSafe && node bench-decode.js && ./bench-decode
  js: sum of transfer amounts=16384 ms=5
 zig: sum of transfer amounts=16384 ns=215000
 ```
