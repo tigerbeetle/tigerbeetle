@@ -24,7 +24,9 @@ TigerBeetle provides more safety than a general-purpose relational database such
 
 * TigerBeetle **does not trust the fsync of a single disk**, or the hardware of a single node. Disk firmware and operating systems frequently have broken fsync, and single node systems fail all the time. TigerBeetle **performs synchronous replication** to a quorum of nodes.
 
-* TigerBeetle **does not truncate the journal at the first corrupt disk sector**, but **recovers from local corruption without violating the global consensus protocol**, already providing more safety than replicated state machines such as ZooKeeper and LogCabin.
+As a replicated state machine:
+
+* TigerBeetle **does not truncate the journal at the first corrupt disk sector**, but **recovers from local corruption without violating the global consensus protocol**, providing more safety than replicated state machines such as ZooKeeper and LogCabin.
 
 ## Developer-Friendly
 
