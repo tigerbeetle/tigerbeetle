@@ -29,7 +29,7 @@ We then integrated ProtoBeetle into Mojaloop and our reference minimum deploymen
 
 **You can watch [our 10-minute talk introducing ProtoBeetle](https://youtu.be/QOC6PHFPtAM?t=324).**
 
-## AlphaBeetle - 400,000 transfers per second
+## AlphaBeetle - 500,000 transfers per second
 
 After ProtoBeetle, from September through October 2020, we knuckled down and rewrote TigerBeetle in C/Zig to create the alpha version of TigerBeetle, using io_uring as a foundation for fast I/O.
 
