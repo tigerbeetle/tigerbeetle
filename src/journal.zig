@@ -92,26 +92,30 @@ pub const Journal = struct {
         };
         // Zero padding is not included in the checksum since it is not material except to prevent
         // buffer bleeds, which we assert against in Debug mode:
-        entry.set_checksum_data(buffer[@sizeOf(JournalHeader)..size]);
+        entry.set_checksum_data(buffer[@sizeOf(JournalHeader)..entry.size]);
         entry.set_checksum_meta();
 
         if (std.builtin.mode == .Debug) {
             // Assert that the sector padding is already zeroed:
             var sum_of_sector_padding_bytes: u32 = 0;
-            for (buffer[size..]) |byte| sum_of_sector_padding_bytes += byte;
+            for (buffer[entry.size..]) |byte| sum_of_sector_padding_bytes += byte;
             assert(sum_of_sector_padding_bytes == 0);
         }
 
         // Write the EOF entry to the last sector of the buffer:
-        var eof_buffer = buffer[buffer.len - config.sector_size..][0..@sizeOf(JournalHeader)];
-        const eof = mem.bytesAsValue(JournalHeader, eof_buffer);
+        const entry_sector_size = Journal.sector_ceil(entry.size);
+        assert(entry_sector_size == buffer.len - config.sector_size);
+        const eof = mem.bytesAsValue(
+            JournalHeader,
+            buffer[entry_sector_size..][0..@sizeOf(JournalHeader)]
+        );
         eof.* = .{
             .prev_checksum_meta = entry.checksum_meta,
-            .offset = entry.offset + buffer.len - config.sector_size,
+            .offset = entry.offset + entry_sector_size,
             .command = .eof,
             .size = @sizeOf(JournalHeader),
         };
-        eof.set_checksum_data(eof_buffer[0..0]);
+        eof.set_checksum_data(buffer[entry_sector_size..][@sizeOf(JournalHeader)..eof.size]);
         eof.set_checksum_meta();
 
         // Write the request entry and EOF entry to the tail of the journal:
