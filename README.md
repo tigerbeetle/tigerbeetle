@@ -16,7 +16,7 @@ For example, processing a balance update event involves:
 
 While investigating a few existing systems it became clear that the majority of architectures cobble together generic databases (relational or NoSQL, on-disk or in-memory) with business logic enforced in the application code. This separation between data and code, persistence and logic, invites the worst of distributed system problems: network delays, multiple roundtrips for a single balance update, clock skew, or cache incoherency etc.
 
-These systems may achieve performance but at the expense of reliability, a compromise that is unacceptable for a system-of-record for financial accounts.
+Furthermore, these systems may achieve performance but at the expense of reliability, especially in the face of hardware failure, corruption and misdirected writes, a compromise that is unacceptable for a system-of-record for financial accounts.
 
 ## The Solution - A Purpose-Built Accounting Database
 
