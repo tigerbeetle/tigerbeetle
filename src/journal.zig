@@ -134,7 +134,7 @@ pub const Journal = struct {
 
         // Submit these writes according to where the last write took place:
         // e.g. If the disk last wrote the headers then write the headers first for better locality.
-        if (config.journal_disk_scheduler == .elevator and (self.entries & 1) == 0) {
+        if (config.journal_disk_scheduler == .elevator and @mod(self.entries, 2) == 0) {
             self.write(headers, headers_offset);
             self.write(buffer, self.offset);
         } else {
