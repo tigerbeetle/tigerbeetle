@@ -14,13 +14,13 @@ For example, processing a balance update event involves:
 4. persisting the updated balance, and
 5. notifying subscribers of the updated balance and that the event has been processed.
 
-While investigating a few existing systems it became clear that the majority of architectures cobble together generic databases (relational or NoSQL, on-disk or in-memory) with business logic enforced in the application code. This forced separation between data and code, persistence and logic, invites the worst of distributed system problems: network delays, multiple roundtrips for a single balance update, clock skew, cache incoherency, [TOCTOU](https://en.wikipedia.org/wiki/Time-of-check_to_time-of-use) etc.
+While investigating a few existing systems it became clear that the majority of architectures cobble together generic databases (relational or NoSQL, on-disk or in-memory) with business logic enforced in the application code. This separation between data and code, persistence and logic, invites the worst of distributed system problems: network delays, multiple roundtrips for a single balance update, clock skew, or cache incoherency etc.
 
-Furthermore, these systems may achieve performance but at the expense of reliability, or they may achieve reliability but at the expense of performance. This is a compromise that is unacceptable for a system-of-record for financial accounts.
+These systems may achieve performance but at the expense of reliability, a compromise that is unacceptable for a system-of-record for financial accounts.
 
 ## The Solution - A Purpose-Built Accounting Database
 
-Our survey led us to conclude that, while there are mechanisms available to shard account balances to parallelize updates and improve performance, there are still significant performance gains to be had in designing a database that is purpose built for storing balances and processing updates in a fast, reliable manner.
+Our survey led us to conclude that, while there are mechanisms available to shard account balances to parallelize updates and improve performance, there are still significant performance gains to be had in designing a database that is purpose built for storing balances and processing updates in a reliable manner.
 
 ## ProtoBeetle - 200,000 transfers per second
 
