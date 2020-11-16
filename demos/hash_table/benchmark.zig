@@ -18,11 +18,7 @@ pub fn main() !void {
         var start = std.time.milliTimestamp();
         var count: usize = 0;
         while (count < insertions) : (count += 1) {
-            if (transfers.contains(id)) {
-                @panic("transfer exists");
-            } else {
-                transfers.putAssumeCapacity(id, transfer);
-            }
+            transfers.putAssumeCapacity(id, transfer);
             id += 1;
         }
         std.debug.print(
