@@ -132,8 +132,8 @@ pub const Journal = struct {
         var headers_length = Journal.sector_ceil((self.entries + 2) * @sizeOf(JournalHeader));
         const headers = mem.sliceAsBytes(self.headers)[headers_offset..headers_length];
 
-        // Submit these writes according to where the last write took place:
-        // e.g. If the disk last wrote the headers then write the headers first for better locality.
+        // Re-order these writes according to where the last write took place for better locality:
+        // e.g. If the disk previously wrote the headers last then write them first this time.
         if (config.journal_disk_scheduler == .elevator and @mod(self.entries, 2) == 0) {
             self.write(headers, headers_offset);
             self.write(buffer, self.offset);
