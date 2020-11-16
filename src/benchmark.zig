@@ -85,14 +85,30 @@ pub fn main() !void {
 
     // Start the benchmark:
     const start = std.time.milliTimestamp();
+    var max_create_transfers_latency: i64 = 0;
+    var max_commit_transfers_latency: i64 = 0;
     var offset: u64 = 0;
     while (offset < transfers.len) {
         // Create a batch of 10,000 transfers:
+        const ms1 = std.time.milliTimestamp();
         var batch_transfers = transfers[offset..][0..10000];
         try send(fd, .create_transfers, mem.asBytes(batch_transfers[0..]), CreateTransferResults);
+
+        const ms2 = std.time.milliTimestamp();
+        var create_transfers_latency = ms2 - ms1;
+        if (create_transfers_latency > max_create_transfers_latency) {
+            max_create_transfers_latency = create_transfers_latency;
+        }
+
         // Commit this batch:
         var batch_commits = commits[offset..][0..10000];
         try send(fd, .commit_transfers, mem.asBytes(batch_commits[0..]), CommitTransferResults);
+
+        const ms3 = std.time.milliTimestamp();
+        var commit_transfers_latency = ms3 - ms2;
+        if (commit_transfers_latency > max_commit_transfers_latency) {
+            max_commit_transfers_latency = commit_transfers_latency;
+        }
 
         offset += batch_transfers.len;
         if (@mod(offset, 100000) == 0) {
@@ -107,6 +123,8 @@ pub fn main() !void {
         "{} transfers per second\n",
         .{ @divFloor(@intCast(i64, transfers.len * 1000), ms) }
     );
+    std.debug.print("max create_transfers latency = {}ms\n", .{ max_create_transfers_latency });
+    std.debug.print("max commit_transfers latency = {}ms\n", .{ max_commit_transfers_latency });
 }
 
 var request_id: u128 = 0;
