@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const crypto = std.crypto;
 const log = std.log.scoped(.state);
 const mem = std.mem;
 const Allocator = mem.Allocator;
@@ -143,10 +144,6 @@ pub const State = struct {
     pub fn create_transfer(self: *State, t: Transfer) CreateTransferResult {
         assert(t.timestamp > self.timestamp);
 
-        if (t.custom_1 != 0) return .reserved_field_custom;
-        if (t.custom_2 != 0) return .reserved_field_custom;
-        if (t.custom_3 != 0) return .reserved_field_custom;
-
         if (t.flags.padding != 0) return .reserved_flag_padding;
         if (t.flags.accept and !t.flags.auto_commit) return .reserved_flag_accept;
         if (t.flags.reject) return .reserved_flag_reject;
@@ -154,6 +151,10 @@ pub const State = struct {
             if (!t.flags.accept) return .auto_commit_must_accept;
             if (t.timeout != 0) return .auto_commit_cannot_timeout;
         }
+        if (t.custom_1 != 0 or t.custom_2 != 0) {
+            if (!t.flags.condition) return .reserved_field_custom;
+        }
+        if (t.custom_3 != 0) return .reserved_field_custom;
 
         if (t.amount == 0) return .amount_is_zero;
 
@@ -177,7 +178,7 @@ pub const State = struct {
         }
         if (dr.exceeds_debit_accepted_limit(t.amount)) return .exceeds_debit_accepted_limit;
         if (cr.exceeds_credit_accepted_limit(t.amount)) return .exceeds_credit_accepted_limit;
-        
+
         var hash_map_result = self.transfers.getOrPutAssumeCapacity(t.id);
         if (hash_map_result.found_existing) {
             const exists = hash_map_result.entry.value;
@@ -221,13 +222,14 @@ pub const State = struct {
     pub fn commit_transfer(self: *State, c: Commit) CommitTransferResult {
         assert(c.timestamp > self.timestamp);
 
-        if (c.custom_1 != 0) return .reserved_field_custom;
-        if (c.custom_2 != 0) return .reserved_field_custom;
-        if (c.custom_3 != 0) return .reserved_field_custom;
-
         if (c.flags.padding != 0) return .reserved_flag_padding;
         if (!c.flags.accept and !c.flags.reject) return .commit_must_accept_or_reject;
         if (c.flags.accept and c.flags.reject) return .commit_cannot_accept_and_reject;
+
+        if (c.custom_1 != 0 or c.custom_2 != 0) {
+            if (!c.flags.preimage) return .reserved_field_custom;
+        }
+        if (c.custom_3 != 0) return .reserved_field_custom;
 
         var t = self.get_transfer(c.id) orelse return .transfer_not_found;
         assert(c.timestamp > t.timestamp);
@@ -240,6 +242,12 @@ pub const State = struct {
         }
 
         if (t.timeout > 0 and t.timestamp + t.timeout <= c.timestamp) return .transfer_expired;
+
+        if (t.flags.condition) {
+            if (!c.flags.preimage) return .condition_requires_preimage;
+        } else if (c.flags.preimage) {
+            return .preimage_requires_condition;
+        }
         
         var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
         var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
@@ -266,6 +274,12 @@ pub const State = struct {
         assert(t.flags.accept or t.flags.reject);
         self.timestamp = c.timestamp;
         return .ok;
+    }
+
+    pub fn valid_preimage(condition: u256, preimage: u256) bool {
+        var target: [32]u8 = undefined;
+        crypto.hash.sha2.Sha256.hash(@bitCast([32]u8, preimage)[0..], target[0..], .{});
+        return mem.eql(u8, target[0..], @bitCast([32]u8, condition)[0..]);
     }
 
     /// This is our core private method for changing balances.
