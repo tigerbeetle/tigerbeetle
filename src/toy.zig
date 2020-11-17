@@ -47,7 +47,7 @@ pub fn main() !void {
     };
 
     try send(fd, .create_accounts, mem.asBytes(accounts[0..]), CreateAccountResults);
-    
+
     var transfers = [_]Transfer {
         Transfer {
             .id = 4,
@@ -56,7 +56,7 @@ pub fn main() !void {
             .custom_1 = 0,
             .custom_2 = 0,
             .custom_3 = 0,
-            .flags = .{ .accept = false, .auto_commit = false },
+            .flags = .{},
             .amount = 100,
             .timeout = 0,
         }
@@ -75,6 +75,25 @@ pub fn main() !void {
     };
 
     try send(fd, .commit_transfers, mem.asBytes(commits[0..]), CommitTransferResults);
+
+    var auto_commit_transfers = [_]Transfer {
+        Transfer {
+            .id = 5,
+            .debit_account_id = accounts[0].id,
+            .credit_account_id = accounts[1].id,
+            .custom_1 = 0,
+            .custom_2 = 0,
+            .custom_3 = 0,
+            .flags = .{
+                .accept = true,
+                .auto_commit = true
+            },
+            .amount = 100,
+            .timeout = 0,
+        }
+    };
+
+    try send(fd, .create_transfers, mem.asBytes(auto_commit_transfers[0..]), CreateTransferResults);
 }
 
 var request_id: u128 = 0;
@@ -101,7 +120,7 @@ fn send(fd: os.fd_t, command: Command, data: []u8, Result: anytype) !void {
     assert(recv_bytes >= @sizeOf(NetworkHeader));
     
     var response = mem.bytesAsValue(NetworkHeader, recv[0..@sizeOf(NetworkHeader)]);
-    std.debug.print("{}\n", .{ response });
+    std.debug.print("\nACK {}:\n{}\n", .{ response.id, response });
     assert(response.magic == Magic);
     assert(response.valid_checksum_meta());
     assert(response.valid_size());

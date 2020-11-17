@@ -73,7 +73,8 @@ pub const TransferFlags = packed struct {
          accept: bool = false,
          reject: bool = false,
     auto_commit: bool = false,
-        padding: u61 = 0,
+      condition: bool = false,
+        padding: u60 = 0,
 };
 
 pub const Commit = packed struct {
@@ -88,7 +89,8 @@ pub const Commit = packed struct {
 pub const CommitFlags = packed struct {
       accept: bool = false,
       reject: bool = false,
-     padding: u62 = 0,
+    preimage: bool = false,
+     padding: u61 = 0,
 };
 
 pub const CreateAccountResult = packed enum(u32) {
@@ -158,6 +160,9 @@ pub const CommitTransferResult = packed enum(u32) {
     credit_amount_was_not_reserved,
     exceeds_debit_accepted_limit,
     exceeds_credit_accepted_limit,
+    condition_requires_preimage,
+    preimage_requires_condition,
+    preimage_invalid,
 };
 
 pub const CreateAccountResults = packed struct {
