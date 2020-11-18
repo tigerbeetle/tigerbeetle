@@ -172,6 +172,56 @@ To give you an idea of how this works in practice:
 * We do not support custom commit results beyond accepted or rejected. A participant cannot indicate to TigerBeetle why they are rejecting the transfer. However, they may include an opaque reason in any of the custom fields.
 * The creation timestamp of a transfer is stored in the `create_transfer` state and in the `transfer` state. However, the commit timestamp is stored in the `commit_transfer` event only.
 
+## Fault Model
+
+We adopt the following fault model with respect to storage, network, memory and processing:
+
+### Storage Fault Model
+
+* Disks experience data corruption with significant and material probability.
+
+* Disk firmware or hardware may cause writes to be misdirected and written to the wrong sector, or not written at all, with low but nevertheless material probability.
+
+* Disk firmware or hardware may cause reads to be misdirected and read from the wrong sector, or not read at all, with low but nevertheless material probability.
+
+* Corruption does not always imply a system crash. Data may be corrupted at any time during its storage lifecycle: before being written, while being written, after being written, and while being read.
+
+* Disk sector writes are not atomic. For example, an Advanced Format 4096 byte sector write to a disk with an emulated logical sector size of 4096 bytes but a physical sector size of 512 bytes is not atomic, and would be split into 8 physical sector writes, which may or may not be atomic. We do not depend on any sector atomicity guarantees from the disk.
+
+* The Linux kernel page cache is not reliable and may misrepresent the state of data on disk after an EIO or latent sector error, see *[Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)* from the University of Wisconsin – Madison presented at the 2020 USENIX Annual Technical Conference.
+
+* File system metadata (such as the size of a file) is not reliable and may change at any time.
+
+* Disk performance and read and write latencies can at times be volatile, causing latency spikes on the order of seconds. A slow disk does not always indicate a failing disk, and a slow disk may return to median performance levels. For example, an SSD undergoing garbage collection.
+
+### Network Fault Model
+
+* Messages may be lost.
+
+* Messages may be corrupted.
+
+* Messages may be delayed.
+
+* Messages may be replayed.
+
+* TCP checksums are inadequate to prevent checksum collisions.
+
+* Network performance may be asymmetrical for the upload and download paths.
+
+### Memory Fault Model
+
+* Memory is protected with error-correcting codes sufficient for our purpose. We make no further effort to protect against memory faults.
+
+* Non-ECC memory is not supported by TigerBeetle.
+
+### Processing Fault Model
+
+* The system may freeze process execution for minutes or hours at a time, for example during a VM migration.
+
+* The system clock may jump backwards or forwards in time, at any time.
+
+* NTP can help, but we do not depend on NTP.
+
 ## Timestamps
 
 **All timestamps in TigerBeetle are strictly reserved** to prevent unexpected distributed system failures due to clock skew. For example, a payer could have all their transfers fail, simply because their clock was behind. This means that only the TigerBeetle leader may assign timestamps to data structures.
