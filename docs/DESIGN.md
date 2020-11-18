@@ -216,6 +216,8 @@ We adopt the following fault model with respect to storage, network, memory and 
 
 ### Processing Fault Model
 
+* The system may crash at any time.
+
 * The system may freeze process execution for minutes or hours at a time, for example during a VM migration.
 
 * The system clock may jump backwards or forwards in time, at any time.
