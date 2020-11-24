@@ -188,7 +188,7 @@ We adopt the following fault model with respect to storage, network, memory and 
 
 * Disk sector writes are not atomic. For example, an Advanced Format 4096 byte sector write to a disk with an emulated logical sector size of 4096 bytes but a physical sector size of 512 bytes is not atomic, and would be split into 8 physical sector writes, which may or may not be atomic. We do not depend on any sector atomicity guarantees from the disk.
 
-* The Linux kernel page cache is not reliable and may misrepresent the state of data on disk after an EIO or latent sector error, see *[Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)* from the University of Wisconsin – Madison presented at the 2020 USENIX Annual Technical Conference.
+* The Linux kernel page cache is not reliable and may misrepresent the state of data on disk after an EIO or latent sector error. See *[Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)* from the University of Wisconsin – Madison presented at the 2020 USENIX Annual Technical Conference.
 
 * File system metadata (such as the size of a file) is not reliable and may change at any time.
 
