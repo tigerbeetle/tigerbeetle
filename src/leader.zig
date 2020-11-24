@@ -24,6 +24,7 @@ pub const Leader = struct {
             .create_accounts  => self.assign_timestamps_for_type(Account, batch),
             .create_transfers => self.assign_timestamps_for_type(Transfer, batch),
             .commit_transfers => self.assign_timestamps_for_type(Commit, batch),
+            .lookup_accounts => true, // TODO
             else => unreachable
         };
     }
