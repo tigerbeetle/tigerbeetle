@@ -44,7 +44,6 @@ pub fn send(fd: std.os.fd_t, command: Command, batch: anytype, Result: anytype) 
     const response_data = recv[@sizeOf(NetworkHeader)..response.size];
     assert(response.valid_checksum_data(response_data));
 
-    //if (response.size > 64) std.debug.print("\n", .{});
     for (std.mem.bytesAsSlice(Result, response_data)) |result| {
         std.debug.print("\n{}\n", .{ result });
     }
