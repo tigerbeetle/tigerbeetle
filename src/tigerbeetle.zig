@@ -13,6 +13,7 @@ pub const Command = packed enum(u32) {
     create_accounts,
     create_transfers,
     commit_transfers,
+    lookup_accounts,
 };
 
 pub const Account = packed struct {
@@ -302,6 +303,7 @@ pub const NetworkHeader = packed struct {
             .create_accounts => @sizeOf(Account),
             .create_transfers => @sizeOf(Transfer),
             .commit_transfers => @sizeOf(Commit),
+            .lookup_accounts => @sizeOf(u128),
             else => unreachable,
         };
         const min_count: usize = switch (self.command) {
@@ -309,6 +311,7 @@ pub const NetworkHeader = packed struct {
             .create_accounts => 1,
             .create_transfers => 1,
             .commit_transfers => 1,
+            .lookup_accounts => 1,
             else => unreachable,
         };
         return (

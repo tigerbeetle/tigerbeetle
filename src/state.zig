@@ -43,6 +43,7 @@ pub const State = struct {
             .create_accounts => self.apply_create_accounts(input, output),
             .create_transfers => self.apply_create_transfers(input, output),
             .commit_transfers => self.apply_commit_transfers(input, output),
+            .lookup_accounts => self.apply_lookup_accounts(input, output),
             else => unreachable
         };
     }
@@ -93,6 +94,21 @@ pub const State = struct {
             }
         }
         return results_count * @sizeOf(CommitTransferResults);
+    }
+
+    pub fn apply_lookup_accounts(self: *State, input: []const u8, output: []u8) usize {
+        const batch = mem.bytesAsSlice(u128, input);
+        // TODO Do the same for other apply methods:
+        var output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
+        var results = mem.bytesAsSlice(Account, output[0..output_len]);
+        var results_count: usize = 0;
+        for (batch) |id, index| {
+            if (self.get_account(id)) |result| {
+                results[results_count] = result.*;
+                results_count += 1;
+            }
+        }
+        return results_count * @sizeOf(Account);
     }
 
     pub fn create_account(self: *State, a: Account) CreateAccountResult {
@@ -172,6 +188,7 @@ pub const State = struct {
 
         if (dr.unit != cr.unit) return .accounts_have_different_units;
 
+        // TODO We need a lookup before inserting in case transfer exists and would overflow limits.
         if (!t.flags.auto_commit) {
             if (dr.exceeds_debit_reserved_limit(t.amount)) return .exceeds_debit_reserved_limit;
             if (cr.exceeds_credit_reserved_limit(t.amount)) return .exceeds_credit_reserved_limit;
