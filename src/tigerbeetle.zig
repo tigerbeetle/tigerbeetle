@@ -17,20 +17,20 @@ pub const Command = packed enum(u32) {
 };
 
 pub const Account = packed struct {
-                       id: u128,
-                   custom: u128,
-                    flags: AccountFlags,
-                     unit: u64,
-           debit_reserved: u64,
-           debit_accepted: u64,
-          credit_reserved: u64,
-          credit_accepted: u64,
-     debit_reserved_limit: u64,
-     debit_accepted_limit: u64,
+    id: u128,
+    custom: u128,
+    flags: AccountFlags,
+    unit: u64,
+    debit_reserved: u64,
+    debit_accepted: u64,
+    credit_reserved: u64,
+    credit_accepted: u64,
+    debit_reserved_limit: u64,
+    debit_accepted_limit: u64,
     credit_reserved_limit: u64,
     credit_accepted_limit: u64,
-                  padding: u64 = 0,
-                timestamp: u64 = 0,
+    padding: u64 = 0,
+    timestamp: u64 = 0,
 
     pub inline fn exceeds(balance: u64, amount: u64, limit: u64) bool {
         return limit > 0 and balance + amount > limit;
@@ -51,47 +51,118 @@ pub const Account = packed struct {
     pub inline fn exceeds_credit_accepted_limit(self: *const Account, amount: u64) bool {
         return Account.exceeds(self.credit_accepted, amount, self.credit_accepted_limit);
     }
+
+    pub fn format(value: Account, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.writeAll("{");
+        try std.fmt.format(writer, "\"id\":{},", .{value.id});
+        try std.fmt.format(writer, "\"custom\":\"{x:0>32}\",", .{value.custom});
+        try std.fmt.format(writer, "\"flags\":{},", .{value.flags});
+        try std.fmt.format(writer, "\"unit\":{},", .{value.unit});
+        try std.fmt.format(writer, "\"debit_reserved\":{},", .{value.debit_reserved});
+        try std.fmt.format(writer, "\"debit_accepted\":{},", .{value.debit_accepted});
+        try std.fmt.format(writer, "\"credit_reserved\":{},", .{value.credit_reserved});
+        try std.fmt.format(writer, "\"credit_accepted\":{},", .{value.credit_accepted});
+        try std.fmt.format(writer, "\"debit_reserved_limit\":{},", .{value.debit_reserved_limit});
+        try std.fmt.format(writer, "\"debit_accepted_limit\":{},", .{value.debit_accepted_limit});
+        try std.fmt.format(writer, "\"credit_reserved_limit\":{},", .{value.credit_reserved_limit});
+        try std.fmt.format(writer, "\"credit_accepted_limit\":{},", .{value.credit_accepted_limit});
+        try std.fmt.format(writer, "\"timestamp\":{}", .{value.timestamp});
+        try writer.writeAll("}");
+        return;
+    }
 };
 
 pub const AccountFlags = packed struct {
     padding: u64 = 0,
+
+    pub fn format(value: AccountFlags, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.writeAll("{}");
+        return;
+    }
 };
 
 pub const Transfer = packed struct {
-                   id: u128,
-     debit_account_id: u128,
+    id: u128,
+    debit_account_id: u128,
     credit_account_id: u128,
-             custom_1: u128,
-             custom_2: u128,
-             custom_3: u128,
-                flags: TransferFlags,
-               amount: u64,
-              timeout: u64,
-            timestamp: u64 = 0,
+    custom_1: u128,
+    custom_2: u128,
+    custom_3: u128,
+    flags: TransferFlags,
+    amount: u64,
+    timeout: u64,
+    timestamp: u64 = 0,
+
+    pub fn format(value: Transfer, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.writeAll("{");
+        try std.fmt.format(writer, "\"id\":{},", .{value.id});
+        try std.fmt.format(writer, "\"debit_account_id\":{},", .{value.debit_account_id});
+        try std.fmt.format(writer, "\"credit_account_id\":{},", .{value.credit_account_id});
+        try std.fmt.format(writer, "\"custom_1\":\"{x:0>32}\",", .{value.custom_1});
+        try std.fmt.format(writer, "\"custom_2\":\"{x:0>32}\",", .{value.custom_2});
+        try std.fmt.format(writer, "\"custom_3\":\"{x:0>32}\",", .{value.custom_3});
+        try std.fmt.format(writer, "\"flags\":{},", .{value.flags});
+        try std.fmt.format(writer, "\"amount\":{},", .{value.amount});
+        try std.fmt.format(writer, "\"timeout\":{},", .{value.timeout});
+        try std.fmt.format(writer, "\"timestamp\":{}", .{value.timestamp});
+        try writer.writeAll("}");
+        return;
+    }
 };
 
 pub const TransferFlags = packed struct {
-         accept: bool = false,
-         reject: bool = false,
+    accept: bool = false,
+    reject: bool = false,
     auto_commit: bool = false,
-      condition: bool = false,
-        padding: u60 = 0,
+    condition: bool = false,
+    padding: u60 = 0,
+
+    pub fn format(value: TransferFlags, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.writeAll("{");
+        try std.fmt.format(writer, "\"accept\":{},", .{value.accept});
+        try std.fmt.format(writer, "\"reject\":{},", .{value.reject});
+        try std.fmt.format(writer, "\"auto_commit\":{},", .{value.auto_commit});
+        try std.fmt.format(writer, "\"condition\":{}", .{value.condition});
+        try writer.writeAll("}");
+        return;
+    }
 };
 
 pub const Commit = packed struct {
-           id: u128,
-     custom_1: u128,
-     custom_2: u128,
-     custom_3: u128,
-        flags: CommitFlags,
+    id: u128,
+    custom_1: u128,
+    custom_2: u128,
+    custom_3: u128,
+    flags: CommitFlags,
     timestamp: u64 = 0,
+
+    pub fn format(value: Commit, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.writeAll("{");
+        try std.fmt.format(writer, "\"id\":{},", .{value.accept});
+        try std.fmt.format(writer, "\"custom_1\":{},", .{value.custom_1});
+        try std.fmt.format(writer, "\"custom_2\":{},", .{value.custom_2});
+        try std.fmt.format(writer, "\"custom_3\":{},", .{value.custom_3});
+        try std.fmt.format(writer, "\"flags\":{},", .{value.flags});
+        try std.fmt.format(writer, "\"timestamp\":{}", .{value.timestamp});
+        try writer.writeAll("}");
+        return;
+    }
 };
 
 pub const CommitFlags = packed struct {
-      accept: bool = false,
-      reject: bool = false,
+    accept: bool = false,
+    reject: bool = false,
     preimage: bool = false,
-     padding: u61 = 0,
+    padding: u61 = 0,
+
+    pub fn format(value: CommitFlags, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.writeAll("{");
+        try std.fmt.format(writer, "\"accept\":{},", .{value.accept});
+        try std.fmt.format(writer, "\"reject\":{},", .{value.reject});
+        try std.fmt.format(writer, "\"preimage\":{}", .{value.auto_commit});
+        try writer.writeAll("}");
+        return;
+    }
 };
 
 pub const CreateAccountResult = packed enum(u32) {
@@ -167,56 +238,56 @@ pub const CommitTransferResult = packed enum(u32) {
 };
 
 pub const CreateAccountResults = packed struct {
-     index: u32,
+    index: u32,
     result: CreateAccountResult,
 };
 
 pub const CreateTransferResults = packed struct {
-     index: u32,
+    index: u32,
     result: CreateTransferResult,
 };
 
 pub const CommitTransferResults = packed struct {
-     index: u32,
+    index: u32,
     result: CommitTransferResult,
 };
 
 pub const Magic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."
 
 pub const JournalHeader = packed struct {
-                        // TODO Move these comments to the design doc:
-                        // This checksum covers this entry's header and becomes the hash chain root.
-                        // The hash chain root covers all entry checksums in the journal:
-                        // 1. to protect against journal tampering, and
-                        // 2. to prove knowledge of history when determining consensus across nodes.
-         checksum_meta: u128 = undefined,
-                        // This checksum covers this entry's data, excluding sector padding:
-                        // 1. to protect against torn writes and provide crash safety, and
-                        // 2. to protect against eventual disk corruption.
-         checksum_data: u128 = undefined,
-                        // This binds this entry with the previous journal entry:
-                        // 1. to protect against misdirected reads/writes by hardware, and
-                        // 2. to enable "relaxed lock step" quorum across the cluster, enabling
-                        //    nodes to form a quorum provided their hash chain roots can be
-                        //    linked together in a directed acyclic graph by a topological sort,
-                        //    i.e. a node can be one hash chain root behind another to accomodate
-                        //    crashes without losing quorum.
+    // TODO Move these comments to the design doc:
+    // This checksum covers this entry's header and becomes the hash chain root.
+    // The hash chain root covers all entry checksums in the journal:
+    // 1. to protect against journal tampering, and
+    // 2. to prove knowledge of history when determining consensus across nodes.
+    checksum_meta: u128 = undefined,
+    // This checksum covers this entry's data, excluding sector padding:
+    // 1. to protect against torn writes and provide crash safety, and
+    // 2. to protect against eventual disk corruption.
+    checksum_data: u128 = undefined,
+    // This binds this entry with the previous journal entry:
+    // 1. to protect against misdirected reads/writes by hardware, and
+    // 2. to enable "relaxed lock step" quorum across the cluster, enabling
+    //    nodes to form a quorum provided their hash chain roots can be
+    //    linked together in a directed acyclic graph by a topological sort,
+    //    i.e. a node can be one hash chain root behind another to accomodate
+    //    crashes without losing quorum.
     prev_checksum_meta: u128,
-                        // Since entries can be variable length, and since intermediate entries can
-                        // be corrupted, the entry offset provides a way to repair the journal at
-                        // the granularity of a single entry:
-                offset: u64,
-               command: Command,
-                        // This is the size of this entry's header and data:
-                        // 1. also covered by checksum_meta and checksum_data respectively, and
-                        // 2. excluding additional zero byte padding for disk sector alignment,
-                        //    which is necessary for direct I/O, to reduce copies in the kernel,
-                        //    and improve write throughput by up to 10%.
-                        //    e.g. If we write a journal entry for a single transfer of 192 bytes
-                        //    (64 + 128), we will actually write 4096 bytes, which is the minimum
-                        //    sector size to work with Advanced Format disks. The size will be 192
-                        //    bytes, covered by the checksums, and the rest will be zero bytes.
-                  size: u32,
+    // Since entries can be variable length, and since intermediate entries can
+    // be corrupted, the entry offset provides a way to repair the journal at
+    // the granularity of a single entry:
+    offset: u64,
+    command: Command,
+    // This is the size of this entry's header and data:
+    // 1. also covered by checksum_meta and checksum_data respectively, and
+    // 2. excluding additional zero byte padding for disk sector alignment,
+    //    which is necessary for direct I/O, to reduce copies in the kernel,
+    //    and improve write throughput by up to 10%.
+    //    e.g. If we write a journal entry for a single transfer of 192 bytes
+    //    (64 + 128), we will actually write 4096 bytes, which is the minimum
+    //    sector size to work with Advanced Format disks. The size will be 192
+    //    bytes, covered by the checksums, and the rest will be zero bytes.
+    size: u32,
 
     pub fn calculate_checksum_meta(self: *const JournalHeader) u128 {
         const meta = @bitCast([@sizeOf(JournalHeader)]u8, self.*);
@@ -256,10 +327,10 @@ pub const JournalHeader = packed struct {
 pub const NetworkHeader = packed struct {
     checksum_meta: u128 = undefined,
     checksum_data: u128 = undefined,
-               id: u128,
-            magic: u64 = Magic,
-          command: Command,
-             size: u32,
+    id: u128,
+    magic: u64 = Magic,
+    command: Command,
+    size: u32,
 
     pub fn calculate_checksum_meta(self: *const NetworkHeader) u128 {
         const meta = @bitCast([@sizeOf(NetworkHeader)]u8, self.*);
@@ -314,16 +385,14 @@ pub const NetworkHeader = packed struct {
             .lookup_accounts => 1,
             else => unreachable,
         };
-        return (
-            @mod(data_size, type_size) == 0 and
-            @divExact(data_size, type_size) >= min_count
-        );
+        return (@mod(data_size, type_size) == 0 and
+            @divExact(data_size, type_size) >= min_count);
     }
 };
 
 comptime {
-    if (builtin.os.tag != .linux) @compileError("linux required for io_uring");
-    
+    //    if (builtin.os.tag != .linux) @compileError("linux required for io_uring");
+
     // We require little-endian architectures everywhere for efficient network deserialization:
     if (builtin.endian != builtin.Endian.Little) @compileError("big-endian systems not supported");
 }
@@ -331,11 +400,7 @@ comptime {
 const testing = std.testing;
 
 test "magic" {
-    testing.expectEqualSlices(
-        u8,
-        ([_]u8{ 0x0a, 0x5c, 0xa1, 0xab, 0x1e, 0xbe, 0xe1, 0x1e })[0..],
-        mem.toBytes(Magic)[0..]
-    );
+    testing.expectEqualSlices(u8, ([_]u8{ 0x0a, 0x5c, 0xa1, 0xab, 0x1e, 0xbe, 0xe1, 0x1e })[0..], mem.toBytes(Magic)[0..]);
 }
 
 test "data structure sizes" {
