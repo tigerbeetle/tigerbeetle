@@ -9,7 +9,7 @@ pub const Leader = struct {
     timestamp: u64,
 
     pub fn init() !Leader {
-        return Leader {
+        return Leader{
             // TODO After recovery, take the max of wall clock and last replicated state timestamp:
             .timestamp = @intCast(u64, std.time.nanoTimestamp()),
         };
@@ -21,11 +21,11 @@ pub const Leader = struct {
     /// Returns true if all reserved timestamps were zero before being assigned, else false.
     pub fn assign_timestamps(self: *Leader, command: Command, batch: []u8) bool {
         return switch (command) {
-            .create_accounts  => self.assign_timestamps_for_type(Account, batch),
+            .create_accounts => self.assign_timestamps_for_type(Account, batch),
             .create_transfers => self.assign_timestamps_for_type(Transfer, batch),
             .commit_transfers => self.assign_timestamps_for_type(Commit, batch),
             .lookup_accounts => true, // TODO
-            else => unreachable
+            else => unreachable,
         };
     }
 
@@ -37,7 +37,7 @@ pub const Leader = struct {
             sum_reserved_timestamps += object.timestamp;
             self.timestamp += 1;
             object.timestamp = self.timestamp;
-            log.debug("assigned timestamp {}", .{ object.timestamp });
+            log.debug("assigned timestamp {}", .{object.timestamp});
         }
         // Use a single branch condition to detect non-zero reserved timestamps.
         // Summing then branching once is much faster than branching every iteration of the loop.

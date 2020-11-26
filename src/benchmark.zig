@@ -9,8 +9,8 @@ const testing = std.testing;
 
 usingnamespace @import("tigerbeetle.zig");
 
-var accounts = [_]Account {
-    Account {
+var accounts = [_]Account{
+    Account{
         .id = 1,
         .custom = 0,
         .flags = .{},
@@ -24,7 +24,7 @@ var accounts = [_]Account {
         .credit_reserved_limit = 0,
         .credit_accepted_limit = 0,
     },
-    Account {
+    Account{
         .id = 2,
         .custom = 0,
         .flags = .{},
@@ -73,7 +73,7 @@ pub fn main() !void {
     }
 
     var addr = try net.Address.parseIp4("127.0.0.1", config.port);
-    std.debug.print("connecting to {}...\n", .{ addr });
+    std.debug.print("connecting to {}...\n", .{addr});
     var connection = try net.tcpConnectToAddress(addr);
     const fd = connection.handle;
     defer os.close(fd);
@@ -119,22 +119,19 @@ pub fn main() !void {
 
     const ms = std.time.milliTimestamp() - start;
     std.debug.print("=============================\n", .{});
-    std.debug.print(
-        "{} transfers per second\n",
-        .{ @divFloor(@intCast(i64, transfers.len * 1000), ms) }
-    );
-    std.debug.print("max create_transfers latency = {}ms\n", .{ max_create_transfers_latency });
-    std.debug.print("max commit_transfers latency = {}ms\n", .{ max_commit_transfers_latency });
+    std.debug.print("{} transfers per second\n", .{@divFloor(@intCast(i64, transfers.len * 1000), ms)});
+    std.debug.print("max create_transfers latency = {}ms\n", .{max_create_transfers_latency});
+    std.debug.print("max commit_transfers latency = {}ms\n", .{max_commit_transfers_latency});
 }
 
 var request_id: u128 = 0;
 
 fn send(fd: os.fd_t, command: Command, data: []u8, comptime Result: anytype) !void {
     request_id += 1;
-    var request = NetworkHeader {
+    var request = NetworkHeader{
         .id = request_id,
         .command = command,
-        .size = @intCast(u32, @sizeOf(NetworkHeader) + data.len)
+        .size = @intCast(u32, @sizeOf(NetworkHeader) + data.len),
     };
     request.set_checksum_data(data[0..]);
     request.set_checksum_meta();
@@ -152,10 +149,10 @@ fn send(fd: os.fd_t, command: Command, data: []u8, comptime Result: anytype) !vo
         if (recv_bytes == 0) @panic("server closed the connection (while waiting for header)");
         recv_size += recv_bytes;
     }
-    
+
     var response = mem.bytesAsValue(NetworkHeader, recv[0..@sizeOf(NetworkHeader)]);
     var print_response = response.size > @sizeOf(NetworkHeader);
-    if (print_response) std.debug.print("{}\n", .{ response });
+    if (print_response) std.debug.print("{}\n", .{response});
     assert(response.magic == Magic);
     assert(response.valid_checksum_meta());
     assert(response.valid_size());
@@ -165,13 +162,13 @@ fn send(fd: os.fd_t, command: Command, data: []u8, comptime Result: anytype) !vo
         if (recv_bytes == 0) @panic("server closed the connection (while waiting for data)");
         recv_size += recv_bytes;
     }
-    
+
     const response_data = recv[@sizeOf(NetworkHeader)..response.size];
     assert(response.valid_checksum_data(response_data));
 
     if (print_response) {
         for (mem.bytesAsSlice(Result, response_data)) |result| {
-            std.debug.print("{}\n", .{ result });
+            std.debug.print("{}\n", .{result});
         }
         @panic("run 'rm -rf journal' and restart the server to do a fresh benchmark");
     }

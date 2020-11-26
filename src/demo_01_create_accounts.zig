@@ -7,8 +7,8 @@ pub fn main() !void {
     const fd = try connect(config.port);
     defer std.os.close(fd);
 
-    var accounts = [_]Account {
-        Account {
+    var accounts = [_]Account{
+        Account{
             .id = 1,
             .custom = 0,
             .flags = .{},
@@ -22,7 +22,7 @@ pub fn main() !void {
             .credit_reserved_limit = 0,
             .credit_accepted_limit = 0,
         },
-        Account {
+        Account{
             .id = 2,
             .custom = 0,
             .flags = .{},

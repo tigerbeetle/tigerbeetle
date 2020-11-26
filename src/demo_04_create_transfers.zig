@@ -7,8 +7,8 @@ pub fn main() !void {
     const fd = try connect(config.port);
     defer std.os.close(fd);
 
-    var transfers = [_]Transfer {
-        Transfer {
+    var transfers = [_]Transfer{
+        Transfer{
             .id = 1001,
             .debit_account_id = 1,
             .credit_account_id = 2,
@@ -19,7 +19,7 @@ pub fn main() !void {
             .amount = 100_000,
             .timeout = 0,
         },
-        Transfer {
+        Transfer{
             .id = 1002,
             .debit_account_id = 1,
             .credit_account_id = 2,
@@ -29,7 +29,7 @@ pub fn main() !void {
             .flags = .{},
             .amount = 1,
             .timeout = 0,
-        }
+        },
     };
 
     try send(fd, .create_transfers, transfers, CreateTransferResults);

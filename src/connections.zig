@@ -53,11 +53,11 @@ pub const Connections = struct {
             mem.set(u8, connection.send[0..], 0);
             assert(@mod(@ptrToInt(&connection.recv), config.sector_size) == 0);
         }
-        return Connections {
+        return Connections{
             .allocator = allocator,
             .accepting = false,
             .active = 0,
-            .array = array
+            .array = array,
         };
     }
 
@@ -66,7 +66,7 @@ pub const Connections = struct {
         assert(self.active == 0);
         self.allocator.free(self.array);
     }
-    
+
     pub fn available(self: *Connections) bool {
         assert(self.active <= self.array.len);
         return self.active < self.array.len;
@@ -115,7 +115,7 @@ pub const Connections = struct {
             .references = 0,
             .recv_size = 0,
             .send_offset = 0,
-            .send_size = 0
+            .send_size = 0,
         };
         mem.set(u8, connection.recv[0..], 0);
         mem.set(u8, connection.send[0..], 0);
@@ -172,7 +172,7 @@ test "connections" {
     const co1 = try connections.get(id1);
     testing.expectEqual(id1, co1.id);
     testing.expectEqual(fd1, co1.fd);
-    
+
     const fd2: os.fd_t = 7;
     const id2 = (try connections.set(fd2)).id;
     testing.expectEqual(@as(u32, 2), id2);
@@ -181,7 +181,7 @@ test "connections" {
     const co2 = try connections.get(id2);
     testing.expectEqual(id2, co2.id);
     testing.expectEqual(fd2, co2.fd);
-    
+
     const fd3: os.fd_t = 6;
     const id3 = (try connections.set(fd3)).id;
     testing.expectEqual(@as(u32, 3), id3);
@@ -190,9 +190,9 @@ test "connections" {
     const co3 = try connections.get(id3);
     testing.expectEqual(id3, co3.id);
     testing.expectEqual(fd3, co3.fd);
-    
+
     testing.expectError(error.ConnectionLimitReached, connections.set(0));
-    
+
     try connections.unset(id0);
     testing.expectEqual(@as(usize, 3), connections.active);
     testing.expectEqual(true, connections.available());

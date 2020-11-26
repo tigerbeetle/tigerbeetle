@@ -11,30 +11,25 @@ usingnamespace @import("tigerbeetle.zig");
 usingnamespace @import("state.zig");
 
 pub const Journal = struct {
-               allocator: *Allocator,
-                   state: *State,
-                    file: fs.File,
-         hash_chain_root: u128,
+    allocator: *Allocator,
+    state: *State,
+    file: fs.File,
+    hash_chain_root: u128,
     prev_hash_chain_root: u128,
-                 headers: []JournalHeader align(config.sector_size),
-                 entries: u64,
-                  offset: u64,
+    headers: []JournalHeader align(config.sector_size),
+    entries: u64,
+    offset: u64,
 
     pub fn init(allocator: *Allocator, state: *State) !Journal {
         const path = "journal";
         const file = try Journal.open(path);
         errdefer file.close();
 
-        var headers = try allocator.allocAdvanced(
-            JournalHeader,
-            config.sector_size,
-            config.journal_entries_max,
-            .exact
-        );
+        var headers = try allocator.allocAdvanced(JournalHeader, config.sector_size, config.journal_entries_max, .exact);
         errdefer allocator.free(headers);
         mem.set(u8, mem.sliceAsBytes(headers), 0);
-        
-        var self = Journal {
+
+        var self = Journal{
             .allocator = allocator,
             .state = state,
             .file = file,
@@ -47,7 +42,7 @@ pub const Journal = struct {
         assert(@mod(self.offset, config.sector_size) == 0);
         assert(@mod(@ptrToInt(&headers[0]), config.sector_size) == 0);
 
-        log.debug("fd={}", .{ self.file.handle });
+        log.debug("fd={}", .{self.file.handle});
 
         try self.recover();
         return self;
@@ -69,7 +64,7 @@ pub const Journal = struct {
 
         assert(@sizeOf(JournalHeader) == @sizeOf(NetworkHeader));
         assert(size >= @sizeOf(JournalHeader));
-        
+
         assert(buffer.len == Journal.append_size(size));
         assert(buffer.len >= size + config.sector_size);
         assert(buffer.len < size + config.sector_size + config.sector_size);
@@ -88,7 +83,7 @@ pub const Journal = struct {
             .prev_checksum_meta = self.hash_chain_root,
             .offset = self.offset,
             .command = command,
-            .size = size
+            .size = size,
         };
         // Zero padding is not included in the checksum since it is not material except to prevent
         // buffer bleeds, which we assert against in Debug mode:
@@ -105,10 +100,7 @@ pub const Journal = struct {
         // Write the EOF entry to the last sector of the buffer:
         const entry_sector_size = Journal.sector_ceil(entry.size);
         assert(entry_sector_size == buffer.len - config.sector_size);
-        const eof = mem.bytesAsValue(
-            JournalHeader,
-            buffer[entry_sector_size..][0..@sizeOf(JournalHeader)]
-        );
+        const eof = mem.bytesAsValue(JournalHeader, buffer[entry_sector_size..][0..@sizeOf(JournalHeader)]);
         eof.* = .{
             .prev_checksum_meta = entry.checksum_meta,
             .offset = entry.offset + entry_sector_size,
@@ -119,8 +111,8 @@ pub const Journal = struct {
         eof.set_checksum_meta();
 
         // Write the request entry and EOF entry to the tail of the journal:
-        log.debug("appending: {}", .{ entry });
-        log.debug("appending: {}", .{ eof });
+        log.debug("appending: {}", .{entry});
+        log.debug("appending: {}", .{eof});
 
         // Write the request entry and EOF entry headers to the head of the journal:
         assert(self.headers[self.entries].command == .eof);
@@ -178,7 +170,7 @@ pub const Journal = struct {
         if (!@hasDecl(os, "O_DIRECT")) return false;
 
         const path = "fs_supports_direct_io";
-        const dir = fs.Dir { .fd = dir_fd };
+        const dir = fs.Dir{ .fd = dir_fd };
         const fd = try os.openatZ(dir_fd, path, os.O_CLOEXEC | os.O_CREAT | os.O_TRUNC, 0o666);
         defer os.close(fd);
         defer dir.deleteFile(path) catch {};
@@ -230,11 +222,11 @@ pub const Journal = struct {
                 } else {
                     // Zero any remaining sectors that cannot be read:
                     // We treat these EIO errors the same as a checksum failure.
-                    log.warn("latent sector error at offset {}, zeroing sector...", .{ offset });
+                    log.warn("latent sector error at offset {}, zeroing sector...", .{offset});
                     mem.set(u8, buffer, 0);
                 }
             } else {
-                log.emerg("impossible read: err={}", .{ err });
+                log.emerg("impossible read: err={}", .{err});
                 @panic("impossible read");
             }
         }
@@ -255,7 +247,7 @@ pub const Journal = struct {
             else => {
                 log.emerg("write: error={} buffer.len={} offset={}", .{ err, buffer.len, offset });
                 @panic("unrecoverable disk error");
-            }
+            },
         };
     }
 
@@ -265,12 +257,7 @@ pub const Journal = struct {
         assert(self.entries == 0);
         assert(self.offset == config.journal_entries_max * @sizeOf(JournalHeader));
 
-        var buffer = try self.allocator.allocAdvanced(
-            u8,
-            config.sector_size,
-            config.request_size_max,
-            .exact
-        );
+        var buffer = try self.allocator.allocAdvanced(u8, config.sector_size, config.request_size_max, .exact);
         defer self.allocator.free(buffer);
         assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
         assert(@mod(buffer.len, config.sector_size) == 0);
@@ -294,13 +281,10 @@ pub const Journal = struct {
                 // TODO Repair headers at the head of the journal in memory.
                 // TODO Repair headers at the head of the journal on disk.
                 const d = &self.headers[self.entries];
-                const e = mem.bytesAsValue(
-                    JournalHeader,
-                    buffer[offset..][0..@sizeOf(JournalHeader)]
-                );
+                const e = mem.bytesAsValue(JournalHeader, buffer[offset..][0..@sizeOf(JournalHeader)]);
 
-                log.debug("d = {}", .{ d });
-                log.debug("e = {}", .{ e });
+                log.debug("d = {}", .{d});
+                log.debug("e = {}", .{e});
 
                 if (!d.valid_checksum_meta()) @panic("corrupt header");
                 if (d.prev_checksum_meta != self.hash_chain_root) @panic("misdirected");
@@ -372,18 +356,18 @@ pub const Journal = struct {
     /// - Zeroes the entire file to force allocation and improve performance (e.g. on EBS volumes).
     /// - Writes an EOF entry.
     fn create(path: []const u8) !fs.File {
-        log.info("creating {}...", .{ path });
+        log.info("creating {}...", .{path});
 
         const file = try Journal.openat(std.fs.cwd().fd, path, true);
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // Some file systems will not support fallocate(), that's fine, but could mean more seeks.
-        log.debug("pre-allocating {} bytes...", .{ config.journal_size_max });
+        log.debug("pre-allocating {} bytes...", .{config.journal_size_max});
         Journal.fallocate(file.handle, 0, 0, config.journal_size_max) catch |err| switch (err) {
             error.OperationNotSupported => {
                 log.notice("file system does not support fallocate()", .{});
             },
-            else => return err
+            else => return err,
         };
 
         // Dynamically allocate a buffer to zero the file:
@@ -392,19 +376,14 @@ pub const Journal = struct {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
         var allocator = &arena.allocator;
-        var buffer = try allocator.allocAdvanced(
-            u8,
-            config.sector_size,
-            config.request_size_max,
-            .exact
-        );
+        var buffer = try allocator.allocAdvanced(u8, config.sector_size, config.request_size_max, .exact);
         defer allocator.free(buffer);
         mem.set(u8, buffer[0..], 0);
-        
+
         // Write zeroes to the disk to improve performance:
         // These zeroes have no semantic meaning from a journal recovery point of view.
         // We use zeroes because we have to use something and we don't want a buffer bleed.
-        log.debug("zeroing {} bytes...", .{ config.journal_size_max });
+        log.debug("zeroing {} bytes...", .{config.journal_size_max});
         assert(@mod(config.journal_size_max, buffer.len) == 0);
         var zeroing_progress: u64 = 0;
         var zeroing_offset: u64 = 0;
@@ -417,7 +396,7 @@ pub const Journal = struct {
 
             const zeroing_percent: u64 = @divTrunc(zeroing_offset * 100, config.journal_size_max);
             if (zeroing_percent - zeroing_progress >= 20 or zeroing_percent == 100) {
-                log.debug("zeroing... {}%", .{ zeroing_percent });
+                log.debug("zeroing... {}%", .{zeroing_percent});
                 zeroing_progress = zeroing_percent;
             }
         }
@@ -440,17 +419,17 @@ pub const Journal = struct {
         log.debug("write(buffer.len={} offset={}): {}", .{
             config.sector_size,
             eof_body_offset,
-            eof
+            eof,
         });
         try file.pwriteAll(buffer[0..config.sector_size], eof_body_offset);
-        
+
         log.debug("write(buffer.len={} offset={}): {}", .{
             config.sector_size,
             eof_head_offset,
-            eof
+            eof,
         });
         try file.pwriteAll(buffer[0..config.sector_size], eof_head_offset);
-        
+
         // TODO Open parent directory to fsync the directory inode (and recurse for all ancestors).
 
         return file;
@@ -471,7 +450,7 @@ pub const Journal = struct {
             linux.EPERM => return error.PermissionDenied,
             linux.ESPIPE => return error.Unseekable,
             linux.ETXTBSY => return error.FileBusy,
-            else => |errno| return os.unexpectedErrno(errno)
+            else => |errno| return os.unexpectedErrno(errno),
         }
     }
 
@@ -500,7 +479,7 @@ pub const Journal = struct {
     /// Opens an existing journal file.
     fn open(path: []const u8) !fs.File {
         // TODO Figure out absolute path to journal file regardless of the server's cwd.
-        log.debug("opening {}...", .{ path });
+        log.debug("opening {}...", .{path});
         return Journal.openat(std.fs.cwd().fd, path, false) catch |err| switch (err) {
             error.FileNotFound => return try Journal.create(path),
             else => return err,
@@ -533,7 +512,7 @@ pub const Journal = struct {
             flags |= os.O_EXCL;
             mode = 0o666;
         }
-        
+
         // This is critical since we rely on O_DSYNC to fsync():
         assert((flags & os.O_DSYNC) > 0);
 
@@ -543,7 +522,7 @@ pub const Journal = struct {
 
         try os.flock(fd, os.LOCK_EX);
 
-        return fs.File {
+        return fs.File{
             .handle = fd,
             .capable_io_mode = .blocking,
             .intended_io_mode = .blocking,

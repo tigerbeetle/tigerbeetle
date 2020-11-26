@@ -35,6 +35,7 @@ pub fn main() !void {
         .amount = 1000,
         .timeout = 0,
     };
+    std.debug.print("{}\n", .{account});
     std.debug.print("{}\n", .{transfer});
 }
 

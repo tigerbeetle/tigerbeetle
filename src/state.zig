@@ -13,7 +13,7 @@ const HashMapTransfers = std.AutoHashMap(u128, Transfer);
 pub const State = struct {
     allocator: *Allocator,
     timestamp: u64,
-     accounts: HashMapAccounts,
+    accounts: HashMapAccounts,
     transfers: HashMapTransfers,
 
     pub fn init(allocator: *Allocator, accounts_max: usize, transfers_max: usize) !State {
@@ -25,11 +25,11 @@ pub const State = struct {
         errdefer transfers.deinit();
         try transfers.ensureCapacity(@intCast(u32, transfers_max));
 
-        return State {
+        return State{
             .allocator = allocator,
             .timestamp = 0,
             .accounts = accounts,
-            .transfers = transfers
+            .transfers = transfers,
         };
     }
 
@@ -44,7 +44,7 @@ pub const State = struct {
             .create_transfers => self.apply_create_transfers(input, output),
             .commit_transfers => self.apply_commit_transfers(input, output),
             .lookup_accounts => self.apply_lookup_accounts(input, output),
-            else => unreachable
+            else => unreachable,
         };
     }
 
@@ -55,7 +55,7 @@ pub const State = struct {
         for (batch) |account, index| {
             log.debug("create_accounts {}/{}: {}", .{ index + 1, batch.len, account });
             const result = self.create_account(account);
-            log.debug("{}", .{ result });
+            log.debug("{}", .{result});
             if (result != .ok) {
                 results[results_count] = .{ .index = @intCast(u32, index), .result = result };
                 results_count += 1;
@@ -71,7 +71,7 @@ pub const State = struct {
         for (batch) |transfer, index| {
             log.debug("create_transfers {}/{}: {}", .{ index + 1, batch.len, transfer });
             const result = self.create_transfer(transfer);
-            log.debug("{}", .{ result });
+            log.debug("{}", .{result});
             if (result != .ok) {
                 results[results_count] = .{ .index = @intCast(u32, index), .result = result };
                 results_count += 1;
@@ -87,7 +87,7 @@ pub const State = struct {
         for (batch) |commit, index| {
             log.debug("commit_transfers {}/{}: {}", .{ index + 1, batch.len, commit });
             const result = self.commit_transfer(commit);
-            log.debug("{}", .{ result });
+            log.debug("{}", .{result});
             if (result != .ok) {
                 results[results_count] = .{ .index = @intCast(u32, index), .result = result };
                 results_count += 1;
@@ -137,12 +137,11 @@ pub const State = struct {
         if (hash_map_result.found_existing) {
             const exists = hash_map_result.entry.value;
             if (exists.unit != a.unit) return .exists_with_different_unit;
-            if (
-                exists.debit_reserved_limit != a.debit_reserved_limit or
+            if (exists.debit_reserved_limit != a.debit_reserved_limit or
                 exists.debit_accepted_limit != a.debit_accepted_limit or
                 exists.credit_reserved_limit != a.credit_reserved_limit or
-                exists.credit_accepted_limit != a.credit_accepted_limit
-            ) {
+                exists.credit_accepted_limit != a.credit_accepted_limit)
+            {
                 return .exists_with_different_limits;
             }
             if (exists.custom != a.custom) return .exists_with_different_custom_field;
@@ -205,11 +204,10 @@ pub const State = struct {
             if (exists.credit_account_id != t.credit_account_id) {
                 return .exists_with_different_credit_account_id;
             }
-            if (
-                exists.custom_1 != t.custom_1 or
+            if (exists.custom_1 != t.custom_1 or
                 exists.custom_2 != t.custom_2 or
-                exists.custom_3 != t.custom_3
-            ) {
+                exists.custom_3 != t.custom_3)
+            {
                 return .exists_with_different_custom_fields;
             }
             if (exists.amount != t.amount) return .exists_with_different_amount;
@@ -265,7 +263,7 @@ pub const State = struct {
         } else if (c.flags.preimage) {
             return .preimage_requires_condition;
         }
-        
+
         var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
         var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
         assert(t.timestamp > dr.timestamp);
