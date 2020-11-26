@@ -2,10 +2,14 @@ const std = @import("std");
 usingnamespace @import("tigerbeetle.zig");
 
 pub fn main() !void {
-    var myValue = MyType{
-        .x = 1,
-        .y = 2,
+    var network = NetworkHeader{
+        .checksum_meta = 76567523,
+        .checksum_data = 2345456373567,
+        .id = 87236482354976,
+        .command = Command.ack,
+        .size = 76253,
     };
+
     var account = Account{
         .id = 1,
         .custom = 10,
@@ -35,25 +39,7 @@ pub fn main() !void {
         .amount = 1000,
         .timeout = 0,
     };
-    std.debug.print("{}\n", .{account});
-    std.debug.print("{}\n", .{transfer});
+    std.debug.print("{json}\n", .{network});
+    std.debug.print("{json}\n", .{account});
+    std.debug.print("{json}\n", .{transfer});
 }
-
-pub const MyType = packed struct {
-    x: u64 = 0,
-    y: u64 = 0,
-
-    pub fn format(value: MyType, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        if (fmt.len > 0) {
-            if (fmt.len > 1) {
-                return std.fmt.format(writer, "{}", .{fmt.len});
-            }
-            switch (fmt[0]) {
-                // json format
-                'j' => return std.fmt.format(writer, "[{},{}]", .{ value.x, value.y }),
-                else => unreachable,
-            }
-        }
-        return std.fmt.format(writer, "{},{}", .{ value.x, value.y });
-    }
-};
