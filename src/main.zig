@@ -27,8 +27,7 @@ const Event = packed struct {
         Recv,
         Send,
         Close,
-    },
-    connection_id: u32
+    }, connection_id: u32
 };
 
 fn accept(ring: *IO_Uring, fd: os.fd_t, addr: *os.sockaddr, addr_len: *os.socklen_t) !void {
@@ -37,7 +36,7 @@ fn accept(ring: *IO_Uring, fd: os.fd_t, addr: *os.sockaddr, addr_len: *os.sockle
     // TODO We use a runtime cast of fd to work around a packed struct default value bug here:
     // The Accept op does not need a connection_id, it's meaningless but we must provide something.
     // The compiler error is "TODO buf_read_value_bytes enum auto".
-    const event = Event { .op = .Accept, .connection_id = @intCast(u32, fd) };
+    const event = Event{ .op = .Accept, .connection_id = @intCast(u32, fd) };
     const user_data = @bitCast(u64, event);
     _ = try ring.accept(user_data, fd, addr, addr_len, os.SOCK_CLOEXEC);
     connections.accepting = true;
@@ -63,7 +62,7 @@ fn accept_completed(ring: *IO_Uring, cqe: *const io_uring_cqe) !void {
 }
 
 fn recv(ring: *IO_Uring, connection: *Connection) !void {
-    const event = Event { .op = .Recv, .connection_id = connection.id };
+    const event = Event{ .op = .Recv, .connection_id = connection.id };
     const user_data = @bitCast(u64, event);
     assert(connection.fd >= 0);
     assert(connection.references == 1);
@@ -72,12 +71,7 @@ fn recv(ring: *IO_Uring, connection: *Connection) !void {
     log.debug("connection {}: recv[{}..]", .{ connection.id, offset });
     // We limit requests (as well as all inflight data) to request_size_max and not recv.len:
     // The difference between recv.len and request_size_max is reserved for sector padding.
-    _ = try ring.recv(
-        user_data,
-        connection.fd,
-        connection.recv[offset..config.request_size_max],
-        os.MSG_NOSIGNAL
-    );
+    _ = try ring.recv(user_data, connection.fd, connection.recv[offset..config.request_size_max], os.MSG_NOSIGNAL);
 }
 
 fn recv_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Connection) !void {
@@ -90,7 +84,7 @@ fn recv_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Connec
             // The connection timed out due to a transmission timeout:
             os.ETIMEDOUT => try close(ring, connection, "ETIMEDOUT"),
             // Shut everything down, we didn't expect this:
-            else => |errno| return os.unexpectedErrno(@intCast(usize, errno))
+            else => |errno| return os.unexpectedErrno(@intCast(usize, errno)),
         }
     } else if (cqe.res == 0) {
         try close(ring, connection, "peer performed an orderly shutdown");
@@ -160,11 +154,7 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
         // Don't overwrite any pipelined data, shift the pipeline to the right:
         if (connection.recv_size - request.size > 0) {
             // These slices overlap, with dest.ptr > src.ptr, so we must use a reverse loop:
-            mem.copyBackwards(
-                u8,
-                connection.recv[journal_append_size..],
-                connection.recv[request.size..connection.recv_size]
-            );
+            mem.copyBackwards(u8, connection.recv[journal_append_size..], connection.recv[request.size..connection.recv_size]);
         }
         // Zero the padding:
         mem.set(u8, connection.recv[request.size..journal_append_size], 0);
@@ -174,18 +164,14 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     try journal.append(request.command, request.size, connection.recv[0..journal_append_size]);
 
     // Apply as input to state machine, writing any response data directly to the send buffer:
-    const response_data_size = state.apply(
-        request.command,
-        request_data,
-        connection.send[@sizeOf(NetworkHeader)..]
-    );
+    const response_data_size = state.apply(request.command, request_data, connection.send[@sizeOf(NetworkHeader)..]);
 
     // Write the response header to the send buffer:
     var response = mem.bytesAsValue(NetworkHeader, connection.send[0..@sizeOf(NetworkHeader)]);
     response.* = .{
         .id = request.id,
         .command = .ack,
-        .size = @sizeOf(NetworkHeader) + @intCast(u32, response_data_size)
+        .size = @sizeOf(NetworkHeader) + @intCast(u32, response_data_size),
     };
     assert(response.valid_size());
     response.set_checksum_data(connection.send[@sizeOf(NetworkHeader)..response.size]);
@@ -199,17 +185,13 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
     const pipeline_size = connection.recv_size - journal_append_size;
     if (pipeline_size > 0) {
         // These slices overlap, with dest.ptr < src.ptr, so we must use a forward loop:
-        mem.copy(
-            u8,
-            connection.recv[0..],
-            connection.recv[journal_append_size..connection.recv_size]
-        );
+        mem.copy(u8, connection.recv[0..], connection.recv[journal_append_size..connection.recv_size]);
     }
 
     // When send() completes it will call parse() instead of recv() if `recv_size` is non-zero:
     connection.recv_size = pipeline_size;
     log.debug("connection {}: parse: pipeline_size={}", .{ connection.id, pipeline_size });
-    
+
     // Ack:
     connection.send_offset = 0;
     connection.send_size = response.size;
@@ -217,7 +199,7 @@ fn parse(ring: *IO_Uring, connection: *Connection, prev_recv_size: usize) !void 
 }
 
 fn send(ring: *IO_Uring, connection: *Connection) !void {
-    const event = Event { .op = .Send, .connection_id = connection.id };
+    const event = Event{ .op = .Send, .connection_id = connection.id };
     const user_data = @bitCast(u64, event);
     assert(connection.fd >= 0);
     assert(connection.references == 1);
@@ -239,7 +221,7 @@ fn send_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Connec
             // The socket is shut down for writing, or the socket is no longer connected.
             os.EPIPE => try close(ring, connection, "EPIPE"),
             // Shut everything down, we didn't expect this:
-            else => |errno| return os.unexpectedErrno(@intCast(usize, errno))
+            else => |errno| return os.unexpectedErrno(@intCast(usize, errno)),
         }
     } else {
         connection.send_offset += @intCast(usize, cqe.res);
@@ -266,7 +248,7 @@ fn send_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Connec
 
 fn close(ring: *IO_Uring, connection: *Connection, reason: []const u8) !void {
     log.debug("connection {}: closing after {}...", .{ connection.id, reason });
-    const event = Event { .op = .Close, .connection_id = connection.id };
+    const event = Event{ .op = .Close, .connection_id = connection.id };
     const user_data = @bitCast(u64, event);
     assert(connection.fd >= 0);
     assert(connection.references == 1);
@@ -278,7 +260,7 @@ fn close_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Conne
     assert(connection.references == 2);
     connection.references -= 1;
     if (cqe.res < 0) return os.unexpectedErrno(@intCast(usize, -cqe.res));
-    log.debug("connection {}: closed", .{ connection.id });
+    log.debug("connection {}: closed", .{connection.id});
     try connections.unset(connection.id);
 }
 
@@ -297,7 +279,7 @@ fn event_loop(ring: *IO_Uring, server: os.fd_t) !void {
                 .Accept => try accept_completed(ring, &cqe),
                 .Recv => try recv_completed(ring, &cqe, try connections.get(event.connection_id)),
                 .Send => try send_completed(ring, &cqe, try connections.get(event.connection_id)),
-                .Close => try close_completed(ring, &cqe, try connections.get(event.connection_id))
+                .Close => try close_completed(ring, &cqe, try connections.get(event.connection_id)),
             }
         }
         // Decide whether or not to accept another connection here in one place, since there are
@@ -355,7 +337,7 @@ fn tcp_server_init() !os.fd_t {
         attempts -= 1;
         if (os.bind(fd, &address.any, address.getOsSockLen())) {
             try os.listen(fd, config.tcp_backlog);
-            log.info("listening on {}", .{ address });
+            log.info("listening on {}", .{address});
             return fd;
         } else |err| switch (err) {
             error.AddressInUse => {
@@ -364,7 +346,7 @@ fn tcp_server_init() !os.fd_t {
                 log.info("port {} is in use, port hopping to {}...", .{ address.getPort(), port });
                 address.setPort(port);
             },
-            else => return err
+            else => return err,
         }
     }
     unreachable;
@@ -390,7 +372,6 @@ fn set_socket_option(fd: os.fd_t, level: u32, option: u32, value: u31) !void {
 
 pub fn main() !void {
     // TODO Log all config variables at debug level at startup.
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     var allocator = &arena.allocator;
@@ -421,13 +402,12 @@ comptime {
     switch (config.deployment_environment) {
         .development => {},
         .production => {},
-        else => @compileError("config: unknown deployment_environment")
+        else => @compileError("config: unknown deployment_environment"),
     }
 
-    if (
-        config.tcp_user_timeout >
-        (config.tcp_keepidle + config.tcp_keepintvl * config.tcp_keepcnt) * 1000
-    ) {
+    if (config.tcp_user_timeout >
+        (config.tcp_keepidle + config.tcp_keepintvl * config.tcp_keepcnt) * 1000)
+    {
         @compileError("config: tcp_user_timeout would cause tcp_keepcnt to be extended");
     }
 
@@ -462,7 +442,7 @@ comptime {
     switch (config.journal_disk_scheduler) {
         .elevator => {},
         .none => {},
-        else => @compileError("config: unknown journal_disk_scheduler")
+        else => @compileError("config: unknown journal_disk_scheduler"),
     }
     // TODO Add safety checks on all config variables and interactions between them.
     // TODO Move this to tigerbeetle.zig or somewhere common to all code.
