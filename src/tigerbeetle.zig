@@ -446,7 +446,7 @@ pub const NetworkHeader = packed struct {
 };
 
 comptime {
-    //    if (builtin.os.tag != .linux) @compileError("linux required for io_uring");
+    if (builtin.os.tag != .linux) @compileError("linux required for io_uring");
 
     // We require little-endian architectures everywhere for efficient network deserialization:
     if (builtin.endian != builtin.Endian.Little) @compileError("big-endian systems not supported");
