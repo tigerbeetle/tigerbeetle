@@ -3,8 +3,8 @@ const assert = std.debug.assert;
 const builtin = std.builtin;
 const net = std.net;
 const os = std.os;
-
-usingnamespace @import("io_uring.zig");
+const IO_Uring = os.linux.IO_Uring;
+const io_uring_cqe = os.linux.io_uring_cqe;
 
 const Event = packed struct {
     fd: i32,
