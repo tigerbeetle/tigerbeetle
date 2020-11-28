@@ -260,38 +260,11 @@ pub const CommitTransferResults = packed struct {
 pub const Magic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."
 
 pub const JournalHeader = packed struct {
-    // TODO Move these comments to the design doc:
-    // This checksum covers this entry's header and becomes the hash chain root.
-    // The hash chain root covers all entry checksums in the journal:
-    // 1. to protect against journal tampering, and
-    // 2. to prove knowledge of history when determining consensus across nodes.
     checksum_meta: u128 = undefined,
-    // This checksum covers this entry's data, excluding sector padding:
-    // 1. to protect against torn writes and provide crash safety, and
-    // 2. to protect against eventual disk corruption.
     checksum_data: u128 = undefined,
-    // This binds this entry with the previous journal entry:
-    // 1. to protect against misdirected reads/writes by hardware, and
-    // 2. to enable "relaxed lock step" quorum across the cluster, enabling
-    //    nodes to form a quorum provided their hash chain roots can be
-    //    linked together in a directed acyclic graph by a topological sort,
-    //    i.e. a node can be one hash chain root behind another to accomodate
-    //    crashes without losing quorum.
     prev_checksum_meta: u128,
-    // Since entries can be variable length, and since intermediate entries can
-    // be corrupted, the entry offset provides a way to repair the journal at
-    // the granularity of a single entry:
     offset: u64,
     command: Command,
-    // This is the size of this entry's header and data:
-    // 1. also covered by checksum_meta and checksum_data respectively, and
-    // 2. excluding additional zero byte padding for disk sector alignment,
-    //    which is necessary for direct I/O, to reduce copies in the kernel,
-    //    and improve write throughput by up to 10%.
-    //    e.g. If we write a journal entry for a single transfer of 192 bytes
-    //    (64 + 128), we will actually write 4096 bytes, which is the minimum
-    //    sector size to work with Advanced Format disks. The size will be 192
-    //    bytes, covered by the checksums, and the rest will be zero bytes.
     size: u32,
 
     pub fn calculate_checksum_meta(self: *const JournalHeader) u128 {
