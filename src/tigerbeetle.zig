@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const builtin = std.builtin;
 const crypto = std.crypto;
 const mem = std.mem;
+const StringifyOptions = std.json.StringifyOptions;
 
 pub const config = @import("tigerbeetle.conf");
 
@@ -15,14 +16,8 @@ pub const Command = packed enum(u32) {
     commit_transfers,
     lookup_accounts,
 
-    pub fn format(value: Command, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        if (comptime !std.mem.eql(u8, fmt, "json")) {
-            try writer.writeAll("Command:");
-        }
-        try writer.writeAll("\"");
-        try writer.writeAll(@tagName(value));
-        try writer.writeAll("\"");
-        return;
+    pub fn jsonStringify(self: Command, options: StringifyOptions, writer: anytype) !void {
+        try std.fmt.format(writer, "\"{}\"", .{@tagName(self)});
     }
 };
 
@@ -62,35 +57,32 @@ pub const Account = packed struct {
         return Account.exceeds(self.credit_accepted, amount, self.credit_accepted_limit);
     }
 
-    pub fn format(value: Account, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        if (comptime !std.mem.eql(u8, fmt, "json")) {
-            try writer.writeAll("Account:");
-        }
+    pub fn jsonStringify(self: Account, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"id\":{},", .{value.id});
-        try std.fmt.format(writer, "\"custom\":\"{x:0>32}\",", .{value.custom});
-        try std.fmt.format(writer, "\"flags\":{" ++ fmt ++ "},", .{value.flags});
-        try std.fmt.format(writer, "\"unit\":{},", .{value.unit});
-        try std.fmt.format(writer, "\"debit_reserved\":{},", .{value.debit_reserved});
-        try std.fmt.format(writer, "\"debit_accepted\":{},", .{value.debit_accepted});
-        try std.fmt.format(writer, "\"credit_reserved\":{},", .{value.credit_reserved});
-        try std.fmt.format(writer, "\"credit_accepted\":{},", .{value.credit_accepted});
-        try std.fmt.format(writer, "\"debit_reserved_limit\":{},", .{value.debit_reserved_limit});
-        try std.fmt.format(writer, "\"debit_accepted_limit\":{},", .{value.debit_accepted_limit});
-        try std.fmt.format(writer, "\"credit_reserved_limit\":{},", .{value.credit_reserved_limit});
-        try std.fmt.format(writer, "\"credit_accepted_limit\":{},", .{value.credit_accepted_limit});
-        try std.fmt.format(writer, "\"timestamp\":{}", .{value.timestamp});
+        try std.fmt.format(writer, "\"id\":{},", .{self.id});
+        try std.fmt.format(writer, "\"custom\":\"{x:0>32}\",", .{self.custom});
+        try writer.writeAll("\"flags\":");
+        try std.json.stringify(self.flags, .{}, writer);
+        try writer.writeAll(",");
+        try std.fmt.format(writer, "\"unit\":{},", .{self.unit});
+        try std.fmt.format(writer, "\"debit_reserved\":{},", .{self.debit_reserved});
+        try std.fmt.format(writer, "\"debit_accepted\":{},", .{self.debit_accepted});
+        try std.fmt.format(writer, "\"credit_reserved\":{},", .{self.credit_reserved});
+        try std.fmt.format(writer, "\"credit_accepted\":{},", .{self.credit_accepted});
+        try std.fmt.format(writer, "\"debit_reserved_limit\":{},", .{self.debit_reserved_limit});
+        try std.fmt.format(writer, "\"debit_accepted_limit\":{},", .{self.debit_accepted_limit});
+        try std.fmt.format(writer, "\"credit_reserved_limit\":{},", .{self.credit_reserved_limit});
+        try std.fmt.format(writer, "\"credit_accepted_limit\":{},", .{self.credit_accepted_limit});
+        try std.fmt.format(writer, "\"timestamp\":{}", .{self.timestamp});
         try writer.writeAll("}");
-        return;
     }
 };
 
 pub const AccountFlags = packed struct {
     padding: u64 = 0,
 
-    pub fn format(value: AccountFlags, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+    pub fn jsonStringify(self: AccountFlags, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{}");
-        return;
     }
 };
 
@@ -106,23 +98,21 @@ pub const Transfer = packed struct {
     timeout: u64,
     timestamp: u64 = 0,
 
-    pub fn format(value: Transfer, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        if (comptime !std.mem.eql(u8, fmt, "json")) {
-            try writer.writeAll("Transfer:");
-        }
+    pub fn jsonStringify(self: Transfer, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"id\":{},", .{value.id});
-        try std.fmt.format(writer, "\"debit_account_id\":{},", .{value.debit_account_id});
-        try std.fmt.format(writer, "\"credit_account_id\":{},", .{value.credit_account_id});
-        try std.fmt.format(writer, "\"custom_1\":\"{x:0>32}\",", .{value.custom_1});
-        try std.fmt.format(writer, "\"custom_2\":\"{x:0>32}\",", .{value.custom_2});
-        try std.fmt.format(writer, "\"custom_3\":\"{x:0>32}\",", .{value.custom_3});
-        try std.fmt.format(writer, "\"flags\":{" ++ fmt ++ "},", .{value.flags});
-        try std.fmt.format(writer, "\"amount\":{},", .{value.amount});
-        try std.fmt.format(writer, "\"timeout\":{},", .{value.timeout});
-        try std.fmt.format(writer, "\"timestamp\":{}", .{value.timestamp});
+        try std.fmt.format(writer, "\"id\":{},", .{self.id});
+        try std.fmt.format(writer, "\"debit_account_id\":{},", .{self.debit_account_id});
+        try std.fmt.format(writer, "\"credit_account_id\":{},", .{self.credit_account_id});
+        try std.fmt.format(writer, "\"custom_1\":\"{x:0>32}\",", .{self.custom_1});
+        try std.fmt.format(writer, "\"custom_2\":\"{x:0>32}\",", .{self.custom_2});
+        try std.fmt.format(writer, "\"custom_3\":\"{x:0>32}\",", .{self.custom_3});
+        try writer.writeAll("\"flags\":");
+        try std.json.stringify(self.flags, .{}, writer);
+        try writer.writeAll(",");
+        try std.fmt.format(writer, "\"amount\":{},", .{self.amount});
+        try std.fmt.format(writer, "\"timeout\":{},", .{self.timeout});
+        try std.fmt.format(writer, "\"timestamp\":{}", .{self.timestamp});
         try writer.writeAll("}");
-        return;
     }
 };
 
@@ -133,17 +123,13 @@ pub const TransferFlags = packed struct {
     condition: bool = false,
     padding: u60 = 0,
 
-    pub fn format(value: TransferFlags, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        if (comptime !std.mem.eql(u8, fmt, "json")) {
-            try writer.writeAll("TransferFlags:");
-        }
+    pub fn jsonStringify(self: TransferFlags, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"accept\":{},", .{value.accept});
-        try std.fmt.format(writer, "\"reject\":{},", .{value.reject});
-        try std.fmt.format(writer, "\"auto_commit\":{},", .{value.auto_commit});
-        try std.fmt.format(writer, "\"condition\":{}", .{value.condition});
+        try std.fmt.format(writer, "\"accept\":{},", .{self.accept});
+        try std.fmt.format(writer, "\"reject\":{},", .{self.reject});
+        try std.fmt.format(writer, "\"auto_commit\":{},", .{self.auto_commit});
+        try std.fmt.format(writer, "\"condition\":{}", .{self.condition});
         try writer.writeAll("}");
-        return;
     }
 };
 
@@ -155,19 +141,17 @@ pub const Commit = packed struct {
     flags: CommitFlags,
     timestamp: u64 = 0,
 
-    pub fn format(value: Commit, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        if (comptime !std.mem.eql(u8, fmt, "json")) {
-            try writer.writeAll("Commit:");
-        }
+    pub fn jsonStringify(self: Commit, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"id\":{},", .{value.accept});
-        try std.fmt.format(writer, "\"custom_1\":{},", .{value.custom_1});
-        try std.fmt.format(writer, "\"custom_2\":{},", .{value.custom_2});
-        try std.fmt.format(writer, "\"custom_3\":{},", .{value.custom_3});
-        try std.fmt.format(writer, "\"flags\":{" ++ fmt ++ "},", .{value.flags});
-        try std.fmt.format(writer, "\"timestamp\":{}", .{value.timestamp});
+        try std.fmt.format(writer, "\"id\":{},", .{self.id});
+        try std.fmt.format(writer, "\"custom_1\":{},", .{self.custom_1});
+        try std.fmt.format(writer, "\"custom_2\":{},", .{self.custom_2});
+        try std.fmt.format(writer, "\"custom_3\":{},", .{self.custom_3});
+        try writer.writeAll("\"flags\":");
+        try std.json.stringify(self.flags, .{}, writer);
+        try writer.writeAll(",");
+        try std.fmt.format(writer, "\"timestamp\":{}", .{self.timestamp});
         try writer.writeAll("}");
-        return;
     }
 };
 
@@ -177,16 +161,12 @@ pub const CommitFlags = packed struct {
     preimage: bool = false,
     padding: u61 = 0,
 
-    pub fn format(value: CommitFlags, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        if (comptime !std.mem.eql(u8, fmt, "json")) {
-            try writer.writeAll("CommitFlags:");
-        }
+    pub fn jsonStringify(self: CommitFlags, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"accept\":{},", .{value.accept});
-        try std.fmt.format(writer, "\"reject\":{},", .{value.reject});
-        try std.fmt.format(writer, "\"preimage\":{}", .{value.auto_commit});
+        try std.fmt.format(writer, "\"accept\":{},", .{self.accept});
+        try std.fmt.format(writer, "\"reject\":{},", .{self.reject});
+        try std.fmt.format(writer, "\"preimage\":{}", .{self.preimage});
         try writer.writeAll("}");
-        return;
     }
 };
 
@@ -348,19 +328,17 @@ pub const JournalHeader = packed struct {
         return self.checksum_data == self.calculate_checksum_data(data);
     }
 
-    pub fn format(value: JournalHeader, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        if (comptime !std.mem.eql(u8, fmt, "json")) {
-            try writer.writeAll("JournalHeader:");
-        }
+    pub fn jsonStringify(self: JournalHeader, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"checksum_meta\":{x:0>32},", .{value.checksum_meta});
-        try std.fmt.format(writer, "\"checksum_data\":{x:0>32},", .{value.checksum_data});
-        try std.fmt.format(writer, "\"prev_checksum_meta\":{x:0>32},", .{value.prev_checksum_meta});
-        try std.fmt.format(writer, "\"offset\":{},", .{value.offset});
-        try std.fmt.format(writer, "\"command\":{" ++ fmt ++ "},", .{value.command});
-        try std.fmt.format(writer, "\"size\":{}", .{value.size});
+        try std.fmt.format(writer, "\"checksum_meta\":\"{x:0>32}\",", .{self.checksum_meta});
+        try std.fmt.format(writer, "\"checksum_data\":\"{x:0>32}\",", .{self.checksum_data});
+        try std.fmt.format(writer, "\"prev_checksum_meta\":\"{x:0>32}\",", .{self.prev_checksum_meta});
+        try std.fmt.format(writer, "\"offset\":{},", .{self.offset});
+        try writer.writeAll("\"command\":");
+        try std.json.stringify(self.command, .{}, writer);
+        try writer.writeAll(",");
+        try std.fmt.format(writer, "\"size\":{}", .{self.size});
         try writer.writeAll("}");
-        return;
     }
 };
 
@@ -429,19 +407,17 @@ pub const NetworkHeader = packed struct {
             @divExact(data_size, type_size) >= min_count);
     }
 
-    pub fn format(value: NetworkHeader, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        if (comptime !std.mem.eql(u8, fmt, "json")) {
-            try writer.writeAll("NetworkHeader:");
-        }
+    pub fn jsonStringify(self: NetworkHeader, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"checksum_meta\":\"{x:0>32}\",", .{value.checksum_meta});
-        try std.fmt.format(writer, "\"checksum_data\":\"{x:0>32}\",", .{value.checksum_data});
-        try std.fmt.format(writer, "\"id\":{},", .{value.id});
-        try std.fmt.format(writer, "\"magic\":\"{x:0>16}\",", .{mem.toBytes(value.magic)});
-        try std.fmt.format(writer, "\"command\":{" ++ fmt ++ "},", .{value.command});
-        try std.fmt.format(writer, "\"size\":{}", .{value.size});
+        try std.fmt.format(writer, "\"checksum_meta\":\"{x:0>32}\",", .{self.checksum_meta});
+        try std.fmt.format(writer, "\"checksum_data\":\"{x:0>32}\",", .{self.checksum_data});
+        try std.fmt.format(writer, "\"id\":{},", .{self.id});
+        try std.fmt.format(writer, "\"magic\":\"{x:0>16}\",", .{mem.toBytes(self.magic)});
+        try writer.writeAll("\"command\":");
+        try std.json.stringify(self.command, .{}, writer);
+        try writer.writeAll(",");
+        try std.fmt.format(writer, "\"size\":{}", .{self.size});
         try writer.writeAll("}");
-        return;
     }
 };
 
