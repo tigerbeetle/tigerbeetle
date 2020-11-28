@@ -2,6 +2,22 @@ const std = @import("std");
 usingnamespace @import("tigerbeetle.zig");
 
 pub fn main() !void {
+    // TODO We need to move to hex for struct ids as well, since these will usually be random.
+    // Otherwise, we risk overflowing the JSON integer size limit.
+
+    // TODO Move this file into tigerbeetle.zig as literal tests:
+    // See std.json for examples of how to test jsonStringify methods.
+    // That way, running "zig test tigerbeetle.zig" will test these automatically.
+
+    // TODO Update demo.zig's send() method to use std.json.stringify.
+    
+    // TODO Update demo.zig to write to std out.
+    // e.g.
+    // var writer = std.io.getStdOut().writer();
+    // try std.json.stringify(transfer, .{}, writer);
+
+    var command = Command.ack;
+
     var network = NetworkHeader{
         .checksum_meta = 76567523,
         .checksum_data = 2345456373567,
@@ -39,7 +55,16 @@ pub fn main() !void {
         .amount = 1000,
         .timeout = 0,
     };
-    std.debug.print("{json}\n", .{network});
-    std.debug.print("{json}\n", .{account});
-    std.debug.print("{json}\n", .{transfer});
+
+    try std.json.stringify(command, .{}, std.io.getStdErr().writer());
+    std.debug.print("\n\n", .{});
+
+    try std.json.stringify(network, .{}, std.io.getStdErr().writer());
+    std.debug.print("\n\n", .{});
+
+    try std.json.stringify(account, .{}, std.io.getStdErr().writer());
+    std.debug.print("\n\n", .{});
+
+    try std.json.stringify(transfer, .{}, std.io.getStdErr().writer());
+    std.debug.print("\n\n", .{});
 }
