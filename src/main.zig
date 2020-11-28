@@ -6,10 +6,11 @@ const mem = std.mem;
 const net = std.net;
 const os = std.os;
 const linux = os.linux;
+const IO_Uring = linux.IO_Uring;
+const io_uring_cqe = linux.io_uring_cqe;
 
 usingnamespace @import("tigerbeetle.zig");
 usingnamespace @import("connections.zig");
-usingnamespace @import("io_uring.zig");
 usingnamespace @import("journal.zig");
 usingnamespace @import("leader.zig");
 usingnamespace @import("state.zig");

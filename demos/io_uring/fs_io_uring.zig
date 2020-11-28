@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
-
-usingnamespace @import("io_uring.zig");
+const IO_Uring = std.os.linux.IO_Uring;
+const io_uring_cqe = std.os.linux.io_uring_cqe;
 
 /// Using non-blocking io_uring, write a page, fsync the write, then read the page back in.
 /// Rinse and repeat to iterate across a large file.
