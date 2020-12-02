@@ -362,7 +362,7 @@ pub const Journal = struct {
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // Some file systems will not support fallocate(), that's fine, but could mean more seeks.
-        log.debug("pre-allocating {} bytes...", .{config.journal_size_max});
+        log.debug("pre-allocating {Bi}...", .{config.journal_size_max});
         Journal.fallocate(file.handle, 0, 0, config.journal_size_max) catch |err| switch (err) {
             error.OperationNotSupported => {
                 log.notice("file system does not support fallocate()", .{});
@@ -383,7 +383,7 @@ pub const Journal = struct {
         // Write zeroes to the disk to improve performance:
         // These zeroes have no semantic meaning from a journal recovery point of view.
         // We use zeroes because we have to use something and we don't want a buffer bleed.
-        log.debug("zeroing {} bytes...", .{config.journal_size_max});
+        log.debug("zeroing {Bi}...", .{config.journal_size_max});
         assert(@mod(config.journal_size_max, buffer.len) == 0);
         var zeroing_progress: u64 = 0;
         var zeroing_offset: u64 = 0;
