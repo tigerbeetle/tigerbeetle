@@ -28,7 +28,8 @@ const Event = packed struct {
         Recv,
         Send,
         Close,
-    }, connection_id: u32
+    },
+    connection_id: u32,
 };
 
 fn accept(ring: *IO_Uring, fd: os.fd_t, addr: *os.sockaddr, addr_len: *os.socklen_t) !void {
