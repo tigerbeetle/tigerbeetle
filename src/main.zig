@@ -407,6 +407,21 @@ comptime {
         else => @compileError("config: unknown deployment_environment"),
     }
 
+    if (config.cluster_nodes < 1) @compileError("config: cluster_nodes must be at least 1");
+    if (config.cluster_nodes > 9) @compileError("config: cluster_nodes can be at most 9");
+
+    if (config.quorum_leader_election < 1) {
+        @compileError("config: quorum_leader_election must be at least 1");
+    }
+    // TODO quorum_leader_election must be at least a majority since replication is the common case.
+
+    if (config.quorum_replication < 1) {
+        @compileError("config: quorum_replication must be at least 1");
+    }
+    if (config.quorum_leader_election + config.quorum_replication != config.cluster_nodes + 1) {
+        @compileError("config: quorum_leader_election + quorum_replication != cluster_nodes + 1");
+    }
+
     if (config.tcp_user_timeout >
         (config.tcp_keepidle + config.tcp_keepintvl * config.tcp_keepcnt) * 1000)
     {
