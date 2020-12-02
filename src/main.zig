@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const builtin = std.builtin;
-const log = std.log;
+const log = std.log.scoped(.network);
 const mem = std.mem;
 const net = std.net;
 const os = std.os;
@@ -11,16 +11,16 @@ const io_uring_cqe = linux.io_uring_cqe;
 
 usingnamespace @import("tigerbeetle.zig");
 usingnamespace @import("connections.zig");
-usingnamespace @import("journal.zig");
 usingnamespace @import("leader.zig");
+usingnamespace @import("journal.zig");
 usingnamespace @import("state.zig");
 
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 
-var leader: Leader = undefined;
-var state: State = undefined;
-var journal: Journal = undefined;
 var connections: Connections = undefined;
+var leader: Leader = undefined;
+var journal: Journal = undefined;
+var state: State = undefined;
 
 const Event = packed struct {
     op: enum(u32) {
