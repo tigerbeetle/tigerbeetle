@@ -14,4 +14,4 @@ sudo ln -s --force /usr/local/lib/zig/zig /usr/local/bin/zig
 zig version
 ```
 
-You can also re-run the same steps above to update your Zig to latest master.
+You can also re-run the same steps above to update your Zig to latest master. Zig has a rapid release cadence at present and we are currently tracking master to keep pace.
