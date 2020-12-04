@@ -1,8 +1,8 @@
-# Install, benchmark! and work your way through the demos...
+# Install TigerBeetle, benchmark! and work your way through six demos...
 
 - [Upgrade Ubuntu to the 5.7.15 kernel](#upgrade-ubuntu-to-the-5715-kernel)
 - [Install Zig](#install-zig)
-- [Clone TigerBeetle and simulate non-pristine lab conditions](#clone-tigerbeetle-and-simulate-non-pristine-lab-conditions)
+- [Clone TigerBeetle (and simulate non-pristine lab conditions)](#clone-tigerbeetle-and-simulate-non-pristine-lab-conditions)
 - [Benchmark!](#benchmark)
 - [Explore the API through six demos](#explore-the-api-through-six-demos)
 
@@ -135,8 +135,4 @@ Let's also pretend someone else tried to commit (but reject) concurrently:
 zig run src/demo_06_reject_transfers.zig
 ```
 
-That's it!
-
-**From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state.zig` by grepping the source for `fn create_account`, `fn create_transfer`, and `fn commit_transfer`.**
-
-**Enjoy...**
+**That's it! From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state.zig` by grepping the source for `fn create_account`, `fn create_transfer`, and `fn commit_transfer`. Enjoy...**
