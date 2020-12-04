@@ -119,9 +119,9 @@ pub fn main() !void {
 
     const ms = std.time.milliTimestamp() - start;
     std.debug.print("=============================\n", .{});
-    std.debug.print("{} transfers per second\n", .{@divFloor(@intCast(i64, transfers.len * 1000), ms)});
-    std.debug.print("max create_transfers latency = {}ms\n", .{max_create_transfers_latency});
-    std.debug.print("max commit_transfers latency = {}ms\n", .{max_commit_transfers_latency});
+    std.debug.print("{} transfers per second\n\n", .{@divFloor(@intCast(i64, transfers.len * 1000), ms)});
+    std.debug.print("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{max_create_transfers_latency});
+    std.debug.print("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{max_commit_transfers_latency});
 }
 
 var request_id: u128 = 0;
@@ -170,6 +170,6 @@ fn send(fd: os.fd_t, command: Command, data: []u8, comptime Result: anytype) !vo
         for (mem.bytesAsSlice(Result, response_data)) |result| {
             std.debug.print("{}\n", .{result});
         }
-        @panic("run 'rm -rf journal' and restart the server to do a fresh benchmark");
+        @panic("run 'rm -rf journal' and restart the server to do a 'clean slate' benchmark");
     }
 }
