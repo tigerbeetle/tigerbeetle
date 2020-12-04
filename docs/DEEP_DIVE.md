@@ -81,7 +81,7 @@ Let's turn up the log level some more (and your favorite album) so you can see e
 
 * Restart the server with a clean journal: `rm -rf journal && ./tigerbeetle`
 
-### Demo 1 & 2: Create and lookup accounts
+### Demo 1, 2: Create and lookup accounts
 
 Let's create some accounts and check their balances and limits:
 
