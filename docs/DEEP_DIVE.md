@@ -1,4 +1,10 @@
-# Install TigerBeetle, benchmark! and work your way through the six demos...
+# Install, benchmark! and work your way through the demos...
+
+- [Upgrade Ubuntu to the 5.7.15 kernel](#upgrade-ubuntu-to-the-5715-kernel)
+- [Install Zig](#install-zig)
+- [Clone TigerBeetle and simulate non-pristine lab conditions](#clone-tigerbeetle-and-simulate-non-pristine-lab-conditions)
+- [Benchmark!](#benchmark)
+- [Explore the API through six demos](#explore-the-api-through-six-demos)
 
 ## Upgrade Ubuntu to the 5.7.15 kernel
 
@@ -7,17 +13,14 @@ Here are instructions to get Ubuntu 20.04 to a recent kernel with io_uring. This
 These are direct links to the 5.7.15 amd64 generic kernel files (note the "_all.deb" or "generic" keywords) you need:
 
 ```
-# Download:
 wget https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.7.15/amd64/linux-headers-5.7.15-050715_5.7.15-050715.202008111432_all.deb
 wget https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.7.15/amd64/linux-headers-5.7.15-050715-generic_5.7.15-050715.202008111432_amd64.deb
 wget https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.7.15/amd64/linux-image-unsigned-5.7.15-050715-generic_5.7.15-050715.202008111432_amd64.deb
 wget https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.7.15/amd64/linux-modules-5.7.15-050715-generic_5.7.15-050715.202008111432_amd64.deb
 
-# Install and reboot:
 sudo dpkg -i *.deb
 sudo reboot
 
-# Check kernel version:
 uname -sr
 ```
 
@@ -41,7 +44,7 @@ zig version
 
 You can also re-run the same steps above to update your Zig to latest master. Zig has a rapid release cadence at present and we are tracking master to keep pace.
 
-## Clone TigerBeetle and simulate non-pristine lab conditions
+## Clone TigerBeetle (and simulate non-pristine lab conditions)
 
 ```bash
 git clone https://github.com/coilhq/tigerbeetle.git
@@ -52,7 +55,7 @@ You are ready to rock! To simulate non-pristine lab conditions (tiger beetles th
 
 Be aware that super non-pristine lab conditions such as an active video call might cause cache pollution and drop throughput. But rock 'n roll is generally fine.
 
-## Benchmark
+## Benchmark!
 
 Launch the server with a clean journal:
 
@@ -68,7 +71,7 @@ zig run src/benchmark.zig -O ReleaseSafe
 
 After each run of the benchmark, you must delete TigerBeetle's `journal` data file and restart the server to ensure a clean journal. The benchmark will abort if any accounts or transfers already exist.
 
-## Explore the API through six TigerBeetle demos
+## Explore the API through six demos
 
 Take a look at the source code of these demos before you run them. Check out our screencast of these demos for much more detail.
 
@@ -77,6 +80,8 @@ Let's turn up the log level some more (and your favorite album) so you can see e
 * Open `src/tigerbeetle.conf` in your editor and change `log_level` to `7` (debug).
 
 * Restart the server with a clean journal: `rm -rf journal && ./tigerbeetle`
+
+### Demo 1 & 2: Create and lookup accounts
 
 Let's create some accounts and check their balances and limits:
 
@@ -91,12 +96,16 @@ What happens if we create those accounts again?
 zig run src/demo_01_create_accounts.zig
 ```
 
-Let's create some simple journal entries (with *auto-commit* transfers):
+### Demo 3: Simple journal entries
+
+Let's create some simple double-entry accounting journal entries (with *auto-commit* transfers):
 
 ```
 zig run src/demo_03_auto_commit_transfers.zig
 zig run src/demo_02_lookup_accounts.zig
 ```
+
+### Demo 4, 5, 6: Two-phase commit journal entries
 
 Let's try full two-phase commit transfers (create, and then commit):
 
@@ -126,6 +135,8 @@ Let's also pretend someone else tried to commit (but reject) concurrently:
 zig run src/demo_06_reject_transfers.zig
 ```
 
-From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state.zig` by grepping the source for `fn create_account`, `fn create_transfer`, and `fn commit_transfer`.
+That's it!
 
-**That's it! Enjoy...**
+**From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state.zig` by grepping the source for `fn create_account`, `fn create_transfer`, and `fn commit_transfer`.**
+
+**Enjoy...**
