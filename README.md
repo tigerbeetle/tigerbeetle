@@ -2,6 +2,10 @@
 
 *TigerBeetle is a purpose-built accounting database, designed for high-throughput low-latency two-phase prepare/commit transfers between accounts.*
 
+Watch the video introduction to the Interledger community from 25 November:
+
+[![Interledger Community Call video on 25 November covering TigerBeetle](https://img.youtube.com/vi/J1OaBRTV2vs/0.jpg)](https://www.youtube.com/watch?v=J1OaBRTV2vs)
+
 ## The Problem - Realtime Processing of Balance Updates
 
 Processing events that impact the balance of an account must be done serially, in the correct order and reliably. For this reason, despite the trend to scale modern applications by distributing work across parallel threads/processes/machines, it remains difficult to scale a ledger or accounting system without sacrificing performance or safety.
@@ -35,6 +39,8 @@ We then integrated ProtoBeetle into [Mojaloop](https://mojaloop.io/) and our ref
 After ProtoBeetle, from September through October 2020, we knuckled down and rewrote TigerBeetle in C/Zig to create the alpha version of TigerBeetle, using [io_uring](https://kernel.dk/io_uring.pdf) as a foundation for fast I/O.
 
 TigerBeetle's Zig implementation of io_uring was [submitted](https://github.com/ziglang/zig/pull/6356) for addition to the Zig standard library.
+
+**[Watch a presentation of TigerBeetle to the Interledger community on 25 November](https://www.youtube.com/watch?v=J1OaBRTV2vs)**
 
 ## BetaBeetle (under active development)
 
