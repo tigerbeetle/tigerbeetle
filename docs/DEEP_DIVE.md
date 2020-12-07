@@ -6,6 +6,10 @@
 - [Benchmark!](#benchmark)
 - [Explore the API through six demos](#explore-the-api-through-six-demos)
 
+## Video walkthrough
+
+[![Video walkthrough on Youtube](https://img.youtube.com/vi/lQSIVgvea48/0.jpg)](https://www.youtube.com/watch?v=lQSIVgvea48)
+
 ## Upgrade Ubuntu to the 5.7.15 kernel
 
 Here are instructions to get Ubuntu 20.04 to a recent kernel with io_uring. This should take less than a minute.
