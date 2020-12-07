@@ -5,7 +5,7 @@ low-level code can be easier than high-level code.
 
 ## Download and install Zig master into your path
 
-[Follow these instructions...](../../docs/INSTALL_ZIG.md)
+[Follow these instructions...](../../docs/DEEP_DIVE.md#install-zig)
 
 ## Clone TigerBeetle or update
 

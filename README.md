@@ -46,7 +46,7 @@ The current beta version of TigerBeetle targets Linux and takes advantage of the
 
 Later portable versions of TigerBeetle may supplement io_uring with kqueue for macOS and FreeBSD support, or IOCP for Windows support.
 
-Once you have [upgraded your kernel on Ubuntu](./docs/UPGRADE_UBUNTU_KERNEL.md) and [installed Zig](./docs/INSTALL_ZIG.md), you can launch the TigerBeetle server:
+Once you have [upgraded your kernel on Ubuntu and installed Zig](./docs/DEEP_DIVE.md), you can launch the TigerBeetle server:
 
 ```bash
 ./tigerbeetle
@@ -60,7 +60,7 @@ With a fresh running TigerBeetle server, you are ready to benchmark!
 zig run src/benchmark.zig -O ReleaseSafe
 ```
 
-After each run of the benchmark, you will need to delete TigerBeetle's `journal` data file and restart the server.
+After each run of the benchmark, you must delete TigerBeetle's `journal` data file and restart the server to ensure a clean journal. The benchmark will abort if any accounts or transfers already exist.
 
 ## Clients
 
