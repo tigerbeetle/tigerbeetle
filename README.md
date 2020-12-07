@@ -65,7 +65,7 @@ After each run of the benchmark, you must delete TigerBeetle's `journal` data fi
 ## Clients
 
 * [client](./src/client) is a TigerBeetle client written in Typescript (pending a few updates to support recent network protocol changes).
-* [toy.zig](./src/toy.zig) is a TigerBeetle client written in Zig (working).
+* [toy.zig](./src/toy.zig) is a TigerBeetle client written in Zig, which we used to create [six demos you can work your way through and modify](./docs/DEEP_DIVE.md) to explore TigerBeetle's commands.
 
 ## Performance Demos
 
