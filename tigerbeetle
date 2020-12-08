@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
+set -e
 zig build-exe src/main.zig -O ReleaseSafe
 ./main
