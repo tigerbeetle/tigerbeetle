@@ -124,6 +124,11 @@ pub const Journal = struct {
         var headers_length = Journal.sector_ceil((self.entries + 2) * @sizeOf(JournalHeader));
         const headers = mem.sliceAsBytes(self.headers)[headers_offset..headers_length];
 
+        // TODO Track exponentially weighted moving average (EWMA) of write latencies.
+        // TODO Warn when the short term EWMA of these latencies exceeds the long term EWMA.
+        // This will enable operators to monitor/replace slow hardware if it remains slow.
+        // TODO Do the same for network replication.
+
         // Re-order these writes according to where the last write took place for better locality:
         // e.g. If the disk previously wrote the headers last then write them first this time.
         if (config.journal_disk_scheduler == .elevator and @mod(self.entries, 2) == 0) {
