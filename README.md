@@ -2,7 +2,7 @@
 
 *TigerBeetle is a purpose-built accounting database, designed for high-throughput low-latency two-phase prepare/commit transfers between accounts.*
 
-Watch the video introduction to the Interledger community from 25 November:
+Watch a video introduction of TigerBeetle given to the [Interledger](https://interledger.org/) community on 25 November 2020:
 
 [![Interledger Community Call video on 25 November covering TigerBeetle](https://img.youtube.com/vi/J1OaBRTV2vs/0.jpg)](https://www.youtube.com/watch?v=J1OaBRTV2vs)
 
@@ -40,7 +40,7 @@ After ProtoBeetle, from September through October 2020, we knuckled down and rew
 
 TigerBeetle's Zig implementation of io_uring was [submitted](https://github.com/ziglang/zig/pull/6356) for addition to the Zig standard library.
 
-**[Watch a presentation of TigerBeetle to the Interledger community on 25 November](https://www.youtube.com/watch?v=J1OaBRTV2vs)**
+**[Watch a presentation of TigerBeetle given to the Interledger community on 25 November 2020.](https://www.youtube.com/watch?v=J1OaBRTV2vs)**
 
 ## BetaBeetle (under active development)
 
