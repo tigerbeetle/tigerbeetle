@@ -52,7 +52,14 @@ The current beta version of TigerBeetle targets Linux and takes advantage of the
 
 Later portable versions of TigerBeetle may supplement io_uring with kqueue for macOS and FreeBSD support, or IOCP for Windows support.
 
-Once you have [upgraded your kernel on Ubuntu and installed Zig](./docs/DEEP_DIVE.md), you can launch the TigerBeetle server:
+```bash
+git clone https://github.com/coilhq/tigerbeetle.git
+cd tigerbeetle
+scripts/upgrade_ubuntu_kernel.sh
+scripts/install_zig.sh
+```
+
+Once you have upgraded your kernel on Ubuntu and installed Zig, you can launch the TigerBeetle server:
 
 ```bash
 ./tigerbeetle
