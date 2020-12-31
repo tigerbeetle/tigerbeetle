@@ -1,8 +1,9 @@
 # Install TigerBeetle, benchmark! and work your way through six demos...
 
+- [Clone TigerBeetle](#clone-tigerbeetle)
 - [Upgrade Ubuntu to the 5.7.15 kernel](#upgrade-ubuntu-to-the-5715-kernel)
 - [Install Zig](#install-zig)
-- [Clone TigerBeetle (and simulate non-pristine lab conditions)](#clone-tigerbeetle-and-simulate-non-pristine-lab-conditions)
+- [Simulate non-pristine lab conditions](#simulate-non-pristine-lab-conditions)
 - [Benchmark!](#benchmark)
 - [Explore the API through six demos](#explore-the-api-through-six-demos)
 
@@ -10,50 +11,32 @@
 
 [![Video walkthrough on Youtube](https://img.youtube.com/vi/lQSIVgvea48/0.jpg)](https://www.youtube.com/watch?v=lQSIVgvea48)
 
+## Clone TigerBeetle
+
+```bash
+git clone https://github.com/coilhq/tigerbeetle.git
+cd tigerbeetle
+```
+
 ## Upgrade Ubuntu to the 5.7.15 kernel
 
-Here are instructions to get Ubuntu 20.04 to a recent kernel with io_uring. This should take less than a minute.
-
-These are direct links to the 5.7.15 amd64 generic kernel files (note the "_all.deb" or "generic" keywords) you need:
+Get Ubuntu 20.04 to a recent kernel with io_uring. This should take less than a minute:
 
 ```
-wget https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.7.15/amd64/linux-headers-5.7.15-050715_5.7.15-050715.202008111432_all.deb
-wget https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.7.15/amd64/linux-headers-5.7.15-050715-generic_5.7.15-050715.202008111432_amd64.deb
-wget https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.7.15/amd64/linux-image-unsigned-5.7.15-050715-generic_5.7.15-050715.202008111432_amd64.deb
-wget https://kernel.ubuntu.com/~kernel-ppa/mainline/v5.7.15/amd64/linux-modules-5.7.15-050715-generic_5.7.15-050715.202008111432_amd64.deb
-
-sudo dpkg -i *.deb
-sudo reboot
-
-uname -sr
+scripts/upgrade_ubuntu_kernel.sh
 ```
 
 For newer than 5.7.15, you can also find the full list of [mainline releases here](https://kernel.ubuntu.com/~kernel-ppa/mainline/?C=N;O=D), but note that kernel 5.7.16 and up introduced a [network performance regression](https://github.com/axboe/liburing/issues/215) that has recently been patched.
 
 ## Install Zig
 
-First, [download the Zig master binary](https://ziglang.org/download/) for your platform.
-
-Next, from within your downloads directory, run:
-
 ```bash
-rm -rf zig-cache
-tar -xf zig-*.tar.xz
-rm zig-*.tar.xz
-sudo rm -rf /usr/local/lib/zig
-sudo mv zig-* /usr/local/lib/zig
-sudo ln -s --force /usr/local/lib/zig/zig /usr/local/bin/zig
-zig version
+scripts/install_zig.sh
 ```
 
-You can also re-run the same steps above to update your Zig to latest master. Zig has a rapid release cadence at present and we are tracking master to keep pace.
+You can also re-run the script above to update your Zig to latest master. Zig has a rapid release cadence at present and we are tracking master to keep pace.
 
-## Clone TigerBeetle (and simulate non-pristine lab conditions)
-
-```bash
-git clone https://github.com/coilhq/tigerbeetle.git
-cd tigerbeetle
-```
+## Simulate non-pristine lab conditions
 
 You are ready to rock! To simulate non-pristine lab conditions (tiger beetles thrive in harsh environments with noisy neighbors) turn up your favorite album, or if you're looking for something new we suggest Noel Gallagher's High Flying Birds.
 
