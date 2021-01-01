@@ -23,7 +23,7 @@ cd tigerbeetle
 Get Ubuntu 20.04 to a recent kernel with io_uring. This should take less than a minute:
 
 ```
-scripts/upgrade_ubuntu_kernel.sh
+scripts/upgrade_ubuntu_kernel
 ```
 
 For newer than 5.7.15, you can also find the full list of [mainline releases here](https://kernel.ubuntu.com/~kernel-ppa/mainline/?C=N;O=D), but note that kernel 5.7.16 and up introduced a [network performance regression](https://github.com/axboe/liburing/issues/215) that has recently been patched.
@@ -31,7 +31,7 @@ For newer than 5.7.15, you can also find the full list of [mainline releases her
 ## Install Zig
 
 ```bash
-scripts/install_zig.sh
+scripts/install_zig
 ```
 
 You can also re-run the script above to update your Zig to latest master. Zig has a rapid release cadence at present and we are tracking master to keep pace.
