@@ -1,0 +1,44 @@
+#!/usr/bin/env node
+
+// We use this to simulate a local cluster while developing cluster connectivity.
+// This helps us skip the boilerplate of a real cluster init, which has several components (TODO).
+
+const net = require('net');
+const assert = require('assert');
+
+function spar(port, socket) {
+  const namespace = `node ${port}: ${socket.remoteAddress}:${socket.remotePort}`;
+  console.log(`${namespace}: connected`);
+  socket.on('data',
+    function(buffer) {
+      console.log(`${namespace}: received ${buffer.length} byte(s)`);
+    }
+  );
+  socket.on('error',
+    function(error) {
+      console.log(`${namespace}: error: ${error}`);
+    }
+  );
+  socket.on('end',
+    function() {
+      console.log(`${namespace}: disconnected`);
+    }
+  );
+}
+
+// We expect the main node will listen on 3001, and that the cluster has 4 nodes (Flexible Paxos):
+[3002, 3003, 3004].forEach(
+  function(port) {
+    const server = net.createServer(spar.bind(undefined, port));
+    server.on('error',
+      function(error) {
+        console.error(`node ${port}: error: ${error}`);
+      }
+    );
+    server.listen(port, '127.0.0.1',
+      function() {
+        console.log(`node ${port}: listening...`);
+      }
+    );
+  }
+);
