@@ -21,40 +21,6 @@ pub const Command = packed enum(u32) {
     }
 };
 
-pub const Node = packed struct {
-    checksum: u128 = undefined,
-    id: u128,
-    cluster: Cluster,
-
-    pub fn calculate_checksum(self: *const Node) u128 {
-        const source = @bitCast([@sizeOf(Node)]u8, self.*);
-        const checksum_size = @sizeOf(@TypeOf(self.checksum));
-        assert(checksum_size == 16);
-        var target: [32]u8 = undefined;
-        crypto.hash.Blake3.hash(source[checksum_size..], target[0..], .{});
-        return @bitCast(u128, target[0..checksum_size].*);
-    }
-
-    pub fn set_checksum(self: *Node) void {
-        self.checksum = self.calculate_checksum();
-    }
-
-    pub fn valid_checksum(self: *const Node) bool {
-        return self.checksum == self.calculate_checksum();
-    }
-};
-
-pub const Cluster = packed struct {
-    id: u128,
-    nodes: [config.cluster_nodes]ClusterNode,
-};
-
-pub const ClusterNode = packed struct {
-    id: u128,
-    host: u32,
-    port: u16,
-};
-
 pub const Account = packed struct {
     id: u128,
     custom: u128,

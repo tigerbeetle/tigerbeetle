@@ -7,6 +7,8 @@ const Allocator = mem.Allocator;
 
 const config = @import("tigerbeetle.zig").config;
 
+const ClusterNode = @import("cluster.zig").ClusterNode;
+
 // The connection receive buffer needs to be sector-aligned for zero-copy direct I/O to disk:
 // We add a sector to ensure there is space for a request to be padded out to a sector multiple.
 // We also add another sector for the EOF journal entry.
@@ -14,15 +16,62 @@ const recv_len = config.request_size_max + config.sector_size + config.sector_si
 
 const send_len = config.response_size_max;
 
+var prng = std.rand.DefaultPrng.init(0);
+
 pub const Connection = struct {
     id: u32,
     fd: os.fd_t,
+    address: std.net.Address,
+    delay: os.timespec,
+    node: ?*ClusterNode,
     references: usize,
     recv_size: usize,
     send_offset: usize,
     send_size: usize,
     recv: [recv_len]u8 align(config.sector_size) = undefined,
     send: [send_len]u8 = undefined,
+
+    /// `sleep = random_between(0, min(cap, base * 2 ** attempt))`
+    /// `attempt` is zero-based, e.g. the first connection will be attempt 0, so that we can simply
+    /// pass the number of connection errors we have already seen so far.
+    /// `attempt` is tracked as a small u4 to flush out any overflow bugs sooner rather than later.
+    /// Implements "Full Jitter" from:
+    /// https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+    pub fn calculate_delay(self: *Connection, attempt: u4) u64 {
+        assert(config.connection_delay_min < config.connection_delay_max);
+        const backoff = self.calculate_delay_backoff(
+            attempt,
+            config.connection_delay_min,
+            config.connection_delay_max - config.connection_delay_min,
+        );
+        const jitter = prng.random.uintAtMostBiased(u64, backoff);
+        const ms = config.connection_delay_min + jitter;
+        assert(ms >= config.connection_delay_min);
+        assert(ms <= config.connection_delay_max);
+        std.debug.print("backoff={} jitter={} ms={}\n", .{ backoff, jitter, ms });
+        return ms;
+    }
+
+    /// `min(cap, base * 2 ** attempt)`
+    pub fn calculate_delay_backoff(self: *Connection, attempt: u4, base: u64, cap: u64) u64 {
+        return std.math.min(
+            cap,
+            // A "1" shifted left gives any power of two: 1<<0 = 1, 1<<1 = 2, 1<<2 = 4, 1<<3 = 8:
+            base * std.math.shl(u64, 1, attempt),
+        );
+    }
+
+    pub fn delay_in_ms(self: *Connection) u64 {
+        const s_ms = self.delay.tv_sec * std.time.ms_per_s;
+        const ns_ms = @divFloor(self.delay.tv_nsec, std.time.ns_per_ms);
+        return @intCast(u64, s_ms + ns_ms);
+    }
+
+    pub fn set_delay(self: *Connection, ms: u64) void {
+        const s = @divFloor(ms, std.time.ms_per_s);
+        const ns = (ms - (s * std.time.ms_per_s)) * std.time.ns_per_ms;
+        self.delay = .{ .tv_sec = @intCast(isize, s), .tv_nsec = @intCast(isize, ns) };
+    }
 };
 
 /// This abstracts all our server connection management logic and static allocation.
@@ -44,6 +93,9 @@ pub const Connections = struct {
             connection.* = .{
                 .id = 0,
                 .fd = -1,
+                .address = undefined,
+                .delay = .{ .tv_sec = 0, .tv_nsec = 0 },
+                .node = null,
                 .references = 0,
                 .recv_size = 0,
                 .send_offset = 0,
@@ -96,6 +148,9 @@ pub const Connections = struct {
                 assert(connection.send_size == 0);
                 connection.id = @intCast(u32, index);
                 connection.fd = fd;
+                connection.address = undefined;
+                connection.delay = .{ .tv_sec = 0, .tv_nsec = 0 };
+                connection.node = null;
                 connection.references += 1;
                 self.active += 1;
                 assert(self.active <= self.array.len);
@@ -112,6 +167,9 @@ pub const Connections = struct {
         connection.* = .{
             .id = 0,
             .fd = -1,
+            .address = undefined,
+            .delay = .{ .tv_sec = 0, .tv_nsec = 0 },
+            .node = null,
             .references = 0,
             .recv_size = 0,
             .send_offset = 0,
