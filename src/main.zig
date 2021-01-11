@@ -6,11 +6,13 @@ const mem = std.mem;
 const net = std.net;
 const os = std.os;
 const linux = os.linux;
+
 const IO_Uring = linux.IO_Uring;
 const io_uring_cqe = linux.io_uring_cqe;
 
 usingnamespace @import("tigerbeetle.zig");
 usingnamespace @import("connections.zig");
+usingnamespace @import("cluster.zig");
 usingnamespace @import("leader.zig");
 usingnamespace @import("journal.zig");
 usingnamespace @import("state.zig");
@@ -18,6 +20,7 @@ usingnamespace @import("state.zig");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 
 var connections: Connections = undefined;
+var cluster: Cluster = undefined;
 var leader: Leader = undefined;
 var journal: Journal = undefined;
 var state: State = undefined;
@@ -25,12 +28,66 @@ var state: State = undefined;
 const Event = packed struct {
     op: enum(u32) {
         Accept,
+        ConnectDelay,
+        Connect,
         Recv,
         Send,
         Close,
     },
     connection_id: u32,
 };
+
+fn connect_delay(ring: *IO_Uring, connection: *Connection) !void {
+    const event = Event{ .op = .ConnectDelay, .connection_id = connection.id };
+    const user_data = @bitCast(u64, event);
+    assert(connection.references == 1);
+    connection.references += 1;
+    const ms = connection.delay.tv_sec * 1000 + @divFloor(connection.delay.tv_nsec, 1000000);
+    log.debug("connection {}: connecting to {} in {}ms...", .{ connection.id, connection.address, ms });
+    _ = try ring.timeout(user_data, &connection.delay, 0, 0);
+}
+
+fn connect_delay_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Connection) !void {
+    assert(connection.references == 2);
+    connection.references -= 1;
+    switch (-cqe.res) {
+        linux.ETIME => try connect(ring, connection),
+        else => |errno| return os.unexpectedErrno(@intCast(usize, errno)),
+    }
+}
+
+fn connect(ring: *IO_Uring, connection: *Connection) !void {
+    const event = Event{ .op = .Connect, .connection_id = connection.id };
+    const user_data = @bitCast(u64, event);
+    assert(connection.references == 1);
+    connection.references += 1;
+    assert(connection.node != null);
+    assert(connection.node.?.connecting);
+    log.debug("connection {}: connecting to {}...", .{ connection.id, connection.address });
+    _ = try ring.connect(
+        user_data,
+        connection.fd,
+        &connection.address.any,
+        connection.address.getOsSockLen(),
+    );
+}
+
+fn connect_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Connection) !void {
+    assert(connection.references == 2);
+    connection.references -= 1;
+    if (cqe.res < 0) {
+        switch (-cqe.res) {
+            os.ECONNREFUSED => try close(ring, connection, "ECONNREFUSED"),
+            else => |errno| return os.unexpectedErrno(@intCast(usize, errno)),
+        }
+    } else {
+        log.debug("connection {}: connected to {}", .{ connection.id, connection.address });
+        if (connection.node) |node| {
+            node.connection = connection;
+            node.connection_errors = 0;
+        }
+    }
+}
 
 fn accept(ring: *IO_Uring, fd: os.fd_t, addr: *os.sockaddr, addr_len: *os.socklen_t) !void {
     assert(connections.accepting == false);
@@ -249,7 +306,7 @@ fn send_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Connec
 }
 
 fn close(ring: *IO_Uring, connection: *Connection, reason: []const u8) !void {
-    log.debug("connection {}: closing after {}...", .{ connection.id, reason });
+    log.debug("connection {}: closing fd {} after {}...", .{ connection.id, connection.fd, reason });
     const event = Event{ .op = .Close, .connection_id = connection.id };
     const user_data = @bitCast(u64, event);
     assert(connection.fd >= 0);
@@ -263,6 +320,15 @@ fn close_completed(ring: *IO_Uring, cqe: *const io_uring_cqe, connection: *Conne
     connection.references -= 1;
     if (cqe.res < 0) return os.unexpectedErrno(@intCast(usize, -cqe.res));
     log.debug("connection {}: closed", .{connection.id});
+    if (connection.node) |node| {
+        node.connecting = false;
+        if (node.connection == null) {
+            node.increment_connection_errors();
+            log.debug("node {}: connection_errors={}", .{ node.id, node.connection_errors });
+        } else {
+            node.connection = null;
+        }
+    }
     try connections.unset(connection.id);
 }
 
@@ -273,17 +339,36 @@ fn event_loop(ring: *IO_Uring, server: os.fd_t) !void {
 
     while (true) {
         const count = try ring.copy_cqes(cqes[0..], 0);
-        var i: usize = 0;
-        while (i < count) : (i += 1) {
-            const cqe = cqes[i];
+        for (cqes[0..count]) |cqe| {
             const event = @bitCast(Event, cqe.user_data);
             switch (event.op) {
                 .Accept => try accept_completed(ring, &cqe),
+                .ConnectDelay => try connect_delay_completed(ring, &cqe, try connections.get(event.connection_id)),
+                .Connect => try connect_completed(ring, &cqe, try connections.get(event.connection_id)),
                 .Recv => try recv_completed(ring, &cqe, try connections.get(event.connection_id)),
                 .Send => try send_completed(ring, &cqe, try connections.get(event.connection_id)),
                 .Close => try close_completed(ring, &cqe, try connections.get(event.connection_id)),
             }
         }
+
+        var nodes_pending_connection: usize = 0;
+        for (cluster.nodes) |*node| {
+            if (node.connecting) continue;
+            node.connecting = true;
+            nodes_pending_connection += 1;
+            const fd = try os.socket(node.address.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0);
+            errdefer os.close(fd);
+            // TODO Assert that there are connections available.
+            var connection = try connections.set(fd);
+            connection.address = node.address;
+            connection.node = node;
+            connection.set_delay(connection.calculate_delay(node.connection_errors));
+            try connect_delay(ring, connection);
+            // TODO Reserve connections for cluster.
+            // TODO Review.
+        }
+        log.debug("nodes pending connection={}", .{nodes_pending_connection});
+
         // Decide whether or not to accept another connection here in one place, since there are
         // otherwise many branches above where connections can be closed making space available.
         if (!connections.accepting and connections.available()) {
@@ -389,6 +474,9 @@ pub fn main() !void {
 
     connections = try Connections.init(allocator, config.connections_max);
     defer connections.deinit();
+
+    cluster = try Cluster.init();
+    defer cluster.deinit();
 
     // TODO Formalize the relation between `config.connections_max` and ring entries:
     var ring = try IO_Uring.init(128, 0);
