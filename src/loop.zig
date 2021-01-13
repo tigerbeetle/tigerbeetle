@@ -8,16 +8,19 @@ fn server_accept_loop(io: *IO, server: os.fd_t) !void {
     while (true) {
         var addr: os.sockaddr = undefined;
         var addr_len: os.socklen_t = @sizeOf(@TypeOf(addr));
-        var buffer: [1024]u8 = undefined;
 
         const fd = try io.accept(server, &addr, &addr_len);
         std.debug.print("fd {}: accepted connection\n", .{ fd });
 
-        const recv_size = try io.recv(fd, buffer[0..]);
-        std.debug.print("fd {}: read {} bytes\n", .{ fd, recv_size });
-        
-        os.close(fd);
+        _ = async server_connection(io, fd);
     }
+}
+
+fn server_connection(io: *IO, connection: os.fd_t) !void {
+    var buffer: [1024]u8 = undefined;
+    const recv_size = try io.recv(connection, buffer[0..]);
+    std.debug.print("fd {}: read {} bytes\n", .{ connection, recv_size });
+    os.close(connection);
 }
 
 fn server_listen(port: u16) !os.fd_t {
@@ -69,6 +72,7 @@ const IO = struct {
     pub fn accept(self: *IO, fd: os.fd_t, addr: *os.sockaddr, addr_len: *os.socklen_t) !os.fd_t {
         var completion = IO.Completion{ .frame = @frame() };
         _ = try self.ring.accept(@ptrToInt(&completion), fd, addr, addr_len, os.SOCK_CLOEXEC);
+        std.debug.print("{} accept...\n", .{ @ptrToInt(&completion) });
         suspend;
         if (completion.result < 0) return os.unexpectedErrno(@intCast(usize, -completion.result));
         return completion.result;
@@ -77,6 +81,7 @@ const IO = struct {
     pub fn recv(self: *IO, fd: os.fd_t, buffer: []u8) !usize {
         var completion = IO.Completion{ .frame = @frame() };
         _ = try self.ring.recv(@ptrToInt(&completion), fd, buffer, os.MSG_NOSIGNAL);
+        std.debug.print("{} recv...\n", .{ @ptrToInt(&completion) });
         suspend;
         if (completion.result < 0) return os.unexpectedErrno(@intCast(usize, -completion.result));
         return @intCast(usize, completion.result);
