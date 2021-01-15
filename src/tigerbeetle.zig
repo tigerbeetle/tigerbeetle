@@ -107,7 +107,7 @@ pub const Account = packed struct {
         try std.fmt.format(writer, "\"debit_accepted_limit\":{},", .{self.debit_accepted_limit});
         try std.fmt.format(writer, "\"credit_reserved_limit\":{},", .{self.credit_reserved_limit});
         try std.fmt.format(writer, "\"credit_accepted_limit\":{},", .{self.credit_accepted_limit});
-        try std.fmt.format(writer, "\"timestamp\":{}", .{self.timestamp});
+        try std.fmt.format(writer, "\"timestamp\":\"{}\"", .{self.timestamp});
         try writer.writeAll("}");
     }
 };
@@ -279,16 +279,37 @@ pub const CommitTransferResult = packed enum(u32) {
 pub const CreateAccountResults = packed struct {
     index: u32,
     result: CreateAccountResult,
+
+    pub fn jsonStringify(self: CreateAccountResults, options: StringifyOptions, writer: anytype) !void {
+        try writer.writeAll("{");
+        try std.fmt.format(writer, "\"index\":{},", .{ self.index });
+        try std.fmt.format(writer, "\"result\":\"{}\"", .{ @tagName(self.result) });
+        try writer.writeAll("}");
+    }
 };
 
 pub const CreateTransferResults = packed struct {
     index: u32,
     result: CreateTransferResult,
+
+    pub fn jsonStringify(self: CreateTransferResults, options: StringifyOptions, writer: anytype) !void {
+        try writer.writeAll("{");
+        try std.fmt.format(writer, "\"index\":{},", .{ self.index });
+        try std.fmt.format(writer, "\"result\":\"{}\"", .{ @tagName(self.result) });
+        try writer.writeAll("}");
+    }
 };
 
 pub const CommitTransferResults = packed struct {
     index: u32,
     result: CommitTransferResult,
+
+    pub fn jsonStringify(self: CommitTransferResults, options: StringifyOptions, writer: anytype) !void {
+        try writer.writeAll("{");
+        try std.fmt.format(writer, "\"index\":{},", .{ self.index });
+        try std.fmt.format(writer, "\"result\":\"{}\"", .{ @tagName(self.result) });
+        try writer.writeAll("}");
+    }
 };
 
 pub const Magic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."

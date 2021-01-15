@@ -11,7 +11,7 @@ pub fn connect(port: u16) !std.os.fd_t {
 
 pub var request_id: u128 = 0;
 
-pub fn send(fd: std.os.fd_t, command: Command, batch: anytype, Result: anytype) !void {
+pub fn send(fd: std.os.fd_t, command: Command, batch: anytype, Results: anytype) !void {
     request_id += 1;
 
     var data = std.mem.asBytes(batch[0..]);
@@ -35,7 +35,11 @@ pub fn send(fd: std.os.fd_t, command: Command, batch: anytype, Result: anytype) 
     assert(recv_bytes >= @sizeOf(NetworkHeader));
 
     var response = std.mem.bytesAsValue(NetworkHeader, recv[0..@sizeOf(NetworkHeader)]);
-    std.debug.print("{}\n", .{response});
+
+    const stdout = std.io.getStdOut().writer();
+    try response.jsonStringify(.{}, stdout);
+    try stdout.writeAll("\n");
+
     assert(response.magic == Magic);
     assert(response.valid_checksum_meta());
     assert(response.valid_size());
@@ -44,7 +48,8 @@ pub fn send(fd: std.os.fd_t, command: Command, batch: anytype, Result: anytype) 
     const response_data = recv[@sizeOf(NetworkHeader)..response.size];
     assert(response.valid_checksum_data(response_data));
 
-    for (std.mem.bytesAsSlice(Result, response_data)) |result| {
-        std.debug.print("\n{}\n", .{result});
+    for (std.mem.bytesAsSlice(Results, response_data)) |result| {
+        try result.jsonStringify(.{}, stdout);
+        try stdout.writeAll("\n");
     }
 }
