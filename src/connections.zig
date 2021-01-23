@@ -16,6 +16,8 @@ const recv_len = config.request_size_max + config.sector_size + config.sector_si
 
 const send_len = config.response_size_max;
 
+// TODO Use os.getrandom(buffer: []u8) at runtime to seed the prng:
+// Otherwise, multiple nodes could all apply jitter in lockstep.
 var prng = std.rand.DefaultPrng.init(0);
 
 pub const Connection = struct {
@@ -31,12 +33,13 @@ pub const Connection = struct {
     recv: [recv_len]u8 align(config.sector_size) = undefined,
     send: [send_len]u8 = undefined,
 
-    /// `sleep = random_between(0, min(cap, base * 2 ** attempt))`
+    /// Calculates the full jitter exponential backoff delay for an outgoing connection,
+    /// according to the formula: `sleep = random_between(0, min(cap, base * 2 ** attempt))`
+    ///
     /// `attempt` is zero-based, e.g. the first connection will be attempt 0, so that we can simply
     /// pass the number of connection errors we have already seen so far.
+    ///
     /// `attempt` is tracked as a small u4 to flush out any overflow bugs sooner rather than later.
-    /// Implements "Full Jitter" from:
-    /// https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
     pub fn calculate_delay(self: *Connection, attempt: u4) u64 {
         assert(config.connection_delay_min < config.connection_delay_max);
         const backoff = self.calculate_delay_backoff(
@@ -48,11 +51,11 @@ pub const Connection = struct {
         const ms = config.connection_delay_min + jitter;
         assert(ms >= config.connection_delay_min);
         assert(ms <= config.connection_delay_max);
-        std.debug.print("backoff={} jitter={} ms={}\n", .{ backoff, jitter, ms });
         return ms;
     }
 
-    /// `min(cap, base * 2 ** attempt)`
+    /// Calculates the capped exponential backoff component of a connection delay,
+    /// according to the formula: `min(cap, base * 2 ** attempt)`
     pub fn calculate_delay_backoff(self: *Connection, attempt: u4, base: u64, cap: u64) u64 {
         return std.math.min(
             cap,
