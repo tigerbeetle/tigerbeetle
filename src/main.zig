@@ -444,6 +444,8 @@ fn set_socket_option(fd: os.fd_t, level: u32, option: u32, value: u31) !void {
     // TODO Submit a PR to handle EPERM in os.zig's definition of setsockopt().
     var value_bytes = mem.toBytes(@as(c_int, value));
     var value_bytes_len = @intCast(linux.socklen_t, value_bytes.len);
+    // TODO There is a pending issue to add setsockopt to io_uring.
+    // See https://github.com/axboe/liburing/issues/234
     const res = linux.setsockopt(fd, level, option, &value_bytes, value_bytes_len);
     switch (linux.getErrno(res)) {
         0 => {},
