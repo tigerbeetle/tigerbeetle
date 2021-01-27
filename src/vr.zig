@@ -21,6 +21,11 @@ const Message = struct {
     view: u64,
 
     command: Command,
+
+    // TODO Remove default values:
+    op: u64 = 0,
+    commit: u64 = 0,
+    latest_normal_view: u64 = 0,
 };
 
 const Status = enum {
@@ -39,10 +44,12 @@ pub const Replica = struct {
 
     /// A sorted array containing the IP addresses of each of the 2f + 1 replicas:
     configuration: [3]u32,
-    outbox: [3]?Message,
+
+    /// An array of outgoing messages, one for each of the 2f + 1 replicas:
+    message: [3]?Message,
 
     /// The index into the configuration where this replica's IP address is stored:
-    replica: u32,
+    index: u32,
 
     /// The current view, initially 0:
     view: u64 = 0,
@@ -60,10 +67,11 @@ pub const Replica = struct {
     /// We use a bitmap instead of a simple counter to tolerate message duplicates.
     start_view_change_from_other_replicas: u64 = 0,
 
-    do_view_change_from_all_replicas: u64 = 0,
+    /// Here, we also want to keep the actual do_view_change messages received from all replicas:
+    do_view_change_from_all_replicas: [3]?Message,
 
     fn enter_view(self: *Replica, view: u64) void {
-        std.debug.print("replica {}: entering new view {}\n", .{ self.replica, view });
+        std.debug.print("replica {}: entering new view {}\n", .{ self.index, view });
         assert(view >= self.view);
         self.view = view;
         self.status = .normal;
@@ -75,8 +83,9 @@ pub const Replica = struct {
     }
 
     pub fn on_message(self: *Replica, message: *const Message) void {
-        log.debug("replica {}: on_message: {}", .{ self.replica, message });
-        assert(message.replica != self.replica);
+        log.debug("", .{});
+        log.debug("{}: on_message: {}", .{ self.index, message });
+        assert(message.replica != self.index);
         assert(message.replica < self.configuration.len);
         switch (message.command) {
             .start_view_change => self.on_start_view_change(message),
@@ -87,24 +96,24 @@ pub const Replica = struct {
     }
 
     fn on_start_view_change(self: *Replica, message: *const Message) void {
-        assert(message.replica != self.replica);
+        assert(message.replica != self.index);
 
         if (message.view < self.view) {
-            log.debug("on_start_view_change: older view", .{});
+            log.debug("{}: on_start_view_change: older view", .{self.index});
             return;
         }
 
         if (message.view == self.view and self.status != .view_change) {
             switch (self.status) {
-                .normal => log.debug("on_start_view_change: view already started", .{}),
-                .recovering => log.debug("on_start_view_change: same view, but recovering", .{}),
+                .normal => log.debug("{}: on_start_view_change: already started", .{self.index}),
+                .recovering => log.debug("{}: on_start_view_change: recovering", .{self.index}),
                 .view_change => unreachable,
             }
             return;
         }
 
         if (message.view > self.view) {
-            log.debug("on_start_view_change: newer view, starting view change", .{});
+            log.debug("{}: on_start_view_change: newer view", .{self.index});
             self.start_view_change(message.view);
             // Continue below...
         }
@@ -117,66 +126,152 @@ pub const Replica = struct {
         const bit = @as(u64, 1) << @intCast(u6, message.replica);
 
         // Do not allow duplicate messages to trigger sending a redundant do_view_change message:
-        // The only reason for this is to prevent multiple passes through the same state transition.
+        // We want to prevent multiple passes through the same state transition.
         // We want to be precise and exact and handle this state transition exactly once.
         if ((self.start_view_change_from_other_replicas & bit) != 0) {
-            log.debug("on_start_view_change: duplicate message", .{});
+            log.debug("{}: on_start_view_change: duplicate message", .{self.index});
             return;
         }
 
         // Record the first receipt of this start_view_change message from the other replica:
-        assert(bit != self.replica);
+        assert(bit != self.index);
         self.start_view_change_from_other_replicas |= bit;
 
         // Count the number of unique messages received from other replicas:
         const count = @popCount(u64, self.start_view_change_from_other_replicas);
+        log.debug("{}: on_start_view_change: {} message(s)", .{ self.index, count });
 
-        // Wait until we have `f` messages (in addition to ourself) for quorum:
+        // Wait until we have `f` messages (excluding ourself) for quorum:
         if (count < self.f) {
-            log.debug("on_start_view_change: {} message(s), waiting for quorum", .{count});
+            log.debug("{}: on_start_view_change: waiting for quorum", .{self.index});
             return;
         }
 
         // This is not the first time we have had quorum, the state transition has already happened:
         if (count > self.f) {
-            log.debug("on_start_view_change: {} message(s), quorum already received", .{count});
+            log.debug("{}: on_start_view_change: quorum received already", .{self.index});
             return;
         }
 
         assert(count == self.f);
-        log.debug("on_start_view_change: {} message(s), quorum received", .{count});
+        log.debug("{}: on_start_view_change: quorum received", .{self.index});
 
+        // When replica i receives start_view_change messages for its view from f other replicas,
+        // it sends a ⟨do_view_change v, l, v’, n, k, i⟩ message to the node that will be the
+        // primary in the new view. Here v is its view, l is its log, v′ is the view number of the
+        // latest view in which its status was normal, n is the op number, and k is the commit
+        // number.
         const new_leader = self.leader(self.view);
-        if (new_leader == self.replica) {
-            log.debug("on_start_view_change: not sending do_view_change to self as leader", .{});
-            return;
-        }
-
-        // When replica i receives start_view_change messages for its view from f other
-        // replicas, it sends a ⟨DOVIEWCHANGE v, l, v’, n, k, i⟩ message to the node that will
-        // be the primary in the new view. Here v is its view, l is its log, v′ is the
-        // view number of the latest view in which its status was normal, n is the op number,
-        // and k is the commit number.
-        log.debug("on_start_view_change: sending do_view_change to new leader {}", .{new_leader});
-        // TODO Add log, last normal view, op number, and commit number.
-        // These will be used by the new leader to decide on the longest log.
-        self.outbox[new_leader] = Message{
-            .replica = self.replica,
+        self.send_message_to_replica(new_leader, Message{
+            .replica = self.index,
             .view = self.view,
             .command = .do_view_change,
-        };
+        });
+        // TODO Add log, last normal view, op number, and commit number.
+        // These will be used by the new leader to decide on the longest log.
     }
 
     fn on_do_view_change(self: *Replica, message: *const Message) void {
-        if (message.view > self.view) {
-            self.start_view_change(message.view);
-        } else if (message.view == self.view) {
-            if (self.leader(self.view) == self.replica) {} else {
-                // TODO Log warning that replica should not have sent do_view_change to us.
-            }
-        } else {
-            unreachable;
+        if (message.view < self.view) {
+            log.debug("{}: on_do_view_change: older view", .{self.index});
+            return;
         }
+
+        if (message.view == self.view and self.status != .view_change) {
+            switch (self.status) {
+                .normal => log.debug("{}: on_do_view_change: already started", .{self.index}),
+                .recovering => log.debug("{}: on_do_view_change: recovering", .{self.index}),
+                .view_change => unreachable,
+            }
+            return;
+        }
+
+        if (message.view > self.view) {
+            log.debug("{}: on_do_view_change: newer view", .{self.index});
+            // At first glance, it might seem that sending start_view_change messages out now after
+            // receiving a do_view_change here would be superfluous. However, this is essential,
+            // especially in the presence of asymmetric network faults. At this point, we may not
+            // yet have received a do_view_change quorum, and another replica might need our
+            // start_view_change message in order to get its do_view_change message through to us.
+            // We therefore do not special case the start_view_change function, and we always send
+            // start_view_change messages, regardless of the message that initiated the view change:
+            self.start_view_change(message.view);
+            // Continue below...
+        }
+
+        assert(self.view == message.view);
+        assert(self.status == .view_change);
+        assert(self.leader(self.view) == self.index);
+
+        // Do not allow duplicate messages to trigger multiple passes through the state transition:
+        if (self.do_view_change_from_all_replicas[message.replica]) |duplicate| {
+            assert(duplicate.view == message.view);
+            assert(duplicate.replica == message.replica);
+            assert(duplicate.command == .do_view_change);
+            log.debug("{}: on_do_view_change: duplicate message", .{self.index});
+            return;
+        }
+
+        // Record the first receipt of this do_view_change message:
+        assert(self.do_view_change_from_all_replicas[message.replica] == null);
+        self.do_view_change_from_all_replicas[message.replica] = message.*;
+
+        // Count the number of unique messages received from all replicas:
+        var count: usize = 0;
+        assert(self.do_view_change_from_all_replicas.len == self.configuration.len);
+        for (self.do_view_change_from_all_replicas) |received, replica| {
+            if (received) |m| {
+                assert(m.view == self.view);
+                assert(m.replica == replica);
+                assert(m.command == .do_view_change);
+                count += 1;
+            }
+        }
+        log.debug("{}: on_do_view_change: {} message(s)", .{ self.index, count });
+
+        // Wait until we have `f + 1` messages (including ourself) for quorum:
+        if (count < self.f + 1) {
+            log.debug("{}: on_do_view_change: waiting for quorum", .{self.index});
+            return;
+        }
+
+        // This is not the first time we have had quorum, the state transition has already happened:
+        if (count > self.f + 1) {
+            log.debug("{}: on_do_view_change: quorum received already", .{self.index});
+            return;
+        }
+
+        assert(count == self.f + 1);
+        log.debug("{}: on_do_view_change: quorum received", .{self.index});
+
+        // When the new primary receives f + 1 do_view_change messages from different replicas
+        // (including itself), it sets its view number to that in the messages and selects as the
+        // new log the one contained in the message with the largest v′; if several messages have
+        // the same v′ it selects the one among them with the largest n. It sets its op number to
+        // that of the topmost entry in the new log, sets its commit number to the largest such
+        // number it received in the do_view_change messages, changes its status to normal, and
+        // informs the other replicas of the completion of the view change by sending
+        // ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
+        // op number, and k is the commit number.
+        var wv: u64 = 0;
+        var wo: u64 = 0;
+        var wc: u64 = 0;
+        // TODO Remove latest_message in favor of latest_log.
+        // We are still within the message handler and it's simply too easy to use `message`.
+        // Even better, move this to another function where we pass a slice of non-null messages.
+        var wm: Message = undefined;
+        for (self.do_view_change_from_all_replicas) |received, replica| {
+            if (received) |m| {
+                if (m.latest_normal_view > wv or (m.latest_normal_view == wv and m.op > wo)) {
+                    wv = m.latest_normal_view;
+                    wo = m.op;
+                    wc = m.commit;
+                    wm = m;
+                }
+            }
+        }
+
+        log.debug("{}: winner is replica {} with op number {}", .{ self.index, wm.replica, wm.op });
     }
 
     fn on_start_view(self: *Replica, message: *const Message) void {}
@@ -188,42 +283,47 @@ pub const Replica = struct {
     /// receives a start_view_change or do_view_change message for a view with a larger number than
     /// its own view.
     fn start_view_change(self: *Replica, newer_view: u64) void {
-        log.debug("replica {}: starting change to newer view {}", .{ self.replica, newer_view });
+        log.debug("{}: starting view change", .{self.index});
         assert(newer_view > self.view);
         self.view = newer_view;
         self.status = .view_change;
+
+        // TODO Reset start_view_change quorum counter (see where we should do this).
 
         // TODO Reset view change timeout.
         // TODO Stop null commit timeout.
         // TODO Stop resend prepare timeout.
 
-        // TODO Do we send to ourself?
-        // TODO If we arrive here by timeout, do we increase quorum for ourself?
-        log.debug("sending start_view_change to all other replicas", .{});
-        for (self.outbox) |*message| {
-            message.* = Message{
-                .replica = self.replica,
-                .view = newer_view,
-                .command = .do_view_change,
-            };
+        // Send only to other replicas (not to self) to avoid any quorum off-by-one error:
+        // This could happen if the replica sends/receives and counts its own message in the quorum.
+        log.debug("{}: sending start_view_change to other replicas:", .{self.index});
+        self.send_message_to_other_replicas(.{
+            .replica = self.index,
+            .view = newer_view,
+            .command = .start_view_change,
+        });
+    }
+
+    fn send_message_to_other_replicas(self: *Replica, message: Message) void {
+        for (self.message) |_, replica| {
+            if (replica == self.index) continue;
+            self.send_message_to_replica(replica, message);
         }
+    }
+
+    fn send_message_to_replica(self: *Replica, replica: usize, message: Message) void {
+        // TODO Add assertions to prevent some messages being sent to self.
+        log.debug("{}: sending {} to replica {}: {}", .{
+            self.index,
+            @tagName(message.command),
+            replica,
+            message,
+        });
+        self.message[replica] = message;
     }
 
     fn tick(self: *Replica) void {
         self.ticks += 1;
-        self.send();
-    }
-
-    fn send(self: *Replica) void {
-        self.send_start_view_change_to_other_replicas();
-        self.send_do_view_change_to_new_leader();
-    }
-
-    fn send_start_view_change_to_other_replicas(self: *Replica) void {
-        if (self.status != .view_change) return;
-        // TODO
-        std.debug.print("{}: send start_view_change message to other replicas\n", .{self.replica});
-        std.debug.print("{}: leader is going to be {}\n", .{ self.replica, self.leader(self.view) });
     }
 
     // TODO Move this into a Configuration struct:
@@ -238,11 +338,13 @@ pub fn main() void {
 
     var replicas: [2 * f + 1]Replica = undefined;
     for (replicas) |*replica, index| {
+        // TODO Assign nulls to message and do_view_change...:
         replica.* = .{
             .f = f,
             .configuration = .{ 0, 1, 2 },
-            .replica = @intCast(u32, index),
-            .outbox = undefined,
+            .index = @intCast(u32, index),
+            .message = undefined,
+            .do_view_change_from_all_replicas = undefined,
         };
         std.debug.print("{}\n", .{replica});
     }
