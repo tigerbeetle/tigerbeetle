@@ -22,4 +22,4 @@ In a similar way, io_uring removes (or amortizes by orders of magnitude) the cos
 
 Our testing is only getting started though, we’re still building out the system end to end, so it will be great to benchmark more performance numbers in various environments (and across cloud providers) and share these as we go.
 
-Credit to "Tom Daly" from the Mojaloop community for prompting us with some great questions about Tigerbeetle in the cloud.
+Credit to @tdaly61 from the Mojaloop community for prompting us with some great questions about Tigerbeetle in the cloud.
