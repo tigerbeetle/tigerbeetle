@@ -118,9 +118,15 @@ pub const Replica = struct {
         // It's important to initialize timeouts here and not in tick() for the very first tick,
         // since on_message() may race with tick() before timeouts have been initialized:
         if (self.leader()) {
+            log.debug("{}: leader", .{self.index});
+            
             self.timeout_commit.start();
+            log.debug("{}: timeout_commit started", .{self.index});
         } else {
+            log.debug("{}: follower", .{self.index});
+            
             self.timeout_view.start();
+            log.debug("{}: timeout_view started", .{self.index});
         }
 
         return self;
@@ -158,13 +164,14 @@ pub const Replica = struct {
         self.timeout_view.tick();
 
         if (self.timeout_commit.fired()) {
+            log.debug("{}: timeout_commit fired", .{self.index});
             assert(self.leader());
             // TODO Send a commit message to other replicas.
         }
 
         if (self.timeout_view.fired()) {
+            log.debug("{}: timeout_view fired", .{self.index});
             assert(self.follower());
-            log.debug("{}: view timed out", .{self.index});
             self.start_view_change(self.view + 1);
         }
     }
@@ -253,7 +260,7 @@ pub const Replica = struct {
             .replica = self.index,
             .view = self.view,
         });
-        
+
         // TODO Add log, last normal view, op number, and commit number.
         // These will be used by the new leader to decide on the longest log.
     }
@@ -415,14 +422,25 @@ pub const Replica = struct {
         self.status = .normal;
 
         if (self.leader()) {
+            log.debug("{}: leader", .{self.index});
+            
             self.timeout_commit.start();
+            log.debug("{}: timeout_commit started", .{self.index});
+
             self.timeout_view.stop();
+            log.debug("{}: timeout_view stopped", .{self.index});
         } else {
+            log.debug("{}: follower", .{self.index});
+
             self.timeout_commit.stop();
+            log.debug("{}: timeout_commit stopped", .{self.index});
+            
             self.timeout_view.start();
+            log.debug("{}: timeout_view started", .{self.index});
+
             // TODO Stop "resend prepare" timeout.
         }
-        
+
         // TODO Reset prepare_ok message counters.
     }
 
@@ -454,12 +472,10 @@ pub const Replica = struct {
         }
 
         self.timeout_view.start();
-        assert(self.timeout_view.ticks == 0);
-        assert(self.timeout_view.ticking == true);
+        log.debug("{}: timeout_view started", .{self.index});
 
         self.timeout_commit.stop();
-        assert(self.timeout_commit.ticks == 0);
-        assert(self.timeout_commit.ticking == false);
+        log.debug("{}: timeout_commit stopped", .{self.index});
 
         // TODO Stop "resend prepare" timeout.
 
