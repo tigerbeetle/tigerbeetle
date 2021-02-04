@@ -99,6 +99,33 @@ pub const Replica = struct {
     /// The number of ticks without hearing from the leader before a follower starts a view change:
     timeout_view: Timeout = Timeout{ .after = 1000 },
 
+    // TODO Pass allocator and allocate all fixed arrays dynamically (at present we're using [3]).
+    // TODO Limit integer types for f and index to match their upper bounds in practice.
+    pub fn init(f: u32, configuration: [3]u32, index: u32) Replica {
+        assert(configuration.len > 0);
+        assert(index < configuration.len);
+
+        var self = Replica{
+            .f = f,
+            .configuration = configuration,
+            .index = index,
+            .message = undefined,
+            .start_view_change_from_other_replicas = undefined,
+            .do_view_change_from_all_replicas = undefined,
+        };
+        // TODO Assign nulls to message, start_view_change... and do_view_change... above.
+
+        // It's important to initialize timeouts here and not in tick() for the very first tick,
+        // since on_message() may race with tick() before timeouts have been initialized:
+        if (self.leader()) {
+            self.timeout_commit.start();
+        } else {
+            self.timeout_view.start();
+        }
+
+        return self;
+    }
+
     pub fn follower(self: *Replica) bool {
         return !self.leader();
     }
@@ -125,14 +152,6 @@ pub const Replica = struct {
     }
 
     pub fn tick(self: *Replica) void {
-        if (self.ticks == 0) {
-            if (self.leader()) {
-                self.timeout_commit.start();
-            } else {
-                self.timeout_view.start();
-            }
-        }
-
         self.ticks += 1;
 
         self.timeout_commit.tick();
@@ -234,6 +253,7 @@ pub const Replica = struct {
             .replica = self.index,
             .view = self.view,
         });
+        
         // TODO Add log, last normal view, op number, and commit number.
         // These will be used by the new leader to decide on the longest log.
     }
@@ -485,14 +505,7 @@ pub fn main() void {
     var replicas: [2 * f + 1]Replica = undefined;
     for (replicas) |*replica, index| {
         // TODO Assign nulls to message, start_view_change... and do_view_change...:
-        replica.* = .{
-            .f = f,
-            .configuration = .{ 0, 1, 2 },
-            .index = @intCast(u32, index),
-            .message = undefined,
-            .start_view_change_from_other_replicas = undefined,
-            .do_view_change_from_all_replicas = undefined,
-        };
+        replica.* = Replica.init(f, .{ 0, 1, 2 }, @intCast(u32, index));
         std.debug.print("{}\n", .{replica});
     }
 
