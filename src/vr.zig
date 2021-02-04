@@ -34,6 +34,30 @@ const Status = enum {
     recovering,
 };
 
+const Timeout = struct {
+    after: u64,
+    ticks: u64 = 0,
+    ticking: bool = false,
+
+    pub fn fired(self: *Timeout) bool {
+        return self.ticking and self.ticks >= self.after;
+    }
+
+    pub fn start(self: *Timeout) void {
+        self.ticks = 0;
+        self.ticking = true;
+    }
+
+    pub fn stop(self: *Timeout) void {
+        self.ticks = 0;
+        self.ticking = false;
+    }
+
+    pub fn tick(self: *Timeout) void {
+        if (self.ticking) self.ticks += 1;
+    }
+};
+
 pub const Replica = struct {
     /// Time is measured in logical ticks that are incremented on every call to tick():
     /// This eliminates a dependency on the system time and enables deterministic testing.
