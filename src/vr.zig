@@ -26,6 +26,8 @@ const Message = struct {
     op: u64 = 0,
     commit: u64 = 0,
     latest_normal_view: u64 = 0,
+
+    value: [32]u8 = [_]u8{0} ** 32,
 };
 
 const Status = enum {
@@ -99,6 +101,11 @@ pub const Replica = struct {
     /// The number of ticks without hearing from the leader before a follower starts a view change:
     timeout_view: Timeout = Timeout{ .after = 1000 },
 
+    /// A hash representing the state of the journal:
+    /// For now we're hashing fixed message values into the journal to prototype faster.
+    /// TODO Replace with our Journal instance.
+    journal: [32]u8 = [_]u8{0} ** 32,
+
     // TODO Pass allocator and allocate all fixed arrays dynamically (at present we're using [3]).
     // TODO Limit integer types for f and index to match their upper bounds in practice.
     pub fn init(f: u32, configuration: [3]u32, index: u32) Replica {
@@ -119,12 +126,12 @@ pub const Replica = struct {
         // since on_message() may race with tick() before timeouts have been initialized:
         if (self.leader()) {
             log.debug("{}: leader", .{self.index});
-            
+
             self.timeout_commit.start();
             log.debug("{}: timeout_commit started", .{self.index});
         } else {
             log.debug("{}: follower", .{self.index});
-            
+
             self.timeout_view.start();
             log.debug("{}: timeout_view started", .{self.index});
         }
@@ -150,6 +157,7 @@ pub const Replica = struct {
         log.debug("{}: on_message: {}", .{ self.index, message });
         assert(message.replica < self.configuration.len);
         switch (message.command) {
+            .prepare => self.on_prepare(message),
             .start_view_change => self.on_start_view_change(message),
             .do_view_change => self.on_do_view_change(message),
             .start_view => self.on_start_view(message),
@@ -174,6 +182,77 @@ pub const Replica = struct {
             assert(self.follower());
             self.start_view_change(self.view + 1);
         }
+    }
+
+    fn on_prepare(self: *Replica, message: Message) void {
+        // TODO Should a replica send a prepare to itself to simplify code paths?
+        assert(message.replica == self.leader_index(message.view));
+
+        if (self.status != .normal) {
+            switch (self.status) {
+                .normal => unreachable,
+                .recovering => log.debug("{}: on_prepare: recovering", .{self.index}),
+                .view_change => log.debug("{}: on_prepare: changing view", .{self.index}),
+            }
+            return;
+        }
+
+        if (message.view < self.view) {
+            log.debug("{}: on_prepare: older view", .{self.index});
+            return;
+        }
+
+        if (message.view > self.view) {
+            log.debug("{}: on_prepare: newer view", .{self.index});
+            // TODO Request state transfer.
+            // TODO Queue this prepare message?
+            return;
+        }
+
+        assert(message.view == self.view);
+
+        if (message.op > self.op + 1) {
+            log.debug("{}: on_prepare: op gap", .{self.index});
+            // TODO Request state transfer.
+            // TODO Queue this prepare message?
+            return;
+        }
+
+        self.timeout_view.start();
+        log.debug("{}: timeout_view started", .{self.index});
+
+        if (message.op <= self.op) {
+            log.debug("{}: on_prepare: duplicate", .{self.index});
+            self.send_message_to_replica(message.replica, Message{
+                .command = .prepare_ok,
+                .replica = self.index,
+                .view = message.view,
+                .op = message.op,
+            });
+            return;
+        }
+
+        // Fold message value into the journal:
+        // TODO Pass to a generic Journal instance.
+        // TODO Handle Journal errors.
+        log.debug("{}: on_prepare: journal was {}", .{ self.index, self.journal });
+        var hasher = std.crypto.hash.Blake3.init(.{});
+        hasher.update(self.journal[0..]);
+        hasher.update(message.value[0..]);
+        hasher.final(self.journal[0..]);
+        log.debug("{}: on_prepare: journal now {}", .{ self.index, self.journal });
+
+        self.op += 1;
+        assert(self.op == message.op);
+
+        // TODO Update client table.
+
+        self.send_message_to_replica(message.replica, Message{
+            .command = .prepare_ok,
+            .replica = self.index,
+            .view = message.view,
+            .op = message.op,
+        });
     }
 
     fn on_start_view_change(self: *Replica, message: Message) void {
@@ -423,7 +502,7 @@ pub const Replica = struct {
 
         if (self.leader()) {
             log.debug("{}: leader", .{self.index});
-            
+
             self.timeout_commit.start();
             log.debug("{}: timeout_commit started", .{self.index});
 
@@ -434,7 +513,7 @@ pub const Replica = struct {
 
             self.timeout_commit.stop();
             log.debug("{}: timeout_commit stopped", .{self.index});
-            
+
             self.timeout_view.start();
             log.debug("{}: timeout_view started", .{self.index});
 
@@ -471,11 +550,11 @@ pub const Replica = struct {
             message.* = null;
         }
 
-        self.timeout_view.start();
-        log.debug("{}: timeout_view started", .{self.index});
-
         self.timeout_commit.stop();
         log.debug("{}: timeout_commit stopped", .{self.index});
+
+        self.timeout_view.start();
+        log.debug("{}: timeout_view started", .{self.index});
 
         // TODO Stop "resend prepare" timeout.
 
@@ -504,6 +583,8 @@ pub const Replica = struct {
             replica,
             message,
         });
+        assert(message.replica == self.index);
+        assert(message.view == self.view);
         if (replica == self.index) {
             // Bypass the external network queue:
             // A replica should not need to keep a TCP connection open to itself.
