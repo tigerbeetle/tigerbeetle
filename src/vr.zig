@@ -1,53 +1,109 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.vr);
 pub const log_level: std.log.Level = .debug;
 
-// TODO Document these fields, for example, multiple uses for `nonce`:
-pub const Header = packed struct {
-          checksum_meta: u128 = undefined,
-          checksum_data: u128 = undefined,
-                  nonce: u128,
-              client_id: u128,
-         request_number: u64,
-                  epoch: u64,
-                   view: u64,
-       last_normal_view: u64,
-                     op: u64,
-                 commit: u64,
-                 offset: u64,
-                   size: u32,
-                replica: u16,
-                command: u16,
-};
-
 // TODO Command to enable client to fetch its latest request_number from the cluster.
-const Command = enum {
+pub const Command = packed enum(u16) {
     request,
     prepare,
     prepare_ok,
+    reply,
+
     commit,
+
     request_state_transfer,
     state_transfer,
+
     start_view_change,
     do_view_change,
     start_view,
 };
 
-const Message = struct {
-    replica: u32,
+const ConfigurationAddress = union(enum) {
+    address: *std.net.Address,
+    replica: *Replica,
+};
 
-    // Every message sent from one replica to another contains the sender's current view.
+pub const Message = packed struct {
+    checksum_meta: u128 = undefined,
+    checksum_data: u128 = undefined,
+
+    /// The checksum_meta of the message to which this message refers, or a recovery nonce:
+    nonce: u128 = 0,
+
+    client_id: u128 = 0,
+    request_number: u64 = 0,
+
+    /// The cluster reconfiguration epoch number (for future use):
+    epoch: u64 = 0,
+
+    /// Every message sent from one replica to another contains the sender's current view:
     view: u64,
 
-    command: Command,
-
-    // TODO Remove default values:
-    op: u64 = 0,
-    commit: u64 = 0,
+    /// The latest view for which the replica's status was .normal:
     latest_normal_view: u64 = 0,
 
-    value: [32]u8 = [_]u8{0} ** 32,
+    /// The op number:
+    op: u64 = 0,
+
+    /// The commit number:
+    commit: u64 = 0,
+
+    /// The journal offset to which this message relates:
+    offset: u64 = 0,
+
+    /// The size of this message header plus additional data if any:
+    size: u32 = @sizeOf(Message),
+
+    /// The index of the replica that sent this message (0 for clients):
+    replica: u16,
+
+    command: Command,
+};
+
+const Client = struct {};
+
+pub const MessageBus = struct {
+    allocator: *Allocator,
+    configuration: []ConfigurationAddress,
+
+    // TODO Add support for remote connections.
+
+    pub const AddressTag = enum { client, replica };
+    pub const Address = union(AddressTag) {
+        client: *Client,
+        replica: *Replica,
+    };
+
+    pub fn init(allocator: *Allocator, configuration: []ConfigurationAddress) !MessageBus {
+        return MessageBus{
+            .allocator = allocator,
+            .configuration = configuration,
+        };
+    }
+
+    pub fn send_message(self: *MessageBus, address: *Address, message: Message) void {
+        switch (address) {
+            .replica => |*replica| replica.on_message(buffer),
+            .client => |*client| client.on_message(buffer),
+        }
+    }
+
+    pub fn send_data(
+        self: *MessageBus,
+        address: *Address,
+        message: Message,
+        data: []const u8,
+    ) void {}
+
+    pub fn send_buffer(self: *MessageBus, address: *Address, buffer: []const u8) void {
+        switch (address) {
+            .replica => |*replica| replica.on_message(buffer),
+            .client => |*client| client.on_message(buffer),
+        }
+    }
 };
 
 const Status = enum {
@@ -81,22 +137,21 @@ const Timeout = struct {
 };
 
 pub const Replica = struct {
-    /// Time is measured in logical ticks that are incremented on every call to tick():
-    /// This eliminates a dependency on the system time and enables deterministic testing.
-    ticks: u64 = 0,
+    allocator: *Allocator,
 
     /// The maximum number of replicas that may be faulty:
     f: u32,
 
-    /// A sorted array containing the IP addresses of each of the 2f + 1 replicas:
-    configuration: [3]u32,
+    /// A sorted array containing the remote or local addresses of each of the 2f + 1 replicas:
+    configuration: []ConfigurationAddress,
 
     /// An array of outgoing messages, one for each of the 2f + 1 replicas:
     /// TODO Replace this with a MessageBus instance.
     message: [3]?Message,
+    message_bus: *MessageBus,
 
     /// The index into the configuration where this replica's IP address is stored:
-    index: u32,
+    index: u16,
 
     /// The current view, initially 0:
     view: u64 = 0,
@@ -133,20 +188,27 @@ pub const Replica = struct {
     journal: [32]u8 = [_]u8{0} ** 32,
 
     /// For executing service up calls after an operation has been committed:
-    /// TODO Replica this with a StateMachine instance.
+    /// TODO Replace this with a StateMachine instance.
     state_machine: bool = true,
 
-    // TODO Pass allocator and allocate all fixed arrays dynamically (at present we're using [3]).
     // TODO Limit integer types for f and index to match their upper bounds in practice.
-    pub fn init(f: u32, configuration: [3]u32, index: u32) Replica {
+    pub fn init(
+        allocator: *Allocator,
+        f: u32,
+        configuration: []ConfigurationAddress,
+        message_bus: *MessageBus,
+        index: u16,
+    ) !Replica {
         assert(configuration.len > 0);
         assert(index < configuration.len);
 
         var self = Replica{
+            .allocator = allocator,
             .f = f,
             .configuration = configuration,
             .index = index,
             .message = undefined,
+            .message_bus = message_bus,
             .prepare_ok_from_other_replicas = undefined,
             .start_view_change_from_other_replicas = undefined,
             .do_view_change_from_all_replicas = undefined,
@@ -170,6 +232,10 @@ pub const Replica = struct {
         }
 
         return self;
+    }
+
+    pub fn deinit() void {
+        // TODO
     }
 
     pub fn follower(self: *Replica) bool {
@@ -200,9 +266,9 @@ pub const Replica = struct {
         }
     }
 
+    /// Time is measured in logical ticks that are incremented on every call to tick():
+    /// This eliminates a dependency on the system time and enables deterministic testing.
     pub fn tick(self: *Replica) void {
-        self.ticks += 1;
-
         self.timeout_commit.tick();
         self.timeout_view.tick();
 
@@ -211,6 +277,7 @@ pub const Replica = struct {
             assert(self.leader());
             assert(self.status == .normal);
             self.timeout_commit.start();
+            // TODO Add more commit fields:
             self.send_message_to_other_replicas(.{
                 .command = .commit,
                 .replica = self.index,
@@ -275,6 +342,9 @@ pub const Replica = struct {
         }
 
         if (message.op <= self.op) {
+            // TODO Sending a prepare_ok means making an important guarantee that we have the data.
+            // We should add more assertions here to check that we really do have exactly what the
+            // leader wants us to ack.
             log.debug("{}: on_prepare: already journalled", .{self.index});
             self.send_message_to_replica(message.replica, Message{
                 .command = .prepare_ok,
@@ -291,7 +361,6 @@ pub const Replica = struct {
         log.debug("{}: on_prepare: journal was {}", .{ self.index, self.journal });
         var hasher = std.crypto.hash.Blake3.init(.{});
         hasher.update(self.journal[0..]);
-        hasher.update(message.value[0..]);
         hasher.final(self.journal[0..]);
         log.debug("{}: on_prepare: journal now {}", .{ self.index, self.journal });
 
@@ -753,58 +822,42 @@ pub const Replica = struct {
         }
 
         self.timeout_commit.stop();
-        log.debug("{}: timeout_commit stopped", .{self.index});
+        log.debug("{}: transition_to_view_change_status: timeout_commit stopped", .{self.index});
 
         self.timeout_view.start();
-        log.debug("{}: timeout_view started", .{self.index});
+        log.debug("{}: transition_to_view_change_status: timeout_view started", .{self.index});
 
         // TODO Stop "resend prepare" timeout.
 
         // Send only to other replicas (and not to ourself) to avoid a quorum off-by-one error:
         // This could happen if the replica mistakenly counts its own message in the quorum.
-        log.debug("{}: sending start_view_change to other replicas:", .{self.index});
         self.send_message_to_other_replicas(.{
             .command = .start_view_change,
             .replica = self.index,
             .view = new_view,
         });
     }
-
-    fn send_message_to_other_replicas(self: *Replica, message: Message) void {
-        for (self.message) |_, replica| {
-            if (replica != self.index) {
-                self.send_message_to_replica(replica, message);
-            }
-        }
-    }
-
-    fn send_message_to_replica(self: *Replica, replica: usize, message: Message) void {
-        log.debug("{}: sending {} to replica {}: {}", .{
-            self.index,
-            @tagName(message.command),
-            replica,
-            message,
-        });
-        assert(message.replica == self.index);
-        assert(message.view == self.view);
-        if (replica == self.index) {
-            // Bypass the external network queue:
-            // A replica should not need to keep a TCP connection open to itself.
-            self.on_message(message);
-        } else {
-            self.message[replica] = message;
-        }
-    }
 };
 
-pub fn main() void {
-    std.debug.print("\n", .{});
-    const f = 1;
+pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var allocator = &arena.allocator;
 
+    const f = 1;
+    var configuration: [3]ConfigurationAddress = undefined;
+    var message_bus = try MessageBus.init(allocator, &configuration);
     var replicas: [2 * f + 1]Replica = undefined;
+
     for (replicas) |*replica, index| {
-        // TODO Assign nulls to message, start_view_change... and do_view_change...:
-        replica.* = Replica.init(f, .{ 0, 1, 2 }, @intCast(u32, index));
+        replica.* = try Replica.init(
+            allocator,
+            f,
+            &configuration,
+            &message_bus,
+            @intCast(u16, index),
+        );
+        configuration[index] = .{ .replica = replica };
         std.debug.print("{}\n", .{replica});
     }
 
