@@ -46,7 +46,9 @@ TigerBeetle provides more performance than a general-purpose relational database
 
 * TigerBeetle **does zero-deserialization** by using fixed-size data structures, that are optimized for cache line alignment to **minimize L1-L3 cache misses**.
 
-* TigerBeetle **masks transient gray failure performance problems**. For example, if a disk write that typically takes 4ms starts taking 4 seconds because the disk is slowly failing, TigerBeetle will use redundancy to mask the gray failure automatically without the user seeing any 4 second latency spike. This is a relatively new performance technique known as "tail tolerance" in the literature and something not provided by most existing databases.
+* TigerBeetle **takes advantage of Flexible Paxos** to reduce the cost of synchronous replication down to a single remote replica (in addition to the leader) and then **uses asynchronous replication** between the remaining followers. This improves write availability, without sacrificing strict serializability or durability guarantees. This can also reduce server deployment cost by up to 20% since a 4-node cluster under Flexible Paxos can now provide the same `f=2` guarantee for the replication quorum compared with a 5-node cluster.
+
+* TigerBeetle **masks transient gray failure performance problems**. For example, if a disk write that typically takes 4ms starts taking 4 seconds because the disk is slowly failing, TigerBeetle will use cluster redundancy to mask the gray failure automatically without the user seeing any 4 second latency spike. This is a relatively new performance technique known as "tail tolerance" in the literature and something not provided by most existing databases.
 
 > ["The major availability breakdowns and performance anomalies we see in cloud environments tend to be caused by subtle underlying faults, i.e. gray failure (slowly failing hardware) rather than fail-stop failure."](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
 
