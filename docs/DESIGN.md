@@ -14,17 +14,17 @@ TigerBeetle is designed to a higher safety standard than a general-purpose relat
 
 * Strict consistency, CRCs and crash safety are not enough.
 
-* TigerBeetle **detects silent disk corruption** ([3.45% per 32 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), **detects misdirected writes** where the disk firmware writes to the wrong sector ([0.042% per 17 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), and **prevents data tampering** with hash-chained cryptographic checksums.
+* TigerBeetle **detects and repairs disk corruption** ([3.45% per 32 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), **detects and repairs misdirected writes** where the disk firmware writes to the wrong sector ([0.042% per 17 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), and **prevents data tampering** through hash-chained cryptographic checksums.
 
 * TigerBeetle **exceeds the fsync durability of a single disk** and the hardware of a single server because disk firmware can have bugs and because single server systems fail all the time.
 
-* TigerBeetle **uses Direct I/O to avoid cache coherency bugs in the kernel page cache** after an `EIO` fsync error.
+* TigerBeetle **uses Direct I/O** to avoid cache coherency bugs in the kernel page cache after an EIO fsync error.
 
 * TigerBeetle **provides strict serializability**, the gold standard of consistency, as a replicated state machine, and as a cluster of TigerBeetle servers, for fault-tolerance.
 
 * TigerBeetle **performs synchronous replication** to a quorum of TigerBeetle servers using [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf), a distributed consensus protocol and member of the Multi-Paxos family, to handle automated leader election and eliminate split brain.
 
-* TigerBeetle is “fault-aware” and **recovers from local storage failures in the context of the global consensus protocol**, providing [more safety than replicated state machines such as ZooKeeper and LogCabin](https://www.youtube.com/watch?v=fDY6Wi0GcPs). For example, TigerBeetle **disentangles corruption in the middle of the journal caused by bitrot from torn writes at the end of the journal caused by power failure**.
+* TigerBeetle is “fault-aware” and **recovers from local storage failures in the context of the global consensus protocol**, providing [more safety than replicated state machines such as ZooKeeper and LogCabin](https://www.youtube.com/watch?v=fDY6Wi0GcPs). For example, TigerBeetle disentangles corruption in the middle of the journal caused by bitrot from torn writes at the end of the journal caused by power failure.
 
 * TigerBeetle does not depend on synchronized system clocks, does not use leader leases, and **performs leader-based timestamping** so that your application can deal only with safe relative quantities of time with respect to transfer timeouts.
 
