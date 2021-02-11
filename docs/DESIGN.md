@@ -4,7 +4,7 @@ This is a living document that keeps a (best effort) record of the design decisi
 
 ## Mission
 
-We want to make it easy for others to build the next generation of financial services and applications without having to cobble together an accounting or ledger system of record from scratch.
+**We want to make it easy for others to build the next generation of financial services and applications without having to cobble together an accounting or ledger system of record from scratch.**
 
 We are implementing the latest research and technology to deliver unprecedented safety, durability and performance while reducing operational cost by orders of magnitude and providing a fantastic developer experience.
 
@@ -16,9 +16,9 @@ TigerBeetle is designed to a higher safety standard than a general-purpose relat
 
 * TigerBeetle **detects and repairs disk corruption** ([3.45% per 32 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), **detects and repairs misdirected writes** where the disk firmware writes to the wrong sector ([0.042% per 17 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), and **prevents data tampering** with hash-chained cryptographic checksums.
 
-* TigerBeetle **exceeds the fsync durability of a single disk** and the hardware of a single server because disk firmware can have bugs and because single server systems fail all the time.
-
 * TigerBeetle **uses Direct I/O** to avoid cache coherency bugs in the kernel page cache after an EIO fsync error.
+
+* TigerBeetle **exceeds the fsync durability of a single disk** and the hardware of a single server because disk firmware can have bugs and because single server systems fail all the time.
 
 * TigerBeetle **provides strict serializability**, the gold standard of consistency, as a replicated state machine, and as a cluster of TigerBeetle servers, for fault-tolerance.
 
