@@ -16,7 +16,7 @@ From a safety point of view, we haven’t yet tested whether any VMs would disre
 
 We are intentionally designing TigerBeetle to repair these local storage failures automatically on a fine-grained basis using cluster redundancy. That’s also another reason why we’re not using Raft as consensus protocol, because Raft can only elect a node as leader if its entire journal is fault free, it cannot leverage full cluster redundancy to repair the leader’s journal (and then the rest of the cluster). It’s possible to have cluster failure with Raft if all nodes only have a single disk block fault somewhere on disk, even if they’re all at different locations. On the other hand, VR’s view change protocol is entirely in-memory, and doesn’t require any disk persistence for the protocol to be correct (as Raft’s protocol does), again much cleaner and safer in the event of disk faults during leader election.
 
-## io_ring
+## io_uring
 
 In a similar way, io_uring removes (or amortizes by orders of magnitude) the cost of syscalls between user space and the kernel, regardless of whether those are both within a virtualized environment or not. io_uring is being developed by Jens Axboe specifically to reduce the cost of large scale server fleets, which are typically cloud native, and there’s already been [work done](https://www.phoronix.com/scan.php?page=news_item&px=KVM-IO-uring-Passthrough-LF2020) to share the host’s io_uring queues with virtualized guests.
 
