@@ -1,14 +1,12 @@
 # Design Document
 
-This is a living document that keeps a (best effort) record of the design decisions behind TigerBeetle, a clustered accounting database.
+This is a living document that keeps a (best effort) record of the design decisions behind TigerBeetle, a clustered accounting database. TigerBeetle is under active development. These design components are in various stages of completion and iteration cycle.
 
 ## Mission
 
 We want to make it easy for others to build the next generation of financial services and applications without having to cobble together an accounting or ledger system of record from scratch.
 
 We are implementing the latest research and technology to deliver unprecedented safety, durability and performance while reducing operational cost by orders of magnitude and providing a fantastic developer experience.
-
-TigerBeetle is under active development. These design components are in various stages of completion and iteration cycle.
 
 ## Safety
 
@@ -51,8 +49,6 @@ TigerBeetle provides more performance than a general-purpose relational database
 * TigerBeetle **masks transient gray failure performance problems**. For example, if a disk write that typically takes 4ms starts taking 4 seconds because the disk is slowly failing, TigerBeetle will use redundancy to mask the gray failure automatically without the user seeing any 4 second latency spike. This is a relatively new performance technique known as "tail tolerance" in the literature and something not provided by most existing databases.
 
 > ["The major availability breakdowns and performance anomalies we see in cloud environments tend to be caused by subtle underlying faults, i.e. gray failure (slowly failing hardware) rather than fail-stop failure."](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
-
-* Tiger
 
 ## Developer-Friendly
 
