@@ -84,7 +84,7 @@ Our architecture then becomes three easy steps:
 
 That's how TigerBeetle **eliminates gray failure in the leader's local disk**, and how TigerBeetle **eliminates gray failure in the network links to the replication nodes**.
 
-Like LMAX, TigerBeetle uses a thread-per-core design for optimal performance, with strict single-threading to enforce the single writer principle and avoid multi-threaded access to data.
+Like LMAX, TigerBeetle uses a thread-per-core design for optimal performance, with strict single-threading to enforce the single writer principle and avoid the costs of multi-threaded coordinated access to data.
 
 ### Data Center Cluster or Application Embedded Library
 
