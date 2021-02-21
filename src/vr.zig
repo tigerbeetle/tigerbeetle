@@ -717,7 +717,6 @@ pub const Replica = struct {
     /// client-table, and sends a ⟨prepare_ok v, n, i⟩ message to the primary to indicate that this
     /// operation and all earlier ones have prepared locally.
     fn on_prepare(self: *Replica, message: *Message) void {
-        // TODO Call commit_ops_through() for message.header.commit.
         if (self.status != .normal) {
             log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
             return;
@@ -788,6 +787,10 @@ pub const Replica = struct {
             .view = message.header.view,
             .op = message.header.op,
         });
+
+        if (self.follower()) {
+            self.commit_ops_through(message.header.commit);
+        }
     }
 
     fn on_prepare_timeout(self: *Replica) void {
@@ -881,6 +884,7 @@ pub const Replica = struct {
         assert(count == self.f + 1);
         log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
 
+        assert(message.header.op == self.op + 1);
         self.commit_ops_through(message.header.op);
 
         self.reset_prepare();
@@ -1348,7 +1352,6 @@ pub const Replica = struct {
     }
 
     fn commit_ops_through(self: *Replica, commit: u64) void {
-        assert(self.commit <= commit);
         while (self.commit < commit) {
             self.commit += 1;
 
