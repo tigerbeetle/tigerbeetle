@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.vr);
 pub const log_level: std.log.Level = .debug;
+
 /// Viewstamped Replication protocol commands:
 // TODO Command for client to fetch its latest request_number from the cluster.
 pub const Command = packed enum(u8) {
@@ -368,19 +369,19 @@ pub const Journal = struct {
         assert(header.size >= @sizeOf(Header));
         assert(header.size == buffer.len);
 
-        // TODO Check that header.nonce matches the hash chain for the specified offset.
-        // TODO Write the entry and eof to the specified offset.
-        // TODO Write the entry header and eof header to the meta area of the journal.
-        // TODO Update dirty bits.
-        var entry = self.headers[header.index];
-        var dirty = self.dirty[header.index];
-        if (entry.checksum_meta == header.checksum_meta and !dirty) {
-            // TODO Read in and compare byte for byte.
-            // TODO Skip duplicate write.
-        }
-        if (entry.valid_checksum_meta() and entry.view > header.view) {
-            // TODO Skip outdated write.
-        }
+        var existing = self.headers[header.index];
+        assert(existing.command == .reserved or existing.checksum_meta == header.checksum_meta);
+
+        log.debug("journal: write: index={} offset={} len={}", .{
+            header.index,
+            header.offset,
+            buffer.len,
+        });
+        
+        self.headers[header.index] = header.*;
+        self.dirty[header.index] = false;
+        // TODO Write to disk.
+        // TODO Write headers to disk to both slots.
     }
 };
 
@@ -821,8 +822,8 @@ pub const Replica = struct {
 
         // We must advance our op number before replicating or journalling as per the paper,
         // so that the leader has the correct op number when it receives the prepare_ok quorum:
-        assert(message.header.op == self.op + 1);
         log.debug("{}: on_prepare: advancing op number", .{self.replica});
+        assert(message.header.op == self.op + 1);
         self.op = message.header.op;
 
         // TODO Update client's information in the client table.
@@ -836,6 +837,26 @@ pub const Replica = struct {
             self.send_message_to_replica(next, message);
         }
 
+        log.debug("{}: on_prepare: appending to journal", .{self.replica});
+
+        if (self.leader()) {
+            assert(message.header.index == self.journal.index);
+            assert(message.header.offset == self.journal.offset);
+            // TODO Handling view jumps and op jumps above must also correct journal index, offset.
+            // TODO As well as ensure that the destination journal entry is free (reserved).
+            // We can then do the above index and offset assertions for followers as well.
+        }
+        // TODO Assert that append will not overflow the journal.
+        // The index and offset must be updated before writing, as the quorum may outrun our writes:
+        self.journal.index = @mod(
+            message.header.index + 1,
+            @intCast(u32, self.journal.headers.len),
+        );
+        self.journal.offset = message.header.offset + message.header.size;
+
+        // TODO Assign an async frame (self.appending) and allow what follows to then be async:
+        // We will then have two async frames (self.appending and self.repairing).
+        // We will be able to repair and append concurrently, and so catch up to the leader.
         self.journal.write(message.header, message.buffer);
 
         self.send_header_to_replica(message.header.replica, .{
@@ -860,6 +881,8 @@ pub const Replica = struct {
         assert(self.prepare_message != null);
         assert(self.prepare_message.?.header.view == self.view);
 
+        // TODO Exponential backoff.
+        // TODO Prevent flooding the network due to multiple concurrent rounds of replication.
         self.prepare_attempt += 1;
         self.prepare_timeout.reset();
         log.debug("{}: on_prepare_timeout: prepare_timeout reset", .{self.replica});
