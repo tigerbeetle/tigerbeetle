@@ -6,6 +6,8 @@ pub const log_level: std.log.Level = .debug;
 /// Viewstamped Replication protocol commands:
 // TODO Command for client to fetch its latest request_number from the cluster.
 pub const Command = packed enum(u8) {
+    reserved,
+
     request,
     prepare,
     prepare_ok,
@@ -23,6 +25,7 @@ pub const Command = packed enum(u8) {
 /// State machine operations:
 pub const Operation = packed enum(u8) {
     reserved,
+
     noop,
 };
 
@@ -84,7 +87,7 @@ pub const Header = packed struct {
     replica: u16 = 0,
 
     /// The VR protocol command for this message:
-    command: Command,
+    command: Command = .reserved,
 
     /// The state machine operation to apply:
     operation: Operation = .reserved,
@@ -105,6 +108,15 @@ pub const Header = packed struct {
         var target: [32]u8 = undefined;
         std.crypto.hash.Blake3.hash(data[0..], target[0..], .{});
         return @bitCast(u128, target[0..checksum_size].*);
+    }
+
+    pub fn reset(self: *Header) void {
+        self.* = .{};
+        assert(self.checksum_meta == 0);
+        assert(self.checksum_data == 0);
+        assert(self.size == @sizeOf(Header));
+        assert(self.command == .reserved);
+        assert(self.operation == .reserved);
     }
 
     /// This must be called only after set_checksum_data() so that checksum_data is also covered:
