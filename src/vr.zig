@@ -1234,7 +1234,8 @@ pub const Replica = struct {
 
     fn transition_to_normal_status(self: *Replica, new_view: u64) void {
         log.debug("{}: transition_to_normal_status: view {}", .{ self.replica, new_view });
-        // TODO Is it possible to transition from .normal to .normal for the same view?
+        // In the VRR paper it's possible to transition from .normal to .normal for the same view.
+        // For example, this could happen after a state transfer triggered by an op jump.
         assert(new_view >= self.view);
         self.view = new_view;
         self.status = .normal;
