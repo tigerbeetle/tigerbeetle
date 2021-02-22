@@ -442,7 +442,7 @@ pub const Replica = struct {
     f: u32,
 
     /// An array containing the remote or local addresses of each of the 2f + 1 replicas:
-    /// Unlike the VR paper, we do not sort the array but leave the order explicitly to the user.
+    /// Unlike the VRR paper, we do not sort the array but leave the order explicitly to the user.
     /// There are several advantages to this:
     /// * The operator may deploy a cluster with proximity in mind since replication follows order.
     /// * A replica's IP address may be changed without reconfiguration.
