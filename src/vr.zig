@@ -348,6 +348,20 @@ pub const Journal = struct {
 
     pub fn deinit(self: *Journal) void {}
 
+    /// Remove entries after op number (exclusive), i.e. with a higher op number.
+    /// This is used after a view change to prune uncommitted entries discarded by the new leader.
+    pub fn remove_entries_after_op(self: *Journal, op: u64) void {
+        assert(op > 0);
+        // TODO Track the highest commit number, and do not remove anything before or equal to this.
+        // TODO Limit how many of these we expect to remove (1?).
+        for (self.headers) |*header| {
+            if (header.op > op) {
+                self.dirty[header.index] = false;
+                header.reset();
+            }
+        }
+    }
+
     pub fn write(self: *Journal, header: *const Header, buffer: []const u8) void {
         assert(header.command == .prepare);
         assert(header.operation != .reserved);
