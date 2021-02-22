@@ -495,12 +495,12 @@ pub const Replica = struct {
 
     /// The number of ticks without enough prepare_ok's before the leader resends a prepare:
     /// TODO Adjust this dynamically to match sliding window EWMA of recent network latencies.
-    prepare_timeout: Timeout = Timeout{ .after = 3 },
+    prepare_timeout: Timeout = Timeout{ .after = 10 },
 
     /// The number of ticks before the leader sends a commit heartbeat:
     /// The leader always sends a commit heartbeat irrespective of when it last sent a prepare.
     /// This improves liveness when prepare messages cannot be replicated fully due to partitions.
-    commit_timeout: Timeout = Timeout{ .after = 20 },
+    commit_timeout: Timeout = Timeout{ .after = 50 },
 
     /// The number of ticks without hearing from the leader before a follower starts a view change:
     /// This is also the number of ticks before an existing view change is timed out.
@@ -669,10 +669,6 @@ pub const Replica = struct {
         // current view-number, m is the message it received from the client, n is the op-number it
         // assigned to the request, and k is the commit-number.
 
-        // We advance our op number only after journalling, since we journal asynchronously.
-        // This is required for correctness since the op number tracks the highest prepared op.
-        // This also simplifies the self.op code in on_prepare() for the leader and followers.
-
         var data = message.buffer[@sizeOf(Header)..message.header.size];
         // TODO Assign timestamps to structs in associated data.
 
@@ -732,79 +728,115 @@ pub const Replica = struct {
     /// The remaining problem then is tail latency tolerance for network latency spikes.
     /// If the next replica is down or partitioned, then the leader's prepare timeout will fire,
     /// and the leader will resend but to another replica, until it receives enough prepare_ok's.
-    ///
-    /// Duplicate prepares are forwarded to ensure availability but are otherwise ignored.
-    ///
-    /// Backups process prepare messages in order: a backup won’t accept a prepare with op-number n
-    /// until it has entries for all earlier requests in its log. When a backup i receives a prepare
-    /// message, it waits until it has entries in its log for all earlier requests (doing state
-    /// transfer if necessary to get the missing information). Then it increments its op-number,
-    /// adds the request to the end of its log, updates the client’s information in the
-    /// client-table, and sends a ⟨prepare_ok v, n, i⟩ message to the primary to indicate that this
-    /// operation and all earlier ones have prepared locally.
     fn on_prepare(self: *Replica, message: *Message) void {
         if (self.status != .normal) {
             log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
+            self.on_repair(message);
             return;
         }
 
         if (message.header.view < self.view) {
             log.debug("{}: on_prepare: ignoring (older view)", .{self.replica});
+            self.on_repair(message);
+            return;
+        }
+
+        // TODO Add assertions for repair edge-cases where we are the leader.
+
+        if (message.header.view == self.view and message.header.op <= self.op) {
+            // Since we allow gaps in the journal, our op number now means only the highest op we
+            // have seen, and no longer the highest op we have prepared (as with basic VRR).
+            log.debug("{}: on_prepare: older op (duplicate, reordered or repair)", .{self.replica});
+            self.on_repair(message);
+            if (message.header.op > self.commit) {
+                // We send a prepare_ok only if we have not committed the prepare.
+                // It's not necessary for correctness otherwise.
+                self.send_header_to_replica(message.header.replica, .{
+                    .command = .prepare_ok,
+                    .nonce = message.header.checksum_meta,
+                    .replica = self.replica,
+                    .view = message.header.view,
+                    .op = message.header.op,
+                });
+            }
             return;
         }
 
         if (message.header.view > self.view) {
-            log.debug("{}: on_prepare: ignoring (newer view)", .{self.replica});
-            self.request_state_transfer();
-            // TODO Queue this prepare message?
-            return;
+            log.debug("{}: on_prepare: view jump from {} to {}", .{
+                self.replica,
+                self.view,
+                message.header.view,
+            });
+            assert(self.leader_index(message.header.view) != self.replica);
+            self.transition_to_normal_status(message.header.view);
+            assert(self.follower());
+            if (self.op >= message.header.op) {
+                // We prepared further than what was accepted through the view change.
+                // Be conservative: "Get Back" only to where we need to be to handle this prepare.
+                // Anything before this is uncertain and must be repaired or reordered separately.
+                assert(message.header.op > 0);
+                assert(message.header.op > self.commit);
+                log.debug("{}: on_prepare: commit number {}, rewinding op number from {} to {}", .{
+                    self.replica,
+                    self.commit,
+                    self.op,
+                    message.header.op - 1,
+                });
+                self.op = message.header.op - 1;
+                assert(self.op >= self.commit);
+                assert(self.op + 1 == message.header.op);
+                log.debug("{}: on_prepare: removing entries after op {}", .{
+                    self.replica,
+                    self.op,
+                });
+                self.journal.remove_entries_after_op(self.op);
+            }
         }
 
         assert(self.status == .normal);
         assert(message.header.view == self.view);
         assert(self.leader() or self.follower());
         assert(message.header.replica == self.leader_index(message.header.view));
+        assert(message.header.op >= self.op + 1);
+
+        if (message.header.op > self.op + 1) {
+            // This can happen where we have an op jump for the same view (no view jump).
+            log.debug("{}: on_prepare: op jump from {} to {}", .{
+                self.replica,
+                self.op + 1,
+                message.header.op,
+            });
+            assert(message.header.op > 0);
+            assert(message.header.op > self.commit);
+            self.op = message.header.op - 1;
+            assert(self.op >= self.commit);
+            assert(self.op + 1 == message.header.op);
+        }
 
         if (self.follower()) {
             self.view_timeout.reset();
             log.debug("{}: on_prepare: view_timeout reset", .{self.replica});
         }
 
+        // We must advance our op number before replicating or journalling as per the paper,
+        // so that the leader has the correct op number when it receives the prepare_ok quorum:
+        assert(message.header.op == self.op + 1);
+        log.debug("{}: on_prepare: advancing op number", .{self.replica});
+        self.op = message.header.op;
+
+        // TODO Update client's information in the client table.
+
         // Replicate to the next replica in the configuration (until we get back to the leader):
-        // TODO Do not replicate if this prepare is a repair.
+        // TODO All replicas should send commit heartbeats.
+        // TODO Skip past the next replica if we know it's probably crashed, frozen or partitioned.
+        // This optimization will improve latency in the event of faults or partitions.
         if (self.next_replica(self.view)) |next| {
             log.debug("{}: on_prepare: replicating to replica {}", .{ self.replica, next });
             self.send_message_to_replica(next, message);
         }
 
-        if (message.header.op > self.op + 1) {
-            log.debug("{}: on_prepare: ignoring (newer op)", .{self.replica});
-            self.request_state_transfer();
-            // TODO Queue this prepare message?
-            return;
-        }
-
-        if (message.header.op <= self.op) {
-            // Sending a prepare_ok means making a critical guarantee that we do have the data.
-            // TODO Add assertions to check that we have exactly what the leader asked us to ack.
-            log.debug("{}: on_prepare: already prepared", .{self.replica});
-            self.send_header_to_replica(message.header.replica, .{
-                .command = .prepare_ok,
-                .nonce = message.header.checksum_meta,
-                .replica = self.replica,
-                .view = message.header.view,
-                .op = message.header.op,
-            });
-            return;
-        }
-
-        // TODO Do not increase our op number if this prepare is a repair.
-        self.op += 1;
-        assert(self.op == message.header.op);
-
         self.journal.write(message.header, message.buffer);
-
-        // TODO Update client's information in the client table.
 
         self.send_header_to_replica(message.header.replica, .{
             .command = .prepare_ok,
@@ -874,6 +906,7 @@ pub const Replica = struct {
         }
 
         if (message.header.view > self.view) {
+            // TODO Can this really happen?
             log.debug("{}: on_prepare_ok: ignoring (newer view)", .{self.replica});
             self.request_state_transfer();
             return;
@@ -899,6 +932,8 @@ pub const Replica = struct {
         assert(message.header.view == self.view);
         assert(self.leader());
         assert(message.header.nonce == self.prepare_message.?.header.checksum_meta);
+        assert(message.header.op == self.op);
+        assert(message.header.op > self.commit);
 
         // Wait until we have `f + 1` messages (including ourself) for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
@@ -910,7 +945,7 @@ pub const Replica = struct {
         assert(count == self.f + 1);
         log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
 
-        assert(message.header.op == self.op + 1);
+        assert(message.header.op == self.commit + 1);
         self.commit_ops_through(message.header.op);
 
         self.reset_prepare();
@@ -990,6 +1025,10 @@ pub const Replica = struct {
         }
 
         self.commit_ops_through(message.header.commit);
+    }
+
+    fn on_repair(self: *Replica, message: *Message) void {
+        @panic("TODO");
     }
 
     fn on_view_timeout(self: *Replica) void {
