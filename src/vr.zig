@@ -804,17 +804,7 @@ pub const Replica = struct {
             // have seen, and no longer the highest op we have prepared (as with basic VRR).
             log.debug("{}: on_prepare: older op (duplicate, reordered or repair)", .{self.replica});
             self.on_repair(message);
-            if (message.header.op > self.commit) {
-                // We send a prepare_ok only if we have not committed the prepare.
-                // It's not necessary for correctness otherwise.
-                self.send_header_to_replica(message.header.replica, .{
-                    .command = .prepare_ok,
-                    .nonce = message.header.checksum_meta,
-                    .replica = self.replica,
-                    .view = message.header.view,
-                    .op = message.header.op,
-                });
-            }
+            self.send_prepare_ok(message);
             return;
         }
 
@@ -887,6 +877,56 @@ pub const Replica = struct {
         // We will be able to repair and append concurrently, and so catch up to the leader.
         self.journal.write(message.header, message.buffer);
 
+        self.send_prepare_ok(message);
+
+        if (self.follower()) {
+            self.commit_ops_through(message.header.commit);
+        }
+    }
+
+    fn send_prepare_ok(self: *Replica, message: *Message) void {
+        if (self.status != .normal) {
+            log.debug("{}: send_prepare_ok: not sending ({})", .{ self.replica, self.status });
+            return;
+        }
+
+        if (message.header.view < self.view) {
+            log.debug("{}: send_prepare_ok: not sending (older view)", .{self.replica});
+            return;
+        }
+
+        if (message.header.view > self.view) {
+            log.warn("{}: send_prepare_ok: not sending (newer view)", .{self.replica});
+            return;
+        }
+
+        if (message.header.op > self.op) {
+            log.warn("{}: send_prepare_ok: not sending (newer op)", .{self.replica});
+            return;
+        }
+
+        if (message.header.op <= self.commit) {
+            log.debug("{}: send_prepare_ok: not sending (committed)", .{self.replica});
+            return;
+        }
+
+        var entry = self.journal.headers[message.header.index];
+
+        if (entry.command == .reserved) {
+            log.debug("{}: send_prepare_ok: not sending (journal entry reserved)", .{self.replica});
+            return;
+        }
+
+        if (entry.checksum_meta != message.header.checksum_meta) {
+            log.debug("{}: send_prepare_ok: not sending (journal entry checksum)", .{self.replica});
+            return;
+        }
+
+        if (self.journal.dirty[message.header.index]) {
+            log.debug("{}: send_prepare_ok: not sending (journal entry dirty)", .{self.replica});
+            return;
+        }
+
         self.send_header_to_replica(message.header.replica, .{
             .command = .prepare_ok,
             .nonce = message.header.checksum_meta,
@@ -894,10 +934,6 @@ pub const Replica = struct {
             .view = message.header.view,
             .op = message.header.op,
         });
-
-        if (self.follower()) {
-            self.commit_ops_through(message.header.commit);
-        }
     }
 
     fn jump_to_newer_view(self: *Replica, new_view: u64) void {
