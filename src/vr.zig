@@ -461,6 +461,8 @@ const Status = enum {
 };
 
 const Timeout = struct {
+    name: []const u8,
+    replica: u16,
     after: u64,
     ticks: u64 = 0,
     ticking: bool = false,
@@ -468,22 +470,30 @@ const Timeout = struct {
     /// It's important to check that when fired() is acted on that the timeout is stopped/started,
     /// otherwise further ticks around the event loop may trigger a thundering herd of messages.
     pub fn fired(self: *Timeout) bool {
-        return self.ticking and self.ticks >= self.after;
+        if (self.ticking and self.ticks >= self.after) {
+            log.debug("{}: {} fired", .{ self.replica, self.name });
+            return true;
+        } else {
+            return false;
+        }
     }
 
     pub fn reset(self: *Timeout) void {
         assert(self.ticking);
         self.ticks = 0;
+        log.debug("{}: {} reset", .{ self.replica, self.name });
     }
 
     pub fn start(self: *Timeout) void {
         self.ticks = 0;
         self.ticking = true;
+        log.debug("{}: {} started", .{ self.replica, self.name });
     }
 
     pub fn stop(self: *Timeout) void {
         self.ticks = 0;
         self.ticking = false;
+        log.debug("{}: {} stopped", .{ self.replica, self.name });
     }
 
     pub fn tick(self: *Timeout) void {
@@ -551,16 +561,16 @@ pub const Replica = struct {
 
     /// The number of ticks without enough prepare_ok's before the leader resends a prepare:
     /// TODO Adjust this dynamically to match sliding window EWMA of recent network latencies.
-    prepare_timeout: Timeout = Timeout{ .after = 10 },
+    prepare_timeout: Timeout,
 
     /// The number of ticks before the leader sends a commit heartbeat:
     /// The leader always sends a commit heartbeat irrespective of when it last sent a prepare.
     /// This improves liveness when prepare messages cannot be replicated fully due to partitions.
-    commit_timeout: Timeout = Timeout{ .after = 50 },
+    commit_timeout: Timeout,
 
     /// The number of ticks without hearing from the leader before a follower starts a view change:
     /// This is also the number of ticks before an existing view change is timed out.
-    view_timeout: Timeout = Timeout{ .after = 500 },
+    view_timeout: Timeout,
 
     // TODO Limit integer types for `f` and `replica` to match their upper bounds in practice.
     pub fn init(
@@ -599,6 +609,21 @@ pub const Replica = struct {
             .prepare_ok_from_all_replicas = prepare_ok,
             .start_view_change_from_other_replicas = start_view_change,
             .do_view_change_from_all_replicas = do_view_change,
+            .prepare_timeout = Timeout{
+                .name = "prepare_timeout",
+                .replica = replica,
+                .after = 10,
+            },
+            .commit_timeout = Timeout{
+                .name = "commit_timeout",
+                .replica = replica,
+                .after = 30,
+            },
+            .view_timeout = Timeout{
+                .name = "view_timeout",
+                .replica = replica,
+                .after = 500,
+            },
         };
 
         // We must initialize timeouts here, not in tick() on the first tick, because on_message()
@@ -606,14 +631,10 @@ pub const Replica = struct {
         assert(self.status == .normal);
         if (self.leader()) {
             log.debug("{}: init: leader", .{self.replica});
-
             self.commit_timeout.start();
-            log.debug("{}: init: commit_timeout started", .{self.replica});
         } else {
             log.debug("{}: init: follower", .{self.replica});
-
             self.view_timeout.start();
-            log.debug("{}: init: view_timeout started", .{self.replica});
         }
 
         return self;
@@ -754,7 +775,6 @@ pub const Replica = struct {
         self.prepare_message = message;
         self.prepare_attempt = 0;
         self.prepare_timeout.start();
-        log.debug("{}: on_request: prepare_timeout started", .{self.replica});
 
         // Use the same replication code path for the leader and followers:
         self.send_message_to_replica(self.replica, message);
@@ -1001,7 +1021,6 @@ pub const Replica = struct {
         // TODO Prevent flooding the network due to multiple concurrent rounds of replication.
         self.prepare_attempt += 1;
         self.prepare_timeout.reset();
-        log.debug("{}: on_prepare_timeout: prepare_timeout reset", .{self.replica});
 
         // The list of remote replicas yet to send a prepare_ok:
         var waiting: [32]u16 = undefined;
@@ -1097,7 +1116,6 @@ pub const Replica = struct {
             self.prepare_message = null;
             self.prepare_attempt = 0;
             self.prepare_timeout.stop();
-            log.debug("{}: reset_prepare: prepare_timeout stopped", .{self.replica});
             self.reset_quorum_counter(self.prepare_ok_from_all_replicas, .prepare_ok);
         }
         assert(self.request_checksum_meta == null);
@@ -1108,13 +1126,10 @@ pub const Replica = struct {
     }
 
     fn on_commit_timeout(self: *Replica) void {
-        log.debug("{}: on_commit_timeout: fired", .{self.replica});
-
         assert(self.status == .normal);
         assert(self.leader());
 
         self.commit_timeout.reset();
-        log.debug("{}: on_commit_timeout: commit_timeout reset", .{self.replica});
 
         // TODO Add checksum_meta (as nonce) of latest committed entry so that followers can verify.
         self.send_header_to_other_replicas(.{
@@ -1153,7 +1168,6 @@ pub const Replica = struct {
         assert(self.commit <= self.op);
 
         self.view_timeout.reset();
-        log.debug("{}: on_commit: view_timeout reset", .{self.replica});
 
         self.commit_ops_through(message.header.commit);
     }
@@ -1163,7 +1177,6 @@ pub const Replica = struct {
     }
 
     fn on_view_timeout(self: *Replica) void {
-        log.debug("{}: on_view_timeout: fired", .{self.replica});
         assert(self.status == .view_change or self.status == .normal);
         // During a view change, all replicas may have view_timeout running, even the new leader:
         assert(self.status == .view_change or self.follower());
@@ -1183,10 +1196,7 @@ pub const Replica = struct {
         self.status = .view_change;
 
         self.commit_timeout.stop();
-        log.debug("{}: transition_to_view_change_status: commit_timeout stopped", .{self.replica});
-
         self.view_timeout.start();
-        log.debug("{}: transition_to_view_change_status: view_timeout started", .{self.replica});
 
         self.reset_prepare();
 
@@ -1414,18 +1424,12 @@ pub const Replica = struct {
             log.debug("{}: transition_to_normal_status: leader", .{self.replica});
 
             self.commit_timeout.start();
-            log.debug("{}: transition_to_normal_status: commit_timeout started", .{self.replica});
-
             self.view_timeout.stop();
-            log.debug("{}: transition_to_normal_status: view_timeout stopped", .{self.replica});
         } else {
             log.debug("{}: transition_to_normal_status: follower", .{self.replica});
 
             self.commit_timeout.stop();
-            log.debug("{}: transition_to_normal_status: commit_timeout stopped", .{self.replica});
-
             self.view_timeout.start();
-            log.debug("{}: transition_to_normal_status: view_timeout started", .{self.replica});
         }
 
         // TODO Wait for any async journal write to finish (before transitioning out of .normal).
