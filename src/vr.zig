@@ -1036,7 +1036,7 @@ pub const Replica = struct {
         assert(self.leader());
         assert(message.header.nonce == self.prepare_message.?.header.checksum_meta);
         assert(message.header.op == self.op);
-        assert(message.header.op > self.commit);
+        assert(message.header.op == self.commit + 1);
 
         // Wait until we have `f + 1` messages (including ourself) for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
@@ -1048,7 +1048,6 @@ pub const Replica = struct {
         assert(count == self.f + 1);
         log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
 
-        assert(message.header.op == self.commit + 1);
         self.commit_ops_through(message.header.op);
 
         self.reset_prepare();
@@ -1119,12 +1118,6 @@ pub const Replica = struct {
 
         self.view_timeout.reset();
         log.debug("{}: on_commit: view_timeout reset", .{self.replica});
-
-        if (message.header.commit > self.op) {
-            log.debug("{}: on_commit: ignoring (commit > op)", .{self.replica});
-            self.request_state_transfer();
-            return;
-        }
 
         self.commit_ops_through(message.header.commit);
     }
