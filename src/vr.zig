@@ -817,14 +817,9 @@ pub const Replica = struct {
             return;
         }
 
-        // TODO Add assertions for repair edge-cases where we are the leader.
-
         if (message.header.view == self.view and message.header.op <= self.op) {
-            // Since we allow gaps in the journal, our op number now means only the highest op we
-            // have seen, and no longer the highest op we have prepared (as with basic VRR).
-            log.debug("{}: on_prepare: older op (duplicate, reordered or repair)", .{self.replica});
+            log.debug("{}: on_prepare: ignoring (older op)", .{self.replica});
             self.on_repair(message);
-            self.send_prepare_ok(message);
             return;
         }
 
@@ -837,71 +832,36 @@ pub const Replica = struct {
         assert(message.header.view == self.view);
         assert(self.leader() or self.follower());
         assert(message.header.replica == self.leader_index(message.header.view));
-        assert(message.header.op >= self.op + 1);
+        assert(message.header.op > self.op);
 
         if (message.header.op > self.op + 1) {
-            // This can happen where we have an op jump for the same view (no view jump).
-            log.debug("{}: on_prepare: op jump from {} to {}", .{
-                self.replica,
-                self.op + 1,
-                message.header.op,
-            });
-            assert(message.header.op > 0);
-            assert(message.header.op > self.commit);
-            self.op = message.header.op - 1;
-            assert(self.op >= self.commit);
-            assert(self.op + 1 == message.header.op);
+            log.debug("{}: on_prepare: newer op", .{self.replica});
+            self.jump_to_newer_op(message.header.op, message.header.index, message.header.offset);
         }
 
-        if (self.follower()) {
-            self.view_timeout.reset();
-            log.debug("{}: on_prepare: view_timeout reset", .{self.replica});
-        }
+        if (self.follower()) self.view_timeout.reset();
 
-        // We must advance our op number before replicating or journalling as per the paper,
-        // so that the leader has the correct op number when it receives the prepare_ok quorum:
+        // We must advance our op, index and offset before replicating and journalling, so that the
+        // leader is ready when it receives the prepare_ok quorum that may outrun the journal:
         log.debug("{}: on_prepare: advancing op number", .{self.replica});
         assert(message.header.op == self.op + 1);
         self.op = message.header.op;
+        self.journal.advance_index_and_offset_to_after(message.header);
 
         // TODO Update client's information in the client table.
 
         // Replicate to the next replica in the configuration (until we get back to the leader):
-        // TODO All replicas should send commit heartbeats.
-        // TODO Skip past the next replica if we know it's probably crashed, frozen or partitioned.
-        // This optimization will improve latency in the event of faults or partitions.
         if (self.next_replica(self.view)) |next| {
             log.debug("{}: on_prepare: replicating to replica {}", .{ self.replica, next });
             self.send_message_to_replica(next, message);
         }
 
         log.debug("{}: on_prepare: appending to journal", .{self.replica});
-
-        if (self.leader()) {
-            assert(message.header.index == self.journal.index);
-            assert(message.header.offset == self.journal.offset);
-            // TODO Handling view jumps and op jumps above must also correct journal index, offset.
-            // TODO As well as ensure that the destination journal entry is free (reserved).
-            // We can then do the above index and offset assertions for followers as well.
-        }
-        // TODO Assert that append will not overflow the journal.
-        // The index and offset must be updated before writing, as the quorum may outrun our writes:
-        self.journal.index = @mod(
-            message.header.index + 1,
-            @intCast(u32, self.journal.headers.len),
-        );
-        self.journal.offset = message.header.offset + message.header.size;
-
-        // TODO Assign an async frame (self.appending) and allow what follows to then be async:
-        // We will then have two async frames (self.appending and self.repairing).
-        // We will be able to repair and append concurrently, and so catch up to the leader.
         self.journal.write(message.header, message.buffer);
 
         self.send_prepare_ok(message);
 
-        if (self.follower()) {
-            self.commit_ops_through(message.header.commit);
-        }
+        if (self.follower()) self.commit_ops_through(message.header.commit);
     }
 
     fn send_prepare_ok(self: *Replica, message: *Message) void {
@@ -957,10 +917,10 @@ pub const Replica = struct {
     }
 
     fn jump_to_newer_view(self: *Replica, new_view: u64) void {
-        log.debug("{}: jump_to_newer_view: view {}", .{ self.replica, new_view });
+        log.debug("{}: jump_to_newer_view: from {} to {}", .{ self.replica, self.view, new_view });
         assert(self.status == .normal);
-        assert(new_view > self.view);
         assert(self.leader() or self.follower());
+        assert(new_view > self.view);
         assert(self.leader_index(new_view) != self.replica);
 
         // 5.2 State Transfer
@@ -1008,9 +968,24 @@ pub const Replica = struct {
         assert(self.follower());
     }
 
-    fn on_prepare_timeout(self: *Replica) void {
-        log.debug("{}: on_prepare_timeout: fired", .{self.replica});
+    fn jump_to_newer_op(self: *Replica, op: u64, index: u32, offset: u64) void {
+        log.debug("{}: jump_to_newer_op: from {} to {}", .{ self.replica, self.op, op });
+        assert(self.status == .normal);
+        assert(self.follower());
+        assert(op > self.op);
+        assert(op > self.op + 1);
+        assert(op > self.commit);
+        assert(self.journal.headers[index].command == .reserved);
+        assert(self.journal.dirty[index] == false);
+        // TODO Assert offset.
+        self.op = op - 1;
+        assert(self.op >= self.commit);
+        assert(self.op + 1 == op);
+        self.journal.index = index;
+        self.journal.offset = offset;
+    }
 
+    fn on_prepare_timeout(self: *Replica) void {
         assert(self.status == .normal);
         assert(self.leader());
         assert(self.request_checksum_meta != null);
