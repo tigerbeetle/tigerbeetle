@@ -3,7 +3,6 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.vr);
 pub const log_level: std.log.Level = .debug;
-
 /// Viewstamped Replication protocol commands:
 // TODO Command for client to fetch its latest request_number from the cluster.
 pub const Command = packed enum(u8) {
@@ -18,9 +17,6 @@ pub const Command = packed enum(u8) {
     start_view_change,
     do_view_change,
     start_view,
-
-    request_state_transfer,
-    state_transfer,
 };
 
 /// State machine operations:
@@ -377,7 +373,7 @@ pub const Journal = struct {
             header.offset,
             buffer.len,
         });
-        
+
         self.headers[header.index] = header.*;
         self.dirty[header.index] = false;
         // TODO Write to disk.
@@ -1441,9 +1437,14 @@ pub const Replica = struct {
     }
 
     fn commit_ops_through(self: *Replica, commit: u64) void {
-        while (self.commit < commit) {
-            self.commit += 1;
+        // TODO Wait until our journal chain from self.commit to self.op is completely connected.
+        // This will serve as another defense against not removing ops after a view jump.
 
+        // We may receive commit messages for ops we don't yet have:
+        // Even a naive state transfer may fail to correct for this.
+        while (self.commit < commit and self.commit < self.op) {
+            self.commit += 1;
+            assert(self.commit <= self.op);
             // Find operation in Journal:
             // TODO Journal should have a fast path where current operation is already in memory.
             // var entry = self.journal.find(self.commit) orelse @panic("operation not found in log");
