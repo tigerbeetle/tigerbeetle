@@ -384,6 +384,7 @@ pub const Journal = struct {
     /// Returns a pointer to the header with the matching op number, or null if not found.
     /// Asserts that at most one such header exists.
     pub fn find_header_for_op(self: *Journal, op: u64) ?*Header {
+        assert(op > 0);
         var result: ?*Header = null;
         for (self.headers) |*header, index| {
             if (header.op == op and header.command != .reserved) {
@@ -422,6 +423,7 @@ pub const Journal = struct {
         assert(header.operation != .reserved);
         assert(header.size >= @sizeOf(Header));
         assert(header.size == buffer.len);
+        assert(header.op > 0);
         // TODO Assert against offset overflow.
 
         var existing = self.headers[header.index];
@@ -536,11 +538,12 @@ pub const Replica = struct {
     /// TODO Don't default to normal, set the starting status according to the Journal's health.
     status: Status = .normal,
 
-    /// The op number assigned to the most recently received request, initially 0:
+    /// The op number assigned to the most recently received request:
+    /// The op number means only the highest op seen, not the highest op prepared, as we allow gaps.
+    /// The first op will be assigned op number 1.
     op: u64 = 0,
 
     /// The op number of the most recently committed operation:
-    /// TODO Review that all usages handle the special starting case (where nothing is committed).
     commit: u64 = 0,
 
     /// The current request's checksum (used for now to enforce one-at-a-time request processing):
