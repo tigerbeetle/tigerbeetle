@@ -553,6 +553,9 @@ pub const Replica = struct {
     prepare_message: ?*Message = null,
     prepare_attempt: u64 = 0,
 
+    journalling: bool = false,
+    journal_frame: @Frame(write_to_journal) = undefined,
+
     /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas:
     prepare_ok_from_all_replicas: []?*Message,
 
@@ -836,6 +839,7 @@ pub const Replica = struct {
         assert(self.leader() or self.follower());
         assert(message.header.replica == self.leader_index(message.header.view));
         assert(message.header.op > self.op);
+        assert(message.header.op > message.header.commit);
 
         if (message.header.op > self.op + 1) {
             log.debug("{}: on_prepare: newer op", .{self.replica});
@@ -859,15 +863,39 @@ pub const Replica = struct {
             self.send_message_to_replica(next, message);
         }
 
+        // TODO Skip the leader's journal if slow (in-mem headers, mark dirty, do not ack).
+        // TODO Wait for leader's journal then only as a last resort in on_prepare_timeout().
+        // Otherwise wait_for_journal() will block prepare_ok's for the next prepare.
         log.debug("{}: on_prepare: appending to journal", .{self.replica});
-        self.journal.write(message.header, message.buffer);
-
-        self.send_prepare_ok(message);
+        self.wait_for_journal();
+        self.journal_frame = async self.write_to_journal(message, &self.journalling);
 
         if (self.follower()) self.commit_ops_through(message.header.commit);
     }
 
+    fn write_to_journal(self: *Replica, message: *Message, lock: *bool) void {
+        assert(lock.* == false);
+        lock.* = true;
+
+        assert(message.header.command == .prepare);
+        assert(message.header.op > 0);
+
+        message.references += 1;
+
+        self.journal.write(message.header, message.buffer);
+        self.send_prepare_ok(message);
+
+        message.references -= 1;
+        self.message_bus.gc(message);
+
+        lock.* = false;
+    }
+
     fn send_prepare_ok(self: *Replica, message: *Message) void {
+        assert(message.references > 0);
+        assert(message.header.command == .prepare);
+        assert(message.header.op > 0);
+
         if (self.status != .normal) {
             log.debug("{}: send_prepare_ok: not sending ({})", .{ self.replica, self.status });
             return;
@@ -878,15 +906,9 @@ pub const Replica = struct {
             return;
         }
 
-        if (message.header.view > self.view) {
-            log.warn("{}: send_prepare_ok: not sending (newer view)", .{self.replica});
-            return;
-        }
-
-        if (message.header.op > self.op) {
-            log.warn("{}: send_prepare_ok: not sending (newer op)", .{self.replica});
-            return;
-        }
+        assert(self.status == .normal);
+        assert(message.header.view == self.view);
+        assert(message.header.op <= self.op);
 
         if (message.header.op <= self.commit) {
             log.debug("{}: send_prepare_ok: not sending (committed)", .{self.replica});
@@ -910,6 +932,7 @@ pub const Replica = struct {
             return;
         }
 
+        assert(message.header.replica == self.leader_index(message.header.view));
         self.send_header_to_replica(message.header.replica, .{
             .command = .prepare_ok,
             .nonce = message.header.checksum_meta,
@@ -921,6 +944,7 @@ pub const Replica = struct {
 
     fn jump_to_newer_view(self: *Replica, new_view: u64) void {
         log.debug("{}: jump_to_newer_view: from {} to {}", .{ self.replica, self.view, new_view });
+        self.wait_for_journal();
         assert(self.status == .normal);
         assert(self.leader() or self.follower());
         assert(new_view > self.view);
@@ -973,6 +997,7 @@ pub const Replica = struct {
 
     fn jump_to_newer_op(self: *Replica, op: u64, index: u32, offset: u64) void {
         log.debug("{}: jump_to_newer_op: from {} to {}", .{ self.replica, self.op, op });
+        self.wait_for_journal();
         assert(self.status == .normal);
         assert(self.follower());
         assert(op > self.op);
@@ -986,6 +1011,14 @@ pub const Replica = struct {
         assert(self.op + 1 == op);
         self.journal.index = index;
         self.journal.offset = offset;
+    }
+
+    fn wait_for_journal(self: *Replica) void {
+        if (self.journalling) {
+            log.debug("{}: waiting for journal", .{self.replica});
+            await self.journal_frame;
+        }
+        assert(self.journalling == false);
     }
 
     fn on_prepare_timeout(self: *Replica) void {
@@ -1629,7 +1662,6 @@ pub fn main() !void {
             @intCast(u16, index),
         );
         configuration[index] = .{ .replica = replica };
-        std.debug.print("{}\n", .{replica});
     }
 
     var ticks: usize = 0;
@@ -1647,7 +1679,7 @@ pub fn main() !void {
         }
 
         if (leader) |replica| {
-            if (ticks == 1) {
+            if (ticks == 1 or ticks == 5) {
                 var request = message_bus.create_message(@sizeOf(Header)) catch unreachable;
                 request.header.* = .{
                     .client_id = 1,
