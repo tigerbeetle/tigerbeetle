@@ -345,18 +345,76 @@ pub const Journal = struct {
 
     pub fn deinit(self: *Journal) void {}
 
-    /// Remove entries after op number (exclusive), i.e. with a higher op number.
+    /// Advances the index and offset to after a header.
+    /// The header's index and offset must match the Journal's current position (as a safety check).
+    /// The header does not need to have been written yet.
+    pub fn advance_index_and_offset_to_after(self: *Journal, header: *const Header) void {
+        assert(header.command != .reserved);
+        assert(header.index == self.index);
+        assert(header.offset == self.offset);
+        const index = @mod(header.index + 1, @intCast(u32, self.headers.len));
+        const offset = header.offset + header.size;
+        assert(index > 0); // TODO Snapshotting.
+        // TODO Assert against offset overflow.
+        self.index = index;
+        self.offset = offset;
+    }
+
+    /// Sets the index and offset to after a header.
+    pub fn set_index_and_offset_to_after(self: *Journal, header: *const Header) void {
+        assert(header.command != .reserved);
+        self.index = header.index;
+        self.offset = header.offset;
+        self.advance_index_and_offset_to_after(header);
+    }
+
+    pub fn set_index_and_offset_to_empty(self: *Journal) void {
+        self.assert_all_headers_are_reserved_from_index(0);
+        // TODO With snapshots, we need to set this to the snapshot index and offset.
+        self.index = 0;
+        self.offset = 0;
+    }
+
+    pub fn assert_all_headers_are_reserved_from_index(self: *Journal, index: u32) void {
+        // TODO With snapshots, adjust slices to stop before starting index.
+        for (self.headers[index..]) |*header| assert(header.command == .reserved);
+        for (self.dirty[index..]) |dirty| assert(dirty == false);
+    }
+
+    /// Returns a pointer to the header with the matching op number, or null if not found.
+    /// Asserts that at most one such header exists.
+    pub fn find_header_for_op(self: *Journal, op: u64) ?*Header {
+        var result: ?*Header = null;
+        for (self.headers) |*header, index| {
+            if (header.op == op and header.command != .reserved) {
+                assert(result == null);
+                assert(header.index == index);
+                result = header;
+            }
+        }
+        return result;
+    }
+
+    pub fn flush(self: *Journal) void {
+        // TODO Flush headers to disk to both slots.
+        // Used for rolling back state, where we want to be sure we don't leak old state.
+        // Especially before we need to append a new entry and we want a good starting point.
+    }
+
+    /// Removes entries after op number (exclusive), i.e. with a higher op number.
     /// This is used after a view change to prune uncommitted entries discarded by the new leader.
     pub fn remove_entries_after_op(self: *Journal, op: u64) void {
         assert(op > 0);
-        // TODO Track the highest commit number, and do not remove anything before or equal to this.
-        // TODO Limit how many of these we expect to remove (1?).
-        for (self.headers) |*header| {
-            if (header.op > op) {
-                self.dirty[header.index] = false;
-                header.reset();
+        for (self.headers) |*header, index| {
+            if (header.op > op and header.command != .reserved) {
+                self.remove_entry_at_index(index);
             }
         }
+    }
+
+    pub fn remove_entry_at_index(self: *Journal, index: u64) void {
+        self.headers[index].reset();
+        self.dirty[index] = false;
     }
 
     pub fn write(self: *Journal, header: *const Header, buffer: []const u8) void {
@@ -364,6 +422,7 @@ pub const Journal = struct {
         assert(header.operation != .reserved);
         assert(header.size >= @sizeOf(Header));
         assert(header.size == buffer.len);
+        // TODO Assert against offset overflow.
 
         var existing = self.headers[header.index];
         assert(existing.command == .reserved or existing.checksum_meta == header.checksum_meta);
