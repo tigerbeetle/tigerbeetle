@@ -819,35 +819,8 @@ pub const Replica = struct {
         }
 
         if (message.header.view > self.view) {
-            log.debug("{}: on_prepare: view jump from {} to {}", .{
-                self.replica,
-                self.view,
-                message.header.view,
-            });
-            assert(self.leader_index(message.header.view) != self.replica);
-            self.transition_to_normal_status(message.header.view);
-            assert(self.follower());
-            if (self.op >= message.header.op) {
-                // We prepared further than what was accepted through the view change.
-                // Be conservative: "Get Back" only to where we need to be to handle this prepare.
-                // Anything before this is uncertain and must be repaired or reordered separately.
-                assert(message.header.op > 0);
-                assert(message.header.op > self.commit);
-                log.debug("{}: on_prepare: commit number {}, rewinding op number from {} to {}", .{
-                    self.replica,
-                    self.commit,
-                    self.op,
-                    message.header.op - 1,
-                });
-                self.op = message.header.op - 1;
-                assert(self.op >= self.commit);
-                assert(self.op + 1 == message.header.op);
-                log.debug("{}: on_prepare: removing entries after op {}", .{
-                    self.replica,
-                    self.op,
-                });
-                self.journal.remove_entries_after_op(self.op);
-            }
+            log.debug("{}: on_prepare: newer view", .{self.replica});
+            self.jump_to_newer_view(message.header.view);
         }
 
         assert(self.status == .normal);
@@ -927,6 +900,58 @@ pub const Replica = struct {
         }
     }
 
+    fn jump_to_newer_view(self: *Replica, new_view: u64) void {
+        log.debug("{}: jump_to_newer_view: view {}", .{ self.replica, new_view });
+        assert(self.status == .normal);
+        assert(new_view > self.view);
+        assert(self.leader() or self.follower());
+        assert(self.leader_index(new_view) != self.replica);
+
+        // 5.2 State Transfer
+        // There are two cases, depending on whether the slow node has learned that it is missing
+        // requests in its current view, or has heard about a later view. In the former case it only
+        // needs to learn about requests after its op-number. In the latter it needs to learn about
+        // requests after the latest committed request in its log, since requests after that might
+        // have been reordered in the view change, so in this case it sets its op-number to its
+        // commit-number and removes all entries after this from its log.
+
+        // It is critical for correctness that we discard any ops here that were not involved in the
+        // view change(s), since they may have been replaced in the view change(s) by other ops.
+        // If we fail to do this immediately then we may commit the wrong op and diverge state when
+        // we process a commit message or when we process a commit number in a prepare message.
+        if (self.op > self.commit) {
+            log.debug("{}: jump_to_newer_view: setting op number {} to commit number {}", .{
+                self.replica,
+                self.op,
+                self.commit,
+            });
+            self.op = self.commit;
+            log.debug("{}: jump_to_newer_view: removing journal entries after op number {}", .{
+                self.replica,
+                self.op,
+            });
+            self.journal.remove_entries_after_op(self.op);
+            if (self.journal.find_header_for_op(self.op)) |header| {
+                self.journal.set_index_and_offset_to_after(header);
+            } else {
+                // TODO When we implement snapshots we must update this assertion since the last
+                // committed op may have been included in the snapshot and removed from the journal.
+                // Our op number may then be greater than zero.
+                assert(self.op == 0);
+                self.journal.set_index_and_offset_to_empty();
+            }
+            self.journal.assert_all_headers_are_reserved_from_index(self.journal.index);
+            self.journal.flush();
+        } else {
+            log.debug("{}: jump_to_newer_view: no journal entries to remove", .{self.replica});
+        }
+
+        assert(self.op == self.commit);
+        self.transition_to_normal_status(new_view);
+        assert(self.view == new_view);
+        assert(self.follower());
+    }
+
     fn on_prepare_timeout(self: *Replica) void {
         log.debug("{}: on_prepare_timeout: fired", .{self.replica});
 
@@ -984,9 +1009,9 @@ pub const Replica = struct {
         }
 
         if (message.header.view > self.view) {
-            // TODO Can this really happen?
-            log.debug("{}: on_prepare_ok: ignoring (newer view)", .{self.replica});
-            self.request_state_transfer();
+            // Another replica is treating us as the leader for a view we do not know about.
+            // This may be caused by a fault in the network topology.
+            log.warn("{}: on_prepare_ok: ignoring (newer view)", .{self.replica});
             return;
         }
 
@@ -1077,9 +1102,8 @@ pub const Replica = struct {
         }
 
         if (message.header.view > self.view) {
-            log.debug("{}: on_commit: ignoring (newer view)", .{self.replica});
-            self.request_state_transfer();
-            return;
+            log.debug("{}: on_commit: newer view", .{self.replica});
+            self.jump_to_newer_view(message.header.view);
         }
 
         if (self.leader()) {
@@ -1376,11 +1400,11 @@ pub const Replica = struct {
         }
 
         // TODO Wait for any async journal write to finish (before transitioning out of .normal).
-
+        // This is essential for correctness:
         self.reset_prepare();
 
         // Reset and garbage collect all view change messages (if any):
-        // This is not essential for correctness here, only efficiency.
+        // This is not essential for correctness, only efficiency.
         // We just don't want to tie them up until the next view change (when they must be reset):
         self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
         self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
@@ -1440,7 +1464,6 @@ pub const Replica = struct {
         var count: usize = 0;
         for (messages) |received, replica| {
             if (received) |m| {
-                // A replica must send a do_view_change to itself if it will become the new leader:
                 assert(m.header.command == message.header.command);
                 assert(m.header.replica == replica);
                 assert(m.header.view == self.view);
@@ -1519,10 +1542,6 @@ pub const Replica = struct {
             // TODO Now that the reply is in the client table, trigger this message to be sent.
             // TODO Do not reply to client if we are a follower.
         }
-    }
-
-    fn request_state_transfer(self: *Replica) void {
-        // TODO
     }
 
     fn send_header_to_other_replicas(self: *Replica, header: Header) void {
