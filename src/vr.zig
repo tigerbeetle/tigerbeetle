@@ -199,6 +199,7 @@ pub const MessageBus = struct {
 
     pub fn deinit(self: *MessageBus) void {}
 
+    /// TODO Detect if gc() called multiple times for message.references == 0.
     pub fn gc(self: *MessageBus, message: *Message) void {
         if (message.references == 0) {
             log.debug("message_bus: freeing {}", .{message.header});
@@ -484,19 +485,38 @@ pub const Journal = struct {
         assert(header.op > 0);
         // TODO Assert against offset overflow.
 
-        var existing = self.headers[header.index];
-        assert(existing.command == .reserved or existing.checksum_meta == header.checksum_meta);
+        // TODO Measure latency
+        if (self.has(header)) {
+            self.write_debug(header, "starting");
 
-        log.debug("journal: write: index={} offset={} len={}", .{
+            if (!self.dirty[header.index]) {
+                self.dirty[header.index] = true;
+                self.write_debug(header, "already clean, marking dirty");
+            }
+
+            // TODO Write to disk.
+            // TODO Write headers to disk to both slots.
+
+            if (self.has(header)) {
+                // TODO Add comment explaining how this acts as a concurrency control.
+                self.dirty[header.index] = false;
+                self.write_debug(header, "complete, marking clean");
+            } else {
+                self.write_debug(header, "entry changed during write");
+            }
+        } else {
+            self.write_debug(header, "entry changed before write");
+        }
+    }
+
+    fn write_debug(self: *Journal, header: *const Header, status: []const u8) void {
+        log.debug("journal: write: index={} offset={} len={}: {} {}", .{
             header.index,
             header.offset,
-            buffer.len,
+            header.size,
+            header.checksum_meta,
+            status,
         });
-
-        self.headers[header.index] = header.*;
-        self.dirty[header.index] = false;
-        // TODO Write to disk.
-        // TODO Write headers to disk to both slots.
     }
 };
 
@@ -611,8 +631,11 @@ pub const Replica = struct {
     prepare_message: ?*Message = null,
     prepare_attempt: u64 = 0,
 
-    journalling: bool = false,
-    journal_frame: @Frame(write_to_journal) = undefined,
+    appending: bool = false,
+    appending_frame: @Frame(write_to_journal) = undefined,
+
+    repairing: bool = false,
+    repairing_frame: @Frame(write_to_journal) = undefined,
 
     /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas:
     prepare_ok_from_all_replicas: []?*Message,
@@ -911,6 +934,9 @@ pub const Replica = struct {
         log.debug("{}: on_prepare: advancing op number", .{self.replica});
         assert(message.header.op == self.op + 1);
         self.op = message.header.op;
+
+        // TODO Assertions and debug logs around this:
+        self.journal.set_entry_as_dirty(message.header);
         self.journal.advance_index_and_offset_to_after(message.header);
 
         // TODO Update client's information in the client table.
@@ -923,10 +949,11 @@ pub const Replica = struct {
 
         // TODO Skip the leader's journal if slow (in-mem headers, mark dirty, do not ack).
         // TODO Wait for leader's journal then only as a last resort in on_prepare_timeout().
-        // Otherwise wait_for_journal() will block prepare_ok's for the next prepare.
+        // Otherwise this will block prepare_ok's for the next prepare:
+        self.finish_appending();
+
         log.debug("{}: on_prepare: appending to journal", .{self.replica});
-        self.wait_for_journal();
-        self.journal_frame = async self.write_to_journal(message, &self.journalling);
+        self.appending_frame = async self.write_to_journal(message, &self.appending);
 
         if (self.follower()) self.commit_ops_through(message.header.commit);
     }
@@ -936,16 +963,24 @@ pub const Replica = struct {
         lock.* = true;
 
         assert(message.header.command == .prepare);
+        assert(message.header.view <= self.view);
+        assert(message.header.op <= self.op);
         assert(message.header.op > 0);
 
-        message.references += 1;
-
         // TODO Set the message header in journal headers from within on_prepare.
-        self.journal.write(message.header, message.buffer);
-        self.send_prepare_ok(message);
 
-        message.references -= 1;
-        self.message_bus.gc(message);
+        // TODO Debug logs
+        if (self.journal.has(message.header)) {
+            message.references += 1;
+
+            if (self.journal.has_dirty(message.header)) {
+                self.journal.write(message.header, message.buffer);
+            }
+            self.send_prepare_ok(message);
+
+            message.references -= 1;
+            self.message_bus.gc(message);
+        }
 
         lock.* = false;
     }
@@ -1063,11 +1098,25 @@ pub const Replica = struct {
     }
 
     fn wait_for_journal(self: *Replica) void {
-        if (self.journalling) {
-            log.debug("{}: waiting for journal", .{self.replica});
-            await self.journal_frame;
+        self.finish_appending();
+        self.finish_repairing();
+    }
+
+    fn finish_appending(self: *Replica) void {
+        // TODO Do we need while loops here in case something else awaits first?
+        if (self.appending) {
+            log.debug("{}: waiting for journal to finish appending", .{self.replica});
+            await self.appending_frame;
         }
-        assert(self.journalling == false);
+        assert(self.appending == false);
+    }
+
+    fn finish_repairing(self: *Replica) void {
+        if (self.repairing) {
+            log.debug("{}: waiting for journal to finish repairing", .{self.replica});
+            await self.repairing_frame;
+        }
+        assert(self.repairing == false);
     }
 
     fn on_prepare_timeout(self: *Replica) void {
@@ -1248,8 +1297,9 @@ pub const Replica = struct {
         self.repair_header(message.header);
 
         if (self.journal.has_dirty(message.header)) {
-            // TODO Journal
-            self.send_prepare_ok(message);
+            self.finish_repairing();
+            log.debug("{}: on_repair: repairing to journal", .{self.replica});
+            self.repairing_frame = async self.write_to_journal(message, &self.repairing);
             return;
         }
     }
