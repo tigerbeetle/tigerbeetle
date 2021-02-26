@@ -354,7 +354,7 @@ pub const Journal = struct {
         assert(header.offset == self.offset);
         const index = @mod(header.index + 1, @intCast(u32, self.headers.len));
         const offset = header.offset + header.size;
-        assert(index > 0); // TODO Snapshotting.
+        assert(index > 0); // TODO Snapshots.
         // TODO Assert against offset overflow.
         self.index = index;
         self.offset = offset;
@@ -370,22 +370,22 @@ pub const Journal = struct {
 
     pub fn set_index_and_offset_to_empty(self: *Journal) void {
         self.assert_all_headers_are_reserved_from_index(0);
-        // TODO With snapshots, we need to set this to the snapshot index and offset.
+        // TODO Snapshots: We need to set this to the snapshot index and offset.
         self.index = 0;
         self.offset = 0;
     }
 
     pub fn assert_all_headers_are_reserved_from_index(self: *Journal, index: u32) void {
-        // TODO With snapshots, adjust slices to stop before starting index.
+        // TODO Snapshots: Adjust slices to stop before starting index.
         for (self.headers[index..]) |*header| assert(header.command == .reserved);
         for (self.dirty[index..]) |dirty| assert(dirty == false);
     }
 
     /// Returns a pointer to the header with the matching op number, or null if not found.
     /// Asserts that at most one such header exists.
-    pub fn find_header_for_op(self: *Journal, op: u64) ?*Header {
+    pub fn find_header_for_op(self: *Journal, op: u64) ?*const Header {
         assert(op > 0);
-        var result: ?*Header = null;
+        var result: ?*const Header = null;
         for (self.headers) |*header, index| {
             if (header.op == op and header.command != .reserved) {
                 assert(result == null);
@@ -396,7 +396,46 @@ pub const Journal = struct {
         return result;
     }
 
-    pub fn flush(self: *Journal) void {
+    pub fn entry(self: *Journal, index: u32) ?*const Header {
+        const header = &self.headers[index];
+        if (header.command == .reserved) return null;
+        return header;
+    }
+
+    pub fn next_entry(self: *Journal, index: u32) ?*const Header {
+        // TODO Snapshots: This will wrap and then be null only when we get back to the head.
+        if (index + 1 == self.headers.len) return null;
+        return self.entry(index + 1);
+    }
+
+    pub fn previous_entry(self: *Journal, index: u32) ?*const Header {
+        // TODO Snapshots: This will wrap and then be null only when we get back to the head.
+        if (index == 0) return null;
+        return self.entry(index - 1);
+    }
+
+    pub fn has(self: *Journal, header: *const Header) bool {
+        const existing = &self.headers[header.index];
+        if (existing.command == .reserved) {
+            assert(existing.checksum_meta == 0);
+            assert(existing.offset == 0);
+            assert(existing.index == 0);
+            return false;
+        } else {
+            assert(existing.index == header.index);
+            return existing.checksum_meta == header.checksum_meta;
+        }
+    }
+
+    pub fn has_clean(self: *Journal, header: *const Header) bool {
+        return self.has(header) and !self.dirty[header.index];
+    }
+
+    pub fn has_dirty(self: *Journal, header: *const Header) bool {
+        return self.has(header) and self.dirty[header.index];
+    }
+
+    pub fn flush_headers(self: *Journal) void {
         // TODO Flush headers to disk to both slots.
         // Used for rolling back state, where we want to be sure we don't leak old state.
         // Especially before we need to append a new entry and we want a good starting point.
@@ -408,14 +447,33 @@ pub const Journal = struct {
         assert(op > 0);
         for (self.headers) |*header, index| {
             if (header.op > op and header.command != .reserved) {
-                self.remove_entry_at_index(index);
+                self.remove_entry(header);
             }
         }
     }
 
-    pub fn remove_entry_at_index(self: *Journal, index: u64) void {
-        self.headers[index].reset();
+    /// A safe way of removing an entry, where the header must match the current entry to succeed.
+    pub fn remove_entry(self: *Journal, header: *const Header) void {
+        assert(header.command != .reserved);
+        const existing = &self.headers[header.index];
+        assert(existing.checksum_meta == header.checksum_meta);
+        assert(existing.offset == header.offset);
+        assert(existing.index == header.index);
+        self.remove_entry_at_index(header.index);
+    }
+
+    fn remove_entry_at_index(self: *Journal, index: u64) void {
+        var header = &self.headers[index];
+        assert(header.index == index or header.command == .reserved);
+        header.reset();
         self.dirty[index] = false;
+        assert(self.headers[index].command == .reserved);
+    }
+
+    pub fn set_entry_as_dirty(self: *Journal, header: *const Header) void {
+        assert(header.command != .reserved);
+        self.headers[header.index] = header.*;
+        self.dirty[header.index] = true;
     }
 
     pub fn write(self: *Journal, header: *const Header, buffer: []const u8) void {
@@ -882,6 +940,7 @@ pub const Replica = struct {
 
         message.references += 1;
 
+        // TODO Set the message header in journal headers from within on_prepare.
         self.journal.write(message.header, message.buffer);
         self.send_prepare_ok(message);
 
@@ -894,6 +953,8 @@ pub const Replica = struct {
     fn send_prepare_ok(self: *Replica, message: *Message) void {
         assert(message.references > 0);
         assert(message.header.command == .prepare);
+        assert(message.header.view <= self.view);
+        assert(message.header.op <= self.op);
         assert(message.header.op > 0);
 
         if (self.status != .normal) {
@@ -915,31 +976,19 @@ pub const Replica = struct {
             return;
         }
 
-        var entry = self.journal.headers[message.header.index];
-
-        if (entry.command == .reserved) {
-            log.debug("{}: send_prepare_ok: not sending (journal entry reserved)", .{self.replica});
+        if (self.journal.has_clean(message.header)) {
+            assert(message.header.replica == self.leader_index(message.header.view));
+            self.send_header_to_replica(message.header.replica, .{
+                .command = .prepare_ok,
+                .nonce = message.header.checksum_meta,
+                .replica = self.replica,
+                .view = message.header.view,
+                .op = message.header.op,
+            });
+        } else {
+            log.debug("{}: send_prepare_ok: not sending (not clean)", .{self.replica});
             return;
         }
-
-        if (entry.checksum_meta != message.header.checksum_meta) {
-            log.debug("{}: send_prepare_ok: not sending (journal entry checksum)", .{self.replica});
-            return;
-        }
-
-        if (self.journal.dirty[message.header.index]) {
-            log.debug("{}: send_prepare_ok: not sending (journal entry dirty)", .{self.replica});
-            return;
-        }
-
-        assert(message.header.replica == self.leader_index(message.header.view));
-        self.send_header_to_replica(message.header.replica, .{
-            .command = .prepare_ok,
-            .nonce = message.header.checksum_meta,
-            .replica = self.replica,
-            .view = message.header.view,
-            .op = message.header.op,
-        });
     }
 
     fn jump_to_newer_view(self: *Replica, new_view: u64) void {
@@ -984,7 +1033,7 @@ pub const Replica = struct {
                 self.journal.set_index_and_offset_to_empty();
             }
             self.journal.assert_all_headers_are_reserved_from_index(self.journal.index);
-            self.journal.flush();
+            self.journal.flush_headers();
         } else {
             log.debug("{}: jump_to_newer_view: no journal entries to remove", .{self.replica});
         }
@@ -1184,7 +1233,179 @@ pub const Replica = struct {
     }
 
     fn on_repair(self: *Replica, message: *Message) void {
-        @panic("TODO");
+        assert(message.header.command == .prepare);
+        assert(message.header.view <= self.view);
+        assert(message.header.op <= self.op);
+
+        if (self.status != .normal and self.status != .view_change) return;
+
+        if (self.journal.has_clean(message.header)) {
+            log.debug("{}: on_repair: duplicate", .{self.replica});
+            self.send_prepare_ok(message);
+            return;
+        }
+
+        self.repair_header(message.header);
+
+        if (self.journal.has_dirty(message.header)) {
+            // TODO Journal
+            self.send_prepare_ok(message);
+            return;
+        }
+    }
+
+    fn repair_header(self: *Replica, header: *const Header) void {
+        assert(header.command == .prepare);
+        assert(header.view <= self.view);
+        assert(header.op <= self.op);
+
+        if (self.journal.entry(header.index)) |exists| {
+            if (exists.view > header.view) {
+                log.debug("{}: repair_header: exists (newer view)", .{self.replica});
+                return;
+            }
+
+            if (exists.view == header.view and exists.op > header.op) {
+                // For example, the journal wraps.
+                log.debug("{}: repair_header: exists (newer op)", .{self.replica});
+                return;
+            }
+
+            if (exists.checksum_meta == header.checksum_meta) {
+                if (self.journal.dirty[header.index]) {
+                    log.debug("{}: repair_header: exists (dirty checksum)", .{self.replica});
+                } else {
+                    log.debug("{}: repair_header: exists (clean checksum)", .{self.replica});
+                    // TODO Compare fields for equality.
+                    return;
+                }
+            } else if (exists.view == header.view) {
+                assert(exists.op < header.op);
+                log.debug("{}: repair_header: exists (same view, older op)", .{self.replica});
+            } else if (exists.op == header.op) {
+                // For example, the op was reordered through a view change by a new leader.
+                assert(exists.view < header.view);
+                log.debug("{}: repair_header: exists (older view, same op)", .{self.replica});
+            } else {
+                assert(exists.view < header.view and exists.op < header.op);
+                log.debug("{}: repair_header: exists (older view, older op)", .{self.replica});
+            }
+
+            assert(exists.view <= header.view and exists.op <= header.op);
+        } else {
+            log.debug("{}: repair_header: gap", .{self.replica});
+        }
+
+        if (self.repair_header_would_break_chain_with_newer_neighbor(header)) {
+            log.debug("{}: repair_header: would break chain with newer neighbor", .{self.replica});
+            return;
+        }
+
+        if (self.repair_header_would_overlap_with_newer_neighbor(header)) {
+            log.debug("{}: repair_header: would overlap with newer neighbor", .{self.replica});
+            return;
+        }
+
+        // TODO Snapshots: Skip if this header is already snapshotted.
+
+        self.journal.set_entry_as_dirty(header);
+    }
+
+    /// If we repair this header would we introduce a break in the chain with a newer neighbor?
+    /// Ignores breaks in the chain if the neighboring entry is older and would in turn be repaired.
+    fn repair_header_would_break_chain_with_newer_neighbor(
+        self: *Replica,
+        header: *const Header,
+    ) bool {
+        if (self.journal.previous_entry(header.index)) |previous| {
+            if (previous.checksum_meta == header.nonce) {
+                assert(previous.view <= header.view);
+                assert(previous.op + 1 == header.op);
+                // TODO Snapshots: Add Journal method to work this out and handle wrapping:
+                assert(previous.offset + previous.size == header.offset);
+                return false;
+            }
+            return self.repair_header_has_newer_neighbor(header, previous);
+        }
+        if (self.journal.next_entry(header.index)) |next| {
+            if (header.checksum_meta == next.nonce) {
+                assert(header.view <= next.view);
+                assert(header.op + 1 == next.op);
+                // TODO Snapshots: Add Journal method to work this out and handle wrapping:
+                assert(header.offset + header.size == next.offset);
+                return false;
+            }
+            return self.repair_header_has_newer_neighbor(header, next);
+        }
+        return false;
+    }
+
+    /// If we repair this header would we overwrite a newer neighbor (immediate or distant)?
+    /// Ignores overlap if the neighboring entry is older and would in turn be repaired.
+    fn repair_header_would_overlap_with_newer_neighbor(self: *Replica, header: *const Header) bool {
+        // TODO Snapshots: Handle Journal wrap around.
+        {
+            // Look behind this entry for any preceeding entry that this would overwrite.
+            var i: usize = header.index;
+            while (i > 0) {
+                i -= 1;
+                const neighbor = &self.journal.headers[i];
+                if (neighbor.command == .reserved) continue;
+                if (neighbor.offset + neighbor.size <= header.offset) break;
+                if (neighbor.offset + neighbor.size > header.offset) {
+                    if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
+                }
+            }
+        }
+        {
+            // Look beyond this entry for any succeeding entry that this would overwrite.
+            var i: usize = header.index + 1;
+            while (i < self.journal.index) : (i += 1) {
+                const neighbor = &self.journal.headers[i];
+                if (neighbor.command == .reserved) continue;
+                if (header.offset + header.size <= neighbor.offset) break;
+                if (header.offset + header.size > neighbor.offset) {
+                    if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// A neighbor may be an immediate neighbor (left or right of the index) or further away.
+    /// Returns whether the neighbor has a higher view or else same view and higher op.
+    fn repair_header_has_newer_neighbor(
+        self: *Replica,
+        header: *const Header,
+        neighbor: *const Header,
+    ) bool {
+        assert(header.command != .reserved);
+        assert(neighbor.command != .reserved);
+        assert(neighbor.index != header.index);
+
+        // Check if we haven't accidentally swapped the header and neighbor arguments above:
+        // The neighbor should at least exist in the journal.
+        assert(self.journal.headers[neighbor.index].checksum_meta == neighbor.checksum_meta);
+
+        if (neighbor.view > header.view) {
+            // We do not assert neighbor.op >= header.op, since ops may be rewound during a view.
+            return true;
+        } else if (neighbor.view < header.view) {
+            // We do not assert neighbor.op <= header.op, since ops may be rewound during a view.
+            return false;
+        } else if (neighbor.op > header.op) {
+            assert(neighbor.view == header.view);
+            return true;
+        } else if (neighbor.op < header.op) {
+            assert(neighbor.view == header.view);
+            return false;
+        } else {
+            assert(neighbor.view == header.view);
+            assert(neighbor.op == header.op);
+            unreachable;
+        }
+
+        return false;
     }
 
     fn on_view_timeout(self: *Replica) void {
