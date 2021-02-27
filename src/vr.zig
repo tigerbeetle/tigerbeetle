@@ -26,7 +26,7 @@ pub const Operation = packed enum(u8) {
     noop,
 };
 
-/// Network message and Journal entry header:
+/// Network message and journal entry header:
 /// We reuse the same header for both so that prepare messages from the leader can simply be
 /// journalled as is by the followers without requiring any further modification.
 pub const Header = packed struct {
@@ -114,6 +114,7 @@ pub const Header = packed struct {
         assert(self.size == @sizeOf(Header));
         assert(self.command == .reserved);
         assert(self.operation == .reserved);
+        // TODO Always set checksums everywhere for reserved headers.
     }
 
     /// This must be called only after set_checksum_data() so that checksum_data is also covered:
@@ -166,7 +167,7 @@ const ConfigurationAddress = union(enum) {
 
 pub const Message = struct {
     header: *Header,
-    buffer: []u8,
+    buffer: []u8 align(sector_size),
     references: usize = 0,
 };
 
@@ -264,7 +265,7 @@ pub const MessageBus = struct {
     fn create_message(self: *MessageBus, size: u32) !*Message {
         assert(size >= @sizeOf(Header));
 
-        var buffer = try self.allocator.alloc(u8, size);
+        var buffer = try self.allocator.allocAdvanced(u8, sector_size, size, .exact);
         errdefer self.allocator.free(buffer);
         std.mem.set(u8, buffer, 0);
 
@@ -307,38 +308,68 @@ const sector_size = 4096;
 
 pub const Journal = struct {
     allocator: *Allocator,
-    hash_chain: u128,
+    size: u64,
+    size_headers: u64,
+    size_circular_buffer: u64,
     headers: []Header align(sector_size),
     dirty: []bool,
+    nonce: u128,
     offset: u64,
     index: u32,
 
-    pub fn init(allocator: *Allocator, entries_max: u32) !Journal {
-        assert(entries_max > 0);
-        var headers = try allocator.allocAdvanced(
-            Header,
-            sector_size,
-            entries_max,
-            .exact,
-        );
+    write_header_range_busy: bool = false,
+
+    /// Apart from the header written with the entry, we also store two redundant copies of each
+    /// header at different locations on disk, and we alternate between these for each append.
+    /// This tracks which copy should be written to next:
+    write_header_range_copy: u1 = 0,
+
+    pub fn init(allocator: *Allocator, size: u64, headers_count: u32) !Journal {
+        if (@mod(size, sector_size) != 0) return error.SizeMustBeMultipleOfSectorSize;
+        if (!std.math.isPowerOfTwo(headers_count)) return error.HeadersCountMustBePowerOfTwo;
+
+        const headers_per_sector = @divExact(sector_size, @sizeOf(Header));
+        assert(headers_per_sector > 0);
+        assert(headers_count >= headers_per_sector);
+
+        var headers = try allocator.allocAdvanced(Header, sector_size, headers_count, .exact);
         errdefer allocator.free(headers);
         std.mem.set(u8, std.mem.sliceAsBytes(headers), 0);
 
-        var dirty = try allocator.alloc(bool, entries_max);
+        var dirty = try allocator.alloc(bool, headers.len);
         errdefer allocator.free(dirty);
         std.mem.set(bool, dirty, false);
 
+        const header_copies = 2;
+        const size_headers = headers.len * @sizeOf(Header);
+        const size_headers_copies = size_headers * header_copies;
+        if (size_headers_copies >= size) return error.SizeTooSmallForHeadersCount;
+
+        const size_circular_buffer = size - size_headers_copies;
+        if (size_circular_buffer < 64 * 1024 * 1024) return error.SizeTooSmallForCircularBuffer;
+
+        log.debug("journal: size={Bi} size_headers={Bi} size_circular_buffer={Bi} headers={}", .{
+            size,
+            size_headers,
+            size_circular_buffer,
+            headers.len,
+        });
+
         var self = Journal{
             .allocator = allocator,
-            .hash_chain = 0,
+            .size = size,
+            .size_headers = size_headers,
+            .size_circular_buffer = size_circular_buffer,
+            .nonce = 0,
             .headers = headers,
             .dirty = dirty,
             .offset = 0,
             .index = 0,
         };
 
-        assert(@mod(@ptrToInt(&headers[0]), sector_size) == 0);
-        assert(dirty.len == headers.len);
+        assert(@mod(self.size_circular_buffer, sector_size) == 0);
+        assert(@mod(@ptrToInt(&self.headers[0]), sector_size) == 0);
+        assert(self.dirty.len == self.headers.len);
         assert(@mod(self.offset, sector_size) == 0);
 
         return self;
@@ -346,31 +377,42 @@ pub const Journal = struct {
 
     pub fn deinit(self: *Journal) void {}
 
-    /// Advances the index and offset to after a header.
-    /// The header's index and offset must match the Journal's current position (as a safety check).
+    /// Advances the hash chain nonce, index and offset to after a header.
+    /// The header's checksum_meta becomes the journal's nonce for the next entry.
+    /// The header's index and offset must match the journal's current position (as a safety check).
     /// The header does not need to have been written yet.
-    pub fn advance_index_and_offset_to_after(self: *Journal, header: *const Header) void {
+    pub fn advance_nonce_offset_and_index_to_after(self: *Journal, header: *const Header) void {
+        assert(header.valid_checksum_meta()); // TODO This can be removed for performance later.
         assert(header.command != .reserved);
-        assert(header.index == self.index);
+        assert(header.nonce == self.nonce);
         assert(header.offset == self.offset);
-        const index = @mod(header.index + 1, @intCast(u32, self.headers.len));
-        const offset = header.offset + header.size;
-        assert(index > 0); // TODO Snapshots.
+        assert(header.index == self.index);
+
+        // TODO Snapshots: Wrap offset and index.
+        const offset = header.offset + Journal.sector_ceil(header.size);
         // TODO Assert against offset overflow.
+        const index = header.index + 1;
+        assert(index < self.headers.len);
+
+        self.nonce = header.checksum_meta;
         self.index = index;
         self.offset = offset;
     }
 
     /// Sets the index and offset to after a header.
-    pub fn set_index_and_offset_to_after(self: *Journal, header: *const Header) void {
+    pub fn set_nonce_offset_and_index_to_after(self: *Journal, header: *const Header) void {
         assert(header.command != .reserved);
+        assert(header.valid_checksum_meta());
+        self.nonce = header.checksum_meta;
         self.index = header.index;
         self.offset = header.offset;
-        self.advance_index_and_offset_to_after(header);
+        self.advance_nonce_offset_and_index_to_after(header);
     }
 
-    pub fn set_index_and_offset_to_empty(self: *Journal) void {
+    pub fn set_nonce_offset_and_index_to_empty(self: *Journal) void {
         self.assert_all_headers_are_reserved_from_index(0);
+        // TODO Use initial nonce state.
+        self.nonce = 0;
         // TODO Snapshots: We need to set this to the snapshot index and offset.
         self.index = 0;
         self.offset = 0;
@@ -436,12 +478,6 @@ pub const Journal = struct {
         return self.has(header) and self.dirty[header.index];
     }
 
-    pub fn flush_headers(self: *Journal) void {
-        // TODO Flush headers to disk to both slots.
-        // Used for rolling back state, where we want to be sure we don't leak old state.
-        // Especially before we need to append a new entry and we want a good starting point.
-    }
-
     /// Removes entries after op number (exclusive), i.e. with a higher op number.
     /// This is used after a view change to prune uncommitted entries discarded by the new leader.
     pub fn remove_entries_after_op(self: *Journal, op: u64) void {
@@ -467,8 +503,8 @@ pub const Journal = struct {
         var header = &self.headers[index];
         assert(header.index == index or header.command == .reserved);
         header.reset();
-        self.dirty[index] = false;
         assert(self.headers[index].command == .reserved);
+        self.dirty[index] = true;
     }
 
     pub fn set_entry_as_dirty(self: *Journal, header: *const Header) void {
@@ -477,32 +513,50 @@ pub const Journal = struct {
         self.dirty[header.index] = true;
     }
 
+    fn offset_in_circular_buffer(self: *Journal, offset: u64) u64 {
+        assert(offset < self.size_circular_buffer);
+        return self.size_headers + offset;
+    }
+
+    fn offset_in_headers_copy(self: *Journal, copy: u1, offset: u64) u64 {
+        assert(offset < self.size_headers);
+        return switch (copy) {
+            0 => offset,
+            1 => self.size_headers + self.size_circular_buffer + offset,
+        };
+    }
+
     pub fn write(self: *Journal, header: *const Header, buffer: []const u8) void {
         assert(header.command == .prepare);
         assert(header.operation != .reserved);
-        assert(header.size >= @sizeOf(Header));
-        assert(header.size == buffer.len);
         assert(header.op > 0);
-        // TODO Assert against offset overflow.
+        assert(header.size >= @sizeOf(Header));
+        assert(header.size <= buffer.len);
+        assert(buffer.len == Journal.sector_ceil(header.size));
+        assert(header.offset + buffer.len <= self.size_circular_buffer);
 
-        // TODO Measure latency
+        // The underlying header memory must be owned by the buffer and not by self.headers:
+        // Otherwise, concurrent writes may modify the memory of the pointer while we write.
+        assert(@ptrToInt(header) == @ptrToInt(buffer.ptr));
+
         if (self.has(header)) {
             self.write_debug(header, "starting");
 
             if (!self.dirty[header.index]) {
-                self.dirty[header.index] = true;
                 self.write_debug(header, "already clean, marking dirty");
+                self.dirty[header.index] = true;
             }
 
-            // TODO Write to disk.
-            // TODO Write headers to disk to both slots.
+            self.write_sectors(buffer, self.offset_in_circular_buffer(header.offset));
+
+            self.write_header_range(header.index, 1);
 
             if (self.has(header)) {
-                // TODO Add comment explaining how this acts as a concurrency control.
-                self.dirty[header.index] = false;
                 self.write_debug(header, "complete, marking clean");
+                self.dirty[header.index] = false;
             } else {
-                self.write_debug(header, "entry changed during write");
+                self.write_debug(header, "entry changed during write, marking dirty");
+                self.dirty[header.index] = true;
             }
         } else {
             self.write_debug(header, "entry changed before write");
@@ -517,6 +571,122 @@ pub const Journal = struct {
             header.checksum_meta,
             status,
         });
+    }
+
+    pub fn write_header_range(self: *Journal, index: u32, len: u32) void {
+        assert(index < self.headers.len);
+        assert(len > 0);
+        assert(index + len <= self.headers.len);
+
+        // TODO Serialize: Queue and suspend if already writing a header range.
+        // The reason for this is to avoid concurrent writes that could corrupt each other.
+        assert(!self.write_header_range_busy);
+        self.write_header_range_busy = true;
+
+        const sector_offset = Journal.sector_floor(index * @sizeOf(Header));
+        const sector_length = Journal.sector_ceil((index + len) * @sizeOf(Header));
+        // TODO We need to copy this memory before writing.
+        const sectors = std.mem.sliceAsBytes(self.headers)[sector_offset..sector_length];
+
+        log.debug("journal: write_header_range: index={} len={} sectors[{}..{}]", .{
+            index,
+            len,
+            sector_offset,
+            sector_length,
+        });
+
+        if (self.write_header_range_once(self.headers[index .. index + len])) {
+            const copy_a = self.write_header_range_copy;
+            self.write_header_range_copy +%= 1;
+
+            self.write_header_range_to_copy(copy_a, sectors, sector_offset);
+        } else {
+            // Copy version must be incremented upfront:
+            // Our write_header_range_to_copy() will block but other calls may proceed concurrently.
+            // If we don't increment upfront we could end up writing to the same copy twice.
+            const copy_a = self.write_header_range_copy;
+            self.write_header_range_copy +%= 1;
+            const copy_b = self.write_header_range_copy;
+            self.write_header_range_copy +%= 1;
+
+            self.write_header_range_to_copy(copy_a, sectors, sector_offset);
+            self.write_header_range_to_copy(copy_b, sectors, sector_offset);
+        }
+
+        assert(self.write_header_range_busy);
+        self.write_header_range_busy = false;
+    }
+
+    fn write_header_range_to_copy(self: *Journal, copy: u1, buffer: []const u8, offset: u64) void {
+        log.debug("journal: write_header_range_to_copy: copy={} offset={} len={}", .{
+            copy,
+            offset,
+            buffer.len,
+        });
+
+        assert(offset + buffer.len <= self.size_headers);
+        self.write_sectors(buffer, self.offset_in_headers_copy(copy, offset));
+    }
+
+    /// Since we allow gaps in the journal, we may have to write our headers twice.
+    /// If a dirty header is being written as reserved (empty) then write twice to make this clear.
+    /// If a dirty header has no previous clean chained entry to give its offset then write twice.
+    /// Otherwise, we only need to write the headers once because their other copy can be located in
+    /// the body of the journal (using the previous entry's offset and size).
+    fn write_header_range_once(self: *Journal, headers: []const Header) bool {
+        // We must use header.index below (and not the loop index) as we are working on a slice.
+        for (headers) |header| {
+            if (self.dirty[header.index]) {
+                if (header.command == .reserved) {
+                    log.debug("journal: write_header_range_once: dirty reserved header", .{});
+                    return false;
+                }
+                if (self.previous_entry(header.index)) |previous| {
+                    assert(previous.command != .reserved);
+                    if (previous.checksum_meta != header.nonce) {
+                        log.debug("journal: write_header_range_once: no hash chain", .{});
+                        return false;
+                    }
+                    if (self.dirty[previous.index]) {
+                        log.debug("journal: write_header_range_once: previous entry is dirty", .{});
+                        return false;
+                    }
+                } else {
+                    log.debug("journal: write_header_range_once: no previous entry", .{});
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    fn write_sectors(self: *Journal, buffer: []const u8, offset: u64) void {
+        log.debug("journal: write_sectors: offset={} len={}", .{ offset, buffer.len });
+        assert(buffer.len > 0);
+        assert(offset + buffer.len <= self.size);
+
+        assert(@mod(@ptrToInt(buffer.ptr), sector_size) == 0);
+        assert(@mod(buffer.len, sector_size) == 0);
+        assert(@mod(offset, sector_size) == 0);
+
+        // TODO Write to underlying storage abstraction layer.
+        // pwriteAll(buffer, offset) catch |err| switch (err) {
+        //     error.InputOutput => @panic("latent sector error: no spare sectors to reallocate"),
+        //     else => {
+        //         log.emerg("write: error={} buffer.len={} offset={}", .{ err, buffer.len, offset });
+        //         @panic("unrecoverable disk error");
+        //     },
+        // };
+    }
+
+    pub fn sector_floor(offset: u64) u64 {
+        const sectors = std.math.divFloor(u64, offset, sector_size) catch unreachable;
+        return sectors * sector_size;
+    }
+
+    pub fn sector_ceil(offset: u64) u64 {
+        const sectors = std.math.divCeil(u64, offset, sector_size) catch unreachable;
+        return sectors * sector_size;
     }
 };
 
@@ -613,7 +783,7 @@ pub const Replica = struct {
     view: u64 = 0,
 
     /// The current status, either normal, view_change, or recovering:
-    /// TODO Don't default to normal, set the starting status according to the Journal's health.
+    /// TODO Don't default to normal, set the starting status according to the journal's health.
     status: Status = .normal,
 
     /// The op number assigned to the most recently received request:
@@ -836,7 +1006,7 @@ pub const Replica = struct {
         var data = message.buffer[@sizeOf(Header)..message.header.size];
         // TODO Assign timestamps to structs in associated data.
 
-        message.header.nonce = self.journal.hash_chain;
+        message.header.nonce = self.journal.nonce;
         message.header.view = self.view;
         message.header.op = self.op + 1;
         message.header.commit = self.commit;
@@ -937,7 +1107,7 @@ pub const Replica = struct {
 
         // TODO Assertions and debug logs around this:
         self.journal.set_entry_as_dirty(message.header);
-        self.journal.advance_index_and_offset_to_after(message.header);
+        self.journal.advance_nonce_offset_and_index_to_after(message.header);
 
         // TODO Update client's information in the client table.
 
@@ -1057,18 +1227,23 @@ pub const Replica = struct {
                 self.replica,
                 self.op,
             });
+            const journal_index = self.journal.index;
             self.journal.remove_entries_after_op(self.op);
             if (self.journal.find_header_for_op(self.op)) |header| {
-                self.journal.set_index_and_offset_to_after(header);
+                self.journal.set_nonce_offset_and_index_to_after(header);
             } else {
-                // TODO When we implement snapshots we must update this assertion since the last
-                // committed op may have been included in the snapshot and removed from the journal.
+                // TODO This is dangerous, add more checks before we set to empty.
+                // We want to double-check and be sure that the journal really is empty.
+
+                // TODO Snapshots: We must update the assertion below as the last committed op may
+                // have been included in the snapshot and removed from the journal.
                 // Our op number may then be greater than zero.
                 assert(self.op == 0);
-                self.journal.set_index_and_offset_to_empty();
+                self.journal.set_nonce_offset_and_index_to_empty();
             }
             self.journal.assert_all_headers_are_reserved_from_index(self.journal.index);
-            self.journal.flush_headers();
+            assert(journal_index > self.journal.index); // TODO Snapshots: Handle wrapping.
+            self.journal.write_header_range(self.journal.index, journal_index - self.journal.index);
         } else {
             log.debug("{}: jump_to_newer_view: no journal entries to remove", .{self.replica});
         }
@@ -1371,8 +1546,6 @@ pub const Replica = struct {
             if (previous.checksum_meta == header.nonce) {
                 assert(previous.view <= header.view);
                 assert(previous.op + 1 == header.op);
-                // TODO Snapshots: Add Journal method to work this out and handle wrapping:
-                assert(previous.offset + previous.size == header.offset);
                 return false;
             }
             return self.repair_header_has_newer_neighbor(header, previous);
@@ -1381,8 +1554,6 @@ pub const Replica = struct {
             if (header.checksum_meta == next.nonce) {
                 assert(header.view <= next.view);
                 assert(header.op + 1 == next.op);
-                // TODO Snapshots: Add Journal method to work this out and handle wrapping:
-                assert(header.offset + header.size == next.offset);
                 return false;
             }
             return self.repair_header_has_newer_neighbor(header, next);
@@ -1393,7 +1564,7 @@ pub const Replica = struct {
     /// If we repair this header would we overwrite a newer neighbor (immediate or distant)?
     /// Ignores overlap if the neighboring entry is older and would in turn be repaired.
     fn repair_header_would_overlap_with_newer_neighbor(self: *Replica, header: *const Header) bool {
-        // TODO Snapshots: Handle Journal wrap around.
+        // TODO Snapshots: Handle journal wrap around.
         {
             // Look behind this entry for any preceeding entry that this would overwrite.
             var i: usize = header.index;
@@ -1401,8 +1572,8 @@ pub const Replica = struct {
                 i -= 1;
                 const neighbor = &self.journal.headers[i];
                 if (neighbor.command == .reserved) continue;
-                if (neighbor.offset + neighbor.size <= header.offset) break;
-                if (neighbor.offset + neighbor.size > header.offset) {
+                if (neighbor.offset + Journal.sector_ceil(neighbor.size) <= header.offset) break;
+                if (neighbor.offset + Journal.sector_ceil(neighbor.size) > header.offset) {
                     if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
                 }
             }
@@ -1413,8 +1584,8 @@ pub const Replica = struct {
             while (i < self.journal.index) : (i += 1) {
                 const neighbor = &self.journal.headers[i];
                 if (neighbor.command == .reserved) continue;
-                if (header.offset + header.size <= neighbor.offset) break;
-                if (header.offset + header.size > neighbor.offset) {
+                if (header.offset + Journal.sector_ceil(header.size) <= neighbor.offset) break;
+                if (header.offset + Journal.sector_ceil(header.size) > neighbor.offset) {
                     if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
                 }
             }
@@ -1637,8 +1808,8 @@ pub const Replica = struct {
 
         log.debug("{}: replica={} has the latest log: op={} commit={}", .{ self.replica, r, n, k });
 
-        // TODO Update Journal
-        // TODO Calculate how much of the Journal to send in start_view message.
+        // TODO Update journal
+        // TODO Calculate how much of the journal to send in start_view message.
         self.transition_to_normal_status(self.view);
 
         assert(self.status == .normal);
@@ -1648,7 +1819,7 @@ pub const Replica = struct {
         self.commit_ops_through(k);
         assert(self.commit == k);
 
-        // TODO Add Journal entries to start_view message:
+        // TODO Add journal entries to start_view message:
         self.send_header_to_other_replicas(.{
             .command = .start_view,
             .replica = self.replica,
@@ -1842,7 +2013,7 @@ pub const Replica = struct {
         while (self.commit < commit and self.commit < self.op) {
             self.commit += 1;
             assert(self.commit <= self.op);
-            // Find operation in Journal:
+            // Find operation in journal:
             // TODO Journal should have a fast path where current operation is already in memory.
             // var entry = self.journal.find(self.commit) orelse @panic("operation not found in log");
 
@@ -1906,14 +2077,15 @@ pub fn main() !void {
     var allocator = &arena.allocator;
 
     const f = 1;
-    const entries_max = 10000;
+    const journal_size = 512 * 1024 * 1024;
+    const journal_headers = 1048576;
 
     var configuration: [3]ConfigurationAddress = undefined;
     var message_bus = try MessageBus.init(allocator, &configuration);
 
     var journals: [2 * f + 1]Journal = undefined;
     for (journals) |*journal| {
-        journal.* = try Journal.init(allocator, entries_max);
+        journal.* = try Journal.init(allocator, journal_size, journal_headers);
     }
 
     var state_machines: [2 * f + 1]StateMachine = undefined;
@@ -1951,7 +2123,7 @@ pub fn main() !void {
 
         if (leader) |replica| {
             if (ticks == 1 or ticks == 5) {
-                var request = message_bus.create_message(@sizeOf(Header)) catch unreachable;
+                var request = message_bus.create_message(sector_size) catch unreachable;
                 request.header.* = .{
                     .client_id = 1,
                     .request_number = ticks,
