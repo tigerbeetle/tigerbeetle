@@ -892,8 +892,10 @@ pub const Replica = struct {
     commit_timeout: Timeout,
 
     /// The number of ticks without hearing from the leader before a follower starts a view change:
-    /// This is also the number of ticks before an existing view change is timed out.
-    view_timeout: Timeout,
+    normal_timeout: Timeout,
+
+    /// The number of ticks before a view change is timed out:
+    view_change_timeout: Timeout,
 
     // TODO Limit integer types for `f` and `replica` to match their upper bounds in practice.
     pub fn init(
@@ -942,10 +944,15 @@ pub const Replica = struct {
                 .replica = replica,
                 .after = 30,
             },
-            .view_timeout = Timeout{
-                .name = "view_timeout",
+            .normal_timeout = Timeout{
+                .name = "normal_timeout",
                 .replica = replica,
                 .after = 500,
+            },
+            .view_change_timeout = Timeout{
+                .name = "view_change_timeout",
+                .replica = replica,
+                .after = 6000,
             },
         };
 
@@ -957,7 +964,7 @@ pub const Replica = struct {
             self.commit_timeout.start();
         } else {
             log.debug("{}: init: follower", .{self.replica});
-            self.view_timeout.start();
+            self.normal_timeout.start();
         }
 
         return self;
@@ -1001,11 +1008,13 @@ pub const Replica = struct {
     pub fn tick(self: *Replica) void {
         self.prepare_timeout.tick();
         self.commit_timeout.tick();
-        self.view_timeout.tick();
+        self.normal_timeout.tick();
+        self.view_change_timeout.tick();
 
         if (self.prepare_timeout.fired()) self.on_prepare_timeout();
         if (self.commit_timeout.fired()) self.on_commit_timeout();
-        if (self.view_timeout.fired()) self.on_view_timeout();
+        if (self.normal_timeout.fired()) self.on_normal_timeout();
+        if (self.view_change_timeout.fired()) self.on_view_change_timeout();
 
         self.repair_last_queued_message_if_any();
     }
@@ -1146,7 +1155,7 @@ pub const Replica = struct {
         assert(message.header.replica == self.leader_index(message.header.view));
         assert(message.header.op > self.op);
 
-        if (self.follower()) self.view_timeout.reset();
+        if (self.follower()) self.normal_timeout.reset();
 
         if (message.header.op > self.op + 1) {
             log.debug("{}: on_prepare: newer op", .{self.replica});
@@ -1571,7 +1580,7 @@ pub const Replica = struct {
         assert(message.header.replica == self.leader_index(message.header.view));
         assert(self.commit <= self.op);
 
-        self.view_timeout.reset();
+        self.normal_timeout.reset();
 
         self.commit_ops_through(message.header.commit);
     }
@@ -1762,11 +1771,14 @@ pub const Replica = struct {
         return false;
     }
 
-    fn on_view_timeout(self: *Replica) void {
-        assert(self.status == .view_change or self.status == .normal);
-        // During a view change, all replicas may have view_timeout running, even the new leader:
-        assert(self.status == .view_change or self.follower());
-        // The transition will reset the view timeout:
+    fn on_normal_timeout(self: *Replica) void {
+        assert(self.status == .normal);
+        assert(self.follower());
+        self.transition_to_view_change_status(self.view + 1);
+    }
+
+    fn on_view_change_timeout(self: *Replica) void {
+        assert(self.status == .view_change);
         self.transition_to_view_change_status(self.view + 1);
     }
 
@@ -1782,7 +1794,8 @@ pub const Replica = struct {
         self.status = .view_change;
 
         self.commit_timeout.stop();
-        self.view_timeout.start();
+        self.normal_timeout.stop();
+        self.view_change_timeout.start();
 
         self.reset_prepare();
 
@@ -1813,7 +1826,6 @@ pub const Replica = struct {
         if (message.header.view > self.view) {
             log.debug("{}: on_start_view_change: changing to newer view", .{self.replica});
             self.transition_to_view_change_status(message.header.view);
-            // Continue below...
         }
 
         assert(self.status == .view_change);
@@ -1911,7 +1923,6 @@ pub const Replica = struct {
             // We therefore do not special case the start_view_change function, and we always send
             // start_view_change messages, regardless of the message that initiated the view change:
             self.transition_to_view_change_status(message.header.view);
-            // Continue below...
         }
 
         assert(self.status == .view_change);
@@ -2018,12 +2029,14 @@ pub const Replica = struct {
             log.debug("{}: transition_to_normal_status: leader", .{self.replica});
 
             self.commit_timeout.start();
-            self.view_timeout.stop();
+            self.normal_timeout.stop();
+            self.view_change_timeout.stop();
         } else {
             log.debug("{}: transition_to_normal_status: follower", .{self.replica});
 
             self.commit_timeout.stop();
-            self.view_timeout.start();
+            self.normal_timeout.start();
+            self.view_change_timeout.stop();
         }
 
         // This is essential for correctness:
