@@ -179,6 +179,7 @@ pub const Message = struct {
     header: *Header,
     buffer: []u8 align(sector_size),
     references: usize = 0,
+    next: ?*Message = null,
 };
 
 pub const MessageBus = struct {
@@ -847,6 +848,10 @@ pub const Replica = struct {
     repairing: bool = false,
     repairing_frame: @Frame(write_to_journal) = undefined,
 
+    repair_queue: ?*Message = null,
+    repair_queue_len: usize = 0,
+    repair_queue_max: usize = 3,
+
     /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas:
     prepare_ok_from_all_replicas: []?*Message,
 
@@ -981,7 +986,7 @@ pub const Replica = struct {
         if (self.commit_timeout.fired()) self.on_commit_timeout();
         if (self.view_timeout.fired()) self.on_view_timeout();
 
-        self.retry_leader_prepare();
+        self.repair_last_queued_message_if_any();
     }
 
     /// Called by the MessageBus to deliver a message to the replica.
@@ -1120,6 +1125,8 @@ pub const Replica = struct {
         assert(message.header.replica == self.leader_index(message.header.view));
         assert(message.header.op > self.op);
 
+        if (self.follower()) self.view_timeout.reset();
+
         if (message.header.op > self.op + 1) {
             log.debug("{}: on_prepare: newer op", .{self.replica});
             self.jump_to_newer_op(message.header);
@@ -1146,23 +1153,15 @@ pub const Replica = struct {
         }
 
         if (self.appending) {
-            if (self.leader()) {
-                // Do not block on the previous prepare, as this may introduce seconds of latency.
-                // Instead, let retry_leader_prepare() retry every tick() and every on_prepare_ok().
-                log.warn("{}: on_prepare: skipping (leader outrun by quorum)", .{self.replica});
-                return;
-            } else {
-                self.finish_appending();
-            }
+            log.debug("{}: on_prepare: skipping (slow journal outrun by quorum)", .{self.replica});
+            self.repair_later(message);
+            return;
         }
 
         log.debug("{}: on_prepare: appending to journal", .{self.replica});
         self.appending_frame = async self.write_to_journal(message, &self.appending);
 
-        if (self.follower()) {
-            self.view_timeout.reset();
-            self.commit_ops_through(message.header.commit);
-        }
+        if (self.follower()) self.commit_ops_through(message.header.commit);
     }
 
     fn is_repair(self: *Replica, message: *const Message) bool {
@@ -1257,6 +1256,51 @@ pub const Replica = struct {
         self.journal.offset = header.offset;
     }
 
+    fn repair_later(self: *Replica, message: *Message) void {
+        assert(self.appending or self.repairing);
+        assert(message.references > 0);
+        assert(message.header.command == .prepare);
+        assert(message.next == null);
+
+        if (!self.repairing) {
+            log.debug("{}: repair_later: repairing immediately", .{self.replica});
+            self.on_repair(message);
+            return;
+        }
+
+        log.debug("{}: repair_later: {} message(s)", .{ self.replica, self.repair_queue_len });
+
+        if (self.repair_queue_len >= self.repair_queue_max) {
+            log.debug("{}: repair_later: dropping", .{self.replica});
+            return;
+        }
+
+        log.debug("{}: repair_later: queueing", .{self.replica});
+
+        message.references += 1;
+        message.next = self.repair_queue;
+        self.repair_queue = message;
+        self.repair_queue_len += 1;
+    }
+
+    fn repair_last_queued_message_if_any(self: *Replica) void {
+        if (self.status != .normal and self.status != .view_change) return;
+        if (self.repairing) return;
+
+        if (self.repair_queue) |message| {
+            assert(self.repair_queue_len > 0);
+            self.repair_queue = message.next;
+            self.repair_queue_len -= 1;
+
+            message.references -= 1;
+            message.next = null;
+            self.on_repair(message);
+            self.message_bus.gc(message);
+        } else {
+            assert(self.repair_queue_len == 0);
+        }
+    }
+
     fn write_to_journal(self: *Replica, message: *Message, lock: *bool) void {
         assert(lock.* == false);
         lock.* = true;
@@ -1334,28 +1378,6 @@ pub const Replica = struct {
         }
     }
 
-    fn wait_for_journal(self: *Replica) void {
-        self.finish_appending();
-        self.finish_repairing();
-    }
-
-    fn finish_appending(self: *Replica) void {
-        // TODO Do we need while loops here in case something else awaits first?
-        if (self.appending) {
-            log.debug("{}: waiting for journal to finish appending", .{self.replica});
-            await self.appending_frame;
-        }
-        assert(self.appending == false);
-    }
-
-    fn finish_repairing(self: *Replica) void {
-        if (self.repairing) {
-            log.debug("{}: waiting for journal to finish repairing", .{self.replica});
-            await self.repairing_frame;
-        }
-        assert(self.repairing == false);
-    }
-
     fn on_prepare_timeout(self: *Replica) void {
         assert(self.status == .normal);
         assert(self.leader());
@@ -1400,19 +1422,6 @@ pub const Replica = struct {
         self.send_message_to_replica(replica, message);
     }
 
-    fn retry_leader_prepare(self: *Replica) void {
-        if (self.prepare_message) |message| {
-            assert(self.status == .normal);
-            assert(self.leader());
-            assert(message.references > 0);
-            assert(message.header.view == self.view);
-            if (!self.appending and self.journal.has_dirty(message.header)) {
-                log.debug("{}: retry_leader_prepare: appending to journal", .{self.replica});
-                self.appending_frame = async self.write_to_journal(message, &self.appending);
-            }
-        }
-    }
-
     fn on_prepare_ok(self: *Replica, message: *Message) void {
         if (self.status != .normal) {
             log.debug("{}: on_prepare_ok: ignoring ({})", .{ self.replica, self.status });
@@ -1438,9 +1447,6 @@ pub const Replica = struct {
         }
 
         if (self.prepare_message) |prepare_message| {
-            // This is an optimization, as we may receive a prepare_ok before the next tick:
-            self.retry_leader_prepare();
-
             if (message.header.nonce != prepare_message.header.checksum_meta) {
                 log.debug("{}: on_prepare_ok: ignoring (different nonce)", .{self.replica});
                 return;
@@ -1562,8 +1568,9 @@ pub const Replica = struct {
         if (self.repair_header(message.header)) {
             assert(self.journal.has_dirty(message.header));
 
+            if (self.repairing) return self.repair_later(message);
+
             log.debug("{}: on_repair: repairing journal", .{self.replica});
-            self.finish_repairing();
             self.repairing_frame = async self.write_to_journal(message, &self.repairing);
         }
     }
