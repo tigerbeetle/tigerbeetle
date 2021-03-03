@@ -116,7 +116,6 @@ pub const Header = packed struct {
         assert(self.size == @sizeOf(Header));
         assert(self.command == .reserved);
         assert(self.operation == .reserved);
-        // TODO Always set checksums everywhere for reserved headers.
     }
 
     /// This must be called only after set_checksum_data() so that checksum_data is also covered:
@@ -230,8 +229,6 @@ pub const MessageBus = struct {
         // The order matters here because checksum_meta depends on checksum_data:
         message.header.set_checksum_data(data);
         message.header.set_checksum_meta();
-        assert(message.header.valid_checksum_data(data));
-        assert(message.header.valid_checksum_meta());
 
         assert(message.references == 0);
         self.send_message_to_replica(replica, message);
@@ -395,7 +392,6 @@ pub const Journal = struct {
     /// The header's index and offset must match the journal's current position (as a safety check).
     /// The header does not need to have been written yet.
     pub fn advance_nonce_offset_and_index_to_after(self: *Journal, header: *const Header) void {
-        assert(header.valid_checksum_meta()); // TODO This can be removed for performance later.
         assert(header.command == .prepare);
         assert(header.nonce == self.nonce);
         assert(header.offset == self.offset);
@@ -423,7 +419,6 @@ pub const Journal = struct {
 
     /// Sets the index and offset to after a header.
     pub fn set_nonce_offset_and_index_to_after(self: *Journal, header: *const Header) void {
-        assert(header.valid_checksum_meta());
         assert(header.command == .prepare);
         self.nonce = header.nonce;
         self.offset = header.offset;
@@ -1064,8 +1059,7 @@ pub const Replica = struct {
 
         message.header.set_checksum_data(data);
         message.header.set_checksum_meta();
-        assert(message.header.valid_checksum_data(data));
-        assert(message.header.valid_checksum_meta());
+
         assert(message.header.checksum_meta != self.request_checksum_meta.?);
 
         log.debug("{}: on_request: prepare {}", .{ self.replica, message.header.checksum_meta });
@@ -1238,7 +1232,6 @@ pub const Replica = struct {
     }
 
     fn jump_to_newer_op(self: *Replica, header: *const Header) void {
-        assert(header.valid_checksum_meta());
         log.debug("{}: jump_to_newer_op: op={}..{} nonce={}..{} offset={}..{} index={}..{}", .{
             self.replica,
             self.op,
