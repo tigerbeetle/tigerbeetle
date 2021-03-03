@@ -317,6 +317,7 @@ const sector_size = 4096;
 
 pub const Journal = struct {
     allocator: *Allocator,
+    replica: u16,
     size: u64,
     size_headers: u64,
     size_circular_buffer: u64,
@@ -338,7 +339,7 @@ pub const Journal = struct {
     writing_headers: ConcurrentRanges = .{ .name = "write_headers" },
     writing_sectors: ConcurrentRanges = .{ .name = "write_sectors" },
 
-    pub fn init(allocator: *Allocator, size: u64, headers_count: u32) !Journal {
+    pub fn init(allocator: *Allocator, replica: u16, size: u64, headers_count: u32) !Journal {
         if (@mod(size, sector_size) != 0) return error.SizeMustBeMultipleOfSectorSize;
         if (!std.math.isPowerOfTwo(headers_count)) return error.HeadersCountMustBePowerOfTwo;
 
@@ -371,15 +372,17 @@ pub const Journal = struct {
         const size_circular_buffer = size - size_headers_copies;
         if (size_circular_buffer < 64 * 1024 * 1024) return error.SizeTooSmallForCircularBuffer;
 
-        log.debug("journal: size={Bi} size_headers={Bi} size_circular_buffer={Bi} headers={}", .{
+        log.debug("{}: journal: size={Bi} headers_len={} headers={Bi} circular_buffer={Bi}", .{
+            replica,
             size,
+            headers.len,
             size_headers,
             size_circular_buffer,
-            headers.len,
         });
 
         var self = Journal{
             .allocator = allocator,
+            .replica = replica,
             .size = size,
             .size_headers = size_headers,
             .size_circular_buffer = size_circular_buffer,
@@ -418,7 +421,8 @@ pub const Journal = struct {
         const index = header.index + 1;
         assert(index < self.headers.len);
 
-        log.debug("journal: advancing: nonce={}..{} offset={}..{} index={}..{}", .{
+        log.debug("{}: journal: advancing: nonce={}..{} offset={}..{} index={}..{}", .{
+            self.replica,
             self.nonce,
             header.checksum_meta,
             self.offset,
@@ -541,7 +545,7 @@ pub const Journal = struct {
 
     pub fn set_entry_as_dirty(self: *Journal, header: *const Header) void {
         assert(header.command == .prepare);
-        log.debug("journal: set_entry_as_dirty: {}", .{header.checksum_meta});
+        log.debug("{}: journal: set_entry_as_dirty: {}", .{ self.replica, header.checksum_meta });
         if (self.entry(header.index)) |existing| {
             if (existing.checksum_meta != header.checksum_meta) {
                 assert(existing.view <= header.view);
@@ -610,7 +614,8 @@ pub const Journal = struct {
     }
 
     fn write_debug(self: *Journal, header: *const Header, status: []const u8) void {
-        log.debug("journal: write: index={} offset={} len={}: {} {}", .{
+        log.debug("{}: journal: write: index={} offset={} len={}: {} {}", .{
+            self.replica,
             header.index,
             header.offset,
             header.size,
@@ -638,7 +643,8 @@ pub const Journal = struct {
         assert(slice.len == source.len);
         std.mem.copy(u8, slice, source);
 
-        log.debug("journal: write_headers: index={} len={} sectors[{}..{}]", .{
+        log.debug("{}: journal: write_headers: index={} len={} sectors[{}..{}]", .{
+            self.replica,
             index,
             len,
             sector_offset,
@@ -675,21 +681,29 @@ pub const Journal = struct {
         for (headers) |header| {
             if (self.dirty[header.index]) {
                 if (header.command == .reserved) {
-                    log.debug("journal: write_headers_once: dirty reserved header", .{});
+                    log.debug("{}: journal: write_headers_once: dirty reserved header", .{
+                        self.replica,
+                    });
                     return false;
                 }
                 if (self.previous_entry(header.index)) |previous| {
                     assert(previous.command == .prepare);
                     if (previous.checksum_meta != header.nonce) {
-                        log.debug("journal: write_headers_once: no hash chain", .{});
+                        log.debug("{}: journal: write_headers_once: no hash chain", .{
+                            self.replica,
+                        });
                         return false;
                     }
                     if (self.dirty[previous.index]) {
-                        log.debug("journal: write_headers_once: previous entry is dirty", .{});
+                        log.debug("{}: journal: write_headers_once: previous entry is dirty", .{
+                            self.replica,
+                        });
                         return false;
                     }
                 } else {
-                    log.debug("journal: write_headers_once: no previous entry", .{});
+                    log.debug("{}: journal: write_headers_once: no previous entry", .{
+                        self.replica,
+                    });
                     return false;
                 }
             }
@@ -698,7 +712,8 @@ pub const Journal = struct {
     }
 
     fn write_headers_to_version(self: *Journal, version: u1, buffer: []const u8, offset: u64) void {
-        log.debug("journal: write_headers_to_version: version={} offset={} len={}", .{
+        log.debug("{}: journal: write_headers_to_version: version={} offset={} len={}", .{
+            self.replica,
             version,
             offset,
             buffer.len,
@@ -723,7 +738,11 @@ pub const Journal = struct {
         self.writing_sectors.acquire(&range);
         defer self.writing_sectors.release(&range);
 
-        log.debug("journal: write_sectors: offset={} len={}", .{ offset, buffer.len });
+        log.debug("{}: journal: write_sectors: offset={} len={}", .{
+            self.replica,
+            offset,
+            buffer.len,
+        });
 
         // TODO Write to underlying storage abstraction layer.
         // pwriteAll(buffer, offset) catch |err| switch (err) {
@@ -2206,8 +2225,13 @@ pub fn run() !void {
     var message_bus = try MessageBus.init(allocator, &configuration);
 
     var journals: [2 * f + 1]Journal = undefined;
-    for (journals) |*journal| {
-        journal.* = try Journal.init(allocator, journal_size, journal_headers);
+    for (journals) |*journal, replica_index| {
+        journal.* = try Journal.init(
+            allocator,
+            @intCast(u16, replica_index),
+            journal_size,
+            journal_headers,
+        );
     }
 
     var state_machines: [2 * f + 1]StateMachine = undefined;
