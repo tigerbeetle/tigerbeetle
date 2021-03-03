@@ -326,10 +326,13 @@ pub const Journal = struct {
     offset: u64,
     index: u32,
 
+    /// We copy-on-write to this buffer when writing, as in-memory headers may change concurrently:
+    write_headers_buffer: []u8 align(sector_size),
+
     /// Apart from the header written with the entry, we also store two redundant copies of each
     /// header at different locations on disk, and we alternate between these for each append.
-    /// This tracks which copy should be written to next:
-    write_headers_copy: u1 = 0,
+    /// This tracks which version (0 or 1) should be written to next:
+    write_headers_version: u1 = 0,
 
     /// These serialize concurrent writes but only for overlapping ranges:
     writing_headers: ConcurrentRanges = .{ .name = "write_headers" },
@@ -350,6 +353,15 @@ pub const Journal = struct {
         var dirty = try allocator.alloc(bool, headers.len);
         errdefer allocator.free(dirty);
         std.mem.set(bool, dirty, false);
+
+        var write_headers_buffer = try allocator.allocAdvanced(
+            u8,
+            sector_size,
+            @sizeOf(Header) * headers.len,
+            .exact,
+        );
+        errdefer allocator.free(write_headers_buffer);
+        std.mem.set(u8, write_headers_buffer, 0);
 
         const header_copies = 2;
         const size_headers = headers.len * @sizeOf(Header);
@@ -376,12 +388,14 @@ pub const Journal = struct {
             .dirty = dirty,
             .offset = 0,
             .index = 0,
+            .write_headers_buffer = write_headers_buffer,
         };
 
         assert(@mod(self.size_circular_buffer, sector_size) == 0);
         assert(@mod(@ptrToInt(&self.headers[0]), sector_size) == 0);
         assert(self.dirty.len == self.headers.len);
         assert(@mod(self.offset, sector_size) == 0);
+        assert(self.write_headers_buffer.len == @sizeOf(Header) * self.headers.len);
 
         return self;
     }
@@ -543,9 +557,9 @@ pub const Journal = struct {
         return self.size_headers + offset;
     }
 
-    fn offset_in_headers_copy(self: *Journal, offset: u64, copy: u1) u64 {
+    fn offset_in_headers_version(self: *Journal, offset: u64, version: u1) u64 {
         assert(offset < self.size_headers);
-        return switch (copy) {
+        return switch (version) {
             0 => offset,
             1 => self.size_headers + self.size_circular_buffer + offset,
         };
@@ -619,8 +633,10 @@ pub const Journal = struct {
         self.writing_headers.acquire(&range);
         defer self.writing_headers.release(&range);
 
-        // TODO We need to copy this memory before writing.
-        const sectors = std.mem.sliceAsBytes(self.headers)[sector_offset..sector_len];
+        const source = std.mem.sliceAsBytes(self.headers)[sector_offset..sector_len];
+        var slice = self.write_headers_buffer[sector_offset..sector_len];
+        assert(slice.len == source.len);
+        std.mem.copy(u8, slice, source);
 
         log.debug("journal: write_headers: index={} len={} sectors[{}..{}]", .{
             index,
@@ -629,24 +645,24 @@ pub const Journal = struct {
             sector_len,
         });
 
-        // Copy versions must be incremented upfront:
-        // write_headers_to_copy() will block while other calls may proceed concurrently.
+        // Versions must be incremented upfront:
+        // write_headers_to_version() will block while other calls may proceed concurrently.
         // If we don't increment upfront we could end up writing to the same copy twice.
         // We would then lose the redundancy required to locate headers or overwrite all copies.
         if (self.write_headers_once(self.headers[index .. index + len])) {
-            const copy_a = self.write_headers_copy_increment();
-            self.write_headers_to_copy(copy_a, sectors, sector_offset);
+            const version_a = self.write_headers_increment_version();
+            self.write_headers_to_version(version_a, slice, sector_offset);
         } else {
-            const copy_a = self.write_headers_copy_increment();
-            const copy_b = self.write_headers_copy_increment();
-            self.write_headers_to_copy(copy_a, sectors, sector_offset);
-            self.write_headers_to_copy(copy_b, sectors, sector_offset);
+            const version_a = self.write_headers_increment_version();
+            const version_b = self.write_headers_increment_version();
+            self.write_headers_to_version(version_a, slice, sector_offset);
+            self.write_headers_to_version(version_b, slice, sector_offset);
         }
     }
 
-    fn write_headers_copy_increment(self: *Journal) u1 {
-        self.write_headers_copy +%= 1;
-        return self.write_headers_copy;
+    fn write_headers_increment_version(self: *Journal) u1 {
+        self.write_headers_version +%= 1;
+        return self.write_headers_version;
     }
 
     /// Since we allow gaps in the journal, we may have to write our headers twice.
@@ -681,14 +697,14 @@ pub const Journal = struct {
         return true;
     }
 
-    fn write_headers_to_copy(self: *Journal, copy: u1, buffer: []const u8, offset: u64) void {
-        log.debug("journal: write_headers_to_copy: copy={} offset={} len={}", .{
-            copy,
+    fn write_headers_to_version(self: *Journal, version: u1, buffer: []const u8, offset: u64) void {
+        log.debug("journal: write_headers_to_version: version={} offset={} len={}", .{
+            version,
             offset,
             buffer.len,
         });
         assert(offset + buffer.len <= self.size_headers);
-        self.write_sectors(buffer, self.offset_in_headers_copy(offset, copy));
+        self.write_sectors(buffer, self.offset_in_headers_version(offset, version));
     }
 
     fn write_sectors(self: *Journal, buffer: []const u8, offset: u64) void {
@@ -700,8 +716,7 @@ pub const Journal = struct {
         assert(@mod(offset, sector_size) == 0);
 
         // Memory must not be owned by self.headers as self.headers may be modified concurrently:
-        // TODO
-        assert(true or @ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
+        assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
             @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + self.size_headers);
 
         var range = Range{ .offset = offset, .len = buffer.len };
