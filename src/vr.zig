@@ -457,7 +457,6 @@ pub const Journal = struct {
     pub fn assert_all_headers_are_reserved_from_index(self: *Journal, index: u32) void {
         // TODO Snapshots: Adjust slices to stop before starting index.
         for (self.headers[index..]) |*header| assert(header.command == .reserved);
-        for (self.dirty[index..]) |dirty| assert(dirty == false);
     }
 
     /// Returns a pointer to the header with the matching op number, or null if not found.
@@ -580,30 +579,18 @@ pub const Journal = struct {
         // Otherwise, concurrent writes may modify the memory of the pointer while we write.
         assert(@ptrToInt(header) == @ptrToInt(buffer.ptr));
 
-        if (!self.has(header)) {
-            // TODO Is this possible?
-            self.write_debug(header, "entry changed before write");
-            return;
-        }
-
-        // TODO Work through prepare index 0, prepare index 1
+        // There should be no concurrency between setting an entry as dirty and deciding to write:
+        assert(self.has_dirty(header));
 
         self.write_debug(header, "starting");
 
-        if (!self.dirty[header.index]) {
-            self.write_debug(header, "already clean, marking dirty");
-            self.dirty[header.index] = true;
-        }
-
         self.write_sectors(buffer, self.offset_in_circular_buffer(header.offset));
-
         if (!self.has(header)) {
-            self.write_debug(header, "entry changed while writing");
+            self.write_debug(header, "entry changed while writing sectors");
             return;
         }
 
         self.write_headers(header.index, 1);
-
         if (!self.has(header)) {
             self.write_debug(header, "entry changed while writing headers");
             return;
