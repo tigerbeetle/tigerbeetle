@@ -1804,18 +1804,30 @@ pub const Replica = struct {
     }
 
     fn on_start_view_change(self: *Replica, message: *Message) void {
-        // Any view change must be greater than zero since the initial view is already zero:
-        assert(message.header.view > 0);
+        assert(message.header.command == .start_view_change);
+        assert(message.header.view > 0); // The initial view is already zero.
+
+        // 4.3 Recovery
+        // While a replica's status is recovering it does not participate in either the request
+        // processing protocol or the view change protocol.
+        // This is critical for correctness (to avoid data loss):
+        if (self.status == .recovering) {
+            log.debug("{}: on_start_view_change: ignoring (recovering)", .{self.replica});
+            return;
+        }
 
         if (message.header.view < self.view) {
             log.debug("{}: on_start_view_change: ignoring (older view)", .{self.replica});
             return;
         }
 
-        if (message.header.view == self.view and self.status != .view_change) {
-            log.debug("{}: on_start_view_change: ignoring ({})", .{ self.replica, self.status });
+        if (message.header.view == self.view and self.status == .normal) {
+            log.debug("{}: on_start_view_change: ignoring (view already started)", .{self.replica});
             return;
         }
+
+        assert(self.status == .normal or self.status == .view_change);
+        assert(message.header.view >= self.view);
 
         if (message.header.view > self.view) {
             log.debug("{}: on_start_view_change: changing to newer view", .{self.replica});
@@ -1831,6 +1843,7 @@ pub const Replica = struct {
 
         assert(self.status == .view_change);
         assert(message.header.view == self.view);
+        assert(message.header.replica != self.replica);
 
         // Wait until we have `f` messages (excluding ourself) for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
@@ -1861,18 +1874,27 @@ pub const Replica = struct {
     }
 
     fn on_do_view_change(self: *Replica, message: *Message) void {
-        // Any view change must be great than zero since the initial view is already zero:
-        assert(message.header.view > 0);
+        assert(message.header.command == .do_view_change);
+        assert(message.header.view > 0); // The initial view is already zero.
+
+        // This is critical for correctness (to avoid data loss):
+        if (self.status == .recovering) {
+            log.debug("{}: on_do_view_change: ignoring (recovering)", .{self.replica});
+            return;
+        }
 
         if (message.header.view < self.view) {
             log.debug("{}: on_do_view_change: ignoring (older view)", .{self.replica});
             return;
         }
 
-        if (message.header.view == self.view and self.status != .view_change) {
-            log.debug("{}: on_do_view_change: ignoring ({})", .{ self.replica, self.status });
+        if (message.header.view == self.view and self.status == .normal) {
+            log.debug("{}: on_do_view_change: ignoring (view already started)", .{self.replica});
             return;
         }
+
+        assert(self.status == .normal or self.status == .view_change);
+        assert(message.header.view >= self.view);
 
         if (message.header.view > self.view) {
             log.debug("{}: on_do_view_change: changing to newer view", .{self.replica});
@@ -1887,15 +1909,15 @@ pub const Replica = struct {
             // Continue below...
         }
 
-        if (self.leader_index(self.view) != self.replica) {
+        if (self.leader_index(message.header.view) != self.replica) {
             // This may be caused by a fault in the network topology.
             log.warn("{}: on_do_view_change: ignoring (follower)", .{self.replica});
             return;
         }
 
         assert(self.status == .view_change);
-        assert(self.leader_index(self.view) == self.replica);
         assert(message.header.view == self.view);
+        assert(self.leader_index(self.view) == self.replica);
 
         // Wait until we have `f + 1` messages (including ourself) for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
@@ -1963,17 +1985,27 @@ pub const Replica = struct {
     }
 
     fn on_start_view(self: *Replica, message: *const Message) void {
-        assert(message.header.view > 0);
+        assert(message.header.command == .start_view);
+        assert(message.header.view > 0); // The initial view is already zero.
+
+        // This is critical for correctness (to avoid data loss):
+        if (self.status == .recovering) {
+            log.debug("{}: on_start_view: ignoring (recovering)", .{self.replica});
+            return;
+        }
 
         if (message.header.view < self.view) {
             log.debug("{}: on_start_view: ignoring (older view)", .{self.replica});
             return;
         }
 
-        if (message.header.view == self.view and self.status != .view_change) {
-            log.debug("{}: on_start_view: ignoring ({})", .{ self.replica, self.status });
+        if (message.header.view == self.view and self.status == .normal) {
+            log.debug("{}: on_start_view: ignoring (view already started)", .{self.replica});
             return;
         }
+
+        assert(self.status == .normal or self.status == .view_change);
+        assert(message.header.view >= self.view);
 
         if (message.header.replica == self.replica) {
             // This may be caused by a fault in the network topology.
@@ -1981,6 +2013,7 @@ pub const Replica = struct {
             return;
         }
 
+        assert(message.header.replica != self.replica);
         assert(message.header.replica == self.leader_index(message.header.view));
 
         // TODO Assert that start_view message matches what we expect if our journal is empty.
