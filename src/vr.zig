@@ -636,6 +636,7 @@ pub const Journal = struct {
         // Copy versions must be incremented upfront:
         // write_headers_to_copy() will block while other calls may proceed concurrently.
         // If we don't increment upfront we could end up writing to the same copy twice.
+        // We would then lose the redundancy required to locate headers or overwrite all copies.
         if (self.write_headers_once(self.headers[index .. index + len])) {
             const copy_a = self.write_headers_copy_increment();
             self.write_headers_to_copy(copy_a, sectors, sector_offset);

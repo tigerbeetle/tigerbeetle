@@ -387,11 +387,13 @@ pub const IO = struct {
         }
     }
 
+    // TODO Switch to nanoseconds to provide a higher resolution common denominator than ms.
     pub fn sleep(self: *IO, milliseconds: u64) !void {
         while (true) {
             var completion = Completion{ .frame = @frame() };
             const seconds = @divFloor(milliseconds, std.time.ms_per_s);
             const nanoseconds = (milliseconds - (seconds * std.time.ms_per_s)) * std.time.ns_per_ms;
+            // TODO Use 64-bit kernel timespec, see https://github.com/ziglang/zig/pull/8118
             const ts = os.timespec{
                 .tv_sec = @intCast(isize, seconds),
                 .tv_nsec = @intCast(isize, nanoseconds),
