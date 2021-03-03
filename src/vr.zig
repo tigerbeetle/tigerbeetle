@@ -1300,19 +1300,22 @@ pub const Replica = struct {
 
     fn repair_last_queued_message_if_any(self: *Replica) void {
         if (self.status != .normal and self.status != .view_change) return;
-        if (self.repairing) return;
 
-        if (self.repair_queue) |message| {
-            assert(self.repair_queue_len > 0);
-            self.repair_queue = message.next;
-            self.repair_queue_len -= 1;
+        while (!self.repairing) {
+            if (self.repair_queue) |message| {
+                assert(self.repair_queue_len > 0);
+                self.repair_queue = message.next;
+                self.repair_queue_len -= 1;
 
-            message.references -= 1;
-            message.next = null;
-            self.on_repair(message);
-            self.message_bus.gc(message);
-        } else {
-            assert(self.repair_queue_len == 0);
+                message.references -= 1;
+                message.next = null;
+                self.on_repair(message);
+                assert(self.repair_queue != message); // Catch an accidental requeue by on_repair().
+                self.message_bus.gc(message);
+            } else {
+                assert(self.repair_queue_len == 0);
+                break;
+            }
         }
     }
 
