@@ -1207,6 +1207,10 @@ pub const Replica = struct {
             self.jump_to_newer_op(message.header);
         }
 
+        if (self.journal.previous_entry(message.header.index)) |previous| {
+            self.panic_if_hash_chain_would_break_in_the_same_view(previous, message.header);
+        }
+
         // We must advance our op, nonce, offset and index before replicating and journalling.
         // The leader needs this before its journal is outrun by any prepare_ok quorum:
         log.debug("{}: on_prepare: advancing: op={}..{}", .{
@@ -1329,6 +1333,24 @@ pub const Replica = struct {
         self.journal.nonce = header.nonce;
         self.journal.index = header.index;
         self.journal.offset = header.offset;
+    }
+
+    /// Panics if immediate neighbors in the same view would have a broken hash chain.
+    /// Assumes gaps and does not require that a preceeds b.
+    fn panic_if_hash_chain_would_break_in_the_same_view(
+        self: *Replica,
+        a: *const Header,
+        b: *const Header,
+    ) void {
+        assert(a.command == .prepare);
+        assert(b.command == .prepare);
+        if (a.view == b.view and a.op + 1 == b.op and a.checksum_meta != b.nonce) {
+            assert(a.valid_checksum_meta());
+            assert(b.valid_checksum_meta());
+            log.emerg("{}: panic_if_hash_chain_would_break: a: {}", .{ self.replica, a });
+            log.emerg("{}: panic_if_hash_chain_would_break: b: {}", .{ self.replica, b });
+            @panic("hash chain would break");
+        }
     }
 
     fn repair_later(self: *Replica, message: *Message) void {
@@ -1726,6 +1748,7 @@ pub const Replica = struct {
 
     /// If we repair this header would we introduce a break in the chain with a newer neighbor?
     /// Ignores breaks in the chain if the neighboring entry is older and would in turn be repaired.
+    /// Panics if the hash chain would break for immediate neighbors in the same view.
     fn repair_header_would_break_chain_with_newer_neighbor(
         self: *Replica,
         header: *const Header,
@@ -1736,6 +1759,7 @@ pub const Replica = struct {
                 assert(previous.op + 1 == header.op);
                 return false;
             }
+            self.panic_if_hash_chain_would_break_in_the_same_view(previous, header);
             return self.repair_header_has_newer_neighbor(header, previous);
         }
         if (self.journal.next_entry(header.index)) |next| {
@@ -1744,6 +1768,7 @@ pub const Replica = struct {
                 assert(header.op + 1 == next.op);
                 return false;
             }
+            self.panic_if_hash_chain_would_break_in_the_same_view(header, next);
             return self.repair_header_has_newer_neighbor(header, next);
         }
         return false;
