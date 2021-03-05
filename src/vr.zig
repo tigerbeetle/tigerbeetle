@@ -507,6 +507,10 @@ pub const Journal = struct {
         return header;
     }
 
+    pub fn latest_entry(self: *Journal) ?*const Header {
+        return self.previous_entry(self.index);
+    }
+
     pub fn next_entry(self: *Journal, index: u32) ?*const Header {
         // TODO Snapshots: This will wrap and then be null only when we get back to the head.
         if (index + 1 == self.headers.len) return null;
