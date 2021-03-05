@@ -544,6 +544,16 @@ pub const Journal = struct {
         return self.has(header) and self.dirty[header.index];
     }
 
+    pub fn copy_latest_headers_to(self: *Journal, dest: []Header) usize {
+        assert(dest.len > 0);
+        for (dest) |*header| header.zero();
+        // TODO Snapshots: Handle wrapping.
+        const n = std.math.min(dest.len, self.index);
+        const source = self.headers[self.index - n .. self.index];
+        std.mem.copy(Header, dest, source);
+        return source.len;
+    }
+
     /// Removes entries after op number (exclusive), i.e. with a higher op number.
     /// This is used after a view change to prune uncommitted entries discarded by the new leader.
     pub fn remove_entries_after_op(self: *Journal, op: u64) void {
