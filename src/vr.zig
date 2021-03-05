@@ -2029,42 +2029,67 @@ pub const Replica = struct {
         // ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
         // op number, and k is the commit number.
 
-        // It's possible for the first view change to not have anything newer than these initial values:
-        // Use real values here, rather than introducing anything artificial.
-        var r: u16 = self.replica;
-        var v: u64 = 0;
-        var n: u64 = 0;
-        var k: u64 = 0;
+        var v: ?u64 = null; // Latest normal view
+        var n: ?u64 = null; // Op number
+        var k: ?u64 = null; // Commit number
+
+        var c: ?u128 = null; // Journal nonce
+        var o: ?u64 = null; // Journal offset
+        var i: ?u32 = null; // Journal index
+
         for (self.do_view_change_from_all_replicas) |received, replica| {
             if (received) |m| {
-                if ((m.header.latest_normal_view > v) or
-                    (m.header.latest_normal_view == v and m.header.op > n))
-                {
-                    r = @intCast(u16, replica);
-                    v = m.header.latest_normal_view;
-                    n = m.header.op;
-                    k = m.header.commit;
+                assert(m.header.command == .do_view_change);
+                assert(m.header.replica == replica);
+                assert(m.header.view == self.view);
+
+                if (k == null or m.header.commit > k.?) k = m.header.commit;
+
+                for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |*h| {
+                    if (h.command == .reserved) continue;
+
+                    if (v == null or h.view > v.? or (h.view == v.? and h.op > n.?)) {
+                        assert(v == null or h.view >= v.?);
+                        v = h.view;
+                        n = h.op;
+                        c = h.nonce;
+                        o = h.offset;
+                        i = h.index;
+                    }
+
+                    _ = self.repair_header(h);
                 }
             }
         }
 
-        // We do not assert that v must be non-zero, because v represents the latest normal view,
-        // which may be zero if this is our first view change.
+        assert(v.? >= 0 and v.? < self.view); // Latest normal view before this view change.
+        assert(n.? >= self.op); // TODO Reordered ops.
+        assert(k.? >= self.commit);
 
-        log.debug("{}: replica={} has the latest log: op={} commit={}", .{ self.replica, r, n, k });
+        log.debug("{}: on_do_view_change: latest: view={} op={} commit={} nonce={} offset={} index={}", .{
+            self.replica,
+            v,
+            n,
+            k,
+            c,
+            o,
+            i,
+        });
 
-        // TODO Update journal
-        // TODO Calculate how much of the journal to send in start_view message.
+        self.op = n.?;
+        // TODO Set journal nonce, offset and index.
+
+        // TODO Repair according to CTRL protocol.
+        self.commit_ops_through(k.?);
+        assert(self.commit == k.?);
+
         self.transition_to_normal_status(self.view);
 
         assert(self.status == .normal);
         assert(self.leader());
 
-        self.op = n;
-        self.commit_ops_through(k);
-        assert(self.commit == k);
-
-        // TODO Add journal entries to start_view message:
+        // TODO Add journal entries to start_view message.
+        // TODO Add journal nonce, offset and index to start_view message.
         self.send_header_to_other_replicas(.{
             .command = .start_view,
             .replica = self.replica,
