@@ -2318,12 +2318,19 @@ pub const Replica = struct {
             replica,
             message.header,
         });
-        // We may forward messages sent by another replica (e.g. prepares from the leader).
-        // We therefore do not assert message.header.replica as we do for send_header_to_replica().
-        assert(self.status == .normal);
-        assert(message.header.view == self.view);
-        assert(message.header.command == .prepare);
-
+        switch (message.header.command) {
+            .prepare => {
+                // We do not assert message.header.replica as we would for send_header_to_replica().
+                // We may forward messages sent by another replica (e.g. prepares from the leader).
+                assert(self.status == .normal);
+                assert(message.header.view == self.view);
+            },
+            .do_view_change => {
+                assert(self.status == .view_change);
+                assert(message.header.view == self.view);
+            },
+            else => unreachable,
+        }
         self.message_bus.send_message_to_replica(replica, message);
     }
 };
