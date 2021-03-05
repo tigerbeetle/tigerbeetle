@@ -139,6 +139,23 @@ pub const Header = packed struct {
     /// This does not verify that checksum_meta is valid, and expects that has already been done.
     pub fn bad(self: *const Header) ?[]const u8 {
         switch (self.command) {
+            .reserved => {
+                if (self.checksum_meta != 0) return "checksum_meta != 0";
+                if (self.checksum_data != 0) return "checksum_data != 0";
+                if (self.nonce != 0) return "nonce != 0";
+                if (self.client_id != 0) return "client_id != 0";
+                if (self.request_number != 0) return "request_number != 0";
+                if (self.view != 0) return "view != 0";
+                if (self.latest_normal_view != 0) return "latest_normal_view != 0";
+                if (self.op != 0) return "op != 0";
+                if (self.commit != 0) return "commit != 0";
+                if (self.offset != 0) return "offset != 0";
+                if (self.index != 0) return "index != 0";
+                if (self.size != 0) return "size != 0";
+                if (self.epoch != 0) return "epoch != 0";
+                if (self.replica != 0) return "replica != 0";
+                if (self.operation != .reserved) return "operation != .reserved";
+            },
             .request => {
                 if (self.nonce != 0) return "nonce != 0";
                 if (self.client_id == 0) return "client_id == 0";
