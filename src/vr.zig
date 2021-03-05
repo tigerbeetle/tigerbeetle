@@ -86,36 +86,36 @@ pub const Header = packed struct {
     replica: u16 = 0,
 
     /// The VR protocol command for this message:
-    command: Command = .reserved,
+    command: Command,
 
     /// The state machine operation to apply:
     operation: Operation = .reserved,
 
     pub fn calculate_checksum_meta(self: *const Header) u128 {
-        const meta = @bitCast([@sizeOf(Header)]u8, self.*);
+        // Reserved headers should be completely zeroed with a checksum_meta also of 0:
+        if (self.command == .reserved) {
+            var sum: u128 = 0;
+            for (std.mem.asBytes(self)) |byte| sum += byte;
+            if (sum == 0) return 0;
+        }
+
         const checksum_size = @sizeOf(@TypeOf(self.checksum_meta));
         assert(checksum_size == 16);
         var target: [32]u8 = undefined;
-        std.crypto.hash.Blake3.hash(meta[checksum_size..], target[0..], .{});
+        std.crypto.hash.Blake3.hash(std.mem.asBytes(self)[checksum_size..], target[0..], .{});
         return @bitCast(u128, target[0..checksum_size].*);
     }
 
     pub fn calculate_checksum_data(self: *const Header, data: []const u8) u128 {
-        assert(@sizeOf(Header) + data.len == self.size);
+        // Reserved headers should be completely zeroed with a checksum_data also of 0:
+        if (self.command == .reserved and self.size == 0 and data.len == 0) return 0;
+
+        assert(self.size == @sizeOf(Header) + data.len);
         const checksum_size = @sizeOf(@TypeOf(self.checksum_data));
         assert(checksum_size == 16);
         var target: [32]u8 = undefined;
         std.crypto.hash.Blake3.hash(data[0..], target[0..], .{});
         return @bitCast(u128, target[0..checksum_size].*);
-    }
-
-    pub fn reset(self: *Header) void {
-        self.* = .{};
-        assert(self.checksum_meta == 0);
-        assert(self.checksum_data == 0);
-        assert(self.size == @sizeOf(Header));
-        assert(self.command == .reserved);
-        assert(self.operation == .reserved);
     }
 
     /// This must be called only after set_checksum_data() so that checksum_data is also covered:
@@ -165,6 +165,16 @@ pub const Header = packed struct {
             else => {}, // TODO Add validators for all commands.
         }
         return null;
+    }
+
+    pub fn zero(self: *Header) void {
+        std.mem.set(u8, std.mem.asBytes(self), 0);
+
+        assert(self.checksum_meta == 0);
+        assert(self.checksum_data == 0);
+        assert(self.size == 0);
+        assert(self.command == .reserved);
+        assert(self.operation == .reserved);
     }
 };
 
@@ -349,7 +359,7 @@ pub const Journal = struct {
 
         var headers = try allocator.allocAdvanced(Header, sector_size, headers_count, .exact);
         errdefer allocator.free(headers);
-        std.mem.set(u8, std.mem.sliceAsBytes(headers), 0);
+        for (headers) |*header| header.zero();
 
         var dirty = try allocator.alloc(bool, headers.len);
         errdefer allocator.free(dirty);
@@ -537,7 +547,7 @@ pub const Journal = struct {
     fn remove_entry_at_index(self: *Journal, index: u64) void {
         var header = &self.headers[index];
         assert(header.index == index or header.command == .reserved);
-        header.reset();
+        header.zero();
         assert(self.headers[index].command == .reserved);
         self.dirty[index] = true;
     }
@@ -1767,7 +1777,6 @@ pub const Replica = struct {
             assert(neighbor.op == header.op);
             unreachable;
         }
-
         return false;
     }
 
