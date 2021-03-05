@@ -183,6 +183,10 @@ pub const Header = packed struct {
             },
             else => {}, // TODO Add validators for all commands.
         }
+        switch (self.command) {
+            .reserved => assert(self.size == 0),
+            else => if (self.size < @sizeOf(Header)) return "size < Header",
+        }
         return null;
     }
 
