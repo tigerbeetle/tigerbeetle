@@ -1706,6 +1706,11 @@ pub const Replica = struct {
             return false;
         }
 
+        if (self.repair_header_would_succeed_newer_neighbor(header)) {
+            log.debug("{}: repair_header: would succeed newer neighbor", .{self.replica});
+            return false;
+        }
+
         if (self.repair_header_would_overlap_with_newer_neighbor(header)) {
             log.debug("{}: repair_header: would overlap with newer neighbor", .{self.replica});
             return false;
@@ -1774,6 +1779,22 @@ pub const Replica = struct {
                     if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
                 }
             }
+        }
+        return false;
+    }
+
+    /// If we repair this header would we succeed a newer neighbor (immediate or distant)?
+    /// Looks behind this entry for any preceeding entry that would be newer.
+    fn repair_header_would_succeed_newer_neighbor(self: *Replica, header: *const Header) bool {
+        // TODO Snapshots: Handle journal wrap around:
+        // We may not know the journal start index (if we do not yet have the snapshot).
+        // Run from header.index - 1 down through zero to self.index?
+        var i: usize = header.index;
+        while (i > 0) {
+            i -= 1;
+            const neighbor = &self.journal.headers[i];
+            if (neighbor.command == .reserved) continue;
+            return self.repair_header_has_newer_neighbor(header, neighbor);
         }
         return false;
     }
