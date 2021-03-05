@@ -1901,22 +1901,8 @@ pub const Replica = struct {
         assert(count == self.f);
         log.debug("{}: on_start_view_change: quorum received", .{self.replica});
 
-        // When replica i receives start_view_change messages for its view from f other replicas,
-        // it sends a ⟨do_view_change v, l, v’, n, k, i⟩ message to the node that will be the
-        // primary in the new view. Here v is its view, l is its log, v′ is the view number of the
-        // latest view in which its status was normal, n is the op number, and k is the commit
-        // number.
-        const new_leader = self.leader_index(self.view);
-        self.send_header_to_replica(new_leader, .{
-            .command = .do_view_change,
-            .replica = self.replica,
-            .view = self.view,
-            .op = self.op,
-            .commit = self.commit,
-        });
-
-        // TODO Add latest normal view.
-        // TODO Add N most recent journal entries.
+        // TODO Resend after timeout:
+        self.send_do_view_change();
     }
 
     fn ignore_view_change_message(self: *Replica, message: *const Message) bool {
@@ -1964,6 +1950,41 @@ pub const Replica = struct {
         }
 
         return false;
+    }
+
+    /// When replica i receives start_view_change messages for its view from f other replicas,
+    /// it sends a ⟨do_view_change v, l, v’, n, k, i⟩ message to the node that will be the
+    /// primary in the new view. Here v is its view, l is its log, v′ is the view number of the
+    /// latest view in which its status was normal, n is the op number, and k is the commit
+    /// number.
+    fn send_do_view_change(self: *Replica) void {
+        assert(self.status == .view_change);
+
+        const size_max = @sizeOf(Header) * 8;
+
+        // TODO Add a method to MessageBus to provide a pre-allocated message:
+        var message = self.message_bus.create_message(size_max) catch unreachable;
+        message.header.* = .{
+            .command = .do_view_change,
+            .replica = self.replica,
+            .view = self.view,
+            .op = self.op,
+            .commit = self.commit,
+        };
+
+        var dest = std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..size_max]);
+        const count = self.journal.copy_latest_headers_to(dest);
+
+        message.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
+        const data = message.buffer[@sizeOf(Header)..message.header.size];
+
+        message.header.set_checksum_data(data);
+        message.header.set_checksum_meta();
+
+        const new_leader = self.leader_index(self.view);
+
+        assert(message.references == 0);
+        self.send_message_to_replica(new_leader, message);
     }
 
     fn on_do_view_change(self: *Replica, message: *Message) void {
