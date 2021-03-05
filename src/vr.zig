@@ -1718,10 +1718,6 @@ pub const Replica = struct {
 
         // TODO Snapshots: Skip if this header is already snapshotted.
 
-        // While we could also skip this header if its view is less than preceeding entries in the
-        // journal, this requires first knowing where the journal begins, is CPU-intensive, and is
-        // not essential for correctness here, where our goal is simply to not overwrite newer data.
-
         self.journal.set_entry_as_dirty(header);
         return true;
     }
