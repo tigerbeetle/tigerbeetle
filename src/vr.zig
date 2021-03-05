@@ -367,8 +367,8 @@ pub const Journal = struct {
     writing_sectors: ConcurrentRanges = .{ .name = "write_sectors" },
 
     pub fn init(allocator: *Allocator, replica: u16, size: u64, headers_count: u32) !Journal {
-        if (@mod(size, sector_size) != 0) return error.SizeMustBeMultipleOfSectorSize;
-        if (!std.math.isPowerOfTwo(headers_count)) return error.HeadersCountMustBePowerOfTwo;
+        if (@mod(size, sector_size) != 0) return error.SizeMustBeAMultipleOfSectorSize;
+        if (!std.math.isPowerOfTwo(headers_count)) return error.HeadersCountMustBeAPowerOfTwo;
 
         const headers_per_sector = @divExact(sector_size, @sizeOf(Header));
         assert(headers_per_sector > 0);
