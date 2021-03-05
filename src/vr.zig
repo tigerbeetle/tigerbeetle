@@ -933,9 +933,11 @@ pub const Replica = struct {
     commit_timeout: Timeout,
 
     /// The number of ticks without hearing from the leader before a follower starts a view change:
+    /// This transitions from .normal status to .view_change status.
     normal_timeout: Timeout,
 
     /// The number of ticks before a view change is timed out:
+    /// This transitions from .view_change status to .view_change status but for a higher view.
     view_change_timeout: Timeout,
 
     // TODO Limit integer types for `f` and `replica` to match their upper bounds in practice.
@@ -1681,7 +1683,7 @@ pub const Replica = struct {
                     return false;
                 }
             } else if (existing.view == header.view) {
-                // We expect the same view and op must have the same checksum:
+                // We expect that the same view and op must have the same checksum:
                 assert(existing.op < header.op);
                 log.debug("{}: repair_header: exists (same view, older op)", .{self.replica});
             } else if (existing.op >= header.op) {
@@ -1854,6 +1856,7 @@ pub const Replica = struct {
             .replica = self.replica,
             .view = new_view,
         });
+        // TODO Resend after timeout.
     }
 
     fn on_start_view_change(self: *Replica, message: *Message) void {
