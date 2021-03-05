@@ -5,8 +5,9 @@ const log = std.log.scoped(.vr);
 pub const log_level: std.log.Level = .debug;
 
 usingnamespace @import("concurrent_ranges.zig");
-/// Viewstamped Replication protocol commands:
+
 // TODO Command for client to fetch its latest request_number from the cluster.
+/// Viewstamped Replication protocol commands:
 pub const Command = packed enum(u8) {
     reserved,
 
@@ -77,6 +78,7 @@ pub const Header = packed struct {
     index: u32 = 0,
 
     /// The size of this message header and any associated data:
+    /// This must be 0 for an empty header with command == .reserved.
     size: u32 = @sizeOf(Header),
 
     /// The cluster reconfiguration epoch number (for future use):
