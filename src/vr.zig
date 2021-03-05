@@ -1676,11 +1676,19 @@ pub const Replica = struct {
     }
 
     fn repair_header(self: *Replica, header: *const Header) bool {
+        assert(self.status == .normal or self.status == .view_change);
         assert(header.command == .prepare);
+        assert(header.size >= @sizeOf(Header));
         assert(header.view <= self.view);
-        assert(header.op <= self.op or header.view < self.view);
 
-        if (header.op > self.op and header.view < self.view) {
+        if (self.status == .normal and header.op > self.op and header.view < self.view) {
+            // This only applies for normal status:
+            // Within a view change, self.view will always be greater.
+            // For example, we may have jumped from view 5 to 10 on receiving a start_view_change.
+            // If we're the new leader processing do_view_change messages, our self.op may be old.
+            // It's critical for correctness that we don't consider newer ops as reordered.
+            // Otherwise, catastrophic data loss would occur.
+            assert(self.status != .view_change);
             // For example, an op reordered through a view change (section 5.2 in the VRR paper).
             log.debug("{}: repair_header: ignoring (reordered op)", .{self.replica});
             return false;
