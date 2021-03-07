@@ -482,11 +482,17 @@ pub const Journal = struct {
         for (self.headers[op + 1 ..]) |*header| assert(header.command == .reserved);
     }
 
+    /// Returns any existing entry at the location indicated by header.op.
+    /// This existing entry may have an older or newer op number.
     pub fn entry(self: *Journal, header: *const Header) ?*const Header {
         assert(header.command == .prepare);
         return self.entry_for_op(header.op);
     }
 
+    /// We use the op number directly to index into the headers array and locate ops without a scan.
+    /// Op numbers cycle through the headers array and do not wrap when offsets wrap. The reason for
+    /// this is to prevent variable offsets from impacting the location of an op. Otherwise, the
+    /// same op number but for different views could exist at multiple locations in the journal.
     pub fn entry_for_op(self: *Journal, op: u64) ?*const Header {
         // TODO Snapshots
         const existing = &self.headers[op];
