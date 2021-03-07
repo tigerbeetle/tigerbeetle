@@ -6,7 +6,7 @@ pub const log_level: std.log.Level = .debug;
 
 usingnamespace @import("concurrent_ranges.zig");
 
-// TODO Command for client to fetch its latest request_number from the cluster.
+// TODO Command for client to fetch its latest request number from the cluster.
 /// Viewstamped Replication protocol commands:
 pub const Command = packed enum(u8) {
     reserved,
@@ -25,7 +25,7 @@ pub const Command = packed enum(u8) {
 /// State machine operations:
 pub const Operation = packed enum(u8) {
     reserved,
-
+    init,
     noop,
 };
 
@@ -36,32 +36,30 @@ pub const Header = packed struct {
     /// A checksum covering only the rest of this header (but including checksum_data):
     /// This enables the header to be trusted without having to recv() or read() associated data.
     /// This checksum is enough to uniquely identify a network message or journal entry.
-    checksum_meta: u128 = 0,
+    checksum: u128 = 0,
 
     /// A checksum covering only associated data.
     checksum_data: u128 = 0,
 
-    /// The checksum_meta of the message to which this message refers, or a unique recovery nonce:
+    /// The checksum of the message to which this message refers, or a unique recovery nonce:
     /// We use this nonce in various ways, for example:
-    /// * A prepare sets nonce to the checksum_meta of the prior prepare to hash-chain the journal.
-    /// * A prepare_ok sets nonce to the checksum_meta of the prepare it wants to ack.
-    /// * A commit sets nonce to the checksum_meta of the latest committed op.
+    /// * A prepare sets nonce to the checksum of the prior prepare to hash-chain the journal.
+    /// * A prepare_ok sets nonce to the checksum of the prepare it wants to ack.
+    /// * A commit sets nonce to the checksum of the latest committed op.
     /// This adds an additional cryptographic safety control beyond VR's op and commit numbers.
     nonce: u128 = 0,
 
-    /// Each client records its own client_id and a current request_number. A client is allowed to
-    /// have just one outstanding request at a time. Each request is given a number by the client
-    /// and later requests must have larger numbers than earlier ones. The request_number is used
-    /// by the replicas to avoid running requests more than once; it is also used by the client to
-    /// discard duplicate responses to its requests.
-    client_id: u128 = 0,
-    request_number: u64 = 0,
+    /// Each client records its own client id and a current request number. A client is allowed to
+    /// have just one outstanding request at a time.
+    client: u128 = 0,
+
+    /// The cluster id binds intention into the header, so that a client or replica can indicate
+    /// which cluster it thinks it's speaking to, instead of accidentally talking to the wrong
+    /// cluster (for example, staging vs production).
+    cluster: u128,
 
     /// Every message sent from one replica to another contains the sending replica's current view:
-    view: u64 = 0,
-
-    /// The latest view for which the replica's status was normal:
-    latest_normal_view: u64 = 0,
+    view: u64,
 
     /// The op number:
     op: u64 = 0,
@@ -70,12 +68,9 @@ pub const Header = packed struct {
     commit: u64 = 0,
 
     /// The journal offset to which this message relates:
-    /// This enables direct access to an entry, without requiring previous variable-length entries.
+    /// This enables direct access to a prepare, without requiring previous variable-length entries.
+    /// While we use fixed-size data structures, a batch will contain a variable amount of them.
     offset: u64 = 0,
-
-    /// The journal index to which this message relates:
-    /// Similarly, this enables direct access to an entry's header in the journal's header array.
-    index: u32 = 0,
 
     /// The size of this message header and any associated data:
     /// This must be 0 for an empty header with command == .reserved.
@@ -84,7 +79,12 @@ pub const Header = packed struct {
     /// The cluster reconfiguration epoch number (for future use):
     epoch: u32 = 0,
 
-    /// The index of the replica that sent this message:
+    /// Each request is given a number by the client and later requests must have larger numbers
+    /// than earlier ones. The request number is used by the replicas to avoid running requests more
+    /// than once; it is also used by the client to discard duplicate responses to its requests.
+    request: u32 = 0,
+
+    /// The index of the replica in the cluster configuration array that sent this message:
     replica: u16 = 0,
 
     /// The VR protocol command for this message:
@@ -93,15 +93,15 @@ pub const Header = packed struct {
     /// The state machine operation to apply:
     operation: Operation = .reserved,
 
-    pub fn calculate_checksum_meta(self: *const Header) u128 {
-        // Reserved headers should be completely zeroed with a checksum_meta also of 0:
+    pub fn calculate_checksum(self: *const Header) u128 {
+        // Reserved headers should be completely zeroed with a checksum also of 0:
         if (self.command == .reserved) {
             var sum: u128 = 0;
             for (std.mem.asBytes(self)) |byte| sum += byte;
             if (sum == 0) return 0;
         }
 
-        const checksum_size = @sizeOf(@TypeOf(self.checksum_meta));
+        const checksum_size = @sizeOf(@TypeOf(self.checksum));
         assert(checksum_size == 16);
         var target: [32]u8 = undefined;
         std.crypto.hash.Blake3.hash(std.mem.asBytes(self)[checksum_size..], target[0..], .{});
@@ -111,6 +111,7 @@ pub const Header = packed struct {
     pub fn calculate_checksum_data(self: *const Header, data: []const u8) u128 {
         // Reserved headers should be completely zeroed with a checksum_data also of 0:
         if (self.command == .reserved and self.size == 0 and data.len == 0) return 0;
+        if (self.size == @sizeOf(Header) and data.len == 0) return 0;
 
         assert(self.size == @sizeOf(Header) + data.len);
         const checksum_size = @sizeOf(@TypeOf(self.checksum_data));
@@ -121,16 +122,16 @@ pub const Header = packed struct {
     }
 
     /// This must be called only after set_checksum_data() so that checksum_data is also covered:
-    pub fn set_checksum_meta(self: *Header) void {
-        self.checksum_meta = self.calculate_checksum_meta();
+    pub fn set_checksum(self: *Header) void {
+        self.checksum = self.calculate_checksum();
     }
 
     pub fn set_checksum_data(self: *Header, data: []const u8) void {
         self.checksum_data = self.calculate_checksum_data(data);
     }
 
-    pub fn valid_checksum_meta(self: *const Header) bool {
-        return self.checksum_meta == self.calculate_checksum_meta();
+    pub fn valid_checksum(self: *const Header) bool {
+        return self.checksum == self.calculate_checksum();
     }
 
     pub fn valid_checksum_data(self: *const Header, data: []const u8) bool {
@@ -138,54 +139,93 @@ pub const Header = packed struct {
     }
 
     /// Returns null if all fields are set correctly according to the command, or else a warning.
-    /// This does not verify that checksum_meta is valid, and expects that has already been done.
+    /// This does not verify that checksum is valid, and expects that has already been done.
     pub fn bad(self: *const Header) ?[]const u8 {
         switch (self.command) {
+            .reserved => if (self.size != 0) return "size != 0",
+            else => if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)",
+        }
+        if (self.epoch != 0) return "epoch != 0";
+        switch (self.command) {
             .reserved => {
-                if (self.checksum_meta != 0) return "checksum_meta != 0";
+                if (self.checksum != 0) return "checksum != 0";
                 if (self.checksum_data != 0) return "checksum_data != 0";
                 if (self.nonce != 0) return "nonce != 0";
-                if (self.client_id != 0) return "client_id != 0";
-                if (self.request_number != 0) return "request_number != 0";
+                if (self.client != 0) return "client != 0";
+                if (self.cluster != 0) return "cluster != 0";
                 if (self.view != 0) return "view != 0";
-                if (self.latest_normal_view != 0) return "latest_normal_view != 0";
                 if (self.op != 0) return "op != 0";
                 if (self.commit != 0) return "commit != 0";
                 if (self.offset != 0) return "offset != 0";
-                if (self.index != 0) return "index != 0";
-                if (self.size != 0) return "size != 0";
-                if (self.epoch != 0) return "epoch != 0";
+                if (self.request != 0) return "request != 0";
                 if (self.replica != 0) return "replica != 0";
                 if (self.operation != .reserved) return "operation != .reserved";
             },
             .request => {
                 if (self.nonce != 0) return "nonce != 0";
-                if (self.client_id == 0) return "client_id == 0";
-                if (self.request_number == 0) return "request_number == 0";
+                if (self.client == 0) return "client == 0";
+                if (self.cluster == 0) return "cluster == 0";
                 if (self.view != 0) return "view != 0";
-                if (self.latest_normal_view != 0) return "latest_normal_view != 0";
                 if (self.op != 0) return "op != 0";
                 if (self.commit != 0) return "commit != 0";
                 if (self.offset != 0) return "offset != 0";
-                if (self.index != 0) return "index != 0";
-                if (self.epoch != 0) return "epoch != 0";
+                if (self.request == 0) return "request == 0";
                 if (self.replica != 0) return "replica != 0";
                 if (self.operation == .reserved) return "operation == .reserved";
             },
-            .prepare, .prepare_ok => {
-                if (self.client_id == 0) return "client_id == 0";
-                if (self.request_number == 0) return "request_number == 0";
-                if (self.latest_normal_view != 0) return "latest_normal_view != 0";
-                if (self.op == 0) return "op == 0";
-                if (self.op <= self.commit) return "op <= commit";
-                if (self.epoch != 0) return "epoch != 0";
-                if (self.operation == .reserved) return "operation == .reserved";
+            .prepare => {
+                switch (self.operation) {
+                    .reserved => return "operation == .reserved",
+                    .init => {
+                        if (self.checksum_data != 0) return "init: checksum_data != 0";
+                        if (self.nonce != 0) return "init: nonce != 0";
+                        if (self.client != 0) return "init: client != 0";
+                        if (self.cluster == 0) return "init: cluster == 0";
+                        if (self.view != 0) return "init: view != 0";
+                        if (self.op != 0) return "init: op != 0";
+                        if (self.commit != 0) return "init: commit != 0";
+                        if (self.offset != 0) return "init: offset != 0";
+                        if (self.size != @sizeOf(Header)) return "init: size != @sizeOf(Header)";
+                        if (self.request != 0) return "init: request != 0";
+                        if (self.replica != 0) return "init: replica != 0";
+                    },
+                    else => {
+                        if (self.client == 0) return "client == 0";
+                        if (self.cluster == 0) return "cluster == 0";
+                        if (self.op == 0) return "op == 0";
+                        if (self.op <= self.commit) return "op <= commit";
+                        if (self.request == 0) return "request == 0";
+                    },
+                }
+            },
+            .prepare_ok => {
+                switch (self.operation) {
+                    .reserved => return "operation == .reserved",
+                    .init => {
+                        if (self.checksum_data != 0) return "init: checksum_data != 0";
+                        if (self.nonce != 0) return "init: nonce != 0";
+                        if (self.client != 0) return "init: client != 0";
+                        if (self.cluster == 0) return "init: cluster == 0";
+                        if (self.view != 0) return "init: view != 0";
+                        if (self.op != 0) return "init: op != 0";
+                        if (self.commit != 0) return "init: commit != 0";
+                        if (self.offset != 0) return "init: offset != 0";
+                        if (self.size != @sizeOf(Header)) return "init: size != @sizeOf(Header)";
+                        if (self.request != 0) return "init: request != 0";
+                        if (self.replica != 0) return "init: replica != 0";
+                    },
+                    else => {
+                        if (self.checksum_data != 0) return "checksum_data != 0";
+                        if (self.client == 0) return "client == 0";
+                        if (self.cluster == 0) return "cluster == 0";
+                        if (self.op == 0) return "op == 0";
+                        if (self.op <= self.commit) return "op <= commit";
+                        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+                        if (self.request == 0) return "request == 0";
+                    },
+                }
             },
             else => {}, // TODO Add validators for all commands.
-        }
-        switch (self.command) {
-            .reserved => assert(self.size == 0),
-            else => if (self.size < @sizeOf(Header)) return "size < Header",
         }
         return null;
     }
@@ -193,7 +233,7 @@ pub const Header = packed struct {
     pub fn zero(self: *Header) void {
         std.mem.set(u8, std.mem.asBytes(self), 0);
 
-        assert(self.checksum_meta == 0);
+        assert(self.checksum == 0);
         assert(self.checksum_data == 0);
         assert(self.size == 0);
         assert(self.command == .reserved);
@@ -202,6 +242,11 @@ pub const Header = packed struct {
 };
 
 const Client = struct {};
+
+// TODO Client table should warn if the client's request number has wrapped past 32 bits.
+// This is easy to detect.
+// If a client has done a few billion requests, we don't expect to see request 0 come through.
+const ClientTable = struct {};
 
 const ConfigurationAddress = union(enum) {
     address: *std.net.Address,
@@ -260,9 +305,9 @@ pub const MessageBus = struct {
         message.header.* = header;
 
         const data = message.buffer[@sizeOf(Header)..message.header.size];
-        // The order matters here because checksum_meta depends on checksum_data:
+        // The order matters here because checksum depends on checksum_data:
         message.header.set_checksum_data(data);
-        message.header.set_checksum_meta();
+        message.header.set_checksum();
 
         assert(message.references == 0);
         self.send_message_to_replica(replica, message);
@@ -356,9 +401,6 @@ pub const Journal = struct {
     size_circular_buffer: u64,
     headers: []Header align(sector_size),
     dirty: []bool,
-    nonce: u128,
-    offset: u64,
-    index: u32,
 
     /// We copy-on-write to this buffer when writing, as in-memory headers may change concurrently:
     write_headers_buffer: []u8 align(sector_size),
@@ -419,18 +461,14 @@ pub const Journal = struct {
             .size = size,
             .size_headers = size_headers,
             .size_circular_buffer = size_circular_buffer,
-            .nonce = 0,
             .headers = headers,
             .dirty = dirty,
-            .offset = 0,
-            .index = 0,
             .write_headers_buffer = write_headers_buffer,
         };
 
         assert(@mod(self.size_circular_buffer, sector_size) == 0);
         assert(@mod(@ptrToInt(&self.headers[0]), sector_size) == 0);
         assert(self.dirty.len == self.headers.len);
-        assert(@mod(self.offset, sector_size) == 0);
         assert(self.write_headers_buffer.len == @sizeOf(Header) * self.headers.len);
 
         return self;
@@ -438,168 +476,124 @@ pub const Journal = struct {
 
     pub fn deinit(self: *Journal) void {}
 
-    /// Advances the hash chain nonce, index and offset to after a header.
-    /// The header's checksum_meta becomes the journal's nonce for the next entry.
-    /// The header's index and offset must match the journal's current position (as a safety check).
-    /// The header does not need to have been written yet.
-    pub fn advance_nonce_offset_and_index_to_after(self: *Journal, header: *const Header) void {
+    pub fn assert_headers_reserved_after_op(self: *Journal, op: u64) void {
+        // TODO Snapshots
+        if (op + 1 == self.headers.len) return;
+        for (self.headers[op + 1 ..]) |*header| assert(header.command == .reserved);
+    }
+
+    pub fn entry(self: *Journal, header: *const Header) ?*const Header {
         assert(header.command == .prepare);
-        assert(header.nonce == self.nonce);
-        assert(header.offset == self.offset);
-        assert(header.index == self.index);
-
-        // TODO Snapshots: Wrap offset and index.
-        const offset = header.offset + Journal.sector_ceil(header.size);
-        // TODO Assert against offset overflow.
-        const index = header.index + 1;
-        assert(index < self.headers.len);
-
-        log.debug("{}: journal: advancing: nonce={}..{} offset={}..{} index={}..{}", .{
-            self.replica,
-            self.nonce,
-            header.checksum_meta,
-            self.offset,
-            offset,
-            self.index,
-            index,
-        });
-
-        self.nonce = header.checksum_meta;
-        self.offset = offset;
-        self.index = index;
+        return self.entry_for_op(header.op);
     }
 
-    /// Sets the index and offset to after a header.
-    pub fn set_nonce_offset_and_index_to_after(self: *Journal, header: *const Header) void {
+    pub fn entry_for_op(self: *Journal, op: u64) ?*const Header {
+        // TODO Snapshots
+        const existing = &self.headers[op];
+        if (existing.command == .reserved) return null;
+        assert(existing.command == .prepare);
+        return existing;
+    }
+
+    pub fn next_entry(self: *Journal, header: *const Header) ?*const Header {
+        // TODO Snapshots
+        if (header.op + 1 == self.headers.len) return null;
+        return self.entry_for_op(header.op + 1);
+    }
+
+    pub fn previous_entry(self: *Journal, header: *const Header) ?*const Header {
+        // TODO Snapshots
+        if (header.op == 0) return null;
+        return self.entry_for_op(header.op - 1);
+    }
+
+    pub fn next_offset(self: *Journal, header: *const Header) u64 {
+        // TODO Snapshots
         assert(header.command == .prepare);
-        self.nonce = header.nonce;
-        self.offset = header.offset;
-        self.index = header.index;
-        self.advance_nonce_offset_and_index_to_after(header);
-    }
-
-    pub fn set_nonce_offset_and_index_to_empty(self: *Journal) void {
-        self.assert_all_headers_are_reserved_from_index(0);
-        // TODO Use initial nonce state.
-        self.nonce = 0;
-        // TODO Snapshots: We need to set this to the snapshot index and offset.
-        self.offset = 0;
-        self.index = 0;
-    }
-
-    pub fn assert_all_headers_are_reserved_from_index(self: *Journal, index: u32) void {
-        // TODO Snapshots: Adjust slices to stop before starting index.
-        for (self.headers[index..]) |*header| assert(header.command == .reserved);
-    }
-
-    /// Returns a pointer to the header with the matching op number, or null if not found.
-    /// Asserts that at most one such header exists.
-    pub fn find_header_for_op(self: *Journal, op: u64) ?*const Header {
-        assert(op > 0);
-        var result: ?*const Header = null;
-        for (self.headers) |*header, index| {
-            if (header.op == op and header.command == .prepare) {
-                assert(result == null);
-                assert(header.index == index);
-                result = header;
-            }
-        }
-        return result;
-    }
-
-    pub fn entry(self: *Journal, index: u32) ?*const Header {
-        const header = &self.headers[index];
-        if (header.command == .reserved) return null;
-        return header;
-    }
-
-    pub fn latest_entry(self: *Journal) ?*const Header {
-        return self.previous_entry(self.index);
-    }
-
-    pub fn next_entry(self: *Journal, index: u32) ?*const Header {
-        // TODO Snapshots: This will wrap and then be null only when we get back to the head.
-        if (index + 1 == self.headers.len) return null;
-        return self.entry(index + 1);
-    }
-
-    pub fn previous_entry(self: *Journal, index: u32) ?*const Header {
-        // TODO Snapshots: This will wrap and then be null only when we get back to the head.
-        if (index == 0) return null;
-        return self.entry(index - 1);
+        return header.offset + Journal.sector_ceil(header.size);
     }
 
     pub fn has(self: *Journal, header: *const Header) bool {
-        const existing = &self.headers[header.index];
+        // TODO Snapshots
+        const existing = &self.headers[header.op];
         if (existing.command == .reserved) {
-            assert(existing.checksum_meta == 0);
+            assert(existing.checksum == 0);
+            assert(existing.checksum_data == 0);
             assert(existing.offset == 0);
-            assert(existing.index == 0);
+            assert(existing.size == 0);
             return false;
         } else {
-            assert(existing.index == header.index);
-            return existing.checksum_meta == header.checksum_meta;
+            if (existing.checksum == header.checksum) {
+                assert(existing.checksum_data == header.checksum_data);
+                assert(existing.op == header.op);
+                return true;
+            } else {
+                return false;
+            }
         }
     }
 
     pub fn has_clean(self: *Journal, header: *const Header) bool {
-        return self.has(header) and !self.dirty[header.index];
+        // TODO Snapshots
+        return self.has(header) and !self.dirty[header.op];
     }
 
     pub fn has_dirty(self: *Journal, header: *const Header) bool {
-        return self.has(header) and self.dirty[header.index];
+        // TODO Snapshots
+        return self.has(header) and self.dirty[header.op];
     }
 
-    pub fn copy_latest_headers_to(self: *Journal, dest: []Header) usize {
+    /// Copies as many headers as will fit in `dest` including `op`.
+    pub fn copy_headers_up_to_op(self: *Journal, op: u64, dest: []Header) usize {
         assert(dest.len > 0);
         for (dest) |*header| header.zero();
-        // TODO Snapshots: Handle wrapping.
-        const n = std.math.min(dest.len, self.index);
-        const source = self.headers[self.index - n .. self.index];
+        // TODO Snapshots
+        const end: usize = op + 1;
+        const len: usize = std.math.min(dest.len, end);
+        const start: usize = end - len;
+        log.debug("op={} start={} end={} len={}", .{ op, start, end, len });
+        const source = self.headers[start..end];
         std.mem.copy(Header, dest, source);
+        assert(source.len > 0);
         return source.len;
     }
 
     /// Removes entries after op number (exclusive), i.e. with a higher op number.
     /// This is used after a view change to prune uncommitted entries discarded by the new leader.
     pub fn remove_entries_after_op(self: *Journal, op: u64) void {
-        assert(op > 0);
-        for (self.headers) |*header, index| {
+        assert(op >= 0);
+        // TODO Snapshots
+        // TODO Optimize to jump directly to op:
+        for (self.headers) |*header| {
             if (header.op > op and header.command == .prepare) {
                 self.remove_entry(header);
             }
         }
+        self.assert_headers_reserved_after_op(op);
+        // TODO Be more precise and efficient:
+        self.write_headers(0, self.headers.len);
     }
 
     /// A safe way of removing an entry, where the header must match the current entry to succeed.
     pub fn remove_entry(self: *Journal, header: *const Header) void {
-        assert(header.command == .prepare);
-        const existing = &self.headers[header.index];
-        assert(existing.checksum_meta == header.checksum_meta);
-        assert(existing.offset == header.offset);
-        assert(existing.index == header.index);
-        self.remove_entry_at_index(header.index);
-    }
-
-    fn remove_entry_at_index(self: *Journal, index: u64) void {
-        var header = &self.headers[index];
-        assert(header.index == index or header.command == .reserved);
-        header.zero();
-        assert(self.headers[index].command == .reserved);
-        self.dirty[index] = true;
+        // TODO Add equality method to Header to do more comparisons:
+        assert(self.entry(header).?.checksum == header.checksum);
+        // TODO Snapshots
+        assert(self.headers[header.op].checksum == header.checksum);
+        self.headers[header.op].zero();
+        self.dirty[header.op] = true;
     }
 
     pub fn set_entry_as_dirty(self: *Journal, header: *const Header) void {
-        assert(header.command == .prepare);
-        log.debug("{}: journal: set_entry_as_dirty: {}", .{ self.replica, header.checksum_meta });
-        if (self.entry(header.index)) |existing| {
-            if (existing.checksum_meta != header.checksum_meta) {
+        log.debug("{}: journal: set_entry_as_dirty: {}", .{ self.replica, header.checksum });
+        if (self.entry(header)) |existing| {
+            if (existing.checksum != header.checksum) {
                 assert(existing.view <= header.view);
                 assert(existing.op < header.op or existing.view < header.view);
             }
         }
-        self.headers[header.index] = header.*;
-        self.dirty[header.index] = true;
+        self.headers[header.op] = header.*;
+        self.dirty[header.op] = true;
     }
 
     fn offset_in_circular_buffer(self: *Journal, offset: u64) u64 {
@@ -637,37 +631,41 @@ pub const Journal = struct {
             return;
         }
 
-        self.write_headers(header.index, 1);
+        // TODO Snapshots
+        self.write_headers(header.op, 1);
         if (!self.has(header)) {
             self.write_debug(header, "entry changed while writing headers");
             return;
         }
 
         self.write_debug(header, "complete, marking clean");
-        self.dirty[header.index] = false;
+        // TODO Snapshots
+        self.dirty[header.op] = false;
     }
 
     fn write_debug(self: *Journal, header: *const Header, status: []const u8) void {
-        log.debug("{}: journal: write: index={} offset={} len={}: {} {}", .{
+        log.debug("{}: journal: write: view={} op={} offset={} len={}: {} {}", .{
             self.replica,
-            header.index,
+            header.view,
+            header.op,
             header.offset,
             header.size,
-            header.checksum_meta,
+            header.checksum,
             status,
         });
     }
 
-    pub fn write_headers(self: *Journal, index: u32, len: u32) void {
-        assert(index < self.headers.len);
+    pub fn write_headers(self: *Journal, op: u64, len: usize) void {
+        // TODO Snapshots
+        assert(op < self.headers.len);
         assert(len > 0);
-        assert(index + len <= self.headers.len);
+        assert(op + len <= self.headers.len);
 
-        const sector_offset = Journal.sector_floor(index * @sizeOf(Header));
-        const sector_len = Journal.sector_ceil((index + len) * @sizeOf(Header));
+        const sector_offset = Journal.sector_floor(op * @sizeOf(Header));
+        const sector_len = Journal.sector_ceil((op + len) * @sizeOf(Header));
 
         // We must acquire the concurrent range using the sector offset and len:
-        // Different headers may share the same sector without any index or len overlap.
+        // Different headers may share the same sector without any op or len overlap.
         var range = Range{ .offset = sector_offset, .len = sector_len };
         self.writing_headers.acquire(&range);
         defer self.writing_headers.release(&range);
@@ -677,9 +675,9 @@ pub const Journal = struct {
         assert(slice.len == source.len);
         std.mem.copy(u8, slice, source);
 
-        log.debug("{}: journal: write_headers: index={} len={} sectors[{}..{}]", .{
+        log.debug("{}: journal: write_headers: op={} len={} sectors[{}..{}]", .{
             self.replica,
-            index,
+            op,
             len,
             sector_offset,
             sector_len,
@@ -689,7 +687,8 @@ pub const Journal = struct {
         // write_headers_to_version() will block while other calls may proceed concurrently.
         // If we don't increment upfront we could end up writing to the same copy twice.
         // We would then lose the redundancy required to locate headers or overwrite all copies.
-        if (self.write_headers_once(self.headers[index .. index + len])) {
+        // TODO Snapshots
+        if (self.write_headers_once(self.headers[op .. op + len])) {
             const version_a = self.write_headers_increment_version();
             self.write_headers_to_version(version_a, slice, sector_offset);
         } else {
@@ -711,35 +710,37 @@ pub const Journal = struct {
     /// Otherwise, we only need to write the headers once because their other copy can be located in
     /// the body of the journal (using the previous entry's offset and size).
     fn write_headers_once(self: *Journal, headers: []const Header) bool {
-        // We must use header.index below (and not the loop index) as we are working on a slice.
-        for (headers) |header| {
-            if (self.dirty[header.index]) {
-                if (header.command == .reserved) {
-                    log.debug("{}: journal: write_headers_once: dirty reserved header", .{
+        for (headers) |*header| {
+            // TODO Snapshots
+            // We must use header.op and not the loop index as we are working from a slice:
+            if (!self.dirty[header.op]) continue;
+            if (header.command == .reserved) {
+                log.debug("{}: journal: write_headers_once: dirty reserved header", .{
+                    self.replica,
+                });
+                return false;
+            }
+            if (self.previous_entry(header)) |previous| {
+                assert(previous.command == .prepare);
+                if (previous.checksum != header.nonce) {
+                    log.debug("{}: journal: write_headers_once: no hash chain", .{
                         self.replica,
                     });
                     return false;
                 }
-                if (self.previous_entry(header.index)) |previous| {
-                    assert(previous.command == .prepare);
-                    if (previous.checksum_meta != header.nonce) {
-                        log.debug("{}: journal: write_headers_once: no hash chain", .{
-                            self.replica,
-                        });
-                        return false;
-                    }
-                    if (self.dirty[previous.index]) {
-                        log.debug("{}: journal: write_headers_once: previous entry is dirty", .{
-                            self.replica,
-                        });
-                        return false;
-                    }
-                } else {
-                    log.debug("{}: journal: write_headers_once: no previous entry", .{
+                // TODO Add is_dirty(header)
+                // TODO Snapshots
+                if (self.dirty[previous.op]) {
+                    log.debug("{}: journal: write_headers_once: previous entry is dirty", .{
                         self.replica,
                     });
                     return false;
                 }
+            } else {
+                log.debug("{}: journal: write_headers_once: no previous entry", .{
+                    self.replica,
+                });
+                return false;
             }
         }
         return true;
@@ -863,6 +864,9 @@ const Timeout = struct {
 pub const Replica = struct {
     allocator: *Allocator,
 
+    /// The id of the cluster to which this replica belongs:
+    cluster: u128,
+
     /// The maximum number of replicas that may be faulty:
     f: u32,
 
@@ -889,22 +893,20 @@ pub const Replica = struct {
     replica: u16,
 
     /// The current view, initially 0:
-    view: u64 = 0,
+    view: u64,
 
     /// The current status, either normal, view_change, or recovering:
     /// TODO Don't default to normal, set the starting status according to the journal's health.
     status: Status = .normal,
 
-    /// The op number assigned to the most recently received request:
-    /// The op number means only the highest op seen, not the highest op prepared, as we allow gaps.
-    /// The first op will be assigned op number 1.
-    op: u64 = 0,
+    /// The op number assigned to the most recently prepared operation:
+    op: u64,
 
     /// The op number of the most recently committed operation:
-    commit: u64 = 0,
+    commit: u64,
 
     /// The current request's checksum (used for now to enforce one-at-a-time request processing):
-    request_checksum_meta: ?u128 = null,
+    request_checksum: ?u128 = null,
 
     /// The current prepare message (used to cross-check prepare_ok messages, and for resending):
     prepare_message: ?*Message = null,
@@ -949,6 +951,7 @@ pub const Replica = struct {
     // TODO Limit integer types for `f` and `replica` to match their upper bounds in practice.
     pub fn init(
         allocator: *Allocator,
+        cluster: u128,
         f: u32,
         configuration: []ConfigurationAddress,
         message_bus: *MessageBus,
@@ -956,6 +959,7 @@ pub const Replica = struct {
         state_machine: *StateMachine,
         replica: u16,
     ) !Replica {
+        assert(cluster > 0);
         assert(configuration.len > 0);
         assert(configuration.len > f);
         assert(replica < configuration.len);
@@ -972,11 +976,38 @@ pub const Replica = struct {
         for (do_view_change) |*received| received.* = null;
         errdefer allocator.free(do_view_change);
 
+        // TODO Only initialize the journal when initializing the cluster:
+        var init_prepare = Header{
+            .checksum_data = 0,
+            .nonce = 0,
+            .client = 0,
+            .cluster = cluster,
+            .view = 0,
+            .op = 0,
+            .commit = 0,
+            .offset = 0,
+            .size = @sizeOf(Header),
+            .epoch = 0,
+            .request = 0,
+            .replica = 0,
+            .command = .prepare,
+            .operation = .init,
+        };
+        init_prepare.set_checksum();
+        assert(init_prepare.valid_checksum());
+        assert(init_prepare.bad() == null);
+        journal.headers[0] = init_prepare;
+        journal.assert_headers_reserved_after_op(init_prepare.op);
+
         var self = Replica{
             .allocator = allocator,
+            .cluster = cluster,
             .f = f,
             .configuration = configuration,
             .replica = replica,
+            .view = init_prepare.view,
+            .op = init_prepare.op,
+            .commit = init_prepare.commit,
             .message_bus = message_bus,
             .journal = journal,
             .state_machine = state_machine,
@@ -1075,6 +1106,14 @@ pub const Replica = struct {
             log.debug("{}: on_message: bad ({})", .{ self.replica, reason });
             return;
         }
+        if (message.header.cluster != self.cluster) {
+            log.warn("{}: on_message: wrong cluster (message.header.cluster={} instead of {})", .{
+                self.replica,
+                message.header.cluster,
+                self.cluster,
+            });
+            return;
+        }
         assert(message.header.replica < self.configuration.len);
         switch (message.header.command) {
             .request => self.on_request(message),
@@ -1108,9 +1147,9 @@ pub const Replica = struct {
         // TODO If request is pending then this will also reflect in client table and we can ignore.
         // TODO Add client information to client table.
 
-        if (self.request_checksum_meta) |request_checksum_meta| {
+        if (self.request_checksum) |request_checksum| {
             assert(message.header.command == .request);
-            if (message.header.checksum_meta == request_checksum_meta) {
+            if (message.header.checksum == request_checksum) {
                 log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
                 return;
             }
@@ -1118,10 +1157,10 @@ pub const Replica = struct {
 
         // TODO Queue (or drop client requests after a limit) to handle one request at a time:
         // TODO Clear this queue if we lose our leadership (critical for correctness).
-        assert(self.request_checksum_meta == null);
-        self.request_checksum_meta = message.header.checksum_meta;
+        assert(self.request_checksum == null);
+        self.request_checksum = message.header.checksum;
 
-        log.debug("{}: on_request: request {}", .{ self.replica, message.header.checksum_meta });
+        log.debug("{}: on_request: request {}", .{ self.replica, message.header.checksum });
 
         // The primary advances op-number, adds the request to the end of the log, and updates the
         // information for this client in the client-table to contain the new request number, s.
@@ -1132,21 +1171,23 @@ pub const Replica = struct {
         var data = message.buffer[@sizeOf(Header)..message.header.size];
         // TODO Assign timestamps to structs in associated data.
 
-        message.header.nonce = self.journal.nonce;
+        var latest_entry = self.journal.entry_for_op(self.op).?;
+        assert(latest_entry.op == self.op);
+
+        message.header.nonce = latest_entry.checksum;
         message.header.view = self.view;
         message.header.op = self.op + 1;
         message.header.commit = self.commit;
-        message.header.offset = self.journal.offset;
-        message.header.index = self.journal.index;
+        message.header.offset = self.journal.next_offset(latest_entry);
         message.header.replica = self.replica;
         message.header.command = .prepare;
 
         message.header.set_checksum_data(data);
-        message.header.set_checksum_meta();
+        message.header.set_checksum();
 
-        assert(message.header.checksum_meta != self.request_checksum_meta.?);
+        assert(message.header.checksum != self.request_checksum.?);
 
-        log.debug("{}: on_request: prepare {}", .{ self.replica, message.header.checksum_meta });
+        log.debug("{}: on_request: prepare {}", .{ self.replica, message.header.checksum });
 
         assert(self.prepare_message == null);
         assert(self.prepare_attempt == 0);
@@ -1211,20 +1252,23 @@ pub const Replica = struct {
             self.jump_to_newer_op(message.header);
         }
 
-        if (self.journal.previous_entry(message.header.index)) |previous| {
-            self.panic_if_hash_chain_would_break_in_the_same_view(previous, message.header);
+        if (self.journal.previous_entry(message.header)) |previous_entry| {
+            // Any previous entry may be a whole journal's worth of ops behind due to wrapping.
+            // We therefore do not do any further op, offset or checksum assertions beyond this:
+            self.panic_if_hash_chain_would_break_in_the_same_view(previous_entry, message.header);
         }
 
-        // We must advance our op, nonce, offset and index before replicating and journalling.
+        // We must advance our op and set the header as dirty before replicating and journalling.
         // The leader needs this before its journal is outrun by any prepare_ok quorum:
-        log.debug("{}: on_prepare: advancing: op={}..{}", .{
+        log.debug("{}: on_prepare: advancing: op={}..{} checksum={}..{}", .{
             self.replica,
             self.op,
             message.header.op,
+            message.header.nonce,
+            message.header.checksum,
         });
         assert(message.header.op == self.op + 1);
         self.op = message.header.op;
-        self.journal.advance_nonce_offset_and_index_to_after(message.header);
         self.journal.set_entry_as_dirty(message.header);
 
         // TODO Update client's information in the client table.
@@ -1257,7 +1301,11 @@ pub const Replica = struct {
     }
 
     fn jump_to_newer_view(self: *Replica, new_view: u64) void {
-        log.debug("{}: jump_to_newer_view: from {} to {}", .{ self.replica, self.view, new_view });
+        log.debug("{}: jump_to_newer_view: advancing: view={}..{}", .{
+            self.replica,
+            self.view,
+            new_view,
+        });
         assert(self.status == .normal);
         assert(self.leader() or self.follower());
         assert(new_view > self.view);
@@ -1276,35 +1324,15 @@ pub const Replica = struct {
         // If we fail to do this immediately then we may commit the wrong op and diverge state when
         // we process a commit message or when we process a commit number in a prepare message.
         if (self.op > self.commit) {
-            log.debug("{}: jump_to_newer_view: setting op number {} to commit number {}", .{
+            log.debug("{}: jump_to_newer_view: rewinding: op={}..{}", .{
                 self.replica,
                 self.op,
                 self.commit,
             });
             self.op = self.commit;
-            log.debug("{}: jump_to_newer_view: removing journal entries after op number {}", .{
-                self.replica,
-                self.op,
-            });
-            const journal_index = self.journal.index;
             self.journal.remove_entries_after_op(self.op);
-            if (self.journal.find_header_for_op(self.op)) |header| {
-                self.journal.set_nonce_offset_and_index_to_after(header);
-            } else {
-                // TODO This is dangerous, add more checks before we set to empty.
-                // We want to double-check and be sure that the journal really is empty.
-
-                // TODO Snapshots: We must update the assertion below as the last committed op may
-                // have been included in the snapshot and removed from the journal.
-                // Our op number may then be greater than zero.
-                assert(self.op == 0);
-                self.journal.set_nonce_offset_and_index_to_empty();
-            }
-            self.journal.assert_all_headers_are_reserved_from_index(self.journal.index);
-            assert(journal_index > self.journal.index); // TODO Snapshots: Handle wrapping.
-            self.journal.write_headers(self.journal.index, journal_index - self.journal.index);
         } else {
-            log.debug("{}: jump_to_newer_view: no journal entries to remove", .{self.replica});
+            log.debug("{}: jump_to_newer_view: op == commit, no need to rewind", .{self.replica});
         }
 
         assert(self.op == self.commit);
@@ -1313,30 +1341,27 @@ pub const Replica = struct {
         assert(self.follower());
     }
 
+    /// Advances `op` to where we need to be before `header` can be processed as a prepare:
     fn jump_to_newer_op(self: *Replica, header: *const Header) void {
-        log.debug("{}: jump_to_newer_op: op={}..{} nonce={}..{} offset={}..{} index={}..{}", .{
-            self.replica,
-            self.op,
-            header.op,
-            self.journal.nonce,
-            header.nonce,
-            self.journal.offset,
-            header.offset,
-            self.journal.index,
-            header.index,
-        });
         assert(self.status == .normal);
         assert(self.follower());
-        assert(header.op > self.op);
+        assert(header.view == self.view);
         assert(header.op > self.op + 1);
         assert(header.op > self.commit);
-        // TODO Assert offset.
+
+        const latest_entry = self.journal.entry_for_op(self.op).?;
+        assert(latest_entry.op == self.op);
+
+        log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
+            self.replica,
+            self.op,
+            header.op - 1,
+            latest_entry.checksum,
+            header.nonce,
+        });
         self.op = header.op - 1;
         assert(self.op >= self.commit);
         assert(self.op + 1 == header.op);
-        self.journal.nonce = header.nonce;
-        self.journal.index = header.index;
-        self.journal.offset = header.offset;
     }
 
     /// Panics if immediate neighbors in the same view would have a broken hash chain.
@@ -1348,9 +1373,9 @@ pub const Replica = struct {
     ) void {
         assert(a.command == .prepare);
         assert(b.command == .prepare);
-        if (a.view == b.view and a.op + 1 == b.op and a.checksum_meta != b.nonce) {
-            assert(a.valid_checksum_meta());
-            assert(b.valid_checksum_meta());
+        if (a.view == b.view and a.op + 1 == b.op and a.checksum != b.nonce) {
+            assert(a.valid_checksum());
+            assert(b.valid_checksum());
             log.emerg("{}: panic_if_hash_chain_would_break: a: {}", .{ self.replica, a });
             log.emerg("{}: panic_if_hash_chain_would_break: b: {}", .{ self.replica, b });
             @panic("hash chain would break");
@@ -1461,19 +1486,18 @@ pub const Replica = struct {
 
         if (self.journal.has_clean(message.header)) {
             assert(message.header.replica == self.leader_index(message.header.view));
-            // Sending extra fields back in the ack such as offset allows the leader to cross-check.
-            // For example, a follower may ack the correct checksum but write to the wrong offset.
             self.send_header_to_replica(message.header.replica, .{
                 .command = .prepare_ok,
-                .nonce = message.header.checksum_meta,
-                .client_id = message.header.client_id,
-                .request_number = message.header.request_number,
+                .nonce = message.header.checksum,
+                .client = message.header.client,
+                .cluster = self.cluster,
                 .replica = self.replica,
                 .view = message.header.view,
                 .op = message.header.op,
                 .commit = message.header.commit,
                 .offset = message.header.offset,
-                .index = message.header.index,
+                .epoch = message.header.epoch,
+                .request = message.header.request,
                 .operation = message.header.operation,
             });
         } else {
@@ -1485,7 +1509,7 @@ pub const Replica = struct {
     fn on_prepare_timeout(self: *Replica) void {
         assert(self.status == .normal);
         assert(self.leader());
-        assert(self.request_checksum_meta != null);
+        assert(self.request_checksum != null);
         assert(self.prepare_message != null);
 
         var message = self.prepare_message.?;
@@ -1551,20 +1575,10 @@ pub const Replica = struct {
         }
 
         if (self.prepare_message) |prepare_message| {
-            if (message.header.nonce != prepare_message.header.checksum_meta) {
+            if (message.header.nonce != prepare_message.header.checksum) {
                 log.debug("{}: on_prepare_ok: ignoring (different nonce)", .{self.replica});
                 return;
             }
-
-            assert(message.header.command == .prepare_ok);
-            assert(message.header.client_id == prepare_message.header.client_id);
-            assert(message.header.request_number == prepare_message.header.request_number);
-            assert(message.header.view == prepare_message.header.view);
-            assert(message.header.op == prepare_message.header.op);
-            assert(message.header.commit == prepare_message.header.commit);
-            assert(message.header.offset == prepare_message.header.offset);
-            assert(message.header.index == prepare_message.header.index);
-            assert(message.header.operation == prepare_message.header.operation);
         } else {
             log.debug("{}: on_prepare_ok: ignoring (not preparing)", .{self.replica});
             return;
@@ -1573,7 +1587,18 @@ pub const Replica = struct {
         assert(self.status == .normal);
         assert(message.header.view == self.view);
         assert(self.leader());
-        assert(message.header.nonce == self.prepare_message.?.header.checksum_meta);
+
+        assert(message.header.command == .prepare_ok);
+        assert(message.header.nonce == self.prepare_message.?.header.checksum);
+        assert(message.header.client == self.prepare_message.?.header.client);
+        assert(message.header.cluster == self.prepare_message.?.header.cluster);
+        assert(message.header.view == self.prepare_message.?.header.view);
+        assert(message.header.op == self.prepare_message.?.header.op);
+        assert(message.header.commit == self.prepare_message.?.header.commit);
+        assert(message.header.offset == self.prepare_message.?.header.offset);
+        assert(message.header.epoch == self.prepare_message.?.header.epoch);
+        assert(message.header.request == self.prepare_message.?.header.request);
+        assert(message.header.operation == self.prepare_message.?.header.operation);
         assert(message.header.op == self.op);
         assert(message.header.op == self.commit + 1);
 
@@ -1594,7 +1619,7 @@ pub const Replica = struct {
 
     fn reset_prepare(self: *Replica) void {
         if (self.prepare_message) |message| {
-            self.request_checksum_meta = null;
+            self.request_checksum = null;
             message.references -= 1;
             self.message_bus.gc(message);
             self.prepare_message = null;
@@ -1602,7 +1627,7 @@ pub const Replica = struct {
             self.prepare_timeout.stop();
             self.reset_quorum_counter(self.prepare_ok_from_all_replicas, .prepare_ok);
         }
-        assert(self.request_checksum_meta == null);
+        assert(self.request_checksum == null);
         assert(self.prepare_message == null);
         assert(self.prepare_attempt == 0);
         assert(self.prepare_timeout.ticking == false);
@@ -1615,9 +1640,14 @@ pub const Replica = struct {
 
         self.commit_timeout.reset();
 
-        // TODO Add checksum_meta (as nonce) of latest committed entry so that followers can verify.
+        // TODO Snapshots: Use snapshot checksum if commit is no longer in journal.
+        const latest_committed_entry = self.journal.entry_for_op(self.commit).?;
+        assert(latest_committed_entry.op == self.commit);
+
         self.send_header_to_other_replicas(.{
             .command = .commit,
+            .nonce = latest_committed_entry.checksum,
+            .cluster = self.cluster,
             .replica = self.replica,
             .view = self.view,
             .commit = self.commit,
@@ -1650,6 +1680,8 @@ pub const Replica = struct {
         assert(self.follower());
         assert(message.header.replica == self.leader_index(message.header.view));
         assert(self.commit <= self.op);
+
+        // TODO Verify message.header.nonce matches journal entry for message.header.commit number.
 
         self.normal_timeout.reset();
 
@@ -1698,7 +1730,7 @@ pub const Replica = struct {
             return false;
         }
 
-        if (self.journal.entry(header.index)) |existing| {
+        if (self.journal.entry(header)) |existing| {
             if (existing.view > header.view) {
                 log.debug("{}: repair_header: ignoring (newer view)", .{self.replica});
                 return false;
@@ -1710,8 +1742,8 @@ pub const Replica = struct {
                 return false;
             }
 
-            if (existing.checksum_meta == header.checksum_meta) {
-                if (self.journal.dirty[header.index]) {
+            if (existing.checksum == header.checksum) {
+                if (self.journal.dirty[header.op]) {
                     log.debug("{}: repair_header: exists (dirty checksum)", .{self.replica});
                     // We still want to run the chain and overlap checks below before deciding...
                 } else {
@@ -1765,8 +1797,8 @@ pub const Replica = struct {
         self: *Replica,
         header: *const Header,
     ) bool {
-        if (self.journal.previous_entry(header.index)) |previous| {
-            if (previous.checksum_meta == header.nonce) {
+        if (self.journal.previous_entry(header)) |previous| {
+            if (previous.checksum == header.nonce) {
                 assert(previous.view <= header.view);
                 assert(previous.op + 1 == header.op);
                 return false;
@@ -1774,8 +1806,8 @@ pub const Replica = struct {
             self.panic_if_hash_chain_would_break_in_the_same_view(previous, header);
             return self.repair_header_has_newer_neighbor(header, previous);
         }
-        if (self.journal.next_entry(header.index)) |next| {
-            if (header.checksum_meta == next.nonce) {
+        if (self.journal.next_entry(header)) |next| {
+            if (header.checksum == next.nonce) {
                 assert(header.view <= next.view);
                 assert(header.op + 1 == next.op);
                 return false;
@@ -1792,26 +1824,28 @@ pub const Replica = struct {
         // TODO Snapshots: Handle journal wrap around.
         {
             // Look behind this entry for any preceeding entry that this would overwrite.
-            var i: usize = header.index;
-            while (i > 0) {
-                i -= 1;
-                const neighbor = &self.journal.headers[i];
-                if (neighbor.command == .reserved) continue;
-                if (neighbor.offset + Journal.sector_ceil(neighbor.size) <= header.offset) break;
-                if (neighbor.offset + Journal.sector_ceil(neighbor.size) > header.offset) {
-                    if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
+            var op: usize = header.op;
+            while (op > 0) {
+                op -= 1;
+                if (self.journal.entry_for_op(op)) |neighbor| {
+                    if (neighbor.offset + Journal.sector_ceil(neighbor.size) > header.offset) {
+                        if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
+                    } else {
+                        break;
+                    }
                 }
             }
         }
         {
             // Look beyond this entry for any succeeding entry that this would overwrite.
-            var i: usize = header.index + 1;
-            while (i < self.journal.index) : (i += 1) {
-                const neighbor = &self.journal.headers[i];
-                if (neighbor.command == .reserved) continue;
-                if (header.offset + Journal.sector_ceil(header.size) <= neighbor.offset) break;
-                if (header.offset + Journal.sector_ceil(header.size) > neighbor.offset) {
-                    if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
+            var op: usize = header.op + 1;
+            while (op <= self.op) : (op += 1) {
+                if (self.journal.entry_for_op(op)) |neighbor| {
+                    if (header.offset + Journal.sector_ceil(header.size) > neighbor.offset) {
+                        if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
+                    } else {
+                        break;
+                    }
                 }
             }
         }
@@ -1822,20 +1856,20 @@ pub const Replica = struct {
     /// Looks behind this entry for any preceeding entry that would be newer.
     fn repair_header_would_succeed_newer_neighbor(self: *Replica, header: *const Header) bool {
         // TODO Snapshots: Handle journal wrap around:
-        // We may not know the journal start index (if we do not yet have the snapshot).
-        // Run from header.index - 1 down through zero to self.index?
-        var i: usize = header.index;
-        while (i > 0) {
-            i -= 1;
-            const neighbor = &self.journal.headers[i];
-            if (neighbor.command == .reserved) continue;
-            return self.repair_header_has_newer_neighbor(header, neighbor);
+        // We may not know the journal start position (if we do not yet have the snapshot).
+        // Run from header.op - 1 down through zero to start?
+        var op: usize = header.op;
+        while (op > 0) {
+            op -= 1;
+            if (self.journal.entry_for_op(op)) |neighbor| {
+                return self.repair_header_has_newer_neighbor(header, neighbor);
+            }
         }
         return false;
     }
 
-    /// A neighbor may be an immediate neighbor (left or right of the index) or further away.
-    /// Returns whether the neighbor has a higher view or else same view and higher op.
+    /// A neighbor may be an immediate neighbor (left or right of the header) or further away.
+    /// Returns whether the neighbor has a higher view or else same view but higher op.
     fn repair_header_has_newer_neighbor(
         self: *Replica,
         header: *const Header,
@@ -1843,11 +1877,11 @@ pub const Replica = struct {
     ) bool {
         assert(header.command == .prepare);
         assert(neighbor.command == .prepare);
-        assert(neighbor.index != header.index);
+        assert(neighbor.op != header.op);
 
         // Check if we haven't accidentally swapped the header and neighbor arguments above:
         // The neighbor should at least exist in the journal.
-        assert(self.journal.headers[neighbor.index].checksum_meta == neighbor.checksum_meta);
+        assert(self.journal.has(neighbor));
 
         if (neighbor.view > header.view) {
             // We do not assert neighbor.op >= header.op, ops may be reordered during a view change.
@@ -1862,8 +1896,6 @@ pub const Replica = struct {
             assert(neighbor.view == header.view);
             return false;
         } else {
-            assert(neighbor.view == header.view);
-            assert(neighbor.op == header.op);
             unreachable;
         }
         return false;
@@ -1909,6 +1941,7 @@ pub const Replica = struct {
         // This could happen if the replica mistakenly counts its own message in the quorum.
         self.send_header_to_other_replicas(.{
             .command = .start_view_change,
+            .cluster = self.cluster,
             .replica = self.replica,
             .view = new_view,
         });
@@ -2005,6 +2038,7 @@ pub const Replica = struct {
         var message = self.message_bus.create_message(size_max) catch unreachable;
         message.header.* = .{
             .command = .do_view_change,
+            .cluster = self.cluster,
             .replica = self.replica,
             .view = self.view,
             .op = self.op,
@@ -2012,13 +2046,13 @@ pub const Replica = struct {
         };
 
         var dest = std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..size_max]);
-        const count = self.journal.copy_latest_headers_to(dest);
+        const count = self.journal.copy_headers_up_to_op(self.op, dest);
 
         message.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
         const data = message.buffer[@sizeOf(Header)..message.header.size];
 
         message.header.set_checksum_data(data);
-        message.header.set_checksum_meta();
+        message.header.set_checksum();
 
         const new_leader = self.leader_index(self.view);
 
@@ -2071,10 +2105,8 @@ pub const Replica = struct {
         var v: ?u64 = null; // Latest normal view
         var n: ?u64 = null; // Op number
         var k: ?u64 = null; // Commit number
-
-        var c: ?u128 = null; // Journal nonce
-        var o: ?u64 = null; // Journal offset
-        var i: ?u32 = null; // Journal index
+        var c: ?u128 = null; // Checksum
+        var o: ?u64 = null; // Offset
 
         for (self.do_view_change_from_all_replicas) |received, replica| {
             if (received) |m| {
@@ -2087,13 +2119,13 @@ pub const Replica = struct {
                 for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |*h| {
                     if (h.command == .reserved) continue;
 
+                    assert(h.command == .prepare);
                     if (v == null or h.view > v.? or (h.view == v.? and h.op > n.?)) {
                         assert(v == null or h.view >= v.?);
                         v = h.view;
                         n = h.op;
-                        c = h.nonce;
+                        c = h.checksum;
                         o = h.offset;
-                        i = h.index;
                     }
 
                     _ = self.repair_header(h);
@@ -2101,22 +2133,30 @@ pub const Replica = struct {
             }
         }
 
-        assert(v.? >= 0 and v.? < self.view); // Latest normal view before this view change.
-        assert(n.? >= self.op); // TODO Reordered ops.
-        assert(k.? >= self.commit);
-
-        log.debug("{}: on_do_view_change: latest: view={} op={} commit={} nonce={} offset={} index={}", .{
+        log.debug("{}: on_do_view_change: latest: view={} op={} commit={} checksum={} offset={}", .{
             self.replica,
             v,
             n,
             k,
             c,
             o,
-            i,
         });
 
+        assert(v.? >= 0 and v.? < self.view); // Latest normal view before this view change.
+        assert(n.? >= self.commit); // Ops may be reordered and rewound through a prior view change.
+        assert(k.? >= self.commit);
+
+        const latest_entry = self.journal.entry_for_op(n.?).?;
+        assert(latest_entry.view == v.?);
+        assert(latest_entry.op == n.?);
+        assert(latest_entry.checksum == c.?);
+        assert(latest_entry.offset == o.?);
+
         self.op = n.?;
-        // TODO Set journal nonce, offset and index.
+        // TODO Set journal nonce and offset.
+
+        // TODO Ensure self.commit == self.op
+        // Next prepare needs this to hold: assert(message.header.op == self.commit + 1);
 
         // TODO Repair according to CTRL protocol.
         self.commit_ops_through(k.?);
@@ -2128,9 +2168,10 @@ pub const Replica = struct {
         assert(self.leader());
 
         // TODO Add journal entries to start_view message.
-        // TODO Add journal nonce, offset and index to start_view message.
+        // TODO Add checksum to start_view message.
         self.send_header_to_other_replicas(.{
             .command = .start_view,
+            .cluster = self.cluster,
             .replica = self.replica,
             .view = self.view,
             .op = self.op,
@@ -2207,7 +2248,7 @@ pub const Replica = struct {
             .prepare_ok => {
                 assert(self.status == .normal);
                 assert(self.leader());
-                assert(message.header.nonce == self.prepare_message.?.header.checksum_meta);
+                assert(message.header.nonce == self.prepare_message.?.header.checksum);
             },
             .start_view_change => assert(self.status == .view_change),
             .do_view_change => {
@@ -2230,7 +2271,8 @@ pub const Replica = struct {
             assert(m.header.view == message.header.view);
             assert(m.header.op == message.header.op);
             assert(m.header.commit == message.header.commit);
-            assert(m.header.latest_normal_view == message.header.latest_normal_view);
+            assert(m.header.checksum_data == message.header.checksum_data);
+            assert(m.header.checksum == message.header.checksum);
             log.debug(
                 "{}: on_{}: ignoring (duplicate message)",
                 .{ self.replica, @tagName(message.header.command) },
@@ -2253,16 +2295,12 @@ pub const Replica = struct {
                 assert(m.header.view == self.view);
                 switch (message.header.command) {
                     .prepare_ok => {
-                        assert(m.header.latest_normal_view <= self.view);
                         assert(m.header.nonce == message.header.nonce);
                     },
                     .start_view_change => {
-                        assert(m.header.latest_normal_view < self.view);
                         assert(m.header.replica != self.replica);
                     },
-                    .do_view_change => {
-                        assert(m.header.latest_normal_view < self.view);
-                    },
+                    .do_view_change => {},
                     else => unreachable,
                 }
                 count += 1;
@@ -2384,15 +2422,16 @@ pub fn run() !void {
     const f = 1;
     const journal_size = 512 * 1024 * 1024;
     const journal_headers = 1048576;
+    const cluster = 123456789;
 
     var configuration: [3]ConfigurationAddress = undefined;
     var message_bus = try MessageBus.init(allocator, &configuration);
 
     var journals: [2 * f + 1]Journal = undefined;
-    for (journals) |*journal, replica_index| {
+    for (journals) |*journal, index| {
         journal.* = try Journal.init(
             allocator,
-            @intCast(u16, replica_index),
+            @intCast(u16, index),
             journal_size,
             journal_headers,
         );
@@ -2407,6 +2446,7 @@ pub fn run() !void {
     for (replicas) |*replica, index| {
         replica.* = try Replica.init(
             allocator,
+            cluster,
             f,
             &configuration,
             &message_bus,
@@ -2435,20 +2475,22 @@ pub fn run() !void {
             if (ticks == 1 or ticks == 5) {
                 var request = message_bus.create_message(sector_size) catch unreachable;
                 request.header.* = .{
-                    .client_id = 1,
-                    .request_number = ticks,
+                    .cluster = cluster,
+                    .client = 1,
+                    .view = 0,
+                    .request = @intCast(u32, ticks),
                     .command = .request,
                     .operation = .noop,
                 };
                 request.header.set_checksum_data(request.buffer[0..0]);
-                request.header.set_checksum_meta();
+                request.header.set_checksum();
 
                 message_bus.send_message_to_replica(replica.replica, request);
             }
         }
 
         message_bus.send_queued_messages();
-        std.time.sleep(std.time.ns_per_s);
+        std.time.sleep(std.time.ns_per_ms * 1000);
     }
 }
 pub fn main() !void {
