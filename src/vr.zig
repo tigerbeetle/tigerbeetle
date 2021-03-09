@@ -552,42 +552,52 @@ pub const Journal = struct {
         return self.has(header) and self.dirty[header.op];
     }
 
-    /// Copies as many headers as will fit in `dest` including `op`.
-    pub fn copy_headers_up_to_op(self: *Journal, op: u64, dest: []Header) usize {
+    /// Copies latest headers between `op_min` and `op_max` (both inclusive) as will fit in `dest`.
+    /// Reverses the order when copying so that latest headers are copied first, which also protects
+    /// against the callsite slicing the buffer the wrong way and incorrectly.
+    /// Skips .reserved headers (gaps between headers).
+    /// Zeroes the `dest` buffer in case the copy would underflow and leave a buffer bleed.
+    /// Returns the number of headers actually copied.
+    pub fn copy_latest_headers_between(
+        self: *Journal,
+        op_min: u64,
+        op_max: u64,
+        dest: []Header,
+    ) usize {
         assert(dest.len > 0);
         for (dest) |*header| header.zero();
-        // TODO Snapshots
-        const end: usize = op + 1;
-        const len: usize = std.math.min(dest.len, end);
-        const start: usize = end - len;
-        log.debug("op={} start={} end={} len={}", .{ op, start, end, len });
-        const source = self.headers[start..end];
-        std.mem.copy(Header, dest, source);
-        assert(source.len > 0);
-        return source.len;
+
+        var copied: usize = 0;
+        var op = op_max + 1;
+        while (op > op_min) {
+            op -= 1;
+            if (self.entry_for_op(op)) |header| {
+                dest[copied] = header.*;
+                copied += 1;
+            }
+        }
+        return copied;
     }
 
-    const HeaderRange = struct { min: u64, max: u64 };
+    const HeaderRange = struct { op_min: u64, op_max: u64 };
 
-    /// Finds the latest gap in headers between `after_op` and `before_op` (both exclusive).
-    pub fn find_gap_between(self: *Journal, after_op: u64, before_op: u64) ?HeaderRange {
+    /// Finds the latest gap in headers, searching between `op_min` and `op_max` (both inclusive).
+    pub fn find_latest_gap_between(self: *Journal, op_min: u64, op_max: u64) ?HeaderRange {
         var range: ?HeaderRange = null;
 
-        if (after_op == before_op) return range;
-        assert(after_op < before_op);
-
-        var op = before_op - 1;
-        while (op > after_op) : (op -= 1) {
+        var op = op_max + 1;
+        while (op > op_min) {
+            op -= 1;
             if (self.entry_for_op(op) == null) {
                 if (range == null) {
                     // We have found the latest gap:
                     range = .{
-                        .min = op,
-                        .max = op,
+                        .op_min = op,
+                        .op_max = op,
                     };
-                } else if (op + 1 == range.?.min) {
+                } else if (op + 1 == range.?.op_min) {
                     // This op is immediately before and part of the gap, widen the range:
-                    range.?.min = op;
+                    range.?.op_min = op;
                 } else {
                     // We failed to break the loop for a present entry with range != null:
                     unreachable;
@@ -597,7 +607,6 @@ pub const Journal = struct {
                 break;
             }
         }
-
         return range;
     }
 
@@ -2091,7 +2100,7 @@ pub const Replica = struct {
         };
 
         var dest = std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..size_max]);
-        const count = self.journal.copy_headers_up_to_op(self.op, dest);
+        const count = self.journal.copy_latest_headers_between(0, self.op, dest);
 
         message.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
         const data = message.buffer[@sizeOf(Header)..message.header.size];
@@ -2228,21 +2237,29 @@ pub const Replica = struct {
         });
     }
 
-    /// Starting from the latest journal entry, backfill any missing or stale headers.
+    /// Starting from the latest journal entry, backfill any missing or disconnected headers.
+    /// A header is disconnected if it breaks the hash chain with its newer neighbor to the right.
+    /// Since we work backwards from the latest entries, we should always be able to fix the chain.
     fn repair_headers(self: *Replica) void {
         if (self.status != .normal and self.status != .view_change) return;
 
-        var range = self.journal.find_gap_between(self.commit, self.op);
-        if (range) |gap| {
-            log.debug("{}: repair_headers: gap: ops={}..{}", .{ self.replica, gap.min, gap.max });
+        // It's critical to pass `self.commit + 1` as `op_min` since before that may be snapshotted:
+        // Once snapshotted, it's no longer in the journal and would then always constitute a gap.
+        var gap = self.journal.find_latest_gap_between(self.commit + 1, self.op);
+        if (gap) |range| {
+            log.debug("{}: repair_headers: gap: ops={}..{}", .{
+                self.replica,
+                range.op_min,
+                range.op_max,
+            });
             // TODO Ask any N random replicas excluding ourself (to reduce traffic).
             self.send_header_to_other_replicas(.{
                 .command = .request_headers,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
-                .commit = gap.min,
-                .op = gap.max,
+                .commit = range.op_min,
+                .op = range.op_max,
             });
             return;
         } else {
@@ -2273,11 +2290,11 @@ pub const Replica = struct {
             return;
         }
 
-        const min = message.header.commit;
-        const max = message.header.op;
-        const len = @intCast(u32, max - min);
+        const op_min = message.header.commit;
+        const op_max = message.header.op;
+        const count_max = @intCast(u32, std.math.min(64, op_max - op_min));
 
-        const size_max = @sizeOf(Header) + @sizeOf(Header) * std.math.min(8, len);
+        const size_max = @sizeOf(Header) + @sizeOf(Header) * count_max;
 
         var m = self.message_bus.create_message(size_max) catch unreachable;
         m.header.* = .{
@@ -2289,7 +2306,7 @@ pub const Replica = struct {
         };
 
         var dest = std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..size_max]);
-        const count = self.journal.copy_headers_up_to_op(max, dest);
+        const count = self.journal.copy_latest_headers_between(op_min, op_max, dest);
         log.debug("copied {} headers", .{count});
 
         m.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
