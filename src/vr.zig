@@ -20,6 +20,9 @@ pub const Command = packed enum(u8) {
     start_view_change,
     do_view_change,
     start_view,
+
+    request_headers,
+    headers,
 };
 
 /// State machine operations:
@@ -562,6 +565,40 @@ pub const Journal = struct {
         std.mem.copy(Header, dest, source);
         assert(source.len > 0);
         return source.len;
+    }
+
+    const HeaderRange = struct { min: u64, max: u64 };
+
+    /// Finds the latest gap in headers between `after_op` and `before_op` (both exclusive).
+    pub fn find_gap_between(self: *Journal, after_op: u64, before_op: u64) ?HeaderRange {
+        var range: ?HeaderRange = null;
+
+        if (after_op == before_op) return range;
+        assert(after_op < before_op);
+
+        var op = before_op - 1;
+        while (op > after_op) : (op -= 1) {
+            if (self.entry_for_op(op) == null) {
+                if (range == null) {
+                    // We have found the latest gap:
+                    range = .{
+                        .min = op,
+                        .max = op,
+                    };
+                } else if (op + 1 == range.?.min) {
+                    // This op is immediately before and part of the gap, widen the range:
+                    range.?.min = op;
+                } else {
+                    // We failed to break the loop for a present entry with range != null:
+                    unreachable;
+                }
+            } else if (range != null) {
+                // The previous entry before this gap is present and we can return:
+                break;
+            }
+        }
+
+        return range;
     }
 
     /// Removes entries after op number (exclusive), i.e. with a higher op number.
@@ -1129,6 +1166,8 @@ pub const Replica = struct {
             .start_view_change => self.on_start_view_change(message),
             .do_view_change => self.on_do_view_change(message),
             .start_view => self.on_start_view(message),
+            .request_headers => self.on_request_headers(message),
+            .headers => self.on_headers(message),
             else => unreachable,
         }
     }
@@ -1258,10 +1297,10 @@ pub const Replica = struct {
             self.jump_to_newer_op(message.header);
         }
 
-        if (self.journal.previous_entry(message.header)) |previous_entry| {
+        if (self.journal.previous_entry(message.header)) |previous| {
             // Any previous entry may be a whole journal's worth of ops behind due to wrapping.
             // We therefore do not do any further op, offset or checksum assertions beyond this:
-            self.panic_if_hash_chain_would_break_in_the_same_view(previous_entry, message.header);
+            self.panic_if_hash_chain_would_break_in_the_same_view(previous, message.header);
         }
 
         // We must advance our op and set the header as dirty before replicating and journalling.
@@ -2159,7 +2198,11 @@ pub const Replica = struct {
         assert(latest_entry.offset == o.?);
 
         self.op = n.?;
-        // TODO Set journal nonce and offset.
+
+        self.repair_headers();
+
+        // TODO
+        if (true) return;
 
         // TODO Ensure self.commit == self.op
         // Next prepare needs this to hold: assert(message.header.op == self.commit + 1);
@@ -2183,6 +2226,105 @@ pub const Replica = struct {
             .op = self.op,
             .commit = self.commit,
         });
+    }
+
+    /// Starting from the latest journal entry, backfill any missing or stale headers.
+    fn repair_headers(self: *Replica) void {
+        if (self.status != .normal and self.status != .view_change) return;
+
+        var range = self.journal.find_gap_between(self.commit, self.op);
+        if (range) |gap| {
+            log.debug("{}: repair_headers: gap: ops={}..{}", .{ self.replica, gap.min, gap.max });
+            // TODO Ask any N random replicas excluding ourself (to reduce traffic).
+            self.send_header_to_other_replicas(.{
+                .command = .request_headers,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .commit = gap.min,
+                .op = gap.max,
+            });
+            return;
+        } else {
+            // TODO
+            log.debug("{}: no gap but asking for headers 0 through 5...", .{self.replica});
+            self.send_header_to_other_replicas(.{
+                .command = .request_headers,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .commit = 0,
+                .op = 5,
+            });
+        }
+    }
+
+    fn on_request_headers(self: *Replica, message: *const Message) void {
+        // TODO Add debug logs.
+        if (self.status != .normal and self.status != .view_change) {
+            return;
+        }
+
+        if (message.header.view != self.view) {
+            return;
+        }
+
+        if (message.header.replica == self.replica) {
+            return;
+        }
+
+        const min = message.header.commit;
+        const max = message.header.op;
+        const len = @intCast(u32, max - min);
+
+        const size_max = @sizeOf(Header) + @sizeOf(Header) * std.math.min(8, len);
+
+        var m = self.message_bus.create_message(size_max) catch unreachable;
+        m.header.* = .{
+            .command = .headers,
+            .nonce = message.header.checksum,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+        };
+
+        var dest = std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..size_max]);
+        const count = self.journal.copy_headers_up_to_op(max, dest);
+        log.debug("copied {} headers", .{count});
+
+        m.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
+        const data = m.buffer[@sizeOf(Header)..m.header.size];
+
+        m.header.set_checksum_data(data);
+        m.header.set_checksum();
+
+        assert(m.references == 0);
+        self.send_message_to_replica(message.header.replica, m);
+    }
+
+    fn on_headers(self: *Replica, message: *const Message) void {
+        if (self.status != .normal and self.status != .view_change) {
+            return;
+        }
+
+        if (message.header.view != self.view) {
+            return;
+        }
+
+        if (message.header.replica == self.replica) {
+            return;
+        }
+
+        log.debug("{}: received headers from {}", .{ self.replica, message.header.replica });
+
+        for (std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..message.header.size])) |*h| {
+            if (h.command == .reserved) continue;
+
+            log.debug("{}: {}", .{ self.replica, h });
+
+            _ = self.repair_header(h);
+        }
+
     }
 
     fn on_start_view(self: *Replica, message: *const Message) void {
@@ -2406,14 +2548,18 @@ pub const Replica = struct {
                 // We do not assert message.header.replica as we would for send_header_to_replica().
                 // We may forward messages sent by another replica (e.g. prepares from the leader).
                 assert(self.status == .normal);
-                assert(message.header.view == self.view);
             },
             .do_view_change => {
                 assert(self.status == .view_change);
-                assert(message.header.view == self.view);
+            },
+            .headers => {
+                assert(self.status == .normal or self.status == .view_change);
+                assert(message.header.replica == self.replica);
             },
             else => unreachable,
         }
+        assert(message.header.cluster == self.cluster);
+        assert(message.header.view == self.view);
         self.message_bus.send_message_to_replica(replica, message);
     }
 };
@@ -2499,6 +2645,7 @@ pub fn run() !void {
         std.time.sleep(std.time.ns_per_ms * 1000);
     }
 }
+
 pub fn main() !void {
     var frame = async run();
     nosuspend try await frame;
