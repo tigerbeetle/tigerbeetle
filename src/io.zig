@@ -102,6 +102,8 @@ pub const IO = struct {
                 error.SignalInterrupt => continue,
                 // Wait for some completions and then try again:
                 // See https://github.com/axboe/liburing/issues/281 re: error.SystemResources.
+                // Be careful also that copy_cqes() will flush before entering to wait (it does):
+                // https://github.com/axboe/liburing/commit/35c199c48dfd54ad46b96e386882e7ac341314c5
                 error.CompletionQueueOvercommitted, error.SystemResources => {
                     try self.flush_completions(true);
                     continue;
