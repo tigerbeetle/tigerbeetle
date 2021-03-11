@@ -458,10 +458,10 @@ pub const IO = struct {
 
     pub fn accept(
         self: *IO,
-        completion: *Completion,
         comptime Context: type,
         context: Context,
         comptime callback: fn (context: Context, completion: *Completion, result: AcceptError!os.socket_t) void,
+        completion: *Completion,
         socket: os.socket_t,
         address: os.sockaddr,
         address_size: os.socklen_t,
@@ -500,10 +500,10 @@ pub const IO = struct {
 
     pub fn close(
         self: *IO,
-        completion: *Completion,
         comptime Context: type,
         context: Context,
         comptime callback: fn (context: Context, completion: *Completion, result: CloseError!void) void,
+        completion: *Completion,
         fd: os.fd_t,
     ) void {
         completion.* = .{
@@ -545,10 +545,10 @@ pub const IO = struct {
 
     pub fn connect(
         self: *IO,
-        completion: *Completion,
         comptime Context: type,
         context: Context,
         comptime callback: fn (context: Context, completion: *Completion, result: ConnectError!void) void,
+        completion: *Completion,
         socket: os.socket_t,
         address: os.sockaddr,
         address_size: os.socklen_t,
@@ -587,10 +587,10 @@ pub const IO = struct {
 
     pub fn fsync(
         self: *IO,
-        completion: *Completion,
         comptime Context: type,
         context: Context,
         comptime callback: fn (context: Context, completion: *Completion, result: FsyncError!void) void,
+        completion: *Completion,
         fd: os.fd_t,
         flags: u32,
     ) void {
@@ -639,10 +639,10 @@ pub const IO = struct {
 
     pub fn openat(
         self: *IO,
-        completion: *Completion,
         comptime Context: type,
         context: Context,
         comptime callback: fn (context: Context, completion: *Completion, result: OpenatError!os.fd_t) void,
+        completion: *Completion,
         fd: os.fd_t,
         path: [*:0]const u8,
         flags: u32,
@@ -685,10 +685,10 @@ pub const IO = struct {
 
     pub fn read(
         self: *IO,
-        completion: *Completion,
         comptime Context: type,
         context: Context,
         comptime callback: fn (context: Context, completion: *Completion, result: ReadError!usize) void,
+        completion: *Completion,
         fd: os.fd_t,
         buffer: []u8,
         offset: u64,
@@ -727,10 +727,10 @@ pub const IO = struct {
 
     pub fn recv(
         self: *IO,
-        completion: *Completion,
         comptime Context: type,
         context: Context,
         comptime callback: fn (context: Context, completion: *Completion, result: RecvError!usize) void,
+        completion: *Completion,
         socket: os.socket_t,
         buffer: []u8,
         flags: u32,
@@ -775,10 +775,10 @@ pub const IO = struct {
 
     pub fn send(
         self: *IO,
-        completion: *Completion,
         comptime Context: type,
         context: Context,
         comptime callback: fn (context: Context, completion: *Completion, result: SendError!usize) void,
+        completion: *Completion,
         socket: os.socket_t,
         buffer: []const u8,
         flags: u32,
@@ -822,10 +822,10 @@ pub const IO = struct {
 
     pub fn write(
         self: *IO,
-        completion: *Completion,
         comptime Context: type,
         context: Context,
         comptime callback: fn (context: Context, completion: *Completion, result: WriteError!usize) void,
+        completion: *Completion,
         fd: os.fd_t,
         buffer: []const u8,
         offset: u64,
@@ -882,10 +882,10 @@ test "openat/close" {
     var fd: os.fd_t = 0;
     var completion: IO.Completion = undefined;
     io.openat(
-        &completion,
         *os.fd_t,
         &fd,
         openat_callback,
+        &completion,
         linux.AT_FDCWD,
         path,
         os.O_CLOEXEC | os.O_RDWR | os.O_CREAT,
