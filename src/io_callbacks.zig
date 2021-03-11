@@ -27,7 +27,7 @@ pub const IO = struct {
 
     ring: IO_Uring,
 
-    /// Completions not yet submitted to the kernel and waiting on available space in the
+    /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
     unqueued: Fifo = .{},
 
@@ -49,7 +49,7 @@ pub const IO = struct {
     }
 
     /// Pass all queued submissions to the kernel and run the event loop
-    /// until there is no longer any i/o pending.
+    /// until there is no longer any I/O pending.
     pub fn run(self: *IO) !void {
         while (self.queued + self.submitted > 0 or
             self.unqueued.out != null or self.completed.out != null)
@@ -62,18 +62,22 @@ pub const IO = struct {
             // Loop on a copy of the linked list, having reset the linked list first, so that any
             // synchronous append on running a completion is executed only the next time round
             // the event loop, without creating an infinite suspend/resume cycle.
-            var out = self.completed.out;
-            self.completed = .{};
-            while (out) |completion| {
-                out = completion.next;
-                completion.run();
+            {
+                var out = self.completed.out;
+                self.completed = .{};
+                while (out) |completion| {
+                    out = completion.next;
+                    completion.complete();
+                }
             }
-            // Again, run on a copy of the list to avoid an infinite loop
-            out = self.unqueued.out;
-            self.unqueued = .{};
-            while (out) |completion| {
-                out = completion.next;
-                self.get_sqe(completion);
+            // Again, loop on a copy of the list to avoid an infinite loop
+            {
+                var out = self.unqueued.out;
+                self.unqueued = .{};
+                while (out) |completion| {
+                    out = completion.next;
+                    self.enqueue(completion);
+                }
             }
         }
         assert(self.unqueued.in == null);
@@ -130,7 +134,7 @@ pub const IO = struct {
         }
     }
 
-    fn get_sqe(self: *IO, completion: *Completion) void {
+    fn enqueue(self: *IO, completion: *Completion) void {
         const sqe = self.ring.get_sqe() catch |err| switch (err) {
             error.SubmissionQueueFull => {
                 completion.next = null;
@@ -139,7 +143,7 @@ pub const IO = struct {
             },
         };
         self.queued += 1;
-        completion.complete_prep(sqe);
+        completion.prep(sqe);
     }
 
     /// This struct holds the data needed for a single io_uring operation
@@ -153,11 +157,7 @@ pub const IO = struct {
         context: ?*c_void,
         callback: fn (context: ?*c_void, completion: *Completion, result: *const c_void) callconv(.C) void,
 
-        fn prep(completion: *Completion) void {
-            completion.io.get_sqe(completion);
-        }
-
-        fn complete_prep(completion: *Completion, sqe: *io_uring_sqe) void {
+        fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
                 .accept => |*op| {
                     linux.io_uring_prep_accept(sqe, op.socket, &op.address, &op.address_size, op.flags);
@@ -190,12 +190,12 @@ pub const IO = struct {
             sqe.user_data = @ptrToInt(completion);
         }
 
-        fn run(completion: *Completion) void {
+        fn complete(completion: *Completion) void {
             switch (completion.operation) {
                 .accept => {
                     const result = if (completion.result < 0) switch (-completion.result) {
                         os.EINTR => {
-                            completion.prep();
+                            completion.io.enqueue(completion);
                             return;
                         },
                         os.EAGAIN => error.WouldBlock,
@@ -229,7 +229,7 @@ pub const IO = struct {
                 .connect => {
                     const result = if (completion.result < 0) switch (-completion.result) {
                         os.EINTR => {
-                            completion.prep();
+                            completion.io.enqueue(completion);
                             return;
                         },
                         os.EACCES => error.AccessDenied,
@@ -255,7 +255,7 @@ pub const IO = struct {
                 .fsync => {
                     const result = if (completion.result < 0) switch (-completion.result) {
                         os.EINTR => {
-                            completion.prep();
+                            completion.io.enqueue(completion);
                             return;
                         },
                         os.EBADF => error.FileDescriptorInvalid,
@@ -271,7 +271,7 @@ pub const IO = struct {
                 .openat => {
                     const result = if (completion.result < 0) switch (-completion.result) {
                         os.EINTR => {
-                            completion.prep();
+                            completion.io.enqueue(completion);
                             return;
                         },
                         os.EACCES => error.AccessDenied,
@@ -302,7 +302,7 @@ pub const IO = struct {
                 .read => {
                     const result = if (completion.result < 0) switch (-completion.result) {
                         os.EINTR => {
-                            completion.prep();
+                            completion.io.enqueue(completion);
                             return;
                         },
                         os.EAGAIN => error.WouldBlock,
@@ -324,7 +324,7 @@ pub const IO = struct {
                 .recv => {
                     const result = if (completion.result < 0) switch (-completion.result) {
                         os.EINTR => {
-                            completion.prep();
+                            completion.io.enqueue(completion);
                             return;
                         },
                         os.EAGAIN => error.WouldBlock,
@@ -342,7 +342,7 @@ pub const IO = struct {
                 .send => {
                     const result = if (completion.result < 0) switch (-completion.result) {
                         os.EINTR => {
-                            completion.prep();
+                            completion.io.enqueue(completion);
                             return;
                         },
                         os.EACCES => error.AccessDenied,
@@ -369,7 +369,7 @@ pub const IO = struct {
                 .write => {
                     const result = if (completion.result < 0) switch (-completion.result) {
                         os.EINTR => {
-                            completion.prep();
+                            completion.io.enqueue(completion);
                             return;
                         },
                         os.EAGAIN => error.WouldBlock,
@@ -488,7 +488,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.prep();
+        completion.io.enqueue(completion);
     }
 
     pub const CloseError = error{
@@ -522,7 +522,7 @@ pub const IO = struct {
                 .close = .{ .fd = fd },
             },
         };
-        completion.prep();
+        completion.io.enqueue(completion);
     }
 
     pub const ConnectError = error{
@@ -573,7 +573,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.prep();
+        completion.io.enqueue(completion);
     }
 
     pub const FsyncError = error{
@@ -613,7 +613,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.prep();
+        completion.io.enqueue(completion);
     }
 
     pub const OpenatError = error{
@@ -669,7 +669,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.prep();
+        completion.io.enqueue(completion);
     }
 
     pub const ReadError = error{
@@ -713,7 +713,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.prep();
+        completion.io.enqueue(completion);
     }
 
     pub const RecvError = error{
@@ -755,7 +755,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.prep();
+        completion.io.enqueue(completion);
     }
 
     pub const SendError = error{
@@ -803,7 +803,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.prep();
+        completion.io.enqueue(completion);
     }
 
     pub const WriteError = error{
@@ -850,7 +850,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.prep();
+        completion.io.enqueue(completion);
     }
 };
 
