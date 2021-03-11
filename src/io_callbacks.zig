@@ -48,54 +48,6 @@ pub const IO = struct {
         self.ring.deinit();
     }
 
-    /// Queue a command for submission to the kernel and register a callback.
-    /// Memory for the Completion struct is provided by the caller and must be
-    /// valid until the passed command's callback function is run.
-    /// The value provided as the context argument will be passed to the
-    /// command's callback function when it is run.
-    pub fn submit(
-        self: *IO,
-        completion: *Completion,
-        comptime Context: type,
-        context: Context,
-        command: Operation(Context),
-    ) void {
-        completion.* = .{
-            .io = self,
-            .result = undefined,
-            .next = undefined,
-            .context = @as(?*c_void, context),
-            // TODO: this could be done with some meta programming. Not sure if it's worth the complexity though
-            .command = switch (command) {
-                .accept => |cmd| .{
-                    .accept = .{
-                        .socket = cmd.socket,
-                        .address = cmd.address,
-                        .address_size = cmd.address_size,
-                        .flags = cmd.flags,
-                        .callback = @ptrCast(fn (result: *const AcceptError!os.socket_t, context: ?*c_void) callconv(.C) void, cmd.callback),
-                    },
-                },
-                .close => |cmd| .{
-                    .close = .{
-                        .fd = cmd.fd,
-                        .callback = @ptrCast(fn (result: *const CloseError!void, context: ?*c_void) callconv(.C) void, cmd.callback),
-                    },
-                },
-                .openat => |cmd| .{
-                    .openat = .{
-                        .fd = cmd.fd,
-                        .path = cmd.path,
-                        .flags = cmd.flags,
-                        .mode = cmd.mode,
-                        .callback = @ptrCast(fn (result: *const OpenatError!os.socket_t, context: ?*c_void) callconv(.C) void, cmd.callback),
-                    },
-                },
-            },
-        };
-        completion.prep();
-    }
-
     /// Pass all queued submissions to the kernel and run the event loop
     /// until there is no longer any i/o pending.
     pub fn run(self: *IO) !void {
@@ -193,38 +145,39 @@ pub const IO = struct {
     /// This struct holds the data needed for a single io_uring operation
     pub const Completion = struct {
         io: *IO,
-        result: i32,
-        next: ?*Completion,
-        // This is one of the usecases for c_void outside of C code and will be supported soon:
-        // https://github.com/ziglang/zig/issues/323
+        result: i32 = undefined,
+        next: ?*Completion = undefined,
+        operation: Operation,
+        // This is one of the usecases for c_void outside of C code and as such c_void will
+        // be replaced with anyopaque eventually: https://github.com/ziglang/zig/issues/323
         context: ?*c_void,
-        command: Operation(?*c_void),
+        callback: fn (context: ?*c_void, completion: *Completion, result: *const c_void) callconv(.C) void,
 
         fn prep(completion: *Completion) void {
             completion.io.get_sqe(completion);
         }
 
         fn complete_prep(completion: *Completion, sqe: *io_uring_sqe) void {
-            switch (completion.command) {
-                .accept => |*accept| {
+            switch (completion.operation) {
+                .accept => |*op| {
                     linux.io_uring_prep_accept(
                         sqe,
-                        accept.socket,
-                        &accept.address,
-                        &accept.address_size,
-                        accept.flags,
+                        op.socket,
+                        &op.address,
+                        &op.address_size,
+                        op.flags,
                     );
                 },
-                .close => |*close| {
-                    linux.io_uring_prep_close(sqe, close.fd);
+                .close => |*op| {
+                    linux.io_uring_prep_close(sqe, op.fd);
                 },
-                .openat => |*openat| {
+                .openat => |*op| {
                     linux.io_uring_prep_openat(
                         sqe,
-                        openat.fd,
-                        openat.path,
-                        openat.flags,
-                        openat.mode,
+                        op.fd,
+                        op.path,
+                        op.flags,
+                        op.mode,
                     );
                 },
             }
@@ -232,8 +185,8 @@ pub const IO = struct {
         }
 
         fn run(completion: *Completion) void {
-            switch (completion.command) {
-                .accept => |accept| {
+            switch (completion.operation) {
+                .accept => |op| {
                     const result = result: {
                         if (completion.result < 0) {
                             break :result switch (-completion.result) {
@@ -260,9 +213,9 @@ pub const IO = struct {
                             break :result @intCast(os.socket_t, completion.result);
                         }
                     };
-                    accept.callback(&result, completion.context);
+                    completion.callback(completion.context, completion, &result);
                 },
-                .close => |close| {
+                .close => |op| {
                     const result = result: {
                         if (completion.result < 0) {
                             break :result switch (-completion.result) {
@@ -278,9 +231,9 @@ pub const IO = struct {
                             break :result {};
                         }
                     };
-                    close.callback(&result, completion.context);
+                    completion.callback(completion.context, completion, &result);
                 },
-                .openat => |openat| {
+                .openat => |op| {
                     const result = result: {
                         if (completion.result < 0) {
                             break :result switch (-completion.result) {
@@ -315,41 +268,30 @@ pub const IO = struct {
                             break :result @intCast(os.fd_t, completion.result);
                         }
                     };
-                    openat.callback(&result, completion.context);
+                    completion.callback(completion.context, completion, &result);
                 },
             }
         }
     };
 
     /// This union encodes the set of operations supported as well as their arguments.
-    /// In addtion a callback with a generic Context is required which will be run on
-    /// completion of the operation.
-    /// The Context type must be a pointer type.
-    /// Callbacks use the c calling convention to allow non-UB calling after type erasure.
-    pub fn Operation(comptime Context: type) type {
-        assert(@sizeOf(Context) == @sizeOf(?*c_void));
-        assert(@alignOf(Context) == @alignOf(?*c_void));
-        return union(enum) {
-            accept: struct {
-                socket: os.fd_t,
-                address: os.sockaddr,
-                address_size: os.socklen_t,
-                flags: u32,
-                callback: fn (result: *const AcceptError!os.socket_t, context: Context) callconv(.C) void,
-            },
-            close: struct {
-                fd: os.fd_t,
-                callback: fn (result: *const CloseError!void, context: Context) callconv(.C) void,
-            },
-            openat: struct {
-                fd: os.fd_t,
-                path: [*:0]const u8,
-                flags: u32,
-                mode: os.mode_t,
-                callback: fn (result: *const OpenatError!os.fd_t, context: Context) callconv(.C) void,
-            },
-        };
-    }
+    const Operation = union(enum) {
+        accept: struct {
+            socket: os.fd_t,
+            address: os.sockaddr,
+            address_size: os.socklen_t,
+            flags: u32,
+        },
+        close: struct {
+            fd: os.fd_t,
+        },
+        openat: struct {
+            fd: os.fd_t,
+            path: [*:0]const u8,
+            flags: u32,
+            mode: os.mode_t,
+        },
+    };
 
     pub const AcceptError = error{
         WouldBlock,
@@ -365,12 +307,74 @@ pub const IO = struct {
         ProtocolFailure,
     } || os.UnexpectedError;
 
+    pub fn accept(
+        self: *IO,
+        completion: *Completion,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (context: Context, completion: *Completion, result: AcceptError!os.socket_t) void,
+        socket: os.socket_t,
+        address: os.sockaddr,
+        address_size: os.socklen_t,
+        flags: u32,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const AcceptError!os.socket_t, @ptrToInt(res)).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .accept = .{
+                    .socket = socket,
+                    .address = address,
+                    .address_size = address_size,
+                    .flags = flags,
+                },
+            },
+        };
+        completion.prep();
+    }
+
     pub const CloseError = error{
         FileDescriptorInvalid,
         DiskQuota,
         InputOutput,
         NoSpaceLeft,
     } || os.UnexpectedError;
+
+    pub fn close(
+        self: *IO,
+        completion: *Completion,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (context: Context, completion: *Completion, result: CloseError!void) void,
+        fd: os.fd_t,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const CloseError!void, @ptrToInt(res)).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .close = .{ .fd = fd },
+            },
+        };
+        completion.prep();
+    }
 
     pub const OpenatError = error{
         AccessDenied,
@@ -392,6 +396,41 @@ pub const IO = struct {
         FileLocksNotSupported,
         WouldBlock,
     } || os.UnexpectedError;
+
+    pub fn openat(
+        self: *IO,
+        completion: *Completion,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (context: Context, completion: *Completion, result: OpenatError!os.fd_t) void,
+        fd: os.fd_t,
+        path: [*:0]const u8,
+        flags: u32,
+        mode: os.mode_t,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const OpenatError!os.fd_t, @ptrToInt(res)).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .openat = .{
+                    .fd = fd,
+                    .path = path,
+                    .flags = flags,
+                    .mode = mode,
+                },
+            },
+        };
+        completion.prep();
+    }
 };
 
 test "openat/close" {
@@ -402,22 +441,23 @@ test "openat/close" {
     defer std.fs.cwd().deleteFile(path) catch {};
 
     var fd: os.fd_t = 0;
-    var openat: IO.Completion = undefined;
-    io.submit(&openat, *os.fd_t, &fd, .{
-        .openat = .{
-            .fd = linux.AT_FDCWD,
-            .path = path,
-            .flags = os.O_CLOEXEC | os.O_RDWR | os.O_CREAT,
-            .mode = 0o666,
-            .callback = openat_callback,
-        },
-    });
+    var completion: IO.Completion = undefined;
+    io.openat(
+        &completion,
+        *os.fd_t,
+        &fd,
+        openat_callback,
+        linux.AT_FDCWD,
+        path,
+        os.O_CLOEXEC | os.O_RDWR | os.O_CREAT,
+        0o666,
+    );
 
     try io.run();
 
     testing.expect(fd > 0);
 }
 
-fn openat_callback(result: *const IO.OpenatError!os.fd_t, context: *os.fd_t) callconv(.C) void {
-    context.* = result.* catch @panic("openat error");
+fn openat_callback(context: *os.fd_t, completion: *IO.Completion, result: IO.OpenatError!os.fd_t) void {
+    context.* = result catch @panic("openat error");
 }
