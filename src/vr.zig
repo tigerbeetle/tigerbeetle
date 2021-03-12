@@ -1931,8 +1931,8 @@ pub const Replica = struct {
             return false;
         }
 
-        if (self.repair_header_would_overlap_with_newer_neighbor(header)) {
-            log.debug("{}: repair_header: would overlap with newer neighbor", .{self.replica});
+        if (self.repair_header_would_overlap_newer_neighbor(header)) {
+            log.debug("{}: repair_header: would overlap newer neighbor", .{self.replica});
             return false;
         }
 
@@ -1956,7 +1956,7 @@ pub const Replica = struct {
                 return false;
             }
             self.panic_if_hash_chain_would_break_in_the_same_view(previous, header);
-            return self.repair_header_has_newer_neighbor(header, previous);
+            return self.ascending_viewstamps(header, previous);
         }
         if (self.journal.next_entry(header)) |next| {
             if (header.checksum == next.nonce) {
@@ -1965,14 +1965,14 @@ pub const Replica = struct {
                 return false;
             }
             self.panic_if_hash_chain_would_break_in_the_same_view(header, next);
-            return self.repair_header_has_newer_neighbor(header, next);
+            return self.ascending_viewstamps(header, next);
         }
         return false;
     }
 
     /// If we repair this header would we overwrite a newer neighbor (immediate or distant)?
     /// Ignores overlap if the neighboring entry is older and would in turn be repaired.
-    fn repair_header_would_overlap_with_newer_neighbor(self: *Replica, header: *const Header) bool {
+    fn repair_header_would_overlap_newer_neighbor(self: *Replica, header: *const Header) bool {
         // TODO Snapshots: Handle journal wrap around.
         {
             // Look behind this entry for any preceeding entry that this would overwrite.
@@ -1981,7 +1981,7 @@ pub const Replica = struct {
                 op -= 1;
                 if (self.journal.entry_for_op(op)) |neighbor| {
                     if (neighbor.offset + Journal.sector_ceil(neighbor.size) > header.offset) {
-                        if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
+                        if (self.ascending_viewstamps(header, neighbor)) return true;
                     } else {
                         break;
                     }
@@ -1994,7 +1994,7 @@ pub const Replica = struct {
             while (op <= self.op) : (op += 1) {
                 if (self.journal.entry_for_op(op)) |neighbor| {
                     if (header.offset + Journal.sector_ceil(header.size) > neighbor.offset) {
-                        if (self.repair_header_has_newer_neighbor(header, neighbor)) return true;
+                        if (self.ascending_viewstamps(header, neighbor)) return true;
                     } else {
                         break;
                     }
@@ -2014,43 +2014,36 @@ pub const Replica = struct {
         while (op > 0) {
             op -= 1;
             if (self.journal.entry_for_op(op)) |neighbor| {
-                return self.repair_header_has_newer_neighbor(header, neighbor);
+                return self.ascending_viewstamps(header, neighbor);
             }
         }
         return false;
     }
 
-    /// A neighbor may be an immediate neighbor (left or right of the header) or further away.
-    /// Returns whether the neighbor has a higher view or else same view but higher op.
-    fn repair_header_has_newer_neighbor(
+    /// Returns whether `b` succeeds `a` by having a newer view or same view and newer op.
+    fn ascending_viewstamps(
         self: *Replica,
-        header: *const Header,
-        neighbor: *const Header,
+        a: *const Header,
+        b: *const Header,
     ) bool {
-        assert(header.command == .prepare);
-        assert(neighbor.command == .prepare);
-        assert(neighbor.op != header.op);
+        assert(a.command == .prepare);
+        assert(b.command == .prepare);
 
-        // Check if we haven't accidentally swapped the header and neighbor arguments above:
-        // The neighbor should at least exist in the journal.
-        assert(self.journal.has(neighbor));
-
-        if (neighbor.view > header.view) {
-            // We do not assert neighbor.op >= header.op, ops may be reordered during a view change.
+        if (a.view < b.view) {
+            // We do not assert b.op >= a.op, ops may be reordered during a view change.
             return true;
-        } else if (neighbor.view < header.view) {
-            // We do not assert neighbor.op <= header.op, ops may be reordered during a view change.
+        } else if (a.view > b.view) {
+            // We do not assert b.op <= a.op, ops may be reordered during a view change.
             return false;
-        } else if (neighbor.op > header.op) {
-            assert(neighbor.view == header.view);
+        } else if (a.op < b.op) {
+            assert(a.view == b.view);
             return true;
-        } else if (neighbor.op < header.op) {
-            assert(neighbor.view == header.view);
+        } else if (a.op > b.op) {
+            assert(a.view == b.view);
             return false;
         } else {
             unreachable;
         }
-        return false;
     }
 
     fn on_normal_timeout(self: *Replica) void {
