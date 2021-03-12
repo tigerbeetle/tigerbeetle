@@ -504,6 +504,13 @@ pub const Journal = struct {
         return existing;
     }
 
+    pub fn entry_for_op_exact(self: *Journal, op: u64) ?*const Header {
+        if (self.entry_for_op(op)) |existing| {
+            if (existing.op == op) return existing;
+        }
+        return null;
+    }
+
     pub fn next_entry(self: *Journal, header: *const Header) ?*const Header {
         // TODO Snapshots
         if (header.op + 1 == self.headers.len) return null;
@@ -568,6 +575,7 @@ pub const Journal = struct {
         for (dest) |*header| header.zero();
 
         var copied: usize = 0;
+        // We start at op_max + 1 but front-load the decrement to avoid overflow when op_min == 0:
         var op = op_max + 1;
         while (op > op_min) {
             op -= 1;
@@ -588,6 +596,7 @@ pub const Journal = struct {
         var op = op_max + 1;
         while (op > op_min) {
             op -= 1;
+
             if (self.entry_for_op(op) == null) {
                 if (range == null) {
                     // We have found the latest gap:
@@ -607,6 +616,95 @@ pub const Journal = struct {
                 break;
             }
         }
+        return range;
+    }
+
+    /// Finds the latest break in headers, searching between `op_min` and `op_max` (both inclusive).
+    /// A break is a missing header or a header not connected to the next header (by hash chain).
+    /// Upon finding the highest break, extends the range downwards to cover as much as possible.
+    ///
+    /// For example: If ops 3, 9 and 10 are missing, returns: `{ .op_min = 9, .op_max = 10 }`.
+    ///
+    /// Another example: If op 17 is disconnected from op 18, 16 is connected to 17, and 12-15 are
+    /// missing, returns: `{ .op_min = 12, .op_max = 17 }`.
+    pub fn find_latest_header_break_between(self: *Journal, op_min: u64, op_max: u64) ?HeaderRange {
+        var range: ?HeaderRange = null;
+
+        // We set B, the op after op_max, to null because we only examine breaks <= op_max:
+        // In other words, we may report a missing header for op_max itself but not a broken chain.
+        var B: ?*const Header = null;
+
+        var op = op_max + 1;
+        while (op > op_min) {
+            op -= 1;
+
+            // Get the entry at @mod(op) location, but only if entry.op == op, else null:
+            var A = self.entry_for_op_exact(op);
+            if (A) |a| {
+                if (B) |b| {
+                    // If A was reordered then A may have a newer op than B (but an older view).
+                    // However, here we use entry_for_op_exact() so we can assert a.op + 1 == b.op:
+                    assert(a.op + 1 == b.op);
+                    // Further, while repair_headers() should never put an older view to the right
+                    // of a newer view, it may put a newer view to the left of an older view.
+                    // We therefore do not assert a.view <= b.view unless the hash chain is intact.
+
+                    // A exists and B exists:
+                    if (range) |*r| {
+                        assert(b.op == r.op_min);
+                        if (a.checksum == b.nonce) {
+                            // A is connected to B, but B is disconnected, add A to range:
+                            assert(a.view <= b.view);
+                            r.op_min = a.op;
+                        } else if (a.view < b.view) {
+                            // A is not connected to B, and A is older than B, add A to range:
+                            r.op_min = a.op;
+                        } else if (a.view > b.view) {
+                            // A is not connected to B, but A is newer than B, close range:
+                            break;
+                        } else {
+                            // Op numbers in the same view must be connected.
+                            unreachable;
+                        }
+                    } else if (a.checksum == b.nonce) {
+                        // A is connected to B, and B is connected or B is op_max.
+                        assert(a.view <= b.view);
+                    } else if (a.view < b.view) {
+                        // A is not connected to B, and A is older than B, open range:
+                        range = .{ .op_min = a.op, .op_max = a.op };
+                    } else if (a.view > b.view) {
+                        // A is not connected to B, but A is newer than B, open and close range:
+                        range = .{ .op_min = b.op, .op_max = b.op };
+                        break;
+                    } else {
+                        // Op numbers in the same view must be connected.
+                        unreachable;
+                    }
+
+                    // A exists and B does not exist:
+                } else if (range) |r| {
+                    // We therefore cannot compare A to B, A may be older/newer, close range:
+                    assert(r.op_min == op + 1);
+                    break;
+                } else {
+                    // We expect a range if B does not exist, unless:
+                    assert(a.op == op_max);
+                }
+
+                // A does not exist:
+            } else if (range) |*r| {
+                // Add A to range:
+                assert(r.op_min == op + 1);
+                r.op_min = op;
+            } else {
+                // Open range:
+                assert(B != null or op == op_max);
+                range = .{ .op_min = op, .op_max = op };
+            }
+
+            B = A;
+        }
+
         return range;
     }
 
@@ -2243,11 +2341,13 @@ pub const Replica = struct {
     fn repair_headers(self: *Replica) void {
         if (self.status != .normal and self.status != .view_change) return;
 
+        // Request any missing or disconnected headers:
         // It's critical to pass `self.commit + 1` as `op_min` since before that may be snapshotted:
         // Once snapshotted, it's no longer in the journal and would then always constitute a gap.
-        var gap = self.journal.find_latest_gap_between(self.commit + 1, self.op);
-        if (gap) |range| {
-            log.debug("{}: repair_headers: gap: ops={}..{}", .{
+        assert(self.journal.entry_for_op_exact(self.op) != null);
+        var broken = self.journal.find_latest_header_break_between(self.commit + 1, self.op);
+        if (broken) |range| {
+            log.debug("{}: repair_headers: latest break: ops={}..{}", .{
                 self.replica,
                 range.op_min,
                 range.op_max,
@@ -2262,17 +2362,6 @@ pub const Replica = struct {
                 .op = range.op_max,
             });
             return;
-        } else {
-            // TODO
-            log.debug("{}: no gap but asking for headers 0 through 5...", .{self.replica});
-            self.send_header_to_other_replicas(.{
-                .command = .request_headers,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .view = self.view,
-                .commit = 0,
-                .op = 5,
-            });
         }
     }
 
@@ -2341,7 +2430,6 @@ pub const Replica = struct {
 
             _ = self.repair_header(h);
         }
-
     }
 
     fn on_start_view(self: *Replica, message: *const Message) void {
