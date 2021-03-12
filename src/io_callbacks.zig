@@ -8,11 +8,11 @@ const io_uring_sqe = linux.io_uring_sqe;
 
 pub const IO = struct {
     /// An intrusive first in/first out linked list.
-    const Fifo = struct {
+    const FIFO = struct {
         in: ?*Completion = null,
         out: ?*Completion = null,
 
-        fn push(fifo: *Fifo, completion: *Completion) void {
+        fn push(fifo: *FIFO, completion: *Completion) void {
             assert(completion.next == null);
             if (fifo.in) |in| {
                 in.next = completion;
@@ -29,7 +29,7 @@ pub const IO = struct {
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
-    unqueued: Fifo = .{},
+    unqueued: FIFO = .{},
 
     /// The number of SQEs queued but not yet submitted to the kernel:
     queued: u32 = 0,
@@ -38,7 +38,7 @@ pub const IO = struct {
     submitted: u32 = 0,
 
     /// Completions that are ready to have their callbacks run.
-    completed: Fifo = .{},
+    completed: FIFO = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
         return IO{ .ring = try IO_Uring.init(entries, flags) };
@@ -398,8 +398,8 @@ pub const IO = struct {
     const Operation = union(enum) {
         accept: struct {
             socket: os.socket_t,
-            address: os.sockaddr,
-            address_size: os.socklen_t,
+            address: os.sockaddr = undefined,
+            address_size: os.socklen_t = @sizeOf(os.sockaddr),
             flags: u32,
         },
         close: struct {
@@ -463,8 +463,6 @@ pub const IO = struct {
         comptime callback: fn (context: Context, completion: *Completion, result: AcceptError!os.socket_t) void,
         completion: *Completion,
         socket: os.socket_t,
-        address: os.sockaddr,
-        address_size: os.socklen_t,
         flags: u32,
     ) void {
         completion.* = .{
@@ -482,13 +480,13 @@ pub const IO = struct {
             .operation = .{
                 .accept = .{
                     .socket = socket,
-                    .address = address,
-                    .address_size = address_size,
+                    .address = undefined,
+                    .address_size = @sizeOf(os.sockaddr),
                     .flags = flags,
                 },
             },
         };
-        completion.io.enqueue(completion);
+        self.enqueue(completion);
     }
 
     pub const CloseError = error{
@@ -522,7 +520,7 @@ pub const IO = struct {
                 .close = .{ .fd = fd },
             },
         };
-        completion.io.enqueue(completion);
+        self.enqueue(completion);
     }
 
     pub const ConnectError = error{
@@ -573,7 +571,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.io.enqueue(completion);
+        self.enqueue(completion);
     }
 
     pub const FsyncError = error{
@@ -613,7 +611,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.io.enqueue(completion);
+        self.enqueue(completion);
     }
 
     pub const OpenatError = error{
@@ -669,7 +667,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.io.enqueue(completion);
+        self.enqueue(completion);
     }
 
     pub const ReadError = error{
@@ -713,7 +711,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.io.enqueue(completion);
+        self.enqueue(completion);
     }
 
     pub const RecvError = error{
@@ -755,7 +753,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.io.enqueue(completion);
+        self.enqueue(completion);
     }
 
     pub const SendError = error{
@@ -803,7 +801,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.io.enqueue(completion);
+        self.enqueue(completion);
     }
 
     pub const WriteError = error{
@@ -850,7 +848,7 @@ pub const IO = struct {
                 },
             },
         };
-        completion.io.enqueue(completion);
+        self.enqueue(completion);
     }
 };
 
@@ -868,35 +866,203 @@ pub fn buffer_limit(buffer_len: usize) usize {
     return std.math.min(limit, buffer_len);
 }
 
-test "" {
+test "ref all decls" {
     std.testing.refAllDecls(IO);
+}
+
+test "write/fsync/read" {
+    const testing = std.testing;
+
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        fd: os.fd_t,
+
+        write_buf: [20]u8 = [_]u8{97} ** 20,
+        read_buf: [20]u8 = [_]u8{98} ** 20,
+
+        written: usize = 0,
+        fsynced: bool = false,
+        read: usize = 0,
+
+        fn run_test() !void {
+            const path = "test_io_write_fsync_read";
+            const file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = true });
+            defer file.close();
+            defer std.fs.cwd().deleteFile(path) catch {};
+
+            var self: Context = .{
+                .io = try IO.init(32, 0),
+                .fd = file.handle,
+            };
+            defer self.io.deinit();
+
+            var completion: IO.Completion = undefined;
+
+            self.io.write(*Context, &self, write_callback, &completion, self.fd, &self.write_buf, 10);
+            try self.io.run();
+
+            testing.expectEqual(self.write_buf.len, self.written);
+            testing.expect(self.fsynced);
+            testing.expectEqual(self.read_buf.len, self.read);
+            testing.expectEqualSlices(u8, &self.write_buf, &self.read_buf);
+        }
+
+        fn write_callback(self: *Context, completion: *IO.Completion, result: IO.WriteError!usize) void {
+            self.written = result catch @panic("write error");
+            self.io.fsync(*Context, self, fsync_callback, completion, self.fd, 0);
+        }
+
+        fn fsync_callback(self: *Context, completion: *IO.Completion, result: IO.FsyncError!void) void {
+            result catch @panic("fsync error");
+            self.fsynced = true;
+            self.io.read(*Context, self, read_callback, completion, self.fd, &self.read_buf, 10);
+        }
+
+        fn read_callback(self: *Context, completion: *IO.Completion, result: IO.ReadError!usize) void {
+            self.read = result catch @panic("read error");
+        }
+    }.run_test();
 }
 
 test "openat/close" {
     const testing = std.testing;
 
-    var io = try IO.init(32, 0);
-    const path = "test_io_openat_close";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    try struct {
+        const Context = @This();
 
-    var fd: os.fd_t = 0;
-    var completion: IO.Completion = undefined;
-    io.openat(
-        *os.fd_t,
-        &fd,
-        openat_callback,
-        &completion,
-        linux.AT_FDCWD,
-        path,
-        os.O_CLOEXEC | os.O_RDWR | os.O_CREAT,
-        0o666,
-    );
+        io: IO,
+        fd: os.fd_t = 0,
+        closed: bool = false,
 
-    try io.run();
+        fn run_test() !void {
+            const path = "test_io_openat_close";
+            defer std.fs.cwd().deleteFile(path) catch {};
 
-    testing.expect(fd > 0);
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            var completion: IO.Completion = undefined;
+            self.io.openat(
+                *Context,
+                &self,
+                openat_callback,
+                &completion,
+                linux.AT_FDCWD,
+                path,
+                os.O_CLOEXEC | os.O_RDWR | os.O_CREAT,
+                0o666,
+            );
+            try self.io.run();
+            testing.expect(self.fd > 0);
+            testing.expect(self.closed);
+        }
+
+        fn openat_callback(self: *Context, completion: *IO.Completion, result: IO.OpenatError!os.fd_t) void {
+            self.fd = result catch @panic("openat error");
+            self.io.close(*Context, self, close_callback, completion, self.fd);
+        }
+
+        fn close_callback(self: *Context, completion: *IO.Completion, result: IO.CloseError!void) void {
+            result catch @panic("close error");
+            self.closed = true;
+        }
+    }.run_test();
 }
 
-fn openat_callback(context: *os.fd_t, completion: *IO.Completion, result: IO.OpenatError!os.fd_t) void {
-    context.* = result catch @panic("openat error");
+test "accept/connect/send/receive" {
+    const testing = std.testing;
+
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        server: os.socket_t,
+        client: os.socket_t,
+
+        accepted_sock: os.socket_t = undefined,
+
+        send_buf: [10]u8 = [_]u8{ 1, 0, 1, 0, 1, 0, 1, 0, 1, 0 },
+        recv_buf: [5]u8 = [_]u8{ 0, 1, 0, 1, 0 },
+
+        sent: usize = 0,
+        received: usize = 0,
+
+        fn run_test() !void {
+            const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
+            const kernel_backlog = 1;
+            const server = try os.socket(address.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0);
+            defer os.close(server);
+
+            const client = try os.socket(address.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0);
+            defer os.close(client);
+
+            try os.setsockopt(server, os.SOL_SOCKET, os.SO_REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
+            try os.bind(server, &address.any, address.getOsSockLen());
+            try os.listen(server, kernel_backlog);
+
+            var self: Context = .{
+                .io = try IO.init(32, 0),
+                .server = server,
+                .client = client,
+            };
+            defer self.io.deinit();
+
+            var client_completion: IO.Completion = undefined;
+            self.io.connect(
+                *Context,
+                &self,
+                connect_callback,
+                &client_completion,
+                client,
+                address.any,
+                address.getOsSockLen(),
+            );
+
+            var server_completion: IO.Completion = undefined;
+            self.io.accept(*Context, &self, accept_callback, &server_completion, server, 0);
+
+            try self.io.run();
+
+            testing.expectEqual(self.send_buf.len, self.sent);
+            testing.expectEqual(self.recv_buf.len, self.received);
+
+            testing.expectEqualSlices(u8, self.send_buf[0..self.received], &self.recv_buf);
+        }
+
+        fn connect_callback(self: *Context, completion: *IO.Completion, result: IO.ConnectError!void) void {
+            result catch @panic("connect error");
+            self.io.send(
+                *Context,
+                self,
+                send_callback,
+                completion,
+                self.client,
+                &self.send_buf,
+                os.MSG_NOSIGNAL,
+            );
+        }
+
+        fn send_callback(self: *Context, completion: *IO.Completion, result: IO.SendError!usize) void {
+            self.sent = result catch @panic("send error");
+        }
+
+        fn accept_callback(self: *Context, completion: *IO.Completion, result: IO.AcceptError!os.socket_t) void {
+            self.accepted_sock = result catch @panic("accept error");
+            self.io.recv(
+                *Context,
+                self,
+                recv_callback,
+                completion,
+                self.accepted_sock,
+                &self.recv_buf,
+                os.MSG_NOSIGNAL,
+            );
+        }
+
+        fn recv_callback(self: *Context, completion: *IO.Completion, result: IO.RecvError!usize) void {
+            self.received = result catch @panic("recv error");
+        }
+    }.run_test();
 }
