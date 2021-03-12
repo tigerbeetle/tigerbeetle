@@ -155,7 +155,7 @@ pub const IO = struct {
         // This is one of the usecases for c_void outside of C code and as such c_void will
         // be replaced with anyopaque eventually: https://github.com/ziglang/zig/issues/323
         context: ?*c_void,
-        callback: fn (context: ?*c_void, completion: *Completion, result: *const c_void) callconv(.C) void,
+        callback: fn (context: ?*c_void, completion: *Completion, result: *const c_void) void,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
@@ -469,7 +469,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -508,7 +508,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -555,7 +555,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -596,7 +596,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -650,7 +650,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -695,7 +695,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -737,7 +737,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -785,7 +785,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -832,7 +832,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) callconv(.C) void {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
