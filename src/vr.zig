@@ -244,6 +244,8 @@ pub const Header = packed struct {
     }
 };
 
+const HeaderRange = struct { op_min: u64, op_max: u64 };
+
 const Client = struct {};
 
 // TODO Client table should warn if the client's request number has wrapped past 32 bits.
@@ -479,10 +481,10 @@ pub const Journal = struct {
 
     pub fn deinit(self: *Journal) void {}
 
-    pub fn assert_headers_reserved_after_op(self: *Journal, op: u64) void {
+    /// Asserts that headers are .reserved (zeroed) from `op_min` (inclusive).
+    pub fn assert_headers_reserved_from(self: *Journal, op_min: u64) void {
         // TODO Snapshots
-        if (op + 1 == self.headers.len) return;
-        for (self.headers[op + 1 ..]) |*header| assert(header.command == .reserved);
+        for (self.headers[op_min..]) |header| assert(header.command == .reserved);
     }
 
     /// Returns any existing entry at the location indicated by header.op.
@@ -504,6 +506,8 @@ pub const Journal = struct {
         return existing;
     }
 
+    /// Returns the entry at `@mod(op)` location, but only if `entry.op == op`, else `null`.
+    /// Be careful of using this without checking if the existing op has a newer viewstamp.
     pub fn entry_for_op_exact(self: *Journal, op: u64) ?*const Header {
         if (self.entry_for_op(op)) |existing| {
             if (existing.op == op) return existing;
@@ -511,16 +515,16 @@ pub const Journal = struct {
         return null;
     }
 
-    pub fn next_entry(self: *Journal, header: *const Header) ?*const Header {
-        // TODO Snapshots
-        if (header.op + 1 == self.headers.len) return null;
-        return self.entry_for_op(header.op + 1);
-    }
-
     pub fn previous_entry(self: *Journal, header: *const Header) ?*const Header {
         // TODO Snapshots
         if (header.op == 0) return null;
         return self.entry_for_op(header.op - 1);
+    }
+
+    pub fn next_entry(self: *Journal, header: *const Header) ?*const Header {
+        // TODO Snapshots
+        if (header.op + 1 == self.headers.len) return null;
+        return self.entry_for_op(header.op + 1);
     }
 
     pub fn next_offset(self: *Journal, header: *const Header) u64 {
@@ -571,52 +575,23 @@ pub const Journal = struct {
         op_max: u64,
         dest: []Header,
     ) usize {
+        assert(op_min <= op_max);
         assert(dest.len > 0);
-        for (dest) |*header| header.zero();
 
         var copied: usize = 0;
+        for (dest) |*header| header.zero();
+
         // We start at op_max + 1 but front-load the decrement to avoid overflow when op_min == 0:
         var op = op_max + 1;
         while (op > op_min) {
             op -= 1;
-            if (self.entry_for_op(op)) |header| {
+
+            if (self.entry_for_op_exact(op)) |header| {
                 dest[copied] = header.*;
                 copied += 1;
             }
         }
         return copied;
-    }
-
-    const HeaderRange = struct { op_min: u64, op_max: u64 };
-
-    /// Finds the latest gap in headers, searching between `op_min` and `op_max` (both inclusive).
-    pub fn find_latest_gap_between(self: *Journal, op_min: u64, op_max: u64) ?HeaderRange {
-        var range: ?HeaderRange = null;
-
-        var op = op_max + 1;
-        while (op > op_min) {
-            op -= 1;
-
-            if (self.entry_for_op(op) == null) {
-                if (range == null) {
-                    // We have found the latest gap:
-                    range = .{
-                        .op_min = op,
-                        .op_max = op,
-                    };
-                } else if (op + 1 == range.?.op_min) {
-                    // This op is immediately before and part of the gap, widen the range:
-                    range.?.op_min = op;
-                } else {
-                    // We failed to break the loop for a present entry with range != null:
-                    unreachable;
-                }
-            } else if (range != null) {
-                // The previous entry before this gap is present and we can return:
-                break;
-            }
-        }
-        return range;
     }
 
     /// Finds the latest break in headers, searching between `op_min` and `op_max` (both inclusive).
@@ -627,7 +602,8 @@ pub const Journal = struct {
     ///
     /// Another example: If op 17 is disconnected from op 18, 16 is connected to 17, and 12-15 are
     /// missing, returns: `{ .op_min = 12, .op_max = 17 }`.
-    pub fn find_latest_header_break_between(self: *Journal, op_min: u64, op_max: u64) ?HeaderRange {
+    pub fn find_latest_headers_break_between(self: *Journal, op_min: u64, op_max: u64) ?HeaderRange {
+        assert(op_min <= op_max);
         var range: ?HeaderRange = null;
 
         // We set B, the op after op_max, to null because we only examine breaks <= op_max:
@@ -680,26 +656,30 @@ pub const Journal = struct {
                         // Op numbers in the same view must be connected.
                         unreachable;
                     }
-
-                    // A exists and B does not exist:
-                } else if (range) |r| {
-                    // We therefore cannot compare A to B, A may be older/newer, close range:
-                    assert(r.op_min == op + 1);
-                    break;
                 } else {
-                    // We expect a range if B does not exist, unless:
-                    assert(a.op == op_max);
+                    // A exists and B does not exist (or B has a lower op number):
+                    if (range) |r| {
+                        // We therefore cannot compare A to B, A may be older/newer, close range:
+                        assert(r.op_min == op + 1);
+                        break;
+                    } else {
+                        // We expect a range if B does not exist, unless:
+                        assert(a.op == op_max);
+                    }
                 }
-
-                // A does not exist:
-            } else if (range) |*r| {
-                // Add A to range:
-                assert(r.op_min == op + 1);
-                r.op_min = op;
             } else {
-                // Open range:
-                assert(B != null or op == op_max);
-                range = .{ .op_min = op, .op_max = op };
+                // A does not exist (or A has a lower op number):
+                if (self.entry_for_op(op)) |wrapped_a| assert(wrapped_a.op < op);
+
+                if (range) |*r| {
+                    // Add A to range:
+                    assert(r.op_min == op + 1);
+                    r.op_min = op;
+                } else {
+                    // Open range:
+                    assert(B != null or op == op_max);
+                    range = .{ .op_min = op, .op_max = op };
+                }
             }
 
             B = A;
@@ -708,30 +688,30 @@ pub const Journal = struct {
         return range;
     }
 
-    /// Removes entries after op number (exclusive), i.e. with a higher op number.
-    /// This is used after a view change to prune uncommitted entries discarded by the new leader.
-    pub fn remove_entries_after_op(self: *Journal, op: u64) void {
-        assert(op >= 0);
-        // TODO Snapshots
-        // TODO Optimize to jump directly to op:
-        for (self.headers) |*header| {
-            if (header.op > op and header.command == .prepare) {
-                self.remove_entry(header);
-            }
-        }
-        self.assert_headers_reserved_after_op(op);
-        // TODO Be more precise and efficient:
-        self.write_headers(0, self.headers.len);
-    }
-
     /// A safe way of removing an entry, where the header must match the current entry to succeed.
-    pub fn remove_entry(self: *Journal, header: *const Header) void {
+    fn remove_entry(self: *Journal, header: *const Header) void {
         // TODO Add equality method to Header to do more comparisons:
         assert(self.entry(header).?.checksum == header.checksum);
         // TODO Snapshots
         assert(self.headers[header.op].checksum == header.checksum);
         self.headers[header.op].zero();
         self.dirty[header.op] = true;
+    }
+
+    /// Removes entries from `op_min` (inclusive) onwards.
+    /// This is used after a view change to remove uncommitted entries discarded by the new leader.
+    pub fn remove_entries_from(self: *Journal, op_min: u64) void {
+        // TODO Snapshots
+        // TODO Optimize to jump directly to op:
+        for (self.headers) |*header| {
+            if (header.op >= op_min and header.command == .prepare) {
+                self.remove_entry(header);
+            }
+        }
+        self.assert_headers_reserved_from(op_min);
+        // TODO Be more precise and efficient:
+        // TODO See if we can solve this rather at startup to avoid the need for a blocking write.
+        self.write_headers_between(0, self.headers.len - 1);
     }
 
     pub fn set_entry_as_dirty(self: *Journal, header: *const Header) void {
@@ -744,19 +724,6 @@ pub const Journal = struct {
         }
         self.headers[header.op] = header.*;
         self.dirty[header.op] = true;
-    }
-
-    fn offset_in_circular_buffer(self: *Journal, offset: u64) u64 {
-        assert(offset < self.size_circular_buffer);
-        return self.size_headers + offset;
-    }
-
-    fn offset_in_headers_version(self: *Journal, offset: u64, version: u1) u64 {
-        assert(offset < self.size_headers);
-        return switch (version) {
-            0 => offset,
-            1 => self.size_headers + self.size_circular_buffer + offset,
-        };
     }
 
     pub fn write(self: *Journal, header: *const Header, buffer: []const u8) void {
@@ -782,7 +749,7 @@ pub const Journal = struct {
         }
 
         // TODO Snapshots
-        self.write_headers(header.op, 1);
+        self.write_headers_between(header.op, header.op);
         if (!self.has(header)) {
             self.write_debug(header, "entry changed while writing headers");
             return;
@@ -805,32 +772,47 @@ pub const Journal = struct {
         });
     }
 
-    pub fn write_headers(self: *Journal, op: u64, len: usize) void {
-        // TODO Snapshots
-        assert(op < self.headers.len);
-        assert(len > 0);
-        assert(op + len <= self.headers.len);
+    fn offset_in_circular_buffer(self: *Journal, offset: u64) u64 {
+        assert(offset < self.size_circular_buffer);
+        return self.size_headers + offset;
+    }
 
-        const sector_offset = Journal.sector_floor(op * @sizeOf(Header));
-        const sector_len = Journal.sector_ceil((op + len) * @sizeOf(Header));
+    fn offset_in_headers_version(self: *Journal, offset: u64, version: u1) u64 {
+        assert(offset < self.size_headers);
+        return switch (version) {
+            0 => offset,
+            1 => self.size_headers + self.size_circular_buffer + offset,
+        };
+    }
+
+    /// Writes headers between `op_min` and `op_max` (both inclusive).
+    fn write_headers_between(self: *Journal, op_min: u64, op_max: u64) void {
+        // TODO Snapshots
+        assert(op_min <= op_max);
+
+        const offset = Journal.sector_floor(op_min * @sizeOf(Header));
+        const len = Journal.sector_ceil((op_max - op_min + 1) * @sizeOf(Header));
+        assert(len > 0);
 
         // We must acquire the concurrent range using the sector offset and len:
-        // Different headers may share the same sector without any op or len overlap.
-        var range = Range{ .offset = sector_offset, .len = sector_len };
+        // Different headers may share the same sector without any op_min or op_max overlap.
+        // TODO Use a callback to acquire the range instead of suspend/resume:
+        var range = Range{ .offset = offset, .len = len };
         self.writing_headers.acquire(&range);
         defer self.writing_headers.release(&range);
 
-        const source = std.mem.sliceAsBytes(self.headers)[sector_offset..sector_len];
-        var slice = self.write_headers_buffer[sector_offset..sector_len];
+        const source = std.mem.sliceAsBytes(self.headers)[offset .. offset + len];
+        var slice = self.write_headers_buffer[offset .. offset + len];
         assert(slice.len == source.len);
+        assert(slice.len == len);
         std.mem.copy(u8, slice, source);
 
-        log.debug("{}: journal: write_headers: op={} len={} sectors[{}..{}]", .{
+        log.debug("{}: journal: write_headers: op_min={} op_max={} sectors[{}..{}]", .{
             self.replica,
-            op,
-            len,
-            sector_offset,
-            sector_len,
+            op_min,
+            op_max,
+            offset,
+            offset + len,
         });
 
         // Versions must be incremented upfront:
@@ -838,14 +820,14 @@ pub const Journal = struct {
         // If we don't increment upfront we could end up writing to the same copy twice.
         // We would then lose the redundancy required to locate headers or overwrite all copies.
         // TODO Snapshots
-        if (self.write_headers_once(self.headers[op .. op + len])) {
+        if (self.write_headers_once(self.headers[op_min .. op_max + 1])) {
             const version_a = self.write_headers_increment_version();
-            self.write_headers_to_version(version_a, slice, sector_offset);
+            self.write_headers_to_version(version_a, slice, offset);
         } else {
             const version_a = self.write_headers_increment_version();
             const version_b = self.write_headers_increment_version();
-            self.write_headers_to_version(version_a, slice, sector_offset);
-            self.write_headers_to_version(version_b, slice, sector_offset);
+            self.write_headers_to_version(version_a, slice, offset);
+            self.write_headers_to_version(version_b, slice, offset);
         }
     }
 
@@ -939,12 +921,12 @@ pub const Journal = struct {
         // };
     }
 
-    pub fn sector_floor(offset: u64) u64 {
+    fn sector_floor(offset: u64) u64 {
         const sectors = std.math.divFloor(u64, offset, sector_size) catch unreachable;
         return sectors * sector_size;
     }
 
-    pub fn sector_ceil(offset: u64) u64 {
+    fn sector_ceil(offset: u64) u64 {
         const sectors = std.math.divCeil(u64, offset, sector_size) catch unreachable;
         return sectors * sector_size;
     }
@@ -1147,7 +1129,7 @@ pub const Replica = struct {
         assert(init_prepare.valid_checksum());
         assert(init_prepare.bad() == null);
         journal.headers[0] = init_prepare;
-        journal.assert_headers_reserved_after_op(init_prepare.op);
+        journal.assert_headers_reserved_from(init_prepare.op + 1);
 
         var self = Replica{
             .allocator = allocator,
@@ -1323,8 +1305,7 @@ pub const Replica = struct {
         var data = message.buffer[@sizeOf(Header)..message.header.size];
         // TODO Assign timestamps to structs in associated data.
 
-        var latest_entry = self.journal.entry_for_op(self.op).?;
-        assert(latest_entry.op == self.op);
+        var latest_entry = self.journal.entry_for_op_exact(self.op).?;
 
         message.header.nonce = latest_entry.checksum;
         message.header.view = self.view;
@@ -1482,7 +1463,8 @@ pub const Replica = struct {
                 self.commit,
             });
             self.op = self.commit;
-            self.journal.remove_entries_after_op(self.op);
+            self.journal.remove_entries_from(self.op + 1);
+            assert(self.journal.entry_for_op_exact(self.op) != null);
         } else {
             log.debug("{}: jump_to_newer_view: op == commit, no need to rewind", .{self.replica});
         }
@@ -1501,8 +1483,7 @@ pub const Replica = struct {
         assert(header.op > self.op + 1);
         assert(header.op > self.commit);
 
-        const latest_entry = self.journal.entry_for_op(self.op).?;
-        assert(latest_entry.op == self.op);
+        const latest_entry = self.journal.entry_for_op_exact(self.op).?;
 
         log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
             self.replica,
@@ -1793,8 +1774,7 @@ pub const Replica = struct {
         self.commit_timeout.reset();
 
         // TODO Snapshots: Use snapshot checksum if commit is no longer in journal.
-        const latest_committed_entry = self.journal.entry_for_op(self.commit).?;
-        assert(latest_committed_entry.op == self.commit);
+        const latest_committed_entry = self.journal.entry_for_op_exact(self.commit).?;
 
         self.send_header_to_other_replicas(.{
             .command = .commit,
@@ -1980,7 +1960,7 @@ pub const Replica = struct {
             while (op > 0) {
                 op -= 1;
                 if (self.journal.entry_for_op(op)) |neighbor| {
-                    if (neighbor.offset + Journal.sector_ceil(neighbor.size) > header.offset) {
+                    if (self.journal.next_offset(neighbor) > header.offset) {
                         if (self.ascending_viewstamps(header, neighbor)) return true;
                     } else {
                         break;
@@ -1993,7 +1973,7 @@ pub const Replica = struct {
             var op: usize = header.op + 1;
             while (op <= self.op) : (op += 1) {
                 if (self.journal.entry_for_op(op)) |neighbor| {
-                    if (header.offset + Journal.sector_ceil(header.size) > neighbor.offset) {
+                    if (self.journal.next_offset(header) > neighbor.offset) {
                         if (self.ascending_viewstamps(header, neighbor)) return true;
                     } else {
                         break;
@@ -2291,7 +2271,7 @@ pub const Replica = struct {
         assert(n.? >= self.commit); // Ops may be reordered and rewound through a prior view change.
         assert(k.? >= self.commit);
 
-        const latest_entry = self.journal.entry_for_op(n.?).?;
+        const latest_entry = self.journal.entry_for_op_exact(n.?).?;
         assert(latest_entry.view == v.?);
         assert(latest_entry.op == n.?);
         assert(latest_entry.checksum == c.?);
@@ -2330,21 +2310,23 @@ pub const Replica = struct {
 
     /// Starting from the latest journal entry, backfill any missing or disconnected headers.
     /// A header is disconnected if it breaks the hash chain with its newer neighbor to the right.
-    /// Since we work backwards from the latest entries, we should always be able to fix the chain.
+    /// Since we work backwards from the latest entry, we should always be able to fix the chain.
     fn repair_headers(self: *Replica) void {
         if (self.status != .normal and self.status != .view_change) return;
 
-        // Request any missing or disconnected headers:
-        // It's critical to pass `self.commit + 1` as `op_min` since before that may be snapshotted:
-        // Once snapshotted, it's no longer in the journal and would then always constitute a gap.
+        // TODO Handle case where we are requesting reordered headers that no longer exist.
+
+        // We expect these always to exist (and be correct):
+        assert(self.journal.entry_for_op_exact(self.commit) != null);
         assert(self.journal.entry_for_op_exact(self.op) != null);
-        var broken = self.journal.find_latest_header_break_between(self.commit + 1, self.op);
+
+        // Request any missing or disconnected headers:
+        // TODO Snapshots: Ensure that self.commit op always exists in the journal.
+        var broken = self.journal.find_latest_headers_break_between(self.commit, self.op);
         if (broken) |range| {
-            log.debug("{}: repair_headers: latest break: ops={}..{}", .{
-                self.replica,
-                range.op_min,
-                range.op_max,
-            });
+            log.notice("{}: repair_headers: latest break: {}", .{ self.replica, range });
+            assert(range.op_min > self.commit);
+            assert(range.op_max < self.op);
             // TODO Ask any N random replicas excluding ourself (to reduce traffic).
             self.send_header_to_other_replicas(.{
                 .command = .request_headers,
@@ -2356,6 +2338,47 @@ pub const Replica = struct {
             });
             return;
         }
+
+        // Assert that all headers are now present and connected with a perfect hash chain:
+        assert(self.valid_hash_chain_between(self.commit, self.op));
+    }
+
+    /// Returns true if all operations are present, correctly ordered and connected by hash chain,
+    /// between `op_min` and `op_max` (both inclusive).
+    fn valid_hash_chain_between(self: *Replica, op_min: u64, op_max: u64) bool {
+        assert(op_min <= op_max);
+
+        var b = self.journal.entry_for_op_exact(op_max);
+        if (b == null) {
+            log.notice("{}: valid_hash_chain_between: missing op {}", .{ self.replica, op_max });
+            return false;
+        }
+
+        var op = op_max;
+        while (op > op_min) {
+            op -= 1;
+
+            var a = self.journal.entry_for_op_exact(op);
+            if (a == null) {
+                log.notice("{}: valid_hash_chain_between: missing op {}", .{ self.replica, op });
+                return false;
+            }
+
+            assert(a.?.op + 1 == b.?.op);
+
+            if (a.?.checksum != b.?.nonce) {
+                log.notice("{}: valid_hash_chain_between: break: A: {}", .{ self.replica, a.? });
+                log.notice("{}: valid_hash_chain_between: break: B: {}", .{ self.replica, b.? });
+                return false;
+            }
+
+            assert(self.ascending_viewstamps(a.?, b.?));
+
+            b = a;
+        }
+        assert(b.?.op == op_min);
+
+        return true;
     }
 
     fn on_request_headers(self: *Replica, message: *const Message) void {
@@ -2374,7 +2397,11 @@ pub const Replica = struct {
 
         const op_min = message.header.commit;
         const op_max = message.header.op;
-        const count_max = @intCast(u32, std.math.min(64, op_max - op_min));
+        assert(op_max >= op_min); // TODO Add Header.bad validator for this.
+
+        // We must add 1 because op_max and op_min are both inclusive:
+        const count_max = @intCast(u32, std.math.min(64, op_max - op_min + 1));
+        assert(count_max > 0);
 
         const size_max = @sizeOf(Header) + @sizeOf(Header) * count_max;
 
@@ -2589,10 +2616,17 @@ pub const Replica = struct {
     fn commit_ops_through(self: *Replica, commit: u64) void {
         // TODO Wait until our journal chain from self.commit to self.op is completely connected.
         // This will serve as another defense against not removing ops after a view jump.
+        if (commit <= self.commit) return;
+
+        if (!self.valid_hash_chain_between(self.commit, commit)) {
+            log.notice("{}: commit_ops_through: waiting for repairs", .{self.replica});
+            return;
+        }
 
         // We may receive commit messages for ops we don't yet have:
         // Even a naive state transfer may fail to correct for this.
         while (self.commit < commit and self.commit < self.op) {
+            assert(self.journal.entry_for_op_exact(self.commit + 1) != null);
             self.commit += 1;
             assert(self.commit <= self.op);
             // Find operation in journal:
@@ -2600,7 +2634,7 @@ pub const Replica = struct {
             // var entry = self.journal.find(self.commit) orelse @panic("operation not found in log");
 
             // TODO Apply to State Machine:
-            log.debug("{}: executing op {}", .{ self.replica, self.commit });
+            log.debug("{}: commit_ops_through: executing op {}", .{ self.replica, self.commit });
 
             // TODO Add reply to the client table to answer future duplicate requests idempotently.
             // Lookup client table entry using client id.
