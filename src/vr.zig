@@ -1034,8 +1034,13 @@ pub const Replica = struct {
     /// The op number assigned to the most recently prepared operation:
     op: u64,
 
-    /// The op number of the most recently committed operation:
-    commit: u64,
+    /// The op number of the latest committed and executed operation (according to the replica):
+    /// The replica may have to wait for repairs to complete before commit_min reaches commit_max.
+    commit_min: u64,
+
+    /// The op number of the latest committed operation (according to the cluster):
+    /// This is the commit number in terms of the VRR paper.
+    commit_max: u64,
 
     /// The current request's checksum (used for now to enforce one-at-a-time request processing):
     request_checksum: ?u128 = null,
@@ -1142,7 +1147,8 @@ pub const Replica = struct {
             .replica = replica,
             .view = init_prepare.view,
             .op = init_prepare.op,
-            .commit = init_prepare.commit,
+            .commit_min = init_prepare.commit,
+            .commit_max = init_prepare.commit,
             .message_bus = message_bus,
             .journal = journal,
             .state_machine = state_machine,
@@ -1322,7 +1328,7 @@ pub const Replica = struct {
         message.header.nonce = latest_entry.checksum;
         message.header.view = self.view;
         message.header.op = self.op + 1;
-        message.header.commit = self.commit;
+        message.header.commit = self.commit_max;
         message.header.offset = self.journal.next_offset(latest_entry);
         message.header.replica = self.replica;
         message.header.command = .prepare;
@@ -1486,7 +1492,7 @@ pub const Replica = struct {
         assert(message.header.request == self.prepare_message.?.header.request);
         assert(message.header.operation == self.prepare_message.?.header.operation);
         assert(message.header.op == self.op);
-        assert(message.header.op == self.commit + 1);
+        assert(message.header.op == self.commit_max + 1);
 
         // Wait until we have `f + 1` messages (including ourself) for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
@@ -1528,7 +1534,7 @@ pub const Replica = struct {
         assert(message.header.view == self.view);
         assert(self.follower());
         assert(message.header.replica == self.leader_index(message.header.view));
-        assert(self.commit <= self.op);
+        assert(self.commit_max <= self.op);
 
         // TODO Verify message.header.nonce matches journal entry for message.header.commit number.
 
@@ -1672,8 +1678,8 @@ pub const Replica = struct {
         });
 
         assert(v.? >= 0 and v.? < self.view); // Latest normal view before this view change.
-        assert(n.? >= self.commit); // Ops may be reordered and rewound through a prior view change.
-        assert(k.? >= self.commit);
+        assert(n.? >= self.commit_max); // Ops may be rewound through a prior view change.
+        assert(k.? >= self.commit_max);
 
         const latest_entry = self.journal.entry_for_op_exact(n.?).?;
         assert(latest_entry.view == v.?);
@@ -1688,12 +1694,12 @@ pub const Replica = struct {
         // TODO
         if (true) return;
 
-        // TODO Ensure self.commit == self.op
-        // Next prepare needs this to hold: assert(message.header.op == self.commit + 1);
+        // TODO Ensure self.commit_max == self.op
+        // Next prepare needs this to hold: assert(message.header.op == self.commit_max + 1);
 
         // TODO Repair according to CTRL protocol.
         self.commit_ops_through(k.?);
-        assert(self.commit == k.?);
+        assert(self.commit_max == k.?);
 
         self.transition_to_normal_status(self.view);
 
@@ -1708,7 +1714,7 @@ pub const Replica = struct {
             .replica = self.replica,
             .view = self.view,
             .op = self.op,
-            .commit = self.commit,
+            .commit = self.commit_max,
         });
     }
 
@@ -1858,7 +1864,7 @@ pub const Replica = struct {
         self.commit_timeout.reset();
 
         // TODO Snapshots: Use snapshot checksum if commit is no longer in journal.
-        const latest_committed_entry = self.journal.entry_for_op_exact(self.commit).?;
+        const latest_committed_entry = self.journal.entry_for_op_exact(self.commit_max).?;
 
         self.send_header_to_other_replicas(.{
             .command = .commit,
@@ -1866,7 +1872,7 @@ pub const Replica = struct {
             .cluster = self.cluster,
             .replica = self.replica,
             .view = self.view,
-            .commit = self.commit,
+            .commit = self.commit_max,
         });
     }
 
@@ -2002,27 +2008,47 @@ pub const Replica = struct {
     }
 
     fn commit_ops_through(self: *Replica, commit: u64) void {
-        // TODO Wait until our journal chain from self.commit to self.op is completely connected.
-        // This will serve as another defense against not removing ops after a view jump.
-        if (commit <= self.commit) return;
+        assert(self.commit_min <= self.commit_max);
+        assert(self.commit_max <= self.op);
+        assert(commit <= self.op or commit > self.op);
 
-        if (!self.valid_hash_chain_between(self.commit, commit)) {
+        if (commit <= self.commit_min) return;
+
+        // We may receive commit messages for ops we do not yet have:
+        // Even a naive state transfer may fail to correct for this.
+        const commit_max = std.math.min(commit, self.op);
+        if (commit_max > self.commit_max) {
+            log.debug("{}: commit_ops_through: advancing commit_max={}..{}", .{
+                self.replica,
+                self.commit_max,
+                commit_max,
+            });
+            self.commit_max = commit_max;
+        }
+
+        // We must validate the hash chain as far as possible, since self.op may disclose a fork:
+        // This is defense-in-depth in case self.jump_to_newer_view() fails.
+        if (!self.valid_hash_chain_between(self.commit_min, self.op)) {
             log.notice("{}: commit_ops_through: waiting for repairs", .{self.replica});
             return;
         }
 
-        // We may receive commit messages for ops we don't yet have:
-        // Even a naive state transfer may fail to correct for this.
-        while (self.commit < commit and self.commit < self.op) {
-            assert(self.journal.entry_for_op_exact(self.commit + 1) != null);
-            self.commit += 1;
-            assert(self.commit <= self.op);
-            // Find operation in journal:
-            // TODO Journal should have a fast path where current operation is already in memory.
-            // var entry = self.journal.find(self.commit) orelse @panic("operation not found in log");
+        while (self.commit_min < self.commit_max) {
+            self.commit_min += 1;
+            assert(self.commit_min <= self.op);
+
+            const entry = self.journal.entry_for_op_exact(self.commit_min).?;
+            assert(entry.op == self.commit_min);
+
+            // TODO See if we are able to read from Journal before incrementing self.commit_min.
 
             // TODO Apply to State Machine:
-            log.debug("{}: commit_ops_through: executing op {}", .{ self.replica, self.commit });
+            log.debug("{}: commit_ops_through: executing op={} checksum={} ({})", .{
+                self.replica,
+                entry.op,
+                entry.checksum,
+                @tagName(entry.operation),
+            });
 
             // TODO Add reply to the client table to answer future duplicate requests idempotently.
             // Lookup client table entry using client id.
@@ -2113,20 +2139,20 @@ pub const Replica = struct {
         // view change(s), since they may have been replaced in the view change(s) by other ops.
         // If we fail to do this immediately then we may commit the wrong op and diverge state when
         // we process a commit message or when we process a commit number in a prepare message.
-        if (self.op > self.commit) {
+        if (self.op > self.commit_max) {
             log.debug("{}: jump_to_newer_view: rewinding: op={}..{}", .{
                 self.replica,
                 self.op,
-                self.commit,
+                self.commit_max,
             });
-            self.op = self.commit;
+            self.op = self.commit_max;
             self.journal.remove_entries_from(self.op + 1);
             assert(self.journal.entry_for_op_exact(self.op) != null);
         } else {
             log.debug("{}: jump_to_newer_view: op == commit, no need to rewind", .{self.replica});
         }
 
-        assert(self.op == self.commit);
+        assert(self.op == self.commit_max);
         self.transition_to_normal_status(new_view);
         assert(self.view == new_view);
         assert(self.follower());
@@ -2138,7 +2164,7 @@ pub const Replica = struct {
         assert(self.follower());
         assert(header.view == self.view);
         assert(header.op > self.op + 1);
-        assert(header.op > self.commit);
+        assert(header.op > self.commit_max);
 
         const latest_entry = self.journal.entry_for_op_exact(self.op).?;
 
@@ -2150,7 +2176,7 @@ pub const Replica = struct {
             header.nonce,
         });
         self.op = header.op - 1;
-        assert(self.op >= self.commit);
+        assert(self.op >= self.commit_max);
         assert(self.op + 1 == header.op);
     }
 
@@ -2344,15 +2370,15 @@ pub const Replica = struct {
         // TODO Handle case where we are requesting reordered headers that no longer exist.
 
         // We expect these always to exist (and be correct):
-        assert(self.journal.entry_for_op_exact(self.commit) != null);
+        assert(self.journal.entry_for_op_exact(self.commit_min) != null);
         assert(self.journal.entry_for_op_exact(self.op) != null);
 
         // Request any missing or disconnected headers:
-        // TODO Snapshots: Ensure that self.commit op always exists in the journal.
-        var broken = self.journal.find_latest_headers_break_between(self.commit, self.op);
+        // TODO Snapshots: Ensure that self.commit_min op always exists in the journal.
+        var broken = self.journal.find_latest_headers_break_between(self.commit_min, self.op);
         if (broken) |range| {
             log.notice("{}: repair_headers: latest break: {}", .{ self.replica, range });
-            assert(range.op_min > self.commit);
+            assert(range.op_min > self.commit_min);
             assert(range.op_max < self.op);
             // TODO Ask any N random replicas excluding ourself (to reduce traffic).
             self.send_header_to_other_replicas(.{
@@ -2367,7 +2393,7 @@ pub const Replica = struct {
         }
 
         // Assert that all headers are now present and connected with a perfect hash chain:
-        assert(self.valid_hash_chain_between(self.commit, self.op));
+        assert(self.valid_hash_chain_between(self.commit_min, self.op));
     }
 
     fn repair_last_queued_message_if_any(self: *Replica) void {
@@ -2471,7 +2497,7 @@ pub const Replica = struct {
         assert(message.header.view == self.view);
         assert(message.header.op <= self.op);
 
-        if (message.header.op <= self.commit) {
+        if (message.header.op <= self.commit_max) {
             log.debug("{}: send_prepare_ok: not sending (committed)", .{self.replica});
             return;
         }
@@ -2516,7 +2542,7 @@ pub const Replica = struct {
             .replica = self.replica,
             .view = self.view,
             .op = self.op,
-            .commit = self.commit,
+            .commit = self.commit_max,
         };
 
         var dest = std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..size_max]);
@@ -2656,9 +2682,13 @@ pub const Replica = struct {
     fn valid_hash_chain_between(self: *Replica, op_min: u64, op_max: u64) bool {
         assert(op_min <= op_max);
 
+        // If we use anything less than self.op (e.g. self.commit_max) then we may commit ops for a
+        // forked hash chain that has since been reordered by a new leader.
+        assert(op_max == self.op);
+
         var b = self.journal.entry_for_op_exact(op_max);
         if (b == null) {
-            log.notice("{}: valid_hash_chain_between: missing op {}", .{ self.replica, op_max });
+            log.notice("{}: valid_hash_chain_between: missing op={}", .{ self.replica, op_max });
             return false;
         }
 
@@ -2668,7 +2698,7 @@ pub const Replica = struct {
 
             var a = self.journal.entry_for_op_exact(op);
             if (a == null) {
-                log.notice("{}: valid_hash_chain_between: missing op {}", .{ self.replica, op });
+                log.notice("{}: valid_hash_chain_between: missing op={}", .{ self.replica, op });
                 return false;
             }
 
