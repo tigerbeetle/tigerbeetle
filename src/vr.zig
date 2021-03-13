@@ -1080,6 +1080,9 @@ pub const Replica = struct {
     /// This transitions from .view_change status to .view_change status but for a higher view.
     view_change_timeout: Timeout,
 
+    /// The number of ticks before repairing missing/disconnected headers and/or dirty data:
+    repair_timeout: Timeout,
+
     // TODO Limit integer types for `f` and `replica` to match their upper bounds in practice.
     pub fn init(
         allocator: *Allocator,
@@ -1166,6 +1169,11 @@ pub const Replica = struct {
                 .replica = replica,
                 .after = 6000,
             },
+            .repair_timeout = Timeout{
+                .name = "repair_timeout",
+                .replica = replica,
+                .after = 3, // TODO
+            },
         };
 
         // We must initialize timeouts here, not in tick() on the first tick, because on_message()
@@ -1174,9 +1182,11 @@ pub const Replica = struct {
         if (self.leader()) {
             log.debug("{}: init: leader", .{self.replica});
             self.commit_timeout.start();
+            self.repair_timeout.start();
         } else {
             log.debug("{}: init: follower", .{self.replica});
             self.normal_timeout.start();
+            self.repair_timeout.start();
         }
 
         return self;
@@ -1222,11 +1232,13 @@ pub const Replica = struct {
         self.commit_timeout.tick();
         self.normal_timeout.tick();
         self.view_change_timeout.tick();
+        self.repair_timeout.tick();
 
         if (self.prepare_timeout.fired()) self.on_prepare_timeout();
         if (self.commit_timeout.fired()) self.on_commit_timeout();
         if (self.normal_timeout.fired()) self.on_normal_timeout();
         if (self.view_change_timeout.fired()) self.on_view_change_timeout();
+        if (self.repair_timeout.fired()) self.on_repair_timeout();
 
         self.repair_last_queued_message_if_any();
     }
@@ -1424,6 +1436,651 @@ pub const Replica = struct {
         if (self.follower()) self.commit_ops_through(message.header.commit);
     }
 
+    fn on_prepare_ok(self: *Replica, message: *Message) void {
+        if (self.status != .normal) {
+            log.debug("{}: on_prepare_ok: ignoring ({})", .{ self.replica, self.status });
+            return;
+        }
+
+        if (message.header.view < self.view) {
+            log.debug("{}: on_prepare_ok: ignoring (older view)", .{self.replica});
+            return;
+        }
+
+        if (message.header.view > self.view) {
+            // Another replica is treating us as the leader for a view we do not know about.
+            // This may be caused by a fault in the network topology.
+            log.warn("{}: on_prepare_ok: ignoring (newer view)", .{self.replica});
+            return;
+        }
+
+        if (self.follower()) {
+            // This may be caused by a fault in the network topology.
+            log.warn("{}: on_prepare_ok: ignoring (follower)", .{self.replica});
+            return;
+        }
+
+        if (self.prepare_message) |prepare_message| {
+            if (message.header.nonce != prepare_message.header.checksum) {
+                log.debug("{}: on_prepare_ok: ignoring (different nonce)", .{self.replica});
+                return;
+            }
+        } else {
+            log.debug("{}: on_prepare_ok: ignoring (not preparing)", .{self.replica});
+            return;
+        }
+
+        assert(self.status == .normal);
+        assert(message.header.view == self.view);
+        assert(self.leader());
+
+        assert(message.header.command == .prepare_ok);
+        assert(message.header.nonce == self.prepare_message.?.header.checksum);
+        assert(message.header.client == self.prepare_message.?.header.client);
+        assert(message.header.cluster == self.prepare_message.?.header.cluster);
+        assert(message.header.view == self.prepare_message.?.header.view);
+        assert(message.header.op == self.prepare_message.?.header.op);
+        assert(message.header.commit == self.prepare_message.?.header.commit);
+        assert(message.header.offset == self.prepare_message.?.header.offset);
+        assert(message.header.epoch == self.prepare_message.?.header.epoch);
+        assert(message.header.request == self.prepare_message.?.header.request);
+        assert(message.header.operation == self.prepare_message.?.header.operation);
+        assert(message.header.op == self.op);
+        assert(message.header.op == self.commit + 1);
+
+        // Wait until we have `f + 1` messages (including ourself) for quorum:
+        const count = self.add_message_and_receive_quorum_exactly_once(
+            self.prepare_ok_from_all_replicas,
+            message,
+            self.f + 1,
+        ) orelse return;
+
+        assert(count == self.f + 1);
+        log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
+
+        self.commit_ops_through(message.header.op);
+
+        self.reset_prepare();
+    }
+
+    fn on_commit(self: *Replica, message: *const Message) void {
+        if (self.status != .normal) {
+            log.debug("{}: on_commit: ignoring ({})", .{ self.replica, self.status });
+            return;
+        }
+
+        if (message.header.view < self.view) {
+            log.debug("{}: on_commit: ignoring (older view)", .{self.replica});
+            return;
+        }
+
+        if (message.header.view > self.view) {
+            log.debug("{}: on_commit: newer view", .{self.replica});
+            self.jump_to_newer_view(message.header.view);
+        }
+
+        if (self.leader()) {
+            log.warn("{}: on_commit: ignoring (leader)", .{self.replica});
+            return;
+        }
+
+        assert(self.status == .normal);
+        assert(message.header.view == self.view);
+        assert(self.follower());
+        assert(message.header.replica == self.leader_index(message.header.view));
+        assert(self.commit <= self.op);
+
+        // TODO Verify message.header.nonce matches journal entry for message.header.commit number.
+
+        self.normal_timeout.reset();
+
+        self.commit_ops_through(message.header.commit);
+    }
+
+    fn on_repair(self: *Replica, message: *Message) void {
+        assert(message.header.command == .prepare);
+        assert(message.header.view <= self.view);
+        assert(message.header.op <= self.op or message.header.view < self.view);
+
+        if (self.status != .normal and self.status != .view_change) return;
+
+        if (self.journal.has_clean(message.header)) {
+            log.debug("{}: on_repair: duplicate", .{self.replica});
+            self.send_prepare_ok(message);
+            return;
+        }
+
+        if (self.repair_header(message.header)) {
+            assert(self.journal.has_dirty(message.header));
+
+            if (self.repairing) return self.repair_later(message);
+
+            log.debug("{}: on_repair: repairing journal", .{self.replica});
+            self.repairing_frame = async self.write_to_journal(message, &self.repairing);
+        }
+    }
+
+    fn on_start_view_change(self: *Replica, message: *Message) void {
+        if (self.ignore_view_change_message(message)) return;
+
+        assert(self.status == .normal or self.status == .view_change);
+        assert(message.header.view >= self.view);
+        assert(message.header.replica != self.replica);
+
+        if (message.header.view > self.view) {
+            log.debug("{}: on_start_view_change: changing to newer view", .{self.replica});
+            self.transition_to_view_change_status(message.header.view);
+        }
+
+        assert(self.status == .view_change);
+        assert(message.header.view == self.view);
+
+        // Wait until we have `f` messages (excluding ourself) for quorum:
+        const count = self.add_message_and_receive_quorum_exactly_once(
+            self.start_view_change_from_other_replicas,
+            message,
+            self.f,
+        ) orelse return;
+
+        assert(count == self.f);
+        log.debug("{}: on_start_view_change: quorum received", .{self.replica});
+
+        // TODO Resend after timeout:
+        self.send_do_view_change();
+    }
+
+    fn on_do_view_change(self: *Replica, message: *Message) void {
+        if (self.ignore_view_change_message(message)) return;
+
+        assert(self.status == .normal or self.status == .view_change);
+        assert(message.header.view >= self.view);
+        assert(self.leader_index(message.header.view) == self.replica);
+
+        if (message.header.view > self.view) {
+            log.debug("{}: on_do_view_change: changing to newer view", .{self.replica});
+            // At first glance, it might seem that sending start_view_change messages out now after
+            // receiving a do_view_change here would be superfluous. However, this is essential,
+            // especially in the presence of asymmetric network faults. At this point, we may not
+            // yet have received a do_view_change quorum, and another replica might need our
+            // start_view_change message in order to get its do_view_change message through to us.
+            // We therefore do not special case the start_view_change function, and we always send
+            // start_view_change messages, regardless of the message that initiated the view change:
+            self.transition_to_view_change_status(message.header.view);
+        }
+
+        assert(self.status == .view_change);
+        assert(message.header.view == self.view);
+
+        // Wait until we have `f + 1` messages (including ourself) for quorum:
+        const count = self.add_message_and_receive_quorum_exactly_once(
+            self.do_view_change_from_all_replicas,
+            message,
+            self.f + 1,
+        ) orelse return;
+
+        assert(count == self.f + 1);
+        log.debug("{}: on_do_view_change: quorum received", .{self.replica});
+
+        // When the new primary receives f + 1 do_view_change messages from different replicas
+        // (including itself), it sets its view number to that in the messages and selects as the
+        // new log the one contained in the message with the largest v′; if several messages have
+        // the same v′ it selects the one among them with the largest n. It sets its op number to
+        // that of the topmost entry in the new log, sets its commit number to the largest such
+        // number it received in the do_view_change messages, changes its status to normal, and
+        // informs the other replicas of the completion of the view change by sending
+        // ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
+        // op number, and k is the commit number.
+
+        var v: ?u64 = null; // Latest normal view
+        var n: ?u64 = null; // Op number
+        var k: ?u64 = null; // Commit number
+        var c: ?u128 = null; // Checksum
+        var o: ?u64 = null; // Offset
+
+        for (self.do_view_change_from_all_replicas) |received, replica| {
+            if (received) |m| {
+                assert(m.header.command == .do_view_change);
+                assert(m.header.replica == replica);
+                assert(m.header.view == self.view);
+
+                if (k == null or m.header.commit > k.?) k = m.header.commit;
+
+                for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |*h| {
+                    if (h.command == .reserved) continue;
+
+                    assert(h.command == .prepare);
+                    if (v == null or h.view > v.? or (h.view == v.? and h.op > n.?)) {
+                        assert(v == null or h.view >= v.?);
+                        v = h.view;
+                        n = h.op;
+                        c = h.checksum;
+                        o = h.offset;
+                    }
+
+                    _ = self.repair_header(h);
+                }
+            }
+        }
+
+        log.debug("{}: on_do_view_change: latest: view={} op={} commit={} checksum={} offset={}", .{
+            self.replica,
+            v,
+            n,
+            k,
+            c,
+            o,
+        });
+
+        assert(v.? >= 0 and v.? < self.view); // Latest normal view before this view change.
+        assert(n.? >= self.commit); // Ops may be reordered and rewound through a prior view change.
+        assert(k.? >= self.commit);
+
+        const latest_entry = self.journal.entry_for_op_exact(n.?).?;
+        assert(latest_entry.view == v.?);
+        assert(latest_entry.op == n.?);
+        assert(latest_entry.checksum == c.?);
+        assert(latest_entry.offset == o.?);
+
+        self.op = n.?;
+
+        self.repair_headers();
+
+        // TODO
+        if (true) return;
+
+        // TODO Ensure self.commit == self.op
+        // Next prepare needs this to hold: assert(message.header.op == self.commit + 1);
+
+        // TODO Repair according to CTRL protocol.
+        self.commit_ops_through(k.?);
+        assert(self.commit == k.?);
+
+        self.transition_to_normal_status(self.view);
+
+        assert(self.status == .normal);
+        assert(self.leader());
+
+        // TODO Add journal entries to start_view message.
+        // TODO Add checksum to start_view message.
+        self.send_header_to_other_replicas(.{
+            .command = .start_view,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+            .op = self.op,
+            .commit = self.commit,
+        });
+    }
+
+    fn on_start_view(self: *Replica, message: *const Message) void {
+        if (self.ignore_view_change_message(message)) return;
+
+        assert(self.status == .normal or self.status == .view_change);
+        assert(message.header.view >= self.view);
+        assert(message.header.replica != self.replica);
+        assert(message.header.replica == self.leader_index(message.header.view));
+
+        // TODO Assert that start_view message matches what we expect if our journal is empty.
+        // TODO Assert that start_view message's oldest op overlaps with our last commit number.
+        // TODO Update the journal.
+
+        self.transition_to_normal_status(message.header.view);
+
+        assert(self.status == .normal);
+        assert(message.header.view == self.view);
+        assert(self.follower());
+
+        // TODO Update our last op number according to message.
+
+        // TODO self.commit(msg.lastcommitted());
+        // TODO self.send_prepare_oks(oldLastOp);
+    }
+
+    fn on_request_headers(self: *Replica, message: *const Message) void {
+        // TODO Add debug logs.
+        if (self.status != .normal and self.status != .view_change) {
+            return;
+        }
+
+        if (message.header.view != self.view) {
+            return;
+        }
+
+        if (message.header.replica == self.replica) {
+            return;
+        }
+
+        const op_min = message.header.commit;
+        const op_max = message.header.op;
+        assert(op_max >= op_min); // TODO Add Header.bad validator for this.
+
+        // We must add 1 because op_max and op_min are both inclusive:
+        const count_max = @intCast(u32, std.math.min(64, op_max - op_min + 1));
+        assert(count_max > 0);
+
+        const size_max = @sizeOf(Header) + @sizeOf(Header) * count_max;
+
+        var m = self.message_bus.create_message(size_max) catch unreachable;
+        m.header.* = .{
+            .command = .headers,
+            .nonce = message.header.checksum,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+        };
+
+        var dest = std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..size_max]);
+        const count = self.journal.copy_latest_headers_between(op_min, op_max, dest);
+        log.debug("copied {} headers", .{count});
+
+        m.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
+        const data = m.buffer[@sizeOf(Header)..m.header.size];
+
+        m.header.set_checksum_data(data);
+        m.header.set_checksum();
+
+        assert(m.references == 0);
+        self.send_message_to_replica(message.header.replica, m);
+    }
+
+    fn on_headers(self: *Replica, message: *const Message) void {
+        if (self.status != .normal and self.status != .view_change) {
+            return;
+        }
+
+        if (message.header.view != self.view) {
+            return;
+        }
+
+        if (message.header.replica == self.replica) {
+            return;
+        }
+
+        log.debug("{}: received headers from {}", .{ self.replica, message.header.replica });
+
+        for (std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..message.header.size])) |*h| {
+            if (h.command == .reserved) continue;
+
+            log.debug("{}: {}", .{ self.replica, h });
+
+            _ = self.repair_header(h);
+        }
+    }
+
+    fn on_prepare_timeout(self: *Replica) void {
+        assert(self.status == .normal);
+        assert(self.leader());
+        assert(self.request_checksum != null);
+        assert(self.prepare_message != null);
+
+        var message = self.prepare_message.?;
+        assert(message.header.view == self.view);
+
+        // TODO Exponential backoff.
+        // TODO Prevent flooding the network due to multiple concurrent rounds of replication.
+        self.prepare_attempt += 1;
+        self.prepare_timeout.reset();
+
+        // The list of remote replicas yet to send a prepare_ok:
+        var waiting: [32]u16 = undefined;
+        var waiting_len: usize = 0;
+        for (self.prepare_ok_from_all_replicas) |received, replica| {
+            if (received == null and replica != self.replica) {
+                waiting[waiting_len] = @intCast(u16, replica);
+                waiting_len += 1;
+                if (waiting_len == waiting.len) break;
+            }
+        }
+
+        if (waiting_len == 0) {
+            log.debug("{}: on_prepare_timeout: waiting for journal", .{self.replica});
+            assert(self.prepare_ok_from_all_replicas[self.replica] == null);
+            return;
+        }
+
+        for (waiting[0..waiting_len]) |replica| {
+            log.debug("{}: on_prepare_timeout: waiting for replica {}", .{ self.replica, replica });
+        }
+
+        // Cycle through the list for each attempt to reach live replicas and get around partitions:
+        // If only the first replica in the list was chosen... liveness would suffer if it was down!
+        var replica = waiting[@mod(self.prepare_attempt, waiting_len)];
+        assert(replica != self.replica);
+
+        log.debug("{}: on_prepare_timeout: replicating to replica {}", .{ self.replica, replica });
+        self.send_message_to_replica(replica, message);
+    }
+
+    fn on_commit_timeout(self: *Replica) void {
+        assert(self.status == .normal);
+        assert(self.leader());
+
+        self.commit_timeout.reset();
+
+        // TODO Snapshots: Use snapshot checksum if commit is no longer in journal.
+        const latest_committed_entry = self.journal.entry_for_op_exact(self.commit).?;
+
+        self.send_header_to_other_replicas(.{
+            .command = .commit,
+            .nonce = latest_committed_entry.checksum,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+            .commit = self.commit,
+        });
+    }
+
+    fn on_normal_timeout(self: *Replica) void {
+        assert(self.status == .normal);
+        assert(self.follower());
+        self.transition_to_view_change_status(self.view + 1);
+    }
+
+    fn on_view_change_timeout(self: *Replica) void {
+        assert(self.status == .view_change);
+        self.transition_to_view_change_status(self.view + 1);
+    }
+
+    fn on_repair_timeout(self: *Replica) void {
+        assert(self.status == .normal or self.status == .view_change);
+        self.repair_headers();
+    }
+
+    fn add_message_and_receive_quorum_exactly_once(
+        self: *Replica,
+        messages: []?*Message,
+        message: *Message,
+        threshold: u32,
+    ) ?usize {
+        assert(messages.len == self.configuration.len);
+
+        assert(message.header.view == self.view);
+        switch (message.header.command) {
+            .prepare_ok => {
+                assert(self.status == .normal);
+                assert(self.leader());
+                assert(message.header.nonce == self.prepare_message.?.header.checksum);
+            },
+            .start_view_change => assert(self.status == .view_change),
+            .do_view_change => {
+                assert(self.status == .view_change);
+                assert(self.leader_index(self.view) == self.replica);
+            },
+            else => unreachable,
+        }
+
+        // TODO Improve this to work for "a cluster of one":
+        assert(threshold >= 1);
+        assert(threshold <= self.configuration.len);
+
+        // Do not allow duplicate messages to trigger multiple passes through a state transition:
+        if (messages[message.header.replica]) |m| {
+            // Assert that this truly is a duplicate message and not a different message:
+            // TODO Review that all message fields are compared for equality:
+            assert(m.header.command == message.header.command);
+            assert(m.header.replica == message.header.replica);
+            assert(m.header.view == message.header.view);
+            assert(m.header.op == message.header.op);
+            assert(m.header.commit == message.header.commit);
+            assert(m.header.checksum_data == message.header.checksum_data);
+            assert(m.header.checksum == message.header.checksum);
+            log.debug(
+                "{}: on_{}: ignoring (duplicate message)",
+                .{ self.replica, @tagName(message.header.command) },
+            );
+            return null;
+        }
+
+        // Record the first receipt of this message:
+        assert(messages[message.header.replica] == null);
+        messages[message.header.replica] = message;
+        assert(message.references == 1);
+        message.references += 1;
+
+        // Count the number of unique messages now received:
+        var count: usize = 0;
+        for (messages) |received, replica| {
+            if (received) |m| {
+                assert(m.header.command == message.header.command);
+                assert(m.header.replica == replica);
+                assert(m.header.view == self.view);
+                switch (message.header.command) {
+                    .prepare_ok => {
+                        assert(m.header.nonce == message.header.nonce);
+                    },
+                    .start_view_change => {
+                        assert(m.header.replica != self.replica);
+                    },
+                    .do_view_change => {},
+                    else => unreachable,
+                }
+                count += 1;
+            }
+        }
+        log.debug("{}: on_{}: {} message(s)", .{ self.replica, @tagName(message.header.command), count });
+
+        // Wait until we have exactly `threshold` messages for quorum:
+        if (count < threshold) {
+            log.debug("{}: on_{}: waiting for quorum", .{ self.replica, @tagName(message.header.command) });
+            return null;
+        }
+
+        // This is not the first time we have had quorum, the state transition has already happened:
+        if (count > threshold) {
+            log.debug("{}: on_{}: ignoring (quorum received already)", .{ self.replica, @tagName(message.header.command) });
+            return null;
+        }
+
+        assert(count == threshold);
+        return count;
+    }
+
+    /// Returns whether `b` succeeds `a` by having a newer view or same view and newer op.
+    fn ascending_viewstamps(
+        self: *Replica,
+        a: *const Header,
+        b: *const Header,
+    ) bool {
+        assert(a.command == .prepare);
+        assert(b.command == .prepare);
+
+        if (a.view < b.view) {
+            // We do not assert b.op >= a.op, ops may be reordered during a view change.
+            return true;
+        } else if (a.view > b.view) {
+            // We do not assert b.op <= a.op, ops may be reordered during a view change.
+            return false;
+        } else if (a.op < b.op) {
+            assert(a.view == b.view);
+            return true;
+        } else if (a.op > b.op) {
+            assert(a.view == b.view);
+            return false;
+        } else {
+            unreachable;
+        }
+    }
+
+    fn commit_ops_through(self: *Replica, commit: u64) void {
+        // TODO Wait until our journal chain from self.commit to self.op is completely connected.
+        // This will serve as another defense against not removing ops after a view jump.
+        if (commit <= self.commit) return;
+
+        if (!self.valid_hash_chain_between(self.commit, commit)) {
+            log.notice("{}: commit_ops_through: waiting for repairs", .{self.replica});
+            return;
+        }
+
+        // We may receive commit messages for ops we don't yet have:
+        // Even a naive state transfer may fail to correct for this.
+        while (self.commit < commit and self.commit < self.op) {
+            assert(self.journal.entry_for_op_exact(self.commit + 1) != null);
+            self.commit += 1;
+            assert(self.commit <= self.op);
+            // Find operation in journal:
+            // TODO Journal should have a fast path where current operation is already in memory.
+            // var entry = self.journal.find(self.commit) orelse @panic("operation not found in log");
+
+            // TODO Apply to State Machine:
+            log.debug("{}: commit_ops_through: executing op {}", .{ self.replica, self.commit });
+
+            // TODO Add reply to the client table to answer future duplicate requests idempotently.
+            // Lookup client table entry using client id.
+            // If client's last request id is <= this request id, then update client table entry.
+            // Otherwise the client is already ahead of us, and we don't need to update the entry.
+
+            // TODO Now that the reply is in the client table, trigger this message to be sent.
+            // TODO Do not reply to client if we are a follower.
+        }
+    }
+
+    fn ignore_view_change_message(self: *Replica, message: *const Message) bool {
+        assert(message.header.command == .start_view_change or
+            message.header.command == .do_view_change or
+            message.header.command == .start_view);
+        assert(message.header.view > 0); // The initial view is already zero.
+
+        const command: []const u8 = @tagName(message.header.command);
+
+        // 4.3 Recovery
+        // While a replica's status is recovering it does not participate in either the request
+        // processing protocol or the view change protocol.
+        // This is critical for correctness (to avoid data loss):
+        if (self.status == .recovering) {
+            log.debug("{}: on_{}: ignoring (recovering)", .{ self.replica, command });
+            return true;
+        }
+
+        if (message.header.view < self.view) {
+            log.debug("{}: on_{}: ignoring (older view)", .{ self.replica, command });
+            return true;
+        }
+
+        if (message.header.view == self.view and self.status == .normal) {
+            log.debug("{}: on_{}: ignoring (view already started)", .{ self.replica, command });
+            return true;
+        }
+
+        // These may be caused by faults in the network topology.
+        switch (message.header.command) {
+            .start_view_change, .start_view => {
+                if (message.header.replica == self.replica) {
+                    log.warn("{}: on_{}: ignoring (self)", .{ self.replica, command });
+                    return true;
+                }
+            },
+            .do_view_change => {
+                if (self.leader_index(message.header.view) != self.replica) {
+                    log.warn("{}: on_{}: ignoring (follower)", .{ self.replica, command });
+                    return true;
+                }
+            },
+            else => unreachable,
+        }
+
+        return false;
+    }
+
     fn is_repair(self: *Replica, message: *const Message) bool {
         assert(message.header.command == .prepare);
 
@@ -1515,332 +2172,10 @@ pub const Replica = struct {
         }
     }
 
-    fn repair_later(self: *Replica, message: *Message) void {
-        assert(self.appending or self.repairing);
-        assert(message.references > 0);
-        assert(message.header.command == .prepare);
-        assert(message.next == null);
-
-        if (!self.repairing) {
-            log.debug("{}: repair_later: repairing immediately", .{self.replica});
-            self.on_repair(message);
-            return;
-        }
-
-        log.debug("{}: repair_later: {} message(s)", .{ self.replica, self.repair_queue_len });
-
-        if (self.repair_queue_len >= self.repair_queue_max) {
-            log.debug("{}: repair_later: dropping", .{self.replica});
-            return;
-        }
-
-        log.debug("{}: repair_later: queueing", .{self.replica});
-
-        message.references += 1;
-        message.next = self.repair_queue;
-        self.repair_queue = message;
-        self.repair_queue_len += 1;
-    }
-
-    fn repair_last_queued_message_if_any(self: *Replica) void {
-        if (self.status != .normal and self.status != .view_change) return;
-
-        while (!self.repairing) {
-            if (self.repair_queue) |message| {
-                assert(self.repair_queue_len > 0);
-                self.repair_queue = message.next;
-                self.repair_queue_len -= 1;
-
-                message.references -= 1;
-                message.next = null;
-                self.on_repair(message);
-                assert(self.repair_queue != message); // Catch an accidental requeue by on_repair().
-                self.message_bus.gc(message);
-            } else {
-                assert(self.repair_queue_len == 0);
-                break;
-            }
-        }
-    }
-
-    fn write_to_journal(self: *Replica, message: *Message, lock: *bool) void {
-        assert(lock.* == false);
-        lock.* = true;
-        defer lock.* = false;
-
-        assert(message.references > 0);
-        assert(message.header.command == .prepare);
-        assert(message.header.view <= self.view);
-        assert(message.header.op <= self.op or message.header.view < self.view);
-
-        if (!self.journal.has(message.header)) {
-            log.debug("{}: write_to_journal: ignoring (header changed)", .{self.replica});
-            return;
-        }
-
-        message.references += 1;
-
-        if (self.journal.has_dirty(message.header)) {
-            self.journal.write(message.header, message.buffer);
-        } else {
-            log.debug("{}: write_to_journal: skipping (already clean)", .{self.replica});
-        }
-
-        self.send_prepare_ok(message);
-
-        message.references -= 1;
-        self.message_bus.gc(message);
-    }
-
-    fn send_prepare_ok(self: *Replica, message: *Message) void {
-        assert(message.references > 0);
-        assert(message.header.command == .prepare);
-        assert(message.header.view <= self.view);
-        assert(message.header.op <= self.op or message.header.view < self.view);
-
-        if (self.status != .normal) {
-            log.debug("{}: send_prepare_ok: not sending ({})", .{ self.replica, self.status });
-            return;
-        }
-
-        if (message.header.view < self.view) {
-            log.debug("{}: send_prepare_ok: not sending (older view)", .{self.replica});
-            return;
-        }
-
-        assert(self.status == .normal);
-        assert(message.header.view == self.view);
-        assert(message.header.op <= self.op);
-
-        if (message.header.op <= self.commit) {
-            log.debug("{}: send_prepare_ok: not sending (committed)", .{self.replica});
-            return;
-        }
-
-        if (self.journal.has_clean(message.header)) {
-            assert(message.header.replica == self.leader_index(message.header.view));
-            self.send_header_to_replica(message.header.replica, .{
-                .command = .prepare_ok,
-                .nonce = message.header.checksum,
-                .client = message.header.client,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .view = message.header.view,
-                .op = message.header.op,
-                .commit = message.header.commit,
-                .offset = message.header.offset,
-                .epoch = message.header.epoch,
-                .request = message.header.request,
-                .operation = message.header.operation,
-            });
-        } else {
-            log.debug("{}: send_prepare_ok: not sending (dirty)", .{self.replica});
-            return;
-        }
-    }
-
-    fn on_prepare_timeout(self: *Replica) void {
-        assert(self.status == .normal);
-        assert(self.leader());
-        assert(self.request_checksum != null);
-        assert(self.prepare_message != null);
-
-        var message = self.prepare_message.?;
-        assert(message.header.view == self.view);
-
-        // TODO Exponential backoff.
-        // TODO Prevent flooding the network due to multiple concurrent rounds of replication.
-        self.prepare_attempt += 1;
-        self.prepare_timeout.reset();
-
-        // The list of remote replicas yet to send a prepare_ok:
-        var waiting: [32]u16 = undefined;
-        var waiting_len: usize = 0;
-        for (self.prepare_ok_from_all_replicas) |received, replica| {
-            if (received == null and replica != self.replica) {
-                waiting[waiting_len] = @intCast(u16, replica);
-                waiting_len += 1;
-                if (waiting_len == waiting.len) break;
-            }
-        }
-
-        if (waiting_len == 0) {
-            log.debug("{}: on_prepare_timeout: waiting for journal", .{self.replica});
-            assert(self.prepare_ok_from_all_replicas[self.replica] == null);
-            return;
-        }
-
-        for (waiting[0..waiting_len]) |replica| {
-            log.debug("{}: on_prepare_timeout: waiting for replica {}", .{ self.replica, replica });
-        }
-
-        // Cycle through the list for each attempt to reach live replicas and get around partitions:
-        // If only the first replica in the list was chosen... liveness would suffer if it was down!
-        var replica = waiting[@mod(self.prepare_attempt, waiting_len)];
-        assert(replica != self.replica);
-
-        log.debug("{}: on_prepare_timeout: replicating to replica {}", .{ self.replica, replica });
-        self.send_message_to_replica(replica, message);
-    }
-
-    fn on_prepare_ok(self: *Replica, message: *Message) void {
-        if (self.status != .normal) {
-            log.debug("{}: on_prepare_ok: ignoring ({})", .{ self.replica, self.status });
-            return;
-        }
-
-        if (message.header.view < self.view) {
-            log.debug("{}: on_prepare_ok: ignoring (older view)", .{self.replica});
-            return;
-        }
-
-        if (message.header.view > self.view) {
-            // Another replica is treating us as the leader for a view we do not know about.
-            // This may be caused by a fault in the network topology.
-            log.warn("{}: on_prepare_ok: ignoring (newer view)", .{self.replica});
-            return;
-        }
-
-        if (self.follower()) {
-            // This may be caused by a fault in the network topology.
-            log.warn("{}: on_prepare_ok: ignoring (follower)", .{self.replica});
-            return;
-        }
-
-        if (self.prepare_message) |prepare_message| {
-            if (message.header.nonce != prepare_message.header.checksum) {
-                log.debug("{}: on_prepare_ok: ignoring (different nonce)", .{self.replica});
-                return;
-            }
-        } else {
-            log.debug("{}: on_prepare_ok: ignoring (not preparing)", .{self.replica});
-            return;
-        }
-
-        assert(self.status == .normal);
-        assert(message.header.view == self.view);
-        assert(self.leader());
-
-        assert(message.header.command == .prepare_ok);
-        assert(message.header.nonce == self.prepare_message.?.header.checksum);
-        assert(message.header.client == self.prepare_message.?.header.client);
-        assert(message.header.cluster == self.prepare_message.?.header.cluster);
-        assert(message.header.view == self.prepare_message.?.header.view);
-        assert(message.header.op == self.prepare_message.?.header.op);
-        assert(message.header.commit == self.prepare_message.?.header.commit);
-        assert(message.header.offset == self.prepare_message.?.header.offset);
-        assert(message.header.epoch == self.prepare_message.?.header.epoch);
-        assert(message.header.request == self.prepare_message.?.header.request);
-        assert(message.header.operation == self.prepare_message.?.header.operation);
-        assert(message.header.op == self.op);
-        assert(message.header.op == self.commit + 1);
-
-        // Wait until we have `f + 1` messages (including ourself) for quorum:
-        const count = self.add_message_and_receive_quorum_exactly_once(
-            self.prepare_ok_from_all_replicas,
-            message,
-            self.f + 1,
-        ) orelse return;
-
-        assert(count == self.f + 1);
-        log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
-
-        self.commit_ops_through(message.header.op);
-
-        self.reset_prepare();
-    }
-
-    fn reset_prepare(self: *Replica) void {
-        if (self.prepare_message) |message| {
-            self.request_checksum = null;
-            message.references -= 1;
-            self.message_bus.gc(message);
-            self.prepare_message = null;
-            self.prepare_attempt = 0;
-            self.prepare_timeout.stop();
-            self.reset_quorum_counter(self.prepare_ok_from_all_replicas, .prepare_ok);
-        }
-        assert(self.request_checksum == null);
-        assert(self.prepare_message == null);
-        assert(self.prepare_attempt == 0);
-        assert(self.prepare_timeout.ticking == false);
-        for (self.prepare_ok_from_all_replicas) |received| assert(received == null);
-    }
-
-    fn on_commit_timeout(self: *Replica) void {
-        assert(self.status == .normal);
-        assert(self.leader());
-
-        self.commit_timeout.reset();
-
-        // TODO Snapshots: Use snapshot checksum if commit is no longer in journal.
-        const latest_committed_entry = self.journal.entry_for_op_exact(self.commit).?;
-
-        self.send_header_to_other_replicas(.{
-            .command = .commit,
-            .nonce = latest_committed_entry.checksum,
-            .cluster = self.cluster,
-            .replica = self.replica,
-            .view = self.view,
-            .commit = self.commit,
-        });
-    }
-
-    fn on_commit(self: *Replica, message: *const Message) void {
-        if (self.status != .normal) {
-            log.debug("{}: on_commit: ignoring ({})", .{ self.replica, self.status });
-            return;
-        }
-
-        if (message.header.view < self.view) {
-            log.debug("{}: on_commit: ignoring (older view)", .{self.replica});
-            return;
-        }
-
-        if (message.header.view > self.view) {
-            log.debug("{}: on_commit: newer view", .{self.replica});
-            self.jump_to_newer_view(message.header.view);
-        }
-
-        if (self.leader()) {
-            log.warn("{}: on_commit: ignoring (leader)", .{self.replica});
-            return;
-        }
-
-        assert(self.status == .normal);
-        assert(message.header.view == self.view);
-        assert(self.follower());
-        assert(message.header.replica == self.leader_index(message.header.view));
-        assert(self.commit <= self.op);
-
-        // TODO Verify message.header.nonce matches journal entry for message.header.commit number.
-
-        self.normal_timeout.reset();
-
-        self.commit_ops_through(message.header.commit);
-    }
-
-    fn on_repair(self: *Replica, message: *Message) void {
-        assert(message.header.command == .prepare);
-        assert(message.header.view <= self.view);
-        assert(message.header.op <= self.op or message.header.view < self.view);
-
-        if (self.status != .normal and self.status != .view_change) return;
-
-        if (self.journal.has_clean(message.header)) {
-            log.debug("{}: on_repair: duplicate", .{self.replica});
-            self.send_prepare_ok(message);
-            return;
-        }
-
-        if (self.repair_header(message.header)) {
-            assert(self.journal.has_dirty(message.header));
-
-            if (self.repairing) return self.repair_later(message);
-
-            log.debug("{}: on_repair: repairing journal", .{self.replica});
-            self.repairing_frame = async self.write_to_journal(message, &self.repairing);
-        }
+    fn repair_dirty(self: *Replica) void {
+        // TODO Add a flag to avoid scanning all dirty bits.
+        // TODO Avoid requesting data if we have already just requested it.
+        // TODO Avoid requesting data if we are busy writing it (writes could take 10 seconds).
     }
 
     fn repair_header(self: *Replica, header: *const Header) bool {
@@ -2000,153 +2335,167 @@ pub const Replica = struct {
         return false;
     }
 
-    /// Returns whether `b` succeeds `a` by having a newer view or same view and newer op.
-    fn ascending_viewstamps(
-        self: *Replica,
-        a: *const Header,
-        b: *const Header,
-    ) bool {
-        assert(a.command == .prepare);
-        assert(b.command == .prepare);
+    /// Starting from the latest journal entry, backfill any missing or disconnected headers.
+    /// A header is disconnected if it breaks the hash chain with its newer neighbor to the right.
+    /// Since we work backwards from the latest entry, we should always be able to fix the chain.
+    fn repair_headers(self: *Replica) void {
+        if (self.status != .normal and self.status != .view_change) return;
 
-        if (a.view < b.view) {
-            // We do not assert b.op >= a.op, ops may be reordered during a view change.
-            return true;
-        } else if (a.view > b.view) {
-            // We do not assert b.op <= a.op, ops may be reordered during a view change.
-            return false;
-        } else if (a.op < b.op) {
-            assert(a.view == b.view);
-            return true;
-        } else if (a.op > b.op) {
-            assert(a.view == b.view);
-            return false;
-        } else {
-            unreachable;
+        // TODO Handle case where we are requesting reordered headers that no longer exist.
+
+        // We expect these always to exist (and be correct):
+        assert(self.journal.entry_for_op_exact(self.commit) != null);
+        assert(self.journal.entry_for_op_exact(self.op) != null);
+
+        // Request any missing or disconnected headers:
+        // TODO Snapshots: Ensure that self.commit op always exists in the journal.
+        var broken = self.journal.find_latest_headers_break_between(self.commit, self.op);
+        if (broken) |range| {
+            log.notice("{}: repair_headers: latest break: {}", .{ self.replica, range });
+            assert(range.op_min > self.commit);
+            assert(range.op_max < self.op);
+            // TODO Ask any N random replicas excluding ourself (to reduce traffic).
+            self.send_header_to_other_replicas(.{
+                .command = .request_headers,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .commit = range.op_min,
+                .op = range.op_max,
+            });
+            return;
+        }
+
+        // Assert that all headers are now present and connected with a perfect hash chain:
+        assert(self.valid_hash_chain_between(self.commit, self.op));
+    }
+
+    fn repair_last_queued_message_if_any(self: *Replica) void {
+        if (self.status != .normal and self.status != .view_change) return;
+
+        while (!self.repairing) {
+            if (self.repair_queue) |message| {
+                assert(self.repair_queue_len > 0);
+                self.repair_queue = message.next;
+                self.repair_queue_len -= 1;
+
+                message.references -= 1;
+                message.next = null;
+                self.on_repair(message);
+                assert(self.repair_queue != message); // Catch an accidental requeue by on_repair().
+                self.message_bus.gc(message);
+            } else {
+                assert(self.repair_queue_len == 0);
+                break;
+            }
         }
     }
 
-    fn on_normal_timeout(self: *Replica) void {
-        assert(self.status == .normal);
-        assert(self.follower());
-        self.transition_to_view_change_status(self.view + 1);
-    }
+    fn repair_later(self: *Replica, message: *Message) void {
+        assert(self.appending or self.repairing);
+        assert(message.references > 0);
+        assert(message.header.command == .prepare);
+        assert(message.next == null);
 
-    fn on_view_change_timeout(self: *Replica) void {
-        assert(self.status == .view_change);
-        self.transition_to_view_change_status(self.view + 1);
-    }
-
-    /// A replica i that notices the need for a view change advances its view, sets its status to
-    /// view_change, and sends a ⟨start_view_change v, i⟩ message to all the other replicas,
-    /// where v identifies the new view. A replica notices the need for a view change either based
-    /// on its own timer, or because it receives a start_view_change or do_view_change message for
-    /// a view with a larger number than its own view.
-    fn transition_to_view_change_status(self: *Replica, new_view: u64) void {
-        log.debug("{}: transition_to_view_change_status: view {}", .{ self.replica, new_view });
-        assert(new_view > self.view);
-        self.view = new_view;
-        self.status = .view_change;
-
-        self.commit_timeout.stop();
-        self.normal_timeout.stop();
-        self.view_change_timeout.start();
-
-        self.reset_prepare();
-
-        // Some VR implementations reset their counters only on entering a view, perhaps assuming
-        // the view will be followed only by a single subsequent view change to the next view.
-        // However, multiple successive view changes can fail, e.g. after a view change timeout.
-        // We must therefore reset our counters here to avoid counting messages from an older view,
-        // which would violate the quorum intersection property essential for correctness.
-        self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
-        self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
-
-        // Send only to other replicas (and not to ourself) to avoid a quorum off-by-one error:
-        // This could happen if the replica mistakenly counts its own message in the quorum.
-        self.send_header_to_other_replicas(.{
-            .command = .start_view_change,
-            .cluster = self.cluster,
-            .replica = self.replica,
-            .view = new_view,
-        });
-        // TODO Resend after timeout.
-    }
-
-    fn on_start_view_change(self: *Replica, message: *Message) void {
-        if (self.ignore_view_change_message(message)) return;
-
-        assert(self.status == .normal or self.status == .view_change);
-        assert(message.header.view >= self.view);
-        assert(message.header.replica != self.replica);
-
-        if (message.header.view > self.view) {
-            log.debug("{}: on_start_view_change: changing to newer view", .{self.replica});
-            self.transition_to_view_change_status(message.header.view);
+        if (!self.repairing) {
+            log.debug("{}: repair_later: repairing immediately", .{self.replica});
+            self.on_repair(message);
+            return;
         }
 
-        assert(self.status == .view_change);
-        assert(message.header.view == self.view);
+        log.debug("{}: repair_later: {} message(s)", .{ self.replica, self.repair_queue_len });
 
-        // Wait until we have `f` messages (excluding ourself) for quorum:
-        const count = self.add_message_and_receive_quorum_exactly_once(
-            self.start_view_change_from_other_replicas,
-            message,
-            self.f,
-        ) orelse return;
+        if (self.repair_queue_len >= self.repair_queue_max) {
+            log.debug("{}: repair_later: dropping", .{self.replica});
+            return;
+        }
 
-        assert(count == self.f);
-        log.debug("{}: on_start_view_change: quorum received", .{self.replica});
+        log.debug("{}: repair_later: queueing", .{self.replica});
 
-        // TODO Resend after timeout:
-        self.send_do_view_change();
+        message.references += 1;
+        message.next = self.repair_queue;
+        self.repair_queue = message;
+        self.repair_queue_len += 1;
     }
 
-    fn ignore_view_change_message(self: *Replica, message: *const Message) bool {
-        assert(message.header.command == .start_view_change or
-            message.header.command == .do_view_change or
-            message.header.command == .start_view);
-        assert(message.header.view > 0); // The initial view is already zero.
+    fn reset_prepare(self: *Replica) void {
+        if (self.prepare_message) |message| {
+            self.request_checksum = null;
+            message.references -= 1;
+            self.message_bus.gc(message);
+            self.prepare_message = null;
+            self.prepare_attempt = 0;
+            self.prepare_timeout.stop();
+            self.reset_quorum_counter(self.prepare_ok_from_all_replicas, .prepare_ok);
+        }
+        assert(self.request_checksum == null);
+        assert(self.prepare_message == null);
+        assert(self.prepare_attempt == 0);
+        assert(self.prepare_timeout.ticking == false);
+        for (self.prepare_ok_from_all_replicas) |received| assert(received == null);
+    }
 
-        const command: []const u8 = @tagName(message.header.command);
+    fn reset_quorum_counter(self: *Replica, messages: []?*Message, command: Command) void {
+        var count: usize = 0;
+        for (messages) |*received, replica| {
+            if (received.*) |message| {
+                assert(message.header.command == command);
+                assert(message.header.replica == replica);
+                assert(message.header.view <= self.view);
+                message.references -= 1;
+                self.message_bus.gc(message);
+                count += 1;
+            }
+            received.* = null;
+        }
+        log.debug("{}: reset {} {} message(s)", .{ self.replica, count, @tagName(command) });
+    }
 
-        // 4.3 Recovery
-        // While a replica's status is recovering it does not participate in either the request
-        // processing protocol or the view change protocol.
-        // This is critical for correctness (to avoid data loss):
-        if (self.status == .recovering) {
-            log.debug("{}: on_{}: ignoring (recovering)", .{ self.replica, command });
-            return true;
+    fn send_prepare_ok(self: *Replica, message: *Message) void {
+        assert(message.references > 0);
+        assert(message.header.command == .prepare);
+        assert(message.header.view <= self.view);
+        assert(message.header.op <= self.op or message.header.view < self.view);
+
+        if (self.status != .normal) {
+            log.debug("{}: send_prepare_ok: not sending ({})", .{ self.replica, self.status });
+            return;
         }
 
         if (message.header.view < self.view) {
-            log.debug("{}: on_{}: ignoring (older view)", .{ self.replica, command });
-            return true;
+            log.debug("{}: send_prepare_ok: not sending (older view)", .{self.replica});
+            return;
         }
 
-        if (message.header.view == self.view and self.status == .normal) {
-            log.debug("{}: on_{}: ignoring (view already started)", .{ self.replica, command });
-            return true;
+        assert(self.status == .normal);
+        assert(message.header.view == self.view);
+        assert(message.header.op <= self.op);
+
+        if (message.header.op <= self.commit) {
+            log.debug("{}: send_prepare_ok: not sending (committed)", .{self.replica});
+            return;
         }
 
-        // These may be caused by faults in the network topology.
-        switch (message.header.command) {
-            .start_view_change, .start_view => {
-                if (message.header.replica == self.replica) {
-                    log.warn("{}: on_{}: ignoring (self)", .{ self.replica, command });
-                    return true;
-                }
-            },
-            .do_view_change => {
-                if (self.leader_index(message.header.view) != self.replica) {
-                    log.warn("{}: on_{}: ignoring (follower)", .{ self.replica, command });
-                    return true;
-                }
-            },
-            else => unreachable,
+        if (self.journal.has_clean(message.header)) {
+            assert(message.header.replica == self.leader_index(message.header.view));
+            self.send_header_to_replica(message.header.replica, .{
+                .command = .prepare_ok,
+                .nonce = message.header.checksum,
+                .client = message.header.client,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = message.header.view,
+                .op = message.header.op,
+                .commit = message.header.commit,
+                .offset = message.header.offset,
+                .epoch = message.header.epoch,
+                .request = message.header.request,
+                .operation = message.header.operation,
+            });
+        } else {
+            log.debug("{}: send_prepare_ok: not sending (dirty)", .{self.replica});
+            return;
         }
-
-        return false;
     }
 
     /// When replica i receives start_view_change messages for its view from f other replicas,
@@ -2183,467 +2532,6 @@ pub const Replica = struct {
 
         assert(message.references == 0);
         self.send_message_to_replica(new_leader, message);
-    }
-
-    fn on_do_view_change(self: *Replica, message: *Message) void {
-        if (self.ignore_view_change_message(message)) return;
-
-        assert(self.status == .normal or self.status == .view_change);
-        assert(message.header.view >= self.view);
-        assert(self.leader_index(message.header.view) == self.replica);
-
-        if (message.header.view > self.view) {
-            log.debug("{}: on_do_view_change: changing to newer view", .{self.replica});
-            // At first glance, it might seem that sending start_view_change messages out now after
-            // receiving a do_view_change here would be superfluous. However, this is essential,
-            // especially in the presence of asymmetric network faults. At this point, we may not
-            // yet have received a do_view_change quorum, and another replica might need our
-            // start_view_change message in order to get its do_view_change message through to us.
-            // We therefore do not special case the start_view_change function, and we always send
-            // start_view_change messages, regardless of the message that initiated the view change:
-            self.transition_to_view_change_status(message.header.view);
-        }
-
-        assert(self.status == .view_change);
-        assert(message.header.view == self.view);
-
-        // Wait until we have `f + 1` messages (including ourself) for quorum:
-        const count = self.add_message_and_receive_quorum_exactly_once(
-            self.do_view_change_from_all_replicas,
-            message,
-            self.f + 1,
-        ) orelse return;
-
-        assert(count == self.f + 1);
-        log.debug("{}: on_do_view_change: quorum received", .{self.replica});
-
-        // When the new primary receives f + 1 do_view_change messages from different replicas
-        // (including itself), it sets its view number to that in the messages and selects as the
-        // new log the one contained in the message with the largest v′; if several messages have
-        // the same v′ it selects the one among them with the largest n. It sets its op number to
-        // that of the topmost entry in the new log, sets its commit number to the largest such
-        // number it received in the do_view_change messages, changes its status to normal, and
-        // informs the other replicas of the completion of the view change by sending
-        // ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
-        // op number, and k is the commit number.
-
-        var v: ?u64 = null; // Latest normal view
-        var n: ?u64 = null; // Op number
-        var k: ?u64 = null; // Commit number
-        var c: ?u128 = null; // Checksum
-        var o: ?u64 = null; // Offset
-
-        for (self.do_view_change_from_all_replicas) |received, replica| {
-            if (received) |m| {
-                assert(m.header.command == .do_view_change);
-                assert(m.header.replica == replica);
-                assert(m.header.view == self.view);
-
-                if (k == null or m.header.commit > k.?) k = m.header.commit;
-
-                for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |*h| {
-                    if (h.command == .reserved) continue;
-
-                    assert(h.command == .prepare);
-                    if (v == null or h.view > v.? or (h.view == v.? and h.op > n.?)) {
-                        assert(v == null or h.view >= v.?);
-                        v = h.view;
-                        n = h.op;
-                        c = h.checksum;
-                        o = h.offset;
-                    }
-
-                    _ = self.repair_header(h);
-                }
-            }
-        }
-
-        log.debug("{}: on_do_view_change: latest: view={} op={} commit={} checksum={} offset={}", .{
-            self.replica,
-            v,
-            n,
-            k,
-            c,
-            o,
-        });
-
-        assert(v.? >= 0 and v.? < self.view); // Latest normal view before this view change.
-        assert(n.? >= self.commit); // Ops may be reordered and rewound through a prior view change.
-        assert(k.? >= self.commit);
-
-        const latest_entry = self.journal.entry_for_op_exact(n.?).?;
-        assert(latest_entry.view == v.?);
-        assert(latest_entry.op == n.?);
-        assert(latest_entry.checksum == c.?);
-        assert(latest_entry.offset == o.?);
-
-        self.op = n.?;
-
-        self.repair_headers();
-
-        // TODO
-        if (true) return;
-
-        // TODO Ensure self.commit == self.op
-        // Next prepare needs this to hold: assert(message.header.op == self.commit + 1);
-
-        // TODO Repair according to CTRL protocol.
-        self.commit_ops_through(k.?);
-        assert(self.commit == k.?);
-
-        self.transition_to_normal_status(self.view);
-
-        assert(self.status == .normal);
-        assert(self.leader());
-
-        // TODO Add journal entries to start_view message.
-        // TODO Add checksum to start_view message.
-        self.send_header_to_other_replicas(.{
-            .command = .start_view,
-            .cluster = self.cluster,
-            .replica = self.replica,
-            .view = self.view,
-            .op = self.op,
-            .commit = self.commit,
-        });
-    }
-
-    /// Starting from the latest journal entry, backfill any missing or disconnected headers.
-    /// A header is disconnected if it breaks the hash chain with its newer neighbor to the right.
-    /// Since we work backwards from the latest entry, we should always be able to fix the chain.
-    fn repair_headers(self: *Replica) void {
-        if (self.status != .normal and self.status != .view_change) return;
-
-        // TODO Handle case where we are requesting reordered headers that no longer exist.
-
-        // We expect these always to exist (and be correct):
-        assert(self.journal.entry_for_op_exact(self.commit) != null);
-        assert(self.journal.entry_for_op_exact(self.op) != null);
-
-        // Request any missing or disconnected headers:
-        // TODO Snapshots: Ensure that self.commit op always exists in the journal.
-        var broken = self.journal.find_latest_headers_break_between(self.commit, self.op);
-        if (broken) |range| {
-            log.notice("{}: repair_headers: latest break: {}", .{ self.replica, range });
-            assert(range.op_min > self.commit);
-            assert(range.op_max < self.op);
-            // TODO Ask any N random replicas excluding ourself (to reduce traffic).
-            self.send_header_to_other_replicas(.{
-                .command = .request_headers,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .view = self.view,
-                .commit = range.op_min,
-                .op = range.op_max,
-            });
-            return;
-        }
-
-        // Assert that all headers are now present and connected with a perfect hash chain:
-        assert(self.valid_hash_chain_between(self.commit, self.op));
-    }
-
-    /// Returns true if all operations are present, correctly ordered and connected by hash chain,
-    /// between `op_min` and `op_max` (both inclusive).
-    fn valid_hash_chain_between(self: *Replica, op_min: u64, op_max: u64) bool {
-        assert(op_min <= op_max);
-
-        var b = self.journal.entry_for_op_exact(op_max);
-        if (b == null) {
-            log.notice("{}: valid_hash_chain_between: missing op {}", .{ self.replica, op_max });
-            return false;
-        }
-
-        var op = op_max;
-        while (op > op_min) {
-            op -= 1;
-
-            var a = self.journal.entry_for_op_exact(op);
-            if (a == null) {
-                log.notice("{}: valid_hash_chain_between: missing op {}", .{ self.replica, op });
-                return false;
-            }
-
-            assert(a.?.op + 1 == b.?.op);
-
-            if (a.?.checksum != b.?.nonce) {
-                log.notice("{}: valid_hash_chain_between: break: A: {}", .{ self.replica, a.? });
-                log.notice("{}: valid_hash_chain_between: break: B: {}", .{ self.replica, b.? });
-                return false;
-            }
-
-            assert(self.ascending_viewstamps(a.?, b.?));
-
-            b = a;
-        }
-        assert(b.?.op == op_min);
-
-        return true;
-    }
-
-    fn on_request_headers(self: *Replica, message: *const Message) void {
-        // TODO Add debug logs.
-        if (self.status != .normal and self.status != .view_change) {
-            return;
-        }
-
-        if (message.header.view != self.view) {
-            return;
-        }
-
-        if (message.header.replica == self.replica) {
-            return;
-        }
-
-        const op_min = message.header.commit;
-        const op_max = message.header.op;
-        assert(op_max >= op_min); // TODO Add Header.bad validator for this.
-
-        // We must add 1 because op_max and op_min are both inclusive:
-        const count_max = @intCast(u32, std.math.min(64, op_max - op_min + 1));
-        assert(count_max > 0);
-
-        const size_max = @sizeOf(Header) + @sizeOf(Header) * count_max;
-
-        var m = self.message_bus.create_message(size_max) catch unreachable;
-        m.header.* = .{
-            .command = .headers,
-            .nonce = message.header.checksum,
-            .cluster = self.cluster,
-            .replica = self.replica,
-            .view = self.view,
-        };
-
-        var dest = std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..size_max]);
-        const count = self.journal.copy_latest_headers_between(op_min, op_max, dest);
-        log.debug("copied {} headers", .{count});
-
-        m.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
-        const data = m.buffer[@sizeOf(Header)..m.header.size];
-
-        m.header.set_checksum_data(data);
-        m.header.set_checksum();
-
-        assert(m.references == 0);
-        self.send_message_to_replica(message.header.replica, m);
-    }
-
-    fn on_headers(self: *Replica, message: *const Message) void {
-        if (self.status != .normal and self.status != .view_change) {
-            return;
-        }
-
-        if (message.header.view != self.view) {
-            return;
-        }
-
-        if (message.header.replica == self.replica) {
-            return;
-        }
-
-        log.debug("{}: received headers from {}", .{ self.replica, message.header.replica });
-
-        for (std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..message.header.size])) |*h| {
-            if (h.command == .reserved) continue;
-
-            log.debug("{}: {}", .{ self.replica, h });
-
-            _ = self.repair_header(h);
-        }
-    }
-
-    fn on_start_view(self: *Replica, message: *const Message) void {
-        if (self.ignore_view_change_message(message)) return;
-
-        assert(self.status == .normal or self.status == .view_change);
-        assert(message.header.view >= self.view);
-        assert(message.header.replica != self.replica);
-        assert(message.header.replica == self.leader_index(message.header.view));
-
-        // TODO Assert that start_view message matches what we expect if our journal is empty.
-        // TODO Assert that start_view message's oldest op overlaps with our last commit number.
-        // TODO Update the journal.
-
-        self.transition_to_normal_status(message.header.view);
-
-        assert(self.status == .normal);
-        assert(message.header.view == self.view);
-        assert(self.follower());
-
-        // TODO Update our last op number according to message.
-
-        // TODO self.commit(msg.lastcommitted());
-        // TODO self.send_prepare_oks(oldLastOp);
-    }
-
-    fn transition_to_normal_status(self: *Replica, new_view: u64) void {
-        log.debug("{}: transition_to_normal_status: view {}", .{ self.replica, new_view });
-        // In the VRR paper it's possible to transition from .normal to .normal for the same view.
-        // For example, this could happen after a state transfer triggered by an op jump.
-        assert(new_view >= self.view);
-        self.view = new_view;
-        self.status = .normal;
-
-        if (self.leader()) {
-            log.debug("{}: transition_to_normal_status: leader", .{self.replica});
-
-            self.commit_timeout.start();
-            self.normal_timeout.stop();
-            self.view_change_timeout.stop();
-        } else {
-            log.debug("{}: transition_to_normal_status: follower", .{self.replica});
-
-            self.commit_timeout.stop();
-            self.normal_timeout.start();
-            self.view_change_timeout.stop();
-        }
-
-        // This is essential for correctness:
-        self.reset_prepare();
-
-        // Reset and garbage collect all view change messages (if any):
-        // This is not essential for correctness, only efficiency.
-        // We just don't want to tie them up until the next view change (when they must be reset):
-        self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
-        self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
-    }
-
-    fn add_message_and_receive_quorum_exactly_once(
-        self: *Replica,
-        messages: []?*Message,
-        message: *Message,
-        threshold: u32,
-    ) ?usize {
-        assert(messages.len == self.configuration.len);
-
-        assert(message.header.view == self.view);
-        switch (message.header.command) {
-            .prepare_ok => {
-                assert(self.status == .normal);
-                assert(self.leader());
-                assert(message.header.nonce == self.prepare_message.?.header.checksum);
-            },
-            .start_view_change => assert(self.status == .view_change),
-            .do_view_change => {
-                assert(self.status == .view_change);
-                assert(self.leader_index(self.view) == self.replica);
-            },
-            else => unreachable,
-        }
-
-        // TODO Improve this to work for "a cluster of one":
-        assert(threshold >= 1);
-        assert(threshold <= self.configuration.len);
-
-        // Do not allow duplicate messages to trigger multiple passes through a state transition:
-        if (messages[message.header.replica]) |m| {
-            // Assert that this truly is a duplicate message and not a different message:
-            // TODO Review that all message fields are compared for equality:
-            assert(m.header.command == message.header.command);
-            assert(m.header.replica == message.header.replica);
-            assert(m.header.view == message.header.view);
-            assert(m.header.op == message.header.op);
-            assert(m.header.commit == message.header.commit);
-            assert(m.header.checksum_data == message.header.checksum_data);
-            assert(m.header.checksum == message.header.checksum);
-            log.debug(
-                "{}: on_{}: ignoring (duplicate message)",
-                .{ self.replica, @tagName(message.header.command) },
-            );
-            return null;
-        }
-
-        // Record the first receipt of this message:
-        assert(messages[message.header.replica] == null);
-        messages[message.header.replica] = message;
-        assert(message.references == 1);
-        message.references += 1;
-
-        // Count the number of unique messages now received:
-        var count: usize = 0;
-        for (messages) |received, replica| {
-            if (received) |m| {
-                assert(m.header.command == message.header.command);
-                assert(m.header.replica == replica);
-                assert(m.header.view == self.view);
-                switch (message.header.command) {
-                    .prepare_ok => {
-                        assert(m.header.nonce == message.header.nonce);
-                    },
-                    .start_view_change => {
-                        assert(m.header.replica != self.replica);
-                    },
-                    .do_view_change => {},
-                    else => unreachable,
-                }
-                count += 1;
-            }
-        }
-        log.debug("{}: on_{}: {} message(s)", .{ self.replica, @tagName(message.header.command), count });
-
-        // Wait until we have exactly `threshold` messages for quorum:
-        if (count < threshold) {
-            log.debug("{}: on_{}: waiting for quorum", .{ self.replica, @tagName(message.header.command) });
-            return null;
-        }
-
-        // This is not the first time we have had quorum, the state transition has already happened:
-        if (count > threshold) {
-            log.debug("{}: on_{}: ignoring (quorum received already)", .{ self.replica, @tagName(message.header.command) });
-            return null;
-        }
-
-        assert(count == threshold);
-        return count;
-    }
-
-    fn reset_quorum_counter(self: *Replica, messages: []?*Message, command: Command) void {
-        var count: usize = 0;
-        for (messages) |*received, replica| {
-            if (received.*) |message| {
-                assert(message.header.command == command);
-                assert(message.header.replica == replica);
-                assert(message.header.view <= self.view);
-                message.references -= 1;
-                self.message_bus.gc(message);
-                count += 1;
-            }
-            received.* = null;
-        }
-        log.debug("{}: reset {} {} message(s)", .{ self.replica, count, @tagName(command) });
-    }
-
-    fn commit_ops_through(self: *Replica, commit: u64) void {
-        // TODO Wait until our journal chain from self.commit to self.op is completely connected.
-        // This will serve as another defense against not removing ops after a view jump.
-        if (commit <= self.commit) return;
-
-        if (!self.valid_hash_chain_between(self.commit, commit)) {
-            log.notice("{}: commit_ops_through: waiting for repairs", .{self.replica});
-            return;
-        }
-
-        // We may receive commit messages for ops we don't yet have:
-        // Even a naive state transfer may fail to correct for this.
-        while (self.commit < commit and self.commit < self.op) {
-            assert(self.journal.entry_for_op_exact(self.commit + 1) != null);
-            self.commit += 1;
-            assert(self.commit <= self.op);
-            // Find operation in journal:
-            // TODO Journal should have a fast path where current operation is already in memory.
-            // var entry = self.journal.find(self.commit) orelse @panic("operation not found in log");
-
-            // TODO Apply to State Machine:
-            log.debug("{}: commit_ops_through: executing op {}", .{ self.replica, self.commit });
-
-            // TODO Add reply to the client table to answer future duplicate requests idempotently.
-            // Lookup client table entry using client id.
-            // If client's last request id is <= this request id, then update client table entry.
-            // Otherwise the client is already ahead of us, and we don't need to update the entry.
-
-            // TODO Now that the reply is in the client table, trigger this message to be sent.
-            // TODO Do not reply to client if we are a follower.
-        }
     }
 
     fn send_header_to_other_replicas(self: *Replica, header: Header) void {
@@ -2693,6 +2581,141 @@ pub const Replica = struct {
         assert(message.header.cluster == self.cluster);
         assert(message.header.view == self.view);
         self.message_bus.send_message_to_replica(replica, message);
+    }
+
+    fn transition_to_normal_status(self: *Replica, new_view: u64) void {
+        log.debug("{}: transition_to_normal_status: view {}", .{ self.replica, new_view });
+        // In the VRR paper it's possible to transition from .normal to .normal for the same view.
+        // For example, this could happen after a state transfer triggered by an op jump.
+        assert(new_view >= self.view);
+        self.view = new_view;
+        self.status = .normal;
+
+        if (self.leader()) {
+            log.debug("{}: transition_to_normal_status: leader", .{self.replica});
+
+            self.commit_timeout.start();
+            self.normal_timeout.stop();
+            self.view_change_timeout.stop();
+        } else {
+            log.debug("{}: transition_to_normal_status: follower", .{self.replica});
+
+            self.commit_timeout.stop();
+            self.normal_timeout.start();
+            self.view_change_timeout.stop();
+        }
+
+        // This is essential for correctness:
+        self.reset_prepare();
+
+        // Reset and garbage collect all view change messages (if any):
+        // This is not essential for correctness, only efficiency.
+        // We just don't want to tie them up until the next view change (when they must be reset):
+        self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
+        self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
+    }
+
+    /// A replica i that notices the need for a view change advances its view, sets its status to
+    /// view_change, and sends a ⟨start_view_change v, i⟩ message to all the other replicas,
+    /// where v identifies the new view. A replica notices the need for a view change either based
+    /// on its own timer, or because it receives a start_view_change or do_view_change message for
+    /// a view with a larger number than its own view.
+    fn transition_to_view_change_status(self: *Replica, new_view: u64) void {
+        log.debug("{}: transition_to_view_change_status: view {}", .{ self.replica, new_view });
+        assert(new_view > self.view);
+        self.view = new_view;
+        self.status = .view_change;
+
+        self.commit_timeout.stop();
+        self.normal_timeout.stop();
+        self.view_change_timeout.start();
+
+        self.reset_prepare();
+
+        // Some VR implementations reset their counters only on entering a view, perhaps assuming
+        // the view will be followed only by a single subsequent view change to the next view.
+        // However, multiple successive view changes can fail, e.g. after a view change timeout.
+        // We must therefore reset our counters here to avoid counting messages from an older view,
+        // which would violate the quorum intersection property essential for correctness.
+        self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
+        self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
+
+        // Send only to other replicas (and not to ourself) to avoid a quorum off-by-one error:
+        // This could happen if the replica mistakenly counts its own message in the quorum.
+        self.send_header_to_other_replicas(.{
+            .command = .start_view_change,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = new_view,
+        });
+        // TODO Resend after timeout.
+    }
+
+    /// Returns true if all operations are present, correctly ordered and connected by hash chain,
+    /// between `op_min` and `op_max` (both inclusive).
+    fn valid_hash_chain_between(self: *Replica, op_min: u64, op_max: u64) bool {
+        assert(op_min <= op_max);
+
+        var b = self.journal.entry_for_op_exact(op_max);
+        if (b == null) {
+            log.notice("{}: valid_hash_chain_between: missing op {}", .{ self.replica, op_max });
+            return false;
+        }
+
+        var op = op_max;
+        while (op > op_min) {
+            op -= 1;
+
+            var a = self.journal.entry_for_op_exact(op);
+            if (a == null) {
+                log.notice("{}: valid_hash_chain_between: missing op {}", .{ self.replica, op });
+                return false;
+            }
+
+            assert(a.?.op + 1 == b.?.op);
+
+            if (a.?.checksum != b.?.nonce) {
+                log.notice("{}: valid_hash_chain_between: break: A: {}", .{ self.replica, a.? });
+                log.notice("{}: valid_hash_chain_between: break: B: {}", .{ self.replica, b.? });
+                return false;
+            }
+
+            assert(self.ascending_viewstamps(a.?, b.?));
+
+            b = a;
+        }
+        assert(b.?.op == op_min);
+
+        return true;
+    }
+
+    fn write_to_journal(self: *Replica, message: *Message, lock: *bool) void {
+        assert(lock.* == false);
+        lock.* = true;
+        defer lock.* = false;
+
+        assert(message.references > 0);
+        assert(message.header.command == .prepare);
+        assert(message.header.view <= self.view);
+        assert(message.header.op <= self.op or message.header.view < self.view);
+
+        if (!self.journal.has(message.header)) {
+            log.debug("{}: write_to_journal: ignoring (header changed)", .{self.replica});
+            return;
+        }
+
+        message.references += 1;
+
+        if (self.journal.has_dirty(message.header)) {
+            self.journal.write(message.header, message.buffer);
+        } else {
+            log.debug("{}: write_to_journal: skipping (already clean)", .{self.replica});
+        }
+
+        self.send_prepare_ok(message);
+
+        message.references -= 1;
+        self.message_bus.gc(message);
     }
 };
 
