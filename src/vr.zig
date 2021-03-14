@@ -2124,7 +2124,7 @@ pub const Replica = struct {
         if (message.header.view < self.view) return true;
         if (message.header.view == self.view and message.header.op <= self.op) return true;
         if (message.header.view == self.view and message.header.op <= self.commit_max) return true;
-        
+
         return false;
     }
 
@@ -2382,6 +2382,8 @@ pub const Replica = struct {
     /// Since we work backwards from the latest entry, we should always be able to fix the chain.
     fn repair_headers(self: *Replica) void {
         if (self.status != .normal and self.status != .view_change) return;
+        assert(self.commit_min <= self.op);
+        assert(self.commit_min <= self.commit_max);
 
         // TODO Handle case where we are requesting reordered headers that no longer exist.
 
@@ -2409,6 +2411,7 @@ pub const Replica = struct {
         }
 
         // Assert that all headers are now present and connected with a perfect hash chain:
+        assert(self.op >= self.commit_max);
         assert(self.valid_hash_chain_between(self.commit_min, self.op));
     }
 
