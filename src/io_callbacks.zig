@@ -23,6 +23,13 @@ pub const IO = struct {
                 fifo.out = completion;
             }
         }
+
+        fn pop(fifo: *FIFO) ?*Completion {
+            const ret = fifo.out orelse return null;
+            fifo.out = ret.next;
+            ret.next = null;
+            return ret;
+        }
     };
 
     ring: IO_Uring,
@@ -63,21 +70,15 @@ pub const IO = struct {
             // synchronous append on running a completion is executed only the next time round
             // the event loop, without creating an infinite suspend/resume cycle.
             {
-                var out = self.completed.out;
+                var copy = self.completed;
                 self.completed = .{};
-                while (out) |completion| {
-                    out = completion.next;
-                    completion.complete();
-                }
+                while (copy.pop()) |completion| completion.complete();
             }
             // Again, loop on a copy of the list to avoid an infinite loop
             {
-                var out = self.unqueued.out;
+                var copy = self.unqueued;
                 self.unqueued = .{};
-                while (out) |completion| {
-                    out = completion.next;
-                    self.enqueue(completion);
-                }
+                while (copy.pop()) |completion| self.enqueue(completion);
             }
         }
         assert(self.unqueued.in == null);
@@ -101,7 +102,6 @@ pub const IO = struct {
             for (cqes[0..completed]) |cqe| {
                 const completion = @intToPtr(*Completion, @intCast(usize, cqe.user_data));
                 completion.result = cqe.res;
-                completion.next = null;
                 // We do not run the completion here (instead appending to a linked list):
                 // * to avoid recursion through `flush_submissions()` and `flush_completions()`,
                 // * to avoid unbounded stack usage, and
@@ -137,7 +137,6 @@ pub const IO = struct {
     fn enqueue(self: *IO, completion: *Completion) void {
         const sqe = self.ring.get_sqe() catch |err| switch (err) {
             error.SubmissionQueueFull => {
-                completion.next = null;
                 self.unqueued.push(completion);
                 return;
             },
@@ -150,7 +149,7 @@ pub const IO = struct {
     pub const Completion = struct {
         io: *IO,
         result: i32 = undefined,
-        next: ?*Completion = undefined,
+        next: ?*Completion = null,
         operation: Operation,
         // This is one of the usecases for c_void outside of C code and as such c_void will
         // be replaced with anyopaque eventually: https://github.com/ziglang/zig/issues/323
