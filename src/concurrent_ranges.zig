@@ -21,7 +21,7 @@ pub const ConcurrentRanges = struct {
 
         while (true) {
             if (self.has_overlapping_range(range)) |overlapping_range| {
-                log.debug("{}: range {} overlaps with concurrent range {}, enqueueing", .{
+                log.debug("{s}: range {} overlaps with concurrent range {}, enqueueing", .{
                     self.name,
                     range,
                     overlapping_range,
@@ -45,14 +45,14 @@ pub const ConcurrentRanges = struct {
 
         range.status = .acquired;
 
-        log.debug("{}: acquired: {}", .{ self.name, range });
+        log.debug("{s}: acquired: {}", .{ self.name, range });
     }
 
     pub fn release(self: *ConcurrentRanges, range: *Range) void {
         assert(range.status == .acquired);
         range.status = .releasing;
 
-        log.debug("{}: released: {}", .{ self.name, range });
+        log.debug("{s}: released: {}", .{ self.name, range });
 
         // Remove the range from the linked list:
         // Connect the previous range to the next range:
