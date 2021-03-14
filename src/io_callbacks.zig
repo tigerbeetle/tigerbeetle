@@ -183,6 +183,13 @@ pub const IO = struct {
                 .send => |op| {
                     linux.io_uring_prep_send(sqe, op.socket, op.buffer, op.flags);
                 },
+                .timeout => |op| {
+                    const ts: os.__kernel_timespec = .{
+                        .tv_sec = 0,
+                        .tv_nsec = op.nanoseconds,
+                    };
+                    linux.io_uring_prep_timeout(sqe, &ts, 0, 0);
+                },
                 .write => |op| {
                     linux.io_uring_prep_write(sqe, op.fd, op.buffer[0..buffer_limit(op.buffer.len)], op.offset);
                 },
@@ -366,6 +373,18 @@ pub const IO = struct {
                     } else @intCast(usize, completion.result);
                     completion.callback(completion.context, completion, &result);
                 },
+                .timeout => {
+                    const result = if (completion.result < 0) switch (-completion.result) {
+                        os.EINTR => {
+                            completion.io.enqueue(completion);
+                            return;
+                        },
+                        os.ECANCELED => error.Canceled,
+                        os.ETIME => {}, // A success.
+                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
+                    } else unreachable;
+                    completion.callback(completion.context, completion, &result);
+                },
                 .write => {
                     const result = if (completion.result < 0) switch (-completion.result) {
                         os.EINTR => {
@@ -434,6 +453,9 @@ pub const IO = struct {
             socket: os.socket_t,
             buffer: []const u8,
             flags: u32,
+        },
+        timeout: struct {
+            nanoseconds: u63,
         },
         write: struct {
             fd: os.fd_t,
@@ -804,6 +826,35 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
+    pub const TimeoutError = error{Canceled} || os.UnexpectedError;
+
+    pub fn timeout(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (context: Context, completion: *Completion, result: TimeoutError!void) void,
+        completion: *Completion,
+        nanoseconds: u63,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const TimeoutError!void, @ptrToInt(res)).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .timeout = .{ .nanoseconds = nanoseconds },
+            },
+        };
+        self.enqueue(completion);
+    }
+
     pub const WriteError = error{
         WouldBlock,
         NotOpenForWriting,
@@ -1063,6 +1114,76 @@ test "accept/connect/send/receive" {
 
         fn recv_callback(self: *Context, completion: *IO.Completion, result: IO.RecvError!usize) void {
             self.received = result catch @panic("recv error");
+        }
+    }.run_test();
+}
+
+test "timeout" {
+    const testing = std.testing;
+
+    const ms = 20;
+    const margin = 5;
+    const count = 10;
+
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        count: u32 = 0,
+        stop_time: i64 = 0,
+
+        fn run_test() !void {
+            const start_time = std.time.milliTimestamp();
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            var completions: [count]IO.Completion = undefined;
+            for (completions) |*completion| {
+                self.io.timeout(*Context, &self, timeout_callback, completion, ms * std.time.ns_per_ms);
+            }
+            try self.io.run();
+
+            testing.expectEqual(@as(u32, count), self.count);
+
+            testing.expectWithinMargin(@as(f64, ms), @intToFloat(f64, self.stop_time - start_time), margin);
+        }
+
+        fn timeout_callback(self: *Context, completion: *IO.Completion, result: IO.TimeoutError!void) void {
+            result catch @panic("timeout error");
+            if (self.stop_time == 0) self.stop_time = std.time.milliTimestamp();
+            self.count += 1;
+        }
+    }.run_test();
+}
+
+test "submission queue full" {
+    const testing = std.testing;
+
+    const ms = 20;
+    const count = 10;
+
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        count: u32 = 0,
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(1, 0) };
+            defer self.io.deinit();
+
+            var completions: [count]IO.Completion = undefined;
+            for (completions) |*completion| {
+                self.io.timeout(*Context, &self, timeout_callback, completion, ms * std.time.ns_per_ms);
+            }
+            try self.io.run();
+
+            testing.expectEqual(@as(u32, count), self.count);
+        }
+
+        fn timeout_callback(self: *Context, completion: *IO.Completion, result: IO.TimeoutError!void) void {
+            result catch @panic("timeout error");
+            self.count += 1;
         }
     }.run_test();
 }
