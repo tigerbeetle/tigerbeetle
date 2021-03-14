@@ -1386,6 +1386,11 @@ pub const Replica = struct {
             return;
         }
 
+        if (self.status != .normal) {
+            log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
+            return;
+        }
+
         if (message.header.view > self.view) {
             log.debug("{}: on_prepare: newer view", .{self.replica});
             self.jump_to_newer_view(message.header.view);
@@ -1396,6 +1401,7 @@ pub const Replica = struct {
         assert(self.leader() or self.follower());
         assert(message.header.replica == self.leader_index(message.header.view));
         assert(message.header.op > self.op);
+        assert(message.header.op > self.commit_max);
 
         if (self.follower()) self.normal_timeout.reset();
 
@@ -2120,10 +2126,13 @@ pub const Replica = struct {
     fn is_repair(self: *Replica, message: *const Message) bool {
         assert(message.header.command == .prepare);
 
-        if (self.status != .normal) return true;
-        if (message.header.view < self.view) return true;
-        if (message.header.view == self.view and message.header.op <= self.op) return true;
-        if (message.header.view == self.view and message.header.op <= self.commit_max) return true;
+        if (self.status == .normal or self.status == .view_change) {
+            if (message.header.view < self.view) return true;
+            if (message.header.view == self.view) {
+                if (message.header.op <= self.op) return true;
+                if (message.header.op <= self.commit_max) return true;
+            }
+        }
 
         return false;
     }
