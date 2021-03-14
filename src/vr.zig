@@ -452,12 +452,12 @@ pub const Journal = struct {
         const size_circular_buffer = size - size_headers_copies;
         if (size_circular_buffer < 64 * 1024 * 1024) return error.SizeTooSmallForCircularBuffer;
 
-        log.debug("{}: journal: size={Bi} headers_len={} headers={Bi} circular_buffer={Bi}", .{
+        log.debug("{}: journal: size={} headers_len={} headers={} circular_buffer={}", .{
             replica,
-            size,
+            std.fmt.fmtIntSizeBin(size),
             headers.len,
-            size_headers,
-            size_circular_buffer,
+            std.fmt.fmtIntSizeBin(size_headers),
+            std.fmt.fmtIntSizeBin(size_circular_buffer),
         });
 
         var self = Journal{
@@ -761,7 +761,7 @@ pub const Journal = struct {
     }
 
     fn write_debug(self: *Journal, header: *const Header, status: []const u8) void {
-        log.debug("{}: journal: write: view={} op={} offset={} len={}: {} {}", .{
+        log.debug("{}: journal: write: view={} op={} offset={} len={}: {} {s}", .{
             self.replica,
             header.view,
             header.op,
@@ -963,7 +963,7 @@ const Timeout = struct {
     /// otherwise further ticks around the event loop may trigger a thundering herd of messages.
     pub fn fired(self: *Timeout) bool {
         if (self.ticking and self.ticks >= self.after) {
-            log.debug("{}: {} fired", .{ self.replica, self.name });
+            log.debug("{}: {s} fired", .{ self.replica, self.name });
             return true;
         } else {
             return false;
@@ -973,19 +973,19 @@ const Timeout = struct {
     pub fn reset(self: *Timeout) void {
         assert(self.ticking);
         self.ticks = 0;
-        log.debug("{}: {} reset", .{ self.replica, self.name });
+        log.debug("{}: {s} reset", .{ self.replica, self.name });
     }
 
     pub fn start(self: *Timeout) void {
         self.ticks = 0;
         self.ticking = true;
-        log.debug("{}: {} started", .{ self.replica, self.name });
+        log.debug("{}: {s} started", .{ self.replica, self.name });
     }
 
     pub fn stop(self: *Timeout) void {
         self.ticks = 0;
         self.ticking = false;
-        log.debug("{}: {} stopped", .{ self.replica, self.name });
+        log.debug("{}: {s} stopped", .{ self.replica, self.name });
     }
 
     pub fn tick(self: *Timeout) void {
@@ -1252,9 +1252,14 @@ pub const Replica = struct {
 
     /// Called by the MessageBus to deliver a message to the replica.
     pub fn on_message(self: *Replica, message: *Message) void {
-        log.debug("{}: on_message: view={} status={} {}", .{ self.replica, self.view, @tagName(self.status), message.header });
+        log.debug("{}: on_message: view={} status={s} {}", .{
+            self.replica,
+            self.view,
+            @tagName(self.status),
+            message.header,
+        });
         if (message.header.bad()) |reason| {
-            log.debug("{}: on_message: bad ({})", .{ self.replica, reason });
+            log.debug("{}: on_message: bad ({s})", .{ self.replica, reason });
             return;
         }
         if (message.header.cluster != self.cluster) {
@@ -1945,10 +1950,10 @@ pub const Replica = struct {
             assert(m.header.commit == message.header.commit);
             assert(m.header.checksum_data == message.header.checksum_data);
             assert(m.header.checksum == message.header.checksum);
-            log.debug(
-                "{}: on_{}: ignoring (duplicate message)",
-                .{ self.replica, @tagName(message.header.command) },
-            );
+            log.debug("{}: on_{s}: ignoring (duplicate message)", .{
+                self.replica,
+                @tagName(message.header.command),
+            });
             return null;
         }
 
@@ -1978,17 +1983,27 @@ pub const Replica = struct {
                 count += 1;
             }
         }
-        log.debug("{}: on_{}: {} message(s)", .{ self.replica, @tagName(message.header.command), count });
+        log.debug("{}: on_{s}: {} message(s)", .{
+            self.replica,
+            @tagName(message.header.command),
+            count,
+        });
 
         // Wait until we have exactly `threshold` messages for quorum:
         if (count < threshold) {
-            log.debug("{}: on_{}: waiting for quorum", .{ self.replica, @tagName(message.header.command) });
+            log.debug("{}: on_{s}: waiting for quorum", .{
+                self.replica,
+                @tagName(message.header.command),
+            });
             return null;
         }
 
         // This is not the first time we have had quorum, the state transition has already happened:
         if (count > threshold) {
-            log.debug("{}: on_{}: ignoring (quorum received already)", .{ self.replica, @tagName(message.header.command) });
+            log.debug("{}: on_{s}: ignoring (quorum received already)", .{
+                self.replica,
+                @tagName(message.header.command),
+            });
             return null;
         }
 
@@ -2059,7 +2074,7 @@ pub const Replica = struct {
             // TODO See if we are able to read from Journal before incrementing self.commit_min.
 
             // TODO Apply to State Machine:
-            log.debug("{}: commit_ops_through: executing op={} checksum={} ({})", .{
+            log.debug("{}: commit_ops_through: executing op={} checksum={} ({s})", .{
                 self.replica,
                 entry.op,
                 entry.checksum,
@@ -2089,17 +2104,17 @@ pub const Replica = struct {
         // processing protocol or the view change protocol.
         // This is critical for correctness (to avoid data loss):
         if (self.status == .recovering) {
-            log.debug("{}: on_{}: ignoring (recovering)", .{ self.replica, command });
+            log.debug("{}: on_{s}: ignoring (recovering)", .{ self.replica, command });
             return true;
         }
 
         if (message.header.view < self.view) {
-            log.debug("{}: on_{}: ignoring (older view)", .{ self.replica, command });
+            log.debug("{}: on_{s}: ignoring (older view)", .{ self.replica, command });
             return true;
         }
 
         if (message.header.view == self.view and self.status == .normal) {
-            log.debug("{}: on_{}: ignoring (view already started)", .{ self.replica, command });
+            log.debug("{}: on_{s}: ignoring (view already started)", .{ self.replica, command });
             return true;
         }
 
@@ -2107,13 +2122,13 @@ pub const Replica = struct {
         switch (message.header.command) {
             .start_view_change, .start_view => {
                 if (message.header.replica == self.replica) {
-                    log.warn("{}: on_{}: ignoring (self)", .{ self.replica, command });
+                    log.warn("{}: on_{s}: ignoring (self)", .{ self.replica, command });
                     return true;
                 }
             },
             .do_view_change => {
                 if (self.leader_index(message.header.view) != self.replica) {
-                    log.warn("{}: on_{}: ignoring (follower)", .{ self.replica, command });
+                    log.warn("{}: on_{s}: ignoring (follower)", .{ self.replica, command });
                     return true;
                 }
             },
@@ -2502,7 +2517,7 @@ pub const Replica = struct {
             }
             received.* = null;
         }
-        log.debug("{}: reset {} {} message(s)", .{ self.replica, count, @tagName(command) });
+        log.debug("{}: reset {} {s} message(s)", .{ self.replica, count, @tagName(command) });
     }
 
     fn send_prepare_ok(self: *Replica, message: *Message) void {
@@ -2598,7 +2613,7 @@ pub const Replica = struct {
 
     // TODO Work out the maximum number of messages a replica may output per tick() or on_message().
     fn send_header_to_replica(self: *Replica, replica: u16, header: Header) void {
-        log.debug("{}: sending {} to replica {}: {}", .{
+        log.debug("{}: sending {s} to replica {}: {}", .{
             self.replica,
             @tagName(header.command),
             replica,
@@ -2611,7 +2626,7 @@ pub const Replica = struct {
     }
 
     fn send_message_to_replica(self: *Replica, replica: u16, message: *Message) void {
-        log.debug("{}: sending {} to replica {}: {}", .{
+        log.debug("{}: sending {s} to replica {}: {}", .{
             self.replica,
             @tagName(message.header.command),
             replica,
