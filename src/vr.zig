@@ -2123,6 +2123,8 @@ pub const Replica = struct {
         if (self.status != .normal) return true;
         if (message.header.view < self.view) return true;
         if (message.header.view == self.view and message.header.op <= self.op) return true;
+        if (message.header.view == self.view and message.header.op <= self.commit_max) return true;
+        
         return false;
     }
 
