@@ -1226,6 +1226,7 @@ pub const Replica = struct {
     /// or null if the next replica is the view's leader.
     /// Replication starts and ends with the leader, we never forward back to the leader.
     pub fn next_replica(self: *Replica, view: u64) ?u16 {
+        assert(self.status == .normal);
         const next = @mod(self.replica + 1, @intCast(u16, self.configuration.len));
         if (next == self.leader_index(view)) return null;
         return next;
