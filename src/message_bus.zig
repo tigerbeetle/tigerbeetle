@@ -6,6 +6,7 @@ const vr = @import("vr.zig");
 const ConfigurationAddress = vr.ConfigurationAddress;
 const Header = vr.Header;
 const Replica = vr.Replica;
+const FIFO = @import("fifo.zig").FIFO;
 
 const log = std.log.scoped(.message_bus);
 
@@ -21,9 +22,8 @@ pub const MessageBus = struct {
     allocated: usize = 0,
     configuration: []ConfigurationAddress,
 
-    /// A linked list of messages that are ready to send (FIFO):
-    head: ?*Envelope = null,
-    tail: ?*Envelope = null,
+    /// Messages that are ready to send:
+    ready: FIFO(Envelope) = .{},
 
     const Address = union(enum) {
         replica: *Replica,
@@ -79,20 +79,17 @@ pub const MessageBus = struct {
             .message = message,
             .next = null,
         };
-        self.enqueue_message(envelope);
+        self.ready.push(envelope);
     }
 
     pub fn send_queued_messages(self: *MessageBus) void {
-        while (self.head != null) {
+        while (self.ready.out != null) {
             // Loop on a copy of the linked list, having reset the linked list first, so that any
             // synchronous append in on_message() is executed the next iteration of the outer loop.
             // This is not critical for safety here, but see run() in src/io.zig where it is.
-            var head = self.head;
-            self.head = null;
-            self.tail = null;
-            while (head) |envelope| {
-                head = envelope.next;
-                envelope.next = null;
+            var copy = self.ready;
+            self.ready = .{};
+            while (copy.pop()) |envelope| {
                 assert(envelope.message.references > 0);
                 switch (envelope.address) {
                     .replica => |r| r.on_message(envelope.message),
@@ -131,18 +128,5 @@ pub const MessageBus = struct {
         self.allocator.free(message.buffer);
         self.allocator.destroy(message);
         self.allocated -= 1;
-    }
-
-    fn enqueue_message(self: *MessageBus, envelope: *Envelope) void {
-        assert(envelope.message.references > 0);
-        assert(envelope.next == null);
-        if (self.head == null) {
-            assert(self.tail == null);
-            self.head = envelope;
-            self.tail = envelope;
-        } else {
-            self.tail.?.next = envelope;
-            self.tail = envelope;
-        }
     }
 };

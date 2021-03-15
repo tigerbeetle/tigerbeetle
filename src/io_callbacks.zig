@@ -6,37 +6,14 @@ const IO_Uring = linux.IO_Uring;
 const io_uring_cqe = linux.io_uring_cqe;
 const io_uring_sqe = linux.io_uring_sqe;
 
+const FIFO = @import("fifo.zig").FIFO;
+
 pub const IO = struct {
-    /// An intrusive first in/first out linked list.
-    const FIFO = struct {
-        in: ?*Completion = null,
-        out: ?*Completion = null,
-
-        fn push(fifo: *FIFO, completion: *Completion) void {
-            assert(completion.next == null);
-            if (fifo.in) |in| {
-                in.next = completion;
-                fifo.in = completion;
-            } else {
-                assert(fifo.out == null);
-                fifo.in = completion;
-                fifo.out = completion;
-            }
-        }
-
-        fn pop(fifo: *FIFO) ?*Completion {
-            const ret = fifo.out orelse return null;
-            fifo.out = ret.next;
-            ret.next = null;
-            return ret;
-        }
-    };
-
     ring: IO_Uring,
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
-    unqueued: FIFO = .{},
+    unqueued: FIFO(Completion) = .{},
 
     /// The number of SQEs queued but not yet submitted to the kernel:
     queued: u32 = 0,
@@ -45,7 +22,7 @@ pub const IO = struct {
     submitted: u32 = 0,
 
     /// Completions that are ready to have their callbacks run.
-    completed: FIFO = .{},
+    completed: FIFO(Completion) = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
         return IO{ .ring = try IO_Uring.init(entries, flags) };
