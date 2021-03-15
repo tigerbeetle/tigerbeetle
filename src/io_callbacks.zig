@@ -1121,7 +1121,7 @@ test "timeout" {
 
             testing.expectEqual(@as(u32, count), self.count);
 
-            testing.expectWithinMargin(@as(f64, ms), @intToFloat(f64, self.stop_time - start_time), margin);
+            testing.expectApproxEqAbs(@as(f64, ms), @intToFloat(f64, self.stop_time - start_time), margin);
         }
 
         fn timeout_callback(self: *Context, completion: *IO.Completion, result: IO.TimeoutError!void) void {
