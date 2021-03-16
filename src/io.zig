@@ -389,16 +389,12 @@ pub const IO = struct {
         }
     }
 
-    // TODO Switch to nanoseconds to provide a higher resolution common denominator than ms.
-    pub fn sleep(self: *IO, milliseconds: u64) !void {
+    pub fn sleep(self: *IO, nanoseconds: u64) !void {
         while (true) {
             var completion = Completion{ .frame = @frame() };
-            const seconds = @divFloor(milliseconds, std.time.ms_per_s);
-            const nanoseconds = (milliseconds - (seconds * std.time.ms_per_s)) * std.time.ns_per_ms;
-            // TODO Use 64-bit kernel timespec, see https://github.com/ziglang/zig/pull/8118
-            const ts = os.timespec{
-                .tv_sec = @intCast(isize, seconds),
-                .tv_nsec = @intCast(isize, nanoseconds),
+            const ts: os.__kernel_timespec = .{
+                .tv_sec = 0,
+                .tv_nsec = @intCast(i64, nanoseconds),
             };
             const sqe = self.get_sqe();
             linux.io_uring_prep_timeout(sqe, &ts, 0, 0);
@@ -502,14 +498,10 @@ fn test_sleep(io: *IO) !void {
         const margin = 5;
 
         const started = std.time.milliTimestamp();
-        try io.sleep(ms);
+        try io.sleep(ms * std.time.ns_per_ms);
         const stopped = std.time.milliTimestamp();
 
-        testing.expectWithinMargin(
-            @intToFloat(f64, ms),
-            @intToFloat(f64, stopped - started),
-            margin,
-        );
+        testing.expectApproxEqAbs(@as(f64, ms), @intToFloat(f64, stopped - started), margin);
     }
     {
         const frames = try testing.allocator.alloc(@Frame(test_sleep_coroutine), 10);
@@ -529,16 +521,12 @@ fn test_sleep(io: *IO) !void {
         const stopped = std.time.milliTimestamp();
 
         testing.expect(count == frames.len);
-        testing.expectWithinMargin(
-            @intToFloat(f64, ms),
-            @intToFloat(f64, stopped - started),
-            margin,
-        );
+        testing.expectApproxEqAbs(@as(f64, ms), @intToFloat(f64, stopped - started), margin);
     }
 }
 
 fn test_sleep_coroutine(io: *IO, ms: u64, count: *usize) !void {
-    try io.sleep(ms);
+    try io.sleep(ms * std.time.ns_per_ms);
     count.* += 1;
 }
 
