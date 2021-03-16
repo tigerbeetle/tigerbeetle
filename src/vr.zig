@@ -46,7 +46,7 @@ pub const Header = packed struct {
 
     /// The checksum of the message to which this message refers, or a unique recovery nonce:
     /// We use this nonce in various ways, for example:
-    /// * A prepare sets nonce to the checksum of the prior prepare to hash-chain the journal.
+    /// * A prepare sets nonce to the checksum of the prior prepare to create a hash chain.
     /// * A prepare_ok sets nonce to the checksum of the prepare it wants to ack.
     /// * A commit sets nonce to the checksum of the latest committed op.
     /// This adds an additional cryptographic safety control beyond VR's op and commit numbers.
@@ -1315,6 +1315,7 @@ pub const Replica = struct {
 
         // TODO Queue (or drop client requests after a limit) to handle one request at a time:
         // TODO Clear this queue if we lose our leadership (critical for correctness).
+        assert(self.commit_min == self.commit_max and self.commit_max == self.op);
         assert(self.request_checksum == null);
         self.request_checksum = message.header.checksum;
 
@@ -1406,7 +1407,7 @@ pub const Replica = struct {
         assert(self.leader() or self.follower());
         assert(message.header.replica == self.leader_index(message.header.view));
         assert(message.header.op > self.op);
-        assert(message.header.op > self.commit_max);
+        assert(message.header.op > self.commit_min);
 
         if (self.follower()) self.normal_timeout.reset();
 
@@ -1437,9 +1438,11 @@ pub const Replica = struct {
         // TODO Update client's information in the client table.
 
         // Replicate to the next replica in the configuration (until we get back to the leader):
-        if (self.next_replica(self.view)) |next| {
-            log.debug("{}: on_prepare: replicating to replica {}", .{ self.replica, next });
-            self.send_message_to_replica(next, message);
+        if (self.op > self.commit_max) {
+            if (self.next_replica(self.view)) |next| {
+                log.debug("{}: on_prepare: replicating to replica {}", .{ self.replica, next });
+                self.send_message_to_replica(next, message);
+            }
         }
 
         if (self.appending) {
@@ -1563,10 +1566,29 @@ pub const Replica = struct {
 
     fn on_repair(self: *Replica, message: *Message) void {
         assert(message.header.command == .prepare);
+
+        if (self.status != .normal and self.status != .view_change) {
+            log.debug("{}: on_repair: ignoring ({})", .{ self.replica, self.status });
+            return;
+        }
+
+        if (message.header.view > self.view) {
+            log.debug("{}: on_repair: ignoring (newer view)", .{self.replica});
+            return;
+        }
+
+        if (self.status == .view_change and message.header.view == self.view) {
+            log.debug("{}: on_repair: ignoring (view already started)", .{self.replica});
+            return;
+        }
+
+        if (self.status == .view_change and self.leader_index(self.view) != self.replica) {
+            log.debug("{}: on_repair: ignoring (follower and view change)", .{self.replica});
+            return;
+        }
+
         assert(message.header.view <= self.view);
         assert(message.header.op <= self.op or message.header.view < self.view);
-
-        if (self.status != .normal and self.status != .view_change) return;
 
         if (self.journal.has_clean(message.header)) {
             log.debug("{}: on_repair: duplicate", .{self.replica});
@@ -1712,10 +1734,11 @@ pub const Replica = struct {
         // TODO
         if (true) return;
 
+        // TODO Repair according to CTRL protocol.
+
         // TODO Ensure self.commit_max == self.op
         // Next prepare needs this to hold: assert(message.header.op == self.commit_max + 1);
 
-        // TODO Repair according to CTRL protocol.
         self.commit_ops_through(k.?);
         assert(self.commit_min == k.?);
         assert(self.commit_max == k.?);
@@ -2141,12 +2164,13 @@ pub const Replica = struct {
     fn is_repair(self: *Replica, message: *const Message) bool {
         assert(message.header.command == .prepare);
 
-        if (self.status == .normal or self.status == .view_change) {
+        if (self.status == .normal) {
             if (message.header.view < self.view) return true;
-            if (message.header.view == self.view) {
-                if (message.header.op <= self.op) return true;
-                if (message.header.op <= self.commit_max) return true;
-            }
+            if (message.header.view == self.view and message.header.op <= self.op) return true;
+        } else if (self.status == .view_change) {
+            if (message.header.view < self.view) return true;
+            // The view has already started.
+            // TODO Think through scenarios of what could happen if we didn't make this distinction.
         }
 
         return false;
@@ -2175,6 +2199,8 @@ pub const Replica = struct {
         // view change(s), since they may have been replaced in the view change(s) by other ops.
         // If we fail to do this immediately then we may commit the wrong op and diverge state when
         // we process a commit message or when we process a commit number in a prepare message.
+
+        // TODO Critical: Rewind any ops in repair queue.
 
         if (self.op > self.commit_max) {
             log.debug("{}: jump_to_newer_view: rewinding: op={}..{}", .{
@@ -2414,6 +2440,25 @@ pub const Replica = struct {
         // We expect these always to exist (and to be correct):
         assert(self.journal.entry_for_op_exact(self.commit_min) != null);
         assert(self.journal.entry_for_op_exact(self.op) != null);
+
+        // Request missing committed headers:
+        if (self.op < self.commit_max) {
+            log.notice("{}: repair_headers: op={} < commit_max={}", .{
+                self.replica,
+                self.op,
+                self.commit_max,
+            });
+            // TODO This must go to the leader of the view?
+            self.send_header_to_other_replicas(.{
+                .command = .request_headers,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .commit = self.op + 1,
+                .op = self.commit_max,
+            });
+            return;
+        }
 
         // Request any missing or disconnected headers:
         // TODO Snapshots: Ensure that self.commit_min op always exists in the journal.
