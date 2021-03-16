@@ -828,6 +828,10 @@ const Timeout = struct {
     pub fn fired(self: *Timeout) bool {
         if (self.ticking and self.ticks >= self.after) {
             log.debug("{}: {s} fired", .{ self.replica, self.name });
+            if (self.ticks > self.after) {
+                log.emerg("{}: {s} is firing every tick", .{ self.replica, self.name });
+                @panic("timeout was not reset correctly");
+            }
             return true;
         } else {
             return false;
@@ -1754,11 +1758,11 @@ pub const Replica = struct {
     }
 
     fn on_commit_timeout(self: *Replica) void {
+        self.commit_timeout.reset();
+
         assert(self.status == .normal);
         assert(self.leader());
         assert(self.commit_min == self.commit_max);
-
-        self.commit_timeout.reset();
 
         // TODO Snapshots: Use snapshot checksum if commit is no longer in journal.
         const latest_committed_entry = self.journal.entry_for_op_exact(self.commit_max).?;
@@ -2315,6 +2319,8 @@ pub const Replica = struct {
     /// A header is disconnected if it breaks the hash chain with its newer neighbor to the right.
     /// Since we work backwards from the latest entry, we should always be able to fix the chain.
     fn repair_headers(self: *Replica) void {
+        self.repair_timeout.reset();
+
         if (self.status != .normal and self.status != .view_change) return;
         assert(self.commit_min <= self.op);
         assert(self.commit_min <= self.commit_max);
