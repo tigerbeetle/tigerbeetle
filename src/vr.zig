@@ -1517,61 +1517,76 @@ pub const Replica = struct {
         // ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
         // op number, and k is the commit number.
 
-        var v: ?u64 = null; // Latest normal view
-        var n: ?u64 = null; // Op number
-        var k: ?u64 = null; // Commit number
-        var c: ?u128 = null; // Checksum
-        var o: ?u64 = null; // Offset
+        var latest: Header = std.mem.zeroInit(Header, .{});
+        var k: u64 = 0;
 
         for (self.do_view_change_from_all_replicas) |received, replica| {
             if (received) |m| {
                 assert(m.header.command == .do_view_change);
+                assert(m.header.cluster == self.cluster);
                 assert(m.header.replica == replica);
                 assert(m.header.view == self.view);
 
-                if (k == null or m.header.commit > k.?) k = m.header.commit;
+                if (m.header.commit > k) k = m.header.commit;
 
-                for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |*h| {
-                    if (h.command == .reserved) continue;
-
+                for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |h| {
                     assert(h.command == .prepare);
-                    if (v == null or h.view > v.? or (h.view == v.? and h.op > n.?)) {
-                        assert(v == null or h.view >= v.?);
-                        v = h.view;
-                        n = h.op;
-                        c = h.checksum;
-                        o = h.offset;
-                    }
+                    assert(h.commit <= k);
 
-                    _ = self.repair_header(h);
+                    if (latest.command == .reserved) {
+                        latest = h;
+                    } else if (h.view > latest.view) {
+                        latest = h;
+                    } else if (h.view == latest.view and h.op > latest.op) {
+                        latest = h;
+                    }
                 }
             }
         }
 
         log.debug("{}: on_do_view_change: latest: view={} op={} commit={} checksum={} offset={}", .{
             self.replica,
-            v,
-            n,
+            latest.view,
+            latest.op,
             k,
-            c,
-            o,
+            latest.checksum,
+            latest.offset,
         });
 
-        assert(v.? >= 0 and v.? < self.view); // Latest normal view before this view change.
-        assert(n.? >= self.commit_max); // Ops may be rewound through a prior view change.
-        assert(k.? >= self.commit_max);
+        assert(latest.valid_checksum());
+        assert(latest.command == .prepare);
+        assert(latest.cluster == self.cluster);
+        assert(latest.view < self.view); // Latest normal view before this view change.
+        assert(latest.op >= self.commit_max); // Ops may be rewound through a prior view change.
+        assert(k >= latest.commit);
+        assert(k >= self.commit_max);
 
-        const latest_entry = self.journal.entry_for_op_exact(n.?).?;
-        assert(latest_entry.view == v.?);
-        assert(latest_entry.op == n.?);
-        assert(latest_entry.checksum == c.?);
-        assert(latest_entry.offset == o.?);
+        self.op = latest.op;
+        self.commit_max = k;
+        self.journal.set_entry_as_dirty(&latest);
 
-        self.op = n.?;
+        // Now that we have the latest HEAD in place, repair any other headers from these messages:
+        for (self.do_view_change_from_all_replicas) |received, replica| {
+            if (received) |m| {
+                for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |*h| {
+                    _ = self.repair_header(h);
+                }
+            }
+        }
+
+        // Verify that our latest entry was not overwritten by a bug in `repair_header()` above:
+        assert(self.op == latest.op);
+        if (self.journal.entry_for_op_exact(self.op)) |entry| {
+            assert(entry.checksum == latest.checksum);
+            assert(entry.view == latest.view);
+            assert(entry.op == latest.op);
+            assert(entry.offset == latest.offset);
+        } else {
+            @panic("failed to set latest entry correctly");
+        }
 
         self.repair_headers();
 
-        // TODO
         if (true) return;
 
         // TODO Repair according to CTRL protocol.
@@ -1579,9 +1594,9 @@ pub const Replica = struct {
         // TODO Ensure self.commit_max == self.op
         // Next prepare needs this to hold: assert(message.header.op == self.commit_max + 1);
 
-        self.commit_ops_through(k.?);
-        assert(self.commit_min == k.?);
-        assert(self.commit_max == k.?);
+        self.commit_ops_through(self.commit_max);
+        assert(self.commit_min == k);
+        assert(self.commit_max == k);
 
         self.transition_to_normal_status(self.view);
 
@@ -1589,7 +1604,6 @@ pub const Replica = struct {
         assert(self.leader());
 
         // TODO Add journal entries to start_view message.
-        // TODO Add checksum to start_view message.
         self.send_header_to_other_replicas(.{
             .command = .start_view,
             .cluster = self.cluster,
@@ -1782,8 +1796,9 @@ pub const Replica = struct {
         threshold: u32,
     ) ?usize {
         assert(messages.len == self.configuration.len);
-
+        assert(message.header.cluster == self.cluster);
         assert(message.header.view == self.view);
+
         switch (message.header.command) {
             .prepare_ok => {
                 assert(self.status == .normal);
