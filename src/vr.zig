@@ -1934,10 +1934,17 @@ pub const Replica = struct {
             self.commit_max = commit;
         }
 
+        // If we know we could validate the hash chain even further then wait until we can:
+        // This is partial defense-in-depth in case self.op is ever advanced by a stale prepare.
+        if (self.op < self.commit_max) {
+            log.notice("{}: commit_ops_through: waiting for repair (op < commit)", .{self.replica});
+            return;
+        }
+
         // We must validate the hash chain as far as possible, since self.op may disclose a fork:
-        // This is defense-in-depth in case self.jump_to_newer_view() fails.
+        // This is defense-in-depth in case jump_to_newer_view() fails.
         if (!self.valid_hash_chain_between(self.commit_min, self.op)) {
-            log.notice("{}: commit_ops_through: waiting for repairs", .{self.replica});
+            log.notice("{}: commit_ops_through: waiting for repair (hash chain)", .{self.replica});
             return;
         }
 
@@ -2126,6 +2133,12 @@ pub const Replica = struct {
         // TODO Avoid requesting data if we are busy writing it (writes could take 10 seconds).
     }
 
+    /// Repairs must always backfill in behind self.op and may never advance past self.op (HEAD).
+    /// Otherwise, a split-brain leader may reapply an op that was removed by jump_to_newer_view(),
+    /// which could then be committed by a higher commit_max number received in a commit message.
+    /// Since we always wait to commit until the hash chain between self.commit_min and self.op is
+    /// fully intact, and since self.op is never advanced except in the current view, we can be sure
+    /// that we do not fork the hash chain.
     fn repair_header(self: *Replica, header: *const Header) bool {
         assert(self.status == .normal or self.status == .view_change);
         assert(header.command == .prepare);
