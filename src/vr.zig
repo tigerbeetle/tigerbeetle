@@ -1086,16 +1086,6 @@ pub const Replica = struct {
         return @intCast(u16, @mod(view, self.configuration.len));
     }
 
-    /// Returns the index into the configuration of the next replica for a given view,
-    /// or null if the next replica is the view's leader.
-    /// Replication starts and ends with the leader, we never forward back to the leader.
-    pub fn next_replica(self: *Replica, view: u64) ?u16 {
-        assert(self.status == .normal);
-        const next = @mod(self.replica + 1, @intCast(u16, self.configuration.len));
-        if (next == self.leader_index(view)) return null;
-        return next;
-    }
-
     /// Time is measured in logical ticks that are incremented on every call to tick().
     /// This eliminates a dependency on the system time and enables deterministic testing.
     pub fn tick(self: *Replica) void {
@@ -1301,22 +1291,8 @@ pub const Replica = struct {
 
         // TODO Update client's information in the client table.
 
-        // Replicate to the next replica in the configuration (until we get back to the leader):
-        if (self.op > self.commit_max) {
-            if (self.next_replica(self.view)) |next| {
-                log.debug("{}: on_prepare: replicating to replica {}", .{ self.replica, next });
-                self.send_message_to_replica(next, message);
-            }
-        }
-
-        if (self.appending) {
-            log.debug("{}: on_prepare: skipping (slow journal outrun by quorum)", .{self.replica});
-            self.repair_later(message);
-            return;
-        }
-
-        log.debug("{}: on_prepare: appending to journal", .{self.replica});
-        self.appending_frame = async self.write_to_journal(message, &self.appending);
+        self.replicate(message);
+        self.append(message);
 
         if (self.follower()) self.commit_ops_through(message.header.commit);
     }
@@ -1898,6 +1874,22 @@ pub const Replica = struct {
         return count;
     }
 
+    fn append(self: *Replica, message: *Message) void {
+        assert(self.status == .normal);
+        assert(message.header.command == .prepare);
+        assert(message.header.view == self.view);
+        assert(message.header.op == self.op);
+
+        if (self.appending) {
+            log.debug("{}: append: skipping (slow journal outrun by quorum)", .{self.replica});
+            self.repair_later(message);
+            return;
+        }
+
+        log.debug("{}: append: appending to journal", .{self.replica});
+        self.appending_frame = async self.write_to_journal(message, &self.appending);
+    }
+
     /// Returns whether `b` succeeds `a` by having a newer view or same view and newer op.
     fn ascending_viewstamps(
         self: *Replica,
@@ -2394,6 +2386,31 @@ pub const Replica = struct {
         message.next = self.repair_queue;
         self.repair_queue = message;
         self.repair_queue_len += 1;
+    }
+
+    /// Replicates to the next replica in the configuration (until we get back to the leader):
+    /// Replication starts and ends with the leader, we never forward back to the leader.
+    /// Does not flood the network with prepares that have already committed.
+    /// TODO Use recent heartbeat data for next replica to leapfrog if faulty.
+    fn replicate(self: *Replica, message: *Message) void {
+        assert(self.status == .normal);
+        assert(message.header.command == .prepare);
+        assert(message.header.view == self.view);
+        assert(message.header.op == self.op);
+
+        if (message.header.op <= self.commit_max) {
+            log.debug("{}: replicate: skipping (already committed by cluster)", .{self.replica});
+            return;
+        }
+
+        const next = @mod(self.replica + 1, @intCast(u16, self.configuration.len));
+        if (next == self.leader_index(message.header.view)) {
+            log.debug("{}: replicate: replication complete", .{self.replica});
+            return;
+        }
+
+        log.debug("{}: replicate: replicating to replica {}", .{ self.replica, next });
+        self.send_message_to_replica(next, message);
     }
 
     fn reset_prepare(self: *Replica) void {
