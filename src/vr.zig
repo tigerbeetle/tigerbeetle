@@ -630,38 +630,38 @@ pub const Journal = struct {
         self.dirty[header.op] = true;
     }
 
-    pub fn write(self: *Journal, header: *const Header, buffer: []const u8) void {
-        assert(header.command == .prepare);
-        assert(header.size >= @sizeOf(Header));
-        assert(header.size <= buffer.len);
-        assert(buffer.len == Journal.sector_ceil(header.size));
-        assert(header.offset + buffer.len <= self.size_circular_buffer);
+    pub fn write(self: *Journal, message: *const Message) void {
+        assert(message.header.command == .prepare);
+        assert(message.header.size >= @sizeOf(Header));
+        assert(message.header.size <= message.buffer.len);
+        assert(message.buffer.len == Journal.sector_ceil(message.header.size));
+        assert(message.header.offset + message.buffer.len <= self.size_circular_buffer);
 
         // The underlying header memory must be owned by the buffer and not by self.headers:
         // Otherwise, concurrent writes may modify the memory of the pointer while we write.
-        assert(@ptrToInt(header) == @ptrToInt(buffer.ptr));
+        assert(@ptrToInt(message.header) == @ptrToInt(message.buffer.ptr));
 
         // There should be no concurrency between setting an entry as dirty and deciding to write:
-        assert(self.has_dirty(header));
+        assert(self.has_dirty(message.header));
 
-        self.write_debug(header, "starting");
+        self.write_debug(message.header, "starting");
 
-        self.write_sectors(buffer, self.offset_in_circular_buffer(header.offset));
-        if (!self.has(header)) {
-            self.write_debug(header, "entry changed while writing sectors");
+        self.write_sectors(message.buffer, self.offset_in_circular_buffer(message.header.offset));
+        if (!self.has(message.header)) {
+            self.write_debug(message.header, "entry changed while writing sectors");
             return;
         }
 
         // TODO Snapshots
-        self.write_headers_between(header.op, header.op);
-        if (!self.has(header)) {
-            self.write_debug(header, "entry changed while writing headers");
+        self.write_headers_between(message.header.op, message.header.op);
+        if (!self.has(message.header)) {
+            self.write_debug(message.header, "entry changed while writing headers");
             return;
         }
 
-        self.write_debug(header, "complete, marking clean");
+        self.write_debug(message.header, "complete, marking clean");
         // TODO Snapshots
-        self.dirty[header.op] = false;
+        self.dirty[message.header.op] = false;
     }
 
     fn write_debug(self: *Journal, header: *const Header, status: []const u8) void {
@@ -1064,6 +1064,8 @@ pub const Replica = struct {
             .prepare_ok_from_all_replicas = prepare_ok,
             .start_view_change_from_other_replicas = start_view_change,
             .do_view_change_from_all_replicas = do_view_change,
+
+            // TODO Fine-tune timeout intervals:
             .prepare_timeout = Timeout{
                 .name = "prepare_timeout",
                 .replica = replica,
@@ -1072,7 +1074,7 @@ pub const Replica = struct {
             .commit_timeout = Timeout{
                 .name = "commit_timeout",
                 .replica = replica,
-                .after = 30,
+                .after = 3,
             },
             .normal_timeout = Timeout{
                 .name = "normal_timeout",
@@ -1087,7 +1089,7 @@ pub const Replica = struct {
             .repair_timeout = Timeout{
                 .name = "repair_timeout",
                 .replica = replica,
-                .after = 3, // TODO
+                .after = 7,
             },
         };
 
@@ -2772,9 +2774,9 @@ pub const Replica = struct {
         message.references += 1;
 
         if (self.journal.has_dirty(message.header)) {
-            self.journal.write(message.header, message.buffer);
+            self.journal.write(message);
         } else {
-            log.debug("{}: write_to_journal: skipping (already clean)", .{self.replica});
+            log.debug("{}: write_to_journal: skipping (clean)", .{self.replica});
         }
 
         self.send_prepare_ok(message);
