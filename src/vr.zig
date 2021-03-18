@@ -495,7 +495,7 @@ pub const Journal = struct {
                     // If A was reordered then A may have a newer op than B (but an older view).
                     // However, here we use entry_for_op_exact() so we can assert a.op + 1 == b.op:
                     assert(a.op + 1 == b.op);
-                    // Further, while repair_headers() should never put an older view to the right
+                    // Further, while repair_header() should never put an older view to the right
                     // of a newer view, it may put a newer view to the left of an older view.
                     // We therefore do not assert a.view <= b.view unless the hash chain is intact.
 
@@ -1642,7 +1642,7 @@ pub const Replica = struct {
             @panic("failed to set latest entry correctly");
         }
 
-        self.repair_headers();
+        self.repair();
 
         if (true) return;
 
@@ -1903,7 +1903,7 @@ pub const Replica = struct {
 
     fn on_repair_timeout(self: *Replica) void {
         assert(self.status == .normal or self.status == .view_change);
-        self.repair_headers();
+        self.repair();
     }
 
     fn add_message_and_receive_quorum_exactly_once(
@@ -2259,6 +2259,70 @@ pub const Replica = struct {
         }
     }
 
+    /// Starting from the latest journal entry, backfill any missing or disconnected headers.
+    /// A header is disconnected if it breaks the hash chain with its newer neighbor to the right.
+    /// Since we work backwards from the latest entry, we should always be able to fix the chain.
+    fn repair(self: *Replica) void {
+        self.repair_timeout.reset();
+
+        if (self.status != .normal and self.status != .view_change) return;
+        assert(self.commit_min <= self.op);
+        assert(self.commit_min <= self.commit_max);
+
+        // TODO Handle case where we are requesting reordered headers that no longer exist.
+
+        // We expect these always to exist (and to be correct):
+        assert(self.journal.entry_for_op_exact(self.commit_min) != null);
+        assert(self.journal.entry_for_op_exact(self.op) != null);
+
+        // Request outstanding committed prepares to advance our op number:
+        // This handles the case of an idle cluster, where a follower will not otherwise advance.
+        // This is not required for correctness, but for durability.
+        if (self.op < self.commit_max) {
+            log.notice("{}: repair: op={} < commit_max={}", .{
+                self.replica,
+                self.op,
+                self.commit_max,
+            });
+            // We need to advance our op number and therefore have to request_prepares,
+            // since only on_prepare() can do this and not repair_header() within on_headers().
+            self.send_header_to_other_replicas(.{
+                .command = .request_prepares,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .commit = self.op + 1,
+                .op = self.commit_max,
+            });
+            return;
+        }
+
+        // Request any missing or disconnected headers:
+        // TODO Snapshots: Ensure that self.commit_min op always exists in the journal.
+        var broken = self.journal.find_latest_headers_break_between(self.commit_min, self.op);
+        if (broken) |range| {
+            log.notice("{}: repair: latest break: {}", .{ self.replica, range });
+            assert(range.op_min > self.commit_min);
+            assert(range.op_max < self.op);
+            // TODO Ask any N random replicas excluding ourself (to reduce traffic).
+            self.send_header_to_other_replicas(.{
+                .command = .request_headers,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .commit = range.op_min,
+                .op = range.op_max,
+            });
+            return;
+        }
+
+        // Assert that all headers are now present and connected with a perfect hash chain:
+        assert(self.op >= self.commit_max);
+        assert(self.valid_hash_chain_between(self.commit_min, self.op));
+
+        // TODO Scan dirty bits and request prepares.
+    }
+
     fn repair_dirty(self: *Replica) void {
         // TODO Add a flag to avoid scanning all dirty bits.
         // TODO Avoid requesting data if we have already just requested it.
@@ -2426,64 +2490,6 @@ pub const Replica = struct {
             }
         }
         return false;
-    }
-
-    /// Starting from the latest journal entry, backfill any missing or disconnected headers.
-    /// A header is disconnected if it breaks the hash chain with its newer neighbor to the right.
-    /// Since we work backwards from the latest entry, we should always be able to fix the chain.
-    fn repair_headers(self: *Replica) void {
-        self.repair_timeout.reset();
-
-        if (self.status != .normal and self.status != .view_change) return;
-        assert(self.commit_min <= self.op);
-        assert(self.commit_min <= self.commit_max);
-
-        // TODO Handle case where we are requesting reordered headers that no longer exist.
-
-        // We expect these always to exist (and to be correct):
-        assert(self.journal.entry_for_op_exact(self.commit_min) != null);
-        assert(self.journal.entry_for_op_exact(self.op) != null);
-
-        // Request missing committed headers:
-        if (self.op < self.commit_max) {
-            log.notice("{}: repair_headers: op={} < commit_max={}", .{
-                self.replica,
-                self.op,
-                self.commit_max,
-            });
-            self.send_header_to_other_replicas(.{
-                .command = .request_prepares,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .view = self.view,
-                .commit = self.op + 1,
-                .op = self.commit_max,
-            });
-            return;
-        }
-
-        // Request any missing or disconnected headers:
-        // TODO Snapshots: Ensure that self.commit_min op always exists in the journal.
-        var broken = self.journal.find_latest_headers_break_between(self.commit_min, self.op);
-        if (broken) |range| {
-            log.notice("{}: repair_headers: latest break: {}", .{ self.replica, range });
-            assert(range.op_min > self.commit_min);
-            assert(range.op_max < self.op);
-            // TODO Ask any N random replicas excluding ourself (to reduce traffic).
-            self.send_header_to_other_replicas(.{
-                .command = .request_headers,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .view = self.view,
-                .commit = range.op_min,
-                .op = range.op_max,
-            });
-            return;
-        }
-
-        // Assert that all headers are now present and connected with a perfect hash chain:
-        assert(self.op >= self.commit_max);
-        assert(self.valid_hash_chain_between(self.commit_min, self.op));
     }
 
     fn repair_last_queued_message_if_any(self: *Replica) void {
