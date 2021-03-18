@@ -145,7 +145,7 @@ pub const Header = packed struct {
 
     /// Returns null if all fields are set correctly according to the command, or else a warning.
     /// This does not verify that checksum is valid, and expects that has already been done.
-    pub fn bad(self: *const Header) ?[]const u8 {
+    pub fn invalid(self: *const Header) ?[]const u8 {
         switch (self.command) {
             .reserved => if (self.size != 0) return "size != 0",
             else => if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)",
@@ -1003,7 +1003,7 @@ pub const Replica = struct {
         };
         init_prepare.set_checksum();
         assert(init_prepare.valid_checksum());
-        assert(init_prepare.bad() == null);
+        assert(init_prepare.invalid() == null);
         journal.headers[0] = init_prepare;
         journal.assert_headers_reserved_from(init_prepare.op + 1);
 
@@ -1116,8 +1116,8 @@ pub const Replica = struct {
             @tagName(self.status),
             message.header,
         });
-        if (message.header.bad()) |reason| {
-            log.debug("{}: on_message: bad ({s})", .{ self.replica, reason });
+        if (message.header.invalid()) |reason| {
+            log.debug("{}: on_message: invalid ({s})", .{ self.replica, reason });
             return;
         }
         if (message.header.cluster != self.cluster) {
