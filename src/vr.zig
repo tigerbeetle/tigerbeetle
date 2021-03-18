@@ -1691,22 +1691,29 @@ pub const Replica = struct {
     }
 
     fn on_request_headers(self: *Replica, message: *const Message) void {
-        // TODO Add debug logs.
         if (self.status != .normal and self.status != .view_change) {
+            log.debug("{}: on_request_headers: ignoring ({})", .{ self.replica, self.status });
             return;
         }
 
-        if (message.header.view != self.view) {
+        if (message.header.view < self.view) {
+            log.debug("{}: on_request_headers: ignoring (older view)", .{self.replica});
             return;
+        }
+
+        if (message.header.view > self.view) {
+            log.debug("{}: on_request_headers: newer view", .{self.replica});
+            self.jump_to_newer_view(message.header.view);
         }
 
         if (message.header.replica == self.replica) {
+            log.warn("{}: on_request_headers: ignoring (self)", .{self.replica});
             return;
         }
 
         const op_min = message.header.commit;
         const op_max = message.header.op;
-        assert(op_max >= op_min); // TODO Add Header.bad validator for this.
+        assert(op_max >= op_min);
 
         // We must add 1 because op_max and op_min are both inclusive:
         const count_max = @intCast(u32, std.math.min(64, op_max - op_min + 1));
@@ -1714,8 +1721,8 @@ pub const Replica = struct {
 
         const size_max = @sizeOf(Header) + @sizeOf(Header) * count_max;
 
-        var m = self.message_bus.create_message(size_max) catch unreachable;
-        m.header.* = .{
+        var response = self.message_bus.create_message(size_max) catch unreachable;
+        response.header.* = .{
             .command = .headers,
             .nonce = message.header.checksum,
             .cluster = self.cluster,
@@ -1723,18 +1730,20 @@ pub const Replica = struct {
             .view = self.view,
         };
 
-        var dest = std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..size_max]);
-        const count = self.journal.copy_latest_headers_between(op_min, op_max, dest);
-        log.debug("copied {} headers", .{count});
+        const count = self.journal.copy_latest_headers_between(
+            op_min,
+            op_max,
+            std.mem.bytesAsSlice(Header, response.buffer[@sizeOf(Header)..size_max])
+        );
 
-        m.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
-        const data = m.buffer[@sizeOf(Header)..m.header.size];
+        response.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
+        const data = response.buffer[@sizeOf(Header)..response.header.size];
 
-        m.header.set_checksum_data(data);
-        m.header.set_checksum();
+        response.header.set_checksum_data(data);
+        response.header.set_checksum();
 
-        assert(m.references == 0);
-        self.send_message_to_replica(message.header.replica, m);
+        assert(response.references == 0);
+        self.send_message_to_replica(message.header.replica, response);
     }
 
     fn on_headers(self: *Replica, message: *const Message) void {
