@@ -1827,6 +1827,11 @@ pub const Replica = struct {
     }
 
     fn on_prepare_timeout(self: *Replica) void {
+        // TODO Exponential backoff.
+        // TODO Prevent flooding the network due to multiple concurrent rounds of replication.
+        self.prepare_timeout.reset();
+        self.prepare_attempt += 1;
+
         assert(self.status == .normal);
         assert(self.leader());
         assert(self.request_checksum != null);
@@ -1834,11 +1839,6 @@ pub const Replica = struct {
 
         var message = self.prepare_message.?;
         assert(message.header.view == self.view);
-
-        // TODO Exponential backoff.
-        // TODO Prevent flooding the network due to multiple concurrent rounds of replication.
-        self.prepare_attempt += 1;
-        self.prepare_timeout.reset();
 
         // The list of remote replicas yet to send a prepare_ok:
         var waiting: [32]u16 = undefined;
