@@ -1748,24 +1748,35 @@ pub const Replica = struct {
 
     fn on_headers(self: *Replica, message: *const Message) void {
         if (self.status != .normal and self.status != .view_change) {
+            log.debug("{}: on_headers: ignoring ({})", .{ self.replica, self.status });
             return;
         }
 
-        if (message.header.view != self.view) {
+        if (message.header.view < self.view) {
+            log.debug("{}: on_headers: ignoring (older view)", .{self.replica});
             return;
+        }
+
+        if (message.header.view > self.view) {
+            log.debug("{}: on_headers: newer view", .{self.replica});
+            self.jump_to_newer_view(message.header.view);
         }
 
         if (message.header.replica == self.replica) {
+            log.warn("{}: on_headers: ignoring (self)", .{self.replica});
             return;
         }
 
-        log.debug("{}: received headers from {}", .{ self.replica, message.header.replica });
+        assert(self.status == .normal or self.status == .view_change);
+        assert(message.header.view == self.view);
 
-        for (std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..message.header.size])) |*h| {
-            if (h.command == .reserved) continue;
+        const headers = std.mem.bytesAsSlice(
+            Header,
+            message.buffer[@sizeOf(Header)..message.header.size]
+        );
+        assert(headers.len > 0);
 
-            log.debug("{}: {}", .{ self.replica, h });
-
+        for (headers) |*h| {
             _ = self.repair_header(h);
         }
     }
