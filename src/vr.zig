@@ -1341,7 +1341,10 @@ pub const Replica = struct {
         self.replicate(message);
         self.append(message);
 
-        if (self.follower()) self.commit_ops_through(message.header.commit);
+        if (self.follower()) {
+            // A prepare may already be committed if requested by repair() so take the max:
+            self.commit_ops_through(std.math.max(message.header.commit, self.commit_max));
+        }
     }
 
     fn on_prepare_ok(self: *Replica, message: *Message) void {
