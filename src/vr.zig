@@ -271,6 +271,10 @@ pub const Journal = struct {
     headers: []Header align(sector_size),
     dirty: []bool,
 
+    /// TODO We are using in-memory storage as the backing for our journal while prototyping:
+    /// This simplifies resetting cluster state.
+    storage: []u8 align(sector_size),
+
     /// We copy-on-write to this buffer when writing, as in-memory headers may change concurrently:
     write_headers_buffer: []u8 align(sector_size),
 
@@ -324,6 +328,10 @@ pub const Journal = struct {
             std.fmt.fmtIntSizeBin(size_circular_buffer),
         });
 
+        var storage = try allocator.allocAdvanced(u8, sector_size, size, .exact);
+        errdefer allocator.free(storage);
+        std.mem.set(u8, storage, 0);
+
         var self = Journal{
             .allocator = allocator,
             .replica = replica,
@@ -332,6 +340,7 @@ pub const Journal = struct {
             .size_circular_buffer = size_circular_buffer,
             .headers = headers,
             .dirty = dirty,
+            .storage = storage,
             .write_headers_buffer = write_headers_buffer,
         };
 
@@ -550,6 +559,37 @@ pub const Journal = struct {
         }
 
         return range;
+    }
+
+    fn read_sectors(self: *Journal, buffer: []u8, offset: u64) void {
+        // TODO All these assertions can be shared across read_sectors() and write_sectors():
+        assert(buffer.len > 0);
+        assert(offset + buffer.len <= self.size);
+
+        assert(@mod(@ptrToInt(buffer.ptr), sector_size) == 0);
+        assert(@mod(buffer.len, sector_size) == 0);
+        assert(@mod(offset, sector_size) == 0);
+
+        // Memory must not be owned by self.headers as self.headers may be modified concurrently:
+        assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
+            @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + self.size_headers);
+
+        log.debug("{}: journal: read_sectors: offset={} len={}", .{
+            self.replica,
+            offset,
+            buffer.len,
+        });
+
+        // TODO Read from underlying storage abstraction layer:
+        // TODO Subdivide read into individual sectors if a we get an EIO (latent sector error).
+        std.mem.copy(u8, buffer, self.storage[offset .. offset + buffer.len]);
+        // preadAll(buffer, offset) catch |err| switch (err) {
+        //     error.InputOutput => @panic("latent sector error: no spare sectors to reallocate"),
+        //     else => {
+        //         log.emerg("write: error={} buffer.len={} offset={}", .{ err, buffer.len, offset });
+        //         @panic("unrecoverable disk error");
+        //     },
+        // };
     }
 
     /// A safe way of removing an entry, where the header must match the current entry to succeed.
@@ -775,7 +815,8 @@ pub const Journal = struct {
             buffer.len,
         });
 
-        // TODO Write to underlying storage abstraction layer.
+        // TODO Write to underlying storage abstraction layer:
+        std.mem.copy(u8, self.storage[offset .. offset + buffer.len], buffer);
         // pwriteAll(buffer, offset) catch |err| switch (err) {
         //     error.InputOutput => @panic("latent sector error: no spare sectors to reallocate"),
         //     else => {
@@ -2751,8 +2792,8 @@ pub fn run() !void {
     var allocator = &arena.allocator;
 
     const f = 1;
-    const journal_size = 512 * 1024 * 1024;
-    const journal_headers = 1048576;
+    const journal_size = 128 * 1024 * 1024;
+    const journal_headers = 16384;
     const cluster = 123456789;
 
     var configuration: [3]ConfigurationAddress = undefined;
