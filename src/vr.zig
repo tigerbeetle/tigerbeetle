@@ -23,6 +23,7 @@ pub const Command = packed enum(u8) {
     do_view_change,
     start_view,
 
+    request_prepares,
     request_headers,
     headers,
 };
@@ -964,6 +965,9 @@ pub const Replica = struct {
     repairing: bool = false,
     repairing_frame: @Frame(write_to_journal) = undefined,
 
+    sending_prepare: bool = false,
+    sending_prepare_frame: @Frame(send_prepare_to_replica) = undefined,
+
     repair_queue: ?*Message = null,
     repair_queue_len: usize = 0,
     repair_queue_max: usize = 3,
@@ -1180,6 +1184,7 @@ pub const Replica = struct {
             .start_view_change => self.on_start_view_change(message),
             .do_view_change => self.on_do_view_change(message),
             .start_view => self.on_start_view(message),
+            .request_prepares => self.on_request_prepares(message),
             .request_headers => self.on_request_headers(message),
             .headers => self.on_headers(message),
             else => unreachable,
@@ -1688,6 +1693,46 @@ pub const Replica = struct {
 
         // TODO self.commit(msg.lastcommitted());
         // TODO self.send_prepare_oks(oldLastOp);
+    }
+
+    fn on_request_prepares(self: *Replica, message: *const Message) void {
+        if (self.status != .normal and self.status != .view_change) {
+            log.debug("{}: on_request_prepares: ignoring ({})", .{ self.replica, self.status });
+            return;
+        }
+
+        if (message.header.view < self.view) {
+            log.debug("{}: on_request_prepares: ignoring (older view)", .{self.replica});
+            return;
+        }
+
+        if (message.header.view > self.view) {
+            log.debug("{}: on_request_prepares: newer view", .{self.replica});
+            self.jump_to_newer_view(message.header.view);
+        }
+
+        if (message.header.replica == self.replica) {
+            log.warn("{}: on_request_prepares: ignoring (self)", .{self.replica});
+            return;
+        }
+
+        const op_min = message.header.commit;
+        const op_max = message.header.op;
+        assert(op_max >= op_min);
+
+        // We must add 1 because `op_max` and `op_min` are both inclusive:
+        assert(op_max - op_min + 1 > 0);
+
+        var op = std.math.min(op_max, self.op) + 1;
+        while (op > op_min) {
+            op -= 1;
+
+            if (self.sending_prepare) return;
+            self.sending_prepare_frame = async self.send_prepare_to_replica(
+                message.header.replica,
+                op,
+            );
+        }
     }
 
     fn on_request_headers(self: *Replica, message: *const Message) void {
@@ -2406,9 +2451,8 @@ pub const Replica = struct {
                 self.op,
                 self.commit_max,
             });
-            // TODO This must go to the leader of the view?
             self.send_header_to_other_replicas(.{
-                .command = .request_headers,
+                .command = .request_prepares,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
@@ -2501,13 +2545,13 @@ pub const Replica = struct {
         assert(message.header.op == self.op);
 
         if (message.header.op <= self.commit_max) {
-            log.debug("{}: replicate: skipping (already committed by cluster)", .{self.replica});
+            log.debug("{}: replicate: not replicating (committed)", .{self.replica});
             return;
         }
 
         const next = @mod(self.replica + 1, @intCast(u16, self.configuration.len));
         if (next == self.leader_index(message.header.view)) {
-            log.debug("{}: replicate: replication complete", .{self.replica});
+            log.debug("{}: replicate: not replicating (completed)", .{self.replica});
             return;
         }
 
@@ -2595,6 +2639,46 @@ pub const Replica = struct {
         }
     }
 
+    fn send_prepare_to_replica(self: *Replica, replica: u16, op: u64) void {
+        assert(self.status == .normal or self.status == .view_change);
+        assert(op <= self.op);
+
+        const optional_entry = self.journal.entry_for_op_exact(op);
+        if (optional_entry == null) {
+            log.debug("{}: send_prepare_to_replica: op={} missing", .{ self.replica, op });
+            return;
+        }
+
+        const entry = optional_entry.?;
+        if (!self.journal.has_clean(entry)) {
+            log.debug("{}: send_prepare_to_replica: op={} dirty", .{ self.replica, op });
+            return;
+        }
+
+        assert(!self.sending_prepare);
+        self.sending_prepare = true;
+        defer self.sending_prepare = false;
+
+        const size = @intCast(u32, Journal.sector_ceil(entry.size));
+        assert(size >= entry.size);
+
+        var message = self.message_bus.create_message(size) catch unreachable;
+        defer self.message_bus.gc(message);
+
+        assert(message.header.offset + size <= self.journal.size_circular_buffer);
+        self.journal.read_sectors(
+            message.buffer[0..size],
+            self.journal.offset_in_circular_buffer(entry.offset),
+        );
+
+        if (message.header.op != op) {
+            log.warn("{}: send_prepare_to_replica: op={} changed", .{ self.replica, op });
+            return;
+        }
+
+        self.send_message_to_replica(replica, message);
+    }
+
     /// When replica i receives start_view_change messages for its view from f other replicas,
     /// it sends a ⟨do_view_change v, l, v’, n, k, i⟩ message to the node that will be the
     /// primary in the new view. Here v is its view, l is its log, v′ is the view number of the
@@ -2662,9 +2746,9 @@ pub const Replica = struct {
         });
         switch (message.header.command) {
             .prepare => {
-                // We do not assert message.header.replica as we would for send_header_to_replica().
-                // We may forward messages sent by another replica (e.g. prepares from the leader).
-                assert(self.status == .normal);
+                // We do not assert message.header.replica as we would for send_header_to_replica()
+                // because we typically forward messages sent by another replica (i.e. the leader).
+                assert(self.status == .normal or self.status == .view_change);
             },
             .do_view_change => {
                 assert(self.status == .view_change);
