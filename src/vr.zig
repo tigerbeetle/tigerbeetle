@@ -1427,6 +1427,8 @@ pub const Replica = struct {
 
         if (message.header.view > self.view) {
             log.debug("{}: on_commit: newer view", .{self.replica});
+            // This is critical for correctness:
+            // https://github.com/coilhq/tigerbeetle/commit/6119c7f759f924d09c088422d5c60ac6334d03de
             self.jump_to_newer_view(message.header.view);
         }
 
