@@ -1614,7 +1614,8 @@ pub const Replica = struct {
         assert(latest.command == .prepare);
         assert(latest.cluster == self.cluster);
         assert(latest.view < self.view); // Latest normal view before this view change.
-        assert(latest.op >= self.commit_max); // Ops may be rewound through a prior view change.
+        // Ops may be rewound through a view change so we use `self.commit_max` and not `self.op`:
+        assert(latest.op >= self.commit_max);
         assert(k >= latest.commit);
         assert(k >= self.commit_max);
 
@@ -1622,7 +1623,7 @@ pub const Replica = struct {
         self.commit_max = k;
         self.journal.set_entry_as_dirty(&latest);
 
-        // Now that we have the latest HEAD in place, repair any other headers from these messages:
+        // Now that we have the latest op in place, repair any other headers from these messages:
         for (self.do_view_change_from_all_replicas) |received, replica| {
             if (received) |m| {
                 for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |*h| {
@@ -2329,28 +2330,38 @@ pub const Replica = struct {
         // TODO Avoid requesting data if we are busy writing it (writes could take 10 seconds).
     }
 
-    /// Repairs must always backfill in behind self.op and may never advance past self.op (HEAD).
-    /// Otherwise, a split-brain leader may reapply an op that was removed by jump_to_newer_view(),
-    /// which could then be committed by a higher commit_max number received in a commit message.
-    /// Since we always wait to commit until the hash chain between self.commit_min and self.op is
-    /// fully intact, and since self.op is never advanced except in the current view, we can be sure
-    /// that we do not fork the hash chain.
     fn repair_header(self: *Replica, header: *const Header) bool {
         assert(self.status == .normal or self.status == .view_change);
         assert(header.command == .prepare);
         assert(header.size >= @sizeOf(Header));
-        assert(header.view <= self.view);
 
-        if (self.status == .normal and header.op > self.op and header.view < self.view) {
-            // This only applies for normal status:
-            // Within a view change, self.view will always be greater.
-            // For example, we may have jumped from view 5 to 10 on receiving a start_view_change.
-            // If we're the new leader processing do_view_change messages, our self.op may be old.
-            // It's critical for correctness that we don't consider newer ops as reordered.
-            // Otherwise, catastrophic data loss would occur.
-            assert(self.status != .view_change);
-            // For example, an op reordered through a view change (section 5.2 in the VRR paper).
-            log.debug("{}: repair_header: ignoring (reordered op)", .{self.replica});
+        if (self.status == .normal) {
+            assert(header.view <= self.view);
+        } else if (self.status == .view_change) {
+            assert(header.view < self.view);
+        }
+
+        if (header.op > self.op) {
+            // A repair may never advance `self.op` (critical for correctness):
+            // https://github.com/coilhq/tigerbeetle/commit/6119c7f759f924d09c088422d5c60ac6334d03de
+            //
+            // Repairs must always backfill in behind `self.op` or replace `self.op` but may never
+            // advance past `self.op`. Otherwise, a split-brain leader may reapply an op that was
+            // removed by `jump_to_newer_view()`, which could then be committed by a higher
+            // `commit_max` number received in a commit message.
+            //
+            // Our guiding principles around repairs in general:
+            //
+            // * Do not commit until the hash chain between `self.commit_min` and `self.op` is
+            // fully connected, to ensure that all the ops in this range are correct.
+            //
+            // * Ensure that `self.commit_max` is never advanced for a newer view without first
+            // calling `jump_to_newer_view()` to rewind uncommitted ops, otherwise `self.commit_max`
+            // may refer to different ops.
+            //
+            // * Ensure that `self.op` is never advanced except in the current view, and never by a
+            // repair since repairs may occur in a view change where `self.view` has not started.
+            log.debug("{}: repair_header: ignoring (would advance op)", .{self.replica});
             return false;
         }
 
@@ -2369,7 +2380,9 @@ pub const Replica = struct {
             if (existing.checksum == header.checksum) {
                 if (self.journal.dirty[header.op]) {
                     log.debug("{}: repair_header: exists (dirty checksum)", .{self.replica});
-                    // We still want to run the chain and overlap checks below before deciding...
+                    // We must run the chain and overlap checks below before returning because our
+                    // return boolean may be used to decide whether or not to do a journal write.
+                    // The header may exist as dirty, but we may not want to break a newer op.
                 } else {
                     log.debug("{}: repair_header: ignoring (clean checksum)", .{self.replica});
                     return false;
@@ -2410,6 +2423,7 @@ pub const Replica = struct {
 
         // TODO Snapshots: Skip if this header is already snapshotted.
 
+        assert(header.op <= self.op);
         self.journal.set_entry_as_dirty(header);
         return true;
     }
