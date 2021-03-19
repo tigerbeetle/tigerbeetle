@@ -1585,19 +1585,7 @@ pub const Replica = struct {
                 assert(m.header.view == self.view);
 
                 if (m.header.commit > k) k = m.header.commit;
-
-                for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |h| {
-                    assert(h.command == .prepare);
-                    assert(h.commit <= k);
-
-                    if (latest.command == .reserved) {
-                        latest = h;
-                    } else if (h.view > latest.view) {
-                        latest = h;
-                    } else if (h.view == latest.view and h.op > latest.op) {
-                        latest = h;
-                    }
-                }
+                self.set_latest_header(self.message_data_as_headers(m), &latest);
             }
         }
 
@@ -1624,9 +1612,9 @@ pub const Replica = struct {
         self.journal.set_entry_as_dirty(&latest);
 
         // Now that we have the latest op in place, repair any other headers from these messages:
-        for (self.do_view_change_from_all_replicas) |received, replica| {
+        for (self.do_view_change_from_all_replicas) |received| {
             if (received) |m| {
-                for (std.mem.bytesAsSlice(Header, m.buffer[@sizeOf(Header)..m.header.size])) |*h| {
+                for (self.message_data_as_headers(m)) |*h| {
                     _ = self.repair_header(h);
                 }
             }
@@ -1640,7 +1628,7 @@ pub const Replica = struct {
             assert(entry.op == latest.op);
             assert(entry.offset == latest.offset);
         } else {
-            @panic("failed to set latest entry correctly");
+            unreachable;
         }
 
         self.repair();
@@ -1681,16 +1669,29 @@ pub const Replica = struct {
         assert(message.header.replica == self.leader_index(message.header.view));
 
         // TODO Assert that start_view message matches what we expect if our journal is empty.
-        // TODO Assert that start_view message's oldest op overlaps with our last commit number.
-        // TODO Update the journal.
+        // TODO Call jump to view if necessary.
+
+        var latest: Header = std.mem.zeroInit(Header, .{});
+        self.set_latest_header(self.message_data_as_headers(message), &latest);
+
+        assert(latest.command == .prepare);
+        assert(latest.op == message.header.op);
+        assert(latest.commit <= message.header.commit);
+
+        self.op = message.header.op;
+        self.commit_max = message.header.commit;
+        self.journal.set_entry_as_dirty(&latest);
+
+        // Now that we have the latest op in place, repair any other headers:
+        for (self.message_data_as_headers(message)) |*h| {
+            _ = self.repair_header(h);
+        }
 
         self.transition_to_normal_status(message.header.view);
 
         assert(self.status == .normal);
         assert(message.header.view == self.view);
         assert(self.follower());
-
-        // TODO Update our last op number according to message.
 
         // TODO self.commit(msg.lastcommitted());
         // TODO self.send_prepare_oks(oldLastOp);
@@ -1779,7 +1780,7 @@ pub const Replica = struct {
         const count = self.journal.copy_latest_headers_between(
             op_min,
             op_max,
-            std.mem.bytesAsSlice(Header, response.buffer[@sizeOf(Header)..size_max])
+            std.mem.bytesAsSlice(Header, response.buffer[@sizeOf(Header)..size_max]),
         );
 
         response.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
@@ -1818,7 +1819,7 @@ pub const Replica = struct {
 
         const headers = std.mem.bytesAsSlice(
             Header,
-            message.buffer[@sizeOf(Header)..message.header.size]
+            message.buffer[@sizeOf(Header)..message.header.size],
         );
         assert(headers.len > 0);
 
@@ -2216,6 +2217,12 @@ pub const Replica = struct {
         self.transition_to_normal_status(new_view);
         assert(self.view == new_view);
         assert(self.follower());
+    }
+
+    fn message_data_as_headers(self: *Replica, message: *const Message) []Header {
+        // TODO Assert message commands that we expect this to be called for.
+        assert(message.header.size > @sizeOf(Header)); // Data must contain at least one header.
+        return std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..message.header.size]);
     }
 
     /// Advances `op` to where we need to be before `header` can be processed as a prepare:
@@ -2782,6 +2789,26 @@ pub const Replica = struct {
         assert(message.header.cluster == self.cluster);
         assert(message.header.view == self.view);
         self.message_bus.send_message_to_replica(replica, message);
+    }
+
+    fn set_latest_header(self: *Replica, headers: []Header, latest: *Header) void {
+        switch (latest.command) {
+            .reserved, .prepare => assert(latest.valid_checksum()),
+            else => unreachable,
+        }
+
+        for (headers) |header| {
+            assert(header.command == .prepare);
+            assert(header.valid_checksum());
+
+            if (latest.command == .reserved) {
+                latest.* = header;
+            } else if (header.view > latest.view) {
+                latest.* = header;
+            } else if (header.view == latest.view and header.op > latest.op) {
+                latest.* = header;
+            }
+        }
     }
 
     fn transition_to_normal_status(self: *Replica, new_view: u64) void {
