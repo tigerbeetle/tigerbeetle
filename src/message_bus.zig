@@ -33,11 +33,18 @@ pub const MessageBus = struct {
     /// The replica which is running the server
     server: *Replica,
     server_fd: os.socket_t,
-    /// The slot for the server's replica id is undefined
+    /// Send only connections to fellow replicas, automatically reconnected on error.
+    /// The slot for the server's replica id is undefined except for its send_queue.
     replicas: []ReplicaConnection,
+    /// Receive only connections to fellow replicas and send/receive
+    /// connections to clients.
     connections: []Connection,
+    /// Number of connections in the connection array currently in use
+    connections_used: usize = 0,
+    /// Number of currently active replica connections in the connections slice.
+    replica_connections: usize = 0,
 
-    /// Initialize the MessageBus for the given server replica and configuration
+    /// Initialize the MessageBus for the given server replica and configuration.
     pub fn init(
         self: *MessageBus,
         allocator: *mem.Allocator,
@@ -50,11 +57,15 @@ pub const MessageBus = struct {
         errdefer allocator.free(replicas);
 
         for (configuration) |address, i| {
-            if (i == server_id) continue;
-            replicas[i] = .{ .connection = .{
-                .message_bus = self,
-                .address = address,
-            } };
+            if (i == server_id) {
+                replicas[i].send_queue = .{};
+            } else {
+                replicas[i] = .{ .connection = .{
+                    .message_bus = self,
+                    .address = address,
+                } };
+                replicas[i].connect();
+            }
         }
 
         const connections = try allocator.alloc(Connection, num_connections);
@@ -69,6 +80,8 @@ pub const MessageBus = struct {
             .replicas = replicas,
             .connections = connections,
         };
+
+        self.maybe_accept();
     }
 
     fn init_tcp(address: std.net.Address) !os.socket_t {
@@ -79,6 +92,66 @@ pub const MessageBus = struct {
         // TODO: port hopping
         try os.bind(server, &address.any, address.getOsSockLen());
         try os.listen(server, tcp_backlog);
+    }
+
+    /// Must be called whenever a Connection in the connections slice is closed.
+    fn maybe_accept(self: *MessageBus) void {
+        if (self.connections_used == self.connections.len) {
+            if (self.replica_connections == self.replicas.len - 1) {
+                // If there are no unusued connections and all replicas are
+                // connected, do nothing.
+                return;
+            } else {
+                assert(self.replica_connections < self.replicas.len - 1);
+                // There are no unused connections but not all replicas are connected.
+                // Disconnect a client to make sure there is space for a replica to connect.
+                log.info("all connections in use but not all replicas connected, disconnecting a client", .{});
+                for (self.connections) |connection| {
+                    assert(connection.peer != .none);
+                    if (connection.peer == .client) {
+                        connection.close();
+                        return;
+                    }
+                }
+                // This code should never be reached in normal circumstances.
+                // In the edge case that all client connections are currently
+                // waiting on the first message header to determine whether the peer
+                // is a client or a replica, disconnected one of these
+                // waiting connections to ensure we make progress.
+                log.warn("failed to disconnect a client as all peers were replicas or unknown, disconnecting an unknown peer.");
+                for (self.connections) |connection| {
+                    assert(connection.peer != .none);
+                    if (connection.peer == .unknown) {
+                        connection.close();
+                        return;
+                    }
+                }
+                // If this is reached, connections.len is too low for the
+                // current number of replicas or there is some other bug in
+                // the system.
+                unreachable;
+            }
+        }
+        assert(self.connections_used < self.connections.len);
+        self.io.accept(*MessageBus, self, accept, &server_completion, server, os.SOCK_CLOEXEC);
+    }
+
+    fn accept_completed(self: *MessageBus, completion: *IO.Completion, result: AcceptError!os.socket_t) void {
+        defer maybe_accept();
+        const fd = result catch |err| {
+            // TODO: some errors should probably be fatal
+            log.err("accept failed: {}", .{err});
+            return;
+        };
+        assert(self.connections_used < self.connections.len);
+        // Find an unused Connection to receive/send from the new peer.
+        for (self.connections) |connection| {
+            if (connection.peer == .none) {
+                connection.receive_messages(fd);
+                break;
+            }
+        } else unreachable;
+        self.connections_used += 1;
     }
 
     /// Teardown, using blocking syscalls to close all sockets
@@ -123,7 +196,13 @@ pub const MessageBus = struct {
             .address = self.configuration[replica],
             .message = message,
         };
-        self.replicas[replica].send_queue.push(envelope);
+
+        // Messages sent by the server to itself are delivered directly in flush()
+        if (replica == self.server.replica) {
+            self.replicas[replica].send_queue.push(envelope);
+        } else {
+            self.replicas[replica].send_message(envelope);
+        }
     }
 
     pub fn send_header_to_client(self: *MessageBus, client_id: u128, header: Header) void {
@@ -151,17 +230,18 @@ pub const MessageBus = struct {
             .address = self.configuration[replica],
             .message = message,
         };
-        // TODO
     }
 
-    // TODO: get rid of this and just send right away?
-    pub fn send_queued_messages(self: *MessageBus) void {
-        for (self.replicas) |connection| {
-            if (connection.fd == -1) {
-                connection.connect();
-            } else {
-                connection.flush_queue();
-            }
+    pub fn flush(self: *MessageBus) void {
+        // Deliver messages the server replica has sent to itself.
+        // Iterate on a copy to avoid a potential infinite loop.
+        var copy = self.replicas[self.server.replica].send_queue;
+        self.replicas[self.server.replica].send_queue = .{};
+        while (copy.pop()) |envelope| {
+            self.server.on_message(envelope.message);
+            envelope.message.references -= 1;
+            self.message_bus.gc(envelope.message);
+            self.message_bus.allocator.destroy(envelope);
         }
     }
 
@@ -199,6 +279,18 @@ pub const MessageBus = struct {
         /// Number of bytes of the current message that have already been sent.
         bytes_sent: usize = 0,
 
+        fn send_message(self: *ReplicaConnection, envelope: *Envelope) void {
+            const queue_was_empty = self.send_queue.out == null;
+            self.send_queue.push(envelope);
+            // If the queue was not empty, the message will be sent after the
+            // messages currently being sent are done.
+            // The connection is not currently active, the message will be sent
+            // when it is reestablished.
+            if (queue_was_empty and self.fd != -1) {
+                self.flush_queue();
+            }
+        }
+
         fn connect(self: *ReplicaConnection) void {
             assert(self.fd == -1);
             self.fd = try os.socket(self.address.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0);
@@ -221,9 +313,12 @@ pub const MessageBus = struct {
                 return;
             };
             log.debug("connected to {}", .{self.address});
+            self.flush_queue();
         }
 
         fn close(self: *ReplicaConnection) void {
+            // Reset bytes_sent to 0 so that we resend the full message on reconnect.
+            self.bytes_sent = 0;
             self.message_bus.io.close(
                 *ReplicaConnection,
                 self,
@@ -239,6 +334,8 @@ pub const MessageBus = struct {
                 return;
             };
             log.debug("closed connection to replica at {}", .{self.address});
+            // TODO: add a delay before reconnecting based on exponential backoff/full jitter
+            self.connect();
         }
 
         fn flush_queue(self: *ReplicaConnection) void {
@@ -359,6 +456,7 @@ pub const MessageBus = struct {
                 if (self.incoming_header.command == .request) {
                     self.peer = .{ .client = self.incoming_header.client };
                 } else {
+                    self.message_bus.replica_connections += 1;
                     self.peer = .{ .replica = self.incoming_header.replica };
                 }
             }
@@ -429,12 +527,17 @@ pub const MessageBus = struct {
         }
 
         fn complete_close(self: *Connection, completion: *IO.Completion, result: CloseError!void) void {
+            defer {
+                if (self.peer == .replica) self.message_bus.replica_connections -= 1;
+                self.message_bus.connections_used -= 1;
+                self.* = .{ .message_bus = self.message_bus };
+                self.message_bus.maybe_accept();
+            }
             result catch |err| {
                 log.err("error closing connection to {}: {}", .{ self.peer, err });
                 return;
             };
             log.debug("closed connection to {}", .{self.peer});
-            self.* = .{ .message_bus = self.message_bus };
         }
     };
 };
