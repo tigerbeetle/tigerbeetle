@@ -221,15 +221,27 @@ pub const MessageBus = struct {
         self.send_message_to_client(replica, message);
     }
 
+    /// Try to send the message to the client with the given id.
+    /// If the client is not currently connected, the message is silently dropped.
     pub fn send_message_to_client(self: *MessageBus, client_id: u128, message: *Message) void {
-        message.references += 1;
-
-        // TODO Pre-allocate envelopes at startup.
-        const envelope = self.allocator.create(Envelope) catch unreachable;
-        envelope.* = .{
-            .address = self.configuration[replica],
-            .message = message,
-        };
+        for (self.connections) |connection| {
+            switch (connection) {
+                .client => |id| if (id == client_id) {
+                    message.references += 1;
+                    // TODO Pre-allocate envelopes at startup.
+                    const envelope = self.allocator.create(Envelope) catch unreachable;
+                    envelope.* = .{
+                        .address = self.configuration[replica],
+                        .message = message,
+                    };
+                    connection.send_message(envelope);
+                    return;
+                },
+                else => {},
+            }
+        }
+        // TODO: not sure if this is necessary or not
+        self.message_bus.gc(message);
     }
 
     pub fn flush(self: *MessageBus) void {
@@ -283,12 +295,8 @@ pub const MessageBus = struct {
             const queue_was_empty = self.send_queue.out == null;
             self.send_queue.push(envelope);
             // If the queue was not empty, the message will be sent after the
-            // messages currently being sent are done.
-            // The connection is not currently active, the message will be sent
-            // when it is reestablished.
-            if (queue_was_empty and self.fd != -1) {
-                self.flush_queue();
-            }
+            // messages currently being sent.
+            if (queue_was_empty) self.send();
         }
 
         fn connect(self: *ReplicaConnection) void {
@@ -313,7 +321,7 @@ pub const MessageBus = struct {
                 return;
             };
             log.debug("connected to {}", .{self.address});
-            self.flush_queue();
+            self.send();
         }
 
         fn close(self: *ReplicaConnection) void {
@@ -338,7 +346,10 @@ pub const MessageBus = struct {
             self.connect();
         }
 
-        fn flush_queue(self: *ReplicaConnection) void {
+        fn send(self: *ReplicaConnection) void {
+            // If currently disconnected, do nothing.
+            // This function will be called again on reconnect.
+            if (self.fd == -1) return;
             const envelope = self.send_queue.out orelse return;
             self.message_bus.io.send(
                 *ReplicaConnection,
@@ -367,7 +378,7 @@ pub const MessageBus = struct {
                 self.message_bus.gc(envelope.message);
                 self.message_bus.allocator.destroy(envelope);
             }
-            self.flush_queue();
+            self.send();
         }
     };
 
@@ -513,6 +524,50 @@ pub const MessageBus = struct {
             self.recv_header();
         }
 
+        fn send_message(self: *Connection, envelope: *Envelope) void {
+            assert(self.peer == .client);
+            const queue_was_empty = self.send_queue.out == null;
+            self.send_queue.push(envelope);
+            // If the queue was not empty, the message will be sent after the
+            // messages currently being sent.
+            if (queue_was_empty) self.send();
+        }
+
+        fn send(self: *ReplicaConnection) void {
+            // If currently disconnected, do nothing.
+            // This function will be called again on reconnect.
+            if (self.fd == -1) return;
+            const envelope = self.send_queue.out orelse return;
+            self.message_bus.io.send(
+                *ReplicaConnection,
+                self,
+                complete_send,
+                &self.completion,
+                self.fd,
+                envelope.message.buffer[self.bytes_sent..],
+                os.MSG_NOSIGNAL,
+            );
+        }
+
+        fn complete_send(self: *ReplicaConnection, completion: *IO.Completion, result: SendError!usize) void {
+            self.bytes_sent += result catch |err| {
+                // TODO: maybe don't need to close on *every* error
+                log.err("error sending message to replica at {}: {}", .{ self.address, err });
+                self.close();
+                return;
+            };
+            assert(self.bytes_sent <= self.send_queue.out.?.message.buffer.len);
+            // If the message has been fully sent, move on to the next one.
+            if (self.bytes_sent == self.send_queue.out.?.message.buffer.len) {
+                self.bytes_sent = 0;
+                const envelope = self.send_queue.pop().?;
+                envelope.message.references -= 1;
+                self.message_bus.gc(envelope.message);
+                self.message_bus.allocator.destroy(envelope);
+            }
+            self.send();
+        }
+
         fn close(self: *Connection) void {
             // If an error occurs in both sending and receving at roughly,
             // the same time, this function might be called twice.
@@ -530,6 +585,11 @@ pub const MessageBus = struct {
             defer {
                 if (self.peer == .replica) self.message_bus.replica_connections -= 1;
                 self.message_bus.connections_used -= 1;
+                while (self.send_queue.pop()) |envelope| {
+                    envelope.message.references -= 1;
+                    self.message_bus.gc(envelope.message);
+                    self.message_bus.allocator.destroy(envelope);
+                }
                 self.* = .{ .message_bus = self.message_bus };
                 self.message_bus.maybe_accept();
             }
