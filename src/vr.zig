@@ -1305,7 +1305,7 @@ pub const Replica = struct {
 
         if (message.header.view > self.view) {
             log.debug("{}: on_prepare: newer view", .{self.replica});
-            self.jump_to_newer_view(message.header.view);
+            self.jump_to_newer_view_in_normal_status(message.header.view);
         }
 
         assert(self.status == .normal);
@@ -1319,7 +1319,7 @@ pub const Replica = struct {
 
         if (message.header.op > self.op + 1) {
             log.debug("{}: on_prepare: newer op", .{self.replica});
-            self.jump_to_newer_op(message.header);
+            self.jump_to_newer_op_in_normal_status(message.header);
         }
 
         if (self.journal.previous_entry(message.header)) |previous| {
@@ -1434,7 +1434,7 @@ pub const Replica = struct {
             log.debug("{}: on_commit: newer view", .{self.replica});
             // This is critical for correctness:
             // https://github.com/coilhq/tigerbeetle/commit/6119c7f759f924d09c088422d5c60ac6334d03de
-            self.jump_to_newer_view(message.header.view);
+            self.jump_to_newer_view_in_normal_status(message.header.view);
         }
 
         if (self.leader()) {
@@ -2173,8 +2173,17 @@ pub const Replica = struct {
         return false;
     }
 
-    fn jump_to_newer_view(self: *Replica, new_view: u64) void {
-        log.debug("{}: jump_to_newer_view: advancing: view={}..{}", .{
+    /// Removes uncommitted ops (as per 5.2 of the VRR paper) to prevent forking the hash chain, and
+    /// transitions from normal status to normal status for the newer view.
+    ///
+    /// We must do this within normal status on seeing a newer view, but only if we are certain that
+    /// the other replica is also within normal status and not within a view change, because then we
+    /// would start the view before the leader of that view.
+    ///
+    /// We can ensure the latter invariant by never sending prepare or commit messages to other
+    /// replicas, unless we have a normal status ourselves.
+    fn jump_to_newer_view_in_normal_status(self: *Replica, new_view: u64) void {
+        log.debug("{}: jump_to_newer_view_in_normal_status: advancing: view={}..{}", .{
             self.replica,
             self.view,
             new_view,
@@ -2184,36 +2193,15 @@ pub const Replica = struct {
         assert(new_view > self.view);
         assert(self.leader_index(new_view) != self.replica);
 
-        // 5.2 State Transfer
-        // There are two cases, depending on whether the slow node has learned that it is missing
-        // requests in its current view, or has heard about a later view. In the former case it only
-        // needs to learn about requests after its op-number. In the latter it needs to learn about
-        // requests after the latest committed request in its log, since requests after that might
-        // have been reordered in the view change, so in this case it sets its op-number to its
-        // commit-number and removes all entries after this from its log.
-
-        // It is critical for correctness that we discard any ops here that were not involved in the
-        // view change(s), since they may have been replaced in the view change(s) by other ops.
-        // If we fail to do this immediately then we may commit the wrong op and diverge state when
-        // we process a commit message or when we process a commit number in a prepare message.
-
-        // TODO Critical: Rewind any ops in repair queue.
-
-        if (self.op > self.commit_max) {
-            log.debug("{}: jump_to_newer_view: rewinding: op={}..{}", .{
-                self.replica,
-                self.op,
-                self.commit_max,
-            });
-            self.op = self.commit_max;
-            self.journal.remove_entries_from(self.op + 1);
-            assert(self.journal.entry_for_op_exact(self.op) != null);
-        } else {
-            log.debug("{}: jump_to_newer_view: op == commit, no need to rewind", .{self.replica});
-        }
-
+        // It is critical for correctness that we remove any uncommitted ops that were not involved
+        // in the interim view changes, since they may have been replaced in those view changes by
+        // other ops. If we fail to do this immediately then we may commit the wrong op and diverge
+        // state when we see a newer commit number in a prepare or commit message, which may then
+        // refer to different ops.
+        self.remove_uncommitted_ops();
         assert(self.op >= self.commit_min);
         assert(self.op <= self.commit_max);
+
         self.transition_to_normal_status(new_view);
         assert(self.view == new_view);
         assert(self.follower());
@@ -2226,24 +2214,23 @@ pub const Replica = struct {
     }
 
     /// Advances `op` to where we need to be before `header` can be processed as a prepare:
-    fn jump_to_newer_op(self: *Replica, header: *const Header) void {
+    fn jump_to_newer_op_in_normal_status(self: *Replica, header: *const Header) void {
         assert(self.status == .normal);
         assert(self.follower());
         assert(header.view == self.view);
         assert(header.op > self.op + 1);
-        // We may have learned of a higher commit_max through a commit message before jumping to a
-        // newer op that is less than commit_max but greater than commit_min:
+        // We may have learned of a higher `commit_max` through a commit message before jumping to a
+        // newer op that is less than `commit_max` but greater than `commit_min`:
         assert(header.op > self.commit_min);
-
-        const latest_entry = self.journal.entry_for_op_exact(self.op).?;
 
         log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
             self.replica,
             self.op,
             header.op - 1,
-            latest_entry.checksum,
+            self.journal.entry_for_op_exact(self.op).?.checksum,
             header.nonce,
         });
+
         self.op = header.op - 1;
         assert(self.op >= self.commit_min);
         assert(self.op + 1 == header.op);
@@ -2264,6 +2251,45 @@ pub const Replica = struct {
             log.emerg("{}: panic_if_hash_chain_would_break: a: {}", .{ self.replica, a });
             log.emerg("{}: panic_if_hash_chain_would_break: b: {}", .{ self.replica, b });
             @panic("hash chain would break");
+        }
+    }
+
+    /// Removes uncommitted ops (as per 5.2 of the VRR paper) to prevent forking the hash chain.
+    ///
+    /// 5.2 State Transfer
+    /// There are two cases, depending on whether the slow node has learned that it is missing
+    /// requests in its current view, or has heard about a later view. In the former case it only
+    /// needs to learn about requests after its op-number. In the latter it needs to learn about
+    /// requests after the latest committed request in its log, since requests after that might
+    /// have been reordered in the view change, so in this case it sets its op-number to its
+    /// commit-number and removes all entries after this from its log.
+    fn remove_uncommitted_ops(self: *Replica) void {
+        assert(self.status == .normal or self.status == .view_change);
+
+        // TODO Almost critical: Rewind any ops in the repair queue.
+
+        if (self.op > self.commit_max) {
+            // We can't simply set `self.op` back to `commit_max` because we may not have that op.
+            // We therefore set `self.op` back to the latest committed op that we actually have.
+            // This removes uncommitted ops (or committed ops that we don't have which is fine).
+            var op = self.commit_max;
+            while (op > self.commit_min) : (op -= 1) {
+                if (self.journal.entry_for_op_exact(op) != null) break;
+            }
+            assert(op <= self.commit_max);
+            assert(op >= self.commit_min);
+
+            log.notice("{}: remove_uncommitted_ops: setting op={}..{} (latest committed)", .{
+                self.replica,
+                self.op,
+                op,
+            });
+
+            self.op = op;
+            self.journal.remove_entries_from(self.op + 1);
+            assert(self.journal.entry_for_op_exact(self.op) != null);
+        } else {
+            log.debug("{}: remove_uncommitted_ops: no uncommitted ops", .{self.replica});
         }
     }
 
@@ -2354,8 +2380,8 @@ pub const Replica = struct {
             //
             // Repairs must always backfill in behind `self.op` or replace `self.op` but may never
             // advance past `self.op`. Otherwise, a split-brain leader may reapply an op that was
-            // removed by `jump_to_newer_view()`, which could then be committed by a higher
-            // `commit_max` number received in a commit message.
+            // removed by `jump_to_newer_view_in_normal_status()`, which could then be committed by
+            // a higher `commit_max` number received in a commit message.
             //
             // Our guiding principles around repairs in general:
             //
@@ -2363,8 +2389,8 @@ pub const Replica = struct {
             // fully connected, to ensure that all the ops in this range are correct.
             //
             // * Ensure that `self.commit_max` is never advanced for a newer view without first
-            // calling `jump_to_newer_view()` to rewind uncommitted ops, otherwise `self.commit_max`
-            // may refer to different ops.
+            // calling `jump_to_newer_view_in_normal_status()` to rewind uncommitted ops, otherwise
+            // `self.commit_max` may refer to different ops.
             //
             // * Ensure that `self.op` is never advanced except in the current view, and never by a
             // repair since repairs may occur in a view change where `self.view` has not started.
