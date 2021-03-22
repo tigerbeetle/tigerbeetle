@@ -1697,66 +1697,11 @@ pub const Replica = struct {
         // TODO self.send_prepare_oks(oldLastOp);
     }
 
-    fn on_request_prepares(self: *Replica, message: *const Message) void {
-        if (self.status != .normal and self.status != .view_change) {
-            log.debug("{}: on_request_prepares: ignoring ({})", .{ self.replica, self.status });
-            return;
-        }
-
-        if (message.header.view < self.view) {
-            log.debug("{}: on_request_prepares: ignoring (older view)", .{self.replica});
-            return;
-        }
-
-        if (message.header.view > self.view) {
-            log.debug("{}: on_request_prepares: newer view", .{self.replica});
-            self.jump_to_newer_view(message.header.view);
-        }
-
-        if (message.header.replica == self.replica) {
-            log.warn("{}: on_request_prepares: ignoring (self)", .{self.replica});
-            return;
-        }
-
-        const op_min = message.header.commit;
-        const op_max = message.header.op;
-        assert(op_max >= op_min);
-
-        // We must add 1 because `op_max` and `op_min` are both inclusive:
-        assert(op_max - op_min + 1 > 0);
-
-        var op = std.math.min(op_max, self.op) + 1;
-        while (op > op_min) {
-            op -= 1;
-
-            if (self.sending_prepare) return;
-            self.sending_prepare_frame = async self.send_prepare_to_replica(
-                message.header.replica,
-                op,
-            );
-        }
-    }
-
     fn on_request_headers(self: *Replica, message: *const Message) void {
-        if (self.status != .normal and self.status != .view_change) {
-            log.debug("{}: on_request_headers: ignoring ({})", .{ self.replica, self.status });
-            return;
-        }
+        if (self.ignore_repair_message(message)) return;
 
-        if (message.header.view < self.view) {
-            log.debug("{}: on_request_headers: ignoring (older view)", .{self.replica});
-            return;
-        }
-
-        if (message.header.view > self.view) {
-            log.debug("{}: on_request_headers: newer view", .{self.replica});
-            self.jump_to_newer_view(message.header.view);
-        }
-
-        if (message.header.replica == self.replica) {
-            log.warn("{}: on_request_headers: ignoring (self)", .{self.replica});
-            return;
-        }
+        assert(self.status == .normal or self.status == .view_change);
+        assert(message.header.view == self.view);
 
         const op_min = message.header.commit;
         const op_max = message.header.op;
@@ -1794,25 +1739,7 @@ pub const Replica = struct {
     }
 
     fn on_headers(self: *Replica, message: *const Message) void {
-        if (self.status != .normal and self.status != .view_change) {
-            log.debug("{}: on_headers: ignoring ({})", .{ self.replica, self.status });
-            return;
-        }
-
-        if (message.header.view < self.view) {
-            log.debug("{}: on_headers: ignoring (older view)", .{self.replica});
-            return;
-        }
-
-        if (message.header.view > self.view) {
-            log.debug("{}: on_headers: newer view", .{self.replica});
-            self.jump_to_newer_view(message.header.view);
-        }
-
-        if (message.header.replica == self.replica) {
-            log.warn("{}: on_headers: ignoring (self)", .{self.replica});
-            return;
-        }
+        if (self.ignore_repair_message(message)) return;
 
         assert(self.status == .normal or self.status == .view_change);
         assert(message.header.view == self.view);
@@ -1825,6 +1752,31 @@ pub const Replica = struct {
 
         for (headers) |*h| {
             _ = self.repair_header(h);
+        }
+    }
+
+    fn on_request_prepares(self: *Replica, message: *const Message) void {
+        if (self.ignore_repair_message(message)) return;
+
+        assert(self.status == .normal or self.status == .view_change);
+        assert(message.header.view == self.view);
+
+        const op_min = message.header.commit;
+        const op_max = message.header.op;
+        assert(op_max >= op_min);
+
+        // We must add 1 because `op_max` and `op_min` are both inclusive:
+        assert(op_max - op_min + 1 > 0);
+
+        var op = std.math.min(op_max, self.op) + 1;
+        while (op > op_min) {
+            op -= 1;
+
+            if (self.sending_prepare) return;
+            self.sending_prepare_frame = async self.send_prepare_to_replica(
+                message.header.replica,
+                op,
+            );
         }
     }
 
@@ -2153,6 +2105,36 @@ pub const Replica = struct {
                 }
             },
             else => unreachable,
+        }
+
+        return false;
+    }
+
+    fn ignore_repair_message(self: *Replica, message: *const Message) bool {
+        assert(message.header.command == .request_headers or
+            message.header.command == .headers or
+            message.header.command == .request_prepares);
+
+        const command: []const u8 = @tagName(message.header.command);
+
+        if (self.status != .normal and self.status != .view_change) {
+            log.debug("{}: on_{s}: ignoring ({})", .{ self.replica, command, self.status });
+            return true;
+        }
+
+        if (message.header.view < self.view) {
+            log.debug("{}: on_{s}: ignoring (older view)", .{ self.replica, command });
+            return true;
+        }
+
+        if (message.header.view > self.view) {
+            log.debug("{}: on_{s}: ignoring (newer view)", .{ self.replica, command });
+            return true;
+        }
+
+        if (message.header.replica == self.replica) {
+            log.warn("{}: on_{s}: ignoring (self)", .{ self.replica, command });
+            return true;
         }
 
         return false;
