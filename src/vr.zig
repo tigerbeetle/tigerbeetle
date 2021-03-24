@@ -981,6 +981,10 @@ pub const Replica = struct {
     /// Unique do_view_change messages for the same view from ALL replicas (including ourself):
     do_view_change_from_all_replicas: []?*Message,
 
+    /// Whether the leader has received a quorum of do_view_change messages for the view change:
+    /// Determines whether the leader may effect repairs according to the CTRL protocol.
+    do_view_change_quorum: bool = false,
+
     /// The number of ticks without enough prepare_ok's before the leader resends a prepare:
     /// TODO Adjust this dynamically to match sliding window EWMA of recent network latencies.
     prepare_timeout: Timeout,
@@ -1480,10 +1484,17 @@ pub const Replica = struct {
         }
 
         if (self.status == .view_change and self.leader_index(self.view) != self.replica) {
-            log.debug("{}: on_repair: ignoring (follower and view change)", .{self.replica});
+            log.debug("{}: on_repair: ignoring (view change: follower)", .{self.replica});
             return;
         }
 
+        if (self.status == .view_change and !self.do_view_change_quorum) {
+            log.debug("{}: on_repair: ignoring (view change: waiting for quorum)", .{self.replica});
+            return;
+        }
+
+        assert(self.status == .normal or self.status == .view_change);
+        assert(self.repairs_allowed());
         assert(message.header.view <= self.view);
         assert(message.header.op <= self.op or message.header.view < self.view);
 
@@ -1527,6 +1538,8 @@ pub const Replica = struct {
 
         assert(count == self.f);
         log.debug("{}: on_start_view_change: quorum received", .{self.replica});
+
+        assert(!self.do_view_change_quorum);
 
         // TODO Resend after timeout:
         self.send_do_view_change();
@@ -1620,22 +1633,25 @@ pub const Replica = struct {
             }
         }
 
-        // Verify that our latest entry was not overwritten by a bug in `repair_header()` above:
+        // Start repairs according to the CTRL protocol:
         assert(self.op == latest.op);
         if (self.journal.entry_for_op_exact(self.op)) |entry| {
+            // Verify that our latest entry was not overwritten by a bug in `repair_header()` above:
             assert(entry.checksum == latest.checksum);
             assert(entry.view == latest.view);
             assert(entry.op == latest.op);
             assert(entry.offset == latest.offset);
+
+            assert(!self.do_view_change_quorum);
+            self.do_view_change_quorum = true;
+
+            self.repair_timeout.start();
+            self.repair();
         } else {
             unreachable;
         }
 
-        self.repair();
-
         if (true) return;
-
-        // TODO Repair according to CTRL protocol.
 
         // TODO Ensure self.commit_max == self.op
         // Next prepare needs this to hold: assert(message.header.op == self.commit_max + 1);
@@ -2127,9 +2143,42 @@ pub const Replica = struct {
             return true;
         }
 
+        // We should never view jump unless we know what our status should be after the jump:
+        // Otherwise we may be normal before the leader, or in a view change that has completed.
+        // Since we do not know the status of the other replica, we rather ignore and do not jump.
         if (message.header.view > self.view) {
             log.debug("{}: on_{s}: ignoring (newer view)", .{ self.replica, command });
             return true;
+        }
+
+        if (self.status == .view_change) {
+            switch (message.header.command) {
+                .request_headers, .request_prepares => {
+                    if (self.leader_index(self.view) != message.header.replica) {
+                        log.debug("{}: on_{s}: ignoring (view change, requested by follower)", .{
+                            self.replica,
+                            command,
+                        });
+                        return true;
+                    }
+                },
+                .headers => {
+                    if (self.leader_index(self.view) != self.replica) {
+                        log.debug("{}: on_{s}: ignoring (view change, received by follower)", .{
+                            self.replica,
+                            command,
+                        });
+                        return true;
+                    } else if (!self.do_view_change_quorum) {
+                        log.debug("{}: on_{s}: ignoring (view change, waiting for quorum)", .{
+                            self.replica,
+                            command,
+                        });
+                        return true;
+                    }
+                },
+                else => unreachable,
+            }
         }
 
         if (message.header.replica == self.replica) {
@@ -2148,8 +2197,7 @@ pub const Replica = struct {
             if (message.header.view == self.view and message.header.op <= self.op) return true;
         } else if (self.status == .view_change) {
             if (message.header.view < self.view) return true;
-            // The view has already started.
-            // TODO Think through scenarios of what could happen if we didn't make this distinction.
+            // The view has already started or is newer.
         }
 
         return false;
@@ -2281,7 +2329,8 @@ pub const Replica = struct {
     fn repair(self: *Replica) void {
         self.repair_timeout.reset();
 
-        if (self.status != .normal and self.status != .view_change) return;
+        assert(self.status == .normal or self.status == .view_change);
+        assert(self.repairs_allowed());
         assert(self.commit_min <= self.op);
         assert(self.commit_min <= self.commit_max);
 
@@ -2569,6 +2618,21 @@ pub const Replica = struct {
         self.repair_queue_len += 1;
     }
 
+    fn repairs_allowed(self: *Replica) bool {
+        switch (self.status) {
+            .view_change => {
+                if (self.do_view_change_quorum) {
+                    assert(self.leader_index(self.view) == self.replica);
+                    return true;
+                } else {
+                    return false;
+                }
+            },
+            .normal => return true,
+            else => return false,
+        }
+    }
+
     /// Replicates to the next replica in the configuration (until we get back to the leader):
     /// Replication starts and ends with the leader, we never forward back to the leader.
     /// Does not flood the network with prepares that have already committed.
@@ -2833,12 +2897,14 @@ pub const Replica = struct {
             self.commit_timeout.start();
             self.normal_timeout.stop();
             self.view_change_timeout.stop();
+            self.repair_timeout.start();
         } else {
             log.debug("{}: transition_to_normal_status: follower", .{self.replica});
 
             self.commit_timeout.stop();
             self.normal_timeout.start();
             self.view_change_timeout.stop();
+            self.repair_timeout.start();
         }
 
         // This is essential for correctness:
@@ -2849,6 +2915,8 @@ pub const Replica = struct {
         // We just don't want to tie them up until the next view change (when they must be reset):
         self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
         self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
+
+        self.do_view_change_quorum = false;
     }
 
     /// A replica i that notices the need for a view change advances its view, sets its status to
@@ -2865,6 +2933,7 @@ pub const Replica = struct {
         self.commit_timeout.stop();
         self.normal_timeout.stop();
         self.view_change_timeout.start();
+        self.repair_timeout.stop();
 
         self.reset_prepare();
 
@@ -2875,6 +2944,8 @@ pub const Replica = struct {
         // which would violate the quorum intersection property essential for correctness.
         self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
         self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
+
+        self.do_view_change_quorum = false;
 
         // Send only to other replicas (and not to ourself) to avoid a quorum off-by-one error:
         // This could happen if the replica mistakenly counts its own message in the quorum.
