@@ -1,8 +1,15 @@
 #!/bin/bash
 set -e
 
-# Determine the latest Linux master build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
-ZIG_URL=`wget --quiet -O - https://ziglang.org/download/index.json | grep zig-linux-x86 | grep builds | awk '{print $2}' | sed 's/[",]//g'`
+ZIG_RELEASE="0.7.1"
+
+if [ "$1" == "master" ]; then
+    ZIG_RELEASE="builds"
+    echo "Installing latest master build..."
+fi
+
+# Determine the 0.7.1 or latest Linux master build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
+ZIG_URL=`wget --quiet -O - https://ziglang.org/download/index.json | grep zig-linux-x86 | grep "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
 
 # Work out the filename from the URL, as well as the directory without the ".tar.xz" file extension:
 ZIG_TARBALL=`basename "$ZIG_URL"`
