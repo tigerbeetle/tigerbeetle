@@ -60,9 +60,9 @@ pub const MessageBus = struct {
         var message = self.create_message(@sizeOf(Header)) catch unreachable;
         message.header.* = header;
 
-        const data = message.buffer[@sizeOf(Header)..message.header.size];
-        // The order matters here because checksum depends on checksum_data:
-        message.header.set_checksum_data(data);
+        const body = message.buffer[@sizeOf(Header)..message.header.size];
+        // The order matters here because checksum depends on checksum_body:
+        message.header.set_checksum_body(body);
         message.header.set_checksum();
 
         assert(message.references == 0);

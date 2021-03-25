@@ -39,13 +39,13 @@ pub const Operation = packed enum(u8) {
 /// We reuse the same header for both so that prepare messages from the leader can simply be
 /// journalled as is by the followers without requiring any further modification.
 pub const Header = packed struct {
-    /// A checksum covering only the rest of this header (but including checksum_data):
-    /// This enables the header to be trusted without having to recv() or read() associated data.
+    /// A checksum covering only the rest of this header (but including checksum_body):
+    /// This enables the header to be trusted without having to recv() or read() associated body.
     /// This checksum is enough to uniquely identify a network message or journal entry.
     checksum: u128 = 0,
 
-    /// A checksum covering only associated data.
-    checksum_data: u128 = 0,
+    /// A checksum covering only associated body.
+    checksum_body: u128 = 0,
 
     /// The checksum of the message to which this message refers, or a unique recovery nonce:
     /// We use this nonce in various ways, for example:
@@ -78,7 +78,7 @@ pub const Header = packed struct {
     /// While we use fixed-size data structures, a batch will contain a variable amount of them.
     offset: u64 = 0,
 
-    /// The size of this message header and any associated data:
+    /// The size of this message header and any associated body:
     /// This must be 0 for an empty header with command == .reserved.
     size: u32 = @sizeOf(Header),
 
@@ -114,34 +114,34 @@ pub const Header = packed struct {
         return @bitCast(u128, target[0..checksum_size].*);
     }
 
-    pub fn calculate_checksum_data(self: *const Header, data: []const u8) u128 {
-        // Reserved headers should be completely zeroed with a checksum_data also of 0:
-        if (self.command == .reserved and self.size == 0 and data.len == 0) return 0;
-        if (self.size == @sizeOf(Header) and data.len == 0) return 0;
+    pub fn calculate_checksum_body(self: *const Header, body: []const u8) u128 {
+        // Reserved headers should be completely zeroed with a checksum_body also of 0:
+        if (self.command == .reserved and self.size == 0 and body.len == 0) return 0;
+        if (self.size == @sizeOf(Header) and body.len == 0) return 0;
 
-        assert(self.size == @sizeOf(Header) + data.len);
-        const checksum_size = @sizeOf(@TypeOf(self.checksum_data));
+        assert(self.size == @sizeOf(Header) + body.len);
+        const checksum_size = @sizeOf(@TypeOf(self.checksum_body));
         assert(checksum_size == 16);
         var target: [32]u8 = undefined;
-        std.crypto.hash.Blake3.hash(data[0..], target[0..], .{});
+        std.crypto.hash.Blake3.hash(body[0..], target[0..], .{});
         return @bitCast(u128, target[0..checksum_size].*);
     }
 
-    /// This must be called only after set_checksum_data() so that checksum_data is also covered:
+    /// This must be called only after set_checksum_body() so that checksum_body is also covered:
     pub fn set_checksum(self: *Header) void {
         self.checksum = self.calculate_checksum();
     }
 
-    pub fn set_checksum_data(self: *Header, data: []const u8) void {
-        self.checksum_data = self.calculate_checksum_data(data);
+    pub fn set_checksum_body(self: *Header, body: []const u8) void {
+        self.checksum_body = self.calculate_checksum_body(body);
     }
 
     pub fn valid_checksum(self: *const Header) bool {
         return self.checksum == self.calculate_checksum();
     }
 
-    pub fn valid_checksum_data(self: *const Header, data: []const u8) bool {
-        return self.checksum_data == self.calculate_checksum_data(data);
+    pub fn valid_checksum_body(self: *const Header, body: []const u8) bool {
+        return self.checksum_body == self.calculate_checksum_body(body);
     }
 
     /// Returns null if all fields are set correctly according to the command, or else a warning.
@@ -155,7 +155,7 @@ pub const Header = packed struct {
         switch (self.command) {
             .reserved => {
                 if (self.checksum != 0) return "checksum != 0";
-                if (self.checksum_data != 0) return "checksum_data != 0";
+                if (self.checksum_body != 0) return "checksum_body != 0";
                 if (self.nonce != 0) return "nonce != 0";
                 if (self.client != 0) return "client != 0";
                 if (self.cluster != 0) return "cluster != 0";
@@ -183,7 +183,7 @@ pub const Header = packed struct {
                 switch (self.operation) {
                     .reserved => return "operation == .reserved",
                     .init => {
-                        if (self.checksum_data != 0) return "init: checksum_data != 0";
+                        if (self.checksum_body != 0) return "init: checksum_body != 0";
                         if (self.nonce != 0) return "init: nonce != 0";
                         if (self.client != 0) return "init: client != 0";
                         if (self.cluster == 0) return "init: cluster == 0";
@@ -208,7 +208,7 @@ pub const Header = packed struct {
                 switch (self.operation) {
                     .reserved => return "operation == .reserved",
                     .init => {
-                        if (self.checksum_data != 0) return "init: checksum_data != 0";
+                        if (self.checksum_body != 0) return "init: checksum_body != 0";
                         if (self.nonce != 0) return "init: nonce != 0";
                         if (self.client != 0) return "init: client != 0";
                         if (self.cluster == 0) return "init: cluster == 0";
@@ -221,7 +221,7 @@ pub const Header = packed struct {
                         if (self.replica != 0) return "init: replica != 0";
                     },
                     else => {
-                        if (self.checksum_data != 0) return "checksum_data != 0";
+                        if (self.checksum_body != 0) return "checksum_body != 0";
                         if (self.client == 0) return "client == 0";
                         if (self.cluster == 0) return "cluster == 0";
                         if (self.op == 0) return "op == 0";
@@ -240,7 +240,7 @@ pub const Header = packed struct {
         std.mem.set(u8, std.mem.asBytes(self), 0);
 
         assert(self.checksum == 0);
-        assert(self.checksum_data == 0);
+        assert(self.checksum_body == 0);
         assert(self.size == 0);
         assert(self.command == .reserved);
         assert(self.operation == .reserved);
@@ -412,13 +412,13 @@ pub const Journal = struct {
         const existing = &self.headers[header.op];
         if (existing.command == .reserved) {
             assert(existing.checksum == 0);
-            assert(existing.checksum_data == 0);
+            assert(existing.checksum_body == 0);
             assert(existing.offset == 0);
             assert(existing.size == 0);
             return false;
         } else {
             if (existing.checksum == header.checksum) {
-                assert(existing.checksum_data == header.checksum_data);
+                assert(existing.checksum_body == header.checksum_body);
                 assert(existing.op == header.op);
                 return true;
             } else {
@@ -1002,7 +1002,7 @@ pub const Replica = struct {
     /// This transitions from .view_change status to .view_change status but for a higher view.
     view_change_timeout: Timeout,
 
-    /// The number of ticks before repairing missing/disconnected headers and/or dirty data:
+    /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
     repair_timeout: Timeout,
 
     // TODO Limit integer types for `f` and `replica` to match their upper bounds in practice.
@@ -1035,7 +1035,7 @@ pub const Replica = struct {
 
         // TODO Only initialize the journal when initializing the cluster:
         var init_prepare = Header{
-            .checksum_data = 0,
+            .checksum_body = 0,
             .nonce = 0,
             .client = 0,
             .cluster = cluster,
@@ -1237,8 +1237,8 @@ pub const Replica = struct {
         // current view-number, m is the message it received from the client, n is the op-number it
         // assigned to the request, and k is the commit-number.
 
-        var data = message.buffer[@sizeOf(Header)..message.header.size];
-        // TODO Assign timestamps to structs in associated data.
+        var body = message.buffer[@sizeOf(Header)..message.header.size];
+        // TODO Assign timestamps to structs in associated body.
 
         var latest_entry = self.journal.entry_for_op_exact(self.op).?;
 
@@ -1250,7 +1250,7 @@ pub const Replica = struct {
         message.header.replica = self.replica;
         message.header.command = .prepare;
 
-        message.header.set_checksum_data(data);
+        message.header.set_checksum_body(body);
         message.header.set_checksum();
 
         assert(message.header.checksum != self.request_checksum.?);
@@ -1598,7 +1598,7 @@ pub const Replica = struct {
                 assert(m.header.view == self.view);
 
                 if (m.header.commit > k) k = m.header.commit;
-                self.set_latest_header(self.message_data_as_headers(m), &latest);
+                self.set_latest_header(self.message_body_as_headers(m), &latest);
             }
         }
 
@@ -1627,7 +1627,7 @@ pub const Replica = struct {
         // Now that we have the latest op in place, repair any other headers from these messages:
         for (self.do_view_change_from_all_replicas) |received| {
             if (received) |m| {
-                for (self.message_data_as_headers(m)) |*h| {
+                for (self.message_body_as_headers(m)) |*h| {
                     _ = self.repair_header(h);
                 }
             }
@@ -1688,7 +1688,7 @@ pub const Replica = struct {
         // TODO Call jump to view if necessary.
 
         var latest: Header = std.mem.zeroInit(Header, .{});
-        self.set_latest_header(self.message_data_as_headers(message), &latest);
+        self.set_latest_header(self.message_body_as_headers(message), &latest);
 
         assert(latest.command == .prepare);
         assert(latest.op == message.header.op);
@@ -1699,7 +1699,7 @@ pub const Replica = struct {
         self.journal.set_entry_as_dirty(&latest);
 
         // Now that we have the latest op in place, repair any other headers:
-        for (self.message_data_as_headers(message)) |*h| {
+        for (self.message_body_as_headers(message)) |*h| {
             _ = self.repair_header(h);
         }
 
@@ -1745,9 +1745,9 @@ pub const Replica = struct {
         );
 
         response.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
-        const data = response.buffer[@sizeOf(Header)..response.header.size];
+        const body = response.buffer[@sizeOf(Header)..response.header.size];
 
-        response.header.set_checksum_data(data);
+        response.header.set_checksum_body(body);
         response.header.set_checksum();
 
         assert(response.references == 0);
@@ -1913,7 +1913,7 @@ pub const Replica = struct {
             assert(m.header.view == message.header.view);
             assert(m.header.op == message.header.op);
             assert(m.header.commit == message.header.commit);
-            assert(m.header.checksum_data == message.header.checksum_data);
+            assert(m.header.checksum_body == message.header.checksum_body);
             assert(m.header.checksum == message.header.checksum);
             log.debug("{}: on_{s}: ignoring (duplicate message)", .{
                 self.replica,
@@ -2237,9 +2237,9 @@ pub const Replica = struct {
         assert(self.follower());
     }
 
-    fn message_data_as_headers(self: *Replica, message: *const Message) []Header {
+    fn message_body_as_headers(self: *Replica, message: *const Message) []Header {
         // TODO Assert message commands that we expect this to be called for.
-        assert(message.header.size > @sizeOf(Header)); // Data must contain at least one header.
+        assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
         return std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..message.header.size]);
     }
 
@@ -2803,9 +2803,9 @@ pub const Replica = struct {
         const count = self.journal.copy_latest_headers_between(0, self.op, dest);
 
         message.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
-        const data = message.buffer[@sizeOf(Header)..message.header.size];
+        const body = message.buffer[@sizeOf(Header)..message.header.size];
 
-        message.header.set_checksum_data(data);
+        message.header.set_checksum_body(body);
         message.header.set_checksum();
 
         const new_leader = self.leader_index(self.view);
@@ -3091,7 +3091,7 @@ pub fn run() !void {
                     .command = .request,
                     .operation = .noop,
                 };
-                request.header.set_checksum_data(request.buffer[0..0]);
+                request.header.set_checksum_body(request.buffer[0..0]);
                 request.header.set_checksum();
 
                 message_bus.send_message_to_replica(replica.replica, request);
