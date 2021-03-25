@@ -167,6 +167,7 @@ pub const MessageBus = struct {
     }
 
     fn on_accept(self: *MessageBus, completion: *IO.Completion, result: IO.AcceptError!os.socket_t) void {
+        assert(self.accept_in_progress);
         self.accept_in_progress = false;
         const fd = result catch |err| {
 
@@ -195,6 +196,7 @@ pub const MessageBus = struct {
     }
 
     fn on_close(self: *MessageBus, completion: *IO.Completion, result: IO.CloseError!void) void {
+        assert(self.accept_in_progress);
         self.accept_in_progress = false;
         result catch |err| log.err("error closing accepted socket: {}", .{err});
     }
@@ -373,6 +375,7 @@ const Connection = struct {
     /// Attempt to connect to a replica. Failure is silent and returns the
     /// connection to an unused state.
     pub fn connect_to_replica(self: *Connection, replica: u16) void {
+        assert(replica != self.message_bus.server.replica);
         assert(self.peer == .none);
         assert(self.fd == -1);
 
@@ -400,6 +403,7 @@ const Connection = struct {
     }
 
     fn on_connect(self: *Connection, completion: *IO.Completion, result: IO.ConnectError!void) void {
+        assert(self.recv_in_progress);
         self.recv_in_progress = false;
         result catch |err| {
             log.err("error connecting to {}: {}", .{ self.peer, err });
@@ -474,22 +478,23 @@ const Connection = struct {
         comptime callback: fn (*Connection, *IO.Completion, IO.RecvError!usize) void,
         buffer: []u8,
     ) void {
-        if (self.peer == .shutting_down) return;
+        assert(self.peer != .shutting_down);
         assert(self.fd != -1);
         assert(!self.recv_in_progress);
         self.recv_in_progress = true;
         self.message_bus.io.recv(
             *Connection,
             self,
-            on_recv_body,
+            callback,
             &self.recv_completion,
             self.fd,
-            self.incoming_message.buffer[self.recv_progress..][0..self.incoming_header.size],
+            buffer,
             os.MSG_NOSIGNAL,
         );
     }
 
     fn on_recv_header(self: *Connection, completion: *IO.Completion, result: IO.RecvError!usize) void {
+        assert(self.recv_in_progress);
         self.recv_in_progress = false;
         if (self.peer == .shutting_down) {
             self.maybe_close();
@@ -532,6 +537,7 @@ const Connection = struct {
     }
 
     fn on_recv_body(self: *Connection, completion: *IO.Completion, result: IO.RecvError!usize) void {
+        assert(self.recv_in_progress);
         self.recv_in_progress = false;
         if (self.peer == .shutting_down) {
             self.maybe_close();
@@ -569,9 +575,9 @@ const Connection = struct {
     }
 
     fn send(self: *Connection) void {
-        if (self.peer == .shutting_down) return;
-        const envelope = self.send_queue.out orelse return;
+        assert(self.peer != .shutting_down);
         assert(self.fd != -1);
+        const envelope = self.send_queue.out orelse return;
         assert(!self.send_in_progress);
         self.send_in_progress = true;
         self.message_bus.io.send(
@@ -586,6 +592,7 @@ const Connection = struct {
     }
 
     fn on_send(self: *Connection, completion: *IO.Completion, result: IO.SendError!usize) void {
+        assert(self.send_in_progress);
         self.send_in_progress = false;
         if (self.peer == .shutting_down) {
             self.maybe_close();
@@ -645,7 +652,6 @@ const Connection = struct {
 };
 
 test "" {
-    std.testing.refAllDecls(@This());
     std.testing.refAllDecls(MessageBus);
     std.testing.refAllDecls(Connection);
 }
