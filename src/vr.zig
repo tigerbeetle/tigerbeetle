@@ -1514,6 +1514,7 @@ pub const Replica = struct {
 
         if (self.repair_header(message.header)) {
             assert(self.journal.has_dirty(message.header));
+            assert(message.header.op <= self.op); // Repairs may never advance `self.op`.
 
             if (self.repairing) return self.repair_later(message);
 
@@ -2121,6 +2122,20 @@ pub const Replica = struct {
         }
     }
 
+    fn discard_repair_queue(self: *Replica) void {
+        while (self.repair_queue) |message| {
+            log.notice("{}: discard_repair_queue: op={}", .{ self.replica, message.header.op });
+            assert(self.repair_queue_len > 0);
+            self.repair_queue = message.next;
+            self.repair_queue_len -= 1;
+
+            message.references -= 1;
+            message.next = null;
+            self.message_bus.gc(message);
+        }
+        assert(self.repair_queue_len == 0);
+    }
+
     fn ignore_view_change_message(self: *Replica, message: *const Message) bool {
         assert(message.header.command == .start_view_change or
             message.header.command == .do_view_change or
@@ -2338,7 +2353,9 @@ pub const Replica = struct {
     fn remove_uncommitted_ops(self: *Replica) void {
         assert(self.status == .normal or self.status == .view_change);
 
-        // TODO Almost critical: Rewind any ops in the repair queue.
+        // We rather discard any repairs than bring any hidden baggage into a view change:
+        // This is just defense-in-depth in case `on_repair()` ever mistakenly advances `self.op`.
+        self.discard_repair_queue();
 
         if (self.op > self.commit_max) {
             // We can't simply set `self.op` back to `commit_max` because we may not have that op.
@@ -2464,8 +2481,11 @@ pub const Replica = struct {
             // fully connected, to ensure that all the ops in this range are correct.
             //
             // * Ensure that `self.commit_max` is never advanced for a newer view without first
-            // calling `jump_to_newer_view_in_normal_status()` to rewind uncommitted ops, otherwise
+            // calling `jump_to_newer_view_in_normal_status()` to remove uncommitted ops, otherwise
             // `self.commit_max` may refer to different ops.
+            //
+            // * Ensure that all view change message handlers call `remove_committed_ops()` when
+            // view jumping.
             //
             // * Ensure that `self.op` is never advanced except in the current view, and never by a
             // repair since repairs may occur in a view change where `self.view` has not started.
@@ -2616,6 +2636,7 @@ pub const Replica = struct {
 
     fn repair_last_queued_message_if_any(self: *Replica) void {
         if (self.status != .normal and self.status != .view_change) return;
+        if (!self.repairs_allowed()) return;
 
         while (!self.repairing) {
             if (self.repair_queue) |message| {
@@ -2636,6 +2657,7 @@ pub const Replica = struct {
     }
 
     fn repair_later(self: *Replica, message: *Message) void {
+        assert(self.repairs_allowed());
         assert(self.appending or self.repairing);
         assert(message.references > 0);
         assert(message.header.command == .prepare);
