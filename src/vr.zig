@@ -524,6 +524,10 @@ pub const Journal = struct {
                         range = .{ .op_min = a.op, .op_max = a.op };
                     } else if (a.view > b.view) {
                         // A is not connected to B, but A is newer than B, open and close range:
+                        // TODO Add unit test especially for this.
+                        // This is important if we see `self.op < self.commit_max` then request
+                        // prepares and then later receive a newer view to the left of `self.op`.
+                        // We must then repair `self.op` which was reordered through a view change.
                         range = .{ .op_min = b.op, .op_max = b.op };
                         break;
                     } else {
