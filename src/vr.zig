@@ -1530,7 +1530,9 @@ pub const Replica = struct {
         assert(message.header.replica != self.replica);
 
         if (message.header.view > self.view) {
-            log.debug("{}: on_start_view_change: changing to newer view", .{self.replica});
+            log.debug("{}: on_start_view_change: jumping to newer view change", .{self.replica});
+            self.remove_uncommitted_ops();
+            assert(self.op >= self.commit_min and self.op <= self.commit_max);
             self.transition_to_view_change_status(message.header.view);
         }
 
@@ -1561,14 +1563,15 @@ pub const Replica = struct {
         assert(self.leader_index(message.header.view) == self.replica);
 
         if (message.header.view > self.view) {
-            log.debug("{}: on_do_view_change: changing to newer view", .{self.replica});
+            log.debug("{}: on_do_view_change: jumping to newer view change", .{self.replica});
+            self.remove_uncommitted_ops();
+            assert(self.op >= self.commit_min and self.op <= self.commit_max);
+            // Always send start_view_change messages here:
             // At first glance, it might seem that sending start_view_change messages out now after
             // receiving a do_view_change here would be superfluous. However, this is essential,
             // especially in the presence of asymmetric network faults. At this point, we may not
             // yet have received a do_view_change quorum, and another replica might need our
             // start_view_change message in order to get its do_view_change message through to us.
-            // We therefore do not special case the start_view_change function, and we always send
-            // start_view_change messages, regardless of the message that initiated the view change:
             self.transition_to_view_change_status(message.header.view);
         }
 
@@ -1692,8 +1695,18 @@ pub const Replica = struct {
         assert(message.header.replica != self.replica);
         assert(message.header.replica == self.leader_index(message.header.view));
 
+        if (message.header.view > self.view) {
+            log.debug("{}: on_start_view: jumping to newer view change", .{self.replica});
+            self.remove_uncommitted_ops();
+            assert(self.op >= self.commit_min and self.op <= self.commit_max);
+            self.status = .view_change;
+            self.view = message.header.view;
+        }
+
+        assert(self.status == .view_change);
+        assert(message.header.view == self.view);
+
         // TODO Assert that start_view message matches what we expect if our journal is empty.
-        // TODO Call jump to view if necessary.
 
         var latest: Header = std.mem.zeroInit(Header, .{});
         self.set_latest_header(self.message_body_as_headers(message), &latest);
@@ -1701,6 +1714,8 @@ pub const Replica = struct {
         assert(latest.command == .prepare);
         assert(latest.op == message.header.op);
         assert(latest.commit <= message.header.commit);
+
+        // TODO Remove any ops after latest.op.
 
         self.op = message.header.op;
         self.commit_max = message.header.commit;
@@ -2333,8 +2348,8 @@ pub const Replica = struct {
             while (op > self.commit_min) : (op -= 1) {
                 if (self.journal.entry_for_op_exact(op) != null) break;
             }
-            assert(op <= self.commit_max);
             assert(op >= self.commit_min);
+            assert(op <= self.commit_max);
 
             log.notice("{}: remove_uncommitted_ops: setting op={}..{} (latest committed)", .{
                 self.replica,
