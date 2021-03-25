@@ -558,6 +558,7 @@ const Connection = struct {
             return;
         }
         assert(self.recv_progress == self.incoming_header.size);
+        defer self.message_bus.unref(self.incoming_message);
 
         const body = self.incoming_message.buffer[@sizeOf(Header)..self.incoming_header.size];
         if (self.incoming_header.valid_checksum_data(body)) {
@@ -565,9 +566,8 @@ const Connection = struct {
         } else {
             log.err("invalid checksum on body received from {}", .{self.peer});
             self.shutdown();
+            return;
         }
-
-        self.message_bus.unref(self.incoming_message);
 
         // Reset state and try to receive the next message.
         self.incoming_header = undefined;
@@ -625,6 +625,11 @@ const Connection = struct {
         if (self.recv_submitted or self.send_submitted) return;
         self.send_submitted = true;
         self.recv_submitted = true;
+        // We can free resources now that there is no longer any I/O in progress.
+        while (self.send_queue.pop()) |envelope| {
+            self.message_bus.unref(envelope.message);
+            self.message_bus.allocator.destroy(envelope);
+        }
         assert(self.fd != -1);
         defer self.fd = -1;
         // It's OK to use the send completion here as we know that no send
@@ -637,10 +642,7 @@ const Connection = struct {
 
         // Reset the connection to its initial state.
         defer {
-            while (self.send_queue.pop()) |envelope| {
-                self.message_bus.unref(envelope.message);
-                self.message_bus.allocator.destroy(envelope);
-            }
+            assert(self.send_queue.out == null);
             self.* = .{ .message_bus = self.message_bus };
             self.message_bus.connections_in_use -= 1;
         }
