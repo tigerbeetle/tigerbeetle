@@ -122,6 +122,7 @@ pub const MessageBus = struct {
         // on the next tick().
         for (self.connections) |*connection| {
             if (connection.peer == .none) {
+                // This function immediately adds the connection to MessageBus.replicas.
                 connection.connect_to_replica(replica);
                 return;
             }
@@ -145,14 +146,14 @@ pub const MessageBus = struct {
             }
         }
 
-        // There's a very slim but non zero chance that this code will be ever reached.
+        // There's a very slim but non zero chance that this code will be ever be reached.
         log.warn("failed to disconnect any peer as all peers are replicas " ++
             "or are already being disconnected.", .{});
     }
 
     fn maybe_accept(self: *MessageBus) void {
         if (self.accept_in_progress) return;
-        // All conenctions are currently in use, do nothing.
+        // All connections are currently in use, do nothing.
         if (self.connections_in_use == self.connections.len) return;
         assert(self.connections_in_use < self.connections.len);
         self.accept_in_progress = true;
@@ -221,7 +222,7 @@ pub const MessageBus = struct {
     pub fn unref(self: *MessageBus, message: *Message) void {
         message.references -= 1;
         if (message.references == 0) {
-            log.debug("message_bus: freeing {}", .{message.header});
+            log.debug("freeing {}", .{message.header});
             self.allocator.free(message.buffer);
             self.allocator.destroy(message);
             self.allocated -= 1;
@@ -254,6 +255,9 @@ pub const MessageBus = struct {
             self.server_send_queue.push(envelope);
         } else if (self.replicas[replica]) |connection| {
             connection.send_message(envelope);
+        } else {
+            log.debug("no active connection to replica {}, " ++
+                "dropping message with header {}", .{ replica, message.header });
         }
     }
 
@@ -323,9 +327,7 @@ pub const MessageBus = struct {
     }
 };
 
-/// Connection used to recive data from clients and replicas as well as
-/// send data to clients. This connection is not re-created if it drops,
-/// The other replica or client is responsible for re-connecting.
+/// Used to send/receive messages to/from a client or fellow replica.
 const Connection = struct {
     message_bus: *MessageBus,
 
@@ -334,7 +336,7 @@ const Connection = struct {
     peer: union(enum) {
         /// No peer is currently connected.
         none: void,
-        /// A connection has been established but the first header has not yet been recieved.
+        /// A connection has been established but the first header has not yet been received.
         unknown: void,
         /// The peer is a client with the given id.
         client: u128,
@@ -347,7 +349,7 @@ const Connection = struct {
     /// It will be reset to -1 during the shutdown process and is always -1 if the
     /// connection is unused (i.e. peer == .none). We use -1 instead of undefined here
     /// for safety to ensure an error if the invalid value is ever used, instead of
-    /// potentially preforming an action on an active fd.
+    /// potentially performing an action on an active fd.
     fd: os.socket_t = -1,
 
     /// This completion is used for all recv operations.
@@ -355,8 +357,8 @@ const Connection = struct {
     recv_completion: IO.Completion = undefined,
     /// True exactly when the recv_completion has been submitted to the IO abstraction
     /// but the callback has not yet been run.
-    recv_in_progress: bool = false,
-    /// Number of bytes of the current header/message that have already been recieved.
+    recv_submitted: bool = false,
+    /// Number of bytes of the current header/message that have already been received.
     recv_progress: usize = 0,
     incoming_header: Header = undefined,
     incoming_message: *Message = undefined,
@@ -365,15 +367,15 @@ const Connection = struct {
     send_completion: IO.Completion = undefined,
     /// True exactly when the send_completion has been submitted to the IO abstraction
     /// but the callback has not yet been run.
-    send_in_progress: bool = false,
+    send_submitted: bool = false,
     /// Number of bytes of the current message that have already been sent.
     send_progress: usize = 0,
-    /// The queue of messages to send to the client.
-    /// Empty unless peer == .client
+    /// The queue of messages to send to the client or replica peer.
     send_queue: FIFO(Envelope) = .{},
 
-    /// Attempt to connect to a replica. Failure is silent and returns the
-    /// connection to an unused state.
+    /// Attempt to connect to a replica.
+    /// The slot in the Message.replicas slices is immediately reserved.
+    /// Failure is silent and returns the connection to an unused state.
     pub fn connect_to_replica(self: *Connection, replica: u16) void {
         assert(replica != self.message_bus.server.replica);
         assert(self.peer == .none);
@@ -387,7 +389,7 @@ const Connection = struct {
         bus.replicas[replica] = self;
         bus.replicas_connected += 1;
 
-        self.recv_in_progress = true;
+        self.recv_submitted = true;
         bus.io.connect(
             *Connection,
             self,
@@ -403,14 +405,14 @@ const Connection = struct {
     }
 
     fn on_connect(self: *Connection, completion: *IO.Completion, result: IO.ConnectError!void) void {
-        assert(self.recv_in_progress);
-        self.recv_in_progress = false;
+        assert(self.recv_submitted);
+        self.recv_submitted = false;
         result catch |err| {
             log.err("error connecting to {}: {}", .{ self.peer, err });
             self.shutdown();
             return;
         };
-        log.debug("connected to {}", .{self.peer});
+        log.info("connected to {}", .{self.peer});
         self.recv_header();
     }
 
@@ -480,8 +482,8 @@ const Connection = struct {
     ) void {
         assert(self.peer != .shutting_down);
         assert(self.fd != -1);
-        assert(!self.recv_in_progress);
-        self.recv_in_progress = true;
+        assert(!self.recv_submitted);
+        self.recv_submitted = true;
         self.message_bus.io.recv(
             *Connection,
             self,
@@ -494,8 +496,8 @@ const Connection = struct {
     }
 
     fn on_recv_header(self: *Connection, completion: *IO.Completion, result: IO.RecvError!usize) void {
-        assert(self.recv_in_progress);
-        self.recv_in_progress = false;
+        assert(self.recv_submitted);
+        self.recv_submitted = false;
         if (self.peer == .shutting_down) {
             self.maybe_close();
             return;
@@ -537,8 +539,8 @@ const Connection = struct {
     }
 
     fn on_recv_body(self: *Connection, completion: *IO.Completion, result: IO.RecvError!usize) void {
-        assert(self.recv_in_progress);
-        self.recv_in_progress = false;
+        assert(self.recv_submitted);
+        self.recv_submitted = false;
         if (self.peer == .shutting_down) {
             self.maybe_close();
             return;
@@ -578,8 +580,8 @@ const Connection = struct {
         assert(self.peer != .shutting_down);
         assert(self.fd != -1);
         const envelope = self.send_queue.out orelse return;
-        assert(!self.send_in_progress);
-        self.send_in_progress = true;
+        assert(!self.send_submitted);
+        self.send_submitted = true;
         self.message_bus.io.send(
             *Connection,
             self,
@@ -592,8 +594,8 @@ const Connection = struct {
     }
 
     fn on_send(self: *Connection, completion: *IO.Completion, result: IO.SendError!usize) void {
-        assert(self.send_in_progress);
-        self.send_in_progress = false;
+        assert(self.send_submitted);
+        self.send_submitted = false;
         if (self.peer == .shutting_down) {
             self.maybe_close();
             return;
@@ -618,11 +620,11 @@ const Connection = struct {
     fn maybe_close(self: *Connection) void {
         assert(self.peer == .shutting_down);
         // If a recv or send operation is currently submitted to the kernel,
-        // submiting a close would cause a race. Therefore we must wait  for
+        // submiting a close would cause a race. Therefore we must wait for
         // any currently submitted operation to complete.
-        if (self.recv_in_progress or self.send_in_progress) return;
-        self.send_in_progress = true;
-        self.recv_in_progress = true;
+        if (self.recv_submitted or self.send_submitted) return;
+        self.send_submitted = true;
+        self.recv_submitted = true;
         assert(self.fd != -1);
         defer self.fd = -1;
         // It's OK to use the send completion here as we know that no send
