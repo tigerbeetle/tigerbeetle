@@ -1005,6 +1005,10 @@ pub const Replica = struct {
     /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
     repair_timeout: Timeout,
 
+    /// Used to provide deterministic entropy to `choose_any_other_replica()`.
+    /// Incremented whenever `choose_any_other_replica()` is called.
+    choose_any_other_replica_ticks: usize = 0,
+
     // TODO Limit integer types for `f` and `replica` to match their upper bounds in practice.
     pub fn init(
         allocator: *Allocator,
@@ -2018,6 +2022,25 @@ pub const Replica = struct {
         }
     }
 
+    /// Choose a different replica each time if possible (excluding ourself).
+    /// The choice of replica is a deterministic function of:
+    /// 1. `choose_any_other_replica_ticks`, and
+    /// 2. whether the replica is connected and ready for sending in the MessageBus.
+    fn choose_any_other_replica(self: *Replica) ?u16 {
+        var count: usize = 0;
+        while (count < self.configuration.len) : (count += 1) {
+            self.choose_any_other_replica_ticks += 1;
+            const replica = @mod(
+                self.replica + self.choose_any_other_replica_ticks,
+                self.configuration.len,
+            );
+            if (replica == self.replica) continue;
+            // TODO if (!MessageBus.can_send_to_replica(replica)) continue;
+            return @intCast(u16, replica);
+        }
+        return null;
+    }
+
     fn commit_ops_through(self: *Replica, commit: u64) void {
         assert(self.commit_min <= self.commit_max);
         assert(self.commit_min <= self.op);
@@ -2349,16 +2372,18 @@ pub const Replica = struct {
                 self.op,
                 self.commit_max,
             });
-            // We need to advance our op number and therefore have to request_prepares,
-            // since only on_prepare() can do this and not repair_header() within on_headers().
-            self.send_header_to_other_replicas(.{
-                .command = .request_prepares,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .view = self.view,
-                .commit = self.op + 1,
-                .op = self.commit_max,
-            });
+            if (self.choose_any_other_replica()) |replica| {
+                // We need to advance our op number and therefore have to request_prepares,
+                // since only on_prepare() can do this and not repair_header() within on_headers().
+                self.send_header_to_replica(replica, .{
+                    .command = .request_prepares,
+                    .cluster = self.cluster,
+                    .replica = self.replica,
+                    .view = self.view,
+                    .commit = self.op + 1,
+                    .op = self.commit_max,
+                });
+            }
             return;
         }
 
