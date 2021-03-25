@@ -588,7 +588,7 @@ const Connection = struct {
             on_send,
             &self.send_completion,
             self.fd,
-            envelope.message.buffer[self.send_progress..],
+            envelope.message.buffer[self.send_progress..][0..envelope.message.header.size],
             os.MSG_NOSIGNAL,
         );
     }
