@@ -399,10 +399,7 @@ const Connection = struct {
             // We need to use the recv_completion here
             &self.recv_completion,
             self.fd,
-            // TODO: is this actually safe to pass by value?
-            // Should IO just take an std.net.Address or a pointer?
-            bus.configuration[replica].any,
-            bus.configuration[replica].getOsSockLen(),
+            bus.configuration[replica],
         );
     }
 
