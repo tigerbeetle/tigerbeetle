@@ -212,6 +212,12 @@ pub const MessageBus = struct {
         }
     }
 
+    /// Returns true if the target replica is connected and has space in its send queue.
+    pub fn can_send_to_replica(self: *MessageBus, replica: u16) bool {
+        const connection = self.replicas[replica] orelse return false;
+        return connection.state == .connected and !connection.send_queue.is_full();
+    }
+
     pub fn send_header_to_replica(self: *MessageBus, replica: u16, header: Header) void {
         assert(header.size == @sizeOf(Header));
 
