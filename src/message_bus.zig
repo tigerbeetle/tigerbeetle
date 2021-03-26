@@ -553,6 +553,13 @@ const Connection = struct {
         switch (self.peer) {
             .none => unreachable,
             .unknown => {
+                // Ensure that the message is addressed to the correct cluster.
+                if (self.incoming_header.cluster != self.message_bus.server.cluster) {
+                    log.err("received message addressed to wrong cluster: {}", .{self.incoming_header.cluster});
+                    self.shutdown();
+                    return;
+                }
+                // The only command sent by clients is the request command.
                 if (self.incoming_header.command == .request) {
                     self.peer = .{ .client = self.incoming_header.client };
                 } else {
@@ -571,6 +578,7 @@ const Connection = struct {
             .client => assert(self.incoming_header.command == .request),
             .replica => assert(self.incoming_header.command != .request),
         }
+        assert(self.incoming_header.cluster == self.message_bus.server.cluster);
 
         self.incoming_message = self.message_bus.create_message(self.incoming_header.size) catch unreachable;
         self.incoming_message.header.* = self.incoming_header;
