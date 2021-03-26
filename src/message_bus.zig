@@ -7,24 +7,20 @@ const vr = @import("vr.zig");
 const ConfigurationAddress = vr.ConfigurationAddress;
 const Header = vr.Header;
 const Replica = vr.Replica;
-const FIFO = @import("fifo.zig").FIFO;
+const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io_callbacks.zig").IO;
 
 const log = std.log.scoped(.message_bus);
 
 const tcp_backlog = 64;
 const num_connections = 32;
+const queue_size = 3;
 
 pub const Message = struct {
     header: *Header,
     buffer: []u8 align(vr.sector_size),
     references: usize = 1,
     next: ?*Message = null,
-};
-
-const Envelope = struct {
-    message: *Message,
-    next: ?*Envelope = null,
 };
 
 // TODO: use a hashmap to make client lookups faster
@@ -39,7 +35,7 @@ pub const MessageBus = struct {
     server: *Replica,
     server_fd: os.socket_t,
     /// Used to store messages sent by the server to itself for delivery in flush().
-    server_send_queue: FIFO(Envelope) = .{},
+    server_send_queue: RingBuffer(*Message, queue_size) = .{},
 
     accept_completion: IO.Completion = undefined,
     /// The connection reserved for the currently in progress accept operation.
@@ -233,15 +229,16 @@ pub const MessageBus = struct {
     }
 
     pub fn send_message_to_replica(self: *MessageBus, replica: u16, message: *Message) void {
-        // TODO Pre-allocate envelopes at startup.
-        const envelope = self.allocator.create(Envelope) catch unreachable;
-        envelope.* = .{ .message = self.ref(message) };
-
         // Messages sent by the server to itself are delivered directly in flush()
         if (replica == self.server.replica) {
-            self.server_send_queue.push(envelope);
+            self.server_send_queue.push(self.ref(message)) catch |err| switch (err) {
+                error.NoSpaceLeft => {
+                    self.unref(message);
+                    log.notice("message queue for server full, dropping message", .{});
+                },
+            };
         } else if (self.replicas[replica]) |connection| {
-            connection.send_message(envelope);
+            connection.send_message(message);
         } else {
             log.debug("no active connection to replica {}, " ++
                 "dropping message with header {}", .{ replica, message.header });
@@ -270,10 +267,7 @@ pub const MessageBus = struct {
         for (self.connections) |*connection| {
             switch (connection.peer) {
                 .client => |id| if (id == client_id) {
-                    // TODO Pre-allocate envelopes at startup.
-                    const envelope = self.allocator.create(Envelope) catch unreachable;
-                    envelope.* = .{ .message = self.ref(message) };
-                    connection.send_message(envelope);
+                    connection.send_message(message);
                     return;
                 },
                 else => {},
@@ -286,10 +280,9 @@ pub const MessageBus = struct {
         // Iterate on a copy to avoid a potential infinite loop.
         var copy = self.server_send_queue;
         self.server_send_queue = .{};
-        while (copy.pop()) |envelope| {
-            self.server.on_message(envelope.message);
-            self.unref(envelope.message);
-            self.allocator.destroy(envelope);
+        while (copy.pop()) |message| {
+            self.server.on_message(message);
+            self.unref(message);
         }
     }
 
@@ -370,7 +363,7 @@ const Connection = struct {
     /// Number of bytes of the current message that have already been sent.
     send_progress: usize = 0,
     /// The queue of messages to send to the client or replica peer.
-    send_queue: FIFO(Envelope) = .{},
+    send_queue: RingBuffer(*Message, queue_size) = .{},
 
     /// Attempt to connect to a replica.
     /// The slot in the Message.replicas slices is immediately reserved.
@@ -432,11 +425,17 @@ const Connection = struct {
 
     /// Add a message to the connection's send queue, starting a send operation
     /// if the queue was previously empty.
-    pub fn send_message(self: *Connection, envelope: *Envelope) void {
+    pub fn send_message(self: *Connection, message: *Message) void {
         assert(self.peer == .client or self.peer == .replica);
         if (self.state == .shutting_down) return;
-        const queue_was_empty = self.send_queue.out == null;
-        self.send_queue.push(envelope);
+        const queue_was_empty = self.send_queue.is_empty();
+        self.send_queue.push(self.message_bus.ref(message)) catch |err| switch (err) {
+            error.NoSpaceLeft => {
+                self.message_bus.unref(message);
+                log.notice("message queue for peer {} full, dropping message", .{self.peer});
+                return;
+            },
+        };
         // If the queue was not empty, the message will be sent after the
         // messages currently being sent.
         if (queue_was_empty) self.send();
@@ -642,7 +641,7 @@ const Connection = struct {
         assert(self.peer == .client or self.peer == .replica);
         assert(self.state == .connected);
         assert(self.fd != -1);
-        const envelope = self.send_queue.out orelse return;
+        const message = self.send_queue.peek() orelse return;
         assert(!self.send_submitted);
         self.send_submitted = true;
         self.message_bus.io.send(
@@ -651,7 +650,7 @@ const Connection = struct {
             on_send,
             &self.send_completion,
             self.fd,
-            envelope.message.buffer[self.send_progress..][0..envelope.message.header.size],
+            message.buffer[self.send_progress..][0..message.header.size],
             os.MSG_NOSIGNAL,
         );
     }
@@ -670,13 +669,12 @@ const Connection = struct {
             self.shutdown();
             return;
         };
-        assert(self.send_progress <= self.send_queue.out.?.message.buffer.len);
+        assert(self.send_progress <= self.send_queue.peek().?.buffer.len);
         // If the message has been fully sent, move on to the next one.
-        if (self.send_progress == self.send_queue.out.?.message.buffer.len) {
+        if (self.send_progress == self.send_queue.peek().?.buffer.len) {
             self.send_progress = 0;
-            const envelope = self.send_queue.pop().?;
-            self.message_bus.unref(envelope.message);
-            self.message_bus.allocator.destroy(envelope);
+            const message = self.send_queue.pop().?;
+            self.message_bus.unref(message);
         }
         self.send();
     }
@@ -691,9 +689,8 @@ const Connection = struct {
         self.send_submitted = true;
         self.recv_submitted = true;
         // We can free resources now that there is no longer any I/O in progress.
-        while (self.send_queue.pop()) |envelope| {
-            self.message_bus.unref(envelope.message);
-            self.message_bus.allocator.destroy(envelope);
+        while (self.send_queue.pop()) |message| {
+            self.message_bus.unref(message);
         }
         assert(self.fd != -1);
         defer self.fd = -1;
@@ -708,7 +705,7 @@ const Connection = struct {
 
         // Reset the connection to its initial state.
         defer {
-            assert(self.send_queue.out == null);
+            assert(self.send_queue.is_empty());
             if (self.peer == .replica) {
                 assert(self.message_bus.replicas[self.peer.replica] != null);
                 // A newer replica connection may have replace this one.
