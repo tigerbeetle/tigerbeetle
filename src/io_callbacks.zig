@@ -142,7 +142,7 @@ pub const IO = struct {
                     linux.io_uring_prep_close(sqe, op.fd);
                 },
                 .connect => |*op| {
-                    linux.io_uring_prep_connect(sqe, op.socket, &op.address, op.address_size);
+                    linux.io_uring_prep_connect(sqe, op.socket, &op.address.any, op.address.getOsSockLen());
                 },
                 .fsync => |op| {
                     linux.io_uring_prep_fsync(sqe, op.fd, op.flags);
@@ -402,8 +402,7 @@ pub const IO = struct {
         },
         connect: struct {
             socket: os.socket_t,
-            address: os.sockaddr,
-            address_size: os.socklen_t,
+            address: std.net.Address,
         },
         fsync: struct {
             fd: os.fd_t,
@@ -546,8 +545,7 @@ pub const IO = struct {
         comptime callback: fn (context: Context, completion: *Completion, result: ConnectError!void) void,
         completion: *Completion,
         socket: os.socket_t,
-        address: os.sockaddr,
-        address_size: os.socklen_t,
+        address: std.net.Address,
     ) void {
         completion.* = .{
             .io = self,
@@ -565,7 +563,6 @@ pub const IO = struct {
                 .connect = .{
                     .socket = socket,
                     .address = address,
-                    .address_size = address_size,
                 },
             },
         };
@@ -1043,8 +1040,7 @@ test "accept/connect/send/receive" {
                 connect_callback,
                 &client_completion,
                 client,
-                address.any,
-                address.getOsSockLen(),
+                address,
             );
 
             var server_completion: IO.Completion = undefined;
