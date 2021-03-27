@@ -23,7 +23,7 @@ pub const Command = packed enum(u8) {
     do_view_change,
     start_view,
 
-    request_prepares,
+    request_prepare,
     request_headers,
     headers,
 };
@@ -1196,7 +1196,7 @@ pub const Replica = struct {
             .start_view_change => self.on_start_view_change(message),
             .do_view_change => self.on_do_view_change(message),
             .start_view => self.on_start_view(message),
-            .request_prepares => self.on_request_prepares(message),
+            .request_prepare => self.on_request_prepare(message),
             .request_headers => self.on_request_headers(message),
             .headers => self.on_headers(message),
             else => unreachable,
@@ -1795,29 +1795,23 @@ pub const Replica = struct {
         }
     }
 
-    fn on_request_prepares(self: *Replica, message: *const Message) void {
+    fn on_request_prepare(self: *Replica, message: *const Message) void {
         if (self.ignore_repair_message(message)) return;
 
         assert(self.status == .normal or self.status == .view_change);
         assert(message.header.view == self.view);
 
-        const op_min = message.header.commit;
-        const op_max = message.header.op;
-        assert(op_max >= op_min);
-
-        // We must add 1 because `op_max` and `op_min` are both inclusive:
-        assert(op_max - op_min + 1 > 0);
-
-        var op = std.math.min(op_max, self.op) + 1;
-        while (op > op_min) {
-            op -= 1;
-
-            if (self.sending_prepare) return;
-            self.sending_prepare_frame = async self.send_prepare_to_replica(
-                message.header.replica,
-                op,
-            );
+        var nonce: ?u128 = message.header.nonce;
+        if (self.leader_index(self.view) == self.replica and message.header.nonce == 0) {
+            nonce = null;
         }
+
+        if (self.sending_prepare) return;
+        self.sending_prepare_frame = async self.send_prepare_to_replica(
+            message.header.replica,
+            message.header.op,
+            nonce,
+        );
     }
 
     fn on_prepare_timeout(self: *Replica) void {
@@ -2186,7 +2180,7 @@ pub const Replica = struct {
     fn ignore_repair_message(self: *Replica, message: *const Message) bool {
         assert(message.header.command == .request_headers or
             message.header.command == .headers or
-            message.header.command == .request_prepares);
+            message.header.command == .request_prepare);
 
         const command: []const u8 = @tagName(message.header.command);
 
@@ -2210,7 +2204,7 @@ pub const Replica = struct {
 
         if (self.status == .view_change) {
             switch (message.header.command) {
-                .request_headers, .request_prepares => {
+                .request_headers, .request_prepare => {
                     if (self.leader_index(self.view) != message.header.replica) {
                         log.debug("{}: on_{s}: ignoring (view change, requested by follower)", .{
                             self.replica,
@@ -2243,6 +2237,16 @@ pub const Replica = struct {
             return true;
         }
 
+        if (message.header.command == .request_prepare) {
+            // Only the leader may answer a request for a prepare that does not specify the nonce:
+            if (message.header.nonce == 0 and self.leader_index(self.view) != self.replica) {
+                log.warn("{}: on_{s}: ignoring (nonce=0, follower)", .{ self.replica, command });
+                return true;
+            }
+        }
+
+        // Only allow repairs for same view as defense-in-depth:
+        assert(message.header.view == self.view);
         return false;
     }
 
@@ -2403,23 +2407,29 @@ pub const Replica = struct {
         // This handles the case of an idle cluster, where a follower will not otherwise advance.
         // This is not required for correctness, but for durability.
         if (self.op < self.commit_max) {
+            // If the leader repairs during a view change, it will have already advanced `self.op`
+            // to the latest op according to the quorum of `do_view_change` messages received, so we
+            // must therefore be in normal status:
+            assert(self.status == .normal);
+            assert(self.follower());
             log.notice("{}: repair: op={} < commit_max={}", .{
                 self.replica,
                 self.op,
                 self.commit_max,
             });
-            if (self.choose_any_other_replica()) |replica| {
-                // We need to advance our op number and therefore have to request_prepares,
-                // since only on_prepare() can do this and not repair_header() within on_headers().
-                self.send_header_to_replica(replica, .{
-                    .command = .request_prepares,
-                    .cluster = self.cluster,
-                    .replica = self.replica,
-                    .view = self.view,
-                    .commit = self.op + 1,
-                    .op = self.commit_max,
-                });
-            }
+            // We need to advance our op number and therefore have to `request_prepare`,
+            // since only `on_prepare()` can do this, not `repair_header()` in `on_headers()`.
+            // TODO Explore danger scenarios if we were to request from a follower instead.
+            self.send_header_to_replica(self.leader_index(self.view), .{
+                .command = .request_prepare,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .op = self.commit_max,
+                // We cannot yet know the nonce so we set it to 0:
+                // The nonce is optional when requesting from the leader but required otherwise.
+                .nonce = 0,
+            });
             return;
         }
 
@@ -2804,9 +2814,17 @@ pub const Replica = struct {
         }
     }
 
-    fn send_prepare_to_replica(self: *Replica, replica: u16, op: u64) void {
+    fn send_prepare_to_replica(self: *Replica, replica: u16, op: u64, nonce: ?u128) void {
         assert(self.status == .normal or self.status == .view_change);
-        assert(op <= self.op);
+
+        if (op > self.op) {
+            log.debug("{}: send_prepare_to_replica: op={} > self.op={}", .{
+                self.replica,
+                op,
+                self.op,
+            });
+            return;
+        }
 
         const optional_entry = self.journal.entry_for_op_exact(op);
         if (optional_entry == null) {
@@ -2815,6 +2833,18 @@ pub const Replica = struct {
         }
 
         const entry = optional_entry.?;
+
+        if (nonce) |checksum| {
+            if (entry.checksum != checksum) {
+                log.debug("{}: send_prepare_to_replica: checksum={} != nonce={}", .{
+                    self.replica,
+                    entry.checksum,
+                    checksum,
+                });
+                return;
+            }
+        }
+
         if (!self.journal.has_clean(entry)) {
             log.debug("{}: send_prepare_to_replica: op={} dirty", .{ self.replica, op });
             return;
