@@ -941,6 +941,11 @@ pub const Replica = struct {
     /// The current view, initially 0:
     view: u64,
 
+    /// Whether we have experienced a view jump (and a unique random nonce to resolve the barrier):
+    /// If this is not null then we must request headers from the leader before committing.
+    /// This prevents us from committing ops that may have been reordered through a view change.
+    view_jump_barrier: ?u128 = null,
+
     /// The current status, either normal, view_change, or recovering:
     /// TODO Don't default to normal, set the starting status according to the journal's health.
     status: Status = .normal,
@@ -1304,6 +1309,8 @@ pub const Replica = struct {
     /// If the next replica is down or partitioned, then the leader's prepare timeout will fire,
     /// and the leader will resend but to another replica, until it receives enough prepare_ok's.
     fn on_prepare(self: *Replica, message: *Message) void {
+        self.view_jump(message.header);
+
         if (self.is_repair(message)) {
             log.debug("{}: on_prepare: ignoring (repair)", .{self.replica});
             self.on_repair(message);
@@ -1313,11 +1320,6 @@ pub const Replica = struct {
         if (self.status != .normal) {
             log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
             return;
-        }
-
-        if (message.header.view > self.view) {
-            log.debug("{}: on_prepare: newer view", .{self.replica});
-            self.jump_to_newer_view_in_normal_status(message.header.view);
         }
 
         assert(self.status == .normal);
@@ -1353,6 +1355,12 @@ pub const Replica = struct {
         self.op = message.header.op;
         self.journal.set_entry_as_dirty(message.header);
 
+        // We have the latest op from the leader and have therefore cleared the view jump barrier:
+        if (self.view_jump_barrier) |nonce| {
+            self.view_jump_barrier = null;
+            log.notice("{}: on_prepare: cleared view_jump_barrier={}", .{ self.replica, nonce });
+        }
+
         // TODO Update client's information in the client table.
 
         self.replicate(message);
@@ -1366,7 +1374,7 @@ pub const Replica = struct {
 
     fn on_prepare_ok(self: *Replica, message: *Message) void {
         if (self.status != .normal) {
-            log.debug("{}: on_prepare_ok: ignoring ({})", .{ self.replica, self.status });
+            log.warn("{}: on_prepare_ok: ignoring ({})", .{ self.replica, self.status });
             return;
         }
 
@@ -1432,6 +1440,8 @@ pub const Replica = struct {
     }
 
     fn on_commit(self: *Replica, message: *const Message) void {
+        self.view_jump(message.header);
+
         if (self.status != .normal) {
             log.debug("{}: on_commit: ignoring ({})", .{ self.replica, self.status });
             return;
@@ -1440,13 +1450,6 @@ pub const Replica = struct {
         if (message.header.view < self.view) {
             log.debug("{}: on_commit: ignoring (older view)", .{self.replica});
             return;
-        }
-
-        if (message.header.view > self.view) {
-            log.debug("{}: on_commit: newer view", .{self.replica});
-            // This is critical for correctness:
-            // https://github.com/coilhq/tigerbeetle/commit/6119c7f759f924d09c088422d5c60ac6334d03de
-            self.jump_to_newer_view_in_normal_status(message.header.view);
         }
 
         if (self.leader()) {
@@ -1492,12 +1495,12 @@ pub const Replica = struct {
         }
 
         if (self.status == .view_change and self.leader_index(self.view) != self.replica) {
-            log.debug("{}: on_repair: ignoring (view change: follower)", .{self.replica});
+            log.debug("{}: on_repair: ignoring (view change, follower)", .{self.replica});
             return;
         }
 
         if (self.status == .view_change and !self.do_view_change_quorum) {
-            log.debug("{}: on_repair: ignoring (view change: waiting for quorum)", .{self.replica});
+            log.debug("{}: on_repair: ignoring (view change, waiting for quorum)", .{self.replica});
             return;
         }
 
@@ -1530,12 +1533,7 @@ pub const Replica = struct {
         assert(message.header.view >= self.view);
         assert(message.header.replica != self.replica);
 
-        if (message.header.view > self.view) {
-            log.debug("{}: on_start_view_change: jumping to newer view change", .{self.replica});
-            self.remove_uncommitted_ops();
-            assert(self.op >= self.commit_min and self.op <= self.commit_max);
-            self.transition_to_view_change_status(message.header.view);
-        }
+        self.view_jump(message.header);
 
         assert(self.status == .view_change);
         assert(message.header.view == self.view);
@@ -1563,18 +1561,7 @@ pub const Replica = struct {
         assert(message.header.view >= self.view);
         assert(self.leader_index(message.header.view) == self.replica);
 
-        if (message.header.view > self.view) {
-            log.debug("{}: on_do_view_change: jumping to newer view change", .{self.replica});
-            self.remove_uncommitted_ops();
-            assert(self.op >= self.commit_min and self.op <= self.commit_max);
-            // Always send start_view_change messages here:
-            // At first glance, it might seem that sending start_view_change messages out now after
-            // receiving a do_view_change here would be superfluous. However, this is essential,
-            // especially in the presence of asymmetric network faults. At this point, we may not
-            // yet have received a do_view_change quorum, and another replica might need our
-            // start_view_change message in order to get its do_view_change message through to us.
-            self.transition_to_view_change_status(message.header.view);
-        }
+        self.view_jump(message.header);
 
         assert(self.status == .view_change);
         assert(message.header.view == self.view);
@@ -1696,13 +1683,7 @@ pub const Replica = struct {
         assert(message.header.replica != self.replica);
         assert(message.header.replica == self.leader_index(message.header.view));
 
-        if (message.header.view > self.view) {
-            log.debug("{}: on_start_view: jumping to newer view change", .{self.replica});
-            self.remove_uncommitted_ops();
-            assert(self.op >= self.commit_min and self.op <= self.commit_max);
-            self.status = .view_change;
-            self.view = message.header.view;
-        }
+        self.view_jump(message.header);
 
         assert(self.status == .view_change);
         assert(message.header.view == self.view);
@@ -1756,7 +1737,8 @@ pub const Replica = struct {
         var response = self.message_bus.create_message(size_max) catch unreachable;
         response.header.* = .{
             .command = .headers,
-            .nonce = message.header.checksum,
+            // We echo the nonce back to the replica so that they can match up our response:
+            .nonce = message.header.nonce,
             .cluster = self.cluster,
             .replica = self.replica,
             .view = self.view,
@@ -1784,14 +1766,38 @@ pub const Replica = struct {
         assert(self.status == .normal or self.status == .view_change);
         assert(message.header.view == self.view);
 
-        const headers = std.mem.bytesAsSlice(
-            Header,
-            message.buffer[@sizeOf(Header)..message.header.size],
-        );
-        assert(headers.len > 0);
-
-        for (headers) |*h| {
+        var op_min: ?u64 = null;
+        var op_max: ?u64 = null;
+        for (self.message_body_as_headers(message)) |*h| {
+            if (op_min == null or h.op < op_min.?) op_min = h.op;
+            if (op_max == null or h.op > op_max.?) op_max = h.op;
             _ = self.repair_header(h);
+        }
+        assert(op_max.? >= op_min.?);
+
+        if (self.view_jump_barrier) |nonce| {
+            // Have we received this from the leader of the current view?
+            if (message.header.replica == self.leader_index(self.view)) {
+                // Is this in direct response to our intent to resolve this exact view jump barrier?
+                if (message.header.nonce == nonce) {
+                    // We may not update `commit_min` or `self.op` while a view jump barrier is set:
+                    // We expect the leader's headers to be within this range, which we requested.
+                    assert(op_min.? >= self.commit_min);
+                    assert(op_max.? <= self.op);
+
+                    log.notice("{}: on_headers: resolved view_jump_barrier={} op={}..{}", .{
+                        self.replica,
+                        nonce,
+                        self.op,
+                        op_max.?,
+                    });
+
+                    self.op = op_max.?;
+                    self.journal.remove_entries_from(self.op + 1);
+                    assert(self.journal.entry_for_op_exact(self.op) != null);
+                    self.view_jump_barrier = null;
+                }
+            }
         }
     }
 
@@ -2073,15 +2079,28 @@ pub const Replica = struct {
             self.commit_max = commit;
         }
 
-        // If we know we could validate the hash chain even further then wait until we can:
-        // This is partial defense-in-depth in case self.op is ever advanced by a stale prepare.
-        if (self.op < self.commit_max) {
-            log.notice("{}: commit_ops_through: waiting for repair (op < commit)", .{self.replica});
+        // If we know we have uncommitted ops that may have been reordered through a view change
+        // then wait until the latest of these has been resolved with the leader:
+        if (self.view_jump_barrier) |nonce| {
+            log.notice("{}: commit_ops_through: waiting to resolve view_jump_barrier={}", .{
+                self.replica,
+                nonce,
+            });
             return;
         }
 
-        // We must validate the hash chain as far as possible, since self.op may disclose a fork:
-        // This is defense-in-depth in case jump_to_newer_view() fails.
+        // If we know we could validate the hash chain even further, then wait until we can:
+        // This is partial defense-in-depth in case `self.op` is ever advanced by a reordered op.
+        if (self.op < self.commit_max) {
+            log.notice("{}: commit_ops_through: waiting for repair (op={} < commit={})", .{
+                self.replica,
+                self.op,
+                self.commit_max,
+            });
+            return;
+        }
+
+        // We must validate the hash chain as far as possible, since `self.op` may disclose a fork:
         if (!self.valid_hash_chain_between(self.commit_min, self.op)) {
             log.notice("{}: commit_ops_through: waiting for repair (hash chain)", .{self.replica});
             return;
@@ -2196,7 +2215,7 @@ pub const Replica = struct {
 
         // We should never view jump unless we know what our status should be after the jump:
         // Otherwise we may be normal before the leader, or in a view change that has completed.
-        // Since we do not know the status of the other replica, we rather ignore and do not jump.
+        // Since we do not know the status of the other replica, we ignore and do not jump.
         if (message.header.view > self.view) {
             log.debug("{}: on_{s}: ignoring (newer view)", .{ self.replica, command });
             return true;
@@ -2264,40 +2283,6 @@ pub const Replica = struct {
         return false;
     }
 
-    /// Removes uncommitted ops (as per 5.2 of the VRR paper) to prevent forking the hash chain, and
-    /// transitions from normal status to normal status for the newer view.
-    ///
-    /// We must do this within normal status on seeing a newer view, but only if we are certain that
-    /// the other replica is also within normal status and not within a view change, because then we
-    /// would start the view before the leader of that view.
-    ///
-    /// We can ensure the latter invariant by never sending prepare or commit messages to other
-    /// replicas, unless we have a normal status ourselves.
-    fn jump_to_newer_view_in_normal_status(self: *Replica, new_view: u64) void {
-        log.debug("{}: jump_to_newer_view_in_normal_status: advancing: view={}..{}", .{
-            self.replica,
-            self.view,
-            new_view,
-        });
-        assert(self.status == .normal);
-        assert(self.leader() or self.follower());
-        assert(new_view > self.view);
-        assert(self.leader_index(new_view) != self.replica);
-
-        // It is critical for correctness that we remove any uncommitted ops that were not involved
-        // in the interim view changes, since they may have been replaced in those view changes by
-        // other ops. If we fail to do this immediately then we may commit the wrong op and diverge
-        // state when we see a newer commit number in a prepare or commit message, which may then
-        // refer to different ops.
-        self.remove_uncommitted_ops();
-        assert(self.op >= self.commit_min);
-        assert(self.op <= self.commit_max);
-
-        self.transition_to_normal_status(new_view);
-        assert(self.view == new_view);
-        assert(self.follower());
-    }
-
     fn message_body_as_headers(self: *Replica, message: *const Message) []Header {
         // TODO Assert message commands that we expect this to be called for.
         assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
@@ -2325,6 +2310,95 @@ pub const Replica = struct {
         self.op = header.op - 1;
         assert(self.op >= self.commit_min);
         assert(self.op + 1 == header.op);
+    }
+
+    fn view_jump(self: *Replica, header: *const Header) void {
+        const status: Status = switch (header.command) {
+            .prepare, .commit => .normal,
+            .start_view_change, .do_view_change, .start_view => .view_change,
+            else => unreachable,
+        };
+
+        if (self.status != .normal and self.status != .view_change) return;
+
+        // If this is an older view, then ignore:
+        if (header.view < self.view) return;
+
+        switch (self.status) {
+            .normal => switch (status) {
+                // If the transition is to `.normal`, then ignore if this is for the same view:
+                .normal => if (header.view == self.view) return,
+                // If the transition is to `.view_change`, then ignore if the view has started:
+                .view_change => if (header.view == self.view) return,
+                else => unreachable,
+            },
+            .view_change => switch (status) {
+                // This is an interesting special case:
+                // If the transition is to `.normal` in the same view, then we missed the
+                // `start_view` message and we must also consider this a view jump:
+                .normal => {},
+                // If the transition is to `.view_change`, then ignore if this is for the same view:
+                .view_change => if (header.view == self.view) return,
+                else => unreachable,
+            },
+            else => unreachable,
+        }
+
+        const command = @tagName(header.command);
+        if (header.view == self.view) {
+            assert(self.status == .view_change and status == .normal);
+            log.debug("{}: view_jump: exiting view change and starting view", .{self.replica});
+        } else {
+            assert(header.view > self.view);
+            log.debug("{}: view_jump: jumping to newer view", .{self.replica});
+        }
+
+        if (self.op > self.commit_max) {
+            // We have uncommitted ops, and these may have been removed or replaced by the new
+            // leader through a view change in which we were not involved.
+            //
+            // In Section 5.2, the VR paper simply removes these uncommitted ops and does state
+            // transfer. However, while strictly safe, this impairs safety in terms of durability,
+            // and also adds unnecessary repair overhead if the ops were in fact committed.
+            //
+            // We therefore set a view jump barrier to keep `commit_ops_through()` from committing.
+            //
+            // This view jump barrier is cleared or may be resolved, respectively, as soon as:
+            // 1. we receive a new prepare from the leader that advances our latest op, or
+            // 2. we compare our uncomitted op range with the leader for this view.
+            //
+            // This is safe because advancing our latest op in the current view, or receiving any op
+            // from the leader between `commit_min` and `self.op` both ensure that the hash chain
+            // for our uncommitted op range has not forked.
+            //
+            // As part of setting this view jump barrier we hash a random nonce that can be passed
+            // to the leader and back again to verify the leader's `.headers` response as part of
+            // option 2 above, which is necessary because we do want to be able to commit when the
+            // cluster is idle, when option 1 may not happen any time soon.
+            var hash = std.crypto.hash.Blake3.init(.{});
+            hash.update(std.mem.asBytes(&header.checksum)); // Only for additional entropy.
+            hash.update(std.mem.asBytes(&self.view));
+            hash.update(std.mem.asBytes(&self.op));
+            hash.update(std.mem.asBytes(&self.commit_min));
+            var nonce: u128 = undefined;
+            hash.final(std.mem.asBytes(&nonce));
+            log.notice("{}: view_jump: setting view_jump_barrier={}..{}", .{
+                self.replica,
+                self.view_jump_barrier,
+                nonce,
+            });
+            self.view_jump_barrier = nonce;
+        } else {
+            assert(self.op == self.commit_max);
+            // We may still need to resolve any prior view jump barrier:
+            assert(self.view_jump_barrier == null or self.view_jump_barrier != null);
+        }
+
+        switch (status) {
+            .normal => self.transition_to_normal_status(header.view),
+            .view_change => self.transition_to_view_change_status(header.view),
+            else => unreachable,
+        }
     }
 
     /// Panics if immediate neighbors in the same view would have a broken hash chain.
@@ -2399,9 +2473,28 @@ pub const Replica = struct {
 
         // TODO Handle case where we are requesting reordered headers that no longer exist.
 
-        // We expect these always to exist (and to be correct):
+        // We expect these always to exist:
         assert(self.journal.entry_for_op_exact(self.commit_min) != null);
         assert(self.journal.entry_for_op_exact(self.op) != null);
+
+        // Resolve any view jump by comparing our uncommitted op range with the leader:
+        if (self.view_jump_barrier) |nonce| {
+            assert(self.status == .normal);
+            assert(self.follower());
+            log.notice("{}: repair: resolving view_jump_barrier={}", .{ self.replica, nonce });
+            // The new leader may have a lower op number, even having removed some uncommitted ops.
+            // We therefore request the header range from `commit_min` through `self.op`:
+            self.send_header_to_replica(self.leader_index(self.view), .{
+                .command = .request_headers,
+                .nonce = nonce,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .commit = self.commit_min,
+                .op = self.op,
+            });
+            return;
+        }
 
         // Request outstanding committed prepares to advance our op number:
         // This handles the case of an idle cluster, where a follower will not otherwise advance.
@@ -2440,19 +2533,25 @@ pub const Replica = struct {
             log.notice("{}: repair: latest break: {}", .{ self.replica, range });
             assert(range.op_min > self.commit_min);
             assert(range.op_max < self.op);
-            // TODO Ask any N random replicas excluding ourself (to reduce traffic).
-            self.send_header_to_other_replicas(.{
-                .command = .request_headers,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .view = self.view,
-                .commit = range.op_min,
-                .op = range.op_max,
-            });
+            // A range of `op_min=0` or `op_max=0` should be impossible as a header break:
+            // This is the init op that is prepared when the cluster is initialized.
+            assert(range.op_min > 0);
+            assert(range.op_max > 0);
+            if (self.choose_any_other_replica()) |replica| {
+                self.send_header_to_replica(replica, .{
+                    .command = .request_headers,
+                    .cluster = self.cluster,
+                    .replica = self.replica,
+                    .view = self.view,
+                    .commit = range.op_min,
+                    .op = range.op_max,
+                });
+            }
             return;
         }
 
         // Assert that all headers are now present and connected with a perfect hash chain:
+        assert(self.view_jump_barrier == null);
         assert(self.op >= self.commit_max);
         assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
@@ -2476,30 +2575,33 @@ pub const Replica = struct {
             assert(header.view < self.view);
         }
 
-        if (header.op > self.op) {
-            // A repair may never advance `self.op` (critical for correctness):
+        if (header.op >= self.op) {
+            // A repair may never advance or replace `self.op` (critical for correctness):
             // https://github.com/coilhq/tigerbeetle/commit/6119c7f759f924d09c088422d5c60ac6334d03de
             //
-            // Repairs must always backfill in behind `self.op` or replace `self.op` but may never
-            // advance past `self.op`. Otherwise, a split-brain leader may reapply an op that was
-            // removed by `jump_to_newer_view_in_normal_status()`, which could then be committed by
-            // a higher `commit_max` number received in a commit message.
+            // Repairs must always backfill in behind `self.op` but may never advance `self.op`.
+            // Otherwise, a split-brain leader may reapply an op that was removed through a view
+            // change, which could then be committed by a higher `commit_max` number received in a
+            // commit message.
             //
             // Our guiding principles around repairs in general:
+            //
+            // * Our latest op makes sense of everything else and must not be replaced or advanced
+            // except by the leader in the current view.
+            //
+            // * Do not jump to a view without setting a view jump barrier.
+            //
+            // * Do not commit before resolving the view jump barrier with the leader.
             //
             // * Do not commit until the hash chain between `self.commit_min` and `self.op` is
             // fully connected, to ensure that all the ops in this range are correct.
             //
             // * Ensure that `self.commit_max` is never advanced for a newer view without first
-            // calling `jump_to_newer_view_in_normal_status()` to remove uncommitted ops, otherwise
-            // `self.commit_max` may refer to different ops.
-            //
-            // * Ensure that all view change message handlers call `remove_committed_ops()` when
-            // view jumping.
+            // setting a view jump barrier, otherwise `self.commit_max` may refer to different ops.
             //
             // * Ensure that `self.op` is never advanced except in the current view, and never by a
             // repair since repairs may occur in a view change where `self.view` has not started.
-            log.debug("{}: repair_header: ignoring (would advance op)", .{self.replica});
+            log.debug("{}: repair_header: ignoring (would replace or advance op)", .{self.replica});
             return false;
         }
 
@@ -2561,7 +2663,7 @@ pub const Replica = struct {
 
         // TODO Snapshots: Skip if this header is already snapshotted.
 
-        assert(header.op <= self.op);
+        assert(header.op < self.op);
         self.journal.set_entry_as_dirty(header);
         return true;
     }
