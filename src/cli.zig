@@ -61,6 +61,8 @@ pub fn parse_args() Args {
     var maybe_replica: ?[]const u8 = null;
 
     var args = std.process.args();
+    // Skip argv[0] which is the name of this executable
+    _ = args.nextPosix();
     while (args.nextPosix()) |arg| {
         if (mem.startsWith(u8, arg, "--cluster")) {
             maybe_cluster = parse_flag("--cluster", arg);
@@ -108,7 +110,7 @@ fn parse_flag(comptime flag: []const u8, arg: []const u8) []const u8 {
     if (value.len < 2) {
         print_error_exit("{s} requires a value.", .{flag});
     }
-    if (value[0] == '=') {
+    if (value[0] != '=') {
         print_error_exit("expected '=' after {s} but found '{c}'.", .{ flag, value[0] });
     }
     return value[1..];

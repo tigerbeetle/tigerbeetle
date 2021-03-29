@@ -930,7 +930,7 @@ pub const Replica = struct {
     /// * The operator may deploy a cluster with proximity in mind since replication follows order.
     /// * A replica's IP address may be changed without reconfiguration.
     /// This does require that the user specify the same order to all replicas.
-    configuration: []ConfigurationAddress,
+    configuration: []std.net.Address,
 
     /// An abstraction to send messages from the replica to itself or another replica or client.
     /// The recipient replica or client may be a local in-memory pointer or network-addressable.
@@ -1034,7 +1034,7 @@ pub const Replica = struct {
         allocator: *Allocator,
         cluster: u128,
         f: u32,
-        configuration: []ConfigurationAddress,
+        configuration: []std.net.Address,
         message_bus: *MessageBus,
         journal: *Journal,
         state_machine: *StateMachine,
@@ -2261,9 +2261,8 @@ pub const Replica = struct {
             self.repair_queue = message.next;
             self.repair_queue_len -= 1;
 
-            message.references -= 1;
             message.next = null;
-            self.message_bus.gc(message);
+            self.message_bus.unref(message);
         }
         assert(self.repair_queue_len == 0);
     }
@@ -2775,11 +2774,10 @@ pub const Replica = struct {
                 self.repair_queue = message.next;
                 self.repair_queue_len -= 1;
 
-                message.references -= 1;
                 message.next = null;
                 self.on_repair(message);
                 assert(self.repair_queue != message); // Catch an accidental requeue by on_repair().
-                self.message_bus.gc(message);
+                self.message_bus.unref(message);
             } else {
                 assert(self.repair_queue_len == 0);
                 break;
@@ -2858,8 +2856,7 @@ pub const Replica = struct {
     fn reset_prepare(self: *Replica) void {
         if (self.prepare_message) |message| {
             self.request_checksum = null;
-            message.references -= 1;
-            self.message_bus.gc(message);
+            self.message_bus.unref(message);
             self.prepare_message = null;
             self.prepare_attempt = 0;
             self.prepare_timeout.stop();
@@ -2879,8 +2876,7 @@ pub const Replica = struct {
                 assert(message.header.command == command);
                 assert(message.header.replica == replica);
                 assert(message.header.view <= self.view);
-                message.references -= 1;
-                self.message_bus.gc(message);
+                self.message_bus.unref(message);
                 count += 1;
             }
             received.* = null;
@@ -2979,7 +2975,7 @@ pub const Replica = struct {
         assert(size >= entry.size);
 
         var message = self.message_bus.create_message(size) catch unreachable;
-        defer self.message_bus.gc(message);
+        defer self.message_bus.unref(message);
 
         assert(message.header.offset + size <= self.journal.size_circular_buffer);
         self.journal.read_sectors(
@@ -3299,8 +3295,7 @@ pub const Replica = struct {
 
         self.send_prepare_ok(message);
 
-        message.references -= 1;
-        self.message_bus.gc(message);
+        self.message_bus.unref(message);
     }
 };
 
