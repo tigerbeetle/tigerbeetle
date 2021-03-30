@@ -56,8 +56,9 @@ pub const MessageBus = struct {
         self: *MessageBus,
         allocator: *mem.Allocator,
         io: *IO,
-        server: *Replica,
         configuration: []std.net.Address,
+        server: *Replica,
+        server_index: u16,
     ) !void {
         // There must be enough connections for all replicas and at least one client.
         assert(num_connections > configuration.len);
@@ -75,7 +76,7 @@ pub const MessageBus = struct {
             .io = io,
             .configuration = configuration,
             .server = server,
-            .server_fd = try init_tcp(configuration[server.replica]),
+            .server_fd = try init_tcp(configuration[server_index]),
             .connections = connections,
             .replicas = replicas,
         };
@@ -215,7 +216,7 @@ pub const MessageBus = struct {
     /// Returns true if the target replica is connected and has space in its send queue.
     pub fn can_send_to_replica(self: *MessageBus, replica: u16) bool {
         const connection = self.replicas[replica] orelse return false;
-        return connection.state == .connected and !connection.send_queue.is_full();
+        return connection.state == .connected and !connection.send_queue.full();
     }
 
     pub fn send_header_to_replica(self: *MessageBus, replica: u16, header: Header) void {
@@ -408,7 +409,8 @@ const Connection = struct {
         assert(self.state == .connecting);
         result catch |err| {
             log.err("error connecting to {}: {}", .{ self.peer, err });
-            self.shutdown();
+            self.state = .shutting_down;
+            self.maybe_close();
             return;
         };
         log.info("connected to {}", .{self.peer});
@@ -434,7 +436,7 @@ const Connection = struct {
     pub fn send_message(self: *Connection, message: *Message) void {
         assert(self.peer == .client or self.peer == .replica);
         if (self.state == .shutting_down) return;
-        const queue_was_empty = self.send_queue.is_empty();
+        const queue_was_empty = self.send_queue.empty();
         self.send_queue.push(self.message_bus.ref(message)) catch |err| switch (err) {
             error.NoSpaceLeft => {
                 self.message_bus.unref(message);
@@ -495,9 +497,7 @@ const Connection = struct {
         buffer: []u8,
     ) void {
         assert(self.peer != .none);
-        // state may be .shutting_down if a recv was partially completed when
-        // the shutdown syscall was made.
-        assert(self.state == .connected or self.state == .shutting_down);
+        assert(self.state == .connected);
         assert(self.fd != -1);
         assert(!self.recv_submitted);
         self.recv_submitted = true;
@@ -544,7 +544,11 @@ const Connection = struct {
 
         if (self.recv_progress < @sizeOf(Header)) {
             // The header has not yet been fully received.
-            self.recv_header();
+            if (self.state == .shutting_down) {
+                self.maybe_close();
+            } else {
+                self.recv_header();
+            }
             return;
         }
         assert(self.recv_progress == @sizeOf(Header));
@@ -621,7 +625,11 @@ const Connection = struct {
 
         if (self.recv_progress < self.incoming_header.size) {
             // The body has not yet been fully received.
-            self.recv_body();
+            if (self.state == .shutting_down) {
+                self.maybe_close();
+            } else {
+                self.recv_body();
+            }
             return;
         }
         assert(self.recv_progress == self.incoming_header.size);
@@ -675,9 +683,9 @@ const Connection = struct {
             self.shutdown();
             return;
         };
-        assert(self.send_progress <= self.send_queue.peek().?.buffer.len);
+        assert(self.send_progress <= self.send_queue.peek().?.header.size);
         // If the message has been fully sent, move on to the next one.
-        if (self.send_progress == self.send_queue.peek().?.buffer.len) {
+        if (self.send_progress == self.send_queue.peek().?.header.size) {
             self.send_progress = 0;
             const message = self.send_queue.pop().?;
             self.message_bus.unref(message);
@@ -711,7 +719,7 @@ const Connection = struct {
 
         // Reset the connection to its initial state.
         defer {
-            assert(self.send_queue.is_empty());
+            assert(self.send_queue.empty());
             if (self.peer == .replica) {
                 assert(self.message_bus.replicas[self.peer.replica] != null);
                 // A newer replica connection may have replace this one.

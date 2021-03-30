@@ -14,7 +14,7 @@ const StateMachine = vr.StateMachine;
 
 const journal_size = 128 * 1024 * 1024;
 const journal_headers = 16384;
-const tick_ns = std.time.ns_per_ms * 1000;
+const tick_ns = std.time.ns_per_ms * 10;
 
 pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -29,7 +29,7 @@ pub fn main() !void {
     var state_machine = try StateMachine.init(arena);
     var journal = try Journal.init(arena, args.replica, journal_size, journal_headers);
     var message_bus: MessageBus = undefined;
-    var server = try Replica.init(
+    var replica = try Replica.init(
         arena,
         args.cluster,
         @intCast(u32, f),
@@ -39,16 +39,16 @@ pub fn main() !void {
         &state_machine,
         args.replica,
     );
-    try message_bus.init(arena, &io, &server, args.configuration);
+    try message_bus.init(arena, &io, args.configuration, &replica, args.replica);
 
     var tick_completion: IO.Completion = undefined;
-    io.timeout(*Replica, &server, on_tick_timeout, &tick_completion, tick_ns);
+    io.timeout(*Replica, &replica, on_tick_timeout, &tick_completion, tick_ns);
 
     try io.run();
 }
 
-fn on_tick_timeout(server: *Replica, tick_completion: *IO.Completion, result: IO.TimeoutError!void) void {
+fn on_tick_timeout(replica: *Replica, tick_completion: *IO.Completion, result: IO.TimeoutError!void) void {
     result catch unreachable; // We never cancel the tick timeout
-    server.tick();
-    tick_completion.io.timeout(*Replica, server, on_tick_timeout, tick_completion, tick_ns);
+    replica.tick();
+    tick_completion.io.timeout(*Replica, replica, on_tick_timeout, tick_completion, tick_ns);
 }
