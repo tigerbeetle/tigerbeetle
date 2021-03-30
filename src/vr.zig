@@ -6,7 +6,12 @@ pub const log_level: std.log.Level = .debug;
 
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Message = @import("message_bus.zig").Message;
-usingnamespace @import("concurrent_ranges.zig");
+
+const ConcurrentRanges = @import("concurrent_ranges.zig").ConcurrentRanges;
+const Range = @import("concurrent_ranges.zig").Range;
+
+const Operation = @import("state_machine.zig").Operation;
+const StateMachine = @import("state_machine.zig").StateMachine;
 
 // TODO Command for client to fetch its latest request number from the cluster.
 /// Viewstamped Replication protocol commands:
@@ -27,13 +32,6 @@ pub const Command = packed enum(u8) {
     request_prepare,
     request_headers,
     headers,
-};
-
-/// State machine operations:
-pub const Operation = packed enum(u8) {
-    reserved,
-    init,
-    noop,
 };
 
 /// Network message and journal entry header:
@@ -262,6 +260,8 @@ pub const ConfigurationAddress = union(enum) {
     replica: *Replica,
 };
 
+// TODO Import these from tigerbeetle.conf:
+pub const response_size_max = 4 * 1024 * 1024;
 pub const sector_size = 4096;
 
 /// TODO Use IO and callbacks:
@@ -273,7 +273,6 @@ pub const Storage = struct {
     fn init(allocator: *Allocator, size: u64) !Storage {
         var memory = try allocator.allocAdvanced(u8, sector_size, size, .exact);
         errdefer allocator.free(memory);
-
         std.mem.set(u8, memory, 0);
 
         return Storage{
@@ -865,20 +864,6 @@ pub const Journal = struct {
     }
 };
 
-pub const StateMachine = struct {
-    allocator: *Allocator,
-
-    pub fn init(allocator: *Allocator) !StateMachine {
-        var self = StateMachine{
-            .allocator = allocator,
-        };
-
-        return self;
-    }
-
-    pub fn deinit(self: *StateMachine) void {}
-};
-
 const Status = enum {
     normal,
     view_change,
@@ -983,6 +968,9 @@ pub const Replica = struct {
     /// The op number of the latest committed operation (according to the cluster):
     /// This is the commit number in terms of the VRR paper.
     commit_max: u64,
+
+    /// Used to read a journal entry before committing operations to the state machine:
+    commit_buffer: []u8 align(sector_size),
 
     /// The current request's checksum (used for now to enforce one-at-a-time request processing):
     request_checksum: ?u128 = null,
@@ -1092,6 +1080,10 @@ pub const Replica = struct {
         journal.headers[0] = init_prepare;
         journal.assert_headers_reserved_from(init_prepare.op + 1);
 
+        var commit_buffer = try allocator.allocAdvanced(u8, sector_size, response_size_max, .exact);
+        errdefer allocator.free(commit_buffer);
+        std.mem.set(u8, commit_buffer, 0);
+
         var self = Replica{
             .allocator = allocator,
             .cluster = cluster,
@@ -1102,6 +1094,7 @@ pub const Replica = struct {
             .op = init_prepare.op,
             .commit_min = init_prepare.commit,
             .commit_max = init_prepare.commit,
+            .commit_buffer = commit_buffer,
             .message_bus = message_bus,
             .journal = journal,
             .state_machine = state_machine,
@@ -1275,7 +1268,7 @@ pub const Replica = struct {
         // assigned to the request, and k is the commit-number.
 
         var body = message.buffer[@sizeOf(Header)..message.header.size];
-        // TODO Assign timestamps to structs in associated body.
+        self.state_machine.prepare(message.header.operation, body);
 
         var latest_entry = self.journal.entry_for_op_exact(self.op).?;
 
@@ -2156,17 +2149,54 @@ pub const Replica = struct {
             assert(self.commit_min <= self.op);
 
             const entry = self.journal.entry_for_op_exact(self.commit_min).?;
+            assert(entry.valid_checksum());
             assert(entry.op == self.commit_min);
+            assert(entry.operation != .init);
 
-            // TODO See if we are able to read from Journal before incrementing self.commit_min.
-
-            // TODO Apply to State Machine:
             log.debug("{}: commit_ops_through: executing op={} checksum={} ({s})", .{
                 self.replica,
                 entry.op,
                 entry.checksum,
                 @tagName(entry.operation),
             });
+
+            // TODO Refactor this loop block into a separate method.
+            // TODO Then pass the buffer in, having read it and validated checksum already.
+            // This will also enable the leader to commit with the prepare buffer it has in memory
+            // without having to hit the disk again.
+            self.journal.read_sectors(
+                self.commit_buffer[0..@intCast(u32, Journal.sector_ceil(entry.size))],
+                self.journal.offset_in_circular_buffer(entry.offset),
+            );
+
+            // TODO See if entry body has a valid checksum before we increment self.commit_min:
+            // We cannot fail after we have incremented self.commit_min.
+            const entry_body = self.commit_buffer[@sizeOf(Header)..entry.size];
+            assert(entry.valid_checksum_body(entry_body));
+
+            var reply = self.message_bus.create_message(response_size_max) catch unreachable;
+            var reply_body_size = @intCast(u32, self.state_machine.commit(
+                entry.operation,
+                entry_body,
+                reply.buffer[@sizeOf(Header)..],
+            ));
+
+            reply.header.command = .reply;
+            reply.header.operation = entry.operation;
+            reply.header.nonce = entry.checksum;
+            reply.header.client = entry.client;
+            reply.header.request = entry.request;
+            reply.header.cluster = self.cluster;
+            reply.header.replica = self.replica;
+            reply.header.view = self.view;
+            reply.header.op = self.op;
+            reply.header.size = @sizeOf(Header) + reply_body_size;
+
+            reply.header.set_checksum_body(reply.buffer[@sizeOf(Header)..reply.header.size]);
+            reply.header.set_checksum();
+
+            log.debug("{}: commit_ops_through: reply: {}", .{ self.replica, reply.header });
+            // TODO Send to client.
 
             // TODO Add reply to the client table to answer future duplicate requests idempotently.
             // Lookup client table entry using client id.
@@ -2175,6 +2205,8 @@ pub const Replica = struct {
 
             // TODO Now that the reply is in the client table, trigger this message to be sent.
             // TODO Do not reply to client if we are a follower.
+
+            self.message_bus.gc(reply);
         }
     }
 
@@ -3230,6 +3262,8 @@ pub const Replica = struct {
     }
 };
 
+const tigerbeetle = @import("tigerbeetle.zig");
+
 pub fn run() !void {
     assert(@sizeOf(Header) == 128);
 
@@ -3240,6 +3274,8 @@ pub fn run() !void {
     const f = 1;
     const journal_size = 128 * 1024 * 1024;
     const journal_headers = 16384;
+    const accounts_max = 1000;
+    const transfers_max = 8192;
     const cluster = 123456789;
 
     var configuration: [3]ConfigurationAddress = undefined;
@@ -3260,7 +3296,7 @@ pub fn run() !void {
 
     var state_machines: [2 * f + 1]StateMachine = undefined;
     for (state_machines) |*state_machine| {
-        state_machine.* = try StateMachine.init(allocator);
+        state_machine.* = try StateMachine.init(allocator, accounts_max, transfers_max);
     }
 
     var replicas: [2 * f + 1]Replica = undefined;
@@ -3301,9 +3337,27 @@ pub fn run() !void {
                     .view = 0,
                     .request = @intCast(u32, ticks),
                     .command = .request,
-                    .operation = .noop,
+                    .operation = .create_accounts,
+                    .size = @sizeOf(Header) + @sizeOf(tigerbeetle.Account),
                 };
-                request.header.set_checksum_body(request.buffer[0..0]);
+
+                var body = request.buffer[@sizeOf(Header)..request.header.size][0..@sizeOf(tigerbeetle.Account)];
+                std.mem.bytesAsValue(tigerbeetle.Account, body).* = .{
+                    .id = 1,
+                    .custom = 0,
+                    .flags = .{},
+                    .unit = 710,
+                    .debit_reserved = 0,
+                    .debit_accepted = 0,
+                    .credit_reserved = 0,
+                    .credit_accepted = 0,
+                    .debit_reserved_limit = 100_000,
+                    .debit_accepted_limit = 1_000_000,
+                    .credit_reserved_limit = 0,
+                    .credit_accepted_limit = 0,
+                };
+
+                request.header.set_checksum_body(body);
                 request.header.set_checksum();
 
                 message_bus.send_message_to_replica(replica.replica, request);

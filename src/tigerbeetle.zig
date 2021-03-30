@@ -37,23 +37,23 @@ pub const Account = packed struct {
     padding: u64 = 0,
     timestamp: u64 = 0,
 
-    pub inline fn exceeds(balance: u64, amount: u64, limit: u64) bool {
+    pub fn exceeds(balance: u64, amount: u64, limit: u64) bool {
         return limit > 0 and balance + amount > limit;
     }
 
-    pub inline fn exceeds_debit_reserved_limit(self: *const Account, amount: u64) bool {
+    pub fn exceeds_debit_reserved_limit(self: *const Account, amount: u64) bool {
         return Account.exceeds(self.debit_reserved, amount, self.debit_reserved_limit);
     }
 
-    pub inline fn exceeds_debit_accepted_limit(self: *const Account, amount: u64) bool {
+    pub fn exceeds_debit_accepted_limit(self: *const Account, amount: u64) bool {
         return Account.exceeds(self.debit_accepted, amount, self.debit_accepted_limit);
     }
 
-    pub inline fn exceeds_credit_reserved_limit(self: *const Account, amount: u64) bool {
+    pub fn exceeds_credit_reserved_limit(self: *const Account, amount: u64) bool {
         return Account.exceeds(self.credit_reserved, amount, self.credit_reserved_limit);
     }
 
-    pub inline fn exceeds_credit_accepted_limit(self: *const Account, amount: u64) bool {
+    pub fn exceeds_credit_accepted_limit(self: *const Account, amount: u64) bool {
         return Account.exceeds(self.credit_accepted, amount, self.credit_accepted_limit);
     }
 
