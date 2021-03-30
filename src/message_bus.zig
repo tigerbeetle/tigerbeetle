@@ -51,6 +51,12 @@ pub const MessageBus = struct {
     /// The connection for the server replica will always be null.
     replicas: []?*Connection,
 
+    /// Map from client id to the currently active connection for that client.
+    /// This is used to make lookup of client connections when sending messages
+    /// efficient and to ensure old client connections are dropped if a new one
+    /// is established.
+    clients: std.AutoHashMapUnmanaged(u128, *Connection) = .{},
+
     /// Initialize the MessageBus for the given server replica and configuration.
     pub fn init(
         self: *MessageBus,
@@ -80,6 +86,9 @@ pub const MessageBus = struct {
             .connections = connections,
             .replicas = replicas,
         };
+
+        // Pre-allocate enough memory to hold all possible connections in the client map.
+        try self.clients.ensureCapacity(allocator, num_connections);
     }
 
     fn init_tcp(address: std.net.Address) !os.socket_t {
@@ -271,14 +280,8 @@ pub const MessageBus = struct {
     /// Try to send the message to the client with the given id.
     /// If the client is not currently connected, the message is silently dropped.
     pub fn send_message_to_client(self: *MessageBus, client_id: u128, message: *Message) void {
-        for (self.connections) |*connection| {
-            switch (connection.peer) {
-                .client => |id| if (id == client_id) {
-                    connection.send_message(message);
-                    return;
-                },
-                else => {},
-            }
+        if (self.clients.get(client_id)) |connection| {
+            connection.send_message(message);
         }
     }
 
@@ -582,6 +585,15 @@ const Connection = struct {
                 // The only command sent by clients is the request command.
                 if (self.incoming_header.command == .request) {
                     self.peer = .{ .client = self.incoming_header.client };
+                    const ret = self.message_bus.clients.getOrPutAssumeCapacity(self.peer.client);
+                    // Shutdown the old connection if there is one and it is active.
+                    if (ret.found_existing) {
+                        const old = ret.entry.value;
+                        assert(old.peer == .client);
+                        assert(old.state == .connected or old.state == .shutting_down);
+                        if (old.state == .connected) old.shutdown();
+                    }
+                    ret.entry.value = self;
                 } else {
                     self.peer = .{ .replica = self.incoming_header.replica };
                     // If there is already a connection to this replica, terminate and replace it.
