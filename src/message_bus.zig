@@ -415,6 +415,9 @@ const Connection = struct {
         };
         log.info("connected to {}", .{self.peer});
         self.recv_header();
+        // It is possible that a message has been queued up to be sent to
+        // the replica while we were connecting.
+        self.send();
     }
 
     /// Given a newly accepted fd, start receiving messages on it.
@@ -435,8 +438,11 @@ const Connection = struct {
     /// if the queue was previously empty.
     pub fn send_message(self: *Connection, message: *Message) void {
         assert(self.peer == .client or self.peer == .replica);
-        if (self.state == .shutting_down) return;
-        const queue_was_empty = self.send_queue.empty();
+        switch (self.state) {
+            .connected, .connecting => {},
+            .shutting_down => return,
+            .idle, .accepting => unreachable,
+        }
         self.send_queue.push(self.message_bus.ref(message)) catch |err| switch (err) {
             error.NoSpaceLeft => {
                 self.message_bus.unref(message);
@@ -444,9 +450,14 @@ const Connection = struct {
                 return;
             },
         };
-        // If the queue was not empty, the message will be sent after the
-        // messages currently being sent.
-        if (queue_was_empty) self.send();
+        // If the connection has not yet been established we can't send yet.
+        // Instead on_connect() will call send().
+        if (self.state == .connecting) {
+            assert(self.peer == .replica);
+            return;
+        }
+        // If there is no send operation currently in progress, start one.
+        if (!self.send_submitted) self.send();
     }
 
     /// Clean up an active connection and reset it to its initial, unused, state.
