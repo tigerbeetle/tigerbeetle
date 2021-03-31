@@ -804,12 +804,18 @@ const Connection = struct {
         defer {
             assert(self.send_queue.empty());
             assert(self.incoming_message == null);
-            if (self.peer == .replica) {
-                assert(self.message_bus.replicas[self.peer.replica] != null);
-                // A newer replica connection may have replaced this one:
-                if (self.message_bus.replicas[self.peer.replica] == self) {
-                    self.message_bus.replicas[self.peer.replica] = null;
-                }
+            switch (self.peer) {
+                .none, .unknown => {},
+                .client => {
+                    self.message_bus.clients.removeAssertDiscard(self.peer.client);
+                },
+                .replica => {
+                    assert(self.message_bus.replicas[self.peer.replica] != null);
+                    // A newer replica connection may have replaced this one:
+                    if (self.message_bus.replicas[self.peer.replica] == self) {
+                        self.message_bus.replicas[self.peer.replica] = null;
+                    }
+                },
             }
             self.* = .{ .message_bus = self.message_bus };
         }
