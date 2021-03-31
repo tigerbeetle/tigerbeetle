@@ -7,8 +7,8 @@ pub const log_level: std.log.Level = .debug;
 const conf = @import("tigerbeetle.conf");
 
 // TODO: This currently needs to be switched out manually.
-//const MessageBus = @import("message_bus.zig").MessageBus;
-const MessageBus = @import("test_message_bus.zig").MessageBus;
+const MessageBus = @import("message_bus.zig").MessageBus;
+//const MessageBus = @import("test_message_bus.zig").MessageBus;
 const Message = MessageBus.Message;
 
 const ConcurrentRanges = @import("concurrent_ranges.zig").ConcurrentRanges;
@@ -1023,9 +1023,12 @@ pub const Replica = struct {
     /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
     repair_timeout: Timeout,
 
+    /// The number of ticks elapsed in total:
+    ticks: u64 = 0,
+
     /// Used to provide deterministic entropy to `choose_any_other_replica()`.
     /// Incremented whenever `choose_any_other_replica()` is called.
-    choose_any_other_replica_ticks: usize = 0,
+    choose_any_other_replica_ticks: u64 = 0,
 
     // TODO Limit integer types for `f` and `replica` to match their upper bounds in practice.
     pub fn init(
@@ -1170,6 +1173,9 @@ pub const Replica = struct {
     /// Time is measured in logical ticks that are incremented on every call to tick().
     /// This eliminates a dependency on the system time and enables deterministic testing.
     pub fn tick(self: *Replica) void {
+        self.ticks += 1;
+        if (self.ticks % 10 == 0) log.debug("{}: still ticking", .{self.replica});
+
         self.prepare_timeout.tick();
         self.commit_timeout.tick();
         self.normal_timeout.tick();
@@ -1189,6 +1195,7 @@ pub const Replica = struct {
 
     /// Called by the MessageBus to deliver a message to the replica.
     pub fn on_message(self: *Replica, message: *Message) void {
+        log.debug("{}:", .{self.replica});
         log.debug("{}: on_message: view={} status={s} {}", .{
             self.replica,
             self.view,
