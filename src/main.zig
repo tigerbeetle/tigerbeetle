@@ -1,10 +1,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const log = std.log;
 const mem = std.mem;
 const net = std.net;
 const os = std.os;
 
 const conf = @import("tigerbeetle.conf");
+pub const log_level: std.log.Level = @intToEnum(std.log.Level, conf.log_level);
 
 const cli = @import("cli.zig");
 const IO = @import("io_callbacks.zig").IO;
@@ -48,6 +50,8 @@ pub fn main() !void {
         args.replica,
     );
     try message_bus.init(arena, &io, args.configuration, &replica, args.replica);
+
+    log.info("replica {}: listening on {}", .{ args.replica, args.configuration[args.replica] });
 
     var tick_completion: IO.Completion = undefined;
     io.timeout(*Replica, &replica, on_tick_timeout, &tick_completion, tick_ns);
