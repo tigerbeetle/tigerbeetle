@@ -2601,7 +2601,6 @@ pub const Replica = struct {
             //
             // * Ensure that `self.op` is never advanced by a repair since repairs may occur in a
             // view change where the view has not started.
-
             log.debug("{}: repair_header: ignoring (would replace or advance op)", .{self.replica});
             return false;
         }
@@ -2615,7 +2614,6 @@ pub const Replica = struct {
         if (self.journal.entry(header)) |existing| {
             // Do not replace any existing op lightly as doing so may impair durability and even
             // violate correctness by undoing a prepare already acknowledged to the leader:
-
             if (existing.checksum == header.checksum) {
                 if (self.journal.dirty[header.op]) {
                     // We may safely replace this existing op (with hash chain and overlap caveats):
@@ -2643,7 +2641,7 @@ pub const Replica = struct {
                 assert(existing.op == header.op or existing.op != header.op);
 
                 if (self.repair_header_would_connect_hash_chain(header)) {
-                    // We may safely replace this existing op (with overlap caveat):
+                    // We may safely replace this existing op:
                     log.debug("{}: repair_header: exists (hash chain break)", .{self.replica});
                 } else {
                     // We cannot replace this existing op until we are sure that doing so would not
@@ -2683,9 +2681,9 @@ pub const Replica = struct {
         return true;
     }
 
-    /// If we repair this header would we break the hash chain only to our immediate right?
+    /// If we repair this header, then would this break the hash chain only to our immediate right?
     /// This offers a weak guarantee compared to `repair_header_would_connect_hash_chain()` below.
-    /// However, it is useful for allowing efficient repairs when the hash chain is sparse.
+    /// However, this is useful for allowing repairs when the hash chain is sparse.
     fn repair_header_would_break_hash_chain_with_next_entry(
         self: *Replica,
         header: *const Header,
@@ -2712,8 +2710,18 @@ pub const Replica = struct {
         return false;
     }
 
-    /// If we repair this header would we connect with the hash chain through to the latest op?
+    /// If we repair this header, then would this connect the hash chain through to the latest op?
     /// This offers a strong guarantee that may be used to replace or overlap an existing op.
+    ///
+    /// Here is an example of what could go wrong if we did not check for complete connection:
+    ///
+    /// 1. We do a prepare that's going to be committed.
+    /// 2. We do a stale prepare to the right of this, ignoring the hash chain break to the left.
+    /// 3. We do another stale prepare that replaces the first op because it connects to the second.
+    ///
+    /// This would violate our quorum replication commitment to the leader.
+    /// The mistake in this example was not that we ignored the break to the left, which we must do
+    /// to repair reordered ops, but that we did not check for complete connection to the right.
     fn repair_header_would_connect_hash_chain(self: *Replica, header: *const Header) bool {
         var entry = header;
         assert(entry.op < self.op);
@@ -2737,7 +2745,7 @@ pub const Replica = struct {
         return true;
     }
 
-    /// If we repair this header would we overlap and overwrite part of another batch?
+    /// If we repair this header, then would this overlap and overwrite part of another batch?
     /// Journal entries have variable-sized batches that may overlap if entries are disconnected.
     fn repair_header_would_overlap_another(self: *Replica, header: *const Header) bool {
         // TODO Snapshots: Handle journal wrap around.
@@ -3243,7 +3251,6 @@ pub const Replica = struct {
                 //
                 // This is safe because advancing our latest op in the current view or receiving the
                 // latest op from the leader both ensure that we have the latest hash chain head.
-
                 log.notice("{}: view_jump: imposing view jump barrier", .{self.replica});
                 self.view_jump_barrier = true;
             } else {
