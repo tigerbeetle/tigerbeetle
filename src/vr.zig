@@ -1687,14 +1687,18 @@ pub const Replica = struct {
         // TODO Ensure self.commit_max == self.op
         // Next prepare needs this to hold: assert(message.header.op == self.commit_max + 1);
 
-        self.commit_ops_through(self.commit_max);
-        assert(self.commit_min == k);
-        assert(self.commit_max == k);
+        // The new primary starts accepting client requests. It also executes (in order) any
+        // committed operations that it hadn’t executed previously, updates its client table, and
+        // sends the replies to the clients.
 
         self.transition_to_normal_status(self.view);
 
         assert(self.status == .normal);
         assert(self.leader());
+
+        self.commit_ops_through(self.commit_max);
+        assert(self.commit_min == k);
+        assert(self.commit_max == k);
 
         var start_view = self.create_do_view_change_or_start_view_message(.start_view);
         assert(start_view.header.command == .start_view);
@@ -1720,6 +1724,14 @@ pub const Replica = struct {
         assert(message.header.view == self.view);
 
         // TODO Assert that start_view message matches what we expect if our journal is empty.
+
+        // When other replicas receive the start_view message, they replace their log with the one
+        // in the message, set their op number to that of the latest entry in the log, set their
+        // view number to the view number in the message, change their status to normal, and update
+        // the information in their client table. If there are non-committed operations in the log,
+        // they send a ⟨prepare_ok v, n, i⟩ message to the primary; here n is the op-number. Then
+        // they execute all operations known to be committed that they haven’t executed previously,
+        // advance their commit number, and update the information in their client table.
 
         var latest: Header = std.mem.zeroInit(Header, .{});
         self.set_latest_header(self.message_body_as_headers(message), &latest);
@@ -1759,8 +1771,9 @@ pub const Replica = struct {
         assert(message.header.view == self.view);
         assert(self.follower());
 
-        // TODO self.commit(msg.lastcommitted());
-        // TODO self.send_prepare_oks(oldLastOp);
+        // TODO Send prepare_ok messages for uncommitted ops.
+
+        self.commit_ops_through(self.commit_max);
     }
 
     fn on_request_start_view(self: *Replica, message: *const Message) void {
@@ -2196,15 +2209,15 @@ pub const Replica = struct {
             reply.header.set_checksum();
 
             log.debug("{}: commit_ops_through: reply: {}", .{ self.replica, reply.header });
-            // TODO Send to client.
 
             // TODO Add reply to the client table to answer future duplicate requests idempotently.
             // Lookup client table entry using client id.
             // If client's last request id is <= this request id, then update client table entry.
             // Otherwise the client is already ahead of us, and we don't need to update the entry.
 
-            // TODO Now that the reply is in the client table, trigger this message to be sent.
-            // TODO Do not reply to client if we are a follower.
+            if (self.leader()) {
+                // TODO Send to client.
+            }
 
             self.message_bus.gc(reply);
         }
