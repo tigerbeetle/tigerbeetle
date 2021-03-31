@@ -7,6 +7,7 @@ const conf = @import("tigerbeetle.conf");
 
 const vr = @import("vr.zig");
 const Header = vr.Header;
+const Journal = vr.Journal;
 const Replica = vr.Replica;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io_callbacks.zig").IO;
@@ -656,7 +657,8 @@ const Connection = struct {
         assert(self.incoming_header.cluster == self.message_bus.server.cluster);
 
         assert(self.incoming_message == null);
-        const message = self.message_bus.create_message(self.incoming_header.size) catch unreachable;
+        const message_sector_size = @intCast(u32, Journal.sector_ceil(self.incoming_header.size));
+        const message = self.message_bus.create_message(message_sector_size) catch unreachable;
         self.incoming_message = self.message_bus.ref(message);
         message.header.* = self.incoming_header;
         self.incoming_header = undefined;
