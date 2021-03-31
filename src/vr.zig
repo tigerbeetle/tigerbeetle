@@ -851,12 +851,12 @@ pub const Journal = struct {
         self.storage.write(buffer, offset);
     }
 
-    fn sector_floor(offset: u64) u64 {
+    pub fn sector_floor(offset: u64) u64 {
         const sectors = std.math.divFloor(u64, offset, conf.sector_size) catch unreachable;
         return sectors * conf.sector_size;
     }
 
-    fn sector_ceil(offset: u64) u64 {
+    pub fn sector_ceil(offset: u64) u64 {
         const sectors = std.math.divCeil(u64, offset, conf.sector_size) catch unreachable;
         return sectors * conf.sector_size;
     }
