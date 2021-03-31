@@ -454,9 +454,8 @@ const Connection = struct {
         assert(self.state == .connecting);
         self.state = .connected;
         result catch |err| {
-            // TODO Switch back to `err` level with exponential backoff.
-            // TODO See if we can use a dirty bit to log these kinds of errors once.
-            log.debug("error connecting to {}: {}", .{ self.peer, err });
+            // TODO Re-enable with exponential backoff:
+            // log.err("error connecting to {}: {}", .{ self.peer, err });
             self.state = .shutting_down;
             self.maybe_close();
             return;
@@ -805,7 +804,7 @@ const Connection = struct {
             assert(self.incoming_message == null);
             if (self.peer == .replica) {
                 assert(self.message_bus.replicas[self.peer.replica] != null);
-                // A newer replica connection may have replace this one.
+                // A newer replica connection may have replaced this one:
                 if (self.message_bus.replicas[self.peer.replica] == self) {
                     self.message_bus.replicas[self.peer.replica] = null;
                 }
@@ -817,7 +816,8 @@ const Connection = struct {
             log.err("error closing connection to {}: {}", .{ self.peer, err });
             return;
         };
-        log.debug("closed connection to {}", .{self.peer});
+        // TODO Re-enable with exponential backoff:
+        // log.info("closed connection to {}", .{self.peer});
     }
 };
 
