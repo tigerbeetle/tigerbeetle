@@ -2210,15 +2210,17 @@ pub const Replica = struct {
             reply.header.set_checksum_body(reply.buffer[@sizeOf(Header)..reply.header.size]);
             reply.header.set_checksum();
 
-            log.debug("{}: commit_ops_through: reply: {}", .{ self.replica, reply.header });
-
             // TODO Add reply to the client table to answer future duplicate requests idempotently.
             // Lookup client table entry using client id.
             // If client's last request id is <= this request id, then update client table entry.
             // Otherwise the client is already ahead of us, and we don't need to update the entry.
 
             if (self.leader()) {
-                // TODO Send to client.
+                log.debug("{}: commit_ops_through: sending reply to client: {}", .{
+                    self.replica,
+                    reply.header,
+                });
+                self.message_bus.send_message_to_client(reply.header.client, reply);
             }
         }
     }
