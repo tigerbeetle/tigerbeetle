@@ -51,7 +51,11 @@ pub fn main() !void {
     );
     try message_bus.init(arena, &io, args.configuration, &replica, args.replica);
 
-    log.info("replica {}: listening on {}", .{ args.replica, args.configuration[args.replica] });
+    log.info("cluster={x} replica={}: listening on {}", .{
+        args.cluster,
+        args.replica,
+        args.configuration[args.replica],
+    });
 
     var tick_completion: IO.Completion = undefined;
     io.timeout(*Replica, &replica, on_tick_timeout, &tick_completion, tick_ns);
