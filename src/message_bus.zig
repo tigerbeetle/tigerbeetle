@@ -552,7 +552,7 @@ const Connection = struct {
     fn recv_body(self: *Connection) void {
         self.recv(
             on_recv_body,
-            self.incoming_message.?.buffer[self.recv_progress..self.incoming_header.size],
+            self.incoming_message.?.buffer[self.recv_progress..self.incoming_message.?.header.size],
         );
     }
 
@@ -709,11 +709,7 @@ const Connection = struct {
     fn deliver_message(self: *Connection) void {
         const message = self.incoming_message.?;
         assert(self.recv_progress == message.header.size);
-        defer {
-            self.message_bus.unref(message);
-            self.incoming_message = null;
-            self.recv_progress = 0;
-        }
+        defer self.message_bus.unref(message);
 
         const body = message.buffer[@sizeOf(Header)..message.header.size];
         if (message.header.valid_checksum_body(body)) {
@@ -728,6 +724,8 @@ const Connection = struct {
         }
 
         // Reset state and try to receive the next message.
+        self.incoming_message = null;
+        self.recv_progress = 0;
         self.recv_header();
     }
 
