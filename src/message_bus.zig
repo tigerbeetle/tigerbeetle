@@ -129,9 +129,9 @@ pub const MessageBus = struct {
             try set(fd, os.IPPROTO_TCP, os.TCP_NODELAY, 1);
         }
 
-        // TODO: port hopping
         try os.bind(fd, &address.any, address.getOsSockLen());
         try os.listen(fd, conf.tcp_backlog);
+
         return fd;
     }
 
@@ -443,8 +443,11 @@ const Connection = struct {
         assert(self.recv_submitted);
         self.recv_submitted = false;
         assert(self.state == .connecting);
+        self.state = .connected;
         result catch |err| {
-            log.err("error connecting to {}: {}", .{ self.peer, err });
+            // TODO Switch back to `err` level with exponential backoff.
+            // TODO See if we can use a dirty bit to log these kinds of errors once.
+            log.debug("error connecting to {}: {}", .{ self.peer, err });
             self.state = .shutting_down;
             self.maybe_close();
             return;
