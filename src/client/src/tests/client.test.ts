@@ -151,7 +151,7 @@ describe('Client', (): void => {
       return Buffer.alloc(64)
     })
     const command: ReserveCommand = {
-      id: Buffer.from([v4().replace(/[^a-fA-F0-9]/g, ''), 'hex']),
+      id: Buffer.from(v4().replace(/[^a-fA-F0-9]/g, ''), 'hex'),
       source_account_id: sourceAccountId,
       target_account_id: targeteAccountId,
       amount: BigInt(10000)
