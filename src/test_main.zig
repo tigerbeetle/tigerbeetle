@@ -72,6 +72,8 @@ pub fn run() !void {
         if (leader) |replica| {
             if (ticks == 1 or ticks == 5) {
                 var request = message_bus.create_message(conf.sector_size) catch unreachable;
+                defer message_bus.unref(request);
+
                 request.header.* = .{
                     .cluster = cluster,
                     .client = 1,
