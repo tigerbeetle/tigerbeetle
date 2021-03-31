@@ -7,20 +7,6 @@ const StringifyOptions = std.json.StringifyOptions;
 
 pub const config = @import("tigerbeetle.conf");
 
-pub const Command = packed enum(u32) {
-    // We reserve command "0" to detect any accidental zero byte being interpreted as a command:
-    eof = 1,
-    ack,
-    create_accounts,
-    create_transfers,
-    commit_transfers,
-    lookup_accounts,
-
-    pub fn jsonStringify(self: Command, options: StringifyOptions, writer: anytype) !void {
-        try std.fmt.format(writer, "\"{}\"", .{@tagName(self)});
-    }
-};
-
 pub const Account = packed struct {
     id: u128,
     custom: u128,
@@ -278,143 +264,6 @@ pub const CommitTransferResults = packed struct {
     }
 };
 
-pub const Magic: u64 = @byteSwap(u64, 0x0a_5ca1ab1e_bee11e); // "A scalable beetle..."
-
-pub const JournalHeader = packed struct {
-    checksum_meta: u128 = undefined,
-    checksum_data: u128 = undefined,
-    prev_checksum_meta: u128,
-    offset: u64,
-    command: Command,
-    size: u32,
-
-    pub fn calculate_checksum_meta(self: *const JournalHeader) u128 {
-        const meta = @bitCast([@sizeOf(JournalHeader)]u8, self.*);
-        const checksum_size = @sizeOf(@TypeOf(self.checksum_meta));
-        assert(checksum_size == 16);
-        var target: [32]u8 = undefined;
-        crypto.hash.Blake3.hash(meta[checksum_size..], target[0..], .{});
-        return @bitCast(u128, target[0..checksum_size].*);
-    }
-
-    pub fn calculate_checksum_data(self: *const JournalHeader, data: []const u8) u128 {
-        assert(@sizeOf(JournalHeader) + data.len == self.size);
-        const checksum_size = @sizeOf(@TypeOf(self.checksum_data));
-        assert(checksum_size == 16);
-        var target: [32]u8 = undefined;
-        crypto.hash.Blake3.hash(data[0..], target[0..], .{});
-        return @bitCast(u128, target[0..checksum_size].*);
-    }
-
-    pub fn set_checksum_meta(self: *JournalHeader) void {
-        self.checksum_meta = self.calculate_checksum_meta();
-    }
-
-    pub fn set_checksum_data(self: *JournalHeader, data: []const u8) void {
-        self.checksum_data = self.calculate_checksum_data(data);
-    }
-
-    pub fn valid_checksum_meta(self: *const JournalHeader) bool {
-        return self.checksum_meta == self.calculate_checksum_meta();
-    }
-
-    pub fn valid_checksum_data(self: *const JournalHeader, data: []const u8) bool {
-        return self.checksum_data == self.calculate_checksum_data(data);
-    }
-
-    pub fn jsonStringify(self: JournalHeader, options: StringifyOptions, writer: anytype) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"checksum_meta\":\"{x:0>32}\",", .{self.checksum_meta});
-        try std.fmt.format(writer, "\"checksum_data\":\"{x:0>32}\",", .{self.checksum_data});
-        try std.fmt.format(writer, "\"prev_checksum_meta\":\"{x:0>32}\",", .{self.prev_checksum_meta});
-        try std.fmt.format(writer, "\"offset\":{},", .{self.offset});
-        try writer.writeAll("\"command\":");
-        try std.json.stringify(self.command, .{}, writer);
-        try writer.writeAll(",");
-        try std.fmt.format(writer, "\"size\":{}", .{self.size});
-        try writer.writeAll("}");
-    }
-};
-
-pub const NetworkHeader = packed struct {
-    checksum_meta: u128 = undefined,
-    checksum_data: u128 = undefined,
-    id: u128,
-    magic: u64 = Magic,
-    command: Command,
-    size: u32,
-
-    pub fn calculate_checksum_meta(self: *const NetworkHeader) u128 {
-        const meta = @bitCast([@sizeOf(NetworkHeader)]u8, self.*);
-        const checksum_size = @sizeOf(@TypeOf(self.checksum_meta));
-        assert(checksum_size == 16);
-        var target: [32]u8 = undefined;
-        crypto.hash.Blake3.hash(meta[checksum_size..], target[0..], .{});
-        return @bitCast(u128, target[0..checksum_size].*);
-    }
-
-    pub fn calculate_checksum_data(self: *const NetworkHeader, data: []const u8) u128 {
-        assert(@sizeOf(NetworkHeader) + data.len == self.size);
-        const checksum_size = @sizeOf(@TypeOf(self.checksum_data));
-        assert(checksum_size == 16);
-        var target: [32]u8 = undefined;
-        crypto.hash.Blake3.hash(data[0..], target[0..], .{});
-        return @bitCast(u128, target[0..checksum_size].*);
-    }
-
-    pub fn set_checksum_meta(self: *NetworkHeader) void {
-        self.checksum_meta = self.calculate_checksum_meta();
-    }
-
-    pub fn set_checksum_data(self: *NetworkHeader, data: []const u8) void {
-        self.checksum_data = self.calculate_checksum_data(data);
-    }
-
-    pub fn valid_checksum_meta(self: *const NetworkHeader) bool {
-        return self.checksum_meta == self.calculate_checksum_meta();
-    }
-
-    pub fn valid_checksum_data(self: *const NetworkHeader, data: []const u8) bool {
-        return self.checksum_data == self.calculate_checksum_data(data);
-    }
-
-    pub fn valid_size(self: *const NetworkHeader) bool {
-        if (self.size < @sizeOf(NetworkHeader)) return false;
-        const data_size = self.size - @sizeOf(NetworkHeader);
-        const type_size: usize = switch (self.command) {
-            .ack => 8,
-            .create_accounts => @sizeOf(Account),
-            .create_transfers => @sizeOf(Transfer),
-            .commit_transfers => @sizeOf(Commit),
-            .lookup_accounts => @sizeOf(u128),
-            else => unreachable,
-        };
-        const min_count: usize = switch (self.command) {
-            .ack => 0,
-            .create_accounts => 1,
-            .create_transfers => 1,
-            .commit_transfers => 1,
-            .lookup_accounts => 1,
-            else => unreachable,
-        };
-        return (@mod(data_size, type_size) == 0 and
-            @divExact(data_size, type_size) >= min_count);
-    }
-
-    pub fn jsonStringify(self: NetworkHeader, options: StringifyOptions, writer: anytype) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"checksum_meta\":\"{x:0>32}\",", .{self.checksum_meta});
-        try std.fmt.format(writer, "\"checksum_data\":\"{x:0>32}\",", .{self.checksum_data});
-        try std.fmt.format(writer, "\"id\":{},", .{self.id});
-        try std.fmt.format(writer, "\"magic\":\"{x:0>16}\",", .{mem.toBytes(self.magic)});
-        try writer.writeAll("\"command\":");
-        try std.json.stringify(self.command, .{}, writer);
-        try writer.writeAll(",");
-        try std.fmt.format(writer, "\"size\":{}", .{self.size});
-        try writer.writeAll("}");
-    }
-};
-
 comptime {
     if (builtin.os.tag != .linux) @compileError("linux required for io_uring");
 
@@ -424,12 +273,7 @@ comptime {
 
 const testing = std.testing;
 
-test "magic" {
-    testing.expectEqualSlices(u8, ([_]u8{ 0x0a, 0x5c, 0xa1, 0xab, 0x1e, 0xbe, 0xe1, 0x1e })[0..], mem.toBytes(Magic)[0..]);
-}
-
 test "data structure sizes" {
-    testing.expectEqual(@as(usize, 4), @sizeOf(Command));
     testing.expectEqual(@as(usize, 8), @sizeOf(AccountFlags));
     testing.expectEqual(@as(usize, 128), @sizeOf(Account));
     testing.expectEqual(@as(usize, 8), @sizeOf(TransferFlags));
@@ -439,10 +283,4 @@ test "data structure sizes" {
     testing.expectEqual(@as(usize, 8), @sizeOf(CreateAccountResults));
     testing.expectEqual(@as(usize, 8), @sizeOf(CreateTransferResults));
     testing.expectEqual(@as(usize, 8), @sizeOf(CommitTransferResults));
-    testing.expectEqual(@as(usize, 8), @sizeOf(@TypeOf(Magic)));
-    testing.expectEqual(@as(usize, 64), @sizeOf(JournalHeader));
-    testing.expectEqual(@as(usize, 64), @sizeOf(NetworkHeader));
-
-    // We swap the network header for a journal header so they must be the same size:
-    testing.expectEqual(@sizeOf(JournalHeader), @sizeOf(NetworkHeader));
 }
