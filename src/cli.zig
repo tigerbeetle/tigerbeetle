@@ -16,7 +16,7 @@ const usage = fmt.comptimePrint(
     \\Required Configuration Options:
     \\
     \\ --cluster=<hex id>
-    \\        Set the cluster ID to the provided non-zero 128 bit hexidecimal number.
+    \\        Set the cluster ID to the provided non-zero 128-bit hexadecimal number.
     \\
     \\ --replica-addresses=<addresses>
     \\        Set the addresses of all replicas in the cluster. Accepts a
@@ -26,9 +26,9 @@ const usage = fmt.comptimePrint(
     \\        will be used.
     \\
     \\ --replica-index=<index>
-    \\        Set the address in the array passed to the --replica-addresses option which
+    \\        Set the address in the array passed to the --replica-addresses option that
     \\        will be used for this replica process. The value of this option is
-    \\        interpereted as a zero-based index in to the array.
+    \\        interpreted as a zero-based index into the array.
     \\
     \\Examples:
     \\
