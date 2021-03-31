@@ -4,8 +4,10 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.vr);
 pub const log_level: std.log.Level = .debug;
 
+// TODO: This currently needs to be switched out manually.
 const MessageBus = @import("message_bus.zig").MessageBus;
-const Message = @import("message_bus.zig").Message;
+//const MessageBus = @import("test_message_bus.zig").MessageBus;
+const Message = MessageBus.Message;
 
 const ConcurrentRanges = @import("concurrent_ranges.zig").ConcurrentRanges;
 const Range = @import("concurrent_ranges.zig").Range;
@@ -38,6 +40,9 @@ pub const Command = packed enum(u8) {
 /// We reuse the same header for both so that prepare messages from the leader can simply be
 /// journalled as is by the followers without requiring any further modification.
 pub const Header = packed struct {
+    comptime {
+        assert(@sizeOf(Header) == 128);
+    }
     /// A checksum covering only the rest of this header (but including checksum_body):
     /// This enables the header to be trusted without having to recv() or read() associated body.
     /// This checksum is enough to uniquely identify a network message or journal entry.
@@ -255,11 +260,6 @@ const Client = struct {};
 // If a client has done a few billion requests, we don't expect to see request 0 come through.
 const ClientTable = struct {};
 
-pub const ConfigurationAddress = union(enum) {
-    address: std.net.Address,
-    replica: *Replica,
-};
-
 // TODO Import these from tigerbeetle.conf:
 pub const response_size_max = 4 * 1024 * 1024;
 pub const sector_size = 4096;
@@ -270,7 +270,7 @@ pub const Storage = struct {
     memory: []u8 align(sector_size),
     size: u64,
 
-    fn init(allocator: *Allocator, size: u64) !Storage {
+    pub fn init(allocator: *Allocator, size: u64) !Storage {
         var memory = try allocator.allocAdvanced(u8, sector_size, size, .exact);
         errdefer allocator.free(memory);
         std.mem.set(u8, memory, 0);
@@ -930,7 +930,7 @@ pub const Replica = struct {
     /// * The operator may deploy a cluster with proximity in mind since replication follows order.
     /// * A replica's IP address may be changed without reconfiguration.
     /// This does require that the user specify the same order to all replicas.
-    configuration: []std.net.Address,
+    configuration: []MessageBus.Address,
 
     /// An abstraction to send messages from the replica to itself or another replica or client.
     /// The recipient replica or client may be a local in-memory pointer or network-addressable.
@@ -1034,7 +1034,7 @@ pub const Replica = struct {
         allocator: *Allocator,
         cluster: u128,
         f: u32,
-        configuration: []std.net.Address,
+        configuration: []MessageBus.Address,
         message_bus: *MessageBus,
         journal: *Journal,
         state_machine: *StateMachine,
@@ -1186,6 +1186,8 @@ pub const Replica = struct {
         if (self.repair_timeout.fired()) self.on_repair_timeout();
 
         self.repair_last_queued_message_if_any();
+
+        self.message_bus.tick();
     }
 
     /// Called by the MessageBus to deliver a message to the replica.
@@ -2187,7 +2189,9 @@ pub const Replica = struct {
             const entry_body = self.commit_buffer[@sizeOf(Header)..entry.size];
             assert(entry.valid_checksum_body(entry_body));
 
-            var reply = self.message_bus.create_message(response_size_max) catch unreachable;
+            const reply = self.message_bus.create_message(response_size_max) catch unreachable;
+            _ = self.message_bus.ref(reply);
+            defer self.message_bus.unref(reply);
             var reply_body_size = @intCast(u32, self.state_machine.commit(
                 entry.operation,
                 entry_body,
@@ -2218,8 +2222,6 @@ pub const Replica = struct {
             if (self.leader()) {
                 // TODO Send to client.
             }
-
-            self.message_bus.gc(reply);
         }
     }
 
@@ -3305,115 +3307,3 @@ pub const Replica = struct {
         self.message_bus.unref(message);
     }
 };
-
-const tigerbeetle = @import("tigerbeetle.zig");
-
-pub fn run() !void {
-    assert(@sizeOf(Header) == 128);
-
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    var allocator = &arena.allocator;
-
-    const f = 1;
-    const journal_size = 128 * 1024 * 1024;
-    const journal_headers = 16384;
-    const accounts_max = 1000;
-    const transfers_max = 8192;
-    const cluster = 123456789;
-
-    var configuration: [3]ConfigurationAddress = undefined;
-    var message_bus = try MessageBus.init(allocator, &configuration);
-
-    var storage: [2 * f + 1]Storage = undefined;
-    var journals: [2 * f + 1]Journal = undefined;
-    for (journals) |*journal, index| {
-        storage[index] = try Storage.init(allocator, journal_size);
-        journal.* = try Journal.init(
-            allocator,
-            &storage[index],
-            @intCast(u16, index),
-            journal_size,
-            journal_headers,
-        );
-    }
-
-    var state_machines: [2 * f + 1]StateMachine = undefined;
-    for (state_machines) |*state_machine| {
-        state_machine.* = try StateMachine.init(allocator, accounts_max, transfers_max);
-    }
-
-    var replicas: [2 * f + 1]Replica = undefined;
-    for (replicas) |*replica, index| {
-        replica.* = try Replica.init(
-            allocator,
-            cluster,
-            f,
-            &configuration,
-            &message_bus,
-            &journals[index],
-            &state_machines[index],
-            @intCast(u16, index),
-        );
-        configuration[index] = .{ .replica = replica };
-    }
-
-    var ticks: usize = 0;
-    while (true) : (ticks += 1) {
-        message_bus.send_queued_messages();
-
-        std.debug.print("\n", .{});
-        log.debug("ticking (message_bus has {} messages allocated)", .{message_bus.allocated});
-        std.debug.print("\n", .{});
-
-        var leader: ?*Replica = null;
-        for (replicas) |*replica| {
-            if (replica.status == .normal and replica.leader()) leader = replica;
-            replica.tick();
-        }
-
-        if (leader) |replica| {
-            if (ticks == 1 or ticks == 5) {
-                var request = message_bus.create_message(sector_size) catch unreachable;
-                request.header.* = .{
-                    .cluster = cluster,
-                    .client = 1,
-                    .view = 0,
-                    .request = @intCast(u32, ticks),
-                    .command = .request,
-                    .operation = .create_accounts,
-                    .size = @sizeOf(Header) + @sizeOf(tigerbeetle.Account),
-                };
-
-                var body = request.buffer[@sizeOf(Header)..request.header.size][0..@sizeOf(tigerbeetle.Account)];
-                std.mem.bytesAsValue(tigerbeetle.Account, body).* = .{
-                    .id = 1,
-                    .custom = 0,
-                    .flags = .{},
-                    .unit = 710,
-                    .debit_reserved = 0,
-                    .debit_accepted = 0,
-                    .credit_reserved = 0,
-                    .credit_accepted = 0,
-                    .debit_reserved_limit = 100_000,
-                    .debit_accepted_limit = 1_000_000,
-                    .credit_reserved_limit = 0,
-                    .credit_accepted_limit = 0,
-                };
-
-                request.header.set_checksum_body(body);
-                request.header.set_checksum();
-
-                message_bus.send_message_to_replica(replica.replica, request);
-            }
-        }
-
-        message_bus.send_queued_messages();
-        std.time.sleep(std.time.ns_per_ms * 1000);
-    }
-}
-
-pub fn main() !void {
-    var frame = async run();
-    nosuspend try await frame;
-}

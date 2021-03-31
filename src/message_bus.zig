@@ -4,7 +4,6 @@ const mem = std.mem;
 const os = std.os;
 
 const vr = @import("vr.zig");
-const ConfigurationAddress = vr.ConfigurationAddress;
 const Header = vr.Header;
 const Replica = vr.Replica;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
@@ -16,15 +15,16 @@ const tcp_backlog = 64;
 const num_connections = 32;
 const queue_size = 3;
 
-pub const Message = struct {
-    header: *Header,
-    buffer: []u8 align(vr.sector_size),
-    references: usize = 1,
-    next: ?*Message = null,
-};
-
-// TODO: use a hashmap to make client lookups faster
 pub const MessageBus = struct {
+    pub const Address = std.net.Address;
+
+    pub const Message = struct {
+        header: *Header,
+        buffer: []u8 align(vr.sector_size),
+        references: usize = 0,
+        next: ?*Message = null,
+    };
+
     allocator: *mem.Allocator,
     allocated: usize = 0,
     io: *IO,
@@ -363,7 +363,7 @@ const Connection = struct {
     /// Number of bytes of the current header/message that have already been received.
     recv_progress: usize = 0,
     incoming_header: Header = undefined,
-    incoming_message: *Message = undefined,
+    incoming_message: *MessageBus.Message = undefined,
 
     /// This completion is used for all send operations.
     send_completion: IO.Completion = undefined,
@@ -373,7 +373,7 @@ const Connection = struct {
     /// Number of bytes of the current message that have already been sent.
     send_progress: usize = 0,
     /// The queue of messages to send to the client or replica peer.
-    send_queue: RingBuffer(*Message, queue_size) = .{},
+    send_queue: RingBuffer(*MessageBus.Message, queue_size) = .{},
 
     /// Attempt to connect to a replica.
     /// The slot in the Message.replicas slices is immediately reserved.
@@ -439,7 +439,7 @@ const Connection = struct {
 
     /// Add a message to the connection's send queue, starting a send operation
     /// if the queue was previously empty.
-    pub fn send_message(self: *Connection, message: *Message) void {
+    pub fn send_message(self: *Connection, message: *MessageBus.Message) void {
         assert(self.peer == .client or self.peer == .replica);
         switch (self.state) {
             .connected, .connecting => {},
@@ -612,7 +612,8 @@ const Connection = struct {
         }
         assert(self.incoming_header.cluster == self.message_bus.server.cluster);
 
-        self.incoming_message = self.message_bus.create_message(self.incoming_header.size) catch unreachable;
+        const message = self.message_bus.create_message(self.incoming_header.size) catch unreachable;
+        self.incoming_message = self.message_bus.ref(message);
         self.incoming_message.header.* = self.incoming_header;
         self.recv_body();
     }
@@ -660,7 +661,10 @@ const Connection = struct {
 
         const body = self.incoming_message.buffer[@sizeOf(Header)..self.incoming_header.size];
         if (self.incoming_header.valid_checksum_body(body)) {
-            self.message_bus.server.on_message(self.incoming_message);
+            self.message_bus.send_message_to_replica(
+                self.message_bus.server.replica,
+                self.incoming_message,
+            );
         } else {
             log.err("invalid checksum on body received from {}", .{self.peer});
             self.shutdown();
