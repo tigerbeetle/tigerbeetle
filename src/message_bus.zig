@@ -396,7 +396,7 @@ const Connection = struct {
     /// Number of bytes of the current header/message that have already been received.
     recv_progress: usize = 0,
     incoming_header: Header = undefined,
-    incoming_message: *MessageBus.Message = undefined,
+    incoming_message: ?*MessageBus.Message = null,
 
     /// This completion is used for all send operations.
     send_completion: IO.Completion = undefined,
@@ -442,6 +442,10 @@ const Connection = struct {
     fn on_connect(self: *Connection, completion: *IO.Completion, result: IO.ConnectError!void) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
+        if (self.state == .shutting_down) {
+            self.maybe_close();
+            return;
+        }
         assert(self.state == .connecting);
         self.state = .connected;
         result catch |err| {
@@ -518,9 +522,15 @@ const Connection = struct {
                 // a connection while a connect operation is in progress.
                 // This is fine though, we simply continue with the logic below and
                 // wait for the connect operation to finish.
-                assert(self.state == .connecting);
-                assert(self.recv_submitted);
-                assert(!self.send_submitted);
+
+                // TODO: This currently happens in other cases if the
+                // connection was closed due to an error. We need to intelligently
+                // decide whether to shutdown or close directly based on the error
+                // before these assertions may be re-enabled.
+
+                //assert(self.state == .connecting);
+                //assert(self.recv_submitted);
+                //assert(!self.send_submitted);
             },
             os.ENOTSOCK => unreachable,
             else => |err| os.unexpectedErrno(err) catch {},
@@ -537,7 +547,7 @@ const Connection = struct {
     fn recv_body(self: *Connection) void {
         self.recv(
             on_recv_body,
-            self.incoming_message.buffer[self.recv_progress..][0..self.incoming_header.size],
+            self.incoming_message.?.buffer[self.recv_progress..self.incoming_header.size],
         );
     }
 
@@ -579,14 +589,11 @@ const Connection = struct {
             return;
         };
 
-        // No bytes received means a clean shutdown, either due to our
-        // shutdown syscall or the peer closing the socket.
+        // No bytes received means that the peer closed the connection.
         if (bytes_received == 0) {
-            if (self.state == .shutting_down) {
-                self.maybe_close();
-            } else {
-                self.shutdown();
-            }
+            // Skip the shutdown syscall and go straight to close.
+            self.state = .shutting_down;
+            self.maybe_close();
             return;
         }
 
@@ -594,11 +601,7 @@ const Connection = struct {
 
         if (self.recv_progress < @sizeOf(Header)) {
             // The header has not yet been fully received.
-            if (self.state == .shutting_down) {
-                self.maybe_close();
-            } else {
-                self.recv_header();
-            }
+            self.recv_header();
             return;
         }
         assert(self.recv_progress == @sizeOf(Header));
@@ -648,10 +651,19 @@ const Connection = struct {
         }
         assert(self.incoming_header.cluster == self.message_bus.server.cluster);
 
+        assert(self.incoming_message == null);
         const message = self.message_bus.create_message(self.incoming_header.size) catch unreachable;
         self.incoming_message = self.message_bus.ref(message);
-        self.incoming_message.header.* = self.incoming_header;
-        self.recv_body();
+        message.header.* = self.incoming_header;
+        self.incoming_header = undefined;
+
+        if (message.header.size == @sizeOf(Header)) {
+            // If the message has no body, deliver it directly
+            self.deliver_message();
+        } else {
+            assert(message.header.size > @sizeOf(Header));
+            self.recv_body();
+        }
     }
 
     fn on_recv_body(self: *Connection, completion: *IO.Completion, result: IO.RecvError!usize) void {
@@ -671,35 +683,38 @@ const Connection = struct {
             return;
         };
 
-        // No bytes received means a clean shutdown, either due to our
-        // shutdown syscall or the peer closing the socket.
+        // No bytes received means that the peer closed the connection.
         if (bytes_received == 0) {
-            if (self.state == .shutting_down) {
-                self.maybe_close();
-            } else {
-                self.shutdown();
-            }
+            // Skip the shutdown syscall and go straight to close.
+            self.state = .shutting_down;
+            self.maybe_close();
             return;
         }
         self.recv_progress += bytes_received;
 
-        if (self.recv_progress < self.incoming_header.size) {
+        if (self.recv_progress < self.incoming_message.?.header.size) {
             // The body has not yet been fully received.
-            if (self.state == .shutting_down) {
-                self.maybe_close();
-            } else {
-                self.recv_body();
-            }
-            return;
+            self.recv_body();
+        } else {
+            self.deliver_message();
         }
-        assert(self.recv_progress == self.incoming_header.size);
-        defer self.message_bus.unref(self.incoming_message);
+    }
 
-        const body = self.incoming_message.buffer[@sizeOf(Header)..self.incoming_header.size];
-        if (self.incoming_header.valid_checksum_body(body)) {
+    /// Deliver the fully received incoming_message then reset state and call recv_header().
+    fn deliver_message(self: *Connection) void {
+        const message = self.incoming_message.?;
+        assert(self.recv_progress == message.header.size);
+        defer {
+            self.message_bus.unref(message);
+            self.incoming_message = null;
+            self.recv_progress = 0;
+        }
+
+        const body = message.buffer[@sizeOf(Header)..message.header.size];
+        if (message.header.valid_checksum_body(body)) {
             self.message_bus.send_message_to_replica(
                 self.message_bus.server.replica,
-                self.incoming_message,
+                message,
             );
         } else {
             log.err("invalid checksum on body received from {}", .{self.peer});
@@ -708,9 +723,6 @@ const Connection = struct {
         }
 
         // Reset state and try to receive the next message.
-        self.incoming_header = undefined;
-        self.incoming_message = undefined;
-        self.recv_progress = 0;
         self.recv_header();
     }
 
@@ -769,6 +781,10 @@ const Connection = struct {
         while (self.send_queue.pop()) |message| {
             self.message_bus.unref(message);
         }
+        if (self.incoming_message) |message| {
+            self.message_bus.unref(message);
+            self.incoming_message = null;
+        }
         assert(self.fd != -1);
         defer self.fd = -1;
         // It's OK to use the send completion here as we know that no send
@@ -783,6 +799,7 @@ const Connection = struct {
         // Reset the connection to its initial state.
         defer {
             assert(self.send_queue.empty());
+            assert(self.incoming_message == null);
             if (self.peer == .replica) {
                 assert(self.message_bus.replicas[self.peer.replica] != null);
                 // A newer replica connection may have replace this one.
