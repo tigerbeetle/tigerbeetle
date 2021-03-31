@@ -144,6 +144,11 @@ pub const MessageBus = struct {
             self.maybe_connect_to_replica(replica);
         }
         self.maybe_accept();
+
+        // TODO: rewrite ConcurrentRanges to not use async
+        // This nosuspend is only safe because we do not actually do any asynchronous disk IO yet.
+        var frame = async self.flush();
+        nosuspend await frame;
     }
 
     fn maybe_connect_to_replica(self: *MessageBus, replica: u16) void {
@@ -712,10 +717,10 @@ const Connection = struct {
 
         const body = message.buffer[@sizeOf(Header)..message.header.size];
         if (message.header.valid_checksum_body(body)) {
-            self.message_bus.send_message_to_replica(
-                self.message_bus.server.replica,
-                message,
-            );
+            // TODO: rewrite ConcurrentRanges to not use async
+            // This nosuspend is only safe because we do not actually do any asynchronous disk IO yet.
+            var frame = async self.message_bus.server.on_message(message);
+            nosuspend await frame;
         } else {
             log.err("invalid checksum on body received from {}", .{self.peer});
             self.shutdown();
