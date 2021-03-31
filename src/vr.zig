@@ -2454,6 +2454,7 @@ pub const Replica = struct {
     ) void {
         assert(a.command == .prepare);
         assert(b.command == .prepare);
+        assert(a.cluster == b.cluster);
         if (a.view == b.view and a.op + 1 == b.op and a.checksum != b.nonce) {
             assert(a.valid_checksum());
             assert(b.valid_checksum());
@@ -2575,19 +2576,20 @@ pub const Replica = struct {
 
         if (header.op >= self.op) {
             // A repair may never advance or replace `self.op` (critical for correctness):
-            // https://github.com/coilhq/tigerbeetle/commit/6119c7f759f924d09c088422d5c60ac6334d03de
             //
             // Repairs must always backfill in behind `self.op` but may never advance `self.op`.
             // Otherwise, a split-brain leader may reapply an op that was removed through a view
-            // change, which could then be committed by a higher `commit_max` number received in a
-            // commit message.
+            // change, which could be committed by a higher `commit_max` number in a commit message.
+            //
+            // See this commit message for an example:
+            // https://github.com/coilhq/tigerbeetle/commit/6119c7f759f924d09c088422d5c60ac6334d03de
             //
             // Our guiding principles around repairs in general:
             //
             // * Our latest op makes sense of everything else and must not be replaced or advanced
             // except by the leader in the current view.
             //
-            // * Do not jump to a view without imposing a view jump barrier.
+            // * Do not jump to a view in normal status without imposing a view jump barrier.
             //
             // * Do not commit before resolving the view jump barrier with the leader.
             //
@@ -2597,66 +2599,81 @@ pub const Replica = struct {
             // * Ensure that `self.commit_max` is never advanced for a newer view without first
             // imposing a view jump barrier, otherwise `self.commit_max` may refer to different ops.
             //
-            // * Ensure that `self.op` is never advanced except in the current view, and never by a
-            // repair since repairs may occur in a view change where `self.view` has not started.
+            // * Ensure that `self.op` is never advanced by a repair since repairs may occur in a
+            // view change where the view has not started.
+
             log.debug("{}: repair_header: ignoring (would replace or advance op)", .{self.replica});
             return false;
         }
 
-        if (self.journal.entry(header)) |existing| {
-            if (existing.view > header.view) {
-                log.debug("{}: repair_header: ignoring (newer view)", .{self.replica});
-                return false;
-            }
+        // See Figure 3.7 on page 41 in Diego Ongaro's Raft thesis for an example of where an op
+        // with an older view number may be committed instead of an op with a newer view number:
+        // http://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf
+        //
+        // We therefore only compare ops in the same view or with reference to our hash chain:
 
-            if (existing.view == header.view and existing.op > header.op) {
-                // For example, the journal wrapped.
-                log.debug("{}: repair_header: ignoring (newer op)", .{self.replica});
-                return false;
-            }
+        if (self.journal.entry(header)) |existing| {
+            // Do not replace any existing op lightly as doing so may impair durability and even
+            // violate correctness by undoing a prepare already acknowledged to the leader:
 
             if (existing.checksum == header.checksum) {
                 if (self.journal.dirty[header.op]) {
+                    // We may safely replace this existing op (with hash chain and overlap caveats):
                     log.debug("{}: repair_header: exists (dirty checksum)", .{self.replica});
-                    // We must run the chain and overlap checks below before returning because our
-                    // return boolean may be used to decide whether or not to do a journal write.
-                    // The header may exist as dirty, but we may not want to break a newer op.
                 } else {
                     log.debug("{}: repair_header: ignoring (clean checksum)", .{self.replica});
                     return false;
                 }
             } else if (existing.view == header.view) {
                 // We expect that the same view and op must have the same checksum:
-                assert(existing.op < header.op);
-                log.debug("{}: repair_header: exists (same view, older op)", .{self.replica});
-            } else if (existing.op >= header.op) {
-                assert(existing.view < header.view);
-                log.debug("{}: repair_header: exists (older view, reordered op)", .{self.replica});
-            } else {
-                assert(existing.view < header.view);
-                assert(existing.op < header.op);
-                log.debug("{}: repair_header: exists (older view, older op)", .{self.replica});
-            }
+                assert(existing.op != header.op);
 
-            assert(existing.view <= header.view);
-            assert(existing.op <= header.op or existing.view < header.view);
+                // The journal must have wrapped:
+                if (existing.op < header.op) {
+                    // We may safely replace this existing op (with hash chain and overlap caveats):
+                    log.debug("{}: repair_header: exists (same view, older op)", .{self.replica});
+                } else if (existing.op > header.op) {
+                    log.debug("{}: repair_header: ignoring (same view, newer op)", .{self.replica});
+                    return false;
+                } else {
+                    unreachable;
+                }
+            } else {
+                assert(existing.view != header.view);
+                assert(existing.op == header.op or existing.op != header.op);
+
+                if (self.repair_header_would_connect_hash_chain(header)) {
+                    // We may safely replace this existing op (with overlap caveat):
+                    log.debug("{}: repair_header: exists (hash chain break)", .{self.replica});
+                } else {
+                    // We cannot replace this existing op until we are sure that doing so would not
+                    // violate any prior commitments made to the leader.
+                    log.debug("{}: repair_header: ignoring (hash chain doubt)", .{self.replica});
+                    return false;
+                }
+            }
         } else {
+            // We may repair the gap (with hash chain and overlap caveats):
             log.debug("{}: repair_header: gap", .{self.replica});
         }
 
-        if (self.repair_header_would_break_chain_with_newer_neighbor(header)) {
-            log.debug("{}: repair_header: would break chain with newer neighbor", .{self.replica});
+        // Caveat: Do not repair an existing op or gap if doing so would break the hash chain:
+        if (self.repair_header_would_break_hash_chain_with_next_entry(header)) {
+            log.debug("{}: repair_header: ignoring (would break hash chain with next entry)", .{
+                self.replica,
+            });
             return false;
         }
 
-        if (self.repair_header_would_succeed_newer_neighbor(header)) {
-            log.debug("{}: repair_header: would succeed newer neighbor", .{self.replica});
-            return false;
-        }
-
-        if (self.repair_header_would_overlap_newer_neighbor(header)) {
-            log.debug("{}: repair_header: would overlap newer neighbor", .{self.replica});
-            return false;
+        // Caveat: Do not repair an existing op or gap if doing so would overlap another:
+        if (self.repair_header_would_overlap_another(header)) {
+            if (self.repair_header_would_connect_hash_chain(header)) {
+                // We may overlap previous entries in order to connect the hash chain:
+                log.debug("{}: repair_header: overlap (would connect hash chain)", .{self.replica});
+            } else {
+                log.debug("{}: repair_header: ignoring (would overlap another)", .{self.replica});
+                return false;
+            }
         }
 
         // TODO Snapshots: Skip if this header is already snapshotted.
@@ -2666,79 +2683,83 @@ pub const Replica = struct {
         return true;
     }
 
-    /// If we repair this header would we introduce a break in the chain with a newer neighbor?
-    /// Ignores breaks in the chain if the neighboring entry is older and would in turn be repaired.
-    /// Panics if the hash chain would break for immediate neighbors in the same view.
-    fn repair_header_would_break_chain_with_newer_neighbor(
+    /// If we repair this header would we break the hash chain only to our immediate right?
+    /// This offers a weak guarantee compared to `repair_header_would_connect_hash_chain()` below.
+    /// However, it is useful for allowing efficient repairs when the hash chain is sparse.
+    fn repair_header_would_break_hash_chain_with_next_entry(
         self: *Replica,
         header: *const Header,
     ) bool {
         if (self.journal.previous_entry(header)) |previous| {
-            if (previous.checksum == header.nonce) {
-                assert(previous.view <= header.view);
-                assert(previous.op + 1 == header.op);
-                return false;
-            }
             self.panic_if_hash_chain_would_break_in_the_same_view(previous, header);
-            return self.ascending_viewstamps(header, previous);
         }
+
         if (self.journal.next_entry(header)) |next| {
+            self.panic_if_hash_chain_would_break_in_the_same_view(header, next);
+
             if (header.checksum == next.nonce) {
                 assert(header.view <= next.view);
                 assert(header.op + 1 == next.op);
+                // We don't break with `next` but this is no guarantee that `next` does not break.
                 return false;
+            } else {
+                // If the journal has wrapped, then err in favor of a break regardless of op order:
+                return true;
             }
-            self.panic_if_hash_chain_would_break_in_the_same_view(header, next);
-            return self.ascending_viewstamps(header, next);
         }
+
+        // We are not completely sure since there is no entry to the immediate right:
         return false;
     }
 
-    /// If we repair this header would we overwrite a newer neighbor (immediate or distant)?
-    /// Ignores overlap if the neighboring entry is older and would in turn be repaired.
-    fn repair_header_would_overlap_newer_neighbor(self: *Replica, header: *const Header) bool {
+    /// If we repair this header would we connect with the hash chain through to the latest op?
+    /// This offers a strong guarantee that may be used to replace or overlap an existing op.
+    fn repair_header_would_connect_hash_chain(self: *Replica, header: *const Header) bool {
+        var entry = header;
+        assert(entry.op < self.op);
+
+        while (entry.op < self.op) {
+            if (self.journal.next_entry(entry)) |next| {
+                if (entry.checksum == next.nonce) {
+                    assert(entry.view <= next.view);
+                    assert(entry.op + 1 == next.op);
+                    entry = next;
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        assert(entry.op == self.op);
+        assert(entry.checksum == self.journal.entry_for_op_exact(self.op).?.checksum);
+        return true;
+    }
+
+    /// If we repair this header would we overlap and overwrite part of another batch?
+    /// Journal entries have variable-sized batches that may overlap if entries are disconnected.
+    fn repair_header_would_overlap_another(self: *Replica, header: *const Header) bool {
         // TODO Snapshots: Handle journal wrap around.
         {
-            // Look behind this entry for any preceeding entry that this would overwrite.
-            var op: usize = header.op;
+            // Look behind this entry for any preceeding entry that this would overlap:
+            var op: u64 = header.op;
             while (op > 0) {
                 op -= 1;
                 if (self.journal.entry_for_op(op)) |neighbor| {
-                    if (self.journal.next_offset(neighbor) > header.offset) {
-                        if (self.ascending_viewstamps(header, neighbor)) return true;
-                    } else {
-                        break;
-                    }
+                    if (self.journal.next_offset(neighbor) > header.offset) return true;
+                    break;
                 }
             }
         }
         {
-            // Look beyond this entry for any succeeding entry that this would overwrite.
-            var op: usize = header.op + 1;
+            // Look beyond this entry for any succeeding entry that this would overlap:
+            var op: u64 = header.op + 1;
             while (op <= self.op) : (op += 1) {
                 if (self.journal.entry_for_op(op)) |neighbor| {
-                    if (self.journal.next_offset(header) > neighbor.offset) {
-                        if (self.ascending_viewstamps(header, neighbor)) return true;
-                    } else {
-                        break;
-                    }
+                    if (self.journal.next_offset(header) > neighbor.offset) return true;
+                    break;
                 }
-            }
-        }
-        return false;
-    }
-
-    /// If we repair this header would we succeed a newer neighbor (immediate or distant)?
-    /// Looks behind this entry for any preceeding entry that would be newer.
-    fn repair_header_would_succeed_newer_neighbor(self: *Replica, header: *const Header) bool {
-        // TODO Snapshots: Handle journal wrap around:
-        // We may not know the journal start position (if we do not yet have the snapshot).
-        // Run from header.op - 1 down through zero to start?
-        var op: usize = header.op;
-        while (op > 0) {
-            op -= 1;
-            if (self.journal.entry_for_op(op)) |neighbor| {
-                return self.ascending_viewstamps(header, neighbor);
             }
         }
         return false;
