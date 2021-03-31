@@ -20,7 +20,7 @@ const usage = fmt.comptimePrint(
     \\ --cluster=<hex id>
     \\        Set the cluster ID to the provided non-zero 128 bit hexidecimal number.
     \\
-    \\ --replicas=<addresses>
+    \\ --replica-addresses=<addresses>
     \\        Set the addresses of all replicas in the cluster. Accepts a
     \\        comma-separated list of IPv4 addresses with port numbers.
     \\        Either the IPv4 address or port number, but not both, may be
@@ -28,17 +28,17 @@ const usage = fmt.comptimePrint(
     \\        will be used.
     \\
     \\ --replica-index=<index>
-    \\        Set the address in the array passed to the --replicas option which
+    \\        Set the address in the array passed to the --replica-addresses option which
     \\        will be used for this replica process. The value of this option is
     \\        interpereted as a zero-based index in to the array.
     \\
     \\Examples:
     \\
-    \\ tigerbeetle --cluster=1a2b3c --replicas=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 --replica-index=0
+    \\ tigerbeetle --cluster=1a2b3c --replica-addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 --replica-index=0
     \\
-    \\ tigerbeetle --cluster=1a2b3c --replicas=3003,3001,3002 --replica-index=1
+    \\ tigerbeetle --cluster=1a2b3c --replica-addresses=3003,3001,3002 --replica-index=1
     \\
-    \\ tigerbeetle --cluster=1a2b3c --replicas=192.168.0.1,192.168.0.2,192.168.0.3 --replica-index=2
+    \\ tigerbeetle --cluster=1a2b3c --replica-addresses=192.168.0.1,192.168.0.2,192.168.0.3 --replica-index=2
     \\
 , .{
     .default_address = default_address,
@@ -66,8 +66,8 @@ pub fn parse_args() Args {
     while (args.nextPosix()) |arg| {
         if (mem.startsWith(u8, arg, "--cluster")) {
             maybe_cluster = parse_flag("--cluster", arg);
-        } else if (mem.startsWith(u8, arg, "--replicas")) {
-            maybe_configuration = parse_flag("--replicas", arg);
+        } else if (mem.startsWith(u8, arg, "--replica-addresses")) {
+            maybe_configuration = parse_flag("--replica-addresses", arg);
         } else if (mem.startsWith(u8, arg, "--replica-index")) {
             maybe_replica = parse_flag("--replica-index", arg);
         } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
@@ -81,7 +81,7 @@ pub fn parse_args() Args {
     const raw_cluster = maybe_cluster orelse
         print_error_exit("the --cluster option is required", .{});
     const raw_configuration = maybe_configuration orelse
-        print_error_exit("the --replicas option is required", .{});
+        print_error_exit("the --replica-addresses option is required", .{});
     const raw_replica = maybe_replica orelse
         print_error_exit("the --replica-index option is required", .{});
 
@@ -138,10 +138,10 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
     var i: usize = 0;
     while (comma_it.next()) |entry| : (i += 1) {
         if (entry.len == 0) {
-            print_error_exit("array of addresses for --replicas must not have a trailing comma", .{});
+            print_error_exit("array of addresses for --replica-addresses must not have a trailing comma", .{});
         }
         if (i == max_replicas) {
-            print_error_exit("max {d} entries are allowed in the array of addresses for --replicas", .{max_replicas});
+            print_error_exit("max {d} addresses are allowed for --replica-addresses", .{max_replicas});
         }
         var colon_it = mem.split(entry, ":");
         // the split iterator will always return non-null once even if the delimiter is not found.
@@ -150,16 +150,16 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
             if (colon_it.next() != null) {
                 print_error_exit("more than one colon in address array entry '{s}'", .{entry});
             }
-            const port = fmt.parseUnsigned(u16, entry, 10) catch |err| switch (err) {
+            const port = fmt.parseUnsigned(u16, raw_port, 10) catch |err| switch (err) {
                 error.Overflow => {
-                    print_error_exit("'{s}' is greater than the maximum port number (65535).", .{entry});
+                    print_error_exit("'{s}' is greater than the maximum port number (65535).", .{raw_port});
                 },
                 error.InvalidCharacter => {
-                    print_error_exit("invalid character in port '{s}'.", .{entry});
+                    print_error_exit("invalid character in port '{s}'.", .{raw_port});
                 },
             };
             configuration_storage[i] = net.Address.parseIp4(raw_ipv4, port) catch {
-                print_error_exit("'{s}' is not a valid IPv4 address.", .{entry});
+                print_error_exit("'{s}' is not a valid IPv4 address.", .{raw_ipv4});
             };
         } else {
             // There was no colon in entry so there are now two cases:
