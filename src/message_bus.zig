@@ -3,6 +3,8 @@ const assert = std.debug.assert;
 const mem = std.mem;
 const os = std.os;
 
+const conf = @import("tigerbeetle.conf");
+
 const vr = @import("vr.zig");
 const Header = vr.Header;
 const Replica = vr.Replica;
@@ -11,16 +13,14 @@ const IO = @import("io_callbacks.zig").IO;
 
 const log = std.log.scoped(.message_bus);
 
-const tcp_backlog = 64;
-const num_connections = 32;
-const queue_size = 3;
+const SendQueue = RingBuffer(*MessageBus.Message, conf.connection_send_queue_max);
 
 pub const MessageBus = struct {
     pub const Address = std.net.Address;
 
     pub const Message = struct {
         header: *Header,
-        buffer: []u8 align(vr.sector_size),
+        buffer: []u8 align(conf.sector_size),
         references: usize = 0,
         next: ?*Message = null,
     };
@@ -35,7 +35,7 @@ pub const MessageBus = struct {
     server: *Replica,
     server_fd: os.socket_t,
     /// Used to store messages sent by the server to itself for delivery in flush().
-    server_send_queue: RingBuffer(*Message, queue_size) = .{},
+    server_send_queue: SendQueue = .{},
 
     accept_completion: IO.Completion = undefined,
     /// The connection reserved for the currently in progress accept operation.
@@ -67,9 +67,9 @@ pub const MessageBus = struct {
         server_index: u16,
     ) !void {
         // There must be enough connections for all replicas and at least one client.
-        assert(num_connections > configuration.len);
+        assert(conf.connections_max > configuration.len);
 
-        const connections = try allocator.alloc(Connection, num_connections);
+        const connections = try allocator.alloc(Connection, conf.connections_max);
         errdefer allocator.free(connections);
         mem.set(Connection, connections, .{ .message_bus = self });
 
@@ -88,7 +88,7 @@ pub const MessageBus = struct {
         };
 
         // Pre-allocate enough memory to hold all possible connections in the client map.
-        try self.clients.ensureCapacity(allocator, num_connections);
+        try self.clients.ensureCapacity(allocator, conf.connections_max);
     }
 
     fn init_tcp(address: std.net.Address) !os.socket_t {
@@ -98,7 +98,7 @@ pub const MessageBus = struct {
         try os.setsockopt(fd, os.SOL_SOCKET, os.SO_REUSEADDR, &mem.toBytes(@as(c_int, 1)));
         // TODO: port hopping
         try os.bind(fd, &address.any, address.getOsSockLen());
-        try os.listen(fd, tcp_backlog);
+        try os.listen(fd, conf.tcp_backlog);
         return fd;
     }
 
@@ -299,7 +299,7 @@ pub const MessageBus = struct {
     pub fn create_message(self: *MessageBus, size: u32) !*Message {
         assert(size >= @sizeOf(Header));
 
-        var buffer = try self.allocator.allocAdvanced(u8, vr.sector_size, size, .exact);
+        var buffer = try self.allocator.allocAdvanced(u8, conf.sector_size, size, .exact);
         errdefer self.allocator.free(buffer);
         mem.set(u8, buffer, 0);
 
@@ -373,7 +373,7 @@ const Connection = struct {
     /// Number of bytes of the current message that have already been sent.
     send_progress: usize = 0,
     /// The queue of messages to send to the client or replica peer.
-    send_queue: RingBuffer(*MessageBus.Message, queue_size) = .{},
+    send_queue: SendQueue = .{},
 
     /// Attempt to connect to a replica.
     /// The slot in the Message.replicas slices is immediately reserved.

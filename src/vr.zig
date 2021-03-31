@@ -4,6 +4,8 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.vr);
 pub const log_level: std.log.Level = .debug;
 
+const conf = @import("tigerbeetle.conf");
+
 // TODO: This currently needs to be switched out manually.
 const MessageBus = @import("message_bus.zig").MessageBus;
 //const MessageBus = @import("test_message_bus.zig").MessageBus;
@@ -260,18 +262,14 @@ const Client = struct {};
 // If a client has done a few billion requests, we don't expect to see request 0 come through.
 const ClientTable = struct {};
 
-// TODO Import these from tigerbeetle.conf:
-pub const response_size_max = 4 * 1024 * 1024;
-pub const sector_size = 4096;
-
 /// TODO Use IO and callbacks:
 pub const Storage = struct {
     allocator: *Allocator,
-    memory: []u8 align(sector_size),
+    memory: []u8 align(conf.sector_size),
     size: u64,
 
     pub fn init(allocator: *Allocator, size: u64) !Storage {
-        var memory = try allocator.allocAdvanced(u8, sector_size, size, .exact);
+        var memory = try allocator.allocAdvanced(u8, conf.sector_size, size, .exact);
         errdefer allocator.free(memory);
         std.mem.set(u8, memory, 0);
 
@@ -290,9 +288,9 @@ pub const Storage = struct {
         assert(buffer.len > 0);
         assert(offset + buffer.len <= self.size);
 
-        assert(@mod(@ptrToInt(buffer.ptr), sector_size) == 0);
-        assert(@mod(buffer.len, sector_size) == 0);
-        assert(@mod(offset, sector_size) == 0);
+        assert(@mod(@ptrToInt(buffer.ptr), conf.sector_size) == 0);
+        assert(@mod(buffer.len, conf.sector_size) == 0);
+        assert(@mod(offset, conf.sector_size) == 0);
     }
 
     fn read(self: *Storage, buffer: []u8, offset: u64) void {
@@ -321,11 +319,11 @@ pub const Journal = struct {
     size: u64,
     size_headers: u64,
     size_circular_buffer: u64,
-    headers: []Header align(sector_size),
+    headers: []Header align(conf.sector_size),
     dirty: []bool,
 
     /// We copy-on-write to this buffer when writing, as in-memory headers may change concurrently:
-    write_headers_buffer: []u8 align(sector_size),
+    write_headers_buffer: []u8 align(conf.sector_size),
 
     /// Apart from the header written with the entry, we also store two redundant copies of each
     /// header at different locations on disk, and we alternate between these for each append.
@@ -343,15 +341,15 @@ pub const Journal = struct {
         size: u64,
         headers_count: u32,
     ) !Journal {
-        if (@mod(size, sector_size) != 0) return error.SizeMustBeAMultipleOfSectorSize;
+        if (@mod(size, conf.sector_size) != 0) return error.SizeMustBeAMultipleOfSectorSize;
         if (!std.math.isPowerOfTwo(headers_count)) return error.HeadersCountMustBeAPowerOfTwo;
         assert(storage.size == size);
 
-        const headers_per_sector = @divExact(sector_size, @sizeOf(Header));
+        const headers_per_sector = @divExact(conf.sector_size, @sizeOf(Header));
         assert(headers_per_sector > 0);
         assert(headers_count >= headers_per_sector);
 
-        var headers = try allocator.allocAdvanced(Header, sector_size, headers_count, .exact);
+        var headers = try allocator.allocAdvanced(Header, conf.sector_size, headers_count, .exact);
         errdefer allocator.free(headers);
         for (headers) |*header| header.zero();
 
@@ -361,7 +359,7 @@ pub const Journal = struct {
 
         var write_headers_buffer = try allocator.allocAdvanced(
             u8,
-            sector_size,
+            conf.sector_size,
             @sizeOf(Header) * headers.len,
             .exact,
         );
@@ -396,8 +394,8 @@ pub const Journal = struct {
             .write_headers_buffer = write_headers_buffer,
         };
 
-        assert(@mod(self.size_circular_buffer, sector_size) == 0);
-        assert(@mod(@ptrToInt(&self.headers[0]), sector_size) == 0);
+        assert(@mod(self.size_circular_buffer, conf.sector_size) == 0);
+        assert(@mod(@ptrToInt(&self.headers[0]), conf.sector_size) == 0);
         assert(self.dirty.len == self.headers.len);
         assert(self.write_headers_buffer.len == @sizeOf(Header) * self.headers.len);
 
@@ -854,13 +852,13 @@ pub const Journal = struct {
     }
 
     fn sector_floor(offset: u64) u64 {
-        const sectors = std.math.divFloor(u64, offset, sector_size) catch unreachable;
-        return sectors * sector_size;
+        const sectors = std.math.divFloor(u64, offset, conf.sector_size) catch unreachable;
+        return sectors * conf.sector_size;
     }
 
     fn sector_ceil(offset: u64) u64 {
-        const sectors = std.math.divCeil(u64, offset, sector_size) catch unreachable;
-        return sectors * sector_size;
+        const sectors = std.math.divCeil(u64, offset, conf.sector_size) catch unreachable;
+        return sectors * conf.sector_size;
     }
 };
 
@@ -970,7 +968,7 @@ pub const Replica = struct {
     commit_max: u64,
 
     /// Used to read a journal entry before committing operations to the state machine:
-    commit_buffer: []u8 align(sector_size),
+    commit_buffer: []u8 align(conf.sector_size),
 
     /// The current request's checksum (used for now to enforce one-at-a-time request processing):
     request_checksum: ?u128 = null,
@@ -1080,7 +1078,7 @@ pub const Replica = struct {
         journal.headers[0] = init_prepare;
         journal.assert_headers_reserved_from(init_prepare.op + 1);
 
-        var commit_buffer = try allocator.allocAdvanced(u8, sector_size, response_size_max, .exact);
+        var commit_buffer = try allocator.allocAdvanced(u8, conf.sector_size, conf.response_size_max, .exact);
         errdefer allocator.free(commit_buffer);
         std.mem.set(u8, commit_buffer, 0);
 
@@ -2189,7 +2187,7 @@ pub const Replica = struct {
             const entry_body = self.commit_buffer[@sizeOf(Header)..entry.size];
             assert(entry.valid_checksum_body(entry_body));
 
-            const reply = self.message_bus.create_message(response_size_max) catch unreachable;
+            const reply = self.message_bus.create_message(conf.response_size_max) catch unreachable;
             _ = self.message_bus.ref(reply);
             defer self.message_bus.unref(reply);
             var reply_body_size = @intCast(u32, self.state_machine.commit(
