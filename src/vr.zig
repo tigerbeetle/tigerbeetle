@@ -1100,16 +1100,15 @@ pub const Replica = struct {
             .start_view_change_from_other_replicas = start_view_change,
             .do_view_change_from_all_replicas = do_view_change,
 
-            // TODO Fine-tune timeout intervals:
             .prepare_timeout = Timeout{
                 .name = "prepare_timeout",
                 .replica = replica,
-                .after = 10,
+                .after = 20,
             },
             .commit_timeout = Timeout{
                 .name = "commit_timeout",
                 .replica = replica,
-                .after = 3,
+                .after = 100,
             },
             .normal_timeout = Timeout{
                 .name = "normal_timeout",
@@ -1124,7 +1123,7 @@ pub const Replica = struct {
             .repair_timeout = Timeout{
                 .name = "repair_timeout",
                 .replica = replica,
-                .after = 7,
+                .after = 20,
             },
         };
 
