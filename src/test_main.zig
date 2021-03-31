@@ -106,7 +106,7 @@ pub fn run() !void {
         }
 
         message_bus.flush();
-        std.time.sleep(std.time.ns_per_ms * 1000);
+        std.time.sleep(std.time.ns_per_ms * 500);
     }
 }
 

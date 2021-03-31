@@ -7,8 +7,8 @@ pub const log_level: std.log.Level = .debug;
 const conf = @import("tigerbeetle.conf");
 
 // TODO: This currently needs to be switched out manually.
-const MessageBus = @import("message_bus.zig").MessageBus;
-//const MessageBus = @import("test_message_bus.zig").MessageBus;
+//const MessageBus = @import("message_bus.zig").MessageBus;
+const MessageBus = @import("test_message_bus.zig").MessageBus;
 const Message = MessageBus.Message;
 
 const ConcurrentRanges = @import("concurrent_ranges.zig").ConcurrentRanges;
@@ -1326,6 +1326,11 @@ pub const Replica = struct {
     /// If the next replica is down or partitioned, then the leader's prepare timeout will fire,
     /// and the leader will resend but to another replica, until it receives enough prepare_ok's.
     fn on_prepare(self: *Replica, message: *Message) void {
+        // TODO
+        if (self.replica == 2 and self.commit_max < 2) {
+            log.debug("{}: on_prepare: dropping for testing purposes", .{self.replica});
+            return;
+        }
         self.view_jump(message.header);
 
         if (self.is_repair(message)) {
@@ -2190,6 +2195,7 @@ pub const Replica = struct {
             const reply = self.message_bus.create_message(conf.response_size_max) catch unreachable;
             _ = self.message_bus.ref(reply);
             defer self.message_bus.unref(reply);
+
             var reply_body_size = @intCast(u32, self.state_machine.commit(
                 entry.operation,
                 entry_body,
@@ -2468,6 +2474,7 @@ pub const Replica = struct {
     /// Starting from the latest journal entry, backfill any missing or disconnected headers.
     /// A header is disconnected if it breaks the hash chain with its newer neighbor to the right.
     /// Since we work backwards from the latest entry, we should always be able to fix the chain.
+    /// Once headers are connected, backfill any dirty or faulty prepares.
     fn repair(self: *Replica) void {
         self.repair_timeout.reset();
 
@@ -2555,7 +2562,14 @@ pub const Replica = struct {
         assert(self.op >= self.commit_max);
         assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
-        // TODO Scan dirty bits and request prepares.
+        // Request the latest dirty or faulty prepare:
+        var op = self.op;
+        while (op > self.commit_min) : (op -= 1) {
+            if (self.journal.dirty[op]) {
+                log.debug("we need to request_prepare for op={}", .{op});
+                return;
+            }
+        }
     }
 
     fn repair_dirty(self: *Replica) void {
