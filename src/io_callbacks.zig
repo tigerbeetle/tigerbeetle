@@ -223,6 +223,7 @@ pub const IO = struct {
                         os.EALREADY => error.OpenAlreadyInProgress,
                         os.EBADF => error.FileDescriptorInvalid,
                         os.ECONNREFUSED => error.ConnectionRefused,
+                        os.ECONNRESET => error.ConnectionResetByPeer,
                         os.EFAULT => unreachable,
                         os.EISCONN => error.AlreadyConnected,
                         os.ENETUNREACH => error.NetworkUnreachable,
@@ -318,6 +319,7 @@ pub const IO = struct {
                         os.ENOMEM => error.SystemResources,
                         os.ENOTCONN => error.SocketNotConnected,
                         os.ENOTSOCK => error.FileDescriptorNotASocket,
+                        os.ECONNRESET => error.ConnectionResetByPeer,
                         else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
                     } else @intCast(usize, completion.result);
                     completion.callback(completion.context, completion, &result);
