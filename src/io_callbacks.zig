@@ -35,33 +35,25 @@ pub const IO = struct {
     /// Pass all queued submissions to the kernel and run the event loop
     /// until there is no longer any I/O pending.
     pub fn run(self: *IO) !void {
-        while (self.queued + self.submitted > 0 or
-            self.unqueued.out != null or self.completed.out != null)
+        // We already use `io_uring_enter()` to submit SQEs so reuse that to wait for CQEs:
+        try self.flush_submissions(true);
+        // We can now just peek for any CQEs without waiting, and without another syscall:
+        try self.flush_completions(false);
+        // Run completions only after all completions have been flushed:
+        // Loop on a copy of the linked list, having reset the linked list first, so that any
+        // synchronous append on running a completion is executed only the next time round
+        // the event loop, without creating an infinite suspend/resume cycle.
         {
-            // We already use `io_uring_enter()` to submit SQEs so reuse that to wait for CQEs:
-            try self.flush_submissions(true);
-            // We can now just peek for any CQEs without waiting, and without another syscall:
-            try self.flush_completions(false);
-            // Run completions only after all completions have been flushed:
-            // Loop on a copy of the linked list, having reset the linked list first, so that any
-            // synchronous append on running a completion is executed only the next time round
-            // the event loop, without creating an infinite suspend/resume cycle.
-            {
-                var copy = self.completed;
-                self.completed = .{};
-                while (copy.pop()) |completion| completion.complete();
-            }
-            // Again, loop on a copy of the list to avoid an infinite loop
-            {
-                var copy = self.unqueued;
-                self.unqueued = .{};
-                while (copy.pop()) |completion| self.enqueue(completion);
-            }
+            var copy = self.completed;
+            self.completed = .{};
+            while (copy.pop()) |completion| completion.complete();
         }
-        assert(self.unqueued.in == null);
-        assert(self.unqueued.out == null);
-        assert(self.completed.in == null);
-        assert(self.completed.out == null);
+        // Again, loop on a copy of the list to avoid an infinite loop
+        {
+            var copy = self.unqueued;
+            self.unqueued = .{};
+            while (copy.pop()) |completion| self.enqueue(completion);
+        }
     }
 
     fn flush_completions(self: *IO, wait: bool) !void {
