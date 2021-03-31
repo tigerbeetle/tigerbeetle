@@ -138,7 +138,7 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
         if (entry.len == 0) {
             print_error_exit("array of addresses for --replica-addresses must not have a trailing comma", .{});
         }
-        if (i == max_replicas) {
+        if (i == conf.replicas_max) {
             print_error_exit("max {d} addresses are allowed for --replica-addresses", .{conf.replicas_max});
         }
         var colon_it = mem.split(entry, ":");

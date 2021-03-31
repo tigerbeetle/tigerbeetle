@@ -94,8 +94,41 @@ pub const MessageBus = struct {
     fn init_tcp(address: std.net.Address) !os.socket_t {
         const fd = try os.socket(address.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, os.IPPROTO_TCP);
         errdefer os.close(fd);
-        // TODO: configure RCVBUF, SNDBUF, KEEPALIVE, TIMEOUT, NODELAY
-        try os.setsockopt(fd, os.SOL_SOCKET, os.SO_REUSEADDR, &mem.toBytes(@as(c_int, 1)));
+
+        const set = struct {
+            fn set(_fd: os.socket_t, level: u32, option: u32, value: c_int) !void {
+                try os.setsockopt(_fd, level, option, &mem.toBytes(value));
+            }
+        }.set;
+
+        try set(fd, os.SOL_SOCKET, os.SO_REUSEADDR, 1);
+        if (conf.tcp_rcvbuf > 0) {
+            // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in the event of an EPERM):
+            set(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, conf.tcp_rcvbuf) catch |err| switch (err) {
+                error.PermissionDenied => try set(fd, os.SOL_SOCKET, os.SO_RCVBUF, conf.tcp_rcvbuf),
+                else => return err,
+            };
+        }
+        if (conf.tcp_sndbuf > 0) {
+            // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in the event of an EPERM):
+            set(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, conf.tcp_sndbuf) catch |err| switch (err) {
+                error.PermissionDenied => try set(fd, os.SOL_SOCKET, os.SO_SNDBUF, conf.tcp_sndbuf),
+                else => return err,
+            };
+        }
+        if (conf.tcp_keepalive) {
+            try set(fd, os.SOL_SOCKET, os.SO_KEEPALIVE, 1);
+            try set(fd, os.IPPROTO_TCP, os.TCP_KEEPIDLE, conf.tcp_keepidle);
+            try set(fd, os.IPPROTO_TCP, os.TCP_KEEPINTVL, conf.tcp_keepintvl);
+            try set(fd, os.IPPROTO_TCP, os.TCP_KEEPCNT, conf.tcp_keepcnt);
+        }
+        if (conf.tcp_user_timeout > 0) {
+            try set(fd, os.IPPROTO_TCP, os.TCP_USER_TIMEOUT, conf.tcp_user_timeout);
+        }
+        if (conf.tcp_nodelay) {
+            try set(fd, os.IPPROTO_TCP, os.TCP_NODELAY, 1);
+        }
+
         // TODO: port hopping
         try os.bind(fd, &address.any, address.getOsSockLen());
         try os.listen(fd, conf.tcp_backlog);
