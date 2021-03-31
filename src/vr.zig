@@ -1174,7 +1174,6 @@ pub const Replica = struct {
     /// This eliminates a dependency on the system time and enables deterministic testing.
     pub fn tick(self: *Replica) void {
         self.ticks += 1;
-        if (self.ticks % 10 == 0) log.debug("{}: still ticking", .{self.replica});
 
         self.prepare_timeout.tick();
         self.commit_timeout.tick();
