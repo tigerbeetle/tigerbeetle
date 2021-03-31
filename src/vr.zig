@@ -1330,11 +1330,6 @@ pub const Replica = struct {
     /// If the next replica is down or partitioned, then the leader's prepare timeout will fire,
     /// and the leader will resend but to another replica, until it receives enough prepare_ok's.
     fn on_prepare(self: *Replica, message: *Message) void {
-        // TODO
-        if (self.replica == 2 and self.commit_max < 2) {
-            log.debug("{}: on_prepare: dropping for testing purposes", .{self.replica});
-            return;
-        }
         self.view_jump(message.header);
 
         if (self.is_repair(message)) {
