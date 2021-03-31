@@ -2,6 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
+const conf = @import("tigerbeetle.conf");
+
 const vr = @import("vr.zig");
 const Header = vr.Header;
 const Replica = vr.Replica;
@@ -9,25 +11,23 @@ const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 const log = std.log.scoped(.message_bus);
 
-const queue_size = 3;
+const SendQueue = RingBuffer(*MessageBus.Message, conf.connection_send_queue_max);
 
 pub const MessageBus = struct {
     pub const Address = *Replica;
 
     pub const Message = struct {
         header: *Header,
-        buffer: []u8 align(vr.sector_size),
+        buffer: []u8 align(conf.sector_size),
         references: usize = 0,
         next: ?*Message = null,
     };
-
-    const SendQueue = RingBuffer(*Message, queue_size);
 
     allocator: *mem.Allocator,
     allocated: usize = 0,
 
     configuration: []Address,
-    send_queues: []RingBuffer(*Message, queue_size),
+    send_queues: []SendQueue,
 
     pub fn init(allocator: *mem.Allocator, configuration: []Address) !MessageBus {
         const send_queues = try allocator.alloc(SendQueue, configuration.len);
@@ -135,7 +135,7 @@ pub const MessageBus = struct {
     pub fn create_message(self: *MessageBus, size: u32) !*Message {
         assert(size >= @sizeOf(Header));
 
-        var buffer = try self.allocator.allocAdvanced(u8, vr.sector_size, size, .exact);
+        var buffer = try self.allocator.allocAdvanced(u8, conf.sector_size, size, .exact);
         errdefer self.allocator.free(buffer);
         mem.set(u8, buffer, 0);
 

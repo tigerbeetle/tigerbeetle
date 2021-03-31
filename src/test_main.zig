@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const conf = @import("tigerbeetle.conf");
+
 const MessageBus = @import("test_message_bus.zig").MessageBus;
 const vr = @import("vr.zig");
 const Replica = vr.Replica;
@@ -17,10 +19,6 @@ pub fn run() !void {
     var allocator = &arena.allocator;
 
     const f = 1;
-    const journal_size = 128 * 1024 * 1024;
-    const journal_headers = 16384;
-    const accounts_max = 1000;
-    const transfers_max = 8192;
     const cluster = 123456789;
 
     var configuration: [3]*Replica = undefined;
@@ -29,19 +27,19 @@ pub fn run() !void {
     var storage: [2 * f + 1]Storage = undefined;
     var journals: [2 * f + 1]Journal = undefined;
     for (journals) |*journal, index| {
-        storage[index] = try Storage.init(allocator, journal_size);
+        storage[index] = try Storage.init(allocator, conf.journal_size_max);
         journal.* = try Journal.init(
             allocator,
             &storage[index],
             @intCast(u16, index),
-            journal_size,
-            journal_headers,
+            conf.journal_size_max,
+            conf.journal_headers_max,
         );
     }
 
     var state_machines: [2 * f + 1]StateMachine = undefined;
     for (state_machines) |*state_machine| {
-        state_machine.* = try StateMachine.init(allocator, accounts_max, transfers_max);
+        state_machine.* = try StateMachine.init(allocator, conf.accounts_max, conf.transfers_max);
     }
 
     var replicas: [2 * f + 1]Replica = undefined;
@@ -73,7 +71,7 @@ pub fn run() !void {
 
         if (leader) |replica| {
             if (ticks == 1 or ticks == 5) {
-                var request = message_bus.create_message(vr.sector_size) catch unreachable;
+                var request = message_bus.create_message(conf.sector_size) catch unreachable;
                 request.header.* = .{
                     .cluster = cluster,
                     .client = 1,
