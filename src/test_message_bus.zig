@@ -19,7 +19,7 @@ pub const MessageBus = struct {
     pub const Message = struct {
         header: *Header,
         buffer: []u8 align(conf.sector_size),
-        references: usize = 0,
+        references: usize = 1,
         next: ?*Message = null,
     };
 
@@ -42,8 +42,7 @@ pub const MessageBus = struct {
     }
 
     pub fn tick(self: *MessageBus) void {
-        // Do nothing
-
+        self.flush();
     }
 
     pub fn deinit(self: *MessageBus) void {
@@ -76,7 +75,8 @@ pub const MessageBus = struct {
         assert(header.size == @sizeOf(Header));
 
         // TODO Pre-allocate messages at startup.
-        var message = self.create_message(@sizeOf(Header)) catch unreachable;
+        const message = self.create_message(@sizeOf(Header)) catch unreachable;
+        defer self.unref(message);
         message.header.* = header;
 
         const body = message.buffer[@sizeOf(Header)..message.header.size];
@@ -84,7 +84,6 @@ pub const MessageBus = struct {
         message.header.set_checksum_body(body);
         message.header.set_checksum();
 
-        assert(message.references == 0);
         self.send_message_to_replica(replica, message);
     }
 
@@ -101,7 +100,8 @@ pub const MessageBus = struct {
         assert(header.size == @sizeOf(Header));
 
         // TODO Pre-allocate messages at startup.
-        var message = self.create_message(@sizeOf(Header)) catch unreachable;
+        const message = self.create_message(@sizeOf(Header)) catch unreachable;
+        defer self.unref(message);
         message.header.* = header;
 
         const body = message.buffer[@sizeOf(Header)..message.header.size];
@@ -109,7 +109,6 @@ pub const MessageBus = struct {
         message.header.set_checksum_body(body);
         message.header.set_checksum();
 
-        assert(message.references == 0);
         self.send_message_to_client(client_id, message);
     }
 

@@ -1298,8 +1298,7 @@ pub const Replica = struct {
         for (self.prepare_ok_from_all_replicas) |received| assert(received == null);
         assert(self.prepare_timeout.ticking == false);
 
-        message.references += 1;
-        self.prepare_message = message;
+        self.prepare_message = self.message_bus.ref(message);
         self.prepare_attempt = 0;
         self.prepare_timeout.start();
 
@@ -1584,7 +1583,10 @@ pub const Replica = struct {
         // primary in the new view. Here v is its view, l is its log, v′ is the view number of the
         // latest view in which its status was normal, n is the op number, and k is the commit
         // number.
-        var do_view_change = self.create_do_view_change_or_start_view_message(.do_view_change);
+        const do_view_change = self.create_do_view_change_or_start_view_message(.do_view_change);
+        defer self.message_bus.unref(do_view_change);
+
+        assert(do_view_change.references == 1);
         assert(do_view_change.header.command == .do_view_change);
         assert(do_view_change.header.view == self.view);
         assert(do_view_change.header.op == self.op);
@@ -1711,7 +1713,10 @@ pub const Replica = struct {
         assert(self.commit_min == k);
         assert(self.commit_max == k);
 
-        var start_view = self.create_do_view_change_or_start_view_message(.start_view);
+        const start_view = self.create_do_view_change_or_start_view_message(.start_view);
+        defer self.message_bus.unref(start_view);
+
+        assert(start_view.references == 1);
         assert(start_view.header.command == .start_view);
         assert(start_view.header.view == self.view);
         assert(start_view.header.op == self.op);
@@ -1795,7 +1800,10 @@ pub const Replica = struct {
         assert(message.header.replica != self.replica);
         assert(self.leader());
 
-        var start_view = self.create_do_view_change_or_start_view_message(.start_view);
+        const start_view = self.create_do_view_change_or_start_view_message(.start_view);
+        defer self.message_bus.unref(start_view);
+
+        assert(start_view.references == 1);
         assert(start_view.header.command == .start_view);
         assert(start_view.header.view == self.view);
         assert(start_view.header.op == self.op);
@@ -1839,7 +1847,8 @@ pub const Replica = struct {
 
         const size_max = @sizeOf(Header) + @sizeOf(Header) * count_max;
 
-        var response = self.message_bus.create_message(size_max) catch unreachable;
+        const response = self.message_bus.create_message(size_max) catch unreachable;
+        defer self.message_bus.unref(response);
         response.header.* = .{
             .command = .headers,
             // We echo the nonce back to the replica so that they can match up our response:
@@ -1861,7 +1870,6 @@ pub const Replica = struct {
         response.header.set_checksum_body(body);
         response.header.set_checksum();
 
-        assert(response.references == 0);
         self.send_message_to_replica(message.header.replica, response);
     }
 
@@ -2009,9 +2017,7 @@ pub const Replica = struct {
 
         // Record the first receipt of this message:
         assert(messages[message.header.replica] == null);
-        messages[message.header.replica] = message;
-        assert(message.references == 1);
-        message.references += 1;
+        messages[message.header.replica] = self.message_bus.ref(message);
 
         // Count the number of unique messages now received:
         var count: usize = 0;
@@ -2199,7 +2205,6 @@ pub const Replica = struct {
             assert(entry.valid_checksum_body(entry_body));
 
             const reply = self.message_bus.create_message(conf.response_size_max) catch unreachable;
-            _ = self.message_bus.ref(reply);
             defer self.message_bus.unref(reply);
 
             var reply_body_size = @intCast(u32, self.state_machine.commit(
@@ -2237,6 +2242,7 @@ pub const Replica = struct {
         }
     }
 
+    /// The returned message has exactly 1 reference.
     fn create_do_view_change_or_start_view_message(self: *Replica, command: Command) *Message {
         assert(command == .do_view_change or command == .start_view);
 
@@ -2245,7 +2251,7 @@ pub const Replica = struct {
 
         const size_max = @sizeOf(Header) * 8;
 
-        var message = self.message_bus.create_message(size_max) catch unreachable;
+        const message = self.message_bus.create_message(size_max) catch unreachable;
         message.header.* = .{
             .command = command,
             .cluster = self.cluster,
@@ -2837,9 +2843,8 @@ pub const Replica = struct {
 
         log.debug("{}: repair_later: queueing", .{self.replica});
 
-        message.references += 1;
         message.next = self.repair_queue;
-        self.repair_queue = message;
+        self.repair_queue = self.message_bus.ref(message);
         self.repair_queue_len += 1;
     }
 
@@ -3314,8 +3319,6 @@ pub const Replica = struct {
             return;
         }
 
-        message.references += 1;
-
         if (self.journal.has_dirty(message.header)) {
             self.journal.write(message);
         } else {
@@ -3323,7 +3326,5 @@ pub const Replica = struct {
         }
 
         self.send_prepare_ok(message);
-
-        self.message_bus.unref(message);
     }
 };
