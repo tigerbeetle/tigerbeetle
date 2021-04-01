@@ -17,8 +17,6 @@ const Journal = vr.Journal;
 const Storage = vr.Storage;
 const StateMachine = @import("state_machine.zig").StateMachine;
 
-const tick_ns = conf.tick_ms * std.time.ns_per_ms;
-
 pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const arena = &arena_allocator.allocator;
@@ -57,14 +55,8 @@ pub fn main() !void {
         args.configuration[args.replica],
     });
 
-    var tick_completion: IO.Completion = undefined;
-    io.timeout(*Replica, &replica, on_tick_timeout, &tick_completion, tick_ns);
-
-    try io.run();
-}
-
-fn on_tick_timeout(replica: *Replica, tick_completion: *IO.Completion, result: IO.TimeoutError!void) void {
-    result catch unreachable; // We never cancel the tick timeout
-    replica.tick();
-    tick_completion.io.timeout(*Replica, replica, on_tick_timeout, tick_completion, tick_ns);
+    while (true) {
+        replica.tick();
+        try io.run_for_ns(conf.tick_ms * std.time.ns_per_ms);
+    }
 }
