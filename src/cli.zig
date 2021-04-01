@@ -39,8 +39,8 @@ const usage = fmt.comptimePrint(
     \\ tigerbeetle --cluster=1a2b3c --replica-addresses=192.168.0.1,192.168.0.2,192.168.0.3 --replica-index=2
     \\
 , .{
-    .default_address = conf.default_address,
-    .default_port = conf.default_port,
+    .default_address = conf.address,
+    .default_port = conf.port,
 });
 
 pub const Args = struct {
@@ -166,14 +166,14 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
 
             // Try to parse as a port first
             if (fmt.parseUnsigned(u16, entry, 10)) |port| {
-                configuration_storage[i] = net.Address.parseIp4(conf.default_address, port) catch unreachable;
+                configuration_storage[i] = net.Address.parseIp4(conf.address, port) catch unreachable;
             } else |err| switch (err) {
                 error.Overflow => {
                     print_error_exit("'{s}' is greater than the maximum port number (65535).", .{entry});
                 },
                 error.InvalidCharacter => {
                     // Found something that was not a digit, try parsing as an IPv4 instead.
-                    configuration_storage[i] = net.Address.parseIp4(entry, conf.default_port) catch {
+                    configuration_storage[i] = net.Address.parseIp4(entry, conf.port) catch {
                         print_error_exit("'{s}' is not a valid IPv4 address.", .{entry});
                     };
                 },

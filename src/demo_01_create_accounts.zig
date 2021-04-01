@@ -4,7 +4,7 @@ usingnamespace @import("tigerbeetle.zig");
 usingnamespace @import("demo.zig");
 
 pub fn main() !void {
-    const fd = try connect(config.default_port);
+    const fd = try connect(config.port);
     defer std.os.close(fd);
 
     var accounts = [_]Account{
