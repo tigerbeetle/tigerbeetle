@@ -57,9 +57,14 @@ pub fn main() !void {
         args.configuration[args.replica],
     });
 
-    while (true) {
-        try io.run();
-        replica.tick();
-        std.time.sleep(tick_ns);
-    }
+    var tick_completion: IO.Completion = undefined;
+    io.timeout(*Replica, &replica, on_tick_timeout, &tick_completion, tick_ns);
+
+    try io.run();
+}
+
+fn on_tick_timeout(replica: *Replica, tick_completion: *IO.Completion, result: IO.TimeoutError!void) void {
+    result catch unreachable; // We never cancel the tick timeout
+    replica.tick();
+    tick_completion.io.timeout(*Replica, replica, on_tick_timeout, tick_completion, tick_ns);
 }
