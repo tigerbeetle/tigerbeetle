@@ -1,20 +1,15 @@
 const std = @import("std");
-const assert = std.debug.assert;
-const log = std.log;
-const mem = std.mem;
-const net = std.net;
-const os = std.os;
 
 const conf = @import("tigerbeetle.conf");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, conf.log_level);
 
 const cli = @import("cli.zig");
 const IO = @import("io_callbacks.zig").IO;
-const MessageBus = @import("message_bus.zig").MessageBus;
 const vr = @import("vr.zig");
 const Replica = vr.Replica;
-const Journal = vr.Journal;
 const Storage = vr.Storage;
+const Journal = vr.Journal;
+const MessageBus = @import("message_bus.zig").MessageBus;
 const StateMachine = @import("state_machine.zig").StateMachine;
 
 pub fn main() !void {
@@ -40,16 +35,16 @@ pub fn main() !void {
     var replica = try Replica.init(
         arena,
         args.cluster,
-        @intCast(u32, f),
         args.configuration,
-        &message_bus,
-        &journal,
-        &state_machine,
         args.replica,
+        @intCast(u32, f),
+        &journal,
+        &message_bus,
+        &state_machine,
     );
     try message_bus.init(arena, &io, args.configuration, &replica, args.replica);
 
-    log.info("cluster={x} replica={}: listening on {}", .{
+    std.log.info("cluster={x} replica={}: listening on {}", .{
         args.cluster,
         args.replica,
         args.configuration[args.replica],
