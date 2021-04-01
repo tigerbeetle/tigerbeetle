@@ -22,6 +22,9 @@ const StateMachine = @import("state_machine.zig").StateMachine;
 pub const Command = packed enum(u8) {
     reserved,
 
+    ping,
+    pong,
+
     request,
     prepare,
     prepare_ok,
@@ -1215,6 +1218,8 @@ pub const Replica = struct {
         }
         assert(message.header.replica < self.configuration.len);
         switch (message.header.command) {
+            .ping => self.on_ping(message),
+            .pong => self.on_pong(message),
             .request => self.on_request(message),
             .prepare => self.on_prepare(message),
             .prepare_ok => self.on_prepare_ok(message),
@@ -1229,6 +1234,27 @@ pub const Replica = struct {
             else => unreachable,
         }
     }
+
+    fn on_ping(self: *Replica, message: *const Message) void {
+        if (self.status != .normal) return;
+
+        var pong = .{
+            .command = .pong,
+            .nonce = message.header.checksum,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+        };
+
+        if (message.header.client > 0) {
+            // TODO Lookup latest request number for client from client table.
+            self.message_bus.send_header_to_client(message.header.client, pong);
+        } else if (message.header.replica != self.replica) {
+            self.message_bus.send_header_to_replica(message.header.replica, pong);
+        }
+    }
+
+    fn on_pong(self: *Replica, message: *Message) void {}
 
     fn on_request(self: *Replica, message: *Message) void {
         if (self.status != .normal) {
