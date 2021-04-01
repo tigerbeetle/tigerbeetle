@@ -919,9 +919,6 @@ pub const Replica = struct {
     /// The id of the cluster to which this replica belongs:
     cluster: u128,
 
-    /// The maximum number of replicas that may be faulty:
-    f: u32,
-
     /// An array containing the remote or local addresses of each of the 2f + 1 replicas:
     /// Unlike the VRR paper, we do not sort the array but leave the order explicitly to the user.
     /// There are several advantages to this:
@@ -930,19 +927,22 @@ pub const Replica = struct {
     /// This does require that the user specify the same order to all replicas.
     configuration: []MessageBus.Address,
 
+    /// The index into the configuration where this replica's IP address is stored:
+    replica: u16,
+
+    /// The maximum number of replicas that may be faulty:
+    f: u32,
+
+    /// The persistent log of hash-chained journal entries:
+    journal: *Journal,
+
     /// An abstraction to send messages from the replica to itself or another replica or client.
     /// The recipient replica or client may be a local in-memory pointer or network-addressable.
     /// The message bus will also deliver messages to this replica by calling Replica.on_message().
     message_bus: *MessageBus,
 
-    /// The persistent log of hash-chained journal entries:
-    journal: *Journal,
-
     /// For executing service up-calls after an operation has been committed:
     state_machine: *StateMachine,
-
-    /// The index into the configuration where this replica's IP address is stored:
-    replica: u16,
 
     /// The current view, initially 0:
     view: u64,
@@ -1023,9 +1023,6 @@ pub const Replica = struct {
     /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
     repair_timeout: Timeout,
 
-    /// The number of ticks elapsed in total:
-    ticks: u64 = 0,
-
     /// Used to provide deterministic entropy to `choose_any_other_replica()`.
     /// Incremented whenever `choose_any_other_replica()` is called.
     choose_any_other_replica_ticks: u64 = 0,
@@ -1034,12 +1031,12 @@ pub const Replica = struct {
     pub fn init(
         allocator: *Allocator,
         cluster: u128,
-        f: u32,
         configuration: []MessageBus.Address,
-        message_bus: *MessageBus,
-        journal: *Journal,
-        state_machine: *StateMachine,
         replica: u16,
+        f: u32,
+        journal: *Journal,
+        message_bus: *MessageBus,
+        state_machine: *StateMachine,
     ) !Replica {
         assert(cluster > 0);
         assert(configuration.len > 0);
@@ -1088,17 +1085,17 @@ pub const Replica = struct {
         var self = Replica{
             .allocator = allocator,
             .cluster = cluster,
-            .f = f,
             .configuration = configuration,
             .replica = replica,
+            .f = f,
+            .journal = journal,
+            .message_bus = message_bus,
+            .state_machine = state_machine,
             .view = init_prepare.view,
             .op = init_prepare.op,
             .commit_min = init_prepare.commit,
             .commit_max = init_prepare.commit,
             .commit_buffer = commit_buffer,
-            .message_bus = message_bus,
-            .journal = journal,
-            .state_machine = state_machine,
             .prepare_ok_from_all_replicas = prepare_ok,
             .start_view_change_from_other_replicas = start_view_change,
             .do_view_change_from_all_replicas = do_view_change,
@@ -1173,8 +1170,6 @@ pub const Replica = struct {
     /// Time is measured in logical ticks that are incremented on every call to tick().
     /// This eliminates a dependency on the system time and enables deterministic testing.
     pub fn tick(self: *Replica) void {
-        self.ticks += 1;
-
         self.prepare_timeout.tick();
         self.commit_timeout.tick();
         self.normal_timeout.tick();
