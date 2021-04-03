@@ -15,7 +15,7 @@ const usage = fmt.comptimePrint(
     \\
     \\Required Configuration Options:
     \\
-    \\ --cluster=<hex id>
+    \\ --cluster-id=<hex id>
     \\        Set the cluster ID to the provided non-zero 128-bit hexadecimal number.
     \\
     \\ --replica-addresses=<addresses>
@@ -32,11 +32,11 @@ const usage = fmt.comptimePrint(
     \\
     \\Examples:
     \\
-    \\ tigerbeetle --cluster=1a2b3c --replica-addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 --replica-index=0
+    \\ tigerbeetle --cluster-id=1a2b3c --replica-addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 --replica-index=0
     \\
-    \\ tigerbeetle --cluster=1a2b3c --replica-addresses=3003,3001,3002 --replica-index=1
+    \\ tigerbeetle --cluster-id=1a2b3c --replica-addresses=3003,3001,3002 --replica-index=1
     \\
-    \\ tigerbeetle --cluster=1a2b3c --replica-addresses=192.168.0.1,192.168.0.2,192.168.0.3 --replica-index=2
+    \\ tigerbeetle --cluster-id=1a2b3c --replica-addresses=192.168.0.1,192.168.0.2,192.168.0.3 --replica-index=2
     \\
 , .{
     .default_address = config.address,
@@ -62,8 +62,8 @@ pub fn parse_args() Args {
     // Skip argv[0] which is the name of this executable
     _ = args.nextPosix();
     while (args.nextPosix()) |arg| {
-        if (mem.startsWith(u8, arg, "--cluster")) {
-            maybe_cluster = parse_flag("--cluster", arg);
+        if (mem.startsWith(u8, arg, "--cluster-id")) {
+            maybe_cluster = parse_flag("--cluster-id", arg);
         } else if (mem.startsWith(u8, arg, "--replica-addresses")) {
             maybe_configuration = parse_flag("--replica-addresses", arg);
         } else if (mem.startsWith(u8, arg, "--replica-index")) {
@@ -77,7 +77,7 @@ pub fn parse_args() Args {
     }
 
     const raw_cluster = maybe_cluster orelse
-        print_error_exit("the --cluster option is required", .{});
+        print_error_exit("the --cluster-id option is required", .{});
     const raw_configuration = maybe_configuration orelse
         print_error_exit("the --replica-addresses option is required", .{});
     const raw_replica = maybe_replica orelse
@@ -117,14 +117,14 @@ fn parse_flag(comptime flag: []const u8, arg: []const u8) []const u8 {
 fn parse_cluster(raw_cluster: []const u8) u128 {
     const cluster = fmt.parseUnsigned(u128, raw_cluster, 16) catch |err| switch (err) {
         error.Overflow => print_error_exit(
-            \\value provided to --cluster does not fit in a 128bit unsigned integer.
+            \\value provided to --cluster-id does not fit in a 128bit unsigned integer.
         , .{}),
         error.InvalidCharacter => print_error_exit(
-            \\value provided to --cluster contains an invalid character.
+            \\value provided to --cluster-id contains an invalid character.
         , .{}),
     };
     if (cluster == 0) {
-        print_error_exit("a value of 0 is not permitted for --cluster", .{});
+        print_error_exit("a value of 0 is not permitted for --cluster-id", .{});
     }
     return cluster;
 }
