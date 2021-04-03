@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const conf = @import("tigerbeetle.conf");
-pub const log_level: std.log.Level = @intToEnum(std.log.Level, conf.log_level);
+const config = @import("config.zig");
+pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 
 const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
@@ -22,14 +22,14 @@ pub fn main() !void {
     const f = (args.configuration.len - 1) / 2;
 
     var io = try IO.init(128, 0);
-    var state_machine = try StateMachine.init(arena, conf.accounts_max, conf.transfers_max);
-    var storage = try Storage.init(arena, conf.journal_size_max);
+    var state_machine = try StateMachine.init(arena, config.accounts_max, config.transfers_max);
+    var storage = try Storage.init(arena, config.journal_size_max);
     var journal = try Journal.init(
         arena,
         &storage,
         args.replica,
-        conf.journal_size_max,
-        conf.journal_headers_max,
+        config.journal_size_max,
+        config.journal_headers_max,
     );
     var message_bus: MessageBus = undefined;
     var replica = try Replica.init(
@@ -52,6 +52,6 @@ pub fn main() !void {
 
     while (true) {
         replica.tick();
-        try io.run_for_ns(conf.tick_ms * std.time.ns_per_ms);
+        try io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
     }
 }

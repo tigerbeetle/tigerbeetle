@@ -10,12 +10,11 @@ pub fn main() !void {
     // That way, running "zig test tigerbeetle.zig" will test these automatically.
 
     // TODO Update demo.zig's send() method to use std.json.stringify.
-    
+
     // TODO Update demo.zig to write to std out.
     // e.g.
     // var writer = std.io.getStdOut().writer();
     // try std.json.stringify(transfer, .{}, writer);
-
     var command = Command.ack;
 
     var network = NetworkHeader{

@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const conf = @import("tigerbeetle.conf");
+const config = @import("config.zig");
 
 const MessageBus = @import("test_message_bus.zig").MessageBus;
 const vr = @import("vr.zig");
@@ -27,19 +27,19 @@ pub fn run() !void {
     var storage: [2 * f + 1]Storage = undefined;
     var journals: [2 * f + 1]Journal = undefined;
     for (journals) |*journal, index| {
-        storage[index] = try Storage.init(allocator, conf.journal_size_max);
+        storage[index] = try Storage.init(allocator, config.journal_size_max);
         journal.* = try Journal.init(
             allocator,
             &storage[index],
             @intCast(u16, index),
-            conf.journal_size_max,
-            conf.journal_headers_max,
+            config.journal_size_max,
+            config.journal_headers_max,
         );
     }
 
     var state_machines: [2 * f + 1]StateMachine = undefined;
     for (state_machines) |*state_machine| {
-        state_machine.* = try StateMachine.init(allocator, conf.accounts_max, conf.transfers_max);
+        state_machine.* = try StateMachine.init(allocator, config.accounts_max, config.transfers_max);
     }
 
     var replicas: [2 * f + 1]Replica = undefined;
@@ -71,7 +71,7 @@ pub fn run() !void {
 
         if (leader) |replica| {
             if (ticks == 1 or ticks == 5) {
-                var request = message_bus.create_message(conf.sector_size) catch unreachable;
+                var request = message_bus.create_message(config.sector_size) catch unreachable;
                 defer message_bus.unref(request);
 
                 request.header.* = .{

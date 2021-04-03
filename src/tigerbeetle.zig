@@ -5,7 +5,7 @@ const crypto = std.crypto;
 const mem = std.mem;
 const StringifyOptions = std.json.StringifyOptions;
 
-pub const config = @import("tigerbeetle.conf");
+pub const config = @import("config.zig");
 
 pub const Account = packed struct {
     id: u128,
@@ -234,8 +234,8 @@ pub const CreateAccountResults = packed struct {
 
     pub fn jsonStringify(self: CreateAccountResults, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"index\":{},", .{ self.index });
-        try std.fmt.format(writer, "\"result\":\"{}\"", .{ @tagName(self.result) });
+        try std.fmt.format(writer, "\"index\":{},", .{self.index});
+        try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
         try writer.writeAll("}");
     }
 };
@@ -246,8 +246,8 @@ pub const CreateTransferResults = packed struct {
 
     pub fn jsonStringify(self: CreateTransferResults, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"index\":{},", .{ self.index });
-        try std.fmt.format(writer, "\"result\":\"{}\"", .{ @tagName(self.result) });
+        try std.fmt.format(writer, "\"index\":{},", .{self.index});
+        try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
         try writer.writeAll("}");
     }
 };
@@ -258,8 +258,8 @@ pub const CommitTransferResults = packed struct {
 
     pub fn jsonStringify(self: CommitTransferResults, options: StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
-        try std.fmt.format(writer, "\"index\":{},", .{ self.index });
-        try std.fmt.format(writer, "\"result\":\"{}\"", .{ @tagName(self.result) });
+        try std.fmt.format(writer, "\"index\":{},", .{self.index});
+        try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
         try writer.writeAll("}");
     }
 };

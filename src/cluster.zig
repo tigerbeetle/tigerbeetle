@@ -1,6 +1,6 @@
 const std = @import("std");
 const log = std.log.scoped(.cluster);
-const config = @import("tigerbeetle.conf");
+const config = @import("config.zig");
 
 const Connection = @import("connections.zig").Connection;
 

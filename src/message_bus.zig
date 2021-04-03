@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const mem = std.mem;
 const os = std.os;
 
-const conf = @import("tigerbeetle.conf");
+const config = @import("config.zig");
 
 const vr = @import("vr.zig");
 const Header = vr.Header;
@@ -14,14 +14,14 @@ const IO = @import("io.zig").IO;
 
 const log = std.log.scoped(.message_bus);
 
-const SendQueue = RingBuffer(*MessageBus.Message, conf.connection_send_queue_max);
+const SendQueue = RingBuffer(*MessageBus.Message, config.connection_send_queue_max);
 
 pub const MessageBus = struct {
     pub const Address = std.net.Address;
 
     pub const Message = struct {
         header: *Header,
-        buffer: []u8 align(conf.sector_size),
+        buffer: []u8 align(config.sector_size),
         references: usize = 1,
         next: ?*Message = null,
     };
@@ -68,9 +68,9 @@ pub const MessageBus = struct {
         server_index: u16,
     ) !void {
         // There must be enough connections for all replicas and at least one client.
-        assert(conf.connections_max > configuration.len);
+        assert(config.connections_max > configuration.len);
 
-        const connections = try allocator.alloc(Connection, conf.connections_max);
+        const connections = try allocator.alloc(Connection, config.connections_max);
         errdefer allocator.free(connections);
         mem.set(Connection, connections, .{ .message_bus = self });
 
@@ -89,7 +89,7 @@ pub const MessageBus = struct {
         };
 
         // Pre-allocate enough memory to hold all possible connections in the client map.
-        try self.clients.ensureCapacity(allocator, conf.connections_max);
+        try self.clients.ensureCapacity(allocator, config.connections_max);
     }
 
     fn init_tcp(address: std.net.Address) !os.socket_t {
@@ -103,35 +103,35 @@ pub const MessageBus = struct {
         }.set;
 
         try set(fd, os.SOL_SOCKET, os.SO_REUSEADDR, 1);
-        if (conf.tcp_rcvbuf > 0) {
+        if (config.tcp_rcvbuf > 0) {
             // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in the event of an EPERM):
-            set(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, conf.tcp_rcvbuf) catch |err| switch (err) {
-                error.PermissionDenied => try set(fd, os.SOL_SOCKET, os.SO_RCVBUF, conf.tcp_rcvbuf),
+            set(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, config.tcp_rcvbuf) catch |err| switch (err) {
+                error.PermissionDenied => try set(fd, os.SOL_SOCKET, os.SO_RCVBUF, config.tcp_rcvbuf),
                 else => return err,
             };
         }
-        if (conf.tcp_sndbuf > 0) {
+        if (config.tcp_sndbuf > 0) {
             // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in the event of an EPERM):
-            set(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, conf.tcp_sndbuf) catch |err| switch (err) {
-                error.PermissionDenied => try set(fd, os.SOL_SOCKET, os.SO_SNDBUF, conf.tcp_sndbuf),
+            set(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, config.tcp_sndbuf) catch |err| switch (err) {
+                error.PermissionDenied => try set(fd, os.SOL_SOCKET, os.SO_SNDBUF, config.tcp_sndbuf),
                 else => return err,
             };
         }
-        if (conf.tcp_keepalive) {
+        if (config.tcp_keepalive) {
             try set(fd, os.SOL_SOCKET, os.SO_KEEPALIVE, 1);
-            try set(fd, os.IPPROTO_TCP, os.TCP_KEEPIDLE, conf.tcp_keepidle);
-            try set(fd, os.IPPROTO_TCP, os.TCP_KEEPINTVL, conf.tcp_keepintvl);
-            try set(fd, os.IPPROTO_TCP, os.TCP_KEEPCNT, conf.tcp_keepcnt);
+            try set(fd, os.IPPROTO_TCP, os.TCP_KEEPIDLE, config.tcp_keepidle);
+            try set(fd, os.IPPROTO_TCP, os.TCP_KEEPINTVL, config.tcp_keepintvl);
+            try set(fd, os.IPPROTO_TCP, os.TCP_KEEPCNT, config.tcp_keepcnt);
         }
-        if (conf.tcp_user_timeout > 0) {
-            try set(fd, os.IPPROTO_TCP, os.TCP_USER_TIMEOUT, conf.tcp_user_timeout);
+        if (config.tcp_user_timeout > 0) {
+            try set(fd, os.IPPROTO_TCP, os.TCP_USER_TIMEOUT, config.tcp_user_timeout);
         }
-        if (conf.tcp_nodelay) {
+        if (config.tcp_nodelay) {
             try set(fd, os.IPPROTO_TCP, os.TCP_NODELAY, 1);
         }
 
         try os.bind(fd, &address.any, address.getOsSockLen());
-        try os.listen(fd, conf.tcp_backlog);
+        try os.listen(fd, config.tcp_backlog);
 
         return fd;
     }
@@ -338,7 +338,7 @@ pub const MessageBus = struct {
     pub fn create_message(self: *MessageBus, size: u32) !*Message {
         assert(size >= @sizeOf(Header));
 
-        var buffer = try self.allocator.allocAdvanced(u8, conf.sector_size, size, .exact);
+        var buffer = try self.allocator.allocAdvanced(u8, config.sector_size, size, .exact);
         errdefer self.allocator.free(buffer);
         mem.set(u8, buffer, 0);
 
