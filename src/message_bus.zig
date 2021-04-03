@@ -10,7 +10,7 @@ const Header = vr.Header;
 const Journal = vr.Journal;
 const Replica = vr.Replica;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
-const IO = @import("io_callbacks.zig").IO;
+const IO = @import("io.zig").IO;
 
 const log = std.log.scoped(.message_bus);
 
