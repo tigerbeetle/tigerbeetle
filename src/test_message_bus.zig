@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const conf = @import("tigerbeetle.conf");
+const config = @import("config.zig");
 
 const vr = @import("vr.zig");
 const Header = vr.Header;
@@ -11,14 +11,14 @@ const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 const log = std.log.scoped(.message_bus);
 
-const SendQueue = RingBuffer(*MessageBus.Message, conf.connection_send_queue_max);
+const SendQueue = RingBuffer(*MessageBus.Message, config.connection_send_queue_max);
 
 pub const MessageBus = struct {
     pub const Address = *Replica;
 
     pub const Message = struct {
         header: *Header,
-        buffer: []u8 align(conf.sector_size),
+        buffer: []u8 align(config.sector_size),
         references: usize = 1,
         next: ?*Message = null,
     };
@@ -134,7 +134,7 @@ pub const MessageBus = struct {
     pub fn create_message(self: *MessageBus, size: u32) !*Message {
         assert(size >= @sizeOf(Header));
 
-        var buffer = try self.allocator.allocAdvanced(u8, conf.sector_size, size, .exact);
+        var buffer = try self.allocator.allocAdvanced(u8, config.sector_size, size, .exact);
         errdefer self.allocator.free(buffer);
         mem.set(u8, buffer, 0);
 

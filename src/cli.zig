@@ -5,7 +5,7 @@ const mem = std.mem;
 const net = std.net;
 const os = std.os;
 
-const conf = @import("tigerbeetle.conf");
+const config = @import("config.zig");
 
 const usage = fmt.comptimePrint(
     \\Usage: tigerbeetle [options]
@@ -39,8 +39,8 @@ const usage = fmt.comptimePrint(
     \\ tigerbeetle --cluster=1a2b3c --replica-addresses=192.168.0.1,192.168.0.2,192.168.0.3 --replica-index=2
     \\
 , .{
-    .default_address = conf.address,
-    .default_port = conf.port,
+    .default_address = config.address,
+    .default_port = config.port,
 });
 
 pub const Args = struct {
@@ -49,7 +49,7 @@ pub const Args = struct {
     replica: u16,
 };
 
-var configuration_storage: [conf.replicas_max]net.Address = undefined;
+var configuration_storage: [config.replicas_max]net.Address = undefined;
 
 /// Parse the command line arguments passed to tigerbeetle.
 /// Exits the program with a non-zero exit code if an error is found.
@@ -138,8 +138,8 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
         if (entry.len == 0) {
             print_error_exit("array of addresses for --replica-addresses must not have a trailing comma", .{});
         }
-        if (i == conf.replicas_max) {
-            print_error_exit("max {d} addresses are allowed for --replica-addresses", .{conf.replicas_max});
+        if (i == config.replicas_max) {
+            print_error_exit("max {d} addresses are allowed for --replica-addresses", .{config.replicas_max});
         }
         var colon_it = mem.split(entry, ":");
         // the split iterator will always return non-null once even if the delimiter is not found.
@@ -166,14 +166,14 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
 
             // Try to parse as a port first
             if (fmt.parseUnsigned(u16, entry, 10)) |port| {
-                configuration_storage[i] = net.Address.parseIp4(conf.address, port) catch unreachable;
+                configuration_storage[i] = net.Address.parseIp4(config.address, port) catch unreachable;
             } else |err| switch (err) {
                 error.Overflow => {
                     print_error_exit("'{s}' is greater than the maximum port number (65535).", .{entry});
                 },
                 error.InvalidCharacter => {
                     // Found something that was not a digit, try parsing as an IPv4 instead.
-                    configuration_storage[i] = net.Address.parseIp4(entry, conf.port) catch {
+                    configuration_storage[i] = net.Address.parseIp4(entry, config.port) catch {
                         print_error_exit("'{s}' is not a valid IPv4 address.", .{entry});
                     };
                 },
@@ -184,7 +184,7 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
 }
 
 fn parse_replica(raw_replica: []const u8, configuration_len: u16) u16 {
-    comptime assert(conf.replicas_max <= std.math.maxInt(u16));
+    comptime assert(config.replicas_max <= std.math.maxInt(u16));
     const replica = fmt.parseUnsigned(u16, raw_replica, 10) catch |err| switch (err) {
         error.Overflow => print_error_exit(
             \\value provided to --replica-index greater than length of address array.
