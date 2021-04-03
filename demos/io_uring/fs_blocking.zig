@@ -41,9 +41,12 @@ pub fn main() !void {
             offset += page;
         }
 
-        std.debug.print(
-            "fs blocking: write({})/fsync/read({}) * {} pages = {} syscalls in {}ms\n",
-            .{ page, page, pages, syscalls, std.time.milliTimestamp() - start }
-        );
+        std.debug.print("fs blocking: write({})/fsync/read({}) * {} pages = {} syscalls: {}ms\n", .{
+            page,
+            page,
+            pages,
+            syscalls,
+            std.time.milliTimestamp() - start,
+        });
     }
 }

@@ -305,7 +305,7 @@ pub const Storage = struct {
         // pwriteAll(buffer, offset) catch |err| switch (err) {
         //     error.InputOutput => @panic("latent sector error: no spare sectors to reallocate"),
         //     else => {
-        //         log.emerg("write: error={} buffer.len={} offset={}", .{ err, buffer.len, offset });
+        //         log.emerg("write: error={} buffer.len={} offset={}", .{err, buffer.len, offset});
         //         @panic("unrecoverable disk error");
         //     },
         // };
@@ -349,7 +349,12 @@ pub const Journal = struct {
         assert(headers_per_sector > 0);
         assert(headers_count >= headers_per_sector);
 
-        var headers = try allocator.allocAdvanced(Header, config.sector_size, headers_count, .exact);
+        var headers = try allocator.allocAdvanced(
+            Header,
+            config.sector_size,
+            headers_count,
+            .exact,
+        );
         errdefer allocator.free(headers);
         for (headers) |*header| header.zero();
 
@@ -525,7 +530,11 @@ pub const Journal = struct {
     ///
     /// Another example: If op 17 is disconnected from op 18, 16 is connected to 17, and 12-15 are
     /// missing, returns: `{ .op_min = 12, .op_max = 17 }`.
-    pub fn find_latest_headers_break_between(self: *Journal, op_min: u64, op_max: u64) ?HeaderRange {
+    pub fn find_latest_headers_break_between(
+        self: *Journal,
+        op_min: u64,
+        op_max: u64,
+    ) ?HeaderRange {
         assert(op_min <= op_max);
         var range: ?HeaderRange = null;
 
@@ -1078,7 +1087,12 @@ pub const Replica = struct {
         journal.headers[0] = init_prepare;
         journal.assert_headers_reserved_from(init_prepare.op + 1);
 
-        var commit_buffer = try allocator.allocAdvanced(u8, config.sector_size, config.response_size_max, .exact);
+        var commit_buffer = try allocator.allocAdvanced(
+            u8,
+            config.sector_size,
+            config.response_size_max,
+            .exact,
+        );
         errdefer allocator.free(commit_buffer);
         std.mem.set(u8, commit_buffer, 0);
 
@@ -2193,7 +2207,9 @@ pub const Replica = struct {
             const entry_body = self.commit_buffer[@sizeOf(Header)..entry.size];
             assert(entry.valid_checksum_body(entry_body));
 
-            const reply = self.message_bus.create_message(config.response_size_max) catch unreachable;
+            const reply = self.message_bus.create_message(
+                config.response_size_max,
+            ) catch unreachable;
             defer self.message_bus.unref(reply);
 
             var reply_body_size = @intCast(u32, self.state_machine.commit(

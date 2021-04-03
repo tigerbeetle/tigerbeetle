@@ -232,7 +232,11 @@ pub const CreateAccountResults = packed struct {
     index: u32,
     result: CreateAccountResult,
 
-    pub fn jsonStringify(self: CreateAccountResults, options: StringifyOptions, writer: anytype) !void {
+    pub fn jsonStringify(
+        self: CreateAccountResults,
+        options: StringifyOptions,
+        writer: anytype,
+    ) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"index\":{},", .{self.index});
         try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
@@ -244,7 +248,11 @@ pub const CreateTransferResults = packed struct {
     index: u32,
     result: CreateTransferResult,
 
-    pub fn jsonStringify(self: CreateTransferResults, options: StringifyOptions, writer: anytype) !void {
+    pub fn jsonStringify(
+        self: CreateTransferResults,
+        options: StringifyOptions,
+        writer: anytype,
+    ) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"index\":{},", .{self.index});
         try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
@@ -256,7 +264,11 @@ pub const CommitTransferResults = packed struct {
     index: u32,
     result: CommitTransferResult,
 
-    pub fn jsonStringify(self: CommitTransferResults, options: StringifyOptions, writer: anytype) !void {
+    pub fn jsonStringify(
+        self: CommitTransferResults,
+        options: StringifyOptions,
+        writer: anytype,
+    ) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"index\":{},", .{self.index});
         try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});

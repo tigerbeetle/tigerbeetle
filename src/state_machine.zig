@@ -70,7 +70,10 @@ pub const StateMachine = struct {
 
     pub fn prepare_timestamps(self: *StateMachine, comptime T: type, batch: []u8) void {
         // Guard against the wall clock going backwards by taking the max with timestamps issued:
-        self.prepare_timestamp = std.math.max(self.prepare_timestamp, @intCast(u64, std.time.nanoTimestamp()));
+        self.prepare_timestamp = std.math.max(
+            self.prepare_timestamp,
+            @intCast(u64, std.time.nanoTimestamp()),
+        );
         assert(self.prepare_timestamp > self.commit_timestamp);
         var sum_reserved_timestamps: usize = 0;
         for (mem.bytesAsSlice(T, batch)) |*event| {

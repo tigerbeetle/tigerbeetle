@@ -11,7 +11,7 @@ const StateMachine = @import("state_machine.zig").StateMachine;
 
 const log = std.log.default;
 
-const tigerbeetle = @import("tigerbeetle.zig");
+const Account = @import("tigerbeetle.zig").Account;
 
 pub fn run() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -39,7 +39,11 @@ pub fn run() !void {
 
     var state_machines: [2 * f + 1]StateMachine = undefined;
     for (state_machines) |*state_machine| {
-        state_machine.* = try StateMachine.init(allocator, config.accounts_max, config.transfers_max);
+        state_machine.* = try StateMachine.init(
+            allocator,
+            config.accounts_max,
+            config.transfers_max,
+        );
     }
 
     var replicas: [2 * f + 1]Replica = undefined;
@@ -47,12 +51,12 @@ pub fn run() !void {
         replica.* = try Replica.init(
             allocator,
             cluster,
-            f,
             &configuration,
-            &message_bus,
-            &journals[index],
-            &state_machines[index],
             @intCast(u16, index),
+            f,
+            &journals[index],
+            &message_bus,
+            &state_machines[index],
         );
         configuration[index] = replica;
     }
@@ -81,11 +85,11 @@ pub fn run() !void {
                     .request = @intCast(u32, ticks),
                     .command = .request,
                     .operation = .create_accounts,
-                    .size = @sizeOf(vr.Header) + @sizeOf(tigerbeetle.Account),
+                    .size = @sizeOf(vr.Header) + @sizeOf(Account),
                 };
 
-                var body = request.buffer[@sizeOf(vr.Header)..request.header.size][0..@sizeOf(tigerbeetle.Account)];
-                std.mem.bytesAsValue(tigerbeetle.Account, body).* = .{
+                var body = request.buffer[@sizeOf(vr.Header)..][0..@sizeOf(Account)];
+                std.mem.bytesAsValue(Account, body).* = .{
                     .id = 1,
                     .custom = 0,
                     .flags = .{},
