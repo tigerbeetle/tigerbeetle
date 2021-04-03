@@ -288,6 +288,11 @@ pub const MessageBus = struct {
     pub fn send_header_to_replica(self: *MessageBus, replica: u16, header: Header) void {
         assert(header.size == @sizeOf(Header));
 
+        if (!self.can_send_to_replica(replica)) {
+            log.debug("cannot send to replica {}, dropping", .{replica});
+            return;
+        }
+
         // TODO Pre-allocate messages at startup.
         const message = self.create_message(@sizeOf(Header)) catch unreachable;
         defer self.unref(message);
@@ -320,6 +325,8 @@ pub const MessageBus = struct {
 
     pub fn send_header_to_client(self: *MessageBus, client_id: u128, header: Header) void {
         assert(header.size == @sizeOf(Header));
+
+        // TODO Do not allocate a message if we know we cannot send to the client.
 
         // TODO Pre-allocate messages at startup.
         const message = self.create_message(@sizeOf(Header)) catch unreachable;
