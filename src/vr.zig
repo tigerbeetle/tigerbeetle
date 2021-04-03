@@ -1008,6 +1008,9 @@ pub const Replica = struct {
     /// Unique do_view_change messages for the same view from ALL replicas (including ourself):
     do_view_change_from_all_replicas: []?*Message,
 
+    /// Whether a replica has received a quorum of start_view_change messages for the view change:
+    start_view_change_quorum: bool = false,
+
     /// Whether the leader has received a quorum of do_view_change messages for the view change:
     /// Determines whether the leader may effect repairs according to the CTRL protocol.
     do_view_change_quorum: bool = false,
@@ -1026,8 +1029,11 @@ pub const Replica = struct {
     normal_timeout: Timeout,
 
     /// The number of ticks before a view change is timed out:
-    /// This transitions from .view_change status to .view_change status but for a higher view.
+    /// This transitions from `view_change` status to `view_change` status but for a newer view.
     view_change_timeout: Timeout,
+
+    /// The number of ticks before resending a `start_view_change` or `do_view_change` message:
+    view_change_message_timeout: Timeout,
 
     /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
     repair_timeout: Timeout,
@@ -1117,7 +1123,7 @@ pub const Replica = struct {
             .prepare_timeout = Timeout{
                 .name = "prepare_timeout",
                 .replica = replica,
-                .after = 20,
+                .after = 50,
             },
             .commit_timeout = Timeout{
                 .name = "commit_timeout",
@@ -1134,10 +1140,15 @@ pub const Replica = struct {
                 .replica = replica,
                 .after = 6000,
             },
+            .view_change_message_timeout = Timeout{
+                .name = "view_change_message_timeout",
+                .replica = replica,
+                .after = 50,
+            },
             .repair_timeout = Timeout{
                 .name = "repair_timeout",
                 .replica = replica,
-                .after = 20,
+                .after = 50,
             },
         };
 
@@ -1188,12 +1199,14 @@ pub const Replica = struct {
         self.commit_timeout.tick();
         self.normal_timeout.tick();
         self.view_change_timeout.tick();
+        self.view_change_message_timeout.tick();
         self.repair_timeout.tick();
 
         if (self.prepare_timeout.fired()) self.on_prepare_timeout();
         if (self.commit_timeout.fired()) self.on_commit_timeout();
         if (self.normal_timeout.fired()) self.on_normal_timeout();
         if (self.view_change_timeout.fired()) self.on_view_change_timeout();
+        if (self.view_change_message_timeout.fired()) self.on_view_change_message_timeout();
         if (self.repair_timeout.fired()) self.on_repair_timeout();
 
         self.repair_last_queued_message_if_any();
@@ -1579,26 +1592,16 @@ pub const Replica = struct {
         assert(count == self.f);
         log.debug("{}: on_start_view_change: quorum received", .{self.replica});
 
+        assert(!self.start_view_change_quorum);
         assert(!self.do_view_change_quorum);
+        self.start_view_change_quorum = true;
 
         // When replica i receives start_view_change messages for its view from f other replicas,
         // it sends a ⟨do_view_change v, l, v’, n, k, i⟩ message to the node that will be the
         // primary in the new view. Here v is its view, l is its log, v′ is the view number of the
         // latest view in which its status was normal, n is the op number, and k is the commit
         // number.
-        const do_view_change = self.create_do_view_change_or_start_view_message(.do_view_change);
-        defer self.message_bus.unref(do_view_change);
-
-        assert(do_view_change.references == 1);
-        assert(do_view_change.header.command == .do_view_change);
-        assert(do_view_change.header.view == self.view);
-        assert(do_view_change.header.op == self.op);
-        assert(do_view_change.header.commit == self.commit_max);
-
-        // TODO Assert that latest header in message body matches self.op.
-
-        // TODO Resend after timeout:
-        self.send_message_to_replica(self.leader_index(self.view), do_view_change);
+        self.send_do_view_change();
     }
 
     fn on_do_view_change(self: *Replica, message: *Message) void {
@@ -1965,6 +1968,22 @@ pub const Replica = struct {
     fn on_view_change_timeout(self: *Replica) void {
         assert(self.status == .view_change);
         self.transition_to_view_change_status(self.view + 1);
+    }
+
+    fn on_view_change_message_timeout(self: *Replica) void {
+        self.view_change_message_timeout.reset();
+        assert(self.status == .view_change);
+
+        // Keep sending `start_view_change` messages:
+        // We may have a `start_view_change_quorum` but other replicas may not.
+        // However, the leader may stop sending once it has a `do_view_change_quorum`.
+        if (!self.do_view_change_quorum) self.send_start_view_change();
+
+        // It is critical that a `do_view_change` message implies a `start_view_change_quorum`.
+        // The leader need not resend a `do_view_change` message to itself.
+        if (self.start_view_change_quorum and self.leader_index(self.view) != self.replica) {
+            self.send_do_view_change();
+        }
     }
 
     fn on_repair_timeout(self: *Replica) void {
@@ -3031,6 +3050,37 @@ pub const Replica = struct {
         self.send_message_to_replica(replica, message);
     }
 
+    fn send_start_view_change(self: *Replica) void {
+        assert(self.status == .view_change);
+        assert(!self.do_view_change_quorum);
+        // Send only to other replicas (and not to ourself) to avoid a quorum off-by-one error:
+        // This could happen if the replica mistakenly counts its own message in the quorum.
+        self.send_header_to_other_replicas(.{
+            .command = .start_view_change,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+        });
+    }
+
+    fn send_do_view_change(self: *Replica) void {
+        assert(self.status == .view_change);
+        assert(self.start_view_change_quorum);
+        assert(!self.do_view_change_quorum);
+
+        const message = self.create_do_view_change_or_start_view_message(.do_view_change);
+        defer self.message_bus.unref(message);
+
+        assert(message.references == 1);
+        assert(message.header.command == .do_view_change);
+        assert(message.header.view == self.view);
+        assert(message.header.op == self.op);
+        assert(message.header.commit == self.commit_max);
+        // TODO Assert that latest header in message body matches self.op.
+
+        self.send_message_to_replica(self.leader_index(self.view), message);
+    }
+
     fn send_header_to_other_replicas(self: *Replica, header: Header) void {
         for (self.configuration) |_, replica| {
             if (replica != self.replica) {
@@ -3076,6 +3126,20 @@ pub const Replica = struct {
             },
             .do_view_change => {
                 assert(self.status == .view_change);
+                assert(self.start_view_change_quorum);
+                assert(!self.do_view_change_quorum);
+            },
+            .start_view => switch (self.status) {
+                .normal => {
+                    // A follower may ask the leader to resend the start_view message.
+                    assert(!self.start_view_change_quorum);
+                    assert(!self.do_view_change_quorum);
+                },
+                .view_change => {
+                    assert(self.start_view_change_quorum);
+                    assert(self.do_view_change_quorum);
+                },
+                else => unreachable,
             },
             .headers => {
                 assert(self.status == .normal or self.status == .view_change);
@@ -3109,7 +3173,7 @@ pub const Replica = struct {
     }
 
     fn transition_to_normal_status(self: *Replica, new_view: u64) void {
-        log.debug("{}: transition_to_normal_status: view {}", .{ self.replica, new_view });
+        log.debug("{}: transition_to_normal_status: view={}", .{ self.replica, new_view });
         // In the VRR paper it's possible to transition from .normal to .normal for the same view.
         // For example, this could happen after a state transfer triggered by an op jump.
         assert(new_view >= self.view);
@@ -3122,6 +3186,7 @@ pub const Replica = struct {
             self.commit_timeout.start();
             self.normal_timeout.stop();
             self.view_change_timeout.stop();
+            self.view_change_message_timeout.stop();
             self.repair_timeout.start();
         } else {
             log.debug("{}: transition_to_normal_status: follower", .{self.replica});
@@ -3129,6 +3194,7 @@ pub const Replica = struct {
             self.commit_timeout.stop();
             self.normal_timeout.start();
             self.view_change_timeout.stop();
+            self.view_change_message_timeout.stop();
             self.repair_timeout.start();
         }
 
@@ -3141,6 +3207,7 @@ pub const Replica = struct {
         self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
         self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
 
+        self.start_view_change_quorum = false;
         self.do_view_change_quorum = false;
     }
 
@@ -3150,7 +3217,7 @@ pub const Replica = struct {
     /// on its own timer, or because it receives a start_view_change or do_view_change message for
     /// a view with a larger number than its own view.
     fn transition_to_view_change_status(self: *Replica, new_view: u64) void {
-        log.debug("{}: transition_to_view_change_status: view {}", .{ self.replica, new_view });
+        log.debug("{}: transition_to_view_change_status: view={}", .{ self.replica, new_view });
         assert(new_view > self.view);
         self.view = new_view;
         self.status = .view_change;
@@ -3158,6 +3225,7 @@ pub const Replica = struct {
         self.commit_timeout.stop();
         self.normal_timeout.stop();
         self.view_change_timeout.start();
+        self.view_change_message_timeout.start();
         self.repair_timeout.stop();
 
         self.reset_prepare();
@@ -3170,17 +3238,10 @@ pub const Replica = struct {
         self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
         self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
 
+        self.start_view_change_quorum = false;
         self.do_view_change_quorum = false;
 
-        // Send only to other replicas (and not to ourself) to avoid a quorum off-by-one error:
-        // This could happen if the replica mistakenly counts its own message in the quorum.
-        self.send_header_to_other_replicas(.{
-            .command = .start_view_change,
-            .cluster = self.cluster,
-            .replica = self.replica,
-            .view = new_view,
-        });
-        // TODO Resend after timeout.
+        self.send_start_view_change();
     }
 
     /// Returns true if all operations are present, correctly ordered and connected by hash chain,
