@@ -119,9 +119,15 @@ pub fn main() !void {
 
     const ms = std.time.milliTimestamp() - start;
     std.debug.print("=============================\n", .{});
-    std.debug.print("{} transfers per second\n\n", .{@divFloor(@intCast(i64, transfers.len * 1000), ms)});
-    std.debug.print("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{max_create_transfers_latency});
-    std.debug.print("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{max_commit_transfers_latency});
+    std.debug.print("{} transfers per second\n\n", .{
+        @divFloor(@intCast(i64, transfers.len * 1000), ms),
+    });
+    std.debug.print("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
+        max_create_transfers_latency,
+    });
+    std.debug.print("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
+        max_commit_transfers_latency,
+    });
 }
 
 var request_id: u128 = 0;

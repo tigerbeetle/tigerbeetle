@@ -93,7 +93,11 @@ pub const MessageBus = struct {
     }
 
     fn init_tcp(address: std.net.Address) !os.socket_t {
-        const fd = try os.socket(address.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, os.IPPROTO_TCP);
+        const fd = try os.socket(
+            address.any.family,
+            os.SOCK_STREAM | os.SOCK_CLOEXEC,
+            os.IPPROTO_TCP,
+        );
         errdefer os.close(fd);
 
         const set = struct {
@@ -106,14 +110,24 @@ pub const MessageBus = struct {
         if (config.tcp_rcvbuf > 0) {
             // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in the event of an EPERM):
             set(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, config.tcp_rcvbuf) catch |err| switch (err) {
-                error.PermissionDenied => try set(fd, os.SOL_SOCKET, os.SO_RCVBUF, config.tcp_rcvbuf),
+                error.PermissionDenied => try set(
+                    fd,
+                    os.SOL_SOCKET,
+                    os.SO_RCVBUF,
+                    config.tcp_rcvbuf,
+                ),
                 else => return err,
             };
         }
         if (config.tcp_sndbuf > 0) {
             // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in the event of an EPERM):
             set(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, config.tcp_sndbuf) catch |err| switch (err) {
-                error.PermissionDenied => try set(fd, os.SOL_SOCKET, os.SO_SNDBUF, config.tcp_sndbuf),
+                error.PermissionDenied => try set(
+                    fd,
+                    os.SOL_SOCKET,
+                    os.SO_SNDBUF,
+                    config.tcp_sndbuf,
+                ),
                 else => return err,
             };
         }
@@ -222,7 +236,11 @@ pub const MessageBus = struct {
         );
     }
 
-    fn on_accept(self: *MessageBus, completion: *IO.Completion, result: IO.AcceptError!os.socket_t) void {
+    fn on_accept(
+        self: *MessageBus,
+        completion: *IO.Completion,
+        result: IO.AcceptError!os.socket_t,
+    ) void {
         assert(self.accept_connection != null);
         defer self.accept_connection = null;
         const fd = result catch |err| {
@@ -425,7 +443,11 @@ const Connection = struct {
 
         const bus = self.message_bus;
         const server_addr = bus.configuration[bus.server.replica];
-        self.fd = os.socket(server_addr.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0) catch return;
+        self.fd = os.socket(
+            server_addr.any.family,
+            os.SOCK_STREAM | os.SOCK_CLOEXEC,
+            0,
+        ) catch return;
 
         self.peer = .{ .replica = replica };
         self.state = .connecting;
@@ -445,7 +467,11 @@ const Connection = struct {
         );
     }
 
-    fn on_connect(self: *Connection, completion: *IO.Completion, result: IO.ConnectError!void) void {
+    fn on_connect(
+        self: *Connection,
+        completion: *IO.Completion,
+        result: IO.ConnectError!void,
+    ) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
         if (self.state == .shutting_down) {
@@ -577,7 +603,11 @@ const Connection = struct {
         );
     }
 
-    fn on_recv_header(self: *Connection, completion: *IO.Completion, result: IO.RecvError!usize) void {
+    fn on_recv_header(
+        self: *Connection,
+        completion: *IO.Completion,
+        result: IO.RecvError!usize,
+    ) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
 
@@ -622,7 +652,9 @@ const Connection = struct {
             .unknown => {
                 // Ensure that the message is addressed to the correct cluster.
                 if (self.incoming_header.cluster != self.message_bus.server.cluster) {
-                    log.err("received message addressed to wrong cluster: {}", .{self.incoming_header.cluster});
+                    log.err("received message addressed to wrong cluster: {}", .{
+                        self.incoming_header.cluster,
+                    });
                     self.shutdown();
                     return;
                 }
@@ -672,7 +704,11 @@ const Connection = struct {
         }
     }
 
-    fn on_recv_body(self: *Connection, completion: *IO.Completion, result: IO.RecvError!usize) void {
+    fn on_recv_body(
+        self: *Connection,
+        completion: *IO.Completion,
+        result: IO.RecvError!usize,
+    ) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
 
@@ -715,7 +751,7 @@ const Connection = struct {
         const body = message.buffer[@sizeOf(Header)..message.header.size];
         if (message.header.valid_checksum_body(body)) {
             // TODO: rewrite ConcurrentRanges to not use async
-            // This nosuspend is only safe because we do not actually do any asynchronous disk IO yet.
+            // This nosuspend is only safe because we do not do any asynchronous disk IO yet.
             var frame = async self.message_bus.server.on_message(message);
             nosuspend await frame;
         } else {

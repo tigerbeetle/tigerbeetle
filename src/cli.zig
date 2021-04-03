@@ -136,10 +136,12 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
     var i: usize = 0;
     while (comma_it.next()) |entry| : (i += 1) {
         if (entry.len == 0) {
-            print_error_exit("array of addresses for --replica-addresses must not have a trailing comma", .{});
+            print_error_exit("--replica-addresses must not have a trailing comma", .{});
         }
         if (i == config.replicas_max) {
-            print_error_exit("max {d} addresses are allowed for --replica-addresses", .{config.replicas_max});
+            print_error_exit("max {d} addresses are allowed for --replica-addresses", .{
+                config.replicas_max,
+            });
         }
         var colon_it = mem.split(entry, ":");
         // the split iterator will always return non-null once even if the delimiter is not found.
@@ -150,7 +152,9 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
             }
             const port = fmt.parseUnsigned(u16, raw_port, 10) catch |err| switch (err) {
                 error.Overflow => {
-                    print_error_exit("'{s}' is greater than the maximum port number (65535).", .{raw_port});
+                    print_error_exit("'{s}' is greater than the maximum port number (65535).", .{
+                        raw_port,
+                    });
                 },
                 error.InvalidCharacter => {
                     print_error_exit("invalid character in port '{s}'.", .{raw_port});
@@ -166,10 +170,15 @@ fn parse_configuration(raw_configuration: []const u8) []net.Address {
 
             // Try to parse as a port first
             if (fmt.parseUnsigned(u16, entry, 10)) |port| {
-                configuration_storage[i] = net.Address.parseIp4(config.address, port) catch unreachable;
+                configuration_storage[i] = net.Address.parseIp4(
+                    config.address,
+                    port,
+                ) catch unreachable;
             } else |err| switch (err) {
                 error.Overflow => {
-                    print_error_exit("'{s}' is greater than the maximum port number (65535).", .{entry});
+                    print_error_exit("'{s}' is greater than the maximum port number (65535).", .{
+                        entry,
+                    });
                 },
                 error.InvalidCharacter => {
                     // Found something that was not a digit, try parsing as an IPv4 instead.
