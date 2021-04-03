@@ -4,7 +4,7 @@ const conf = @import("tigerbeetle.conf");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, conf.log_level);
 
 const cli = @import("cli.zig");
-const IO = @import("io_callbacks.zig").IO;
+const IO = @import("io.zig").IO;
 const vr = @import("vr.zig");
 const Replica = vr.Replica;
 const Storage = vr.Storage;
