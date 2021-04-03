@@ -1617,6 +1617,9 @@ pub const Replica = struct {
         assert(self.status == .view_change);
         assert(message.header.view == self.view);
 
+        // We may receive a `do_view_change` message from another replica, which already has a
+        // `start_view_change_quorum` before we ourselves receive a `start_view_change_quorum`.
+
         // Wait until we have `f + 1` messages (including ourself) for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
             self.do_view_change_from_all_replicas,
@@ -1626,6 +1629,8 @@ pub const Replica = struct {
 
         assert(count == self.f + 1);
         log.debug("{}: on_do_view_change: quorum received", .{self.replica});
+
+        assert(self.start_view_change_quorum);
 
         // When the new primary receives f + 1 do_view_change messages from different replicas
         // (including itself), it sets its view number to that in the messages and selects as the
@@ -1692,6 +1697,7 @@ pub const Replica = struct {
             assert(entry.op == latest.op);
             assert(entry.offset == latest.offset);
 
+            assert(self.start_view_change_quorum);
             assert(!self.do_view_change_quorum);
             self.do_view_change_quorum = true;
 
