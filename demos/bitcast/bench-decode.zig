@@ -2,7 +2,16 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const Transfer = packed struct {
-    id: u128, debit_id: u128, credit_id: u128, custom_1: u128, custom_2: u128, custom_3: u128, flags: u64, amount: u64, timeout: u64, timestamp: u64
+    id: u128,
+    debit_id: u128,
+    credit_id: u128,
+    custom_1: u128,
+    custom_2: u128,
+    custom_3: u128,
+    flags: u64,
+    amount: u64,
+    timeout: u64,
+    timestamp: u64,
 };
 
 pub fn main() !void {
