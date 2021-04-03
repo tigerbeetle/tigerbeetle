@@ -1,0 +1,28 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+const path = require('path');
+
+const exceptions = {
+    'src/cli.zig:35': true,
+    'src/cli.zig:39': true,
+};
+
+function check_dir(dir) {
+    fs.readdirSync(dir).forEach(function(file) {
+        if (!/\.zig$/.test(file)) return;
+        check_file(path.join(dir, file));
+    });
+}
+
+function check_file(file) {
+    fs.readFileSync(file, 'utf-8').split('\n').forEach(function(line, line_index) {
+        if (line.length > 100) {
+            const file_line = file + ':' + (line_index + 1);
+            if (exceptions.hasOwnProperty(file_line)) return;
+            console.log(file_line);
+        }
+    });
+}
+
+check_dir('src');
