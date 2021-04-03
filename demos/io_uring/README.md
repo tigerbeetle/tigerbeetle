@@ -42,12 +42,6 @@ As you can see, `io_uring` can drastically amortize the cost of syscalls. What y
 
 ## Network benchmarks
 
-### net_blocking.zig
-
-Uses blocking syscalls to `accept` at most one TCP connection and then `recv`/`send` up to 1000 bytes per message on this connection as an echo server. This should be the fastest candidate for the task on Linux, since it does not use `epoll` or any async methods.
-
-*This was designed by [MasterQ32](https://github.com/MasterQ32), Felix (xq) Queißner, who wrote [zig-network](https://github.com/MasterQ32/zig-network). Thanks for jumping in and creating this echo server candidate!*
-
 ### net_io_uring.zig
 
 Uses `io_uring` syscalls to `accept` one or more TCP connections and then `recv`/`send` up to 1000 bytes per message on these connections as an echo server. This server is non-blocking and takes advantage of kernel 5.6 or higher with support for `IORING_FEAT_FAST_POLL`.
@@ -87,9 +81,6 @@ These were taken on a 2020 MacBook Air running Ubuntu 20.04 with a 5.7.15 kernel
   </tr>
   <tr>
     <td>node.js</td><td>43694</td><td>52635</td><td>52977</td>
-  </tr>
-  <tr>
-    <td>blocking.zig</td><td>32149</td><td>N/A</td><td>N/A</td>
   </tr>
   <tr>
     <td>io_uring.zig</td><td>31754</td><td>94731</td><td>144332</td>
