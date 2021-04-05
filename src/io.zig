@@ -892,7 +892,7 @@ pub const IO = struct {
             }.wrapper,
             .operation = .{
                 .timeout = .{
-                    .timespec = .{ .tv_sec = 0, .tv_nsec = nanoseconds }
+                    .timespec = .{ .tv_sec = 0, .tv_nsec = nanoseconds },
                 },
             },
         };
