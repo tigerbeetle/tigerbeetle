@@ -189,7 +189,7 @@ pub const IO = struct {
                 .send => |op| {
                     linux.io_uring_prep_send(sqe, op.socket, op.buffer, op.flags);
                 },
-                .timeout => |op| {
+                .timeout => |*op| {
                     linux.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
                 },
                 .write => |op| {
