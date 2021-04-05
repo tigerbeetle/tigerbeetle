@@ -51,12 +51,19 @@ pub const MessageBus = struct {
     /// Map from replica index to the currently active connection for that replica, if any.
     /// The connection for the server replica will always be null.
     replicas: []?*Connection,
+    /// The number of outgoing `connect()` attempts for a given replica:
+    /// Reset to zero after a successful `on_connect()`.
+    replicas_connect_attempts: []u4,
 
     /// Map from client id to the currently active connection for that client.
     /// This is used to make lookup of client connections when sending messages
     /// efficient and to ensure old client connections are dropped if a new one
     /// is established.
     clients: std.AutoHashMapUnmanaged(u128, *Connection) = .{},
+
+    /// Used to apply full jitter when calculating exponential backoff:
+    /// Seeded with the server's replica index.
+    prng: std.rand.DefaultPrng,
 
     /// Initialize the MessageBus for the given server replica and configuration.
     pub fn init(
@@ -78,6 +85,10 @@ pub const MessageBus = struct {
         errdefer allocator.free(replicas);
         mem.set(?*Connection, replicas, null);
 
+        const replicas_connect_attempts = try allocator.alloc(u4, configuration.len);
+        errdefer allocator.free(replicas_connect_attempts);
+        mem.set(u4, replicas_connect_attempts, 0);
+
         self.* = .{
             .allocator = allocator,
             .io = io,
@@ -86,6 +97,8 @@ pub const MessageBus = struct {
             .server_fd = try init_tcp(configuration[server_index]),
             .connections = connections,
             .replicas = replicas,
+            .replicas_connect_attempts = replicas_connect_attempts,
+            .prng = std.rand.DefaultPrng.init(server_index),
         };
 
         // Pre-allocate enough memory to hold all possible connections in the client map.
@@ -379,6 +392,28 @@ pub const MessageBus = struct {
 
         return message;
     }
+
+    /// Calculates exponential backoff with full jitter according to the formula:
+    /// `sleep = random_between(0, min(cap, base * 2 ** attempt))`
+    ///
+    /// `attempt` is zero-based.
+    /// `attempt` is tracked as a small u4 to flush out any overflow bugs sooner rather than later.
+    pub fn exponential_backoff_with_full_jitter_in_ms(self: *MessageBus, attempt: u4) u63 {
+        assert(config.connection_delay_min < config.connection_delay_max);
+        // Calculate the capped exponential backoff component: `min(cap, base * 2 ** attempt)`
+        const base: u63 = config.connection_delay_min;
+        const cap: u63 = config.connection_delay_max - config.connection_delay_min;
+        const exponential_backoff = std.math.min(
+            cap,
+            // A "1" shifted left gives any power of two: 1<<0 = 1, 1<<1 = 2, 1<<2 = 4, 1<<3 = 8:
+            base * std.math.shl(u63, 1, attempt),
+        );
+        const jitter = self.prng.random.uintAtMostBiased(u63, exponential_backoff);
+        const ms = base + jitter;
+        assert(ms >= config.connection_delay_min);
+        assert(ms <= config.connection_delay_max);
+        return ms;
+    }
 };
 
 /// Used to send/receive messages to/from a client or fellow replica.
@@ -448,29 +483,62 @@ const Connection = struct {
         assert(self.state == .idle);
         assert(self.fd == -1);
 
-        const bus = self.message_bus;
-        const server_addr = bus.configuration[bus.server.replica];
-        self.fd = os.socket(
-            server_addr.any.family,
-            os.SOCK_STREAM | os.SOCK_CLOEXEC,
-            0,
-        ) catch return;
-
+        const family = self.message_bus.configuration[self.message_bus.server.replica].any.family;
+        self.fd = os.socket(family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0) catch return;
         self.peer = .{ .replica = replica };
         self.state = .connecting;
-        assert(bus.replicas[replica] == null);
-        bus.replicas[replica] = self;
+
+        assert(self.message_bus.replicas[replica] == null);
+        self.message_bus.replicas[replica] = self;
+
+        var attempts = &self.message_bus.replicas_connect_attempts[replica];
+        const ms = self.message_bus.exponential_backoff_with_full_jitter_in_ms(attempts.*);
+        // Saturate the counter at its maximum value if the addition wraps:
+        attempts.* +%= 1;
+        if (attempts.* == 0) attempts.* -%= 1;
+
+        log.info("connecting to replica {} in {}ms...", .{ self.peer.replica, ms });
 
         assert(!self.recv_submitted);
         self.recv_submitted = true;
-        bus.io.connect(
+
+        self.message_bus.io.timeout(
+            *Connection,
+            self,
+            on_connect_with_exponential_backoff,
+            // We use `recv_completion` for the connection `timeout()` and `connect()` calls:
+            &self.recv_completion,
+            ms * std.time.ns_per_ms,
+        );
+    }
+
+    fn on_connect_with_exponential_backoff(
+        self: *Connection,
+        completion: *IO.Completion,
+        result: IO.TimeoutError!void,
+    ) void {
+        assert(self.recv_submitted);
+        self.recv_submitted = false;
+        if (self.state == .shutting_down) {
+            self.maybe_close();
+            return;
+        }
+        assert(self.state == .connecting);
+        result catch unreachable;
+
+        log.info("connecting to replica {}...", .{self.peer.replica});
+
+        assert(!self.recv_submitted);
+        self.recv_submitted = true;
+
+        self.message_bus.io.connect(
             *Connection,
             self,
             on_connect,
-            // We need to use the recv_completion here
+            // We use `recv_completion` for the connection `timeout()` and `connect()` calls:
             &self.recv_completion,
             self.fd,
-            bus.configuration[replica],
+            self.message_bus.configuration[self.peer.replica],
         );
     }
 
@@ -488,13 +556,13 @@ const Connection = struct {
         assert(self.state == .connecting);
         self.state = .connected;
         result catch |err| {
-            // TODO Re-enable with exponential backoff:
-            // log.err("error connecting to {}: {}", .{ self.peer, err });
+            log.err("error connecting to replica {}: {}", .{ self.peer.replica, err });
             self.state = .shutting_down;
             self.maybe_close();
             return;
         };
-        log.info("connected to {}", .{self.peer});
+        log.info("connected to replica {}", .{self.peer.replica});
+        self.message_bus.replicas_connect_attempts[self.peer.replica] = 0;
         self.recv_header();
         // It is possible that a message has been queued up to be sent to
         // the replica while we were connecting.
