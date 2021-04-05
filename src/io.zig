@@ -190,11 +190,7 @@ pub const IO = struct {
                     linux.io_uring_prep_send(sqe, op.socket, op.buffer, op.flags);
                 },
                 .timeout => |op| {
-                    const ts: os.__kernel_timespec = .{
-                        .tv_sec = 0,
-                        .tv_nsec = op.nanoseconds,
-                    };
-                    linux.io_uring_prep_timeout(sqe, &ts, 0, 0);
+                    linux.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
                 },
                 .write => |op| {
                     linux.io_uring_prep_write(
@@ -467,7 +463,7 @@ pub const IO = struct {
             flags: u32,
         },
         timeout: struct {
-            nanoseconds: u63,
+            timespec: os.__kernel_timespec,
         },
         write: struct {
             fd: os.fd_t,
@@ -895,7 +891,9 @@ pub const IO = struct {
                 }
             }.wrapper,
             .operation = .{
-                .timeout = .{ .nanoseconds = nanoseconds },
+                .timeout = .{
+                    .timespec = .{ .tv_sec = 0, .tv_nsec = nanoseconds }
+                },
             },
         };
         self.enqueue(completion);
