@@ -2043,25 +2043,7 @@ pub const Replica = struct {
         messages[message.header.replica] = self.message_bus.ref(message);
 
         // Count the number of unique messages now received:
-        var count: usize = 0;
-        for (messages) |received, replica| {
-            if (received) |m| {
-                assert(m.header.command == message.header.command);
-                assert(m.header.replica == replica);
-                assert(m.header.view == self.view);
-                switch (message.header.command) {
-                    .prepare_ok => {
-                        assert(m.header.nonce == message.header.nonce);
-                    },
-                    .start_view_change => {
-                        assert(m.header.replica != self.replica);
-                    },
-                    .do_view_change => {},
-                    else => unreachable,
-                }
-                count += 1;
-            }
-        }
+        const count = self.count_quorum(messages, message.header.command, message.header.nonce);
         log.debug("{}: on_{s}: {} message(s)", .{
             self.replica,
             @tagName(message.header.command),
@@ -2267,6 +2249,29 @@ pub const Replica = struct {
             log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
             self.message_bus.send_message_to_client(reply.header.client, reply);
         }
+    }
+
+    fn count_quorum(self: *Replica, messages: []?*Message, command: Command, nonce: u128) usize {
+        assert(messages.len == self.configuration.len);
+
+        var count: usize = 0;
+        for (messages) |received, replica| {
+            if (received) |m| {
+                assert(m.header.command == command);
+                assert(m.header.nonce == nonce);
+                assert(m.header.cluster == self.cluster);
+                assert(m.header.replica == replica);
+                assert(m.header.view == self.view);
+                switch (command) {
+                    .prepare_ok => {},
+                    .start_view_change => assert(m.header.replica != self.replica),
+                    .do_view_change => {},
+                    else => unreachable,
+                }
+                count += 1;
+            }
+        }
+        return count;
     }
 
     /// The caller owns the returned message, if any, which has exactly 1 reference.
