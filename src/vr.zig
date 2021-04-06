@@ -3135,6 +3135,11 @@ pub const Replica = struct {
         assert(self.status == .view_change);
         assert(self.start_view_change_quorum);
         assert(!self.do_view_change_quorum);
+        assert(self.count_quorum(
+            self.start_view_change_from_other_replicas,
+            .start_view_change,
+            0,
+        ) >= self.f);
 
         const message = self.create_do_view_change_or_start_view_message(.do_view_change);
         defer self.message_bus.unref(message);
