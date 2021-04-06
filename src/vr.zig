@@ -976,9 +976,6 @@ pub const Replica = struct {
     /// This is the commit number in terms of the VRR paper.
     commit_max: u64,
 
-    /// Used to read a journal entry before committing operations to the state machine:
-    commit_buffer: []u8 align(config.sector_size),
-
     /// The current request's checksum (used for now to enforce one-at-a-time request processing):
     request_checksum: ?u128 = null,
 
@@ -1093,15 +1090,6 @@ pub const Replica = struct {
         journal.headers[0] = init_prepare;
         journal.assert_headers_reserved_from(init_prepare.op + 1);
 
-        var commit_buffer = try allocator.allocAdvanced(
-            u8,
-            config.sector_size,
-            config.response_size_max,
-            .exact,
-        );
-        errdefer allocator.free(commit_buffer);
-        std.mem.set(u8, commit_buffer, 0);
-
         var self = Replica{
             .allocator = allocator,
             .cluster = cluster,
@@ -1115,7 +1103,6 @@ pub const Replica = struct {
             .op = init_prepare.op,
             .commit_min = init_prepare.commit,
             .commit_max = init_prepare.commit,
-            .commit_buffer = commit_buffer,
             .prepare_ok_from_all_replicas = prepare_ok,
             .start_view_change_from_other_replicas = start_view_change,
             .do_view_change_from_all_replicas = do_view_change,
@@ -1465,6 +1452,7 @@ pub const Replica = struct {
         assert(message.header.request == self.prepare_message.?.header.request);
         assert(message.header.operation == self.prepare_message.?.header.operation);
         assert(message.header.op == self.op);
+        assert(message.header.op == self.commit_min + 1);
         assert(message.header.op == self.commit_max + 1);
 
         // Wait until we have `f + 1` messages (including ourself) for quorum:
@@ -1477,7 +1465,9 @@ pub const Replica = struct {
         assert(count == self.f + 1);
         log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
 
-        self.commit_ops_through(message.header.op);
+        self.commit_op(self.prepare_message.?);
+        assert(self.commit_min == self.op);
+        assert(self.commit_max == self.op);
 
         self.reset_prepare();
     }
@@ -2200,79 +2190,81 @@ pub const Replica = struct {
             return;
         }
 
-        // We may receive commit numbers for ops we do not yet have:
+        // We may receive commit numbers for ops we do not yet have (`commit_max > self.op`):
         // Even a naive state transfer may fail to correct for this.
         while (self.commit_min < self.commit_max and self.commit_min < self.op) {
-            self.commit_min += 1;
-            assert(self.commit_min <= self.op);
+            const header = self.journal.entry_for_op_exact(self.commit_min + 1).?;
+            assert(header.op == self.commit_min + 1);
+            assert(header.operation != .init);
 
-            const entry = self.journal.entry_for_op_exact(self.commit_min).?;
-            assert(entry.valid_checksum());
-            assert(entry.op == self.commit_min);
-            assert(entry.operation != .init);
+            if (self.create_prepare_message(header)) |prepare| {
+                defer self.message_bus.unref(prepare);
 
-            log.debug("{}: commit_ops_through: executing op={} checksum={} ({s})", .{
-                self.replica,
-                entry.op,
-                entry.checksum,
-                @tagName(entry.operation),
-            });
-
-            // TODO Refactor this loop block into a separate method.
-            // TODO Then pass the buffer in, having read it and validated checksum already.
-            // This will also enable the leader to commit with the prepare buffer it has in memory
-            // without having to hit the disk again.
-            self.journal.read_sectors(
-                self.commit_buffer[0..@intCast(u32, Journal.sector_ceil(entry.size))],
-                self.journal.offset_in_circular_buffer(entry.offset),
-            );
-
-            // TODO See if entry body has a valid checksum before we increment self.commit_min:
-            // We cannot fail after we have incremented self.commit_min.
-            const entry_body = self.commit_buffer[@sizeOf(Header)..entry.size];
-            assert(entry.valid_checksum_body(entry_body));
-
-            const reply = self.message_bus.create_message(
-                config.response_size_max,
-            ) catch unreachable;
-            defer self.message_bus.unref(reply);
-
-            var reply_body_size = @intCast(u32, self.state_machine.commit(
-                entry.operation,
-                entry_body,
-                reply.buffer[@sizeOf(Header)..],
-            ));
-
-            reply.header.command = .reply;
-            reply.header.operation = entry.operation;
-            reply.header.nonce = entry.checksum;
-            reply.header.client = entry.client;
-            reply.header.request = entry.request;
-            reply.header.cluster = self.cluster;
-            reply.header.replica = self.replica;
-            reply.header.view = self.view;
-            reply.header.op = self.op;
-            reply.header.size = @sizeOf(Header) + reply_body_size;
-
-            reply.header.set_checksum_body(reply.buffer[@sizeOf(Header)..reply.header.size]);
-            reply.header.set_checksum();
-
-            // TODO Add reply to the client table to answer future duplicate requests idempotently.
-            // Lookup client table entry using client id.
-            // If client's last request id is <= this request id, then update client table entry.
-            // Otherwise the client is already ahead of us, and we don't need to update the entry.
-
-            if (self.leader()) {
-                log.debug("{}: commit_ops_through: sending reply to client: {}", .{
-                    self.replica,
-                    reply.header,
-                });
-                self.message_bus.send_message_to_client(reply.header.client, reply);
+                const commit_min = self.commit_min;
+                self.commit_op(prepare);
+                assert(self.commit_min == commit_min + 1);
+                assert(self.commit_min <= self.op);
+            } else {
+                return;
             }
         }
     }
 
-    /// The returned message has exactly 1 reference.
+    fn commit_op(self: *Replica, prepare: *const Message) void {
+        assert(self.status == .normal);
+        assert(prepare.header.command == .prepare);
+        assert(prepare.header.op == self.commit_min + 1);
+        assert(prepare.header.op <= self.op);
+
+        assert(!self.view_jump_barrier);
+        assert(self.op >= self.commit_max);
+
+        log.debug("{}: commit_op: executing op={} checksum={} ({s})", .{
+            self.replica,
+            prepare.header.op,
+            prepare.header.checksum,
+            @tagName(prepare.header.operation),
+        });
+
+        const reply = self.message_bus.create_message(config.response_size_max) catch unreachable;
+        defer self.message_bus.unref(reply);
+
+        var reply_body_size = @intCast(u32, self.state_machine.commit(
+            prepare.header.operation,
+            prepare.buffer[@sizeOf(Header)..prepare.header.size],
+            reply.buffer[@sizeOf(Header)..],
+        ));
+
+        self.commit_min += 1;
+        assert(self.commit_min == prepare.header.op);
+        if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
+
+        reply.header.command = .reply;
+        reply.header.operation = prepare.header.operation;
+        reply.header.nonce = prepare.header.checksum;
+        reply.header.client = prepare.header.client;
+        reply.header.request = prepare.header.request;
+        reply.header.cluster = self.cluster;
+        reply.header.replica = self.replica;
+        reply.header.view = self.view;
+        reply.header.commit = prepare.header.op;
+        reply.header.size = @sizeOf(Header) + reply_body_size;
+
+        reply.header.set_checksum_body(reply.buffer[@sizeOf(Header)..reply.header.size]);
+        reply.header.set_checksum();
+
+        // TODO Add reply to the client table to answer future duplicate requests idempotently.
+        // Lookup client table entry using client id.
+        // If client's last request id is <= this request id, then update client table entry.
+        // Otherwise the client is already ahead of us, and we don't need to update the entry.
+
+        if (self.leader()) {
+            log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
+            self.message_bus.send_message_to_client(reply.header.client, reply);
+        }
+    }
+
+    /// The caller owns the returned message, if any, which has exactly 1 reference.
     fn create_do_view_change_or_start_view_message(self: *Replica, command: Command) *Message {
         assert(command == .do_view_change or command == .start_view);
 
@@ -2282,6 +2274,8 @@ pub const Replica = struct {
         const size_max = @sizeOf(Header) * 8;
 
         const message = self.message_bus.create_message(size_max) catch unreachable;
+        defer self.message_bus.unref(message);
+
         message.header.* = .{
             .command = command,
             .cluster = self.cluster,
@@ -2301,7 +2295,54 @@ pub const Replica = struct {
         message.header.set_checksum_body(body);
         message.header.set_checksum();
 
-        return message;
+        return self.message_bus.ref(message);
+    }
+
+    /// The caller owns the returned message, if any, which has exactly 1 reference.
+    fn create_prepare_message(self: *Replica, header: *const Header) ?*Message {
+        assert(header.valid_checksum());
+        assert(header.command == .prepare);
+
+        if (!self.journal.has_clean(header)) {
+            log.debug("{}: create_prepare_message: dirty", .{self.replica});
+            return null;
+        }
+
+        const sector_size = @intCast(u32, Journal.sector_ceil(header.size));
+        assert(sector_size >= header.size);
+
+        var message = self.message_bus.create_message(sector_size) catch unreachable;
+        defer self.message_bus.unref(message);
+
+        // TODO Move this into the journal:
+        assert(message.header.offset + sector_size <= self.journal.size_circular_buffer);
+        self.journal.read_sectors(
+            message.buffer[0..sector_size],
+            self.journal.offset_in_circular_buffer(header.offset),
+        );
+
+        if (!message.header.valid_checksum()) {
+            log.warn("{}: create_prepare_message: corrupt header", .{self.replica});
+            return null;
+        }
+
+        if (message.header.op != header.op) {
+            log.warn("{}: create_prepare_message: op changed", .{self.replica});
+            return null;
+        }
+
+        if (message.header.checksum != header.checksum) {
+            log.warn("{}: create_prepare_message: checksum changed", .{self.replica});
+            return null;
+        }
+
+        const body = message.buffer[@sizeOf(Header)..message.header.size];
+        if (!message.header.valid_checksum_body(body)) {
+            log.warn("{}: create_prepare_message: corrupt body", .{self.replica});
+            return null;
+        }
+
+        return self.message_bus.ref(message);
     }
 
     fn discard_repair_queue(self: *Replica) void {
@@ -2561,7 +2602,6 @@ pub const Replica = struct {
             });
             // We need to advance our op number and therefore have to `request_prepare`,
             // since only `on_prepare()` can do this, not `repair_header()` in `on_headers()`.
-            // TODO Explore danger scenarios if we were to request from a follower instead.
             self.send_header_to_replica(self.leader_index(self.view), .{
                 .command = .request_prepare,
                 .cluster = self.cluster,
@@ -3256,7 +3296,7 @@ pub const Replica = struct {
         assert(op_min <= op_max);
 
         // If we use anything less than self.op then we may commit ops for a forked hash chain that
-        // has since been reordered by a new leader.
+        // have since been reordered by a new leader.
         assert(op_max == self.op);
         var b = self.journal.entry_for_op_exact(op_max).?;
 
