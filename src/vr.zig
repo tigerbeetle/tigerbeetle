@@ -1691,6 +1691,7 @@ pub const Replica = struct {
             assert(!self.do_view_change_quorum);
             self.do_view_change_quorum = true;
 
+            assert(!self.repair_timeout.ticking);
             self.repair_timeout.start();
             self.repair();
         } else {
@@ -1792,6 +1793,8 @@ pub const Replica = struct {
         // TODO Send prepare_ok messages for uncommitted ops.
 
         self.commit_ops_through(self.commit_max);
+
+        self.repair();
     }
 
     fn on_request_start_view(self: *Replica, message: *const Message) void {
@@ -1889,6 +1892,8 @@ pub const Replica = struct {
             _ = self.repair_header(h);
         }
         assert(op_max.? >= op_min.?);
+
+        self.repair();
     }
 
     fn on_prepare_timeout(self: *Replica) void {
@@ -2645,10 +2650,21 @@ pub const Replica = struct {
         assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
         // Request the latest dirty or faulty prepare:
+        // We never repair op=0 because that is the cluster initialization op.
+        // TODO Optimize.
         var op = self.op;
-        while (op > self.commit_min) : (op -= 1) {
+        while (op > 0) : (op -= 1) {
             if (self.journal.dirty[op]) {
-                log.debug("we need to request_prepare for op={}", .{op});
+                if (self.choose_any_other_replica()) |replica| {
+                    self.send_header_to_replica(replica, .{
+                        .command = .request_prepare,
+                        .cluster = self.cluster,
+                        .replica = self.replica,
+                        .view = self.view,
+                        .op = op,
+                        .nonce = self.journal.entry_for_op_exact(op).?.checksum,
+                    });
+                }
                 return;
             }
         }
@@ -2876,6 +2892,8 @@ pub const Replica = struct {
 
         while (!self.repairing) {
             if (self.repair_queue) |message| {
+                defer self.message_bus.unref(message);
+
                 assert(self.repair_queue_len > 0);
                 self.repair_queue = message.next;
                 self.repair_queue_len -= 1;
@@ -2883,7 +2901,6 @@ pub const Replica = struct {
                 message.next = null;
                 self.on_repair(message);
                 assert(self.repair_queue != message); // Catch an accidental requeue by on_repair().
-                self.message_bus.unref(message);
             } else {
                 assert(self.repair_queue_len == 0);
                 break;
@@ -3438,5 +3455,9 @@ pub const Replica = struct {
         }
 
         self.send_prepare_ok(message);
+
+        // If this was a repair, continue immediately to repair the next prepare:
+        // This is an optimization to eliminate waiting until the next repair timeout.
+        if (lock == &self.repairing) self.repair();
     }
 };
