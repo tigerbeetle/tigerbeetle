@@ -1544,7 +1544,7 @@ pub const Replica = struct {
 
         if (self.journal.has_clean(message.header)) {
             log.debug("{}: on_repair: duplicate", .{self.replica});
-            self.send_prepare_ok(message);
+            self.send_prepare_ok(message.header);
             return;
         }
 
@@ -1854,6 +1854,7 @@ pub const Replica = struct {
 
         const response = self.message_bus.create_message(size_max) catch unreachable;
         defer self.message_bus.unref(response);
+
         response.header.* = .{
             .command = .headers,
             // We echo the nonce back to the replica so that they can match up our response:
@@ -3011,46 +3012,45 @@ pub const Replica = struct {
         log.debug("{}: reset {} {s} message(s)", .{ self.replica, count, @tagName(command) });
     }
 
-    fn send_prepare_ok(self: *Replica, message: *Message) void {
-        assert(message.references > 0);
-        assert(message.header.command == .prepare);
-        assert(message.header.view <= self.view);
-        assert(message.header.op <= self.op or message.header.view < self.view);
+    fn send_prepare_ok(self: *Replica, header: *const Header) void {
+        assert(header.command == .prepare);
+        assert(header.view <= self.view);
+        assert(header.op <= self.op or header.view < self.view);
 
         if (self.status != .normal) {
             log.debug("{}: send_prepare_ok: not sending ({})", .{ self.replica, self.status });
             return;
         }
 
-        if (message.header.view < self.view) {
+        if (header.view < self.view) {
             log.debug("{}: send_prepare_ok: not sending (older view)", .{self.replica});
             return;
         }
 
         assert(self.status == .normal);
-        assert(message.header.view == self.view);
-        assert(message.header.op <= self.op);
+        assert(header.view == self.view);
+        assert(header.op <= self.op);
 
-        if (message.header.op <= self.commit_max) {
+        if (header.op <= self.commit_max) {
             log.debug("{}: send_prepare_ok: not sending (committed)", .{self.replica});
             return;
         }
 
-        if (self.journal.has_clean(message.header)) {
-            assert(message.header.replica == self.leader_index(message.header.view));
-            self.send_header_to_replica(message.header.replica, .{
+        if (self.journal.has_clean(header)) {
+            assert(header.replica == self.leader_index(header.view));
+            self.send_header_to_replica(header.replica, .{
                 .command = .prepare_ok,
-                .nonce = message.header.checksum,
-                .client = message.header.client,
+                .nonce = header.checksum,
+                .client = header.client,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .view = message.header.view,
-                .op = message.header.op,
-                .commit = message.header.commit,
-                .offset = message.header.offset,
-                .epoch = message.header.epoch,
-                .request = message.header.request,
-                .operation = message.header.operation,
+                .view = header.view,
+                .op = header.op,
+                .commit = header.commit,
+                .offset = header.offset,
+                .epoch = header.epoch,
+                .request = header.request,
+                .operation = header.operation,
             });
         } else {
             log.debug("{}: send_prepare_ok: not sending (dirty)", .{self.replica});
@@ -3464,7 +3464,7 @@ pub const Replica = struct {
             log.debug("{}: write_to_journal: skipping (clean)", .{self.replica});
         }
 
-        self.send_prepare_ok(message);
+        self.send_prepare_ok(message.header);
 
         // If this was a repair, continue immediately to repair the next prepare:
         // This is an optimization to eliminate waiting until the next repair timeout.
