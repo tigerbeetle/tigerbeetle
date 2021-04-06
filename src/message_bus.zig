@@ -497,7 +497,7 @@ const Connection = struct {
         attempts.* +%= 1;
         if (attempts.* == 0) attempts.* -%= 1;
 
-        log.info("connecting to replica {} in {}ms...", .{ self.peer.replica, ms });
+        log.debug("connecting to replica {} in {}ms...", .{ self.peer.replica, ms });
 
         assert(!self.recv_submitted);
         self.recv_submitted = true;
@@ -526,7 +526,7 @@ const Connection = struct {
         assert(self.state == .connecting);
         result catch unreachable;
 
-        log.info("connecting to replica {}...", .{self.peer.replica});
+        log.debug("connecting to replica {}...", .{self.peer.replica});
 
         assert(!self.recv_submitted);
         self.recv_submitted = true;
