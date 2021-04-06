@@ -1698,8 +1698,6 @@ pub const Replica = struct {
             unreachable;
         }
 
-        if (true) return;
-
         // TODO Ensure self.commit_max == self.op
         // Next prepare needs this to hold: assert(message.header.op == self.commit_max + 1);
 
