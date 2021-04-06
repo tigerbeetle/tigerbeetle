@@ -2150,31 +2150,9 @@ pub const Replica = struct {
             self.commit_max = commit;
         }
 
-        // If we know we have uncommitted ops that may have been reordered through a view change
-        // then wait until the latest of these has been resolved with the leader:
-        if (self.view_jump_barrier) {
-            log.notice("{}: commit_ops_through: waiting to resolve view jump barrier", .{
-                self.replica,
-            });
-            return;
-        }
-
-        // If we know we could validate the hash chain even further, then wait until we can:
-        // This is partial defense-in-depth in case `self.op` is ever advanced by a reordered op.
-        if (self.op < self.commit_max) {
-            log.notice("{}: commit_ops_through: waiting for repair (op={} < commit={})", .{
-                self.replica,
-                self.op,
-                self.commit_max,
-            });
-            return;
-        }
-
-        // We must validate the hash chain as far as possible, since `self.op` may disclose a fork:
-        if (!self.valid_hash_chain_between(self.commit_min, self.op)) {
-            log.notice("{}: commit_ops_through: waiting for repair (hash chain)", .{self.replica});
-            return;
-        }
+        if (!self.valid_hash_chain("commit_ops_through")) return;
+        assert(!self.view_jump_barrier);
+        assert(self.op >= self.commit_max);
 
         // We may receive commit numbers for ops we do not yet have (`commit_max > self.op`):
         // Even a naive state transfer may fail to correct for this.
@@ -2202,6 +2180,7 @@ pub const Replica = struct {
         assert(prepare.header.op == self.commit_min + 1);
         assert(prepare.header.op <= self.op);
 
+        if (!self.valid_hash_chain("commit_op")) return;
         assert(!self.view_jump_barrier);
         assert(self.op >= self.commit_max);
 
@@ -3313,6 +3292,38 @@ pub const Replica = struct {
         self.do_view_change_quorum = false;
 
         self.send_start_view_change();
+    }
+
+    /// Whether it is safe to commit or send prepare_ok messages.
+    /// Returns true if the hash chain is valid and up to date for the current view.
+    /// This is a stronger guarantee than `valid_hash_chain_between()` below.
+    fn valid_hash_chain(self: *Replica, method: []const u8) bool {
+        // If we know we have uncommitted ops that may have been reordered through a view change
+        // then wait until the latest of these has been resolved with the leader:
+        if (self.view_jump_barrier) {
+            log.notice("{}: {s}: waiting to resolve view jump barrier", .{ self.replica, method });
+            return false;
+        }
+
+        // If we know we could validate the hash chain even further, then wait until we can:
+        // This is partial defense-in-depth in case `self.op` is ever advanced by a reordered op.
+        if (self.op < self.commit_max) {
+            log.notice("{}: {s}: waiting for repair (op={} < commit={})", .{
+                self.replica,
+                method,
+                self.op,
+                self.commit_max,
+            });
+            return false;
+        }
+
+        // We must validate the hash chain as far as possible, since `self.op` may disclose a fork:
+        if (!self.valid_hash_chain_between(self.commit_min, self.op)) {
+            log.notice("{}: {s}: waiting for repair (hash chain)", .{ self.replica, method });
+            return false;
+        }
+
+        return true;
     }
 
     /// Returns true if all operations are present, correctly ordered and connected by hash chain,
