@@ -63,10 +63,6 @@ pub fn run() !void {
 
     var ticks: usize = 0;
     while (true) : (ticks += 1) {
-        std.debug.print("\n", .{});
-        log.debug("ticking (message_bus has {} messages allocated)", .{message_bus.allocated});
-        std.debug.print("\n", .{});
-
         var leader: ?*Replica = null;
         for (replicas) |*replica| {
             if (replica.status == .normal and replica.leader()) leader = replica;
@@ -111,7 +107,7 @@ pub fn run() !void {
             }
         }
 
-        std.time.sleep(std.time.ns_per_ms * 500);
+        std.time.sleep(std.time.ns_per_ms * 50);
     }
 }
 
