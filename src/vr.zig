@@ -2991,6 +2991,8 @@ pub const Replica = struct {
 
     fn send_prepare_ok(self: *Replica, header: *const Header) void {
         assert(header.command == .prepare);
+        assert(header.cluster == self.cluster);
+        assert(header.replica == self.leader_index(header.view));
         assert(header.view <= self.view);
         assert(header.op <= self.op or header.view < self.view);
 
@@ -2999,13 +3001,17 @@ pub const Replica = struct {
             return;
         }
 
-        if (header.view < self.view) {
-            log.debug("{}: send_prepare_ok: not sending (older view)", .{self.replica});
+        if (header.op > self.op) {
+            assert(header.view < self.view);
+            // An op may be reordered concurrently through a view change while being journalled:
+            log.debug("{}: send_prepare_ok: not sending (reordered)", .{self.replica});
             return;
         }
 
         assert(self.status == .normal);
-        assert(header.view == self.view);
+        // After a view change followers must send prepare_oks for uncommitted ops with older views:
+        // However, we will only ever send to the leader of our current view.
+        assert(header.view <= self.view);
         assert(header.op <= self.op);
 
         if (header.op <= self.commit_max) {
@@ -3013,9 +3019,23 @@ pub const Replica = struct {
             return;
         }
 
+        // TODO Think through a scenario of where not doing this would be wrong.
+        if (!self.valid_hash_chain("send_prepare_ok")) return;
+        assert(!self.view_jump_barrier);
+        assert(self.op >= self.commit_max);
+
         if (self.journal.has_clean(header)) {
-            assert(header.replica == self.leader_index(header.view));
-            self.send_header_to_replica(header.replica, .{
+            // It is crucial that replicas stop accepting prepare messages from earlier views once
+            // they start the view change protocol. Without this constraint, the system could get
+            // into a state in which there are two active primaries: the old one, which hasn't
+            // failed but is merely slow or not well connected to the network, and the new one. If a
+            // replica sent a prepare_ok message to the old primary after sending its log to the new
+            // one, the old primary might commit an operation that the new primary doesn't learn
+            // about in the do_view_change messages.
+
+            // We therefore only send to the leader of the current view, never to the leader of the
+            // prepare header's view:
+            self.send_header_to_replica(self.leader_index(self.view), .{
                 .command = .prepare_ok,
                 .nonce = header.checksum,
                 .client = header.client,
@@ -3032,6 +3052,24 @@ pub const Replica = struct {
         } else {
             log.debug("{}: send_prepare_ok: not sending (dirty)", .{self.replica});
             return;
+        }
+    }
+
+    fn send_prepare_oks_through(self: *Replica, op: u64) void {
+        assert(self.status == .normal);
+        assert(op >= self.commit_max);
+        assert(op <= self.op);
+
+        if (!self.valid_hash_chain("send_prepare_oks_through")) return;
+        assert(!self.view_jump_barrier);
+        assert(self.op >= self.commit_max);
+
+        while (op > self.commit_max and op < self.op) : (op += 1) {
+            const header = self.journal.entry_for_op_exact(op).?;
+            assert(header.op == op);
+            assert(header.operation != .init);
+
+            self.send_prepare_ok(header);
         }
     }
 
