@@ -2389,6 +2389,8 @@ pub const Replica = struct {
     fn ignore_repair_message_during_view_change(self: *Replica, message: *const Message) bool {
         if (self.status != .view_change) return false;
 
+        const command: []const u8 = @tagName(message.header.command);
+
         switch (message.header.command) {
             .request_start_view => {
                 log.debug("{}: on_{s}: ignoring (view change)", .{ self.replica, command });
