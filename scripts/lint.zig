@@ -52,7 +52,7 @@ pub fn main() !void {
         }
     }
 
-    var max_path_len: usize = 0;
+    var max_path_len: usize = "total:".len;
     var total_assert_count: usize = 0;
     var total_function_count: usize = 0;
     for (file_stats.items) |stats| {
