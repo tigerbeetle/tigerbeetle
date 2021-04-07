@@ -25,7 +25,11 @@ pub fn build(b: *std.build.Builder) void {
 
         const run_cmd = lint.run();
         run_cmd.step.dependOn(&lint.step);
-        run_cmd.addArg("src");
+        if (b.args) |args| {
+            run_cmd.addArgs(args);
+        } else {
+            run_cmd.addArg("src");
+        }
 
         const lint_step = b.step("lint", "Run the linter on src/");
         lint_step.dependOn(&run_cmd.step);

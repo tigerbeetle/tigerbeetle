@@ -1,7 +1,5 @@
 const std = @import("std");
-const ast = std.ast;
 const fs = std.fs;
-const os = std.os;
 const mem = std.mem;
 
 const whitelist = std.ComptimeStringMap([]const u32, .{
@@ -13,14 +11,20 @@ fn whitelisted(path: []const u8, line: u32) bool {
     return mem.indexOfScalar(u32, lines, line) != null;
 }
 
+const Stats = struct {
+    path: []const u8,
+    assert_count: u32,
+    function_count: u32,
+    ratio: f64,
+};
+
+var file_stats = std.ArrayListUnmanaged(Stats){};
+
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 const gpa = &general_purpose_allocator.allocator;
 
-var function_count: usize = 0;
-var assert_count: usize = 0;
-
 pub fn main() !void {
-    const argv = os.argv;
+    const argv = std.os.argv;
     for (argv[1..]) |raw_path| {
         const path = mem.span(raw_path);
         if (fs.walkPath(gpa, path)) |*walker| {
@@ -48,17 +52,45 @@ pub fn main() !void {
         }
     }
 
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print(
-        \\Assertions: {d}
-        \\Functions: {d}
-        \\Assertion/Function Ratio: {d:.2}
-        \\
-    , .{
-        assert_count,
-        function_count,
-        @intToFloat(f64, assert_count) / @intToFloat(f64, function_count),
+    var max_path_len: usize = 0;
+    var total_assert_count: usize = 0;
+    var total_function_count: usize = 0;
+    for (file_stats.items) |stats| {
+        max_path_len = std.math.max(max_path_len, stats.path.len);
+        total_assert_count += stats.assert_count;
+        total_function_count += stats.function_count;
+    }
+
+    std.sort.sort(Stats, file_stats.items, {}, struct {
+        fn less_than(_: void, a: Stats, b: Stats) bool {
+            return a.ratio < b.ratio;
+        }
+    }.less_than);
+
+    var buffered_writer = std.io.bufferedWriter(std.io.getStdOut().writer());
+    const stdout = buffered_writer.writer();
+
+    try stdout.writeAll("\npath");
+    try stdout.writeByteNTimes(' ', max_path_len - "path".len);
+    try stdout.writeAll(" asserts functions ratio\n");
+
+    for (file_stats.items) |stats| {
+        try stdout.writeAll(stats.path);
+        try stdout.writeByteNTimes(' ', max_path_len - stats.path.len);
+        try stdout.print(" {d: >7} {d: >9} {d: >5.2}\n", .{
+            stats.assert_count,
+            stats.function_count,
+            stats.ratio,
+        });
+    }
+
+    try stdout.writeByteNTimes(' ', max_path_len - "total:".len);
+    try stdout.print("total: {d: >7} {d: >9} {d: >5.2}\n", .{
+        total_assert_count,
+        total_function_count,
+        @intToFloat(f64, total_assert_count) / @intToFloat(f64, total_function_count),
     });
+    try buffered_writer.flush();
 }
 
 fn lint(source: []const u8, path: []const u8) !void {
@@ -73,6 +105,8 @@ fn lint(source: []const u8, path: []const u8) !void {
     const main_tokens = tree.nodes.items(.main_token);
     const node_datas = tree.nodes.items(.data);
 
+    var function_count: u32 = 0;
+    var assert_count: u32 = 0;
     for (node_tags) |tag, node| {
         switch (tag) {
             .fn_decl => {
@@ -106,6 +140,13 @@ fn lint(source: []const u8, path: []const u8) !void {
             else => {},
         }
     }
+
+    try file_stats.append(gpa, .{
+        .path = try gpa.dupe(u8, path),
+        .assert_count = assert_count,
+        .function_count = function_count,
+        .ratio = @intToFloat(f64, assert_count) / @intToFloat(f64, function_count),
+    });
 }
 
 fn check_line_length(source: []const u8, path: []const u8) !void {
