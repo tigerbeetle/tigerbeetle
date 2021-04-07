@@ -312,6 +312,52 @@ pub const Storage = struct {
     }
 };
 
+// TODO Snapshots
+pub const BitSet = struct {
+    allocator: *Allocator,
+    bits: []bool,
+
+    /// The number of bits set (updated incrementally as bits are set or cleared):
+    len: u64 = 0,
+
+    fn init(allocator: *Allocator, count: u64) !BitSet {
+        var bits = try allocator.alloc(bool, count);
+        errdefer allocator.free(bits);
+        std.mem.set(bool, bits, false);
+
+        return BitSet{
+            .allocator = allocator,
+            .bits = bits,
+        };
+    }
+
+    fn deinit(self: *BitSet) void {
+        self.allocator.free(self.bits);
+    }
+
+    /// Clear the bit for an op (idempotent):
+    pub fn clear(self: *BitSet, op: u64) void {
+        if (self.bits[op]) {
+            self.bits[op] = false;
+            self.len -= 1;
+        }
+    }
+
+    /// Whether the bit for an op is set:
+    pub fn bit(self: *BitSet, op: u64) bool {
+        return self.bits[op];
+    }
+
+    /// Set the bit for an op (idempotent):
+    pub fn set(self: *BitSet, op: u64) void {
+        if (!self.bits[op]) {
+            self.bits[op] = true;
+            self.len += 1;
+            assert(self.len <= self.bits.len);
+        }
+    }
+};
+
 pub const Journal = struct {
     allocator: *Allocator,
     storage: *Storage,
@@ -320,7 +366,20 @@ pub const Journal = struct {
     size_headers: u64,
     size_circular_buffer: u64,
     headers: []Header align(config.sector_size),
-    dirty: []bool,
+
+    /// Whether an entry is in memory only and needs to be written or is being written:
+    /// We use this in the same sense as a dirty bit in the kernel page cache.
+    /// A dirty bit means that we have not yet prepared the entry, or need to repair a faulty entry.
+    dirty: BitSet,
+
+    /// Whether an entry was written to disk and this write was subsequently lost due to:
+    /// * corruption,
+    /// * a misdirected write (or a misdirected read, we do not distinguish), or else
+    /// * a latent sector error, where the sector can no longer be read.
+    /// A faulty bit means that we prepared and then lost the entry.
+    /// A faulty bit requires the dirty bit to also be set so that functions need not check both.
+    /// A faulty bit is used then only to qualify the severity of the dirty bit.
+    faulty: BitSet,
 
     /// We copy-on-write to this buffer when writing, as in-memory headers may change concurrently:
     write_headers_buffer: []u8 align(config.sector_size),
@@ -358,9 +417,11 @@ pub const Journal = struct {
         errdefer allocator.free(headers);
         for (headers) |*header| header.zero();
 
-        var dirty = try allocator.alloc(bool, headers.len);
-        errdefer allocator.free(dirty);
-        std.mem.set(bool, dirty, false);
+        var dirty = try BitSet.init(allocator, headers.len);
+        errdefer dirty.deinit();
+
+        var faulty = try BitSet.init(allocator, headers.len);
+        errdefer faulty.deinit();
 
         var write_headers_buffer = try allocator.allocAdvanced(
             u8,
@@ -396,12 +457,14 @@ pub const Journal = struct {
             .size_circular_buffer = size_circular_buffer,
             .headers = headers,
             .dirty = dirty,
+            .faulty = faulty,
             .write_headers_buffer = write_headers_buffer,
         };
 
         assert(@mod(self.size_circular_buffer, config.sector_size) == 0);
         assert(@mod(@ptrToInt(&self.headers[0]), config.sector_size) == 0);
-        assert(self.dirty.len == self.headers.len);
+        assert(self.dirty.bits.len == self.headers.len);
+        assert(self.faulty.bits.len == self.headers.len);
         assert(self.write_headers_buffer.len == @sizeOf(Header) * self.headers.len);
 
         return self;
@@ -483,12 +546,12 @@ pub const Journal = struct {
 
     pub fn has_clean(self: *Journal, header: *const Header) bool {
         // TODO Snapshots
-        return self.has(header) and !self.dirty[header.op];
+        return self.has(header) and !self.dirty.bit(header.op);
     }
 
     pub fn has_dirty(self: *Journal, header: *const Header) bool {
         // TODO Snapshots
-        return self.has(header) and self.dirty[header.op];
+        return self.has(header) and self.dirty.bit(header.op);
     }
 
     /// Copies latest headers between `op_min` and `op_max` (both inclusive) as will fit in `dest`.
@@ -645,7 +708,8 @@ pub const Journal = struct {
         // TODO Snapshots
         assert(self.headers[header.op].checksum == header.checksum);
         self.headers[header.op].zero();
-        self.dirty[header.op] = true;
+        self.dirty.set(header.op);
+        self.faulty.clear(header.op);
     }
 
     /// Removes entries from `op_min` (inclusive) onwards.
@@ -668,12 +732,12 @@ pub const Journal = struct {
         log.debug("{}: journal: set_entry_as_dirty: {}", .{ self.replica, header.checksum });
         if (self.entry(header)) |existing| {
             if (existing.checksum != header.checksum) {
-                assert(existing.view <= header.view);
-                assert(existing.op < header.op or existing.view < header.view);
+                self.faulty.clear(header.op);
             }
         }
         self.headers[header.op] = header.*;
-        self.dirty[header.op] = true;
+        self.dirty.set(header.op);
+        // Do not clear any faulty bit for the same entry.
     }
 
     pub fn write(self: *Journal, message: *const Message) void {
@@ -707,7 +771,8 @@ pub const Journal = struct {
 
         self.write_debug(message.header, "complete, marking clean");
         // TODO Snapshots
-        self.dirty[message.header.op] = false;
+        self.dirty.clear(message.header.op);
+        self.faulty.clear(message.header.op);
     }
 
     fn write_debug(self: *Journal, header: *const Header, status: []const u8) void {
@@ -795,7 +860,7 @@ pub const Journal = struct {
         for (headers) |*header| {
             // TODO Snapshots
             // We must use header.op and not the loop index as we are working from a slice:
-            if (!self.dirty[header.op]) continue;
+            if (!self.dirty.bit(header.op)) continue;
             if (header.command == .reserved) {
                 log.debug("{}: journal: write_headers_once: dirty reserved header", .{
                     self.replica,
@@ -812,7 +877,7 @@ pub const Journal = struct {
                 }
                 // TODO Add is_dirty(header)
                 // TODO Snapshots
-                if (self.dirty[previous.op]) {
+                if (self.dirty.bit(previous.op)) {
                     log.debug("{}: journal: write_headers_once: previous entry is dirty", .{
                         self.replica,
                     });
@@ -2628,11 +2693,20 @@ pub const Replica = struct {
         assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
         // Request the latest dirty or faulty prepare:
-        // We never repair op=0 because that is the cluster initialization op.
-        // TODO Optimize.
+        self.repair_dirty();
+    }
+
+    fn repair_dirty(self: *Replica) void {
+        // TODO Avoid requesting data if we have already just requested it.
+        // TODO Avoid requesting data if we are busy writing it (writes could take 10 seconds).
+        // TODO Avoid requesting data if our repair queue is full.
+        if (self.journal.dirty.len == 0) return;
         var op = self.op;
+        // We never repair op=0 because that is the cluster initialization op:
         while (op > 0) : (op -= 1) {
-            if (self.journal.dirty[op]) {
+            if (self.journal.dirty.bit(op)) {
+                // Do not try to repair a concurrent append:
+                if (op == self.op and self.appending) continue;
                 if (self.choose_any_other_replica()) |replica| {
                     self.send_header_to_replica(replica, .{
                         .command = .request_prepare,
@@ -2646,12 +2720,6 @@ pub const Replica = struct {
                 return;
             }
         }
-    }
-
-    fn repair_dirty(self: *Replica) void {
-        // TODO Add a flag to avoid scanning all dirty bits.
-        // TODO Avoid requesting data if we have already just requested it.
-        // TODO Avoid requesting data if we are busy writing it (writes could take 10 seconds).
     }
 
     fn repair_header(self: *Replica, header: *const Header) bool {
@@ -2706,7 +2774,7 @@ pub const Replica = struct {
             // Do not replace any existing op lightly as doing so may impair durability and even
             // violate correctness by undoing a prepare already acknowledged to the leader:
             if (existing.checksum == header.checksum) {
-                if (self.journal.dirty[header.op]) {
+                if (self.journal.dirty.bit(header.op)) {
                     // We may safely replace this existing op (with hash chain and overlap caveats):
                     log.debug("{}: repair_header: exists (dirty checksum)", .{self.replica});
                 } else {
@@ -3145,11 +3213,12 @@ pub const Replica = struct {
         assert(self.status == .view_change);
         assert(self.start_view_change_quorum);
         assert(!self.do_view_change_quorum);
-        assert(self.count_quorum(
+        const count_start_view_change = self.count_quorum(
             self.start_view_change_from_other_replicas,
             .start_view_change,
             0,
-        ) >= self.f);
+        );
+        assert(count_start_view_change >= self.f);
 
         const message = self.create_do_view_change_or_start_view_message(.do_view_change);
         defer self.message_bus.unref(message);
@@ -3500,10 +3569,13 @@ pub const Replica = struct {
             return;
         }
 
-        if (self.journal.has_dirty(message.header)) {
+        if (self.journal.dirty.bit(message.header.op)) {
             self.journal.write(message);
         } else {
+            // Any function that sets the faulty bit should also set the dirty bit:
+            assert(!self.journal.faulty.bit(message.header.op));
             log.debug("{}: write_to_journal: skipping (clean)", .{self.replica});
+            // Continue through below to send a prepare_ok message if necessary.
         }
 
         self.send_prepare_ok(message.header);
