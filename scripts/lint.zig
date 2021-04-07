@@ -1,5 +1,6 @@
 const std = @import("std");
 const fs = std.fs;
+const math = std.math;
 const mem = std.mem;
 
 const whitelist = std.ComptimeStringMap([]const u32, .{
@@ -19,6 +20,7 @@ const Stats = struct {
 };
 
 var file_stats = std.ArrayListUnmanaged(Stats){};
+var seen = std.AutoArrayHashMapUnmanaged(fs.File.INode, void){};
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 const gpa = &general_purpose_allocator.allocator;
@@ -27,36 +29,17 @@ pub fn main() !void {
     const argv = std.os.argv;
     for (argv[1..]) |raw_path| {
         const path = mem.span(raw_path);
-        if (fs.walkPath(gpa, path)) |*walker| {
-            defer walker.deinit();
-            while (try walker.next()) |entry| {
-                if (entry.kind == .File and
-                    mem.eql(u8, ".zig", entry.basename[entry.basename.len - 4 ..]))
-                {
-                    const file = try entry.dir.openFile(entry.basename, .{});
-                    defer file.close();
-                    const source = try file.readToEndAlloc(gpa, std.math.maxInt(usize));
-                    defer gpa.free(source);
-                    try lint(source, entry.path);
-                }
-            }
-        } else |err| switch (err) {
-            error.NotDir => {
-                const file = try fs.cwd().openFile(path, .{});
-                defer file.close();
-                const source = try file.readToEndAlloc(gpa, std.math.maxInt(usize));
-                defer gpa.free(source);
-                try lint(source, path);
-            },
+        lint_file(path, fs.cwd(), path) catch |err| switch (err) {
+            error.IsDir, error.AccessDenied => try lint_dir(path, fs.cwd(), path),
             else => return err,
-        }
+        };
     }
 
     var max_path_len: usize = "total:".len;
     var total_assert_count: usize = 0;
     var total_function_count: usize = 0;
     for (file_stats.items) |stats| {
-        max_path_len = std.math.max(max_path_len, stats.path.len);
+        max_path_len = math.max(max_path_len, stats.path.len);
         total_assert_count += stats.assert_count;
         total_function_count += stats.function_count;
     }
@@ -93,8 +76,51 @@ pub fn main() !void {
     try buffered_writer.flush();
 }
 
-fn lint(source: []const u8, path: []const u8) !void {
-    try check_line_length(source, path);
+const LintError = error{
+    OutOfMemory,
+    ParseError,
+    NotUtf8,
+} || fs.File.OpenError || fs.File.ReadError || fs.File.WriteError;
+
+fn lint_dir(file_path: []const u8, parent_dir: fs.Dir, parent_sub_path: []const u8) LintError!void {
+    var dir = try parent_dir.openDir(parent_sub_path, .{ .iterate = true });
+    defer dir.close();
+
+    const stat = try dir.stat();
+    if (try seen.fetchPut(gpa, stat.inode, {})) |_| return;
+
+    var dir_it = dir.iterate();
+    while (try dir_it.next()) |entry| {
+        const is_dir = entry.kind == .Directory;
+
+        if (is_dir and std.mem.eql(u8, entry.name, "zig-cache")) continue;
+
+        if (is_dir or mem.endsWith(u8, entry.name, ".zig")) {
+            const full_path = try fs.path.join(gpa, &[_][]const u8{ file_path, entry.name });
+            defer gpa.free(full_path);
+
+            if (is_dir) {
+                try lint_dir(full_path, dir, entry.name);
+            } else {
+                try lint_file(full_path, dir, entry.name);
+            }
+        }
+    }
+}
+
+fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError!void {
+    const source_file = try dir.openFile(sub_path, .{});
+    defer source_file.close();
+
+    const stat = try source_file.stat();
+
+    if (stat.kind == .Directory) return error.IsDir;
+
+    // Add to set after no longer possible to get error.IsDir.
+    if (try seen.fetchPut(gpa, stat.inode, {})) |_| return;
+
+    const source = try source_file.readToEndAlloc(gpa, math.maxInt(usize));
+    try check_line_length(source, file_path);
 
     var tree = try std.zig.parse(gpa, source);
     defer tree.deinit(gpa);
@@ -118,10 +144,10 @@ fn lint(source: []const u8, path: []const u8) !void {
                 // 0-indexed while most editors start at 1.
                 const line = @intCast(u32, body_start.line + 1);
                 const body_lines = body_end.line - body_start.line;
-                if (body_lines > 70 and !whitelisted(path, line)) {
+                if (body_lines > 70 and !whitelisted(file_path, line)) {
                     const stderr = std.io.getStdErr().writer();
                     try stderr.print("{s}:{d} function body exceeds 70 lines ({d} lines)\n", .{
-                        path,
+                        file_path,
                         line,
                         body_lines,
                     });
@@ -142,7 +168,7 @@ fn lint(source: []const u8, path: []const u8) !void {
     }
 
     try file_stats.append(gpa, .{
-        .path = try gpa.dupe(u8, path),
+        .path = try gpa.dupe(u8, file_path),
         .assert_count = assert_count,
         .function_count = function_count,
         .ratio = @intToFloat(f64, assert_count) / @intToFloat(f64, function_count),
@@ -153,7 +179,9 @@ fn check_line_length(source: []const u8, path: []const u8) !void {
     var i: usize = 0;
     var line: u32 = 1;
     while (mem.indexOfScalar(u8, source[i..], '\n')) |newline| : (line += 1) {
-        const line_length = try std.unicode.utf8CountCodepoints(source[i..][0..newline]);
+        const line_length = std.unicode.utf8CountCodepoints(
+            source[i..][0..newline],
+        ) catch return error.NotUtf8;
         if (line_length > 100 and !whitelisted(path, line)) {
             const stderr = std.io.getStdErr().writer();
             try stderr.print("{s}:{d} line exceeds 100 columns\n", .{ path, line });
