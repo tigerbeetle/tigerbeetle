@@ -2354,45 +2354,12 @@ pub const Replica = struct {
 
         // We should never view jump unless we know what our status should be after the jump:
         // Otherwise we may be normal before the leader, or in a view change that has completed.
-        // Since we do not know the status of the other replica, we ignore and do not jump.
         if (message.header.view > self.view) {
             log.debug("{}: on_{s}: ignoring (newer view)", .{ self.replica, command });
             return true;
         }
 
-        if (self.status == .view_change) {
-            switch (message.header.command) {
-                .request_start_view => {
-                    log.debug("{}: on_{s}: ignoring (view change)", .{ self.replica, command });
-                    return true;
-                },
-                .request_headers, .request_prepare => {
-                    if (self.leader_index(self.view) != message.header.replica) {
-                        log.debug("{}: on_{s}: ignoring (view change, requested by follower)", .{
-                            self.replica,
-                            command,
-                        });
-                        return true;
-                    }
-                },
-                .headers => {
-                    if (self.leader_index(self.view) != self.replica) {
-                        log.debug("{}: on_{s}: ignoring (view change, received by follower)", .{
-                            self.replica,
-                            command,
-                        });
-                        return true;
-                    } else if (!self.do_view_change_quorum) {
-                        log.debug("{}: on_{s}: ignoring (view change, waiting for quorum)", .{
-                            self.replica,
-                            command,
-                        });
-                        return true;
-                    }
-                },
-                else => unreachable,
-            }
-        }
+        if (self.ignore_repair_message_during_view_change(message)) return true;
 
         if (message.header.replica == self.replica) {
             log.warn("{}: on_{s}: ignoring (self)", .{ self.replica, command });
@@ -2416,6 +2383,44 @@ pub const Replica = struct {
 
         // Only allow repairs for same view as defense-in-depth:
         assert(message.header.view == self.view);
+        return false;
+    }
+
+    fn ignore_repair_message_during_view_change(self: *Replica, message: *const Message) bool {
+        if (self.status != .view_change) return false;
+
+        switch (message.header.command) {
+            .request_start_view => {
+                log.debug("{}: on_{s}: ignoring (view change)", .{ self.replica, command });
+                return true;
+            },
+            .request_headers, .request_prepare => {
+                if (self.leader_index(self.view) != message.header.replica) {
+                    log.debug("{}: on_{s}: ignoring (view change, requested by follower)", .{
+                        self.replica,
+                        command,
+                    });
+                    return true;
+                }
+            },
+            .headers => {
+                if (self.leader_index(self.view) != self.replica) {
+                    log.debug("{}: on_{s}: ignoring (view change, received by follower)", .{
+                        self.replica,
+                        command,
+                    });
+                    return true;
+                } else if (!self.do_view_change_quorum) {
+                    log.debug("{}: on_{s}: ignoring (view change, waiting for quorum)", .{
+                        self.replica,
+                        command,
+                    });
+                    return true;
+                }
+            },
+            else => unreachable,
+        }
+
         return false;
     }
 
