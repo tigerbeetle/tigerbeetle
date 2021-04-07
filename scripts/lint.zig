@@ -63,7 +63,7 @@ pub fn main() !void {
 
     std.sort.sort(Stats, file_stats.items, {}, struct {
         fn less_than(_: void, a: Stats, b: Stats) bool {
-            return a.ratio < b.ratio;
+            return a.ratio > b.ratio;
         }
     }.less_than);
 
