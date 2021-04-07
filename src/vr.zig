@@ -2019,10 +2019,11 @@ pub const Replica = struct {
         assert(threshold >= 1);
         assert(threshold <= self.configuration.len);
 
+        const command: []const u8 = @tagName(message.header.command);
+
         // Do not allow duplicate messages to trigger multiple passes through a state transition:
         if (messages[message.header.replica]) |m| {
             // Assert that this truly is a duplicate message and not a different message:
-            // TODO Review that all message fields are compared for equality:
             assert(m.header.command == message.header.command);
             assert(m.header.replica == message.header.replica);
             assert(m.header.view == message.header.view);
@@ -2030,10 +2031,7 @@ pub const Replica = struct {
             assert(m.header.commit == message.header.commit);
             assert(m.header.checksum_body == message.header.checksum_body);
             assert(m.header.checksum == message.header.checksum);
-            log.debug("{}: on_{s}: ignoring (duplicate message)", .{
-                self.replica,
-                @tagName(message.header.command),
-            });
+            log.debug("{}: on_{s}: ignoring (duplicate message)", .{ self.replica, command });
             return null;
         }
 
@@ -2043,27 +2041,17 @@ pub const Replica = struct {
 
         // Count the number of unique messages now received:
         const count = self.count_quorum(messages, message.header.command, message.header.nonce);
-        log.debug("{}: on_{s}: {} message(s)", .{
-            self.replica,
-            @tagName(message.header.command),
-            count,
-        });
+        log.debug("{}: on_{s}: {} message(s)", .{ self.replica, command, count });
 
         // Wait until we have exactly `threshold` messages for quorum:
         if (count < threshold) {
-            log.debug("{}: on_{s}: waiting for quorum", .{
-                self.replica,
-                @tagName(message.header.command),
-            });
+            log.debug("{}: on_{s}: waiting for quorum", .{ self.replica, command });
             return null;
         }
 
         // This is not the first time we have had quorum, the state transition has already happened:
         if (count > threshold) {
-            log.debug("{}: on_{s}: ignoring (quorum received already)", .{
-                self.replica,
-                @tagName(message.header.command),
-            });
+            log.debug("{}: on_{s}: ignoring (quorum received already)", .{ self.replica, command });
             return null;
         }
 
@@ -3435,7 +3423,7 @@ pub const Replica = struct {
         if (to_status == .normal) {
             assert(header.view >= self.view);
 
-            const command = @tagName(header.command);
+            const command: []const u8 = @tagName(header.command);
             if (header.view == self.view) {
                 assert(self.status == .view_change and to_status == .normal);
                 log.debug("{}: view_jump: exiting view change and starting view", .{self.replica});
