@@ -83,9 +83,14 @@ fn lint(source: []const u8, path: []const u8) !void {
                 // Add 1 as the count returned by tokenLocation() is
                 // 0-indexed while most editors start at 1.
                 const line = @intCast(u32, body_start.line + 1);
-                if (body_end.line - body_start.line > 70 and !whitelisted(path, line)) {
+                const body_lines = body_end.line - body_start.line;
+                if (body_lines > 70 and !whitelisted(path, line)) {
                     const stderr = std.io.getStdErr().writer();
-                    try stderr.print("{s}:{d} function body exceeds 70 lines\n", .{ path, line });
+                    try stderr.print("{s}:{d} function body exceeds 70 lines ({d} lines)\n", .{
+                        path,
+                        line,
+                        body_lines,
+                    });
                 }
             },
 
