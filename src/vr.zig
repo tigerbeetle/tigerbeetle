@@ -498,10 +498,23 @@ pub const Journal = struct {
     }
 
     /// Returns the entry at `@mod(op)` location, but only if `entry.op == op`, else `null`.
-    /// Be careful of using this without checking if the existing op has a newer viewstamp.
+    /// Be careful of using this without considering that there may still be an existing op.
     pub fn entry_for_op_exact(self: *Journal, op: u64) ?*const Header {
         if (self.entry_for_op(op)) |existing| {
             if (existing.op == op) return existing;
+        }
+        return null;
+    }
+
+    /// As per `entry_for_op_exact()`, but only if there is an optional checksum match.
+    pub fn entry_for_op_exact_with_checksum(
+        self: *Journal,
+        op: u64,
+        checksum: ?u128,
+    ) ?*const Header {
+        if (self.entry_for_op_exact(op)) |existing| {
+            assert(existing.op == op);
+            if (checksum == null or existing.checksum == checksum.?) return existing;
         }
         return null;
     }
@@ -1887,17 +1900,34 @@ pub const Replica = struct {
         assert(self.status == .normal or self.status == .view_change);
         assert(message.header.view == self.view);
 
-        var nonce: ?u128 = message.header.nonce;
+        const op = message.header.op;
+
+        var checksum: ?u128 = message.header.nonce;
         if (self.leader_index(self.view) == self.replica and message.header.nonce == 0) {
-            nonce = null;
+            checksum = null;
         }
 
-        if (self.sending_prepare) return;
-        self.sending_prepare_frame = async self.send_prepare_to_replica(
-            message.header.replica,
-            message.header.op,
-            nonce,
-        );
+        if (self.journal.entry_for_op_exact_with_checksum(op, checksum)) |header| {
+            assert(header.op == op);
+
+            if (!self.journal.dirty.bit(op)) {
+                assert(!self.journal.faulty.bit(op));
+
+                if (self.sending_prepare) return;
+                self.sending_prepare_frame = async self.send_prepare_to_replica(
+                    message.header.replica,
+                    header.*,
+                );
+                return;
+            } else if (self.journal.faulty.bit(op)) {
+                // We have gauranteed the prepare but our copy is faulty (not safe to nack).
+                return;
+            }
+
+            // We know of the prepare but we have yet to write or guarantee it (safe to nack).
+            assert(self.journal.dirty.bit(op));
+            assert(!self.journal.faulty.bit(op));
+        }
     }
 
     fn on_request_headers(self: *Replica, message: *const Message) void {
@@ -2693,7 +2723,11 @@ pub const Replica = struct {
         assert(self.op >= self.commit_max);
         assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
-        // Request the latest dirty or faulty prepare:
+        // Request and repair any faulty prepares:
+        // Faulty prepares are more critical than dirty prepares, so we repair them first.
+        self.repair_faulty();
+
+        // Request and repair any dirty prepares:
         self.repair_dirty();
     }
 
@@ -2706,15 +2740,19 @@ pub const Replica = struct {
             return;
         }
 
-        if (self.repair_queue_len == self.repair_queue_max) return;
+        if (self.repair_queue_len == self.repair_queue_max) {
+            log.debug("{}: repair_dirty: waiting for repair queue to drain", .{self.replica});
+            return;
+        }
 
         // Request enough prepares to fill the repair queue:
         var budget = self.repair_queue_max - self.repair_queue_len;
         assert(budget > 0);
 
-        var op = self.op;
-        // We never request op 0 because that is the cluster initialization op:
-        while (op > 0) : (op -= 1) {
+        var op = self.op + 1;
+        while (op > 0) {
+            op -= 1;
+
             if (self.journal.dirty.bit(op)) {
                 // We never request `self.op` from any other replica but the leader:
                 if (op == self.op) continue;
@@ -2736,6 +2774,32 @@ pub const Replica = struct {
                 }
             } else {
                 assert(!self.journal.faulty.bit(op));
+            }
+        }
+    }
+
+    fn repair_faulty(self: *Replica) void {
+        if (self.journal.faulty.len == 0) return;
+
+        if (self.repair_queue_len == self.repair_queue_max) {
+            log.debug("{}: repair_faulty: waiting for repair queue to drain", .{self.replica});
+            return;
+        }
+
+        var op = self.op + 1;
+        while (op > 0) {
+            op -= 1;
+
+            if (self.journal.faulty.bit(op)) {
+                self.send_header_to_other_replicas(.{
+                    .command = .request_prepare,
+                    .cluster = self.cluster,
+                    .replica = self.replica,
+                    .view = self.view,
+                    .op = op,
+                    .nonce = self.journal.entry_for_op_exact(op).?.checksum,
+                });
+                return;
             }
         }
     }
@@ -3155,64 +3219,64 @@ pub const Replica = struct {
         }
     }
 
-    fn send_prepare_to_replica(self: *Replica, replica: u16, op: u64, nonce: ?u128) void {
+    // We pass `header` by value and not as a constant pointer for concurrency control.
+    fn send_prepare_to_replica(self: *Replica, replica: u16, header: Header) void {
         assert(self.status == .normal or self.status == .view_change);
-
-        if (op > self.op) {
-            log.debug("{}: send_prepare_to_replica: op={} > self.op={}", .{
-                self.replica,
-                op,
-                self.op,
-            });
-            return;
-        }
-
-        const optional_entry = self.journal.entry_for_op_exact(op);
-        if (optional_entry == null) {
-            log.debug("{}: send_prepare_to_replica: op={} missing", .{ self.replica, op });
-            return;
-        }
-
-        const entry = optional_entry.?;
-
-        if (nonce) |checksum| {
-            if (entry.checksum != checksum) {
-                log.debug("{}: send_prepare_to_replica: checksum={} != nonce={}", .{
-                    self.replica,
-                    entry.checksum,
-                    checksum,
-                });
-                return;
-            }
-        }
-
-        if (!self.journal.has_clean(entry)) {
-            log.debug("{}: send_prepare_to_replica: op={} dirty", .{ self.replica, op });
-            return;
-        }
+        assert(header.op <= self.op);
+        assert(self.journal.has_clean(&header));
 
         assert(!self.sending_prepare);
         self.sending_prepare = true;
         defer self.sending_prepare = false;
 
-        const size = @intCast(u32, Journal.sector_ceil(entry.size));
-        assert(size >= entry.size);
+        const size = @intCast(u32, Journal.sector_ceil(header.size));
+        assert(size >= header.size);
 
-        var message = self.message_bus.create_message(size) catch unreachable;
-        defer self.message_bus.unref(message);
+        var prepare = self.message_bus.create_message(size) catch unreachable;
+        defer self.message_bus.unref(prepare);
 
-        assert(message.header.offset + size <= self.journal.size_circular_buffer);
+        assert(header.offset + size <= self.journal.size_circular_buffer);
         self.journal.read_sectors(
-            message.buffer[0..size],
-            self.journal.offset_in_circular_buffer(entry.offset),
+            prepare.buffer[0..size],
+            self.journal.offset_in_circular_buffer(header.offset),
         );
 
-        if (message.header.op != op) {
-            log.warn("{}: send_prepare_to_replica: op={} changed", .{ self.replica, op });
+        if (!prepare.header.valid_checksum()) {
+            // This may be because of corruption, a misdirected read, or even a concurrent write.
+            log.notice("{}: send_prepare_to_replica: invalid checksum after reading", .{
+                self.replica,
+            });
             return;
         }
 
-        self.send_message_to_replica(replica, message);
+        if (prepare.header.view != header.view) {
+            log.notice("{}: send_prepare_to_replica: view changed while reading: {}..{}", .{
+                self.replica,
+                header.view,
+                prepare.header.view,
+            });
+            return;
+        }
+
+        if (prepare.header.op != header.op) {
+            log.notice("{}: send_prepare_to_replica: op changed while reading: {}..{}", .{
+                self.replica,
+                header.op,
+                prepare.header.op,
+            });
+            return;
+        }
+
+        if (prepare.header.checksum != header.checksum) {
+            log.notice("{}: send_prepare_to_replica: checksum changed while reading: {}..{}", .{
+                self.replica,
+                header.checksum,
+                prepare.header.checksum,
+            });
+            return;
+        }
+
+        self.send_message_to_replica(replica, prepare);
     }
 
     fn send_start_view_change(self: *Replica) void {
