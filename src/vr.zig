@@ -2697,16 +2697,19 @@ pub const Replica = struct {
     }
 
     fn repair_dirty(self: *Replica) void {
-        // TODO Avoid requesting data if we have already just requested it.
+        if (self.repair_queue_len == self.repair_queue_max) return;
         // TODO Avoid requesting data if we are busy writing it (writes could take 10 seconds).
-        // TODO Avoid requesting data if our repair queue is full.
-        if (self.journal.dirty.len == 0) return;
+        if (self.journal.dirty.len == 0) {
+            assert(self.journal.faulty.len == 0);
+            return;
+        }
         var op = self.op;
         // We never repair op=0 because that is the cluster initialization op:
         while (op > 0) : (op -= 1) {
             if (self.journal.dirty.bit(op)) {
                 // Do not try to repair a concurrent append:
                 if (op == self.op and self.appending) continue;
+
                 if (self.choose_any_other_replica()) |replica| {
                     self.send_header_to_replica(replica, .{
                         .command = .request_prepare,
@@ -2718,6 +2721,8 @@ pub const Replica = struct {
                     });
                 }
                 return;
+            } else {
+                assert(!self.journal.faulty.bit(op));
             }
         }
     }
@@ -2969,12 +2974,13 @@ pub const Replica = struct {
 
         log.debug("{}: repair_later: {} message(s)", .{ self.replica, self.repair_queue_len });
 
-        if (self.repair_queue_len >= self.repair_queue_max) {
+        if (self.repair_queue_len == self.repair_queue_max) {
             log.debug("{}: repair_later: dropping", .{self.replica});
             return;
         }
 
         log.debug("{}: repair_later: queueing", .{self.replica});
+        assert(self.repair_queue_len < self.repair_queue_max);
 
         message.next = self.repair_queue;
         self.repair_queue = self.message_bus.ref(message);
