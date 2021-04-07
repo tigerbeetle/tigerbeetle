@@ -1057,6 +1057,7 @@ pub const Replica = struct {
     sending_prepare: bool = false,
     sending_prepare_frame: @Frame(send_prepare_to_replica) = undefined,
 
+    /// TODO Size repair_queue_max according to a reasonable bandwidth-delay product:
     repair_queue: ?*Message = null,
     repair_queue_len: usize = 0,
     repair_queue_max: usize = 3,
@@ -2697,18 +2698,26 @@ pub const Replica = struct {
     }
 
     fn repair_dirty(self: *Replica) void {
-        if (self.repair_queue_len == self.repair_queue_max) return;
-        // TODO Avoid requesting data if we are busy writing it (writes could take 10 seconds).
         if (self.journal.dirty.len == 0) {
             assert(self.journal.faulty.len == 0);
             return;
+        } else if (self.journal.dirty.len == 1 and self.journal.dirty.bit(self.op)) {
+            // If we are constantly appending but healthy, this branch is likely most of the time.
+            return;
         }
+
+        if (self.repair_queue_len == self.repair_queue_max) return;
+
+        // Request enough prepares to fill the repair queue:
+        var budget = self.repair_queue_max - self.repair_queue_len;
+        assert(budget > 0);
+
         var op = self.op;
-        // We never repair op=0 because that is the cluster initialization op:
+        // We never request op 0 because that is the cluster initialization op:
         while (op > 0) : (op -= 1) {
             if (self.journal.dirty.bit(op)) {
-                // Do not try to repair a concurrent append:
-                if (op == self.op and self.appending) continue;
+                // We never request `self.op` from any other replica but the leader:
+                if (op == self.op) continue;
 
                 if (self.choose_any_other_replica()) |replica| {
                     self.send_header_to_replica(replica, .{
@@ -2719,8 +2728,12 @@ pub const Replica = struct {
                         .op = op,
                         .nonce = self.journal.entry_for_op_exact(op).?.checksum,
                     });
+                    budget -= 1;
+                    if (budget == 0) return;
+                } else {
+                    // We have no connectivity to any other replicas.
+                    return;
                 }
-                return;
             } else {
                 assert(!self.journal.faulty.bit(op));
             }
