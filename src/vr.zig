@@ -9,7 +9,8 @@ const config = @import("config.zig");
 // TODO: This currently needs to be switched out manually.
 const MessageBus = @import("message_bus.zig").MessageBus;
 //const MessageBus = @import("test_message_bus.zig").MessageBus;
-const Message = MessageBus.Message;
+
+const Message = @import("message_pool.zig").MessagePool.Message;
 
 const ConcurrentRanges = @import("concurrent_ranges.zig").ConcurrentRanges;
 const Range = @import("concurrent_ranges.zig").Range;
@@ -1476,7 +1477,7 @@ pub const Replica = struct {
         for (self.prepare_ok_from_all_replicas) |received| assert(received == null);
         assert(self.prepare_timeout.ticking == false);
 
-        self.prepare_message = self.message_bus.ref(message);
+        self.prepare_message = message.ref();
         self.prepare_attempt = 0;
         self.prepare_timeout.start();
 
@@ -1884,7 +1885,12 @@ pub const Replica = struct {
         assert(self.commit_min == k);
         assert(self.commit_max == k);
 
-        const start_view = self.create_do_view_change_or_start_view_message(.start_view);
+        const start_view = self.create_do_view_change_or_start_view_message(.start_view) orelse {
+            log.debug("{}: on_do_view_change: dropping start_view, no message available", .{
+                self.replica,
+            });
+            return;
+        };
         defer self.message_bus.unref(start_view);
 
         assert(start_view.references == 1);
@@ -1973,7 +1979,12 @@ pub const Replica = struct {
         assert(message.header.replica != self.replica);
         assert(self.leader());
 
-        const start_view = self.create_do_view_change_or_start_view_message(.start_view);
+        const start_view = self.create_do_view_change_or_start_view_message(.start_view) orelse {
+            log.debug("{}: on_request_start_view: dropping start_view, no message available", .{
+                self.replica,
+            });
+            return;
+        };
         defer self.message_bus.unref(start_view);
 
         assert(start_view.references == 1);
@@ -2055,7 +2066,12 @@ pub const Replica = struct {
 
         const size_max = @sizeOf(Header) + @sizeOf(Header) * count_max;
 
-        const response = self.message_bus.create_message(size_max) catch unreachable;
+        const response = self.message_bus.get_message() orelse {
+            log.debug("{}: on_request_headers: dropping response, no message available", .{
+                self.replica,
+            });
+            return;
+        };
         defer self.message_bus.unref(response);
 
         response.header.* = .{
@@ -2252,7 +2268,7 @@ pub const Replica = struct {
 
         // Record the first receipt of this message:
         assert(messages[message.header.replica] == null);
-        messages[message.header.replica] = self.message_bus.ref(message);
+        messages[message.header.replica] = message.ref();
 
         // Count the number of unique messages now received:
         const count = self.count_quorum(messages, message.header.command, message.header.nonce);
@@ -2396,18 +2412,23 @@ pub const Replica = struct {
             @tagName(prepare.header.operation),
         });
 
-        const reply = self.message_bus.create_message(config.response_size_max) catch unreachable;
+        self.commit_min += 1;
+        assert(self.commit_min == prepare.header.op);
+        if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
+
+        const reply = self.message_bus.get_message() orelse {
+            log.debug("{}: commit_op: dropping message to client, no message available", .{
+                self.replica,
+            });
+            return;
+        };
         defer self.message_bus.unref(reply);
 
-        var reply_body_size = @intCast(u32, self.state_machine.commit(
+        const reply_body_size = @intCast(u32, self.state_machine.commit(
             prepare.header.operation,
             prepare.buffer[@sizeOf(Header)..prepare.header.size],
             reply.buffer[@sizeOf(Header)..],
         ));
-
-        self.commit_min += 1;
-        assert(self.commit_min == prepare.header.op);
-        if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
 
         reply.header.command = .reply;
         reply.header.operation = prepare.header.operation;
@@ -2458,7 +2479,7 @@ pub const Replica = struct {
     }
 
     /// The caller owns the returned message, if any, which has exactly 1 reference.
-    fn create_do_view_change_or_start_view_message(self: *Replica, command: Command) *Message {
+    fn create_do_view_change_or_start_view_message(self: *Replica, command: Command) ?*Message {
         assert(command == .do_view_change or command == .start_view);
 
         // We may also send a start_view message in normal status to resolve a follower's view jump:
@@ -2466,7 +2487,7 @@ pub const Replica = struct {
 
         const size_max = @sizeOf(Header) * 8;
 
-        const message = self.message_bus.create_message(size_max) catch unreachable;
+        const message = self.message_bus.get_message() orelse return null;
         defer self.message_bus.unref(message);
 
         message.header.* = .{
@@ -2488,7 +2509,7 @@ pub const Replica = struct {
         message.header.set_checksum_body(body);
         message.header.set_checksum();
 
-        return self.message_bus.ref(message);
+        return message.ref();
     }
 
     /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -2520,7 +2541,10 @@ pub const Replica = struct {
         const sector_size = @intCast(u32, Journal.sector_ceil(entry.size));
         assert(sector_size >= entry.size);
 
-        var message = self.message_bus.create_message(sector_size) catch unreachable;
+        const message = self.message_bus.get_message() orelse {
+            self.create_prepare_message_notice(op, checksum, "no message available");
+            return null;
+        };
         defer self.message_bus.unref(message);
 
         assert(entry.offset + sector_size <= self.journal.size_circular_buffer);
@@ -2550,7 +2574,7 @@ pub const Replica = struct {
             return null;
         }
 
-        return self.message_bus.ref(message);
+        return message.ref();
     }
 
     fn create_prepare_message_notice(
@@ -3210,7 +3234,7 @@ pub const Replica = struct {
         assert(self.repair_queue_len < self.repair_queue_max);
 
         message.next = self.repair_queue;
-        self.repair_queue = self.message_bus.ref(message);
+        self.repair_queue = message.ref();
         self.repair_queue_len += 1;
     }
 
@@ -3409,7 +3433,12 @@ pub const Replica = struct {
         );
         assert(count_start_view_change >= self.f);
 
-        const message = self.create_do_view_change_or_start_view_message(.do_view_change);
+        const message = self.create_do_view_change_or_start_view_message(.do_view_change) orelse {
+            log.debug("{}: send_do_view_change: dropping do_view_change, no message available", .{
+                self.replica,
+            });
+            return;
+        };
         defer self.message_bus.unref(message);
 
         assert(message.references == 1);

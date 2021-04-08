@@ -62,7 +62,7 @@ pub const journal_headers_max = switch (deployment_environment) {
     else => 16384,
 };
 
-/// The maximum size of a request or response in bytes:
+/// The maximum size of a message in bytes:
 /// This is also the limit of all inflight data across multiple pipelined requests per connection.
 /// We may have one request of up to 4 MiB inflight or 4 pipelined requests of up to 1 MiB inflight.
 /// This impacts sequential disk write throughput, the larger the buffer the better.
@@ -70,9 +70,8 @@ pub const journal_headers_max = switch (deployment_environment) {
 /// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
 /// For a 1 Gbps NIC = 125 MiB/s throughput: 4 MiB / 125 * 1000ms = 32ms for the next request.
 /// This also impacts the amount of memory allocated at initialization by the server.
-/// e.g. connections_max * (request_size_max + response_size_max) = 32 * (4 + 4) = 256 MiB
-pub const request_size_max = 4 * 1024 * 1024;
-pub const response_size_max = 4 * 1024 * 1024;
+/// e.g. connections_max * message_size_max = 32 * (4 + 4) = 256 MiB
+pub const message_size_max = 4 * 1024 * 1024;
 
 /// The maximum number of connections that can be accepted and held open by the server at any time:
 pub const connections_max = 32;
