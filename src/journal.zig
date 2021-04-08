@@ -282,7 +282,7 @@ pub const Journal = struct {
         assert(@mod(config.journal_size_max, buffer.len) == 0);
         assert(buffer.len > @sizeOf(JournalHeader));
 
-        var state_output = try self.allocator.alloc(u8, config.response_size_max);
+        const state_output = try self.allocator.alloc(u8, config.message_size_max);
         defer self.allocator.free(state_output);
 
         // Read entry headers from the head of the journal:
