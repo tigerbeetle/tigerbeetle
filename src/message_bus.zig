@@ -259,16 +259,6 @@ pub const MessageBus = struct {
         self.accept_connection.?.on_accept(fd);
     }
 
-    /// Teardown, using blocking syscalls to close all sockets
-    /// Calling IO.run() after this function is illegal.
-    /// TODO: should we free memory here or just let the OS clean up?
-    pub fn deinit(self: *MessageBus) void {
-        os.close(self.server_fd);
-        for (self.connections) |connection| {
-            if (connection.fd != -1) os.close(connection.fd);
-        }
-    }
-
     pub fn get_message(self: *MessageBus) ?*Message {
         return self.pool.get_message();
     }
