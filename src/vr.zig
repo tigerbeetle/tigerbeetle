@@ -17,6 +17,12 @@ const Range = @import("concurrent_ranges.zig").Range;
 const Operation = @import("state_machine.zig").Operation;
 const StateMachine = @import("state_machine.zig").StateMachine;
 
+pub const Status = enum {
+    normal,
+    view_change,
+    recovering,
+};
+
 // TODO Command for client to fetch its latest request number from the cluster.
 /// Viewstamped Replication protocol commands:
 pub const Command = packed enum(u8) {
@@ -391,52 +397,6 @@ pub const Storage = struct {
 
     fn write_all(self: *Storage, buffer: []const u8, offset: u64) !void {
         std.mem.copy(u8, self.memory[offset .. offset + buffer.len], buffer);
-    }
-};
-
-// TODO Snapshots
-pub const BitSet = struct {
-    allocator: *Allocator,
-    bits: []bool,
-
-    /// The number of bits set (updated incrementally as bits are set or cleared):
-    len: u64 = 0,
-
-    fn init(allocator: *Allocator, count: u64) !BitSet {
-        var bits = try allocator.alloc(bool, count);
-        errdefer allocator.free(bits);
-        std.mem.set(bool, bits, false);
-
-        return BitSet{
-            .allocator = allocator,
-            .bits = bits,
-        };
-    }
-
-    fn deinit(self: *BitSet) void {
-        self.allocator.free(self.bits);
-    }
-
-    /// Clear the bit for an op (idempotent):
-    pub fn clear(self: *BitSet, op: u64) void {
-        if (self.bits[op]) {
-            self.bits[op] = false;
-            self.len -= 1;
-        }
-    }
-
-    /// Whether the bit for an op is set:
-    pub fn bit(self: *BitSet, op: u64) bool {
-        return self.bits[op];
-    }
-
-    /// Set the bit for an op (idempotent):
-    pub fn set(self: *BitSet, op: u64) void {
-        if (!self.bits[op]) {
-            self.bits[op] = true;
-            self.len += 1;
-            assert(self.len <= self.bits.len);
-        }
     }
 };
 
@@ -1031,10 +991,50 @@ pub const Journal = struct {
     }
 };
 
-const Status = enum {
-    normal,
-    view_change,
-    recovering,
+// TODO Snapshots
+pub const BitSet = struct {
+    allocator: *Allocator,
+    bits: []bool,
+
+    /// The number of bits set (updated incrementally as bits are set or cleared):
+    len: u64 = 0,
+
+    fn init(allocator: *Allocator, count: u64) !BitSet {
+        var bits = try allocator.alloc(bool, count);
+        errdefer allocator.free(bits);
+        std.mem.set(bool, bits, false);
+
+        return BitSet{
+            .allocator = allocator,
+            .bits = bits,
+        };
+    }
+
+    fn deinit(self: *BitSet) void {
+        self.allocator.free(self.bits);
+    }
+
+    /// Clear the bit for an op (idempotent):
+    pub fn clear(self: *BitSet, op: u64) void {
+        if (self.bits[op]) {
+            self.bits[op] = false;
+            self.len -= 1;
+        }
+    }
+
+    /// Whether the bit for an op is set:
+    pub fn bit(self: *BitSet, op: u64) bool {
+        return self.bits[op];
+    }
+
+    /// Set the bit for an op (idempotent):
+    pub fn set(self: *BitSet, op: u64) void {
+        if (!self.bits[op]) {
+            self.bits[op] = true;
+            self.len += 1;
+            assert(self.len <= self.bits.len);
+        }
+    }
 };
 
 const Timeout = struct {
