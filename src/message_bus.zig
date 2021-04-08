@@ -11,23 +11,17 @@ const Journal = vr.Journal;
 const Replica = vr.Replica;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
+const MessagePool = @import("message_pool.zig").MessagePool;
+const Message = MessagePool.Message;
 
 const log = std.log.scoped(.message_bus);
 
-const SendQueue = RingBuffer(*MessageBus.Message, config.connection_send_queue_max);
+const SendQueue = RingBuffer(*Message, config.connection_send_queue_max);
 
 pub const MessageBus = struct {
     pub const Address = std.net.Address;
 
-    pub const Message = struct {
-        header: *Header,
-        buffer: []u8 align(config.sector_size),
-        references: usize = 1,
-        next: ?*Message = null,
-    };
-
-    allocator: *mem.Allocator,
-    allocated: usize = 0,
+    pool: MessagePool,
     io: *IO,
 
     configuration: []std.net.Address,
@@ -90,7 +84,7 @@ pub const MessageBus = struct {
         mem.set(u4, replicas_connect_attempts, 0);
 
         self.* = .{
-            .allocator = allocator,
+            .pool = try MessagePool.init(allocator),
             .io = io,
             .configuration = configuration,
             .server = server,
@@ -275,21 +269,12 @@ pub const MessageBus = struct {
         }
     }
 
-    /// Increment the reference count of the message and return the same pointer passed.
-    pub fn ref(self: *MessageBus, message: *Message) *Message {
-        message.references += 1;
-        return message;
+    pub fn get_message(self: *MessageBus) ?*Message {
+        return self.pool.get_message();
     }
 
-    /// Decrement the reference count of the message, possibly freeing it.
     pub fn unref(self: *MessageBus, message: *Message) void {
-        message.references -= 1;
-        if (message.references == 0) {
-            log.debug("freeing {}", .{message.header});
-            self.allocator.free(message.buffer);
-            self.allocator.destroy(message);
-            self.allocated -= 1;
-        }
+        self.pool.unref(message);
     }
 
     /// Returns true if the target replica is connected and has space in its send queue.
@@ -306,8 +291,11 @@ pub const MessageBus = struct {
             return;
         }
 
-        // TODO Pre-allocate messages at startup.
-        const message = self.create_message(@sizeOf(Header)) catch unreachable;
+        const message = self.pool.get_header_only_message() orelse {
+            log.debug("no header only message available, " ++
+                "dropping message to replica {}", .{replica});
+            return;
+        };
         defer self.unref(message);
         message.header.* = header;
 
@@ -322,7 +310,7 @@ pub const MessageBus = struct {
     pub fn send_message_to_replica(self: *MessageBus, replica: u16, message: *Message) void {
         // Messages sent by the server to itself are delivered directly in flush()
         if (replica == self.server.replica) {
-            self.server_send_queue.push(self.ref(message)) catch |err| switch (err) {
+            self.server_send_queue.push(message.ref()) catch |err| switch (err) {
                 error.NoSpaceLeft => {
                     self.unref(message);
                     log.notice("message queue for server full, dropping message", .{});
@@ -341,8 +329,11 @@ pub const MessageBus = struct {
 
         // TODO Do not allocate a message if we know we cannot send to the client.
 
-        // TODO Pre-allocate messages at startup.
-        const message = self.create_message(@sizeOf(Header)) catch unreachable;
+        const message = self.pool.get_header_only_message() orelse {
+            log.debug("no header only message available, " ++
+                "dropping message to client {}", .{client_id});
+            return;
+        };
         defer self.unref(message);
         message.header.* = header;
 
@@ -371,26 +362,6 @@ pub const MessageBus = struct {
             self.server.on_message(message);
             self.unref(message);
         }
-    }
-
-    pub fn create_message(self: *MessageBus, size: u32) !*Message {
-        assert(size >= @sizeOf(Header));
-
-        var buffer = try self.allocator.allocAdvanced(u8, config.sector_size, size, .exact);
-        errdefer self.allocator.free(buffer);
-        mem.set(u8, buffer, 0);
-
-        var message = try self.allocator.create(Message);
-        errdefer self.allocator.destroy(message);
-
-        self.allocated += 1;
-
-        message.* = .{
-            .header = mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]),
-            .buffer = buffer,
-        };
-
-        return message;
     }
 
     /// Calculates exponential backoff with full jitter according to the formula:
@@ -462,7 +433,7 @@ const Connection = struct {
     /// Number of bytes of the current header/message that have already been received.
     recv_progress: usize = 0,
     incoming_header: Header = undefined,
-    incoming_message: ?*MessageBus.Message = null,
+    incoming_message: ?*Message = null,
 
     /// This completion is used for all send operations.
     send_completion: IO.Completion = undefined,
@@ -585,14 +556,14 @@ const Connection = struct {
 
     /// Add a message to the connection's send queue, starting a send operation
     /// if the queue was previously empty.
-    pub fn send_message(self: *Connection, message: *MessageBus.Message) void {
+    pub fn send_message(self: *Connection, message: *Message) void {
         assert(self.peer == .client or self.peer == .replica);
         switch (self.state) {
             .connected, .connecting => {},
             .shutting_down => return,
             .idle, .accepting => unreachable,
         }
-        self.send_queue.push(self.message_bus.ref(message)) catch |err| switch (err) {
+        self.send_queue.push(message.ref()) catch |err| switch (err) {
             error.NoSpaceLeft => {
                 self.message_bus.unref(message);
                 log.notice("message queue for peer {} full, dropping message", .{self.peer});
@@ -763,18 +734,23 @@ const Connection = struct {
         }
         assert(self.incoming_header.cluster == self.message_bus.server.cluster);
 
+        // TODO: reserve the message before recving and only use one recv call.
         assert(self.incoming_message == null);
-        const message_sector_size = @intCast(u32, Journal.sector_ceil(self.incoming_header.size));
-        const message = self.message_bus.create_message(message_sector_size) catch unreachable;
-        self.incoming_message = self.message_bus.ref(message);
-        message.header.* = self.incoming_header;
+        self.incoming_message = self.message_bus.get_message() orelse {
+            log.debug("no buffer available for incoming message", .{});
+            self.incoming_header = undefined;
+            self.recv_progress = 0;
+            self.recv_header();
+            return;
+        };
+        self.incoming_message.?.header.* = self.incoming_header;
         self.incoming_header = undefined;
 
-        if (message.header.size == @sizeOf(Header)) {
+        if (self.incoming_message.?.header.size == @sizeOf(Header)) {
             // If the message has no body, deliver it directly
             self.deliver_message();
         } else {
-            assert(message.header.size > @sizeOf(Header));
+            assert(self.incoming_message.?.header.size > @sizeOf(Header));
             self.recv_body();
         }
     }

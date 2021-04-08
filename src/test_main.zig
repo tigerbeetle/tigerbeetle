@@ -71,7 +71,7 @@ pub fn run() !void {
 
         if (leader) |replica| {
             if (ticks == 1 or ticks == 5) {
-                var request = message_bus.create_message(config.sector_size) catch unreachable;
+                const request = message_bus.get_message() orelse unreachable;
                 defer message_bus.unref(request);
 
                 request.header.* = .{
