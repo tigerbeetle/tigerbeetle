@@ -117,13 +117,18 @@ Events are **immutable data structures** that **instantiate or mutate state data
        credit_account_id: 16 bytes (128-bit)
                 custom_1: 16 bytes (128-bit) [optional, e.g. enforce a foreign key relation on a pre-existing `transfer` state]
                 custom_2: 16 bytes (128-bit) [optional, e.g. a short description for the transfer]
-                custom_3: 16 bytes (128-bit) [optional, e.g. an ILPv4 condition to validate a subsequent `commit-transfer` event]
+                custom_3: 16 bytes (128-bit) [optional, e.g. two custom slots may store a 256-bit ILPv4 condition to validate against the preimage of the corresponding `commit-transfer` event]
                    flags:  8 bytes ( 64-bit) [optional, to modify the usage of custom slots, and for future feature expansion]
                   amount:  8 bytes ( 64-bit) [required, an unsigned integer in the unit of value of the debit and credit accounts, which must be the same for both accounts]
                  timeout:  8 bytes ( 64-bit) [optional, a quantity of time, i.e. an offset in nanoseconds from timestamp]
                timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
 } = 128 bytes (2 CPU cache lines)
 ```
+
+The three `custom_1/2/3` slots above and below are similar to CPU registers. Their usage is modified
+by the `flags` field. Custom slots are either opaque to TigerBeetle or interpreted by TigerBeetle
+according to their usage. Custom slots are 128-bit and may be joined together to form a 256-bit
+register, for example to support ILPv4 conditions and preimages.
 
 **commit_transfer**: Commit a transfer between accounts (maps to a "fulfill"). A transfer can be accepted or rejected by toggling a bit in the `flags` field.
 
@@ -132,7 +137,7 @@ Events are **immutable data structures** that **instantiate or mutate state data
                       id: 16 bytes (128-bit)
                 custom_1: 16 bytes (128-bit) [optional, e.g. enforce a foreign key relation on a pre-existing `transfer` state]
                 custom_2: 16 bytes (128-bit) [optional, e.g. a short description for the accept or reject]
-                custom_3: 16 bytes (128-bit) [optional, e.g. an ILPv4 preimage to validate against the condition of a previous `commit-transfer` event]
+                custom_3: 16 bytes (128-bit) [optional, e.g. two custom slots may store a 256-bit ILPv4 preimage to validate against the condition of the corresponding `create-transfer` event]
                    flags:  8 bytes ( 64-bit) [optional, used to indicate transfer success/failure, to modify usage of custom slots, and for future feature expansion]
                timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
 } = 80 bytes (2 CPU cache lines)
