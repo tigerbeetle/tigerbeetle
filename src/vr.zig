@@ -799,8 +799,6 @@ pub const Journal = struct {
         assert(message.header.command == .prepare);
         assert(message.header.size >= @sizeOf(Header));
         assert(message.header.size <= message.buffer.len);
-        assert(message.buffer.len == Journal.sector_ceil(message.header.size));
-        assert(message.header.offset + message.buffer.len <= self.size_circular_buffer);
 
         // The underlying header memory must be owned by the buffer and not by self.headers:
         // Otherwise, concurrent writes may modify the memory of the pointer while we write.
@@ -808,6 +806,16 @@ pub const Journal = struct {
 
         // There should be no concurrency between setting an entry as dirty and deciding to write:
         assert(self.has_dirty(message.header));
+
+        const sectors = message.buffer[0..Journal.sector_ceil(message.header.size)];
+        assert(message.header.offset + sectors.len <= self.size_circular_buffer);
+
+        if (std.builtin.mode == .Debug) {
+            // Assert that any sector padding has already been zeroed:
+            var sum_of_sector_padding_bytes: u32 = 0;
+            for (sectors[message.header.size..]) |byte| sum_of_sector_padding_bytes += byte;
+            assert(sum_of_sector_padding_bytes == 0);
+        }
 
         self.write_debug(message.header, "starting");
 
