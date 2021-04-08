@@ -281,22 +281,37 @@ pub const Storage = struct {
         };
     }
 
-    fn deinit() void {
+    pub fn deinit() void {
         self.allocator.free(self.memory);
     }
 
-    fn assert_bounds_and_alignment(self: *Storage, buffer: []const u8, offset: u64) void {
-        assert(buffer.len > 0);
-        assert(offset + buffer.len <= self.size);
+    /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
+    /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
+    pub fn fs_supports_direct_io(dir_fd: std.os.fd_t) !bool {
+        if (!@hasDecl(std.os, "O_DIRECT")) return false;
 
-        // Ensure that the read or write is aligned correctly for Direct I/O:
-        // If this is not the case, the underlying syscall will return EINVAL.
-        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
-        assert(@mod(buffer.len, config.sector_size) == 0);
-        assert(@mod(offset, config.sector_size) == 0);
+        const os = std.os;
+        const path = "fs_supports_direct_io";
+        const dir = fs.Dir{ .fd = dir_fd };
+        const fd = try os.openatZ(dir_fd, path, os.O_CLOEXEC | os.O_CREAT | os.O_TRUNC, 0o666);
+        defer os.close(fd);
+        defer dir.deleteFile(path) catch {};
+
+        while (true) {
+            const res = os.system.openat(dir_fd, path, os.O_CLOEXEC | os.O_RDONLY | os.O_DIRECT, 0);
+            switch (linux.getErrno(res)) {
+                0 => {
+                    os.close(@intCast(os.fd_t, res));
+                    return true;
+                },
+                linux.EINTR => continue,
+                linux.EINVAL => return false,
+                else => |err| return os.unexpectedErrno(err),
+            }
+        }
     }
 
-    fn read(self: *Storage, buffer: []u8, offset: u64) void {
+    pub fn read(self: *Storage, buffer: []u8, offset: u64) void {
         self.assert_bounds_and_alignment(buffer, offset);
 
         if (self.read_all(buffer, offset)) |bytes_read| {
@@ -345,12 +360,7 @@ pub const Storage = struct {
         }
     }
 
-    fn read_all(self: *Storage, buffer: []u8, offset: u64) !u64 {
-        std.mem.copy(u8, buffer, self.memory[offset .. offset + buffer.len]);
-        return buffer.len;
-    }
-
-    fn write(self: *Storage, buffer: []const u8, offset: u64) void {
+    pub fn write(self: *Storage, buffer: []const u8, offset: u64) void {
         self.assert_bounds_and_alignment(buffer, offset);
         self.write_all(buffer, offset) catch |err| switch (err) {
             // We assume that the disk will attempt to reallocate a spare sector for any LSE.
@@ -361,6 +371,22 @@ pub const Storage = struct {
                 @panic("unrecoverable disk error");
             },
         };
+    }
+
+    fn assert_bounds_and_alignment(self: *Storage, buffer: []const u8, offset: u64) void {
+        assert(buffer.len > 0);
+        assert(offset + buffer.len <= self.size);
+
+        // Ensure that the read or write is aligned correctly for Direct I/O:
+        // If this is not the case, the underlying syscall will return EINVAL.
+        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
+        assert(@mod(buffer.len, config.sector_size) == 0);
+        assert(@mod(offset, config.sector_size) == 0);
+    }
+
+    fn read_all(self: *Storage, buffer: []u8, offset: u64) !u64 {
+        std.mem.copy(u8, buffer, self.memory[offset .. offset + buffer.len]);
+        return buffer.len;
     }
 
     fn write_all(self: *Storage, buffer: []const u8, offset: u64) !void {
