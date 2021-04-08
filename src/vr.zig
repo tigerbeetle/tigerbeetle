@@ -35,6 +35,7 @@ pub const Command = packed enum(u8) {
     request_start_view,
     request_prepare,
     request_headers,
+    nack_prepare,
     headers,
 };
 
@@ -1314,6 +1315,7 @@ pub const Replica = struct {
             .request_prepare => self.on_request_prepare(message),
             .request_headers => self.on_request_headers(message),
             .headers => self.on_headers(message),
+            .nack_prepare => self.on_nack_prepare(message),
             else => unreachable,
         }
     }
@@ -1899,16 +1901,16 @@ pub const Replica = struct {
 
         assert(self.status == .normal or self.status == .view_change);
         assert(message.header.view == self.view);
+        assert(message.header.replica != self.replica);
 
         const op = message.header.op;
-
         var checksum: ?u128 = message.header.nonce;
         if (self.leader_index(self.view) == self.replica and message.header.nonce == 0) {
             checksum = null;
         }
 
-        if (self.journal.entry_for_op_exact_with_checksum(op, checksum)) |header| {
-            assert(header.op == op);
+        if (self.journal.entry_for_op_exact_with_checksum(op, checksum)) |entry| {
+            assert(entry.op == op);
 
             if (!self.journal.dirty.bit(op)) {
                 assert(!self.journal.faulty.bit(op));
@@ -1916,8 +1918,10 @@ pub const Replica = struct {
                 if (self.sending_prepare) return;
                 self.sending_prepare_frame = async self.send_prepare_to_replica(
                     message.header.replica,
-                    header.*,
+                    op,
+                    checksum,
                 );
+                // We have guaranteed the prepare and our copy is clean (not safe to nack).
                 return;
             } else if (self.journal.faulty.bit(op)) {
                 // We have gauranteed the prepare but our copy is faulty (not safe to nack).
@@ -1925,8 +1929,23 @@ pub const Replica = struct {
             }
 
             // We know of the prepare but we have yet to write or guarantee it (safe to nack).
-            assert(self.journal.dirty.bit(op));
-            assert(!self.journal.faulty.bit(op));
+            // Continue through below...
+        }
+
+        if (self.status == .view_change) {
+            assert(message.header.replica == self.leader_index(self.view));
+            assert(checksum != null);
+            if (self.journal.entry_for_op_exact_with_checksum(op, checksum) != null) {
+                assert(self.journal.dirty.bit(op) and !self.journal.faulty.bit(op));
+            }
+            self.send_header_to_replica(message.header.replica, .{
+                .command = .nack_prepare,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .op = op,
+                .nonce = checksum.?,
+            });
         }
     }
 
@@ -1935,6 +1954,7 @@ pub const Replica = struct {
 
         assert(self.status == .normal or self.status == .view_change);
         assert(message.header.view == self.view);
+        assert(message.header.replica != self.replica);
 
         const op_min = message.header.commit;
         const op_max = message.header.op;
@@ -1973,11 +1993,21 @@ pub const Replica = struct {
         self.send_message_to_replica(message.header.replica, response);
     }
 
+    fn on_nack_prepare(self: *Replica, message: *const Message) void {
+        // TODO On receiving a quorum of these, remove the uncommitted op.
+        // if (self.ignore_repair_message(message)) return;
+
+        // assert(self.status == .normal or self.status == .view_change);
+        // assert(message.header.view == self.view);
+        // assert(message.header.replica != self.replica);
+    }
+
     fn on_headers(self: *Replica, message: *const Message) void {
         if (self.ignore_repair_message(message)) return;
 
         assert(self.status == .normal or self.status == .view_change);
         assert(message.header.view == self.view);
+        assert(message.header.replica != self.replica);
 
         var op_min: ?u64 = null;
         var op_max: ?u64 = null;
@@ -2241,12 +2271,14 @@ pub const Replica = struct {
         // We may receive commit numbers for ops we do not yet have (`commit_max > self.op`):
         // Even a naive state transfer may fail to correct for this.
         while (self.commit_min < self.commit_max and self.commit_min < self.op) {
-            const header = self.journal.entry_for_op_exact(self.commit_min + 1).?;
-            assert(header.op == self.commit_min + 1);
-            assert(header.operation != .init);
+            const op = self.commit_min + 1;
+            const checksum = self.journal.entry_for_op_exact(op).?.checksum;
 
-            if (self.create_prepare_message(header)) |prepare| {
+            if (self.create_prepare_message(op, checksum)) |prepare| {
                 defer self.message_bus.unref(prepare);
+
+                assert(prepare.header.op == op);
+                assert(prepare.header.checksum == checksum);
 
                 const commit_min = self.commit_min;
                 self.commit_op(prepare);
@@ -2371,50 +2403,79 @@ pub const Replica = struct {
     }
 
     /// The caller owns the returned message, if any, which has exactly 1 reference.
-    fn create_prepare_message(self: *Replica, header: *const Header) ?*Message {
-        assert(header.valid_checksum());
-        assert(header.command == .prepare);
-
-        if (!self.journal.has_clean(header)) {
-            log.debug("{}: create_prepare_message: dirty", .{self.replica});
+    fn create_prepare_message(self: *Replica, op: u64, checksum: ?u128) ?*Message {
+        if (op > self.op) {
+            self.create_prepare_message_notice(op, checksum, "beyond self.op");
             return null;
         }
 
-        const sector_size = @intCast(u32, Journal.sector_ceil(header.size));
-        assert(sector_size >= header.size);
+        const exact = self.journal.entry_for_op_exact_with_checksum(op, checksum);
+        if (exact == null) {
+            self.create_prepare_message_notice(op, checksum, "no entry exactly");
+            return null;
+        }
+
+        if (self.journal.faulty.bit(op)) {
+            self.create_prepare_message_notice(op, checksum, "faulty");
+            return null;
+        }
+
+        if (self.journal.dirty.bit(op)) {
+            self.create_prepare_message_notice(op, checksum, "dirty");
+            return null;
+        }
+
+        // Do not use this pointer beyond the read() below, as the header memory may then change:
+        const entry = exact.?;
+
+        const sector_size = @intCast(u32, Journal.sector_ceil(entry.size));
+        assert(sector_size >= entry.size);
 
         var message = self.message_bus.create_message(sector_size) catch unreachable;
         defer self.message_bus.unref(message);
 
-        // TODO Move this into the journal:
-        assert(message.header.offset + sector_size <= self.journal.size_circular_buffer);
+        assert(entry.offset + sector_size <= self.journal.size_circular_buffer);
         self.journal.read_sectors(
             message.buffer[0..sector_size],
-            self.journal.offset_in_circular_buffer(header.offset),
+            self.journal.offset_in_circular_buffer(entry.offset),
         );
 
         if (!message.header.valid_checksum()) {
-            log.warn("{}: create_prepare_message: corrupt header", .{self.replica});
-            return null;
-        }
-
-        if (message.header.op != header.op) {
-            log.warn("{}: create_prepare_message: op changed", .{self.replica});
-            return null;
-        }
-
-        if (message.header.checksum != header.checksum) {
-            log.warn("{}: create_prepare_message: checksum changed", .{self.replica});
+            self.create_prepare_message_notice(op, checksum, "corrupt header after read");
             return null;
         }
 
         const body = message.buffer[@sizeOf(Header)..message.header.size];
         if (!message.header.valid_checksum_body(body)) {
-            log.warn("{}: create_prepare_message: corrupt body", .{self.replica});
+            self.create_prepare_message_notice(op, checksum, "corrupt body after read");
+            return null;
+        }
+
+        if (message.header.op != op) {
+            self.create_prepare_message_notice(op, checksum, "op changed during read");
+            return null;
+        }
+
+        if (checksum != null and message.header.checksum != checksum.?) {
+            self.create_prepare_message_notice(op, checksum, "checksum changed during read");
             return null;
         }
 
         return self.message_bus.ref(message);
+    }
+
+    fn create_prepare_message_notice(
+        self: *Replica,
+        op: u64,
+        checksum: ?u128,
+        notice: []const u8,
+    ) void {
+        log.notice("{}: create_prepare_message: op={} checksum={}: {s}", .{
+            self.replica,
+            op,
+            checksum,
+            notice,
+        });
     }
 
     fn discard_repair_queue(self: *Replica) void {
@@ -3219,64 +3280,20 @@ pub const Replica = struct {
         }
     }
 
-    // We pass `header` by value and not as a constant pointer for concurrency control.
-    fn send_prepare_to_replica(self: *Replica, replica: u16, header: Header) void {
+    fn send_prepare_to_replica(self: *Replica, replica: u16, op: u64, checksum: ?u128) void {
         assert(self.status == .normal or self.status == .view_change);
-        assert(header.op <= self.op);
-        assert(self.journal.has_clean(&header));
 
         assert(!self.sending_prepare);
         self.sending_prepare = true;
         defer self.sending_prepare = false;
 
-        const size = @intCast(u32, Journal.sector_ceil(header.size));
-        assert(size >= header.size);
+        if (self.create_prepare_message(op, checksum)) |message| {
+            defer self.message_bus.unref(message);
 
-        var prepare = self.message_bus.create_message(size) catch unreachable;
-        defer self.message_bus.unref(prepare);
-
-        assert(header.offset + size <= self.journal.size_circular_buffer);
-        self.journal.read_sectors(
-            prepare.buffer[0..size],
-            self.journal.offset_in_circular_buffer(header.offset),
-        );
-
-        if (!prepare.header.valid_checksum()) {
-            // This may be because of corruption, a misdirected read, or even a concurrent write.
-            log.notice("{}: send_prepare_to_replica: invalid checksum after reading", .{
-                self.replica,
-            });
-            return;
+            assert(message.header.op == op);
+            assert(checksum == null or message.header.checksum == checksum.?);
+            self.send_message_to_replica(replica, message);
         }
-
-        if (prepare.header.view != header.view) {
-            log.notice("{}: send_prepare_to_replica: view changed while reading: {}..{}", .{
-                self.replica,
-                header.view,
-                prepare.header.view,
-            });
-            return;
-        }
-
-        if (prepare.header.op != header.op) {
-            log.notice("{}: send_prepare_to_replica: op changed while reading: {}..{}", .{
-                self.replica,
-                header.op,
-                prepare.header.op,
-            });
-            return;
-        }
-
-        if (prepare.header.checksum != header.checksum) {
-            log.notice("{}: send_prepare_to_replica: checksum changed while reading: {}..{}", .{
-                self.replica,
-                header.checksum,
-                prepare.header.checksum,
-            });
-            return;
-        }
-
-        self.send_message_to_replica(replica, prepare);
     }
 
     fn send_start_view_change(self: *Replica) void {
