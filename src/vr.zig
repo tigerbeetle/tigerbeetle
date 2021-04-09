@@ -2404,6 +2404,18 @@ pub const Replica = struct {
         assert(!self.view_jump_barrier);
         assert(self.op >= self.commit_max);
 
+        const reply = self.message_bus.get_message() orelse {
+            log.debug("{}: commit_op: waiting for a message", .{self.replica});
+            return;
+        };
+        defer self.message_bus.unref(reply);
+
+        const reply_body_size = @intCast(u32, self.state_machine.commit(
+            prepare.header.operation,
+            prepare.buffer[@sizeOf(Header)..prepare.header.size],
+            reply.buffer[@sizeOf(Header)..],
+        ));
+
         log.debug("{}: commit_op: executing op={} checksum={} ({s})", .{
             self.replica,
             prepare.header.op,
@@ -2414,20 +2426,6 @@ pub const Replica = struct {
         self.commit_min += 1;
         assert(self.commit_min == prepare.header.op);
         if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
-
-        const reply = self.message_bus.get_message() orelse {
-            log.debug("{}: commit_op: dropping message to client, no message available", .{
-                self.replica,
-            });
-            return;
-        };
-        defer self.message_bus.unref(reply);
-
-        const reply_body_size = @intCast(u32, self.state_machine.commit(
-            prepare.header.operation,
-            prepare.buffer[@sizeOf(Header)..prepare.header.size],
-            reply.buffer[@sizeOf(Header)..],
-        ));
 
         reply.header.command = .reply;
         reply.header.operation = prepare.header.operation;
