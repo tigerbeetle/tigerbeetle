@@ -39,10 +39,10 @@ pub const Command = packed enum(u8) {
     start_view,
 
     request_start_view,
-    request_prepare,
     request_headers,
-    nack_prepare,
+    request_prepare,
     headers,
+    nack_prepare,
 };
 
 /// Network message and journal entry header:
@@ -1174,12 +1174,18 @@ pub const Replica = struct {
     /// Unique do_view_change messages for the same view from ALL replicas (including ourself):
     do_view_change_from_all_replicas: []?*Message,
 
+    /// Unique nack_prepare messages for the same view from OTHER replicas (excluding ourself):
+    nack_prepare_from_other_replicas: []?*Message,
+
     /// Whether a replica has received a quorum of start_view_change messages for the view change:
     start_view_change_quorum: bool = false,
 
     /// Whether the leader has received a quorum of do_view_change messages for the view change:
     /// Determines whether the leader may effect repairs according to the CTRL protocol.
     do_view_change_quorum: bool = false,
+
+    /// Whether the leader is expecting to receive a nack_prepare and for which op:
+    nack_prepare_op: ?u64 = null,
 
     /// The number of ticks without enough prepare_ok's before the leader resends a prepare:
     /// TODO Adjust this dynamically to match sliding window EWMA of recent network latencies.
@@ -1225,16 +1231,20 @@ pub const Replica = struct {
         assert(replica < configuration.len);
 
         var prepare_ok = try allocator.alloc(?*Message, configuration.len);
-        for (prepare_ok) |*received| received.* = null;
         errdefer allocator.free(prepare_ok);
+        std.mem.set(?*Message, prepare_ok, null);
 
         var start_view_change = try allocator.alloc(?*Message, configuration.len);
-        for (start_view_change) |*received| received.* = null;
         errdefer allocator.free(start_view_change);
+        std.mem.set(?*Message, start_view_change, null);
 
         var do_view_change = try allocator.alloc(?*Message, configuration.len);
-        for (do_view_change) |*received| received.* = null;
         errdefer allocator.free(do_view_change);
+        std.mem.set(?*Message, do_view_change, null);
+
+        var nack_prepare = try allocator.alloc(?*Message, configuration.len);
+        errdefer allocator.free(nack_prepare);
+        std.mem.set(?*Message, nack_prepare, null);
 
         // TODO Only initialize the journal when initializing the cluster:
         var init_prepare = Header{
@@ -1275,6 +1285,7 @@ pub const Replica = struct {
             .prepare_ok_from_all_replicas = prepare_ok,
             .start_view_change_from_other_replicas = start_view_change,
             .do_view_change_from_all_replicas = do_view_change,
+            .nack_prepare_from_other_replicas = nack_prepare,
 
             .prepare_timeout = Timeout{
                 .name = "prepare_timeout",
@@ -1328,6 +1339,7 @@ pub const Replica = struct {
         self.allocator.free(self.prepare_ok_from_all_replicas);
         self.allocator.free(self.start_view_change_from_other_replicas);
         self.allocator.free(self.do_view_change_from_all_replicas);
+        self.allocator.free(self.nack_prepare_from_other_replicas);
     }
 
     /// Returns whether the replica is a follower for the current view.
@@ -2097,13 +2109,43 @@ pub const Replica = struct {
         self.send_message_to_replica(message.header.replica, response);
     }
 
-    fn on_nack_prepare(self: *Replica, message: *const Message) void {
-        // TODO On receiving a quorum of these, remove the uncommitted op.
-        // if (self.ignore_repair_message(message)) return;
+    fn on_nack_prepare(self: *Replica, message: *Message) void {
+        if (self.ignore_repair_message(message)) return;
 
-        // assert(self.status == .normal or self.status == .view_change);
-        // assert(message.header.view == self.view);
-        // assert(message.header.replica != self.replica);
+        assert(self.status == .view_change);
+        assert(!self.view_jump_barrier);
+        assert(message.header.view == self.view);
+        assert(message.header.replica != self.replica);
+        assert(self.leader_index(self.view) == self.replica);
+        assert(self.do_view_change_quorum);
+
+        if (self.nack_prepare_op == null) return;
+
+        // TODO Can we issue a request_prepare and then remove an op?
+        const op = self.nack_prepare_op.?;
+        const checksum = self.journal.entry_for_op_exact(op).?.checksum;
+
+        if (message.header.op != op) return;
+        assert(message.header.nonce == checksum);
+
+        const threshold = if (self.journal.faulty.bit(op)) self.f + 1 else self.f;
+
+        // Wait until we have `threshold` messages (excluding ourself) for quorum:
+        const count = self.add_message_and_receive_quorum_exactly_once(
+            self.nack_prepare_from_other_replicas,
+            message,
+            threshold,
+        ) orelse return;
+
+        assert(count == threshold);
+        log.debug("{}: on_nack_prepare: quorum received", .{self.replica});
+
+        assert(op > self.commit_max);
+        assert(self.journal.entry_for_op_exact_with_checksum(op, checksum) != null);
+        assert(self.journal.faulty.bit(op));
+        assert(self.journal.dirty.bit(op));
+
+        // TODO Remove this uncommitted op and subsequent ops.
     }
 
     fn on_headers(self: *Replica, message: *const Message) void {
@@ -2604,8 +2646,9 @@ pub const Replica = struct {
     fn ignore_repair_message(self: *Replica, message: *const Message) bool {
         assert(message.header.command == .request_start_view or
             message.header.command == .request_headers or
+            message.header.command == .request_prepare or
             message.header.command == .headers or
-            message.header.command == .request_prepare);
+            message.header.command == .nack_prepare);
 
         const command: []const u8 = @tagName(message.header.command);
 
@@ -2633,7 +2676,10 @@ pub const Replica = struct {
             return true;
         }
 
-        if (message.header.command == .request_start_view) {
+        if (message.header.command == .request_start_view or
+            message.header.command == .nack_prepare)
+        {
+            // Only the leader may receive these messages:
             if (self.leader_index(self.view) != self.replica) {
                 log.debug("{}: on_{s}: ignoring (follower)", .{ self.replica, command });
                 return true;
@@ -2646,6 +2692,11 @@ pub const Replica = struct {
                 log.warn("{}: on_{s}: ignoring (nonce=0, follower)", .{ self.replica, command });
                 return true;
             }
+        }
+
+        if (message.header.command == .nack_prepare and self.status == .normal) {
+            log.debug("{}: on_{s}: ignoring (view started)", .{ self.replica, command });
+            return true;
         }
 
         // Only allow repairs for same view as defense-in-depth:
@@ -2672,7 +2723,7 @@ pub const Replica = struct {
                     return true;
                 }
             },
-            .headers => {
+            .headers, .nack_prepare => {
                 if (self.leader_index(self.view) != self.replica) {
                     log.debug("{}: on_{s}: ignoring (view change, received by follower)", .{
                         self.replica,
@@ -2894,85 +2945,8 @@ pub const Replica = struct {
         assert(self.op >= self.commit_max);
         assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
-        // Request and repair any faulty prepares:
-        // Faulty prepares are more critical than dirty prepares, so we repair them first.
-        self.repair_faulty();
-
-        // Request and repair any dirty prepares:
-        self.repair_dirty();
-    }
-
-    fn repair_dirty(self: *Replica) void {
-        if (self.journal.dirty.len == 0) {
-            assert(self.journal.faulty.len == 0);
-            return;
-        } else if (self.journal.dirty.len == 1 and self.journal.dirty.bit(self.op)) {
-            // If we are constantly appending but healthy, this branch is likely most of the time.
-            return;
-        }
-
-        if (self.repair_queue_len == self.repair_queue_max) {
-            log.debug("{}: repair_dirty: waiting for repair queue to drain", .{self.replica});
-            return;
-        }
-
-        // Request enough prepares to fill the repair queue:
-        var budget = self.repair_queue_max - self.repair_queue_len;
-        assert(budget > 0);
-
-        var op = self.op + 1;
-        while (op > 0) {
-            op -= 1;
-
-            if (self.journal.dirty.bit(op)) {
-                // We never request `self.op` from any other replica but the leader:
-                if (op == self.op) continue;
-
-                if (self.choose_any_other_replica()) |replica| {
-                    self.send_header_to_replica(replica, .{
-                        .command = .request_prepare,
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                        .view = self.view,
-                        .op = op,
-                        .nonce = self.journal.entry_for_op_exact(op).?.checksum,
-                    });
-                    budget -= 1;
-                    if (budget == 0) return;
-                } else {
-                    // We have no connectivity to any other replicas.
-                    return;
-                }
-            } else {
-                assert(!self.journal.faulty.bit(op));
-            }
-        }
-    }
-
-    fn repair_faulty(self: *Replica) void {
-        if (self.journal.faulty.len == 0) return;
-
-        if (self.repair_queue_len == self.repair_queue_max) {
-            log.debug("{}: repair_faulty: waiting for repair queue to drain", .{self.replica});
-            return;
-        }
-
-        var op = self.op + 1;
-        while (op > 0) {
-            op -= 1;
-
-            if (self.journal.faulty.bit(op)) {
-                self.send_header_to_other_replicas(.{
-                    .command = .request_prepare,
-                    .cluster = self.cluster,
-                    .replica = self.replica,
-                    .view = self.view,
-                    .op = op,
-                    .nonce = self.journal.entry_for_op_exact(op).?.checksum,
-                });
-                return;
-            }
-        }
+        // Request and repair any dirty or faulty prepares:
+        self.repair_prepares();
     }
 
     fn repair_header(self: *Replica, header: *const Header) bool {
@@ -3233,6 +3207,106 @@ pub const Replica = struct {
         message.next = self.repair_queue;
         self.repair_queue = message.ref();
         self.repair_queue_len += 1;
+    }
+
+    fn repair_prepares(self: *Replica) void {
+        assert(self.status == .normal or self.status == .view_change);
+        assert(self.repairs_allowed());
+
+        if (self.journal.dirty.len == 0) {
+            assert(self.journal.faulty.len == 0);
+            return;
+        } else if (self.journal.dirty.len == 1 and self.journal.dirty.bit(self.op)) {
+            // If we are constantly appending but healthy, this branch is likely most of the time.
+            // TODO Restrict this optimization. The leader must repair self.op during a view change.
+            return;
+        }
+
+        if (self.repair_queue_len == self.repair_queue_max) {
+            log.debug("{}: repair_prepares: waiting for repair queue to drain", .{self.replica});
+            return;
+        }
+
+        // Request enough prepares to fill the repair queue:
+        var budget = self.repair_queue_max - self.repair_queue_len;
+        assert(budget > 0);
+
+        var op = self.op + 1;
+        while (op > 0) {
+            op -= 1;
+
+            if (self.journal.dirty.bit(op)) {
+                self.repair_prepare(op);
+
+                // If this is an uncommitted op, and we are the leader in `view_change` status, then
+                // we `request_prepare` from the rest of the cluster and set `nack_prepare_op`:
+                if (self.nack_prepare_op) |nack_prepare_op| {
+                    assert(nack_prepare_op == op);
+                    assert(self.status == .view_change);
+                    assert(self.leader_index(self.view) == self.replica);
+                    assert(op > self.commit_max);
+                    return;
+                }
+
+                // Otherwise, continue to request prepares until our budget is used up:
+                budget -= 1;
+                if (budget == 0) return;
+            } else {
+                assert(!self.journal.faulty.bit(op));
+            }
+        }
+    }
+
+    fn repair_prepare(self: *Replica, op: u64) void {
+        assert(self.status == .normal or self.status == .view_change);
+        assert(self.repairs_allowed());
+        assert(self.journal.dirty.bit(op));
+
+        const request_prepare = Header{
+            .command = .request_prepare,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+            .op = op,
+            // If we request a prepare from a follower, as below, it is critical to pass a checksum:
+            // Otherwise we could receive different prepares for the same op number.
+            .nonce = self.journal.entry_for_op_exact(op).?.checksum,
+        };
+
+        if (self.status == .view_change and op > self.commit_max) {
+            // Only the leader is allowed to do repairs in a view change:
+            assert(self.leader_index(self.view) == self.replica);
+
+            // Initialize the `nack_prepare` quorum counter for this uncommitted op:
+            // It is also possible that we may start repairing a lower uncommitted op, having
+            // initialized `nack_prepare_op` before we learn of a higher uncommitted dirty op,
+            // in which case we also want to reset the quorum counter.
+            if (self.nack_prepare_op) |nack_prepare_op| {
+                assert(nack_prepare_op <= op);
+                if (nack_prepare_op != op) {
+                    self.nack_prepare_op = op;
+                    self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
+                }
+            } else {
+                self.nack_prepare_op = op;
+                self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
+            }
+            self.send_header_to_other_replicas(request_prepare);
+        } else {
+            // We expect that `repair_prepare()` is called in reverse chronological order:
+            // Any uncommitted ops should have already been dealt with.
+            assert(self.nack_prepare_op == null);
+
+            // We never roll back committed ops, and thus never regard any nack_prepare responses:
+            // These ops are also likely to represent the bulk of any repair work so we also want to
+            // have multiple requests in flight to prime the repair queue.
+            // We also rotate each request across the cluster round-robin for faster recovery:
+            // This spreads load across connected peers, takes advantage of each peer's outgoing
+            // bandwidth, and parallelizes disk seeks and disk read bandwidth.
+            if (self.choose_any_other_replica()) |replica| {
+                self.send_header_to_replica(replica, request_prepare);
+            }
+        }
     }
 
     fn repairs_allowed(self: *Replica) bool {
@@ -3573,9 +3647,11 @@ pub const Replica = struct {
         // We just don't want to tie them up until the next view change (when they must be reset):
         self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
         self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
+        self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
 
         self.start_view_change_quorum = false;
         self.do_view_change_quorum = false;
+        self.nack_prepare_op = null;
     }
 
     /// A replica i that notices the need for a view change advances its view, sets its status to
@@ -3597,16 +3673,18 @@ pub const Replica = struct {
 
         self.reset_prepare();
 
-        // Some VR implementations reset their counters only on entering a view, perhaps assuming
-        // the view will be followed only by a single subsequent view change to the next view.
+        // Some VR implementations reset their counters only on entering a view, assuming that the
+        // view will be followed only by a single subsequent view change to the next view.
         // However, multiple successive view changes can fail, e.g. after a view change timeout.
         // We must therefore reset our counters here to avoid counting messages from an older view,
         // which would violate the quorum intersection property essential for correctness.
         self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
         self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
+        self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
 
         self.start_view_change_quorum = false;
         self.do_view_change_quorum = false;
+        self.nack_prepare_op = null;
 
         self.send_start_view_change();
     }
