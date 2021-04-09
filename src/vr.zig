@@ -9,7 +9,7 @@ const config = @import("config.zig");
 // TODO: This currently needs to be switched out manually.
 const MessageBus = @import("message_bus.zig").MessageBus;
 //const MessageBus = @import("test_message_bus.zig").MessageBus;
-const Message = MessageBus.Message;
+const Message = @import("message_bus.zig").Message;
 
 const ConcurrentRanges = @import("concurrent_ranges.zig").ConcurrentRanges;
 const Range = @import("concurrent_ranges.zig").Range;
