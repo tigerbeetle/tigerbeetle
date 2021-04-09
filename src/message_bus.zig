@@ -4,6 +4,7 @@ const mem = std.mem;
 const os = std.os;
 
 const config = @import("config.zig");
+const log = std.log.scoped(.message_bus);
 
 const vr = @import("vr.zig");
 const Header = vr.Header;
@@ -12,9 +13,8 @@ const Replica = vr.Replica;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
-const Message = MessagePool.Message;
 
-const log = std.log.scoped(.message_bus);
+pub const Message = MessagePool.Message;
 
 const SendQueue = RingBuffer(*Message, config.connection_send_queue_max);
 
