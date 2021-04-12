@@ -3307,13 +3307,32 @@ pub const Replica = struct {
 
                 // Otherwise, we continue to request prepares until our budget is used up:
                 budget -= 1;
-                if (budget == 0) return;
+                if (budget == 0) {
+                    log.debug("{}: repair_prepares: request budget used up", .{self.replica});
+                    return;
+                }
             } else {
                 assert(!self.journal.faulty.bit(op));
             }
         }
     }
 
+    /// During a view change, for uncommitted ops, which may be one or two, we optimize for latency:
+    ///
+    /// * request a `prepare` or `nack_prepare` from all followers in parallel,
+    /// * repair as soon as we receive a `prepare`, or
+    /// * discard as soon as we receive a majority of `nack_prepare` messages for the same checksum.
+    ///
+    /// For committed ops, which likely represent the bulk of repairs, we optimize for throughput:
+    ///
+    /// * have multiple requests in flight to prime the repair queue,
+    /// * rotate these requests across the cluster round-robin,
+    /// * to spread the load across connected peers,
+    /// * to take advantage of each peer's outgoing bandwidth, and
+    /// * to parallelize disk seeks and disk read bandwidth.
+    ///
+    /// This is effectively "many-to-one" repair, where a single replica recovers using the
+    /// resources of many replicas, for faster recovery.
     fn repair_prepare(self: *Replica, op: u64) void {
         assert(self.status == .normal or self.status == .view_change);
         assert(self.repairs_allowed());
@@ -3348,24 +3367,16 @@ pub const Replica = struct {
                 self.nack_prepare_op = op;
                 self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
             }
+            log.debug("{}: repair_prepare: requesting uncommitted op={}", .{ self.replica, op });
+            assert(self.nack_prepare_op.? == op);
             assert(request_prepare.nonce != 0);
             self.send_header_to_other_replicas(request_prepare);
         } else {
+            log.debug("{}: repair_prepare: requesting committed op={}", .{ self.replica, op });
             // We expect that `repair_prepare()` is called in reverse chronological order:
             // Any uncommitted ops should have already been dealt with.
             // We never roll back committed ops, and thus never regard any `nack_prepare` responses.
             assert(self.nack_prepare_op == null);
-
-            // We optimize for committed ops, which are likely to represent the bulk of repairs:
-            //
-            // * have multiple requests in flight to prime the repair queue,
-            // * rotate these requests across the cluster round-robin,
-            // * to spread the load across connected peers,
-            // * to take advantage of each peer's outgoing bandwidth, and
-            // * to parallelize disk seeks and disk read bandwidth.
-            //
-            // This is effectively "many-to-one" repair, where a single replica recovers using the
-            // resources of many replicas, for faster recovery.
             assert(request_prepare.nonce != 0);
             if (self.choose_any_other_replica()) |replica| {
                 self.send_header_to_replica(replica, request_prepare);
