@@ -38,21 +38,23 @@ pub const IO = struct {
             .tv_sec = current_ts.tv_sec,
             .tv_nsec = current_ts.tv_nsec + nanoseconds,
         };
+        var timeouts: usize = 0;
         var timeout_complete = false;
         while (!timeout_complete) {
             const timeout_sqe = self.ring.get_sqe() catch blk: {
                 // The submission queue is full, so flush submissions to make space.
-                if (try self.flush_submissions(0)) timeout_complete = true;
+                if (try self.flush_submissions(0, &timeouts)) timeout_complete = true;
                 break :blk self.ring.get_sqe() catch unreachable;
             };
             // Submit an absolute timeout that will be canceled if any other operation is
             // completed first.
             linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.IORING_TIMEOUT_ABS);
             timeout_sqe.user_data = 0;
+            timeouts += 1;
             // The amount of time this call will block is bounded by the timeout we just submitted.
-            if (try self.flush_submissions(1)) timeout_complete = true;
+            if (try self.flush_submissions(1, &timeouts)) timeout_complete = true;
             // We can now just peek for any CQEs without waiting, and without another syscall:
-            if (try self.flush_completions(0)) timeout_complete = true;
+            if (try self.flush_completions(0, &timeouts)) timeout_complete = true;
             // Run completions only after all completions have been flushed:
             // Loop on a copy of the linked list, having reset the linked list first, so that any
             // synchronous append on running a completion is executed only the next time round
@@ -69,9 +71,13 @@ pub const IO = struct {
                 while (copy.pop()) |completion| self.enqueue(completion);
             }
         }
+        // Reap any remaining timouts, which reference the timespec in the current stack frame.
+        // The busy loop here is required to avoid a potential deadlock as the kernel determines
+        // when the timeouts are pushed to the completion queue, not us.
+        while (timeouts > 0) _ = try self.flush_completions(0, &timeouts);
     }
 
-    fn flush_completions(self: *IO, _wait_nr: u32) !bool {
+    fn flush_completions(self: *IO, _wait_nr: u32, timeouts: *usize) !bool {
         var cqes: [256]io_uring_cqe = undefined;
         var timeout_complete = false;
         var wait_nr = _wait_nr;
@@ -85,6 +91,7 @@ pub const IO = struct {
             if (completed > wait_nr) wait_nr = 0 else wait_nr -= completed;
             for (cqes[0..completed]) |cqe| {
                 if (cqe.user_data == 0) {
+                    timeouts.* -= 1;
                     // We are only done if the timeout submitted was completed due to time,
                     // not if it was completed due to the completion of an event in which case
                     // cqe.res would be 0.
@@ -106,7 +113,7 @@ pub const IO = struct {
         return timeout_complete;
     }
 
-    fn flush_submissions(self: *IO, wait_nr: u32) !bool {
+    fn flush_submissions(self: *IO, wait_nr: u32, timeouts: *usize) !bool {
         var timeout_complete = false;
         while (true) {
             _ = self.ring.submit_and_wait(wait_nr) catch |err| switch (err) {
@@ -116,7 +123,7 @@ pub const IO = struct {
                 // Be careful also that copy_cqes() will flush before entering to wait (it does):
                 // https://github.com/axboe/liburing/commit/35c199c48dfd54ad46b96e386882e7ac341314c5
                 error.CompletionQueueOvercommitted, error.SystemResources => {
-                    timeout_complete = try self.flush_completions(1);
+                    timeout_complete = try self.flush_completions(1, timeouts);
                     continue;
                 },
                 else => return err,
