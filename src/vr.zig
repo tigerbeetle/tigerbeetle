@@ -1717,10 +1717,16 @@ pub const Replica = struct {
             return;
         }
 
+        if (message.header.op > self.op) {
+            assert(message.header.view < self.view);
+            log.debug("{}: on_repair: ignoring (would advance self.op)", .{self.replica});
+            return;
+        }
+
         assert(self.status == .normal or self.status == .view_change);
         assert(self.repairs_allowed());
         assert(message.header.view <= self.view);
-        assert(message.header.op <= self.op or message.header.view < self.view);
+        assert(message.header.op <= self.op); // Repairs may never advance `self.op`.
 
         if (self.journal.has_clean(message.header)) {
             log.debug("{}: on_repair: duplicate", .{self.replica});
@@ -1730,7 +1736,6 @@ pub const Replica = struct {
 
         if (self.repair_header(message.header)) {
             assert(self.journal.has_dirty(message.header));
-            assert(message.header.op <= self.op); // Repairs may never advance `self.op`.
 
             if (self.repairing) return self.repair_later(message);
 
