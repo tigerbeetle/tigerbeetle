@@ -1737,6 +1737,16 @@ pub const Replica = struct {
         if (self.repair_header(message.header)) {
             assert(self.journal.has_dirty(message.header));
 
+            if (self.nack_prepare_op) |nack_prepare_op| {
+                if (nack_prepare_op == message.header.op) {
+                    log.debug("{}: on_repair: repairing uncommitted op={}", .{
+                        self.replica,
+                        message.header.op,
+                    });
+                    self.nack_prepare_op = null;
+                }
+            }
+
             if (self.repairing) return self.repair_later(message);
 
             log.debug("{}: on_repair: repairing journal", .{self.replica});
