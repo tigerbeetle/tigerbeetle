@@ -1421,6 +1421,11 @@ pub const Replica = struct {
         }
     }
 
+    /// The primary advances op-number, adds the request to the end of the log, and updates the
+    /// information for this client in the client-table to contain the new request number, s.
+    /// Then it sends a ⟨PREPARE v, m, n, k⟩ message to the other replicas, where v is the current
+    /// view-number, m is the message it received from the client, n is the op-number it assigned to
+    /// the request, and k is the commit-number.
     fn on_request(self: *Replica, message: *Message) void {
         if (self.status != .normal) {
             log.debug("{}: on_request: ignoring ({})", .{ self.replica, self.status });
@@ -1429,7 +1434,6 @@ pub const Replica = struct {
 
         if (self.follower()) {
             // TODO Add an optimization to tell the client the view (and leader) ahead of a timeout.
-            // This would prevent thundering herds where clients suddenly broadcast the cluster.
             log.debug("{}: on_request: ignoring (follower)", .{self.replica});
             return;
         }
@@ -1456,12 +1460,6 @@ pub const Replica = struct {
         self.request_checksum = message.header.checksum;
 
         log.debug("{}: on_request: request {}", .{ self.replica, message.header.checksum });
-
-        // The primary advances op-number, adds the request to the end of the log, and updates the
-        // information for this client in the client-table to contain the new request number, s.
-        // Then it sends a ⟨PREPARE v, m, n, k⟩ message to the other replicas, where v is the
-        // current view-number, m is the message it received from the client, n is the op-number it
-        // assigned to the request, and k is the commit-number.
 
         var body = message.buffer[@sizeOf(Header)..message.header.size];
         self.state_machine.prepare(message.header.operation, body);
