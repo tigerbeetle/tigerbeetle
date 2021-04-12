@@ -3501,6 +3501,7 @@ pub const Replica = struct {
 
             // We therefore only send to the leader of the current view, never to the leader of the
             // prepare header's view:
+            // TODO We could surprise the new leader with this, if it is preparing a different op.
             self.send_header_to_replica(self.leader_index(self.view), .{
                 .command = .prepare_ok,
                 .nonce = header.checksum,
@@ -3930,7 +3931,7 @@ pub const Replica = struct {
         assert(message.references > 0);
         assert(message.header.command == .prepare);
         assert(message.header.view <= self.view);
-        assert(message.header.op <= self.op or message.header.view < self.view);
+        assert(message.header.op <= self.op);
 
         if (!self.journal.has(message.header)) {
             log.debug("{}: write_to_journal: ignoring (header changed)", .{self.replica});
