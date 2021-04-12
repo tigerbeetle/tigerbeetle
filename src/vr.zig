@@ -772,15 +772,15 @@ pub const Journal = struct {
     pub fn remove_entries_from(self: *Journal, op_min: u64) void {
         // TODO Snapshots
         // TODO Optimize to jump directly to op:
+        assert(op_min > 0);
         for (self.headers) |*header| {
             if (header.op >= op_min and header.command == .prepare) {
                 self.remove_entry(header);
             }
         }
         self.assert_headers_reserved_from(op_min);
-        // TODO Be more precise and efficient:
-        // TODO See if we can solve this rather at startup to avoid the need for a blocking write.
-        self.write_headers_between(0, self.headers.len - 1);
+        // TODO At startup we need to handle entries that may have been removed but now reappear.
+        // This is because we do not call `write_headers_between()` here.
     }
 
     pub fn set_entry_as_dirty(self: *Journal, header: *const Header) void {
