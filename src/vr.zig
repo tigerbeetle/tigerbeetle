@@ -1762,6 +1762,7 @@ pub const Replica = struct {
         ) orelse return;
 
         assert(count == self.f);
+        assert(self.start_view_change_from_other_replicas[self.replica] == null);
         log.debug("{}: on_start_view_change: quorum received", .{self.replica});
 
         assert(!self.start_view_change_quorum);
@@ -1800,6 +1801,7 @@ pub const Replica = struct {
         ) orelse return;
 
         assert(count == self.f + 1);
+        assert(self.do_view_change_from_all_replicas[self.replica] != null);
         log.debug("{}: on_do_view_change: quorum received", .{self.replica});
 
         assert(self.start_view_change_quorum);
@@ -2138,6 +2140,7 @@ pub const Replica = struct {
         ) orelse return;
 
         assert(count == threshold);
+        assert(self.nack_prepare_from_other_replicas[self.replica] == null);
         log.debug("{}: on_nack_prepare: quorum received", .{self.replica});
 
         assert(op > self.commit_max);
