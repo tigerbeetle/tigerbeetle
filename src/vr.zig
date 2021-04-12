@@ -3268,14 +3268,18 @@ pub const Replica = struct {
         if (self.journal.dirty.len == 0) {
             assert(self.journal.faulty.len == 0);
             return;
-        } else if (self.journal.dirty.len == 1 and self.journal.dirty.bit(self.op)) {
-            // If we are constantly appending but healthy, this branch is likely most of the time.
-            // TODO Restrict this optimization. The leader must repair self.op during a view change.
-            return;
         }
 
         if (self.repair_queue_len == self.repair_queue_max) {
             log.debug("{}: repair_prepares: waiting for repair queue to drain", .{self.replica});
+            return;
+        }
+
+        // We may be appending to or repairing the journal concurrently.
+        // We do not want to re-request any of these prepares unnecessarily.
+        // TODO Add journal.writing bits to clear this up (and needed anyway).
+        if (self.appending or self.repairing) {
+            log.debug("{}: repair_prepares: waiting for dirty bits to settle", .{self.replica});
             return;
         }
 
