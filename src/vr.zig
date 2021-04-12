@@ -2986,53 +2986,59 @@ pub const Replica = struct {
         self.repair_prepares();
     }
 
+    /// Decide whether or not to insert or update a header:
+    ///
+    /// A repair may never advance or replace `self.op` (critical for correctness):
+    ///
+    /// Repairs must always backfill in behind `self.op` but may never advance `self.op`.
+    /// Otherwise, a split-brain leader may reapply an op that was removed through a view
+    /// change, which could be committed by a higher `commit_max` number in a commit message.
+    ///
+    /// See this commit message for an example:
+    /// https://github.com/coilhq/tigerbeetle/commit/6119c7f759f924d09c088422d5c60ac6334d03de
+    ///
+    /// Our guiding principles around repairs in general:
+    ///
+    /// * The latest op makes sense of everything else and must not be replaced with a different op
+    /// or advanced except by the leader in the current view.
+    ///
+    /// * Do not jump to a view in normal status without imposing a view jump barrier.
+    ///
+    /// * Do not commit before resolving the view jump barrier with the leader.
+    ///
+    /// * Do not commit until the hash chain between `self.commit_min` and `self.op` is fully
+    /// connected, to ensure that all the ops in this range are correct.
+    ///
+    /// * Ensure that `self.commit_max` is never advanced for a newer view without first imposing a
+    /// view jump barrier, otherwise `self.commit_max` may again refer to different ops.
+    ///
+    /// * Ensure that `self.op` is never advanced by a repair since repairs may occur in a view
+    /// change where the view has not yet started.
+    ///
+    /// * Do not assume that an existing op with a older viewstamp can be replaced by an op with a
+    /// newer viewstamp, but only compare ops in the same view or with reference to the hash chain.
+    /// See Figure 3.7 on page 41 in Diego Ongaro's Raft thesis for an example of where an op with
+    /// an older view number may be committed instead of an op with a newer view number:
+    /// http://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf.
+    ///
     fn repair_header(self: *Replica, header: *const Header) bool {
-        assert(self.status == .normal or self.status == .view_change);
         assert(header.command == .prepare);
-        assert(header.size >= @sizeOf(Header));
 
-        if (self.status == .normal) {
-            assert(header.view <= self.view);
-        } else if (self.status == .view_change) {
-            assert(header.view < self.view);
+        switch (self.status) {
+            .normal => assert(header.view <= self.view),
+            .view_change => assert(header.view < self.view),
+            else => unreachable,
         }
 
-        if (header.op >= self.op) {
-            // A repair may never advance or replace `self.op` (critical for correctness):
-            //
-            // Repairs must always backfill in behind `self.op` but may never advance `self.op`.
-            // Otherwise, a split-brain leader may reapply an op that was removed through a view
-            // change, which could be committed by a higher `commit_max` number in a commit message.
-            //
-            // See this commit message for an example:
-            // https://github.com/coilhq/tigerbeetle/commit/6119c7f759f924d09c088422d5c60ac6334d03de
-            //
-            // Our guiding principles around repairs in general:
-            //
-            // * Our latest op makes sense of everything else and must not be replaced or advanced
-            // except by the leader in the current view.
-            //
-            // * Do not jump to a view in normal status without imposing a view jump barrier.
-            //
-            // * Do not commit before resolving the view jump barrier with the leader.
-            //
-            // * Do not commit until the hash chain between `self.commit_min` and `self.op` is
-            // fully connected, to ensure that all the ops in this range are correct.
-            //
-            // * Ensure that `self.commit_max` is never advanced for a newer view without first
-            // imposing a view jump barrier, otherwise `self.commit_max` may refer to different ops.
-            //
-            // * Ensure that `self.op` is never advanced by a repair since repairs may occur in a
-            // view change where the view has not started.
-            log.debug("{}: repair_header: ignoring (would replace or advance op)", .{self.replica});
+        if (header.op > self.op) {
+            log.debug("{}: repair_header: ignoring (would advance self.op)", .{self.replica});
             return false;
+        } else if (header.op == self.op) {
+            if (self.journal.entry_for_op_exact_with_checksum(self.op, header.checksum) == null) {
+                log.debug("{}: repair_header: ignoring (would replace self.op)", .{self.replica});
+                return false;
+            }
         }
-
-        // See Figure 3.7 on page 41 in Diego Ongaro's Raft thesis for an example of where an op
-        // with an older view number may be committed instead of an op with a newer view number:
-        // http://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf
-        //
-        // We therefore only compare ops in the same view or with reference to our hash chain:
 
         if (self.journal.entry(header)) |existing| {
             // Do not replace any existing op lightly as doing so may impair durability and even
@@ -3080,9 +3086,7 @@ pub const Replica = struct {
 
         // Caveat: Do not repair an existing op or gap if doing so would break the hash chain:
         if (self.repair_header_would_break_hash_chain_with_next_entry(header)) {
-            log.debug("{}: repair_header: ignoring (would break hash chain with next entry)", .{
-                self.replica,
-            });
+            log.debug("{}: repair_header: ignoring (would break hash chain)", .{self.replica});
             return false;
         }
 
@@ -3099,7 +3103,9 @@ pub const Replica = struct {
 
         // TODO Snapshots: Skip if this header is already snapshotted.
 
-        assert(header.op < self.op);
+        assert(header.op < self.op or
+            self.journal.entry_for_op_exact(self.op).?.checksum == header.checksum);
+
         self.journal.set_entry_as_dirty(header);
         return true;
     }
@@ -3147,7 +3153,6 @@ pub const Replica = struct {
     /// to repair reordered ops, but that we did not check for complete connection to the right.
     fn repair_header_would_connect_hash_chain(self: *Replica, header: *const Header) bool {
         var entry = header;
-        assert(entry.op < self.op);
 
         while (entry.op < self.op) {
             if (self.journal.next_entry(entry)) |next| {
