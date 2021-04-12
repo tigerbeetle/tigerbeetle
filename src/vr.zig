@@ -2118,25 +2118,33 @@ pub const Replica = struct {
         if (self.ignore_repair_message(message)) return;
 
         assert(self.status == .view_change);
-        assert(!self.view_jump_barrier);
         assert(message.header.view == self.view);
         assert(message.header.replica != self.replica);
         assert(self.leader_index(self.view) == self.replica);
         assert(self.do_view_change_quorum);
         assert(self.repairs_allowed());
 
-        if (self.nack_prepare_op == null) return;
+        if (self.nack_prepare_op == null) {
+            log.debug("{}: on_nack_prepare: ignoring (no longer expected)", .{self.replica});
+            return;
+        }
 
-        // TODO Can we issue a request_prepare and then remove an op?
         const op = self.nack_prepare_op.?;
         const checksum = self.journal.entry_for_op_exact(op).?.checksum;
 
-        if (message.header.op != op) return;
+        if (message.header.op != op) {
+            log.debug("{}: on_nack_prepare: ignoring (repairing another op)", .{self.replica});
+            return;
+        }
+
+        // Followers may not send a `nack_prepare` for a different checksum:
         assert(message.header.nonce == checksum);
 
+        // We require a `nack_prepare` from a majority of followers if our op is faulty:
+        // Otherwise, we know we do not have the op and need only `f` other nacks.
         const threshold = if (self.journal.faulty.bit(op)) self.f + 1 else self.f;
 
-        // Wait until we have `threshold` messages (excluding ourself) for quorum:
+        // Wait until we have `threshold` messages for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
             self.nack_prepare_from_other_replicas,
             message,
@@ -2147,12 +2155,32 @@ pub const Replica = struct {
         assert(self.nack_prepare_from_other_replicas[self.replica] == null);
         log.debug("{}: on_nack_prepare: quorum received", .{self.replica});
 
-        assert(op > self.commit_max);
-        assert(self.journal.entry_for_op_exact_with_checksum(op, checksum) != null);
-        assert(self.journal.faulty.bit(op));
-        assert(self.journal.dirty.bit(op));
+        assert(self.valid_hash_chain("on_nack_prepare"));
 
-        // TODO Remove this uncommitted op and subsequent ops.
+        assert(op > self.commit_max);
+        assert(op <= self.op);
+        assert(self.journal.entry_for_op_exact_with_checksum(op, checksum) != null);
+        assert(self.journal.dirty.bit(op));
+        assert(self.journal.faulty.bit(op));
+
+        log.debug("{}: on_nack_prepare: discarding uncommitted op={}..{}", .{
+            self.replica,
+            op,
+            self.op,
+        });
+        self.journal.remove_entries_from(op);
+        self.op = op - 1;
+
+        assert(self.journal.entry_for_op(op) == null);
+        assert(!self.journal.dirty.bit(op));
+        assert(!self.journal.faulty.bit(op));
+
+        // We require that `self.op` always exists. Rewinding `self.op` could change that.
+        // However, we do this only as the leader within a view change, with all headers intact.
+        assert(self.journal.entry_for_op_exact(self.op) != null);
+
+        self.nack_prepare_op = null;
+        self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
     }
 
     fn on_headers(self: *Replica, message: *const Message) void {
@@ -2516,6 +2544,10 @@ pub const Replica = struct {
                     .prepare_ok => {},
                     .start_view_change => assert(m.header.replica != self.replica),
                     .do_view_change => {},
+                    .nack_prepare => {
+                        assert(m.header.replica != self.replica);
+                        assert(m.header.op == self.nack_prepare_op.?);
+                    },
                     else => unreachable,
                 }
                 count += 1;
