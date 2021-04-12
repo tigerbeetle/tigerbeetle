@@ -2120,6 +2120,7 @@ pub const Replica = struct {
         assert(message.header.replica != self.replica);
         assert(self.leader_index(self.view) == self.replica);
         assert(self.do_view_change_quorum);
+        assert(self.repairs_allowed());
 
         if (self.nack_prepare_op == null) return;
 
@@ -2283,7 +2284,7 @@ pub const Replica = struct {
                 assert(message.header.nonce == self.prepare_message.?.header.checksum);
             },
             .start_view_change => assert(self.status == .view_change),
-            .do_view_change => {
+            .do_view_change, .nack_prepare => {
                 assert(self.status == .view_change);
                 assert(self.leader_index(self.view) == self.replica);
             },
@@ -2679,21 +2680,19 @@ pub const Replica = struct {
             return true;
         }
 
-        if (message.header.command == .request_start_view or
-            message.header.command == .nack_prepare)
-        {
-            // Only the leader may receive these messages:
-            if (self.leader_index(self.view) != self.replica) {
-                log.debug("{}: on_{s}: ignoring (follower)", .{ self.replica, command });
-                return true;
-            }
-        }
-
-        if (message.header.command == .request_prepare) {
-            // Only the leader may answer a request for a prepare that does not specify the nonce:
-            if (message.header.nonce == 0 and self.leader_index(self.view) != self.replica) {
-                log.warn("{}: on_{s}: ignoring (nonce=0, follower)", .{ self.replica, command });
-                return true;
+        if (self.leader_index(self.view) != self.replica) {
+            switch (message.header.command) {
+                // Only the leader may receive these messages:
+                .request_start_view, .nack_prepare => {
+                    log.warn("{}: on_{s}: ignoring (follower)", .{ self.replica, command });
+                    return true;
+                },
+                // Only the leader may answer a request for a prepare without a nonce:
+                .request_prepare => if (message.header.nonce == 0) {
+                    log.warn("{}: on_{s}: ignoring (no nonce)", .{ self.replica, command });
+                    return true;
+                },
+                else => {},
             }
         }
 
@@ -3239,10 +3238,11 @@ pub const Replica = struct {
             op -= 1;
 
             if (self.journal.dirty.bit(op)) {
-                self.repair_prepare(op);
-
                 // If this is an uncommitted op, and we are the leader in `view_change` status, then
-                // we `request_prepare` from the rest of the cluster and set `nack_prepare_op`:
+                // we will `request_prepare` from the rest of the cluster, set `nack_prepare_op`,
+                // and stop repairing any further prepares:
+                // This will also rebroadcast any `request_prepare` every `repair_timeout` tick.
+                self.repair_prepare(op);
                 if (self.nack_prepare_op) |nack_prepare_op| {
                     assert(nack_prepare_op == op);
                     assert(self.status == .view_change);
@@ -3251,7 +3251,7 @@ pub const Replica = struct {
                     return;
                 }
 
-                // Otherwise, continue to request prepares until our budget is used up:
+                // Otherwise, we continue to request prepares until our budget is used up:
                 budget -= 1;
                 if (budget == 0) return;
             } else {
@@ -3294,18 +3294,25 @@ pub const Replica = struct {
                 self.nack_prepare_op = op;
                 self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
             }
+            assert(request_prepare.nonce != 0);
             self.send_header_to_other_replicas(request_prepare);
         } else {
             // We expect that `repair_prepare()` is called in reverse chronological order:
             // Any uncommitted ops should have already been dealt with.
+            // We never roll back committed ops, and thus never regard any `nack_prepare` responses.
             assert(self.nack_prepare_op == null);
 
-            // We never roll back committed ops, and thus never regard any nack_prepare responses:
-            // These ops are also likely to represent the bulk of any repair work so we also want to
-            // have multiple requests in flight to prime the repair queue.
-            // We also rotate each request across the cluster round-robin for faster recovery:
-            // This spreads load across connected peers, takes advantage of each peer's outgoing
-            // bandwidth, and parallelizes disk seeks and disk read bandwidth.
+            // We optimize for committed ops, which are likely to represent the bulk of repairs:
+            //
+            // * have multiple requests in flight to prime the repair queue,
+            // * rotate these requests across the cluster round-robin,
+            // * to spread the load across connected peers,
+            // * to take advantage of each peer's outgoing bandwidth, and
+            // * to parallelize disk seeks and disk read bandwidth.
+            //
+            // This is effectively "many-to-one" repair, where a single replica recovers using the
+            // resources of many replicas, for faster recovery.
+            assert(request_prepare.nonce != 0);
             if (self.choose_any_other_replica()) |replica| {
                 self.send_header_to_replica(replica, request_prepare);
             }
