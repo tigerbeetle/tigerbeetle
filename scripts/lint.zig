@@ -163,6 +163,8 @@ fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError
                 }
             },
 
+            .unreachable_literal => assert_count += 1,
+
             else => {},
         }
     }
