@@ -1157,6 +1157,8 @@ pub const Replica = struct {
     repairing: bool = false,
     repairing_frame: @Frame(write_to_journal) = undefined,
 
+    committing: bool = false,
+
     sending_prepare: bool = false,
     sending_prepare_frame: @Frame(send_prepare_to_replica) = undefined,
 
@@ -2440,6 +2442,7 @@ pub const Replica = struct {
     }
 
     fn commit_ops_through(self: *Replica, commit: u64) void {
+        assert(self.status == .normal or self.status == .view_change);
         assert(self.commit_min <= self.commit_max);
         assert(self.commit_min <= self.op);
         assert(self.commit_max <= self.op or self.commit_max > self.op);
@@ -2447,6 +2450,15 @@ pub const Replica = struct {
 
         // We have already committed this far:
         if (commit <= self.commit_min) return;
+
+        // Guard against multiple concurrent invocations of commit_ops_through():
+        if (self.committing) {
+            log.debug("{}: commit_ops_through: already committing...", .{self.replica});
+            return;
+        }
+
+        self.committing = true;
+        defer self.committing = false;
 
         if (commit > self.commit_max) {
             log.debug("{}: commit_ops_through: advancing commit_max={}..{}", .{
@@ -2470,6 +2482,11 @@ pub const Replica = struct {
             if (self.create_prepare_message(op, checksum)) |prepare| {
                 defer self.message_bus.unref(prepare);
 
+                // Things change quickly when we're reading from disk:
+                if (self.status != .normal and self.status != .view_change) return;
+
+                // Guard against any re-entrancy concurrent to reading this prepare from disk:
+                assert(op == self.commit_min + 1);
                 assert(prepare.header.op == op);
                 assert(prepare.header.checksum == checksum);
 
@@ -2484,7 +2501,7 @@ pub const Replica = struct {
     }
 
     fn commit_op(self: *Replica, prepare: *const Message) void {
-        assert(self.status == .normal);
+        assert(self.status == .normal or self.status == .view_change);
         assert(prepare.header.command == .prepare);
         assert(prepare.header.op == self.commit_min + 1);
         assert(prepare.header.op <= self.op);
