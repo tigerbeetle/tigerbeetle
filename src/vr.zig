@@ -1649,7 +1649,7 @@ pub const Replica = struct {
         assert(self.commit_min == self.op);
         assert(self.commit_max == self.op);
 
-        self.reset_prepare();
+        self.reset_quorum_prepare();
     }
 
     fn on_commit(self: *Replica, message: *const Message) void {
@@ -1743,7 +1743,7 @@ pub const Replica = struct {
                         self.replica,
                         message.header.op,
                     });
-                    self.nack_prepare_op = null;
+                    self.reset_quorum_nack_prepare();
                 }
             }
 
@@ -2189,8 +2189,9 @@ pub const Replica = struct {
         // However, we do this only as the leader within a view change, with all headers intact.
         assert(self.journal.entry_for_op_exact(self.op) != null);
 
-        self.nack_prepare_op = null;
-        self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
+        self.reset_quorum_nack_prepare();
+
+        self.repair();
     }
 
     fn on_headers(self: *Replica, message: *const Message) void {
@@ -3424,7 +3425,32 @@ pub const Replica = struct {
         self.send_message_to_replica(next, message);
     }
 
-    fn reset_prepare(self: *Replica) void {
+    fn reset_quorum_counter(self: *Replica, messages: []?*Message, command: Command) void {
+        var count: usize = 0;
+        for (messages) |*received, replica| {
+            if (received.*) |message| {
+                assert(message.header.command == command);
+                assert(message.header.replica == replica);
+                assert(message.header.view <= self.view);
+                self.message_bus.unref(message);
+                count += 1;
+            }
+            received.* = null;
+        }
+        log.debug("{}: reset {} {s} message(s)", .{ self.replica, count, @tagName(command) });
+    }
+
+    fn reset_quorum_do_view_change(self: *Replica) void {
+        self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
+        self.do_view_change_quorum = false;
+    }
+
+    fn reset_quorum_nack_prepare(self: *Replica) void {
+        self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
+        self.nack_prepare_op = null;
+    }
+
+    fn reset_quorum_prepare(self: *Replica) void {
         if (self.prepare_message) |message| {
             self.request_checksum = null;
             self.message_bus.unref(message);
@@ -3440,19 +3466,9 @@ pub const Replica = struct {
         for (self.prepare_ok_from_all_replicas) |received| assert(received == null);
     }
 
-    fn reset_quorum_counter(self: *Replica, messages: []?*Message, command: Command) void {
-        var count: usize = 0;
-        for (messages) |*received, replica| {
-            if (received.*) |message| {
-                assert(message.header.command == command);
-                assert(message.header.replica == replica);
-                assert(message.header.view <= self.view);
-                self.message_bus.unref(message);
-                count += 1;
-            }
-            received.* = null;
-        }
-        log.debug("{}: reset {} {s} message(s)", .{ self.replica, count, @tagName(command) });
+    fn reset_quorum_start_view_change(self: *Replica) void {
+        self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
+        self.start_view_change_quorum = false;
     }
 
     fn send_prepare_ok(self: *Replica, header: *const Header) void {
@@ -3715,19 +3731,14 @@ pub const Replica = struct {
             self.repair_timeout.start();
         }
 
-        // This is essential for correctness:
-        self.reset_prepare();
+        self.reset_quorum_prepare();
+        self.reset_quorum_start_view_change();
+        self.reset_quorum_do_view_change();
+        self.reset_quorum_nack_prepare();
 
-        // Reset and garbage collect all view change messages (if any):
-        // This is not essential for correctness, only efficiency.
-        // We just don't want to tie them up until the next view change (when they must be reset):
-        self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
-        self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
-        self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
-
-        self.start_view_change_quorum = false;
-        self.do_view_change_quorum = false;
-        self.nack_prepare_op = null;
+        assert(self.start_view_change_quorum == false);
+        assert(self.do_view_change_quorum == false);
+        assert(self.nack_prepare_op == null);
     }
 
     /// A replica i that notices the need for a view change advances its view, sets its status to
@@ -3747,20 +3758,19 @@ pub const Replica = struct {
         self.view_change_message_timeout.start();
         self.repair_timeout.stop();
 
-        self.reset_prepare();
-
-        // Some VR implementations reset their counters only on entering a view, assuming that the
-        // view will be followed only by a single subsequent view change to the next view.
-        // However, multiple successive view changes can fail, e.g. after a view change timeout.
+        // Do not reset quorum counters only on entering a view, assuming that the view will be
+        // followed only by a single subsequent view change to the next view, because multiple
+        // successive view changes can fail, e.g. after a view change timeout.
         // We must therefore reset our counters here to avoid counting messages from an older view,
         // which would violate the quorum intersection property essential for correctness.
-        self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
-        self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
-        self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
+        self.reset_quorum_prepare();
+        self.reset_quorum_start_view_change();
+        self.reset_quorum_do_view_change();
+        self.reset_quorum_nack_prepare();
 
-        self.start_view_change_quorum = false;
-        self.do_view_change_quorum = false;
-        self.nack_prepare_op = null;
+        assert(self.start_view_change_quorum == false);
+        assert(self.do_view_change_quorum == false);
+        assert(self.nack_prepare_op == null);
 
         self.send_start_view_change();
     }
