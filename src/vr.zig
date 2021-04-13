@@ -2297,10 +2297,11 @@ pub const Replica = struct {
         // However, the leader may stop sending once it has a `do_view_change_quorum`.
         if (!self.do_view_change_quorum) self.send_start_view_change();
 
-        // It is critical that a `do_view_change` message implies a `start_view_change_quorum`.
-        // The leader need not resend a `do_view_change` message to itself.
-        if (self.start_view_change_quorum and self.leader_index(self.view) != self.replica) {
-            self.send_do_view_change();
+        // It is critical that a `do_view_change` message implies a `start_view_change_quorum`:
+        if (self.start_view_change_quorum) {
+            // The leader need not retry to send a `do_view_change` message to itself:
+            // We assume the MessageBus will not drop messages sent by a replica to itself.
+            if (self.leader_index(self.view) != self.replica) self.send_do_view_change();
         }
     }
 
@@ -3597,7 +3598,7 @@ pub const Replica = struct {
         assert(count_start_view_change >= self.f);
 
         const message = self.create_do_view_change_or_start_view_message(.do_view_change) orelse {
-            log.debug("{}: send_do_view_change: dropping do_view_change, no message available", .{
+            log.warn("{}: send_do_view_change: dropping do_view_change, no message available", .{
                 self.replica,
             });
             return;
