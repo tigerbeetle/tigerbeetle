@@ -28,5 +28,9 @@ pub fn FIFO(comptime T: type) type {
             ret.next = null;
             return ret;
         }
+
+        pub fn peek(self: Self) ?*T {
+            return self.out;
+        }
     };
 }
