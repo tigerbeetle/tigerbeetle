@@ -1677,7 +1677,7 @@ pub const Replica = struct {
         assert(self.follower());
         assert(message.header.replica == self.leader_index(message.header.view));
 
-        // We may not always have the latest commit entry but if we do its checksum must match:
+        // We may not always have the latest commit entry but if we do these checksums must match:
         if (self.journal.entry_for_op_exact(message.header.commit)) |commit_entry| {
             if (commit_entry.checksum == message.header.nonce) {
                 log.debug("{}: on_commit: verified commit checksum", .{self.replica});
@@ -1896,38 +1896,6 @@ pub const Replica = struct {
         } else {
             unreachable;
         }
-
-        // TODO Ensure self.commit_max == self.op
-        // Next prepare needs this to hold: assert(message.header.op == self.commit_max + 1);
-
-        // The new primary starts accepting client requests. It also executes (in order) any
-        // committed operations that it hadn’t executed previously, updates its client table, and
-        // sends the replies to the clients.
-
-        self.transition_to_normal_status(self.view);
-
-        assert(self.status == .normal);
-        assert(self.leader());
-
-        self.commit_ops_through(self.commit_max);
-        assert(self.commit_min == k);
-        assert(self.commit_max == k);
-
-        const start_view = self.create_do_view_change_or_start_view_message(.start_view) orelse {
-            log.debug("{}: on_do_view_change: dropping start_view, no message available", .{
-                self.replica,
-            });
-            return;
-        };
-        defer self.message_bus.unref(start_view);
-
-        assert(start_view.references == 1);
-        assert(start_view.header.command == .start_view);
-        assert(start_view.header.view == self.view);
-        assert(start_view.header.op == self.op);
-        assert(start_view.header.commit == self.commit_max);
-
-        self.send_message_to_other_replicas(start_view);
     }
 
     fn on_start_view(self: *Replica, message: *const Message) void {
@@ -2442,6 +2410,8 @@ pub const Replica = struct {
     }
 
     fn commit_ops_through(self: *Replica, commit: u64) void {
+        // TODO Restrict `view_change` status only to the leader purely as defense-in-depth.
+        // Be careful of concurrency when doing this, as successive view changes can happen quickly.
         assert(self.status == .normal or self.status == .view_change);
         assert(self.commit_min <= self.commit_max);
         assert(self.commit_min <= self.op);
@@ -3012,7 +2982,21 @@ pub const Replica = struct {
         assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
         // Request and repair any dirty or faulty prepares:
-        self.repair_prepares();
+        if (self.journal.dirty.len > 0) return self.repair_prepares();
+
+        // Commit ops, which may in turn discover faulty prepares and drive more repairs:
+        if (self.commit_min < self.commit_max) return self.commit_ops_through(self.commit_max);
+
+        if (self.status == .view_change and self.leader_index(self.view) == self.replica) {
+            // TODO Drive uncommitted ops to completion through replication to a majority:
+            if (self.commit_max < self.op) {
+                log.debug("{}: repair: waiting for uncomitted ops to replicate", .{self.replica});
+                return;
+            }
+
+            // Start the view as the new leader:
+            self.start_view_as_the_new_leader();
+        }
     }
 
     /// Decide whether or not to insert or update a header:
@@ -3283,11 +3267,7 @@ pub const Replica = struct {
     fn repair_prepares(self: *Replica) void {
         assert(self.status == .normal or self.status == .view_change);
         assert(self.repairs_allowed());
-
-        if (self.journal.dirty.len == 0) {
-            assert(self.journal.faulty.len == 0);
-            return;
-        }
+        assert(self.journal.dirty.len > 0);
 
         if (self.repair_queue_len == self.repair_queue_max) {
             log.debug("{}: repair_prepares: waiting for repair queue to drain", .{self.replica});
@@ -3721,6 +3701,42 @@ pub const Replica = struct {
                 latest.* = header;
             }
         }
+    }
+
+    fn start_view_as_the_new_leader(self: *Replica) void {
+        assert(self.status == .view_change);
+        assert(self.leader_index(self.view) == self.replica);
+        assert(self.do_view_change_quorum);
+
+        // TODO Do one last count of our do_view_change quorum messages.
+
+        assert(!self.view_jump_barrier);
+        assert(self.commit_min == self.op);
+        assert(self.commit_max == self.op);
+        assert(self.valid_hash_chain_between(self.commit_min, self.op));
+
+        assert(self.journal.dirty.len == 0);
+        assert(self.journal.faulty.len == 0);
+        assert(self.nack_prepare_op == null);
+
+        const start_view = self.create_do_view_change_or_start_view_message(.start_view) orelse {
+            log.warn("{}: start_view_as_the_new_leader: waiting for a message", .{self.replica});
+            return;
+        };
+        defer self.message_bus.unref(start_view);
+
+        self.transition_to_normal_status(self.view);
+
+        assert(self.status == .normal);
+        assert(self.leader());
+
+        assert(start_view.references == 1);
+        assert(start_view.header.command == .start_view);
+        assert(start_view.header.view == self.view);
+        assert(start_view.header.op == self.op);
+        assert(start_view.header.commit == self.commit_max);
+
+        self.send_message_to_other_replicas(start_view);
     }
 
     fn transition_to_normal_status(self: *Replica, new_view: u64) void {
