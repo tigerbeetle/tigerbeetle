@@ -177,12 +177,11 @@ pub const MessageBus = struct {
 
         // If there are Connections waiting for a Message to become free and there are Messages
         // available, provide them to the Connections and allow them to recv.
-        while (self.waiting_for_free_message.peek() != null) {
-            if (self.get_message()) |message| {
-                const connection = self.waiting_for_free_message.pop().?;
-                connection.incoming_message = message;
-                connection.recv_header();
-            }
+        while (self.waiting_for_free_message.peek()) |connection| {
+            assert(connection.recv_message == null);
+            connection.recv_message = self.get_message() orelse break;
+            _ = self.waiting_for_free_message.pop().?;
+            connection.recv();
         }
     }
 
@@ -435,7 +434,13 @@ const Connection = struct {
     recv_submitted: bool = false,
     /// Number of bytes of the current header/message that have already been received.
     recv_progress: usize = 0,
-    incoming_message: ?*Message = null,
+    /// The Message with the buffer passed to the kernel for recv operations.
+    recv_message: ?*Message = null,
+    /// A Message that has been used to recv and has extra data from a subsequent message
+    /// which needs to be properly dealt with.
+    pipeline_message: ?*Message = null,
+    /// The offset of remaining extra data in the buffer of `pipeline_message`.
+    pipeline_offset: usize = 0,
 
     /// This completion is used for all send operations.
     send_completion: IO.Completion = undefined,
@@ -539,7 +544,7 @@ const Connection = struct {
         };
         log.info("connected to replica {}", .{self.peer.replica});
         self.message_bus.replicas_connect_attempts[self.peer.replica] = 0;
-        self.maybe_recv_header();
+        self.maybe_recv();
         // It is possible that a message has been queued up to be sent to
         // the replica while we were connecting.
         self.send();
@@ -556,7 +561,7 @@ const Connection = struct {
         self.state = .connected;
         self.fd = fd;
         self.message_bus.connections_used += 1;
-        self.maybe_recv_header();
+        self.maybe_recv();
     }
 
     /// Add a message to the connection's send queue, starting a send operation
@@ -624,57 +629,82 @@ const Connection = struct {
 
     /// Kick off a recv if a Message is available, otherwise add this Connection
     /// to the FIFO to wait for a free Message.
-    fn maybe_recv_header(self: *Connection) void {
-        assert(self.recv_progress == 0);
-        assert(self.incoming_message == null);
-        if (self.message_bus.get_message()) |message| {
-            self.incoming_message = message;
-            self.recv_header();
-        } else {
+    fn maybe_recv(self: *Connection) void {
+        assert((self.recv_progress == 0) == (self.pipeline_message == null));
+        assert(self.recv_message == null);
+        self.recv_message = self.message_bus.get_message() orelse {
             self.message_bus.waiting_for_free_message.push(self);
-        }
+            return;
+        };
+        self.recv();
     }
 
-    fn recv_header(self: *Connection) void {
-        self.recv(
-            on_recv_header,
-            self.incoming_message.?.buffer[self.recv_progress..@sizeOf(Header)],
-        );
-    }
-
-    fn recv_body(self: *Connection) void {
-        self.recv(
-            on_recv_body,
-            self.incoming_message.?.buffer[self.recv_progress..self.incoming_message.?.header.size],
-        );
-    }
-
-    fn recv(
-        self: *Connection,
-        comptime callback: fn (*Connection, *IO.Completion, IO.RecvError!usize) void,
-        buffer: []u8,
-    ) void {
+    fn recv(self: *Connection) void {
         assert(self.peer != .none);
         assert(self.state == .connected);
         assert(self.fd != -1);
+
+        if (self.pipeline_message) |pipeline| {
+            assert(self.recv_progress != 0);
+            assert(self.pipeline_offset != 0);
+
+            const buffer = pipeline.buffer[self.pipeline_offset..self.recv_progress];
+            if (buffer.len >= @sizeOf(Header)) {
+                const header = mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]);
+                if (!header.valid_checksum()) {
+                    log.err("invalid checksum on header received from {}", .{self.peer});
+                    self.shutdown();
+                    return;
+                }
+
+                if (buffer.len >= header.size) {
+                    const body = buffer[@sizeOf(Header)..header.size];
+                    if (!header.valid_checksum_body(body)) {
+                        log.err("invalid checksum on body received from {}", .{self.peer});
+                        self.shutdown();
+                        return;
+                    }
+                    mem.copy(u8, self.recv_message.?.buffer, buffer[0..header.size]);
+
+                    // TODO: rewrite ConcurrentRanges to not use async. This nosuspend is only
+                    // safe because we do not do any asynchronous disk IO yet.
+                    var frame = async self.message_bus.server.on_message(self.recv_message.?);
+                    nosuspend await frame;
+
+                    self.message_bus.unref(self.recv_message.?);
+                    self.recv_message = null;
+
+                    if (header.size == self.recv_progress) {
+                        self.recv_progress = 0;
+                        self.message_bus.unref(pipeline);
+                        self.pipeline_message = null;
+                    }
+                    self.maybe_recv();
+                    return;
+                }
+            }
+            // The pipeline message is not yet fully received, copy to the new buffer and start
+            // a new recv operation.
+            mem.copy(u8, self.recv_message.?.buffer, buffer);
+            self.recv_progress = buffer.len;
+            self.message_bus.unref(pipeline);
+            self.pipeline_message = null;
+        }
+
         assert(!self.recv_submitted);
         self.recv_submitted = true;
         self.message_bus.io.recv(
             *Connection,
             self,
-            callback,
+            on_recv,
             &self.recv_completion,
             self.fd,
-            buffer,
+            self.recv_message.?.buffer[self.recv_progress..],
             os.MSG_NOSIGNAL,
         );
     }
 
-    fn on_recv_header(
-        self: *Connection,
-        completion: *IO.Completion,
-        result: IO.RecvError!usize,
-    ) void {
+    fn on_recv(self: *Connection, completion: *IO.Completion, result: IO.RecvError!usize) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
 
@@ -686,7 +716,7 @@ const Connection = struct {
 
         const bytes_received = result catch |err| {
             // TODO: maybe don't need to close on *every* error
-            log.err("error receiving body from {}: {}", .{ self.peer, err });
+            log.err("error receiving from {}: {}", .{ self.peer, err });
             self.shutdown();
             return;
         };
@@ -699,36 +729,48 @@ const Connection = struct {
             return;
         }
 
-        self.recv_progress += bytes_received;
+        const header_already_checked = self.recv_progress >= @sizeOf(Header);
 
+        self.recv_progress += bytes_received;
         if (self.recv_progress < @sizeOf(Header)) {
-            // The header has not yet been fully received.
-            self.recv_header();
+            // The header has not yet been fully received, recv() again...
+            self.recv();
             return;
         }
-        assert(self.recv_progress == @sizeOf(Header));
 
-        const header_received = self.incoming_message.?.header;
-        if (!header_received.valid_checksum()) {
-            log.err("invalid checksum on header received from {}", .{self.peer});
-            self.shutdown();
-            return;
+        const message = self.recv_message.?;
+        if (!header_already_checked) {
+            if (!message.header.valid_checksum()) {
+                log.err("invalid checksum on header received from {}", .{self.peer});
+                self.shutdown();
+                return;
+            }
+            if (message.header.size < @sizeOf(Header) or
+                message.header.size > config.message_size_max)
+            {
+                log.err("header with invalid size {d} received from {}", .{
+                    message.header.size,
+                    self.peer,
+                });
+                self.shutdown();
+                return;
+            }
         }
 
         switch (self.peer) {
             .none => unreachable,
             .unknown => {
                 // Ensure that the message is addressed to the correct cluster.
-                if (header_received.cluster != self.message_bus.server.cluster) {
+                if (message.header.cluster != self.message_bus.server.cluster) {
                     log.err("received message addressed to wrong cluster: {}", .{
-                        header_received.cluster,
+                        message.header.cluster,
                     });
                     self.shutdown();
                     return;
                 }
                 // The only command sent by clients is the request command.
-                if (header_received.command == .request) {
-                    self.peer = .{ .client = header_received.client };
+                if (message.header.command == .request) {
+                    self.peer = .{ .client = message.header.client };
                     const ret = self.message_bus.clients.getOrPutAssumeCapacity(self.peer.client);
                     // Shutdown the old connection if there is one and it is active.
                     if (ret.found_existing) {
@@ -739,7 +781,7 @@ const Connection = struct {
                     }
                     ret.entry.value = self;
                 } else {
-                    self.peer = .{ .replica = header_received.replica };
+                    self.peer = .{ .replica = message.header.replica };
                     // If there is already a connection to this replica, terminate and replace it.
                     if (self.message_bus.replicas[self.peer.replica]) |old| {
                         assert(old.peer == .replica);
@@ -751,81 +793,58 @@ const Connection = struct {
                     self.message_bus.replicas[self.peer.replica] = self;
                 }
             },
-            .client => assert(header_received.command == .request),
-            .replica => assert(header_received.command != .request),
+            .client => assert(message.header.command == .request),
+            .replica => assert(message.header.command != .request),
         }
-        assert(header_received.cluster == self.message_bus.server.cluster);
+        assert(message.header.cluster == self.message_bus.server.cluster);
 
-        if (header_received.size == @sizeOf(Header)) {
-            // If the message has no body, deliver it directly
-            self.deliver_message();
-        } else {
-            assert(header_received.size > @sizeOf(Header));
-            self.recv_body();
-        }
-    }
-
-    fn on_recv_body(
-        self: *Connection,
-        completion: *IO.Completion,
-        result: IO.RecvError!usize,
-    ) void {
-        assert(self.recv_submitted);
-        self.recv_submitted = false;
-
-        if (self.state == .shutting_down) {
-            self.maybe_close();
+        if (self.recv_progress < message.header.size) {
+            // We have not yet received the full body.
+            self.recv();
             return;
         }
-        assert(self.state == .connected);
-
-        const bytes_received = result catch |err| {
-            // TODO: maybe don't need to close on *every* error
-            log.err("error receiving body from {}: {}", .{ self.peer, err });
-            self.shutdown();
-            return;
-        };
-
-        // No bytes received means that the peer closed the connection.
-        if (bytes_received == 0) {
-            // Skip the shutdown syscall and go straight to close.
-            self.state = .shutting_down;
-            self.maybe_close();
-            return;
-        }
-        self.recv_progress += bytes_received;
-
-        if (self.recv_progress < self.incoming_message.?.header.size) {
-            // The body has not yet been fully received.
-            self.recv_body();
-        } else {
-            self.deliver_message();
-        }
-    }
-
-    /// Deliver the fully received incoming_message then reset state and call maybe_recv_header().
-    fn deliver_message(self: *Connection) void {
-        const message = self.incoming_message.?;
-        defer self.message_bus.unref(message);
-
-        assert(self.recv_progress == message.header.size);
 
         const body = message.buffer[@sizeOf(Header)..message.header.size];
-        if (message.header.valid_checksum_body(body)) {
-            // TODO: rewrite ConcurrentRanges to not use async
-            // This nosuspend is only safe because we do not do any asynchronous disk IO yet.
-            var frame = async self.message_bus.server.on_message(message);
-            nosuspend await frame;
-        } else {
+        if (!message.header.valid_checksum_body(body)) {
             log.err("invalid checksum on body received from {}", .{self.peer});
             self.shutdown();
             return;
         }
 
-        // Reset state and try to receive the next message.
-        self.incoming_message = null;
-        self.recv_progress = 0;
-        self.maybe_recv_header();
+        // The Journal requires that the space in the buffer past the message body
+        // and up to the sector_ceil be zeroed.
+        const sector_ceil = Journal.sector_ceil(message.header.size);
+        if (message.header.size != sector_ceil) {
+            assert(message.header.size < sector_ceil);
+            assert(message.buffer.len == config.message_size_max + config.sector_size);
+            if (self.recv_progress > message.header.size) {
+                // We have received part of the next message as well. Therefore, we need to shift
+                // this partially received message to avoid overwriting it with the padding.
+                // These slices overlap, with dest.ptr > src.ptr, so we must use a reverse loop:
+                mem.copyBackwards(
+                    u8,
+                    message.buffer[sector_ceil..],
+                    message.buffer[message.header.size..self.recv_progress],
+                );
+                self.pipeline_message = message.ref();
+                assert(self.pipeline_offset == 0);
+                self.pipeline_offset = sector_ceil;
+                self.recv_progress += sector_ceil - message.header.size;
+            } else {
+                // Reset this for the next recv as there no pipeline data to deal with.
+                self.recv_progress = 0;
+            }
+            mem.set(u8, message.buffer[message.header.size..sector_ceil], 0);
+        }
+
+        // TODO: rewrite ConcurrentRanges to not use async
+        // This nosuspend is only safe because we do not do any asynchronous disk IO yet.
+        var frame = async self.message_bus.server.on_message(message);
+        nosuspend await frame;
+
+        self.message_bus.unref(message);
+        self.recv_message = null;
+        self.maybe_recv();
     }
 
     fn send(self: *Connection) void {
@@ -883,9 +902,9 @@ const Connection = struct {
         while (self.send_queue.pop()) |message| {
             self.message_bus.unref(message);
         }
-        if (self.incoming_message) |message| {
+        if (self.recv_message) |message| {
             self.message_bus.unref(message);
-            self.incoming_message = null;
+            self.recv_message = null;
         }
         assert(self.fd != -1);
         defer self.fd = -1;
@@ -901,7 +920,7 @@ const Connection = struct {
         // Reset the connection to its initial state.
         defer {
             assert(self.send_queue.empty());
-            assert(self.incoming_message == null);
+            assert(self.recv_message == null);
             switch (self.peer) {
                 .none, .unknown => {},
                 .client => {
