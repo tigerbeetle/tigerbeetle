@@ -1916,8 +1916,6 @@ pub const Replica = struct {
         assert(self.status == .view_change or self.view_jump_barrier);
         assert(message.header.view == self.view);
 
-        // TODO Assert that start_view message matches what we expect if our journal is empty.
-
         // When other replicas receive the start_view message, they replace their log with the one
         // in the message, set their op number to that of the latest entry in the log, set their
         // view number to the view number in the message, change their status to normal, and update
@@ -1935,8 +1933,16 @@ pub const Replica = struct {
 
         assert(latest.op >= self.commit_min);
         assert(latest.op >= self.commit_max);
-        assert(latest.commit >= self.commit_min);
-        assert(latest.commit >= self.commit_max);
+        // We expect that `latest.commit` may be less than `commit_min` because this was only the
+        // commit number at the time that the latest op was prepared not committed.
+
+        log.debug("{}: on_start_view: op={}..{} commit_max={}..{}", .{
+            self.replica,
+            self.op,
+            message.header.op,
+            self.commit_max,
+            message.header.commit,
+        });
 
         self.op = message.header.op;
         self.commit_max = message.header.commit;
