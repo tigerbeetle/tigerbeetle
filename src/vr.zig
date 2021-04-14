@@ -620,6 +620,8 @@ pub const Journal = struct {
         return copied;
     }
 
+    const HeaderRange = struct { op_min: u64, op_max: u64 };
+
     /// Finds the latest break in headers, searching between `op_min` and `op_max` (both inclusive).
     /// A break is a missing header or a header not connected to the next header (by hash chain).
     /// Upon finding the highest break, extends the range downwards to cover as much as possible.
