@@ -153,7 +153,6 @@ pub const Header = packed struct {
         if (self.epoch != 0) return "epoch != 0";
         switch (self.command) {
             .reserved => {
-                if (self.checksum_body != 0) return "checksum_body != 0";
                 if (self.nonce != 0) return "nonce != 0";
                 if (self.client != 0) return "client != 0";
                 if (self.cluster != 0) return "cluster != 0";
@@ -181,7 +180,6 @@ pub const Header = packed struct {
                 switch (self.operation) {
                     .reserved => return "operation == .reserved",
                     .init => {
-                        if (self.checksum_body != 0) return "init: checksum_body != 0";
                         if (self.nonce != 0) return "init: nonce != 0";
                         if (self.client != 0) return "init: client != 0";
                         if (self.cluster == 0) return "init: cluster == 0";
@@ -206,7 +204,6 @@ pub const Header = packed struct {
                 switch (self.operation) {
                     .reserved => return "operation == .reserved",
                     .init => {
-                        if (self.checksum_body != 0) return "init: checksum_body != 0";
                         if (self.nonce != 0) return "init: nonce != 0";
                         if (self.client != 0) return "init: client != 0";
                         if (self.cluster == 0) return "init: cluster == 0";
@@ -219,7 +216,6 @@ pub const Header = packed struct {
                         if (self.replica != 0) return "init: replica != 0";
                     },
                     else => {
-                        if (self.checksum_body != 0) return "checksum_body != 0";
                         if (self.client == 0) return "client == 0";
                         if (self.cluster == 0) return "cluster == 0";
                         if (self.op == 0) return "op == 0";
@@ -236,6 +232,8 @@ pub const Header = packed struct {
 
     pub fn reserved() Header {
         var header = Header{ .command = .reserved, .cluster = 0 };
+        const body: [0]u8 = undefined;
+        header.set_checksum_body(body[0..0]);
         header.set_checksum();
         assert(header.invalid() == null);
         return header;
@@ -1236,7 +1234,6 @@ pub const Replica = struct {
 
         // TODO Initialize the journal when initializing the cluster:
         var init_prepare = Header{
-            .checksum_body = 0,
             .nonce = 0,
             .client = 0,
             .cluster = cluster,
@@ -1251,6 +1248,8 @@ pub const Replica = struct {
             .command = .prepare,
             .operation = .init,
         };
+        const init_prepare_body: [0]u8 = undefined;
+        init_prepare.set_checksum_body(init_prepare_body[0..0]);
         init_prepare.set_checksum();
         assert(init_prepare.valid_checksum());
         assert(init_prepare.invalid() == null);
