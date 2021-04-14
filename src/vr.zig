@@ -2151,13 +2151,13 @@ pub const Replica = struct {
         assert(op <= self.op);
         assert(self.journal.entry_for_op_exact_with_checksum(op, checksum) != null);
         assert(self.journal.dirty.bit(op));
-        assert(self.journal.faulty.bit(op));
 
-        log.debug("{}: on_nack_prepare: discarding uncommitted op={}..{}", .{
+        log.debug("{}: on_nack_prepare: discarding uncommitted ops={}..{}", .{
             self.replica,
             op,
             self.op,
         });
+
         self.journal.remove_entries_from(op);
         self.op = op - 1;
 
