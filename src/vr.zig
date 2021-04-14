@@ -2478,6 +2478,9 @@ pub const Replica = struct {
                 return;
             }
         }
+
+        // This is an optimization to expedite the view change without waiting for `repair_timeout`:
+        if (self.status == .view_change and self.repairs_allowed()) self.repair();
     }
 
     fn commit_op(self: *Replica, prepare: *const Message) void {
