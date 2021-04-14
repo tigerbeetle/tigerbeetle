@@ -3666,33 +3666,40 @@ pub const Replica = struct {
             .prepare => {
                 // We do not assert message.header.replica as we would for send_header_to_replica()
                 // because we typically forward messages sent by another replica (i.e. the leader).
-                assert(self.status == .normal or self.status == .view_change);
+                switch (self.status) {
+                    .normal => assert(message.header.view <= self.view),
+                    .view_change => assert(message.header.view < self.view),
+                    else => unreachable,
+                }
             },
             .do_view_change => {
                 assert(self.status == .view_change);
                 assert(self.start_view_change_quorum);
                 assert(!self.do_view_change_quorum);
+                assert(message.header.view == self.view);
             },
             .start_view => switch (self.status) {
                 .normal => {
                     // A follower may ask the leader to resend the start_view message.
                     assert(!self.start_view_change_quorum);
                     assert(!self.do_view_change_quorum);
+                    assert(message.header.view == self.view);
                 },
                 .view_change => {
                     assert(self.start_view_change_quorum);
                     assert(self.do_view_change_quorum);
+                    assert(message.header.view == self.view);
                 },
                 else => unreachable,
             },
             .headers => {
                 assert(self.status == .normal or self.status == .view_change);
+                assert(message.header.view == self.view);
                 assert(message.header.replica == self.replica);
             },
             else => unreachable,
         }
         assert(message.header.cluster == self.cluster);
-        assert(message.header.view == self.view);
         self.message_bus.send_message_to_replica(replica, message);
     }
 
