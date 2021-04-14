@@ -78,7 +78,7 @@ pub const Header = packed struct {
     cluster: u128,
 
     /// Every message sent from one replica to another contains the sending replica's current view:
-    view: u64,
+    view: u64 = 0,
 
     /// The op number:
     op: u64 = 0,
@@ -113,13 +113,6 @@ pub const Header = packed struct {
     operation: Operation = .reserved,
 
     pub fn calculate_checksum(self: *const Header) u128 {
-        // Reserved headers should be completely zeroed with a checksum also of 0:
-        if (self.command == .reserved) {
-            var sum: u128 = 0;
-            for (std.mem.asBytes(self)) |byte| sum += byte;
-            if (sum == 0) return 0;
-        }
-
         const checksum_size = @sizeOf(@TypeOf(self.checksum));
         assert(checksum_size == 16);
         var target: [32]u8 = undefined;
@@ -128,10 +121,6 @@ pub const Header = packed struct {
     }
 
     pub fn calculate_checksum_body(self: *const Header, body: []const u8) u128 {
-        // Reserved headers should be completely zeroed with a checksum_body also of 0:
-        if (self.command == .reserved and self.size == 0 and body.len == 0) return 0;
-        if (self.size == @sizeOf(Header) and body.len == 0) return 0;
-
         assert(self.size == @sizeOf(Header) + body.len);
         const checksum_size = @sizeOf(@TypeOf(self.checksum_body));
         assert(checksum_size == 16);
@@ -160,14 +149,10 @@ pub const Header = packed struct {
     /// Returns null if all fields are set correctly according to the command, or else a warning.
     /// This does not verify that checksum is valid, and expects that has already been done.
     pub fn invalid(self: *const Header) ?[]const u8 {
-        switch (self.command) {
-            .reserved => if (self.size != 0) return "size != 0",
-            else => if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)",
-        }
+        if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.epoch != 0) return "epoch != 0";
         switch (self.command) {
             .reserved => {
-                if (self.checksum != 0) return "checksum != 0";
                 if (self.checksum_body != 0) return "checksum_body != 0";
                 if (self.nonce != 0) return "nonce != 0";
                 if (self.client != 0) return "client != 0";
@@ -249,18 +234,13 @@ pub const Header = packed struct {
         return null;
     }
 
-    pub fn zero(self: *Header) void {
-        std.mem.set(u8, std.mem.asBytes(self), 0);
-
-        assert(self.checksum == 0);
-        assert(self.checksum_body == 0);
-        assert(self.size == 0);
-        assert(self.command == .reserved);
-        assert(self.operation == .reserved);
+    pub fn reserved() Header {
+        var header = Header{ .command = .reserved, .cluster = 0 };
+        header.set_checksum();
+        assert(header.invalid() == null);
+        return header;
     }
 };
-
-const HeaderRange = struct { op_min: u64, op_max: u64 };
 
 const Client = struct {};
 
@@ -457,7 +437,7 @@ pub const Journal = struct {
             .exact,
         );
         errdefer allocator.free(headers);
-        for (headers) |*header| header.zero();
+        std.mem.set(Header, headers, Header.reserved());
 
         var dirty = try BitSet.init(allocator, headers.len);
         errdefer dirty.deinit();
@@ -625,7 +605,7 @@ pub const Journal = struct {
         assert(dest.len > 0);
 
         var copied: usize = 0;
-        for (dest) |*header| header.zero();
+        std.mem.set(Header, dest, Header.reserved());
 
         // We start at op_max + 1 but front-load the decrement to avoid overflow when op_min == 0:
         var op = op_max + 1;
@@ -758,14 +738,14 @@ pub const Journal = struct {
 
     /// A safe way of removing an entry, where the header must match the current entry to succeed.
     fn remove_entry(self: *Journal, header: *const Header) void {
-        // Copy the header.op by value to avoid a zero() followed by undefined header.op usage:
+        // Copy the header.op by value to avoid a reset() followed by undefined header.op usage:
         const op = header.op;
         log.debug("{}: journal: remove_entry: op={}", .{ self.replica, op });
 
         assert(self.entry(header).?.checksum == header.checksum);
         assert(self.headers[op].checksum == header.checksum); // TODO Snapshots
 
-        defer self.headers[op].zero();
+        defer self.headers[op] = Header.reserved();
         self.dirty.clear(op);
         self.faulty.clear(op);
     }
@@ -1252,7 +1232,7 @@ pub const Replica = struct {
         errdefer allocator.free(nack_prepare);
         std.mem.set(?*Message, nack_prepare, null);
 
-        // TODO Only initialize the journal when initializing the cluster:
+        // TODO Initialize the journal when initializing the cluster:
         var init_prepare = Header{
             .checksum_body = 0,
             .nonce = 0,
@@ -1835,7 +1815,7 @@ pub const Replica = struct {
         // ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
         // op number, and k is the commit number.
 
-        var latest: Header = std.mem.zeroInit(Header, .{});
+        var latest = Header.reserved();
         var k: u64 = 0;
 
         for (self.do_view_change_from_all_replicas) |received, replica| {
@@ -1923,7 +1903,7 @@ pub const Replica = struct {
         assert(self.status == .view_change or self.view_jump_barrier);
         assert(message.header.view == self.view);
 
-        var latest: Header = std.mem.zeroInit(Header, .{});
+        var latest = Header.reserved();
         self.set_latest_header(self.message_body_as_headers(message), &latest);
 
         assert(latest.command == .prepare);
