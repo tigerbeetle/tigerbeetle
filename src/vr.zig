@@ -232,8 +232,7 @@ pub const Header = packed struct {
 
     pub fn reserved() Header {
         var header = Header{ .command = .reserved, .cluster = 0 };
-        const body: [0]u8 = undefined;
-        header.set_checksum_body(body[0..0]);
+        header.set_checksum_body(&[0]u8{});
         header.set_checksum();
         assert(header.invalid() == null);
         return header;
@@ -1248,8 +1247,7 @@ pub const Replica = struct {
             .command = .prepare,
             .operation = .init,
         };
-        const init_prepare_body: [0]u8 = undefined;
-        init_prepare.set_checksum_body(init_prepare_body[0..0]);
+        init_prepare.set_checksum_body(&[0]u8{});
         init_prepare.set_checksum();
         assert(init_prepare.valid_checksum());
         assert(init_prepare.invalid() == null);
