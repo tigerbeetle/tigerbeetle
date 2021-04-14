@@ -758,13 +758,16 @@ pub const Journal = struct {
 
     /// A safe way of removing an entry, where the header must match the current entry to succeed.
     fn remove_entry(self: *Journal, header: *const Header) void {
-        // TODO Add equality method to Header to do more comparisons:
+        // Copy the header.op by value to avoid a zero() followed by undefined header.op usage:
+        const op = header.op;
+        log.debug("{}: journal: remove_entry: op={}", .{ self.replica, op });
+
         assert(self.entry(header).?.checksum == header.checksum);
-        // TODO Snapshots
-        assert(self.headers[header.op].checksum == header.checksum);
-        self.headers[header.op].zero();
-        self.dirty.set(header.op);
-        self.faulty.clear(header.op);
+        assert(self.headers[op].checksum == header.checksum); // TODO Snapshots
+
+        defer self.headers[op].zero();
+        self.dirty.clear(op);
+        self.faulty.clear(op);
     }
 
     /// Removes entries from `op_min` (inclusive) onwards.
@@ -773,6 +776,7 @@ pub const Journal = struct {
         // TODO Snapshots
         // TODO Optimize to jump directly to op:
         assert(op_min > 0);
+        log.debug("{}: journal: remove_entries_from: op_min={}", .{ self.replica, op_min });
         for (self.headers) |*header| {
             if (header.op >= op_min and header.command == .prepare) {
                 self.remove_entry(header);
