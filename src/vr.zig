@@ -1902,6 +1902,13 @@ pub const Replica = struct {
         }
     }
 
+    /// When other replicas receive the start_view message, they replace their log with the one
+    /// in the message, set their op number to that of the latest entry in the log, set their
+    /// view number to the view number in the message, change their status to normal, and update
+    /// the information in their client table. If there are non-committed operations in the log,
+    /// they send a ⟨prepare_ok v, n, i⟩ message to the primary; here n is the op-number. Then
+    /// they execute all operations known to be committed that they haven’t executed previously,
+    /// advance their commit number, and update the information in their client table.
     fn on_start_view(self: *Replica, message: *const Message) void {
         if (self.ignore_view_change_message(message)) return;
 
@@ -1915,14 +1922,6 @@ pub const Replica = struct {
         assert(!self.view_jump_barrier or self.status == .normal);
         assert(self.status == .view_change or self.view_jump_barrier);
         assert(message.header.view == self.view);
-
-        // When other replicas receive the start_view message, they replace their log with the one
-        // in the message, set their op number to that of the latest entry in the log, set their
-        // view number to the view number in the message, change their status to normal, and update
-        // the information in their client table. If there are non-committed operations in the log,
-        // they send a ⟨prepare_ok v, n, i⟩ message to the primary; here n is the op-number. Then
-        // they execute all operations known to be committed that they haven’t executed previously,
-        // advance their commit number, and update the information in their client table.
 
         var latest: Header = std.mem.zeroInit(Header, .{});
         self.set_latest_header(self.message_body_as_headers(message), &latest);
