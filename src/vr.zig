@@ -2535,7 +2535,7 @@ pub const Replica = struct {
         // If client's last request id is <= this request id, then update client table entry.
         // Otherwise the client is already ahead of us, and we don't need to update the entry.
 
-        if (self.leader()) {
+        if (self.leader_index(self.view) == self.replica) {
             log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
             self.message_bus.send_message_to_client(reply.header.client, reply);
         }
