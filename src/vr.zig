@@ -2618,6 +2618,12 @@ pub const Replica = struct {
         };
         defer self.message_bus.unref(message);
 
+        // Skip the disk read if the header is all we need:
+        if (entry.size == @sizeOf(Header)) {
+            message.header.* = entry.*;
+            return message.ref();
+        }
+
         assert(entry.offset + sector_size <= self.journal.size_circular_buffer);
         self.journal.read_sectors(
             message.buffer[0..sector_size],
