@@ -207,14 +207,14 @@ pub const MessageBus = struct {
 
         // If there is already a connection being shut down, no need to kill another.
         for (self.connections) |*connection| {
-            if (connection.state == .shutting_down) return;
+            if (connection.state == .terminating) return;
         }
 
         log.notice("all connections in use but not all replicas are connected, " ++
             "attempting to disconnect a client", .{});
         for (self.connections) |*connection| {
             if (connection.peer == .client) {
-                connection.shutdown();
+                connection.terminate(.shutdown);
                 return;
             }
         }
@@ -223,7 +223,7 @@ pub const MessageBus = struct {
             "attempting to disconnect an unknown peer.", .{});
         for (self.connections) |*connection| {
             if (connection.peer == .unknown) {
-                connection.shutdown();
+                connection.terminate(.shutdown);
                 return;
             }
         }
@@ -417,7 +417,7 @@ const Connection = struct {
         /// The peer is fully connected and may be a client, replica, or unknown.
         connected,
         /// The connection is being terminated but cleanup has not yet finished.
-        shutting_down,
+        terminating,
     } = .idle,
     /// This is guaranteed to be valid only while state is connected.
     /// It will be reset to -1 during the shutdown process and is always -1 if the
@@ -500,7 +500,7 @@ const Connection = struct {
     ) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
-        if (self.state == .shutting_down) {
+        if (self.state == .terminating) {
             self.maybe_close();
             return;
         }
@@ -530,7 +530,7 @@ const Connection = struct {
     ) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
-        if (self.state == .shutting_down) {
+        if (self.state == .terminating) {
             self.maybe_close();
             return;
         }
@@ -538,8 +538,7 @@ const Connection = struct {
         self.state = .connected;
         result catch |err| {
             log.err("error connecting to replica {}: {}", .{ self.peer.replica, err });
-            self.state = .shutting_down;
-            self.maybe_close();
+            self.terminate(.close);
             return;
         };
         log.info("connected to replica {}", .{self.peer.replica});
@@ -551,8 +550,7 @@ const Connection = struct {
     }
 
     /// Given a newly accepted fd, start receiving messages on it.
-    /// Callbacks will be continuously re-registered until shutdown() is
-    /// called and the connection is terminated.
+    /// Callbacks will be continuously re-registered until terminate() is called.
     pub fn on_accept(self: *Connection, fd: os.socket_t) void {
         assert(self.peer == .none);
         assert(self.state == .accepting);
@@ -570,7 +568,7 @@ const Connection = struct {
         assert(self.peer == .client or self.peer == .replica);
         switch (self.state) {
             .connected, .connecting => {},
-            .shutting_down => return,
+            .terminating => return,
             .idle, .accepting => unreachable,
         }
         self.send_queue.push(message.ref()) catch |err| switch (err) {
@@ -592,38 +590,46 @@ const Connection = struct {
 
     /// Clean up an active connection and reset it to its initial, unused, state.
     /// This reset does not happen instantly as currently in progress operations
-    /// must first be stopped.
-    pub fn shutdown(self: *Connection) void {
+    /// must first be stopped. The `how` arg allows the caller to specify if a
+    /// shutdown syscall should be made or not before proceeding to wait for
+    /// currently in progress operations to complete and close the socket.
+    /// I'll be back! (when the Connection is reused after being fully closed)
+    pub fn terminate(self: *Connection, how: enum { shutdown, close }) void {
         assert(self.peer != .none);
         assert(self.state != .idle);
         assert(self.fd != -1);
-        // The shutdown syscall will cause currently in progress send/recv
-        // operations to be gracefully closed while keeping the fd open.
-        const rc = os.linux.shutdown(self.fd, os.SHUT_RDWR);
-        switch (os.errno(rc)) {
-            0 => {},
-            os.EBADF => unreachable,
-            os.EINVAL => unreachable,
-            os.ENOTCONN => {
-                // This should only happen if we for some reason decide to shutdown()
-                // a connection while a connect operation is in progress.
-                // This is fine though, we simply continue with the logic below and
-                // wait for the connect operation to finish.
+        switch (how) {
+            .shutdown => {
+                // The shutdown syscall will cause currently in progress send/recv
+                // operations to be gracefully closed while keeping the fd open.
+                const rc = os.linux.shutdown(self.fd, os.SHUT_RDWR);
+                switch (os.errno(rc)) {
+                    0 => {},
+                    os.EBADF => unreachable,
+                    os.EINVAL => unreachable,
+                    os.ENOTCONN => {
+                        // This should only happen if we for some reason decide to terminate()
+                        // a connection while a connect operation is in progress.
+                        // This is fine though, we simply continue with the logic below and
+                        // wait for the connect operation to finish.
 
-                // TODO: This currently happens in other cases if the
-                // connection was closed due to an error. We need to intelligently
-                // decide whether to shutdown or close directly based on the error
-                // before these assertions may be re-enabled.
+                        // TODO: This currently happens in other cases if the
+                        // connection was closed due to an error. We need to intelligently
+                        // decide whether to shutdown or close directly based on the error
+                        // before these assertions may be re-enabled.
 
-                //assert(self.state == .connecting);
-                //assert(self.recv_submitted);
-                //assert(!self.send_submitted);
+                        //assert(self.state == .connecting);
+                        //assert(self.recv_submitted);
+                        //assert(!self.send_submitted);
+                    },
+                    os.ENOTSOCK => unreachable,
+                    else => |err| os.unexpectedErrno(err) catch {},
+                }
             },
-            os.ENOTSOCK => unreachable,
-            else => |err| os.unexpectedErrno(err) catch {},
+            .close => {},
         }
-        assert(self.state != .shutting_down);
-        self.state = .shutting_down;
+        assert(self.state != .terminating);
+        self.state = .terminating;
         self.maybe_close();
     }
 
@@ -653,7 +659,7 @@ const Connection = struct {
                 const header = mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]);
                 if (!header.valid_checksum()) {
                     log.err("invalid checksum on header received from {}", .{self.peer});
-                    self.shutdown();
+                    self.terminate(.shutdown);
                     return;
                 }
 
@@ -661,7 +667,7 @@ const Connection = struct {
                     const body = buffer[@sizeOf(Header)..header.size];
                     if (!header.valid_checksum_body(body)) {
                         log.err("invalid checksum on body received from {}", .{self.peer});
-                        self.shutdown();
+                        self.terminate(.shutdown);
                         return;
                     }
                     mem.copy(u8, self.recv_message.?.buffer, buffer[0..header.size]);
@@ -708,7 +714,7 @@ const Connection = struct {
         assert(self.recv_submitted);
         self.recv_submitted = false;
 
-        if (self.state == .shutting_down) {
+        if (self.state == .terminating) {
             self.maybe_close();
             return;
         }
@@ -717,15 +723,13 @@ const Connection = struct {
         const bytes_received = result catch |err| {
             // TODO: maybe don't need to close on *every* error
             log.err("error receiving from {}: {}", .{ self.peer, err });
-            self.shutdown();
+            self.terminate(.shutdown);
             return;
         };
 
-        // No bytes received means that the peer closed the connection.
+        // No bytes received means that the peer closed its side of the connection.
         if (bytes_received == 0) {
-            // Skip the shutdown syscall and go straight to close.
-            self.state = .shutting_down;
-            self.maybe_close();
+            self.terminate(.close);
             return;
         }
 
@@ -742,7 +746,7 @@ const Connection = struct {
         if (!header_already_checked) {
             if (!message.header.valid_checksum()) {
                 log.err("invalid checksum on header received from {}", .{self.peer});
-                self.shutdown();
+                self.terminate(.shutdown);
                 return;
             }
             if (message.header.size < @sizeOf(Header) or
@@ -752,7 +756,7 @@ const Connection = struct {
                     message.header.size,
                     self.peer,
                 });
-                self.shutdown();
+                self.terminate(.shutdown);
                 return;
             }
         }
@@ -765,7 +769,7 @@ const Connection = struct {
                     log.err("received message addressed to wrong cluster: {}", .{
                         message.header.cluster,
                     });
-                    self.shutdown();
+                    self.terminate(.shutdown);
                     return;
                 }
                 // The only command sent by clients is the request command.
@@ -776,8 +780,8 @@ const Connection = struct {
                     if (ret.found_existing) {
                         const old = ret.entry.value;
                         assert(old.peer == .client);
-                        assert(old.state == .connected or old.state == .shutting_down);
-                        if (old.state == .connected) old.shutdown();
+                        assert(old.state == .connected or old.state == .terminating);
+                        if (old.state == .connected) old.terminate(.shutdown);
                     }
                     ret.entry.value = self;
                 } else {
@@ -787,7 +791,7 @@ const Connection = struct {
                         assert(old.peer == .replica);
                         assert(old.peer.replica == self.peer.replica);
                         assert(old.state != .idle);
-                        if (old.state != .shutting_down) old.shutdown();
+                        if (old.state != .terminating) old.terminate(.shutdown);
                         self.message_bus.replicas[self.peer.replica] = null;
                     }
                     self.message_bus.replicas[self.peer.replica] = self;
@@ -807,7 +811,7 @@ const Connection = struct {
         const body = message.buffer[@sizeOf(Header)..message.header.size];
         if (!message.header.valid_checksum_body(body)) {
             log.err("invalid checksum on body received from {}", .{self.peer});
-            self.shutdown();
+            self.terminate(.shutdown);
             return;
         }
 
@@ -869,14 +873,14 @@ const Connection = struct {
         assert(self.peer == .client or self.peer == .replica);
         assert(self.send_submitted);
         self.send_submitted = false;
-        if (self.state == .shutting_down) {
+        if (self.state == .terminating) {
             self.maybe_close();
             return;
         }
         self.send_progress += result catch |err| {
             // TODO: maybe don't need to close on *every* error
             log.err("error sending message to replica at {}: {}", .{ self.peer, err });
-            self.shutdown();
+            self.terminate(.shutdown);
             return;
         };
         assert(self.send_progress <= self.send_queue.peek().?.header.size);
@@ -891,7 +895,7 @@ const Connection = struct {
 
     fn maybe_close(self: *Connection) void {
         assert(self.peer != .none);
-        assert(self.state == .shutting_down);
+        assert(self.state == .terminating);
         // If a recv or send operation is currently submitted to the kernel,
         // submitting a close would cause a race. Therefore we must wait for
         // any currently submitted operation to complete.
@@ -915,7 +919,7 @@ const Connection = struct {
 
     fn on_close(self: *Connection, completion: *IO.Completion, result: IO.CloseError!void) void {
         assert(self.peer != .none);
-        assert(self.state == .shutting_down);
+        assert(self.state == .terminating);
 
         // Reset the connection to its initial state.
         defer {
