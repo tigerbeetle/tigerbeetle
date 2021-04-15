@@ -147,85 +147,98 @@ pub const Header = packed struct {
     }
 
     /// Returns null if all fields are set correctly according to the command, or else a warning.
-    /// This does not verify that checksum is valid, and expects that has already been done.
+    /// This does not verify that checksum is valid, and expects that this has already been done.
     pub fn invalid(self: *const Header) ?[]const u8 {
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.epoch != 0) return "epoch != 0";
-        switch (self.command) {
-            .reserved => {
-                if (self.nonce != 0) return "nonce != 0";
-                if (self.client != 0) return "client != 0";
-                if (self.cluster != 0) return "cluster != 0";
-                if (self.view != 0) return "view != 0";
-                if (self.op != 0) return "op != 0";
-                if (self.commit != 0) return "commit != 0";
-                if (self.offset != 0) return "offset != 0";
-                if (self.request != 0) return "request != 0";
-                if (self.replica != 0) return "replica != 0";
-                if (self.operation != .reserved) return "operation != .reserved";
+        return switch (self.command) {
+            .reserved => self.invalid_reserved(),
+            .request => self.invalid_request(),
+            .prepare => self.invalid_prepare(),
+            .prepare_ok => self.invalid_prepare_ok(),
+            else => return null, // TODO Add validators for all commands.
+        };
+    }
+
+    fn invalid_reserved(self: *const Header) ?[]const u8 {
+        assert(self.command == .reserved);
+        if (self.nonce != 0) return "nonce != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.cluster != 0) return "cluster != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.replica != 0) return "replica != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request(self: *const Header) ?[]const u8 {
+        assert(self.command == .request);
+        if (self.nonce != 0) return "nonce != 0";
+        if (self.client == 0) return "client == 0";
+        if (self.cluster == 0) return "cluster == 0";
+        if (self.view != 0) return "view != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.request == 0) return "request == 0";
+        if (self.replica != 0) return "replica != 0";
+        if (self.operation == .reserved) return "operation == .reserved";
+        return null;
+    }
+
+    fn invalid_prepare(self: *const Header) ?[]const u8 {
+        assert(self.command == .prepare);
+        switch (self.operation) {
+            .reserved => return "operation == .reserved",
+            .init => {
+                if (self.nonce != 0) return "init: nonce != 0";
+                if (self.client != 0) return "init: client != 0";
+                if (self.cluster == 0) return "init: cluster == 0";
+                if (self.view != 0) return "init: view != 0";
+                if (self.op != 0) return "init: op != 0";
+                if (self.commit != 0) return "init: commit != 0";
+                if (self.offset != 0) return "init: offset != 0";
+                if (self.size != @sizeOf(Header)) return "init: size != @sizeOf(Header)";
+                if (self.request != 0) return "init: request != 0";
+                if (self.replica != 0) return "init: replica != 0";
             },
-            .request => {
-                if (self.nonce != 0) return "nonce != 0";
+            else => {
                 if (self.client == 0) return "client == 0";
                 if (self.cluster == 0) return "cluster == 0";
-                if (self.view != 0) return "view != 0";
-                if (self.op != 0) return "op != 0";
-                if (self.commit != 0) return "commit != 0";
-                if (self.offset != 0) return "offset != 0";
+                if (self.op == 0) return "op == 0";
+                if (self.op <= self.commit) return "op <= commit";
                 if (self.request == 0) return "request == 0";
-                if (self.replica != 0) return "replica != 0";
-                if (self.operation == .reserved) return "operation == .reserved";
             },
-            .prepare => {
-                switch (self.operation) {
-                    .reserved => return "operation == .reserved",
-                    .init => {
-                        if (self.nonce != 0) return "init: nonce != 0";
-                        if (self.client != 0) return "init: client != 0";
-                        if (self.cluster == 0) return "init: cluster == 0";
-                        if (self.view != 0) return "init: view != 0";
-                        if (self.op != 0) return "init: op != 0";
-                        if (self.commit != 0) return "init: commit != 0";
-                        if (self.offset != 0) return "init: offset != 0";
-                        if (self.size != @sizeOf(Header)) return "init: size != @sizeOf(Header)";
-                        if (self.request != 0) return "init: request != 0";
-                        if (self.replica != 0) return "init: replica != 0";
-                    },
-                    else => {
-                        if (self.client == 0) return "client == 0";
-                        if (self.cluster == 0) return "cluster == 0";
-                        if (self.op == 0) return "op == 0";
-                        if (self.op <= self.commit) return "op <= commit";
-                        if (self.request == 0) return "request == 0";
-                    },
-                }
+        }
+        return null;
+    }
+
+    fn invalid_prepare_ok(self: *const Header) ?[]const u8 {
+        assert(self.command == .prepare_ok);
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.cluster == 0) return "cluster == 0";
+        switch (self.operation) {
+            .reserved => return "operation == .reserved",
+            .init => {
+                if (self.nonce != 0) return "init: nonce != 0";
+                if (self.client != 0) return "init: client != 0";
+                if (self.view != 0) return "init: view != 0";
+                if (self.op != 0) return "init: op != 0";
+                if (self.commit != 0) return "init: commit != 0";
+                if (self.offset != 0) return "init: offset != 0";
+                if (self.request != 0) return "init: request != 0";
+                if (self.replica != 0) return "init: replica != 0";
             },
-            .prepare_ok => {
-                switch (self.operation) {
-                    .reserved => return "operation == .reserved",
-                    .init => {
-                        if (self.nonce != 0) return "init: nonce != 0";
-                        if (self.client != 0) return "init: client != 0";
-                        if (self.cluster == 0) return "init: cluster == 0";
-                        if (self.view != 0) return "init: view != 0";
-                        if (self.op != 0) return "init: op != 0";
-                        if (self.commit != 0) return "init: commit != 0";
-                        if (self.offset != 0) return "init: offset != 0";
-                        if (self.size != @sizeOf(Header)) return "init: size != @sizeOf(Header)";
-                        if (self.request != 0) return "init: request != 0";
-                        if (self.replica != 0) return "init: replica != 0";
-                    },
-                    else => {
-                        if (self.client == 0) return "client == 0";
-                        if (self.cluster == 0) return "cluster == 0";
-                        if (self.op == 0) return "op == 0";
-                        if (self.op <= self.commit) return "op <= commit";
-                        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-                        if (self.request == 0) return "request == 0";
-                    },
-                }
+            else => {
+                if (self.client == 0) return "client == 0";
+                if (self.op == 0) return "op == 0";
+                if (self.op <= self.commit) return "op <= commit";
+                if (self.request == 0) return "request == 0";
             },
-            else => {}, // TODO Add validators for all commands.
         }
         return null;
     }
