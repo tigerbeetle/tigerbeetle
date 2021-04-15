@@ -60,7 +60,6 @@ pub const MessagePool = struct {
                     message_size_max_padded,
                     .exact,
                 );
-                mem.set(u8, buffer, 0);
                 const message = try allocator.create(Message);
                 message.* = .{
                     .header = mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]),
@@ -115,7 +114,7 @@ pub const MessagePool = struct {
     pub fn unref(pool: *MessagePool, message: *Message) void {
         message.references -= 1;
         if (message.references == 0) {
-            mem.set(u8, message.buffer, 0);
+            if (std.builtin.mode == .Debug) mem.set(u8, message.buffer, undefined);
             if (message.header_only()) {
                 message.next = pool.header_only_free_list;
                 pool.header_only_free_list = message;
