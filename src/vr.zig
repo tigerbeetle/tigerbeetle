@@ -781,7 +781,11 @@ pub const Journal = struct {
     }
 
     pub fn set_entry_as_dirty(self: *Journal, header: *const Header) void {
-        log.debug("{}: journal: set_entry_as_dirty: {}", .{ self.replica, header.checksum });
+        log.debug("{}: journal: set_entry_as_dirty: op={} checksum={}", .{
+            self.replica,
+            header.op,
+            header.checksum,
+        });
         if (self.entry(header)) |existing| {
             if (existing.checksum != header.checksum) {
                 self.faulty.clear(header.op);
