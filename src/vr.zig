@@ -624,6 +624,7 @@ pub const Journal = struct {
 
             if (self.entry_for_op_exact(op)) |header| {
                 dest[copied] = header.*;
+                assert(dest[copied].invalid() == null);
                 copied += 1;
             }
         }
@@ -3045,6 +3046,8 @@ pub const Replica = struct {
     /// http://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf.
     ///
     fn repair_header(self: *Replica, header: *const Header) bool {
+        assert(header.valid_checksum());
+        assert(header.invalid() == null);
         assert(header.command == .prepare);
 
         switch (self.status) {
@@ -3707,8 +3710,9 @@ pub const Replica = struct {
         }
 
         for (headers) |header| {
-            assert(header.command == .prepare);
             assert(header.valid_checksum());
+            assert(header.invalid() == null);
+            assert(header.command == .prepare);
 
             if (latest.command == .reserved) {
                 latest.* = header;
