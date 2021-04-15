@@ -1793,6 +1793,15 @@ pub const Replica = struct {
         self.send_do_view_change();
     }
 
+    /// When the new primary receives f + 1 do_view_change messages from different replicas
+    /// (including itself), it sets its view number to that in the messages and selects as the
+    /// new log the one contained in the message with the largest v′; if several messages have
+    /// the same v′ it selects the one among them with the largest n. It sets its op number to
+    /// that of the topmost entry in the new log, sets its commit number to the largest such
+    /// number it received in the do_view_change messages, changes its status to normal, and
+    /// informs the other replicas of the completion of the view change by sending
+    /// ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
+    /// op number, and k is the commit number.
     fn on_do_view_change(self: *Replica, message: *Message) void {
         if (self.ignore_view_change_message(message)) return;
 
@@ -1820,20 +1829,8 @@ pub const Replica = struct {
         assert(self.do_view_change_from_all_replicas[self.replica] != null);
         log.debug("{}: on_do_view_change: quorum received", .{self.replica});
 
-        assert(self.start_view_change_quorum);
-
-        // When the new primary receives f + 1 do_view_change messages from different replicas
-        // (including itself), it sets its view number to that in the messages and selects as the
-        // new log the one contained in the message with the largest v′; if several messages have
-        // the same v′ it selects the one among them with the largest n. It sets its op number to
-        // that of the topmost entry in the new log, sets its commit number to the largest such
-        // number it received in the do_view_change messages, changes its status to normal, and
-        // informs the other replicas of the completion of the view change by sending
-        // ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
-        // op number, and k is the commit number.
-
         var latest = Header.reserved();
-        var k: u64 = 0;
+        var k: ?u64 = null;
 
         for (self.do_view_change_from_all_replicas) |received, replica| {
             if (received) |m| {
@@ -1842,34 +1839,14 @@ pub const Replica = struct {
                 assert(m.header.replica == replica);
                 assert(m.header.view == self.view);
 
-                if (m.header.commit > k) k = m.header.commit;
+                if (k == null or m.header.commit > k.?) k = m.header.commit;
                 self.set_latest_header(self.message_body_as_headers(m), &latest);
             }
         }
 
-        log.debug("{}: on_do_view_change: latest: view={} op={} commit={} checksum={} offset={}", .{
-            self.replica,
-            latest.view,
-            latest.op,
-            k,
-            latest.checksum,
-            latest.offset,
-        });
+        self.set_latest_op_and_k(&latest, k.?, "on_do_view_change");
 
-        assert(latest.valid_checksum());
-        assert(latest.command == .prepare);
-        assert(latest.cluster == self.cluster);
-        assert(latest.view < self.view); // Latest normal view before this view change.
-        // Ops may be rewound through a view change so we use `self.commit_max` and not `self.op`:
-        assert(latest.op >= self.commit_max);
-        assert(k >= latest.commit);
-        assert(k >= self.commit_max);
-
-        self.op = latest.op;
-        self.commit_max = k;
-        self.journal.set_entry_as_dirty(&latest);
-
-        // Now that we have the latest op in place, repair any other headers from these messages:
+        // Now that we have the latest op in place, repair any other headers:
         for (self.do_view_change_from_all_replicas) |received| {
             if (received) |m| {
                 for (self.message_body_as_headers(m)) |*h| {
@@ -1878,25 +1855,17 @@ pub const Replica = struct {
             }
         }
 
+        // Verify that the repairs above have not replaced or advanced the latest op:
+        assert(self.journal.entry_for_op_exact(self.op).?.checksum == latest.checksum);
+
+        assert(self.start_view_change_quorum);
+        assert(!self.do_view_change_quorum);
+        self.do_view_change_quorum = true;
+
         // Start repairs according to the CTRL protocol:
-        assert(self.op == latest.op);
-        if (self.journal.entry_for_op_exact(self.op)) |entry| {
-            // Verify that our latest entry was not overwritten by a bug in `repair_header()` above:
-            assert(entry.checksum == latest.checksum);
-            assert(entry.view == latest.view);
-            assert(entry.op == latest.op);
-            assert(entry.offset == latest.offset);
-
-            assert(self.start_view_change_quorum);
-            assert(!self.do_view_change_quorum);
-            self.do_view_change_quorum = true;
-
-            assert(!self.repair_timeout.ticking);
-            self.repair_timeout.start();
-            self.repair();
-        } else {
-            unreachable;
-        }
+        assert(!self.repair_timeout.ticking);
+        self.repair_timeout.start();
+        self.repair();
     }
 
     /// When other replicas receive the start_view message, they replace their log with the one
@@ -1922,35 +1891,17 @@ pub const Replica = struct {
 
         var latest = Header.reserved();
         self.set_latest_header(self.message_body_as_headers(message), &latest);
-
-        assert(latest.command == .prepare);
         assert(latest.op == message.header.op);
-        assert(latest.commit <= message.header.commit);
 
-        assert(latest.op >= self.commit_min);
-        assert(latest.op >= self.commit_max);
-        // We expect that `latest.commit` may be less than `commit_min` because this was only the
-        // commit number at the time that the latest op was prepared not committed.
-
-        log.debug("{}: on_start_view: op={}..{} commit_max={}..{}", .{
-            self.replica,
-            self.op,
-            message.header.op,
-            self.commit_max,
-            message.header.commit,
-        });
-
-        self.op = message.header.op;
-        self.commit_max = message.header.commit;
-        self.journal.set_entry_as_dirty(&latest);
-
-        self.journal.remove_entries_from(self.op + 1);
-        assert(self.journal.entry_for_op_exact(self.op).?.checksum == latest.checksum);
+        self.set_latest_op_and_k(&latest, message.header.commit, "on_start_view");
 
         // Now that we have the latest op in place, repair any other headers:
         for (self.message_body_as_headers(message)) |*h| {
             _ = self.repair_header(h);
         }
+
+        // Verify that the repairs above have not replaced or advanced the latest op:
+        assert(self.journal.entry_for_op_exact(self.op).?.checksum == latest.checksum);
 
         if (self.view_jump_barrier) {
             assert(self.status == .normal);
@@ -3726,6 +3677,51 @@ pub const Replica = struct {
                 latest.* = header;
             }
         }
+    }
+
+    fn set_latest_op_and_k(self: *Replica, latest: *const Header, k: u64, method: []const u8) void {
+        assert(self.status == .view_change);
+
+        assert(latest.valid_checksum());
+        assert(latest.invalid() == null);
+        assert(latest.command == .prepare);
+        assert(latest.cluster == self.cluster);
+        assert(latest.view < self.view); // Latest normal view before this view change.
+        // Ops may be rewound through a view change so we use `self.commit_max` and not `self.op`:
+        assert(latest.op >= self.commit_max);
+        // We expect that `commit_min` may be greater than `latest.commit` because the latter is
+        // only the commit number at the time the latest op was prepared (but not committed).
+        // We therefore only assert `latest.commit` against `commit_max` above and `k` below.
+
+        assert(k >= latest.commit);
+        assert(k >= self.commit_max);
+
+        log.debug("{}: {s}: view={} op={}..{} commit={}..{} checksum={} offset={}", .{
+            self.replica,
+            method,
+            self.view,
+            self.op,
+            latest.op,
+            self.commit_max,
+            k,
+            latest.checksum,
+            latest.offset,
+        });
+
+        self.op = latest.op;
+        self.commit_max = k;
+
+        // Do not set the latest op as dirty if we already have it exactly:
+        // Otherwise, this would trigger a repair and delay the view change.
+        if (self.journal.entry_for_op_exact_with_checksum(latest.op, latest.checksum) == null) {
+            self.journal.set_entry_as_dirty(latest);
+        } else {
+            log.debug("{}: {s}: latest op exists exactly", .{ self.replica, method });
+        }
+
+        assert(self.op == latest.op);
+        self.journal.remove_entries_from(self.op + 1);
+        assert(self.journal.entry_for_op_exact(self.op).?.checksum == latest.checksum);
     }
 
     fn start_view_as_the_new_leader(self: *Replica) void {
