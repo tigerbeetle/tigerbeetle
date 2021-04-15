@@ -1308,7 +1308,7 @@ pub const Replica = struct {
             .view_change_timeout = Timeout{
                 .name = "view_change_timeout",
                 .replica = replica,
-                .after = 6000,
+                .after = 500,
             },
             .view_change_message_timeout = Timeout{
                 .name = "view_change_message_timeout",
