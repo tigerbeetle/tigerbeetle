@@ -1815,8 +1815,14 @@ pub const Replica = struct {
         assert(self.status == .view_change);
         assert(message.header.view == self.view);
 
-        // We may receive a `do_view_change` message from another replica, which already has a
-        // `start_view_change_quorum` before we ourselves receive a `start_view_change_quorum`.
+        // We may receive a `do_view_change` quorum from other replicas, which already have a
+        // `start_view_change_quorum`, before we receive a `start_view_change_quorum`:
+        if (!self.start_view_change_quorum) {
+            log.notice("{}: on_do_view_change: waiting for start_view_change quorum", .{
+                self.replica,
+            });
+            return;
+        }
 
         // Wait until we have `f + 1` messages (including ourself) for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
