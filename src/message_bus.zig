@@ -178,11 +178,9 @@ pub const MessageBus = struct {
         // If there are Connections waiting for a Message to become free and there are Messages
         // available, provide them to the Connections and allow them to recv.
         while (self.waiting_for_free_message.peek()) |connection| {
-            assert(connection.recv_message == null);
             const new_message = self.get_message() orelse break;
             defer self.unref(new_message);
             _ = self.waiting_for_free_message.pop().?;
-
             if (connection.recv_message == null) {
                 // A null recv_message indicates that this Connection has
                 // not yet started its first recv operation.
@@ -927,6 +925,7 @@ const Connection = struct {
             self.message_bus.unref(message);
             self.recv_message = null;
         }
+        if (self.next != null) self.message_bus.waiting_for_free_message.remove(self);
         assert(self.fd != -1);
         defer self.fd = -1;
         // It's OK to use the send completion here as we know that no send
@@ -942,6 +941,7 @@ const Connection = struct {
         defer {
             assert(self.send_queue.empty());
             assert(self.recv_message == null);
+            assert(self.next == null);
             switch (self.peer) {
                 .none, .unknown => {},
                 .client => {
