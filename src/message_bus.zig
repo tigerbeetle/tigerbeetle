@@ -840,7 +840,7 @@ const Connection = struct {
             on_recv,
             &self.recv_completion,
             self.fd,
-            self.recv_message.?.buffer[self.recv_progress..],
+            self.recv_message.?.buffer[self.recv_progress..config.message_size_max],
             os.MSG_NOSIGNAL,
         );
     }
