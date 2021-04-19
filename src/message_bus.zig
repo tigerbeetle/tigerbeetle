@@ -745,38 +745,7 @@ const Connection = struct {
             return null;
         }
 
-        switch (self.peer) {
-            .none => unreachable,
-            .unknown => {
-                // The only command sent by clients is the request command.
-                if (header.command == .request) {
-                    self.peer = .{ .client = header.client };
-                    const ret = self.message_bus.clients.getOrPutAssumeCapacity(self.peer.client);
-                    // Terminate the old connection if there is one and it is active.
-                    if (ret.found_existing) {
-                        const old = ret.entry.value;
-                        assert(old.peer == .client);
-                        assert(old.state == .connected or old.state == .terminating);
-                        if (old.state == .connected) old.terminate(.shutdown);
-                    }
-                    ret.entry.value = self;
-                } else {
-                    self.peer = .{ .replica = header.replica };
-                    // If there is already a connection to this replica, terminate and replace it.
-                    if (self.message_bus.replicas[self.peer.replica]) |old| {
-                        assert(old.peer == .replica);
-                        assert(old.peer.replica == self.peer.replica);
-                        assert(old.state != .idle);
-                        if (old.state != .terminating) old.terminate(.shutdown);
-                        self.message_bus.replicas[self.peer.replica] = null;
-                    }
-                    self.message_bus.replicas[self.peer.replica] = self;
-                }
-            },
-            .client => assert(header.command == .request),
-            .replica => assert(header.command != .request),
-        }
-        assert(header.cluster == self.message_bus.server.cluster);
+        self.set_peer(header);
 
         return header;
     }
@@ -969,6 +938,41 @@ const Connection = struct {
         };
         // TODO Re-enable with exponential backoff:
         // log.info("closed connection to {}", .{self.peer});
+    }
+
+    fn set_peer(self: *Connection, header: *const Header) void {
+        assert(header.cluster == self.message_bus.server.cluster);
+        switch (self.peer) {
+            .none => unreachable,
+            .unknown => {
+                // The only command sent by clients is the request command.
+                if (header.command == .request) {
+                    self.peer = .{ .client = header.client };
+                    const ret = self.message_bus.clients.getOrPutAssumeCapacity(self.peer.client);
+                    // Terminate the old connection if there is one and it is active.
+                    if (ret.found_existing) {
+                        const old = ret.entry.value;
+                        assert(old.peer == .client);
+                        assert(old.state == .connected or old.state == .terminating);
+                        if (old.state == .connected) old.terminate(.shutdown);
+                    }
+                    ret.entry.value = self;
+                } else {
+                    self.peer = .{ .replica = header.replica };
+                    // If there is already a connection to this replica, terminate and replace it.
+                    if (self.message_bus.replicas[self.peer.replica]) |old| {
+                        assert(old.peer == .replica);
+                        assert(old.peer.replica == self.peer.replica);
+                        assert(old.state != .idle);
+                        if (old.state != .terminating) old.terminate(.shutdown);
+                        self.message_bus.replicas[self.peer.replica] = null;
+                    }
+                    self.message_bus.replicas[self.peer.replica] = self;
+                }
+            },
+            .client => assert(header.command == .request),
+            .replica => assert(header.command != .request),
+        }
     }
 };
 
