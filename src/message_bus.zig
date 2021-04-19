@@ -808,7 +808,7 @@ const Connection = struct {
 
     /// Acquires a free message if necessary and then calls `recv()`.
     /// If the connection has a `recv_message` and the message being parsed is at pole position then
-    /// `recv()` immediately, otherwise copies any partial message into the new `recv_message`.
+    /// calls `recv()` immediately, otherwise copies any partial message into new `recv_message`.
     fn get_recv_message_and_recv(self: *Connection) void {
         if (self.recv_message != null and self.recv_parsed == 0) {
             self.recv();
