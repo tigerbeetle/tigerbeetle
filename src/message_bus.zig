@@ -738,15 +738,16 @@ const Connection = struct {
             return null;
         }
 
+        // Ensure that the message is addressed to the correct cluster.
+        if (header.cluster != self.message_bus.server.cluster) {
+            log.err("received message addressed to wrong cluster: {}", .{header.cluster});
+            self.terminate(.shutdown);
+            return null;
+        }
+
         switch (self.peer) {
             .none => unreachable,
             .unknown => {
-                // Ensure that the message is addressed to the correct cluster.
-                if (header.cluster != self.message_bus.server.cluster) {
-                    log.err("received message addressed to wrong cluster: {}", .{header.cluster});
-                    self.terminate(.shutdown);
-                    return null;
-                }
                 // The only command sent by clients is the request command.
                 if (header.command == .request) {
                     self.peer = .{ .client = header.client };
