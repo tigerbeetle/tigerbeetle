@@ -42,8 +42,8 @@ pub const MessageBus = struct {
     connections: []Connection,
     /// Number of connections currently in use (i.e. connection.peer != .none).
     connections_used: usize = 0,
-    /// Connections which are waiting for a free Message before they can continue to recv.
-    waiting_for_free_message: FIFO(Connection) = .{},
+    /// Connections waiting for a message to become free before they can continue to recv:
+    connections_waiting_for_a_message: FIFO(Connection) = .{},
 
     /// Map from replica index to the currently active connection for that replica, if any.
     /// The connection for the server replica will always be null.
@@ -175,22 +175,25 @@ pub const MessageBus = struct {
         var frame = async self.flush();
         nosuspend await frame;
 
-        // If there are Connections waiting for a Message to become free and there are Messages
-        // available, provide them to the Connections and allow them to recv.
-        while (self.waiting_for_free_message.peek()) |connection| {
-            const new_message = self.get_message() orelse break;
-            defer self.unref(new_message);
-            _ = self.waiting_for_free_message.pop().?;
+        // If there are connections waiting for a message to become free and there are messages
+        // available, provide them to the connections and allow them to recv:
+        while (self.connections_waiting_for_a_message.peek()) |connection| {
+            const message = self.get_message() orelse break;
+            defer self.unref(message);
+
+            // Now that we have a message, remove this connection from the FIFO:
+            _ = self.connections_waiting_for_a_message.pop().?;
+
             if (connection.recv_message == null) {
                 // A null recv_message indicates that this Connection has
                 // not yet started its first recv operation.
-                connection.recv_message = new_message.ref();
+                connection.recv_message = message.ref();
                 connection.parse_and_recv();
             } else {
                 // Otherwise, the Connection needed a new Message while
                 // handling a partial recv but none was available.
                 assert(connection.pipeline_offset != 0);
-                connection.handle_partial_pipeline_recv(new_message);
+                connection.handle_partial_pipeline_recv(message);
             }
         }
     }
@@ -459,7 +462,7 @@ const Connection = struct {
     /// The queue of messages to send to the client or replica peer.
     send_queue: SendQueue = .{},
 
-    /// Used by the MessageBus.waiting_for_free_message FIFO.
+    /// Used by the MessageBus.connections_waiting_for_a_message FIFO.
     next: ?*Connection = null,
 
     /// Attempt to connect to a replica.
@@ -647,7 +650,7 @@ const Connection = struct {
         assert(self.recv_progress == 0);
         assert(self.pipeline_offset == 0);
         self.recv_message = self.message_bus.get_message() orelse {
-            self.message_bus.waiting_for_free_message.push(self);
+            self.message_bus.connections_waiting_for_a_message.push(self);
             return;
         };
         self.parse_and_recv();
@@ -777,8 +780,8 @@ const Connection = struct {
     }
 
     /// Hande the case in which an incomplete message is found while parsing.
-    /// This will either call recv() directly or add this Connection to a queue to wait
-    /// for a Message to become available before the next recv operation may be submitted.
+    /// This will either call recv() directly or add this connection to a queue to wait
+    /// for a message to become free before the next recv operation may be submitted.
     fn handle_partial_recv(self: *Connection) void {
         if (self.pipeline_offset == 0) {
             // The message we are currently receiving is at the start of
@@ -787,7 +790,7 @@ const Connection = struct {
             return;
         }
         const message = self.message_bus.get_message() orelse {
-            self.message_bus.waiting_for_free_message.push(self);
+            self.message_bus.connections_waiting_for_a_message.push(self);
             return;
         };
         defer self.message_bus.unref(message);
@@ -925,7 +928,7 @@ const Connection = struct {
             self.message_bus.unref(message);
             self.recv_message = null;
         }
-        if (self.next != null) self.message_bus.waiting_for_free_message.remove(self);
+        if (self.next != null) self.message_bus.connections_waiting_for_a_message.remove(self);
         assert(self.fd != -1);
         defer self.fd = -1;
         // It's OK to use the send completion here as we know that no send
