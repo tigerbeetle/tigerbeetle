@@ -182,7 +182,8 @@ pub const MessageBus = struct {
             defer self.unref(message);
 
             // Now that we have a message, remove this connection from the FIFO:
-            _ = self.connections_waiting_for_a_message.pop().?;
+            const removed = self.connections_waiting_for_a_message.pop().?;
+            assert(removed == connection);
 
             if (connection.recv_message == null) {
                 // A null recv_message indicates that this Connection has
