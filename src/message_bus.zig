@@ -193,7 +193,7 @@ pub const MessageBus = struct {
             } else {
                 // Otherwise, the Connection needed a new Message while
                 // handling a partial recv but none was available.
-                assert(connection.pipeline_offset != 0);
+                assert(connection.recv_parsed != 0);
                 connection.handle_partial_pipeline_recv(message);
             }
         }
@@ -446,12 +446,12 @@ const Connection = struct {
     /// True exactly when the recv_completion has been submitted to the IO abstraction
     /// but the callback has not yet been run.
     recv_submitted: bool = false,
-    /// Number of bytes of the current header/message that have already been received.
-    recv_progress: usize = 0,
     /// The Message with the buffer passed to the kernel for recv operations.
     recv_message: ?*Message = null,
-    /// The offset of remaining extra data in the buffer of `pipeline_message`.
-    pipeline_offset: usize = 0,
+    /// The number of bytes in `recv_message` that have been received and are ready to be parsed.
+    recv_progress: usize = 0,
+    /// The number of bytes in `recv_message` that have been parsed.
+    recv_parsed: usize = 0,
 
     /// This completion is used for all send operations.
     send_completion: IO.Completion = undefined,
@@ -649,7 +649,7 @@ const Connection = struct {
     fn initial_recv(self: *Connection) void {
         assert(self.recv_message == null);
         assert(self.recv_progress == 0);
-        assert(self.pipeline_offset == 0);
+        assert(self.recv_parsed == 0);
         self.recv_message = self.message_bus.get_message() orelse {
             self.message_bus.connections_waiting_for_a_message.push(self);
             return;
@@ -663,7 +663,7 @@ const Connection = struct {
         assert(self.fd != -1);
 
         while (true) {
-            const data = self.recv_message.?.buffer[self.pipeline_offset..self.recv_progress];
+            const data = self.recv_message.?.buffer[self.recv_parsed..self.recv_progress];
             const header = self.parse_header() orelse return;
 
             if (data.len < header.size) {
@@ -678,7 +678,7 @@ const Connection = struct {
                 return;
             }
 
-            if (self.pipeline_offset == 0) {
+            if (self.recv_parsed == 0) {
                 // We can pass the Message holding the buffer used to recv directly to the Replica
                 // instead of copying to a new Message.
                 const message = self.recv_message.?;
@@ -689,17 +689,17 @@ const Connection = struct {
                     // the padding.
                     // These slices overlap, with dest.ptr > src.ptr, so we must use a reverse loop:
                     mem.copyBackwards(u8, message.buffer[sector_ceil..], data[header.size..]);
-                    self.pipeline_offset = sector_ceil;
+                    self.recv_parsed = sector_ceil;
                     self.recv_progress += sector_ceil - header.size;
                 } else {
                     // There is no extra "pipeline" data in the buffer.
-                    self.pipeline_offset = self.recv_progress;
+                    self.recv_parsed = self.recv_progress;
                 }
                 self.deliver_message(message);
             } else {
                 // We have a fully received message in extra "pipeline" data in the buffer.
                 // Copy this to a new message and deliver it.
-                self.pipeline_offset += header.size;
+                self.recv_parsed += header.size;
 
                 const message = self.message_bus.get_message() orelse {
                     log.debug("no message available, dropping message from {}", .{self.peer});
@@ -720,7 +720,7 @@ const Connection = struct {
         assert(self.state == .connected);
         assert(self.fd != -1);
 
-        const data = self.recv_message.?.buffer[self.pipeline_offset..self.recv_progress];
+        const data = self.recv_message.?.buffer[self.recv_parsed..self.recv_progress];
         if (data.len < @sizeOf(Header)) {
             self.handle_partial_recv();
             return null;
@@ -754,7 +754,7 @@ const Connection = struct {
     /// This will either call recv() directly or add this connection to a queue to wait
     /// for a message to become free before the next recv operation may be submitted.
     fn handle_partial_recv(self: *Connection) void {
-        if (self.pipeline_offset == 0) {
+        if (self.recv_parsed == 0) {
             // The message we are currently receiving is at the start of
             // the buffer of recv_message, so continue to use recv_message.
             self.recv();
@@ -773,12 +773,12 @@ const Connection = struct {
         // finished processing extra data received in the last recv operation.
         // Move the partially received message data to a new Message's buffer
         // and release the old one.
-        const data = self.recv_message.?.buffer[self.pipeline_offset..self.recv_progress];
+        const data = self.recv_message.?.buffer[self.recv_parsed..self.recv_progress];
         mem.copy(u8, message.buffer, data);
         self.message_bus.unref(self.recv_message.?);
         self.recv_message = message.ref();
         self.recv_progress = data.len;
-        self.pipeline_offset = 0;
+        self.recv_parsed = 0;
         self.recv();
     }
 
