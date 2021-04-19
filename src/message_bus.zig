@@ -201,7 +201,10 @@ pub const MessageBus = struct {
 
     fn maybe_connect_to_replica(self: *MessageBus, replica: u16) void {
         // We already have a connection to the given replica.
-        if (self.replicas[replica] != null) return;
+        if (self.replicas[replica] != null) {
+            assert(self.connections_used > 0);
+            return;
+        }
 
         // Obtain a connection struct for our new replica connection.
         // If there is an unused connection, use that. Otherwise drop
@@ -479,6 +482,7 @@ const Connection = struct {
         self.fd = os.socket(family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0) catch return;
         self.peer = .{ .replica = replica };
         self.state = .connecting;
+        self.message_bus.connections_used += 1;
 
         assert(self.message_bus.replicas[replica] == null);
         self.message_bus.replicas[replica] = self;
@@ -929,6 +933,7 @@ const Connection = struct {
                     }
                 },
             }
+            self.message_bus.connections_used -= 1;
             self.* = .{ .message_bus = self.message_bus };
         }
 
