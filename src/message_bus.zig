@@ -42,8 +42,8 @@ pub const MessageBus = struct {
     connections: []Connection,
     /// Number of connections currently in use (i.e. connection.peer != .none).
     connections_used: usize = 0,
-    /// Connections which are waiting for a free Message before they can continue to recv.
-    waiting_for_free_message: FIFO(Connection) = .{},
+    /// Connections waiting for a message to become free before they can continue to recv:
+    connections_waiting_for_a_message: FIFO(Connection) = .{},
 
     /// Map from replica index to the currently active connection for that replica, if any.
     /// The connection for the server replica will always be null.
@@ -175,20 +175,26 @@ pub const MessageBus = struct {
         var frame = async self.flush();
         nosuspend await frame;
 
-        // If there are Connections waiting for a Message to become free and there are Messages
-        // available, provide them to the Connections and allow them to recv.
-        while (self.waiting_for_free_message.peek() != null) {
-            if (self.get_message()) |message| {
-                const connection = self.waiting_for_free_message.pop().?;
-                connection.incoming_message = message;
-                connection.recv_header();
-            }
+        // If there are connections waiting for a message to become free and there are messages
+        // available, provide them to the connections and allow them to recv:
+        while (self.connections_waiting_for_a_message.peek()) |connection| {
+            const message = self.get_message() orelse break;
+            defer self.unref(message);
+
+            // Now that we have a message, remove this connection from the FIFO:
+            const removed = self.connections_waiting_for_a_message.pop().?;
+            assert(removed == connection);
+
+            connection.set_recv_message_and_recv(message);
         }
     }
 
     fn maybe_connect_to_replica(self: *MessageBus, replica: u16) void {
         // We already have a connection to the given replica.
-        if (self.replicas[replica] != null) return;
+        if (self.replicas[replica] != null) {
+            assert(self.connections_used > 0);
+            return;
+        }
 
         // Obtain a connection struct for our new replica connection.
         // If there is an unused connection, use that. Otherwise drop
@@ -208,14 +214,14 @@ pub const MessageBus = struct {
 
         // If there is already a connection being shut down, no need to kill another.
         for (self.connections) |*connection| {
-            if (connection.state == .shutting_down) return;
+            if (connection.state == .terminating) return;
         }
 
         log.notice("all connections in use but not all replicas are connected, " ++
             "attempting to disconnect a client", .{});
         for (self.connections) |*connection| {
             if (connection.peer == .client) {
-                connection.shutdown();
+                connection.terminate(.shutdown);
                 return;
             }
         }
@@ -224,7 +230,7 @@ pub const MessageBus = struct {
             "attempting to disconnect an unknown peer.", .{});
         for (self.connections) |*connection| {
             if (connection.peer == .unknown) {
-                connection.shutdown();
+                connection.terminate(.shutdown);
                 return;
             }
         }
@@ -418,7 +424,7 @@ const Connection = struct {
         /// The peer is fully connected and may be a client, replica, or unknown.
         connected,
         /// The connection is being terminated but cleanup has not yet finished.
-        shutting_down,
+        terminating,
     } = .idle,
     /// This is guaranteed to be valid only while state is connected.
     /// It will be reset to -1 during the shutdown process and is always -1 if the
@@ -433,9 +439,12 @@ const Connection = struct {
     /// True exactly when the recv_completion has been submitted to the IO abstraction
     /// but the callback has not yet been run.
     recv_submitted: bool = false,
-    /// Number of bytes of the current header/message that have already been received.
+    /// The Message with the buffer passed to the kernel for recv operations.
+    recv_message: ?*Message = null,
+    /// The number of bytes in `recv_message` that have been received and are ready to be parsed.
     recv_progress: usize = 0,
-    incoming_message: ?*Message = null,
+    /// The number of bytes in `recv_message` that have been parsed.
+    recv_parsed: usize = 0,
 
     /// This completion is used for all send operations.
     send_completion: IO.Completion = undefined,
@@ -447,7 +456,7 @@ const Connection = struct {
     /// The queue of messages to send to the client or replica peer.
     send_queue: SendQueue = .{},
 
-    /// Used by the MessageBus.waiting_for_free_message FIFO.
+    /// Used by the MessageBus.connections_waiting_for_a_message FIFO.
     next: ?*Connection = null,
 
     /// Attempt to connect to a replica.
@@ -463,6 +472,7 @@ const Connection = struct {
         self.fd = os.socket(family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0) catch return;
         self.peer = .{ .replica = replica };
         self.state = .connecting;
+        self.message_bus.connections_used += 1;
 
         assert(self.message_bus.replicas[replica] == null);
         self.message_bus.replicas[replica] = self;
@@ -495,7 +505,7 @@ const Connection = struct {
     ) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
-        if (self.state == .shutting_down) {
+        if (self.state == .terminating) {
             self.maybe_close();
             return;
         }
@@ -525,38 +535,62 @@ const Connection = struct {
     ) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
-        if (self.state == .shutting_down) {
+
+        if (self.state == .terminating) {
             self.maybe_close();
             return;
         }
         assert(self.state == .connecting);
         self.state = .connected;
+
         result catch |err| {
             log.err("error connecting to replica {}: {}", .{ self.peer.replica, err });
-            self.state = .shutting_down;
-            self.maybe_close();
+            self.terminate(.close);
             return;
         };
+
         log.info("connected to replica {}", .{self.peer.replica});
         self.message_bus.replicas_connect_attempts[self.peer.replica] = 0;
-        self.maybe_recv_header();
-        // It is possible that a message has been queued up to be sent to
-        // the replica while we were connecting.
+
+        self.assert_recv_send_initial_state();
+        self.get_recv_message_and_recv();
+        // A message may have been queued for sending while we were connecting:
         self.send();
     }
 
     /// Given a newly accepted fd, start receiving messages on it.
-    /// Callbacks will be continuously re-registered until shutdown() is
-    /// called and the connection is terminated.
+    /// Callbacks will be continuously re-registered until terminate() is called.
     pub fn on_accept(self: *Connection, fd: os.socket_t) void {
         assert(self.peer == .none);
         assert(self.state == .accepting);
         assert(self.fd == -1);
+
         self.peer = .unknown;
         self.state = .connected;
         self.fd = fd;
         self.message_bus.connections_used += 1;
-        self.maybe_recv_header();
+
+        self.assert_recv_send_initial_state();
+        self.get_recv_message_and_recv();
+        assert(self.send_queue.empty());
+    }
+
+    fn assert_recv_send_initial_state(self: *Connection) void {
+        assert(self.message_bus.connections_used > 0);
+
+        assert(self.peer == .unknown or self.peer == .replica);
+        assert(self.state == .connected);
+        assert(self.fd != -1);
+
+        assert(self.recv_submitted == false);
+        assert(self.recv_message == null);
+        assert(self.recv_progress == 0);
+        assert(self.recv_parsed == 0);
+
+        assert(self.send_submitted == false);
+        assert(self.send_progress == 0);
+
+        assert(self.next == null);
     }
 
     /// Add a message to the connection's send queue, starting a send operation
@@ -565,7 +599,7 @@ const Connection = struct {
         assert(self.peer == .client or self.peer == .replica);
         switch (self.state) {
             .connected, .connecting => {},
-            .shutting_down => return,
+            .terminating => return,
             .idle, .accepting => unreachable,
         }
         self.send_queue.push(message.ref()) catch |err| switch (err) {
@@ -587,245 +621,274 @@ const Connection = struct {
 
     /// Clean up an active connection and reset it to its initial, unused, state.
     /// This reset does not happen instantly as currently in progress operations
-    /// must first be stopped.
-    pub fn shutdown(self: *Connection) void {
+    /// must first be stopped. The `how` arg allows the caller to specify if a
+    /// shutdown syscall should be made or not before proceeding to wait for
+    /// currently in progress operations to complete and close the socket.
+    /// I'll be back! (when the Connection is reused after being fully closed)
+    pub fn terminate(self: *Connection, how: enum { shutdown, close }) void {
         assert(self.peer != .none);
         assert(self.state != .idle);
         assert(self.fd != -1);
-        // The shutdown syscall will cause currently in progress send/recv
-        // operations to be gracefully closed while keeping the fd open.
-        const rc = os.linux.shutdown(self.fd, os.SHUT_RDWR);
-        switch (os.errno(rc)) {
-            0 => {},
-            os.EBADF => unreachable,
-            os.EINVAL => unreachable,
-            os.ENOTCONN => {
-                // This should only happen if we for some reason decide to shutdown()
-                // a connection while a connect operation is in progress.
-                // This is fine though, we simply continue with the logic below and
-                // wait for the connect operation to finish.
+        switch (how) {
+            .shutdown => {
+                // The shutdown syscall will cause currently in progress send/recv
+                // operations to be gracefully closed while keeping the fd open.
+                const rc = os.linux.shutdown(self.fd, os.SHUT_RDWR);
+                switch (os.errno(rc)) {
+                    0 => {},
+                    os.EBADF => unreachable,
+                    os.EINVAL => unreachable,
+                    os.ENOTCONN => {
+                        // This should only happen if we for some reason decide to terminate()
+                        // a connection while a connect operation is in progress.
+                        // This is fine though, we simply continue with the logic below and
+                        // wait for the connect operation to finish.
 
-                // TODO: This currently happens in other cases if the
-                // connection was closed due to an error. We need to intelligently
-                // decide whether to shutdown or close directly based on the error
-                // before these assertions may be re-enabled.
+                        // TODO: This currently happens in other cases if the
+                        // connection was closed due to an error. We need to intelligently
+                        // decide whether to shutdown or close directly based on the error
+                        // before these assertions may be re-enabled.
 
-                //assert(self.state == .connecting);
-                //assert(self.recv_submitted);
-                //assert(!self.send_submitted);
+                        //assert(self.state == .connecting);
+                        //assert(self.recv_submitted);
+                        //assert(!self.send_submitted);
+                    },
+                    os.ENOTSOCK => unreachable,
+                    else => |err| os.unexpectedErrno(err) catch {},
+                }
             },
-            os.ENOTSOCK => unreachable,
-            else => |err| os.unexpectedErrno(err) catch {},
+            .close => {},
         }
-        assert(self.state != .shutting_down);
-        self.state = .shutting_down;
+        assert(self.state != .terminating);
+        self.state = .terminating;
         self.maybe_close();
     }
 
-    /// Kick off a recv if a Message is available, otherwise add this Connection
-    /// to the FIFO to wait for a free Message.
-    fn maybe_recv_header(self: *Connection) void {
-        assert(self.recv_progress == 0);
-        assert(self.incoming_message == null);
-        if (self.message_bus.get_message()) |message| {
-            self.incoming_message = message;
-            self.recv_header();
-        } else {
-            self.message_bus.waiting_for_free_message.push(self);
-        }
-    }
-
-    fn recv_header(self: *Connection) void {
-        self.recv(
-            on_recv_header,
-            self.incoming_message.?.buffer[self.recv_progress..@sizeOf(Header)],
-        );
-    }
-
-    fn recv_body(self: *Connection) void {
-        self.recv(
-            on_recv_body,
-            self.incoming_message.?.buffer[self.recv_progress..self.incoming_message.?.header.size],
-        );
-    }
-
-    fn recv(
-        self: *Connection,
-        comptime callback: fn (*Connection, *IO.Completion, IO.RecvError!usize) void,
-        buffer: []u8,
-    ) void {
+    fn parse_messages(self: *Connection) void {
         assert(self.peer != .none);
         assert(self.state == .connected);
         assert(self.fd != -1);
-        assert(!self.recv_submitted);
-        self.recv_submitted = true;
-        self.message_bus.io.recv(
-            *Connection,
-            self,
-            callback,
-            &self.recv_completion,
-            self.fd,
-            buffer,
-            os.MSG_NOSIGNAL,
-        );
+
+        while (self.parse_message()) |message| {
+            defer self.message_bus.unref(message);
+
+            self.on_message(message);
+        }
     }
 
-    fn on_recv_header(
-        self: *Connection,
-        completion: *IO.Completion,
-        result: IO.RecvError!usize,
-    ) void {
-        assert(self.recv_submitted);
-        self.recv_submitted = false;
-
-        if (self.state == .shutting_down) {
-            self.maybe_close();
-            return;
+    fn parse_message(self: *Connection) ?*Message {
+        const data = self.recv_message.?.buffer[self.recv_parsed..self.recv_progress];
+        if (data.len < @sizeOf(Header)) {
+            self.get_recv_message_and_recv();
+            return null;
         }
-        assert(self.state == .connected);
 
-        const bytes_received = result catch |err| {
-            // TODO: maybe don't need to close on *every* error
-            log.err("error receiving body from {}: {}", .{ self.peer, err });
-            self.shutdown();
-            return;
+        // TODO We need to avoid re-checksumming the header if a "slowloris" forces each recv() to
+        // recv only a single byte at a time.
+        const header = mem.bytesAsValue(Header, data[0..@sizeOf(Header)]);
+        if (!header.valid_checksum()) {
+            log.err("invalid header checksum received from {}", .{self.peer});
+            self.terminate(.shutdown);
+            return null;
+        }
+
+        if (header.size < @sizeOf(Header) or header.size > config.message_size_max) {
+            log.err("invalid header size {d} received from {}", .{ header.size, self.peer });
+            self.terminate(.shutdown);
+            return null;
+        }
+
+        if (header.cluster != self.message_bus.server.cluster) {
+            log.err("message addressed to the wrong cluster: {}", .{header.cluster});
+            self.terminate(.shutdown);
+            return null;
+        }
+
+        self.set_peer(header);
+
+        if (data.len < header.size) {
+            self.get_recv_message_and_recv();
+            return null;
+        }
+
+        const body = data[@sizeOf(Header)..header.size];
+        if (!header.valid_checksum_body(body)) {
+            log.err("invalid body checksum received from {}", .{self.peer});
+            self.terminate(.shutdown);
+            return null;
+        }
+
+        self.recv_parsed += header.size;
+
+        // Return the parsed message using zero-copy if we can, or copy if the client is pipelining:
+        // If this is the first message but there are messages in the pipeline then we copy the
+        // message so that its sector padding (if any) will not overwrite the front of the pipeline.
+        // If this is not the first message then we must copy the message to a new message as each
+        // message needs to have its own unique `references` and `header` metadata.
+        if (self.recv_progress == header.size) return self.recv_message.?.ref();
+
+        const message = self.message_bus.get_message() orelse {
+            // TODO Decrease the probability of this happening by:
+            // 1. getting a header-only message when that's all we need for this particular message,
+            // 2. determining a true upper limit for static allocation.
+            log.err("no free message available to deliver message from {}", .{self.peer});
+            self.terminate(.shutdown);
+            return null;
         };
+        mem.copy(u8, message.buffer, data[0..header.size]);
+        return message;
+    }
 
-        // No bytes received means that the peer closed the connection.
-        if (bytes_received == 0) {
-            // Skip the shutdown syscall and go straight to close.
-            self.state = .shutting_down;
-            self.maybe_close();
-            return;
+    /// Forwards a received message to `Replica.on_message()`.
+    /// Zeroes any `.prepare` sector padding after the body and up to the nearest sector multiple.
+    fn on_message(self: *Connection, message: *Message) void {
+        if (message == self.recv_message.?) {
+            assert(self.recv_parsed == message.header.size);
+            assert(self.recv_parsed == self.recv_progress);
+        } else if (self.recv_parsed == message.header.size) {
+            assert(self.recv_parsed < self.recv_progress);
+        } else {
+            assert(self.recv_parsed > message.header.size);
+            assert(self.recv_parsed <= self.recv_progress);
         }
 
-        self.recv_progress += bytes_received;
-
-        if (self.recv_progress < @sizeOf(Header)) {
-            // The header has not yet been fully received.
-            self.recv_header();
-            return;
+        if (message.header.command == .prepare) {
+            const sector_ceil = Journal.sector_ceil(message.header.size);
+            if (message.header.size != sector_ceil) {
+                assert(message.header.size < sector_ceil);
+                assert(message.buffer.len == config.message_size_max + config.sector_size);
+                mem.set(u8, message.buffer[message.header.size..sector_ceil], 0);
+            }
         }
-        assert(self.recv_progress == @sizeOf(Header));
 
-        const header_received = self.incoming_message.?.header;
-        if (!header_received.valid_checksum()) {
-            log.err("invalid checksum on header received from {}", .{self.peer});
-            self.shutdown();
-            return;
-        }
+        // TODO: rewrite ConcurrentRanges to not use async. This nosuspend is only
+        // safe because we do not do any asynchronous disk IO yet.
+        var frame = async self.message_bus.server.on_message(message);
+        nosuspend await frame;
+    }
+
+    fn set_peer(self: *Connection, header: *const Header) void {
+        assert(self.state == .connected);
+        assert(self.fd != -1);
+
+        assert(self.message_bus.server.cluster == header.cluster);
+        assert(self.message_bus.connections_used > 0);
 
         switch (self.peer) {
             .none => unreachable,
             .unknown => {
-                // Ensure that the message is addressed to the correct cluster.
-                if (header_received.cluster != self.message_bus.server.cluster) {
-                    log.err("received message addressed to wrong cluster: {}", .{
-                        header_received.cluster,
-                    });
-                    self.shutdown();
-                    return;
-                }
                 // The only command sent by clients is the request command.
-                if (header_received.command == .request) {
-                    self.peer = .{ .client = header_received.client };
+                if (header.command == .request) {
+                    self.peer = .{ .client = header.client };
                     const ret = self.message_bus.clients.getOrPutAssumeCapacity(self.peer.client);
-                    // Shutdown the old connection if there is one and it is active.
+                    // Terminate the old connection if there is one and it is active.
                     if (ret.found_existing) {
                         const old = ret.entry.value;
                         assert(old.peer == .client);
-                        assert(old.state == .connected or old.state == .shutting_down);
-                        if (old.state == .connected) old.shutdown();
+                        assert(old.state == .connected or old.state == .terminating);
+                        if (old.state == .connected) old.terminate(.shutdown);
                     }
                     ret.entry.value = self;
                 } else {
-                    self.peer = .{ .replica = header_received.replica };
+                    self.peer = .{ .replica = header.replica };
                     // If there is already a connection to this replica, terminate and replace it.
                     if (self.message_bus.replicas[self.peer.replica]) |old| {
                         assert(old.peer == .replica);
                         assert(old.peer.replica == self.peer.replica);
                         assert(old.state != .idle);
-                        if (old.state != .shutting_down) old.shutdown();
+                        if (old.state != .terminating) old.terminate(.shutdown);
                         self.message_bus.replicas[self.peer.replica] = null;
                     }
                     self.message_bus.replicas[self.peer.replica] = self;
                 }
             },
-            .client => assert(header_received.command == .request),
-            .replica => assert(header_received.command != .request),
-        }
-        assert(header_received.cluster == self.message_bus.server.cluster);
-
-        if (header_received.size == @sizeOf(Header)) {
-            // If the message has no body, deliver it directly
-            self.deliver_message();
-        } else {
-            assert(header_received.size > @sizeOf(Header));
-            self.recv_body();
+            .client => assert(header.command == .request),
+            .replica => assert(header.command != .request),
         }
     }
 
-    fn on_recv_body(
-        self: *Connection,
-        completion: *IO.Completion,
-        result: IO.RecvError!usize,
-    ) void {
+    /// Acquires a free message if necessary and then calls `recv()`.
+    /// If the connection has a `recv_message` and the message being parsed is at pole position then
+    /// calls `recv()` immediately, otherwise copies any partial message into new `recv_message`.
+    fn get_recv_message_and_recv(self: *Connection) void {
+        if (self.recv_message != null and self.recv_parsed == 0) {
+            self.recv();
+            return;
+        }
+
+        const message = self.message_bus.get_message() orelse {
+            self.message_bus.connections_waiting_for_a_message.push(self);
+            return;
+        };
+        defer self.message_bus.unref(message);
+
+        self.set_recv_message_and_recv(message);
+    }
+
+    /// Sets `recv_message` and then calls `recv()`.
+    /// Copies any partial message into the new `recv_message` and frees the old `recv_message`.
+    fn set_recv_message_and_recv(self: *Connection, message: *Message) void {
+        if (self.recv_message) |recv_message| {
+            defer self.message_bus.unref(recv_message);
+
+            assert(self.recv_progress > 0);
+            assert(self.recv_parsed > 0);
+            const data = recv_message.buffer[self.recv_parsed..self.recv_progress];
+            mem.copy(u8, message.buffer, data);
+            self.recv_progress = data.len;
+            self.recv_parsed = 0;
+        } else {
+            assert(self.recv_progress == 0);
+            assert(self.recv_parsed == 0);
+        }
+
+        self.recv_message = message.ref();
+        self.recv();
+    }
+
+    fn recv(self: *Connection) void {
+        assert(self.peer != .none);
+        assert(self.state == .connected);
+        assert(self.fd != -1);
+
+        assert(!self.recv_submitted);
+        self.recv_submitted = true;
+
+        assert(self.recv_progress < config.message_size_max);
+
+        self.message_bus.io.recv(
+            *Connection,
+            self,
+            on_recv,
+            &self.recv_completion,
+            self.fd,
+            self.recv_message.?.buffer[self.recv_progress..config.message_size_max],
+            os.MSG_NOSIGNAL,
+        );
+    }
+
+    fn on_recv(self: *Connection, completion: *IO.Completion, result: IO.RecvError!usize) void {
         assert(self.recv_submitted);
         self.recv_submitted = false;
-
-        if (self.state == .shutting_down) {
+        if (self.state == .terminating) {
             self.maybe_close();
             return;
         }
         assert(self.state == .connected);
-
         const bytes_received = result catch |err| {
             // TODO: maybe don't need to close on *every* error
-            log.err("error receiving body from {}: {}", .{ self.peer, err });
-            self.shutdown();
+            log.err("error receiving from {}: {}", .{ self.peer, err });
+            self.terminate(.shutdown);
             return;
         };
-
-        // No bytes received means that the peer closed the connection.
+        // No bytes received means that the peer closed its side of the connection.
         if (bytes_received == 0) {
-            // Skip the shutdown syscall and go straight to close.
-            self.state = .shutting_down;
-            self.maybe_close();
+            log.info("peer performed an orderly shutdown: {}", .{self.peer});
+            self.terminate(.close);
             return;
         }
         self.recv_progress += bytes_received;
-
-        if (self.recv_progress < self.incoming_message.?.header.size) {
-            // The body has not yet been fully received.
-            self.recv_body();
-        } else {
-            self.deliver_message();
-        }
-    }
-
-    /// Deliver the fully received incoming_message then reset state and call maybe_recv_header().
-    fn deliver_message(self: *Connection) void {
-        const message = self.incoming_message.?;
-        defer self.message_bus.unref(message);
-
-        assert(self.recv_progress == message.header.size);
-
-        const body = message.buffer[@sizeOf(Header)..message.header.size];
-        if (message.header.valid_checksum_body(body)) {
-            // TODO: rewrite ConcurrentRanges to not use async
-            // This nosuspend is only safe because we do not do any asynchronous disk IO yet.
-            var frame = async self.message_bus.server.on_message(message);
-            nosuspend await frame;
-        } else {
-            log.err("invalid checksum on body received from {}", .{self.peer});
-            self.shutdown();
-            return;
-        }
-
-        // Reset state and try to receive the next message.
-        self.incoming_message = null;
-        self.recv_progress = 0;
-        self.maybe_recv_header();
+        self.parse_messages();
     }
 
     fn send(self: *Connection) void {
@@ -850,14 +913,14 @@ const Connection = struct {
         assert(self.peer == .client or self.peer == .replica);
         assert(self.send_submitted);
         self.send_submitted = false;
-        if (self.state == .shutting_down) {
+        if (self.state == .terminating) {
             self.maybe_close();
             return;
         }
         self.send_progress += result catch |err| {
             // TODO: maybe don't need to close on *every* error
             log.err("error sending message to replica at {}: {}", .{ self.peer, err });
-            self.shutdown();
+            self.terminate(.shutdown);
             return;
         };
         assert(self.send_progress <= self.send_queue.peek().?.header.size);
@@ -872,7 +935,7 @@ const Connection = struct {
 
     fn maybe_close(self: *Connection) void {
         assert(self.peer != .none);
-        assert(self.state == .shutting_down);
+        assert(self.state == .terminating);
         // If a recv or send operation is currently submitted to the kernel,
         // submitting a close would cause a race. Therefore we must wait for
         // any currently submitted operation to complete.
@@ -883,10 +946,11 @@ const Connection = struct {
         while (self.send_queue.pop()) |message| {
             self.message_bus.unref(message);
         }
-        if (self.incoming_message) |message| {
+        if (self.recv_message) |message| {
             self.message_bus.unref(message);
-            self.incoming_message = null;
+            self.recv_message = null;
         }
+        if (self.next != null) self.message_bus.connections_waiting_for_a_message.remove(self);
         assert(self.fd != -1);
         defer self.fd = -1;
         // It's OK to use the send completion here as we know that no send
@@ -896,14 +960,17 @@ const Connection = struct {
 
     fn on_close(self: *Connection, completion: *IO.Completion, result: IO.CloseError!void) void {
         assert(self.peer != .none);
-        assert(self.state == .shutting_down);
+        assert(self.state == .terminating);
 
         // Reset the connection to its initial state.
         defer {
+            assert(self.recv_message == null);
             assert(self.send_queue.empty());
-            assert(self.incoming_message == null);
+            assert(self.next == null);
+
             switch (self.peer) {
-                .none, .unknown => {},
+                .none => unreachable,
+                .unknown => {},
                 .client => {
                     self.message_bus.clients.removeAssertDiscard(self.peer.client);
                 },
@@ -915,6 +982,7 @@ const Connection = struct {
                     }
                 },
             }
+            self.message_bus.connections_used -= 1;
             self.* = .{ .message_bus = self.message_bus };
         }
 
@@ -922,8 +990,6 @@ const Connection = struct {
             log.err("error closing connection to {}: {}", .{ self.peer, err });
             return;
         };
-        // TODO Re-enable with exponential backoff:
-        // log.info("closed connection to {}", .{self.peer});
     }
 };
 
