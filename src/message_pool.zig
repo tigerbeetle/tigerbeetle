@@ -4,16 +4,21 @@ const mem = std.mem;
 
 const config = @import("config.zig");
 
+const vr = @import("vr.zig");
+const Header = vr.Header;
+
 comptime {
     // message_size_max must be a multiple of sector_size for Direct I/O
     assert(config.message_size_max % config.sector_size == 0);
 }
 
-const vr = @import("vr.zig");
-const Header = vr.Header;
+/// Add an extra sector_size bytes to allow a partially received subsequent
+/// message to be shifted to make space for 0 padding to Journal.sector_ceil.
+const message_size_max_padded = config.message_size_max + config.sector_size;
 
-/// A pool of config.connections_max messages of config.message_size_max as well as a further
-/// config.connections_max header-sized messages for use in sending.
+/// A pool of reference-counted Messages, memory for which is allocated only once
+/// during initialization and reused thereafter. The config.message_bus_messages_max
+/// and config.message_bus_headers_max values determine the size of this pool.
 pub const MessagePool = struct {
     pub const Message = struct {
         header: *Header,
@@ -31,12 +36,12 @@ pub const MessagePool = struct {
 
         fn header_only(message: Message) bool {
             const ret = message.buffer.len == @sizeOf(Header);
-            assert(ret or message.buffer.len == config.message_size_max);
+            assert(ret or message.buffer.len == message_size_max_padded);
             return ret;
         }
     };
 
-    /// List of currently unused messages of config.message_size_max
+    /// List of currently unused messages of message_size_max_padded
     free_list: ?*Message,
     /// List of currently usused header-sized messages
     header_only_free_list: ?*Message,
@@ -46,17 +51,15 @@ pub const MessagePool = struct {
             .free_list = null,
             .header_only_free_list = null,
         };
-
-        var i: usize = 0;
-        while (i < config.connections_max) : (i += 1) {
-            {
+        {
+            var i: usize = 0;
+            while (i < config.message_bus_messages_max) : (i += 1) {
                 const buffer = try allocator.allocAdvanced(
                     u8,
                     config.sector_size,
-                    config.message_size_max,
+                    message_size_max_padded,
                     .exact,
                 );
-                mem.set(u8, buffer, 0);
                 const message = try allocator.create(Message);
                 message.* = .{
                     .header = mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]),
@@ -65,7 +68,10 @@ pub const MessagePool = struct {
                 };
                 ret.free_list = message;
             }
-            {
+        }
+        {
+            var i: usize = 0;
+            while (i < config.message_bus_headers_max) : (i += 1) {
                 const header = try allocator.create(Header);
                 const message = try allocator.create(Message);
                 message.* = .{
@@ -108,7 +114,7 @@ pub const MessagePool = struct {
     pub fn unref(pool: *MessagePool, message: *Message) void {
         message.references -= 1;
         if (message.references == 0) {
-            mem.set(u8, message.buffer, 0);
+            if (std.builtin.mode == .Debug) mem.set(u8, message.buffer, undefined);
             if (message.header_only()) {
                 message.next = pool.header_only_free_list;
                 pool.header_only_free_list = message;

@@ -62,6 +62,9 @@ pub const journal_headers_max = switch (deployment_environment) {
     else => 16384,
 };
 
+/// The maximum number of connections that can be accepted and held open by the server at any time:
+pub const connections_max = 32;
+
 /// The maximum size of a message in bytes:
 /// This is also the limit of all inflight data across multiple pipelined requests per connection.
 /// We may have one request of up to 4 MiB inflight or 4 pipelined requests of up to 1 MiB inflight.
@@ -70,11 +73,13 @@ pub const journal_headers_max = switch (deployment_environment) {
 /// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
 /// For a 1 Gbps NIC = 125 MiB/s throughput: 4 MiB / 125 * 1000ms = 32ms for the next request.
 /// This also impacts the amount of memory allocated at initialization by the server.
-/// e.g. connections_max * message_size_max = 32 * (4 + 4) = 256 MiB
 pub const message_size_max = 4 * 1024 * 1024;
 
-/// The maximum number of connections that can be accepted and held open by the server at any time:
-pub const connections_max = 32;
+/// The number of full-sized messages allocated at initialization by the message bus.
+pub const message_bus_messages_max = connections_max * 2;
+/// The number of header-sized messages allocated at initialization by the message bus.
+/// These are much smaller/cheaper and we can therefore have many of them.
+pub const message_bus_headers_max = connections_max * connection_send_queue_max;
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and full jitter are applied within this range.
