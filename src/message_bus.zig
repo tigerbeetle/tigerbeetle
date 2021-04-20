@@ -13,7 +13,6 @@ const Replica = vr.Replica;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
-const FIFO = @import("fifo.zig").FIFO;
 
 pub const Message = MessagePool.Message;
 
@@ -42,8 +41,6 @@ pub const MessageBus = struct {
     connections: []Connection,
     /// Number of connections currently in use (i.e. connection.peer != .none).
     connections_used: usize = 0,
-    /// Connections waiting for a message to become free before they can continue to recv:
-    connections_waiting_for_a_message: FIFO(Connection) = .{},
 
     /// Map from replica index to the currently active connection for that replica, if any.
     /// The connection for the server replica will always be null.
@@ -174,19 +171,6 @@ pub const MessageBus = struct {
         // This nosuspend is only safe because we do not actually do any asynchronous disk IO yet.
         var frame = async self.flush();
         nosuspend await frame;
-
-        // If there are connections waiting for a message to become free and there are messages
-        // available, provide them to the connections and allow them to recv:
-        while (self.connections_waiting_for_a_message.peek()) |connection| {
-            const message = self.get_message() orelse break;
-            defer self.unref(message);
-
-            // Now that we have a message, remove this connection from the FIFO:
-            const removed = self.connections_waiting_for_a_message.pop().?;
-            assert(removed == connection);
-
-            connection.set_recv_message_and_recv(message);
-        }
     }
 
     fn maybe_connect_to_replica(self: *MessageBus, replica: u16) void {
@@ -456,9 +440,6 @@ const Connection = struct {
     /// The queue of messages to send to the client or replica peer.
     send_queue: SendQueue = .{},
 
-    /// Used by the MessageBus.connections_waiting_for_a_message FIFO.
-    next: ?*Connection = null,
-
     /// Attempt to connect to a replica.
     /// The slot in the Message.replicas slices is immediately reserved.
     /// Failure is silent and returns the connection to an unused state.
@@ -589,8 +570,6 @@ const Connection = struct {
 
         assert(self.send_submitted == false);
         assert(self.send_progress == 0);
-
-        assert(self.next == null);
     }
 
     /// Add a message to the connection's send queue, starting a send operation
@@ -731,7 +710,7 @@ const Connection = struct {
             // TODO Decrease the probability of this happening by:
             // 1. getting a header-only message when that's all we need for this particular message,
             // 2. determining a true upper limit for static allocation.
-            log.err("no free message available to deliver message from {}", .{self.peer});
+            log.err("no free buffer available to deliver message from {}", .{self.peer});
             self.terminate(.shutdown);
             return null;
         };
@@ -808,33 +787,33 @@ const Connection = struct {
     }
 
     /// Acquires a free message if necessary and then calls `recv()`.
-    /// If the connection has a `recv_message` and the message being parsed is at pole position then
-    /// calls `recv()` immediately, otherwise copies any partial message into new `recv_message`.
+    /// If the connection has a `recv_message` and the message being parsed is
+    /// at pole position then calls `recv()` immediately, otherwise copies any
+    /// partially received message into a new Message and sets `recv_message`,
+    /// releasing the old one.
     fn get_recv_message_and_recv(self: *Connection) void {
         if (self.recv_message != null and self.recv_parsed == 0) {
             self.recv();
             return;
         }
 
-        const message = self.message_bus.get_message() orelse {
-            self.message_bus.connections_waiting_for_a_message.push(self);
+        const new_message = self.message_bus.get_message() orelse {
+            // TODO Decrease the probability of this happening by:
+            // 1. getting a header-only message when that's all we need for this particular message,
+            // 2. determining a true upper limit for static allocation.
+            log.err("no free buffer available to recv message from {}", .{self.peer});
+            self.terminate(.shutdown);
             return;
         };
-        defer self.message_bus.unref(message);
+        defer self.message_bus.unref(new_message);
 
-        self.set_recv_message_and_recv(message);
-    }
-
-    /// Sets `recv_message` and then calls `recv()`.
-    /// Copies any partial message into the new `recv_message` and frees the old `recv_message`.
-    fn set_recv_message_and_recv(self: *Connection, message: *Message) void {
         if (self.recv_message) |recv_message| {
             defer self.message_bus.unref(recv_message);
 
             assert(self.recv_progress > 0);
             assert(self.recv_parsed > 0);
             const data = recv_message.buffer[self.recv_parsed..self.recv_progress];
-            mem.copy(u8, message.buffer, data);
+            mem.copy(u8, new_message.buffer, data);
             self.recv_progress = data.len;
             self.recv_parsed = 0;
         } else {
@@ -842,7 +821,7 @@ const Connection = struct {
             assert(self.recv_parsed == 0);
         }
 
-        self.recv_message = message.ref();
+        self.recv_message = new_message.ref();
         self.recv();
     }
 
@@ -950,7 +929,6 @@ const Connection = struct {
             self.message_bus.unref(message);
             self.recv_message = null;
         }
-        if (self.next != null) self.message_bus.connections_waiting_for_a_message.remove(self);
         assert(self.fd != -1);
         defer self.fd = -1;
         // It's OK to use the send completion here as we know that no send
@@ -966,7 +944,6 @@ const Connection = struct {
         defer {
             assert(self.recv_message == null);
             assert(self.send_queue.empty());
-            assert(self.next == null);
 
             switch (self.peer) {
                 .none => unreachable,
