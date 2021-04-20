@@ -429,6 +429,9 @@ const Connection = struct {
     recv_progress: usize = 0,
     /// The number of bytes in `recv_message` that have been parsed.
     recv_parsed: usize = 0,
+    /// True if we have already checked the header checksum of the message we
+    /// are currently receiving/parsing.
+    recv_checked_header: bool = false,
 
     /// This completion is used for all send operations.
     send_completion: IO.Completion = undefined,
@@ -662,33 +665,41 @@ const Connection = struct {
             return null;
         }
 
-        // TODO We need to avoid re-checksumming the header if a "slowloris" forces each recv() to
-        // recv only a single byte at a time.
         const header = mem.bytesAsValue(Header, data[0..@sizeOf(Header)]);
-        if (!header.valid_checksum()) {
-            log.err("invalid header checksum received from {}", .{self.peer});
-            self.terminate(.shutdown);
-            return null;
-        }
+        if (!self.recv_checked_header) {
+            if (!header.valid_checksum()) {
+                log.err("invalid header checksum received from {}", .{self.peer});
+                self.terminate(.shutdown);
+                return null;
+            }
 
-        if (header.size < @sizeOf(Header) or header.size > config.message_size_max) {
-            log.err("invalid header size {d} received from {}", .{ header.size, self.peer });
-            self.terminate(.shutdown);
-            return null;
-        }
+            if (header.size < @sizeOf(Header) or header.size > config.message_size_max) {
+                log.err("invalid header size {d} received from {}", .{ header.size, self.peer });
+                self.terminate(.shutdown);
+                return null;
+            }
 
-        if (header.cluster != self.message_bus.server.cluster) {
-            log.err("message addressed to the wrong cluster: {}", .{header.cluster});
-            self.terminate(.shutdown);
-            return null;
-        }
+            if (header.cluster != self.message_bus.server.cluster) {
+                log.err("message addressed to the wrong cluster: {}", .{header.cluster});
+                self.terminate(.shutdown);
+                return null;
+            }
 
-        self.set_peer(header);
+            self.set_peer(header);
+
+            self.recv_checked_header = true;
+        }
 
         if (data.len < header.size) {
             self.get_recv_message_and_recv();
             return null;
         }
+
+        // At this point we know that we have the full message in our buffer.
+        // We will now either deliver this message or terminate the connection
+        // due to an error, so reset recv_checked_header for the next message.
+        assert(self.recv_checked_header);
+        self.recv_checked_header = false;
 
         const body = data[@sizeOf(Header)..header.size];
         if (!header.valid_checksum_body(body)) {
