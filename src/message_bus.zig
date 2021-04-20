@@ -728,10 +728,11 @@ const Connection = struct {
         if (self.recv_progress == header.size) return self.recv_message.?.ref();
 
         const message = self.message_bus.get_message() orelse {
-            log.notice("waiting for a free message for pipelined message from {}", .{self.peer});
-            // TODO Can this next line cause an assertion failure in `set_recv_message_and_recv()`?
-            self.recv_parsed -= header.size;
-            self.get_recv_message_and_recv();
+            // TODO Decrease the probability of this happening by:
+            // 1. getting a header-only message when that's all we need for this particular message,
+            // 2. determining a true upper limit for static allocation.
+            log.err("no free message available to deliver message from {}", .{self.peer});
+            self.terminate(.shutdown);
             return null;
         };
         mem.copy(u8, message.buffer, data[0..header.size]);
