@@ -219,6 +219,27 @@ fn batch (
     defer allocator.free(events);
 
     // call out to client.zig
+    // Store reference to JS callback in (statically?) allocated array.
+    var callback_reference: c.napi_value = undefined;
+    var callback_type: napi_valuetype = undefined;
+    if (c.napi_typeof(env, argv[3], &callback_type) != .napi_ok) {
+        throw(env, "Failed to determine type of argument 4.") catch return null;
+    }
+    if (callback_type != .napi_function) throw(env, "Argument 4 is not a function.") catch return null;
+    if (c.napi_create_reference(env, argv[3], 1, &callback_reference) != .napi_ok) {
+        throw(env, "Failed to create reference to callback.") catch return null;
+    } 
+    const index = try store_callback(callback_reference) catch return null;
+
+    // Client.batch(context operation, batch, index, &on_result);
 
     return null;
+}
+
+func store_callback(callback_reference: c.napi_value) u32 {
+    return 1;
+}
+
+func on_result (index: u32, results: []const u8) void {
+
 }
