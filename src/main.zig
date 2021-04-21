@@ -42,7 +42,7 @@ pub fn main() !void {
         &message_bus,
         &state_machine,
     );
-    try message_bus.init(arena, &io, args.configuration, &replica, args.replica);
+    try message_bus.init(arena, &io, args.cluster, args.configuration, .{ .replica = &replica });
 
     std.log.info("cluster={x} replica={}: listening on {}", .{
         args.cluster,
