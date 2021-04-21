@@ -785,7 +785,7 @@ const Connection = struct {
         }
 
         if (message.header.command == .prepare) {
-            assert(self.process == .replica);
+            assert(self.message_bus.process == .replica);
 
             const sector_ceil = Journal.sector_ceil(message.header.size);
             if (message.header.size != sector_ceil) {
