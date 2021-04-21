@@ -10,6 +10,7 @@ const vr = @import("vr.zig");
 const Header = vr.Header;
 const Journal = vr.Journal;
 const Replica = vr.Replica;
+const Client = @import("client.zig").Client;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
@@ -18,19 +19,27 @@ pub const Message = MessagePool.Message;
 
 const SendQueue = RingBuffer(*Message, config.connection_send_queue_max);
 
+const Process = union(enum) {
+    replica: *Replica,
+    client: *Client,
+};
+
 pub const MessageBus = struct {
+    // TODO Standardize on one of these and use them everywhere:
     pub const Address = std.net.Address;
 
     pool: MessagePool,
     io: *IO,
 
+    cluster: u128,
     configuration: []std.net.Address,
 
-    /// The replica which is running the server
-    server: *Replica,
-    server_fd: os.socket_t,
-    /// Used to store messages sent by the server to itself for delivery in flush().
-    server_send_queue: SendQueue = .{},
+    /// The Replica or Client process that will receive messages from this MessageBus.
+    process: Process,
+    /// Used to store messages sent by a process to itself for delivery in flush().
+    process_send_queue: SendQueue = .{},
+    /// The file descriptor for the process on which to accept connections.
+    process_accept_fd: ?os.socket_t,
 
     accept_completion: IO.Completion = undefined,
     /// The connection reserved for the currently in progress accept operation.
@@ -43,7 +52,7 @@ pub const MessageBus = struct {
     connections_used: usize = 0,
 
     /// Map from replica index to the currently active connection for that replica, if any.
-    /// The connection for the server replica will always be null.
+    /// The connection for the process replica if any will always be null.
     replicas: []?*Connection,
     /// The number of outgoing `connect()` attempts for a given replica:
     /// Reset to zero after a successful `on_connect()`.
@@ -56,17 +65,17 @@ pub const MessageBus = struct {
     clients: std.AutoHashMapUnmanaged(u128, *Connection) = .{},
 
     /// Used to apply full jitter when calculating exponential backoff:
-    /// Seeded with the server's replica index.
+    /// Seeded with the process' replica index or client ID.
     prng: std.rand.DefaultPrng,
 
-    /// Initialize the MessageBus for the given server replica and configuration.
+    /// Initialize the MessageBus for the given cluster, configuration and replica/client process.
     pub fn init(
         self: *MessageBus,
         allocator: *mem.Allocator,
         io: *IO,
+        cluster: u128,
         configuration: []std.net.Address,
-        server: *Replica,
-        server_index: u16,
+        process: Process,
     ) !void {
         // There must be enough connections for all replicas and at least one client.
         assert(config.connections_max > configuration.len);
@@ -83,16 +92,27 @@ pub const MessageBus = struct {
         errdefer allocator.free(replicas_connect_attempts);
         mem.set(u4, replicas_connect_attempts, 0);
 
+        const process_accept_fd = switch (process) {
+            .replica => |p| try init_tcp(configuration[p.replica]),
+            .client => null,
+        };
+
+        const prng_seed = switch (process) {
+            .replica => |p| p.replica,
+            .client => |p| @truncate(u64, p.id),
+        };
+
         self.* = .{
             .pool = try MessagePool.init(allocator),
             .io = io,
+            .cluster = cluster,
             .configuration = configuration,
-            .server = server,
-            .server_fd = try init_tcp(configuration[server_index]),
+            .process = process,
+            .process_accept_fd = process_accept_fd,
             .connections = connections,
             .replicas = replicas,
             .replicas_connect_attempts = replicas_connect_attempts,
-            .prng = std.rand.DefaultPrng.init(server_index),
+            .prng = std.rand.DefaultPrng.init(prng_seed),
         };
 
         // Pre-allocate enough memory to hold all possible connections in the client map.
@@ -158,14 +178,27 @@ pub const MessageBus = struct {
     }
 
     pub fn tick(self: *MessageBus) void {
-        // Each replica is responsible for connecting to replicas that come
-        // after it in the configuration. This ensures that replicas never try
-        // to connect to each other at the same time.
-        var replica: u16 = self.server.replica + 1;
-        while (replica < self.replicas.len) : (replica += 1) {
-            self.maybe_connect_to_replica(replica);
+        switch (self.process) {
+            .replica => |process| {
+                // Each replica is responsible for connecting to replicas that come
+                // after it in the configuration. This ensures that replicas never try
+                // to connect to each other at the same time.
+                var replica: u16 = process.replica + 1;
+                while (replica < self.replicas.len) : (replica += 1) {
+                    self.maybe_connect_to_replica(replica);
+                }
+
+                // Only replicas accept connections from other replicas and clients:
+                self.maybe_accept();
+            },
+            .client => {
+                // The client connects to all replicas.
+                var replica: u16 = 0;
+                while (replica < self.replicas.len) : (replica += 1) {
+                    self.maybe_connect_to_replica(replica);
+                }
+            },
         }
-        self.maybe_accept();
 
         // TODO: rewrite ConcurrentRanges to not use async
         // This nosuspend is only safe because we do not actually do any asynchronous disk IO yet.
@@ -225,6 +258,8 @@ pub const MessageBus = struct {
     }
 
     fn maybe_accept(self: *MessageBus) void {
+        assert(self.process == .replica);
+
         if (self.accept_connection != null) return;
         // All connections are currently in use, do nothing.
         if (self.connections_used == self.connections.len) return;
@@ -241,7 +276,7 @@ pub const MessageBus = struct {
             self,
             on_accept,
             &self.accept_completion,
-            self.server_fd,
+            self.process_accept_fd.?,
             os.SOCK_CLOEXEC,
         );
     }
@@ -301,12 +336,12 @@ pub const MessageBus = struct {
     }
 
     pub fn send_message_to_replica(self: *MessageBus, replica: u16, message: *Message) void {
-        // Messages sent by the server to itself are delivered directly in flush()
-        if (replica == self.server.replica) {
-            self.server_send_queue.push(message.ref()) catch |err| switch (err) {
+        // Messages sent by a process to itself are delivered directly in flush():
+        if (self.process == .replica and replica == self.process.replica.replica) {
+            self.process_send_queue.push(message.ref()) catch |err| switch (err) {
                 error.NoSpaceLeft => {
                     self.unref(message);
-                    log.notice("message queue for server full, dropping message", .{});
+                    log.notice("process' message queue full, dropping message", .{});
                 },
             };
         } else if (self.replicas[replica]) |connection| {
@@ -341,18 +376,23 @@ pub const MessageBus = struct {
     /// Try to send the message to the client with the given id.
     /// If the client is not currently connected, the message is silently dropped.
     pub fn send_message_to_client(self: *MessageBus, client_id: u128, message: *Message) void {
+        assert(self.process == .replica);
+
         if (self.clients.get(client_id)) |connection| {
             connection.send_message(message);
         }
     }
 
     pub fn flush(self: *MessageBus) void {
-        // Deliver messages the server replica has sent to itself.
+        // Deliver messages the process has sent to itself.
         // Iterate on a copy to avoid a potential infinite loop.
-        var copy = self.server_send_queue;
-        self.server_send_queue = .{};
+        var copy = self.process_send_queue;
+        self.process_send_queue = .{};
         while (copy.pop()) |message| {
-            self.server.on_message(message);
+            switch (self.process) {
+                .replica => |process| process.on_message(message),
+                .client => unreachable,
+            }
             self.unref(message);
         }
     }
@@ -447,12 +487,14 @@ const Connection = struct {
     /// The slot in the Message.replicas slices is immediately reserved.
     /// Failure is silent and returns the connection to an unused state.
     pub fn connect_to_replica(self: *Connection, replica: u16) void {
-        assert(replica != self.message_bus.server.replica);
+        assert(self.message_bus.process == .client or
+            replica != self.message_bus.process.replica.replica);
         assert(self.peer == .none);
         assert(self.state == .idle);
         assert(self.fd == -1);
 
-        const family = self.message_bus.configuration[self.message_bus.server.replica].any.family;
+        // The first replica's network address family determines the family for all other replicas:
+        const family = self.message_bus.configuration[0].any.family;
         self.fd = os.socket(family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0) catch return;
         self.peer = .{ .replica = replica };
         self.state = .connecting;
@@ -679,7 +721,7 @@ const Connection = struct {
                 return null;
             }
 
-            if (header.cluster != self.message_bus.server.cluster) {
+            if (header.cluster != self.message_bus.cluster) {
                 log.err("message addressed to the wrong cluster: {}", .{header.cluster});
                 self.terminate(.shutdown);
                 return null;
@@ -729,7 +771,7 @@ const Connection = struct {
         return message;
     }
 
-    /// Forwards a received message to `Replica.on_message()`.
+    /// Forwards a received message to `Process.on_message()`.
     /// Zeroes any `.prepare` sector padding after the body and up to the nearest sector multiple.
     fn on_message(self: *Connection, message: *Message) void {
         if (message == self.recv_message.?) {
@@ -743,6 +785,8 @@ const Connection = struct {
         }
 
         if (message.header.command == .prepare) {
+            assert(self.message_bus.process == .replica);
+
             const sector_ceil = Journal.sector_ceil(message.header.size);
             if (message.header.size != sector_ceil) {
                 assert(message.header.size < sector_ceil);
@@ -751,17 +795,19 @@ const Connection = struct {
             }
         }
 
-        // TODO: rewrite ConcurrentRanges to not use async. This nosuspend is only
-        // safe because we do not do any asynchronous disk IO yet.
-        var frame = async self.message_bus.server.on_message(message);
-        nosuspend await frame;
+        switch (self.message_bus.process) {
+            // TODO: Rewrite ConcurrentRanges to not use async:
+            // This `nosuspend` is only safe because we do not do any asynchronous disk IO yet.
+            .replica => |process| nosuspend await async process.on_message(message),
+            .client => |process| process.on_message(message),
+        }
     }
 
     fn set_peer(self: *Connection, header: *const Header) void {
         assert(self.state == .connected);
         assert(self.fd != -1);
 
-        assert(self.message_bus.server.cluster == header.cluster);
+        assert(self.message_bus.cluster == header.cluster);
         assert(self.message_bus.connections_used > 0);
 
         switch (self.peer) {
