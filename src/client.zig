@@ -55,7 +55,7 @@ pub const Client = struct {
     pub fn batch(
         self: *Client,
         user_data: u64,
-        calback: BatchCallback,
+        callback: BatchCallback,
         operation: Operation,
         data: []const u8,
     ) void {
@@ -63,7 +63,7 @@ pub const Client = struct {
             .reserved, .init => unreachable,
 
             .create_accounts => {
-                self.create_accounts_batch.push(user_data, calback, mem.bytesAsSlice(Account, data)) catch {
+                self.batch_create_accounts.push(user_data, callback, mem.bytesAsSlice(Account, data)) catch {
                     // TODO return error
                 };
             },
