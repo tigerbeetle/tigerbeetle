@@ -32,6 +32,10 @@ pub fn main() !void {
 
     while (true) {
         client.tick();
+        // We tick IO outside of client so that an IO instance can be shared by multiple clients:
+        // Otherwise we will hit io_uring memory restrictions too quickly.
+        // TODO client.ts must setInterval(10ms) to call io.tick() and clients.forEach.tick().
+        try io.tick();
         std.time.sleep(1000 * std.time.ns_per_ms);
     }
 }
