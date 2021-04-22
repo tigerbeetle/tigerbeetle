@@ -26,95 +26,118 @@ pub const IO = struct {
         self.ring.deinit();
     }
 
+    /// Pass all queued submissions to the kernel and peek for completions.
+    pub fn tick(self: *IO) !void {
+        // We assume that all timeouts submitted by `run_for_ns()` will be reaped by `run_for_ns()`
+        // and that `tick()` and `run_for_ns()` cannot be run concurrently.
+        // Therefore `timeouts` here will never be decremented and `etime` will always be false.
+        var timeouts: usize = 0;
+        var etime = false;
+
+        try self.flush(0, &timeouts, &etime);
+        assert(etime == false);
+
+        // Flush any SQEs that were queued while running completion callbacks in `flush()`:
+        // This is an optimization to avoid delaying submissions until the next tick.
+        // At the same time, we do not flush any ready CQEs since SQEs may complete synchronously.
+        // We guard against an io_uring_enter() syscall if we know we do not have any queued SQEs.
+        // We cannot use `self.ring.sq_ready()` here since this counts flushed and unflushed SQEs.
+        const queued = self.ring.sq.sqe_tail -% self.ring.sq.sqe_head;
+        if (queued > 0) {
+            try self.flush_submissions(0, &timeouts, &etime);
+            assert(etime == false);
+        }
+    }
+
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the __kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
         var current_ts: os.timespec = undefined;
-        // Any kernel that supports io_uring supports CLOCK_MONOTONIC as well
+        // Any kernel that supports io_uring supports CLOCK_MONOTONIC as well:
         os.clock_gettime(os.CLOCK_MONOTONIC, &current_ts) catch unreachable;
-        // The absolute CLOCK_MONOTONIC time after which we may return from this function.
+        // The absolute CLOCK_MONOTONIC time after which we may return from this function:
         const timeout_ts: os.__kernel_timespec = .{
             .tv_sec = current_ts.tv_sec,
             .tv_nsec = current_ts.tv_nsec + nanoseconds,
         };
         var timeouts: usize = 0;
-        var timeout_complete = false;
-        while (!timeout_complete) {
+        var etime = false;
+        while (!etime) {
             const timeout_sqe = self.ring.get_sqe() catch blk: {
-                // The submission queue is full, so flush submissions to make space.
-                if (try self.flush_submissions(0, &timeouts)) timeout_complete = true;
+                // The submission queue is full, so flush submissions to make space:
+                try self.flush_submissions(0, &timeouts, &etime);
                 break :blk self.ring.get_sqe() catch unreachable;
             };
-            // Submit an absolute timeout that will be canceled if any other operation is
-            // completed first.
+            // Submit an absolute timeout that will be canceled if any other SQE completes first:
             linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.IORING_TIMEOUT_ABS);
             timeout_sqe.user_data = 0;
             timeouts += 1;
-            // The amount of time this call will block is bounded by the timeout we just submitted.
-            if (try self.flush_submissions(1, &timeouts)) timeout_complete = true;
-            // We can now just peek for any CQEs without waiting, and without another syscall:
-            if (try self.flush_completions(0, &timeouts)) timeout_complete = true;
-            // Run completions only after all completions have been flushed:
-            // Loop on a copy of the linked list, having reset the linked list first, so that any
-            // synchronous append on running a completion is executed only the next time round
-            // the event loop, without creating an infinite suspend/resume cycle.
-            {
-                var copy = self.completed;
-                self.completed = .{};
-                while (copy.pop()) |completion| completion.complete();
-            }
-            // Again, loop on a copy of the list to avoid an infinite loop
-            {
-                var copy = self.unqueued;
-                self.unqueued = .{};
-                while (copy.pop()) |completion| self.enqueue(completion);
-            }
+            // The amount of time this call will block is bounded by the timeout we just submitted:
+            try self.flush(1, &timeouts, &etime);
         }
-        // Reap any remaining timouts, which reference the timespec in the current stack frame.
-        // The busy loop here is required to avoid a potential deadlock as the kernel determines
+        // Reap any remaining timeouts, which reference the timespec in the current stack frame.
+        // The busy loop here is required to avoid a potential deadlock, as the kernel determines
         // when the timeouts are pushed to the completion queue, not us.
-        while (timeouts > 0) _ = try self.flush_completions(0, &timeouts);
+        while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
     }
 
-    fn flush_completions(self: *IO, _wait_nr: u32, timeouts: *usize) !bool {
+    fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
+        // Flush any queued SQEs and reuse the same syscall to wait for completions if required:
+        try self.flush_submissions(wait_nr, timeouts, etime);
+        // We can now just peek for any CQEs without waiting and without another syscall:
+        try self.flush_completions(0, timeouts, etime);
+        // Run completions only after all completions have been flushed:
+        // Loop on a copy of the linked list, having reset the list first, so that any synchronous
+        // append on running a completion is executed only the next time round the event loop,
+        // without creating an infinite loop.
+        {
+            var copy = self.completed;
+            self.completed = .{};
+            while (copy.pop()) |completion| completion.complete();
+        }
+        // Again, loop on a copy of the list to avoid an infinite loop:
+        {
+            var copy = self.unqueued;
+            self.unqueued = .{};
+            while (copy.pop()) |completion| self.enqueue(completion);
+        }
+    }
+
+    fn flush_completions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
         var cqes: [256]io_uring_cqe = undefined;
-        var timeout_complete = false;
-        var wait_nr = _wait_nr;
+        var wait_remaining = wait_nr;
         while (true) {
             // Guard against waiting indefinitely (if there are too few requests inflight),
             // especially if this is not the first time round the loop:
-            const completed = self.ring.copy_cqes(&cqes, wait_nr) catch |err| switch (err) {
+            const completed = self.ring.copy_cqes(&cqes, wait_remaining) catch |err| switch (err) {
                 error.SignalInterrupt => continue,
                 else => return err,
             };
-            if (completed > wait_nr) wait_nr = 0 else wait_nr -= completed;
+            if (completed > wait_remaining) wait_remaining = 0 else wait_remaining -= completed;
             for (cqes[0..completed]) |cqe| {
                 if (cqe.user_data == 0) {
                     timeouts.* -= 1;
-                    // We are only done if the timeout submitted was completed due to time,
-                    // not if it was completed due to the completion of an event in which case
-                    // cqe.res would be 0.
-                    // It is possible for multiple timeout operations to complete at the same
-                    // time if the nanoseconds value passed to run_for_ns() was very low.
-                    if (-cqe.res == os.ETIME) timeout_complete = true;
+                    // We are only done if the timeout submitted was completed due to time, not if
+                    // it was completed due to the completion of an event, in which case `cqe.res`
+                    // would be 0. It is possible for multiple timeout operations to complete at the
+                    // same time if the nanoseconds value passed to `run_for_ns()` is very short.
+                    if (-cqe.res == os.ETIME) etime.* = true;
                     continue;
                 }
                 const completion = @intToPtr(*Completion, @intCast(usize, cqe.user_data));
                 completion.result = cqe.res;
-                // We do not run the completion here (instead appending to a linked list):
-                // * to avoid recursion through `flush_submissions()` and `flush_completions()`,
-                // * to avoid unbounded stack usage, and
-                // * to avoid confusing stack traces.
+                // We do not run the completion here (instead appending to a linked list) to avoid:
+                // * recursion through `flush_submissions()` and `flush_completions()`,
+                // * unbounded stack usage, and
+                // * confusing stack traces.
                 self.completed.push(completion);
             }
             if (completed < cqes.len) break;
         }
-        return timeout_complete;
     }
 
-    fn flush_submissions(self: *IO, wait_nr: u32, timeouts: *usize) !bool {
-        var timeout_complete = false;
+    fn flush_submissions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
         while (true) {
             _ = self.ring.submit_and_wait(wait_nr) catch |err| switch (err) {
                 error.SignalInterrupt => continue,
@@ -123,14 +146,13 @@ pub const IO = struct {
                 // Be careful also that copy_cqes() will flush before entering to wait (it does):
                 // https://github.com/axboe/liburing/commit/35c199c48dfd54ad46b96e386882e7ac341314c5
                 error.CompletionQueueOvercommitted, error.SystemResources => {
-                    timeout_complete = try self.flush_completions(1, timeouts);
+                    try self.flush_completions(1, timeouts, etime);
                     continue;
                 },
                 else => return err,
             };
             break;
         }
-        return timeout_complete;
     }
 
     fn enqueue(self: *IO, completion: *Completion) void {
