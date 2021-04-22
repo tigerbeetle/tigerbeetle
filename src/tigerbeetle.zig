@@ -8,8 +8,6 @@ const StringifyOptions = std.json.StringifyOptions;
 pub const config = @import("config.zig");
 
 pub const Account = packed struct {
-    pub const Results = CreateAccountResults;
-
     id: u128,
     custom: u128,
     flags: AccountFlags,
