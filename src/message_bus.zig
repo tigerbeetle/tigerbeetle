@@ -122,6 +122,9 @@ pub const MessageBus = struct {
         try self.clients.ensureCapacity(allocator, config.connections_max);
     }
 
+    /// TODO This is required by the Client.
+    pub fn deinit(self: *MessageBus) void {}
+
     fn init_tcp(address: std.net.Address) !os.socket_t {
         const fd = try os.socket(
             address.any.family,
