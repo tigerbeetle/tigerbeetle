@@ -131,7 +131,7 @@ fn decode_context(env: c.napi_env, value: c.napi_value, comptime message: [*:0]c
     return @ptrCast(*Client, @alignCast(@alignOf(Client), result));
 }
 
-// This will create a reference in V8 with a ref_count of 1. This reference will be destroyed when 
+// This will create a reference in V8 with a ref_count of 1. This reference will be destroyed when
 // we return the server response to JS.
 fn decode_callback(env: c.napi_env, value: c.napi_value, comptime message: [*:0]const u8) !usize {
     var callback_type: c.napi_valuetype = undefined;
@@ -202,7 +202,7 @@ fn decode_from_array(comptime T: type, env: c.napi_env, object: c.napi_value) ![
     errdefer allocator.free(events);
 
     var i: u32 = 0;
-    while (i < array_length) : (i+=1) {
+    while (i < array_length) : (i += 1) {
         var entry: c.napi_value = undefined;
         if (c.napi_get_element(env, object, i, &entry) != .napi_ok) {
             return throw(env, "Failed to get array element.");
@@ -216,8 +216,7 @@ fn decode_from_array(comptime T: type, env: c.napi_env, object: c.napi_value) ![
     return std.mem.sliceAsBytes(events);
 }
 
-fn decode_slice_from_array(env: c.napi_env, object: c.napi_value, operation: Operation) ![]u8
-{
+fn decode_slice_from_array(env: c.napi_env, object: c.napi_value, operation: Operation) ![]u8 {
     const allocator = std.heap.c_allocator;
     return switch (operation) {
         .reserved, .init => {
@@ -231,7 +230,7 @@ fn decode_slice_from_array(env: c.napi_env, object: c.napi_value, operation: Ope
     };
 }
 
-fn init (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 20;
     var argv: [20]c.napi_value = undefined;
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
@@ -248,7 +247,7 @@ fn init (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
 
     var configuration: [1]std.net.Address = undefined;
     configuration[0] = address;
-   
+
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_allocator.deinit();
     const allocator = &arena_allocator.allocator;
@@ -276,7 +275,7 @@ fn init (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     return context;
 }
 
-fn batch (
+fn batch(
     env: c.napi_env,
     info: c.napi_callback_info,
 ) callconv(.C) c.napi_value {
@@ -305,7 +304,7 @@ fn batch (
     defer allocator.free(events);
 
     // TODO: map env and user_callback
-    // const userdata = 
+    // const userdata =
 
     // client.batch(operation, events, userdata, &on_result);
     client.hello_world();
