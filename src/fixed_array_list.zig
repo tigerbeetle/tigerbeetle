@@ -1,30 +1,30 @@
 const std = @import("std");
 const mem = std.mem;
 
-fn FixedArrayList(comptime T: type, comptime size: usize) type {
+pub fn FixedArrayList(comptime T: type, comptime size: usize) type {
     return struct {
         const Self = @This();
 
         items: []T,
 
-        fn init(allocator: *mem.Allocator) !Self {
+        pub fn init(allocator: *mem.Allocator) !Self {
             var ret = Self{ .items = &[0]T{} };
             ret.items.ptr = try allocator.create([size]T);
             return ret;
         }
 
-        fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
+        pub fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
             // Must use "unsafe" slicing here to avoid safety checks
             allocator.free(self.items.ptr[0..size]);
         }
 
-        fn append(self: *Self, item: T) error{NoSpaceLeft}!void {
+        pub fn append(self: *Self, item: T) error{NoSpaceLeft}!void {
             if (self.items.len == size) return error.NoSpaceLeft;
             self.items.len += 1;
             self.items[self.items.len - 1] = item;
         }
 
-        fn clear(self: *Self) void {
+        pub fn clear(self: *Self) void {
             self.items.len = 0;
         }
     };
