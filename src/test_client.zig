@@ -18,7 +18,9 @@ pub fn main() !void {
     const id = 123;
 
     var io = try IO.init(32, 0);
+    // TODO Use a comptime generator or have MessageBus.init() return self:
     var message_bus: MessageBus = undefined;
+    try message_bus.init(allocator, args.cluster, args.configuration, .{ .client = id }, &io);
     var client = try Client.init(
         allocator,
         id,
@@ -26,10 +28,10 @@ pub fn main() !void {
         args.configuration,
         &message_bus,
     );
-    try message_bus.init(allocator, &io, args.cluster, args.configuration, .{ .client = &client });
+    message_bus.process = .{ .client = &client };
 
     while (true) {
         client.tick();
-        try io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
+        std.time.sleep(1000 * std.time.ns_per_ms);
     }
 }

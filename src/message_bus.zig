@@ -72,10 +72,13 @@ pub const MessageBus = struct {
     pub fn init(
         self: *MessageBus,
         allocator: *mem.Allocator,
-        io: *IO,
         cluster: u128,
         configuration: []std.net.Address,
-        process: Process,
+        pid: union(enum) {
+            replica: u16,
+            client: u128,
+        },
+        io: *IO,
     ) !void {
         // There must be enough connections for all replicas and at least one client.
         assert(config.connections_max > configuration.len);
@@ -92,14 +95,14 @@ pub const MessageBus = struct {
         errdefer allocator.free(replicas_connect_attempts);
         mem.set(u4, replicas_connect_attempts, 0);
 
-        const process_accept_fd = switch (process) {
-            .replica => |p| try init_tcp(configuration[p.replica]),
+        const process_accept_fd = switch (pid) {
+            .replica => |replica_index| try init_tcp(configuration[replica_index]),
             .client => null,
         };
 
-        const prng_seed = switch (process) {
-            .replica => |p| p.replica,
-            .client => |p| @truncate(u64, p.id),
+        const prng_seed = switch (pid) {
+            .replica => pid.replica,
+            .client => @truncate(u64, pid.client),
         };
 
         self.* = .{
@@ -107,7 +110,7 @@ pub const MessageBus = struct {
             .io = io,
             .cluster = cluster,
             .configuration = configuration,
-            .process = process,
+            .process = undefined,
             .process_accept_fd = process_accept_fd,
             .connections = connections,
             .replicas = replicas,
