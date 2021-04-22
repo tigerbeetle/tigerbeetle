@@ -8,6 +8,9 @@ const TransferFlags = @import("./tigerbeetle.zig").TransferFlags;
 const CommitFlags = @import("./tigerbeetle.zig").CommitFlags;
 const Commit = @import("./tigerbeetle.zig").Commit;
 const Operation = @import("./state_machine.zig").Operation;
+const MessageBus = @import("message_bus.zig").MessageBus;
+const Client = @import("client.zig").Client;
+const IO = @import("io.zig").IO;
 
 const c = @cImport({
     @cInclude("node_api.h");
@@ -19,11 +22,23 @@ const c = @cImport({
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
     var function: c.napi_value = undefined;
     if (c.napi_create_function(env, null, 0, batch, null, &function) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to create function");
+        _ = c.napi_throw_error(env, null, "Failed to create function batch().");
         return null;
     }
 
     if (c.napi_set_named_property(env, exports, "batch", function) != .napi_ok) {
+        _ = c.napi_throw_error(env, null, "Failed to add function to exports");
+
+        return null;
+    }
+
+    var init_function: c.napi_value = undefined;
+    if (c.napi_create_function(env, null, 0, init, null, &init_function) != .napi_ok) {
+        _ = c.napi_throw_error(env, null, "Failed to create function init().");
+        return null;
+    }
+
+    if (c.napi_set_named_property(env, exports, "init", init_function) != .napi_ok) {
         _ = c.napi_throw_error(env, null, "Failed to add function to exports");
 
         return null;
@@ -91,7 +106,7 @@ fn decode_buffer_from_object(env: c.napi_env, object: c.napi_value, comptime key
     var data_length: usize = undefined;
     assert(c.napi_get_buffer_info(env, property, &data, &data_length) == .napi_ok);
 
-    if (data_length > 0) return throw(env, key ++ " must not be empty");
+    if (data_length < 1) return throw(env, key ++ " must not be empty");
 
     return @ptrCast([*]u8, data.?)[0..data_length];
 }
@@ -105,6 +120,32 @@ fn decode_u32(env: c.napi_env, value: c.napi_value, comptime message: [*:0]const
     }
 
     return result;
+}
+
+fn decode_context(env: c.napi_env, value: c.napi_value, comptime message: [*:0]const u8) !*Client {
+    var result: ?*c_void = null;
+    if (c.napi_get_value_external(env, value, &result) != .napi_ok) {
+        return throw(env, message);
+    }
+
+    return @ptrCast(*Client, @alignCast(@alignOf(Client), result));
+}
+
+// This will create a reference in V8 with a ref_count of 1. This reference will be destroyed when 
+// we return the server response to JS.
+fn decode_callback(env: c.napi_env, value: c.napi_value, comptime message: [*:0]const u8) !usize {
+    var callback_type: c.napi_valuetype = undefined;
+    if (c.napi_typeof(env, value, &callback_type) != .napi_ok) {
+        return throw(env, message);
+    }
+    if (callback_type != .napi_function) return throw(env, "Callback must be a function.");
+
+    var callback_reference: c.napi_ref = undefined;
+    if (c.napi_create_reference(env, value, 1, &callback_reference) != .napi_ok) {
+        return throw(env, "Failed to create reference to callback.");
+    }
+
+    return @ptrToInt(callback_reference);
 }
 
 fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !T {
@@ -190,6 +231,51 @@ fn decode_slice_from_array(env: c.napi_env, object: c.napi_value, operation: Ope
     };
 }
 
+fn init (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+    var argc: usize = 20;
+    var argv: [20]c.napi_value = undefined;
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
+        throw(env, "Failed to get args.") catch return null;
+    }
+    if (argc != 1) throw(env, "Function init() must receive 1 argument exactly.") catch return null;
+
+    const id = decode_u128_from_object(env, argv[0], "client_id") catch return null;
+    const cluster = decode_u128_from_object(env, argv[0], "cluster_id") catch return null;
+    // TODO: parse replica_addresses from from args
+    const address = std.net.Address.parseIp4("127.0.0.1", 3001) catch {
+        throw(env, "Failed to parse arguments.") catch return null;
+    };
+
+    var configuration: [1]std.net.Address = undefined;
+    configuration[0] = address;
+   
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_allocator.deinit();
+    const allocator = &arena_allocator.allocator;
+    var message_bus: MessageBus = undefined;
+    var client = try Client.init(
+        allocator,
+        id,
+        cluster,
+        configuration[0..],
+        &message_bus,
+    );
+    var io = IO.init(128, 0) catch {
+        throw(env, "Failed to initialise IO.") catch return null;
+    };
+    message_bus.init(allocator, &io, cluster, configuration[0..1], .{ .client = &client }) catch {
+        throw(env, "Failed to initialise the message bus.") catch return null;
+    };
+
+    var context: c.napi_value = null;
+    if (c.napi_create_external(env, @ptrCast(*c_void, &client), null, null, &context) != .napi_ok) {
+        client.deinit();
+        throw(env, "Failed to initialise client.") catch return null;
+    }
+
+    return context;
+}
+
 fn batch (
     env: c.napi_env,
     info: c.napi_callback_info,
@@ -203,9 +289,9 @@ fn batch (
     const allocator = std.heap.c_allocator;
     if (argc != 4) throw(env, "Function batch() must receive 4 arguments exactly.") catch return null;
 
-    // TODO: context will be napi_external
-    var context = decode_u32(env, argv[0], "Failed to parse \"context\".") catch return null;
-    var operation_int = decode_u32(env, argv[1], "Failed to parse \"operation\".") catch return null;
+    const client = decode_context(env, argv[0], "Failed to parse \"context\".") catch return null;
+    const operation_int = decode_u32(env, argv[1], "Failed to parse \"operation\".") catch return null;
+    const user_callback = decode_callback(env, argv[3], "Failed to parse \"callback\".") catch return null;
     if (operation_int >= @typeInfo(Operation).Enum.fields.len) {
         throw(env, "Unknown operation.") catch return null;
     }
@@ -218,28 +304,15 @@ fn batch (
     };
     defer allocator.free(events);
 
-    // call out to client.zig
-    // Store reference to JS callback in (statically?) allocated array.
-    var callback_reference: c.napi_value = undefined;
-    var callback_type: napi_valuetype = undefined;
-    if (c.napi_typeof(env, argv[3], &callback_type) != .napi_ok) {
-        throw(env, "Failed to determine type of argument 4.") catch return null;
-    }
-    if (callback_type != .napi_function) throw(env, "Argument 4 is not a function.") catch return null;
-    if (c.napi_create_reference(env, argv[3], 1, &callback_reference) != .napi_ok) {
-        throw(env, "Failed to create reference to callback.") catch return null;
-    } 
-    const index = try store_callback(callback_reference) catch return null;
+    // TODO: map env and user_callback
+    // const userdata = 
 
-    // Client.batch(context operation, batch, index, &on_result);
+    // client.batch(operation, events, userdata, &on_result);
+    client.hello_world();
 
     return null;
 }
 
-func store_callback(callback_reference: c.napi_value) u32 {
-    return 1;
-}
-
-func on_result (index: u32, results: []const u8) void {
-
-}
+// func on_result (userdata: u64, results: []const u8) void {
+//     // retrieve callback
+// }
