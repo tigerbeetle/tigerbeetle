@@ -18,6 +18,9 @@ pub const Client = struct {
     configuration: []MessageBus.Address,
     message_bus: *MessageBus,
 
+    // TODO Ask the cluster for our last request number.
+    request: u32 = 0,
+
     batch_create_accounts: Batch(.create_accounts, 1000),
 
     pub fn init(
@@ -87,6 +90,14 @@ pub const Client = struct {
                 message.header.cluster,
                 self.cluster,
             });
+            return;
+        }
+        if (message.header.command != .reply) {
+            log.warn("{}: on_message: unexpected command {}", .{ self.id, message.header.command });
+            return;
+        }
+        if (message.header.request < self.request) {
+            log.debug("{}: on_message: duplicate reply {}", .{ self.id, message.header.request });
             return;
         }
     }
