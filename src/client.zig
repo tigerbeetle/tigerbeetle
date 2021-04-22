@@ -6,6 +6,9 @@ const Message = @import("message_bus.zig").Message;
 const Operation = @import("state_machine.zig").Operation;
 const FixedArrayList = @import("fixed_array_list.zig").FixedArrayList;
 
+// TODO Be explicit with what we import:
+usingnamespace @import("tigerbeetle.zig");
+
 const log = std.log;
 
 pub const Client = struct {
@@ -15,7 +18,7 @@ pub const Client = struct {
     configuration: []MessageBus.Address,
     message_bus: *MessageBus,
 
-    create_accounts_batch: Batch(.create_accounts, 1000),
+    batch_create_accounts: Batch(.create_accounts, 1000),
 
     pub fn init(
         allocator: *std.mem.Allocator,
@@ -28,14 +31,16 @@ pub const Client = struct {
         assert(cluster > 0);
         assert(configuration.len > 0);
 
-        const batch = try Batch(.create_accounts, 1000).init(allocator, message_bus.get_message().?);
         const self = Client{
             .allocator = allocator,
             .id = id,
             .cluster = cluster,
             .configuration = configuration,
             .message_bus = message_bus,
-            .create_accounts_batch = batch,
+            .batch_create_accounts = try Batch(.create_accounts, 1000).init(
+                allocator,
+                message_bus.get_message().?,
+            ),
         };
 
         return self;
@@ -87,69 +92,81 @@ pub const Client = struct {
     }
 };
 
-/// This allows building a batch to be sent as a single message and handles
-/// callback state. The idea is to have multiple of these structs for different
-/// Operations and perhaps even multiple for the same opertion if we want to queue
-/// more entries while a message is in flight.
-fn Batch(comptime operation: Operation, comptime size: usize) type {
-    const T = switch (operation) {
+/// This aggregates groups of events into a batch, containing many events, sent as a single message.
+/// Each group of events within the batch has a callback.
+/// The idea is to have several of these structs, one for each Operation, and perhaps even more
+/// than one for each Operation if we want to queue more events while a message is inflight.
+fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
+    const Event = switch (operation) {
         .create_accounts => Account,
         else => unreachable, // TODO
     };
+
+    const Result = switch (operation) {
+        .create_accounts => CreateAccountResults,
+        else => unreachable, // TODO
+    };
+
     return struct {
         const Self = @This();
 
-        const Callback = fn (user_data: u64, operation: Operation, data: []const u8) void;
+        const Callback = fn (user_data: u64, operation: Operation, results: []const u8) void;
 
-        const Entry = struct {
+        const Group = struct {
             user_data: u64,
             callback: Callback,
-            /// Number of items in the Message buffer associated with the entry.
-            items: u32,
+            /// The number of events in the message buffer associated with this group:
+            len: u32,
         };
 
-        entries: FixedArrayList(Entry, size),
+        const Groups = FixedArrayList(Group, groups_max);
+
+        groups: Groups,
         message: *Message,
 
         fn init(allocator: *std.mem.Allocator, message: *Message) !Self {
             return Self{
-                .entries = try FixedArrayList(Entry, size).init(allocator),
+                .groups = try Groups.init(allocator),
                 .message = message.ref(),
             };
         }
 
-        /// Clear all state but keep the allocated memory
-        fn reset(self: *Self, new_message: *Message, message_bus: *MessageBus) void {
+        fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
+            self.groups.deinit(allocator);
+        }
+
+        /// Clears all state, keeping the allocated memory.
+        fn clear(self: *Self, message_bus: *MessageBus, new_message: *Message) void {
             message_bus.unref(self.message);
             self.message = new_message.ref();
             self.entries.clear();
         }
 
-        fn push(self: *Self, user_data: u64, callback: Callback, items: []T) error{NoSpaceLeft}!void {
-            const data = mem.sliceAsBytes(items);
+        fn push(self: *Self, user_data: u64, callback: Callback, events: []Event) error{NoSpaceLeft}!void {
+            const data = mem.sliceAsBytes(events);
             if (self.message.header.size + data.len > config.message_size_max) {
                 return error.NoSpaceLeft;
             }
             self.entries.append(.{
                 .user_data = user_data,
                 .callback = callback,
-                .items = @intCast(u32, items.len),
-            }) orelse return error.NoSpaceLeft;
+                .len = @intCast(u32, events.len),
+            }) catch return error.NoSpaceLeft; // TODO Use exhaustive switch.
         }
 
         fn deliver(self: *Self, message: *Message) void {
-            // This assumes the results are sorted by their index field, if not we need to sort them here
-            const results = mem.bytesAsSlice(T.Results, message.buffer);
+            // Results are sorted by index field.
+            const results = std.mem.bytesAsSlice(Result, message.buffer);
             var result_idx: u32 = 0;
             var item_idx: u32 = 0;
-            for (self.entries.items) |entry| {
-                const entry_first_result = result_idx;
-                while (results[result_idx].index < item_idx + entry.items) : (result_idx += 1) {
-                    // Mutate the result index to be relative to this entry in-place
+            for (self.groups.items) |group| {
+                const group_first_result = result_idx;
+                while (results[result_idx].index < item_idx + group.len) : (result_idx += 1) {
+                    // Mutate the result index in-place to be relative to this group:
                     result.index -= item_idx;
                 }
-                entry.callback(entry.user_data, operation, results[entry_first_result..result_idx]);
-                item_idx += entry.items;
+                group.callback(group.user_data, operation, std.mem.sliceAsBytes(results[group_first_result..result_idx]));
+                item_idx += group.len;
             }
             assert(result_idx == results.len);
         }
