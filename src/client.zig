@@ -1,14 +1,15 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const mem = std.mem;
 
 const vr = @import("vr.zig");
+const Header = vr.Header;
 
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Message = @import("message_bus.zig").Message;
 const Operation = @import("state_machine.zig").Operation;
 const FixedArrayList = @import("fixed_array_list.zig").FixedArrayList;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
-const Header = @import("vr.zig").Header;
 
 // TODO Be explicit with what we import:
 usingnamespace @import("tigerbeetle.zig");
@@ -16,7 +17,7 @@ usingnamespace @import("tigerbeetle.zig");
 const log = std.log;
 
 pub const Client = struct {
-    allocator: *std.mem.Allocator,
+    allocator: *mem.Allocator,
     id: u128,
     cluster: u128,
     configuration: []MessageBus.Address,
@@ -28,7 +29,7 @@ pub const Client = struct {
     batch_manager: BatchManager,
 
     pub fn init(
-        allocator: *std.mem.Allocator,
+        allocator: *mem.Allocator,
         id: u128,
         cluster: u128,
         configuration_raw: []const u8,
@@ -123,14 +124,18 @@ const BatchManager = struct {
 
     const AnyBatch = union(enum) {
         create_accounts: *Batch(.create_accounts, groups_max),
-        // TODO
+        create_transfers: *Batch(.create_transfers, groups_max),
+        commit_transfers: *Batch(.commit_transfers, groups_max),
+        lookup_accounts: *Batch(.lookup_accounts, groups_max),
     };
 
     /// The currently inflight message (if any) is always at the front of this queue.
     send_queue: RingBuffer(AnyBatch, 4 * batches_per_op) = .{},
 
     create_accounts: BatchRing(Batch(.create_accounts, groups_max), batches_per_op) = .{},
-    // TODO: other ops
+    create_transfers: BatchRing(Batch(.create_transfers, groups_max), batches_per_op) = .{},
+    commit_transfers: BatchRing(Batch(.commit_transfers, groups_max), batches_per_op) = .{},
+    lookup_accounts: BatchRing(Batch(.lookup_accounts, groups_max), batches_per_op) = .{},
 
     fn init(client: Client) !BatchManager {
         var self = BatchManager{};
@@ -138,7 +143,15 @@ const BatchManager = struct {
         for (self.create_accounts.batches) |*batch| {
             batch.* = try Batch(.create_accounts, groups_max).init(client);
         }
-        // TODO: other ops
+        for (self.create_transfers.batches) |*batch| {
+            batch.* = try Batch(.create_transfers, groups_max).init(client);
+        }
+        for (self.commit_transfers.batches) |*batch| {
+            batch.* = try Batch(.commit_transfers, groups_max).init(client);
+        }
+        for (self.lookup_accounts.batches) |*batch| {
+            batch.* = try Batch(.lookup_accounts, groups_max).init(client);
+        }
 
         return self;
     }
@@ -155,16 +168,48 @@ const BatchManager = struct {
             .reserved, .init => unreachable,
             .create_accounts => {
                 const batch = self.create_accounts.current() orelse return error.NoSpaceLeft;
-                batch.push(user_data, callback, std.mem.bytesAsSlice(Account, data)) catch {
+                batch.push(user_data, callback, mem.bytesAsSlice(Account, data)) catch {
                     // The current batch is full, so mark it as complete and push it to the send queue.
                     self.create_accounts.mark_current_complete();
                     self.push_to_send_queue(client, .{ .create_accounts = batch });
                     const new_batch = self.create_accounts.current() orelse return error.NoSpaceLeft;
                     // TODO: reject Client.batch calls with data > message_size_max.
-                    new_batch.push(user_data, callback, std.mem.bytesAsSlice(Account, data)) catch unreachable;
+                    new_batch.push(user_data, callback, mem.bytesAsSlice(Account, data)) catch unreachable;
                 };
             },
-            else => unreachable, // TODO: other operations
+            .create_transfers => {
+                const batch = self.create_transfers.current() orelse return error.NoSpaceLeft;
+                batch.push(user_data, callback, mem.bytesAsSlice(Transfer, data)) catch {
+                    // The current batch is full, so mark it as complete and push it to the send queue.
+                    self.create_transfers.mark_current_complete();
+                    self.push_to_send_queue(client, .{ .create_transfers = batch });
+                    const new_batch = self.create_transfers.current() orelse return error.NoSpaceLeft;
+                    // TODO: reject Client.batch calls with data > message_size_max.
+                    new_batch.push(user_data, callback, mem.bytesAsSlice(Transfer, data)) catch unreachable;
+                };
+            },
+            .commit_transfers => {
+                const batch = self.commit_transfers.current() orelse return error.NoSpaceLeft;
+                batch.push(user_data, callback, mem.bytesAsSlice(Commit, data)) catch {
+                    // The current batch is full, so mark it as complete and push it to the send queue.
+                    self.commit_transfers.mark_current_complete();
+                    self.push_to_send_queue(client, .{ .commit_transfers = batch });
+                    const new_batch = self.commit_transfers.current() orelse return error.NoSpaceLeft;
+                    // TODO: reject Client.batch calls with data > message_size_max.
+                    new_batch.push(user_data, callback, mem.bytesAsSlice(Commit, data)) catch unreachable;
+                };
+            },
+            .lookup_accounts => {
+                const batch = self.lookup_accounts.current() orelse return error.NoSpaceLeft;
+                batch.push(user_data, callback, mem.bytesAsSlice(u128, data)) catch {
+                    // The current batch is full, so mark it as complete and push it to the send queue.
+                    self.lookup_accounts.mark_current_complete();
+                    self.push_to_send_queue(client, .{ .lookup_accounts = batch });
+                    const new_batch = self.lookup_accounts.current() orelse return error.NoSpaceLeft;
+                    // TODO: reject Client.batch calls with data > message_size_max.
+                    new_batch.push(user_data, callback, mem.bytesAsSlice(u128, data)) catch unreachable;
+                };
+            },
         }
     }
 
@@ -176,7 +221,6 @@ const BatchManager = struct {
         if (was_empty) {
             const message = switch (any_batch) {
                 .create_accounts => |batch| batch.message,
-                else => unreachable, // TODO
             };
 
             const body = message.buffer[@sizeOf(Header)..message.header.size];
@@ -189,12 +233,27 @@ const BatchManager = struct {
     fn send_if_none_inflight(self: *BatchManager, client: *Client) void {
         if (!self.send_queue.empty()) return;
 
+        // TODO: instead of sending the first non-empty batch we could send the largest one.
         if (self.create_accounts.current().?.group.items.len > 0) {
             self.create_accounts.mark_current_complete();
             self.push_to_send_queue(client, .{ .create_accounts = batch });
             return;
         }
-        // TODO: other operations
+        if (self.create_transfers.current().?.group.items.len > 0) {
+            self.create_transfers.mark_current_complete();
+            self.push_to_send_queue(client, .{ .create_transfers = batch });
+            return;
+        }
+        if (self.commit_transfers.current().?.group.items.len > 0) {
+            self.commit_transfers.mark_current_complete();
+            self.push_to_send_queue(client, .{ .commit_transfers = batch });
+            return;
+        }
+        if (self.lookup_accounts.current().?.group.items.len > 0) {
+            self.lookup_accounts.mark_current_complete();
+            self.push_to_send_queue(client, .{ .lookup_accounts = batch });
+            return;
+        }
     }
 
     fn deliver(self: *BatchManager, client: *Client, message: *Message) void {
@@ -249,13 +308,19 @@ const BatchCallback = fn (user_data: u64, operation: Operation, results: []const
 /// than one for each Operation if we want to queue more events while a message is inflight.
 fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
     const Event = switch (operation) {
+        .init, .reserved => @compileError("invalid operation"),
         .create_accounts => Account,
-        else => unreachable, // TODO
+        .create_transfers => Transfer,
+        .commit_transfers => Commit,
+        .lookup_accounts => u128,
     };
 
     const Result = switch (operation) {
+        .init, .reserved => @compileError("invalid operation"),
         .create_accounts => CreateAccountResults,
-        else => unreachable, // TODO
+        .create_transfers => CreateTransferResults,
+        .commit_transfers => CommitTransferResults,
+        .lookup_accounts => Account,
     };
 
     return struct {
@@ -282,7 +347,7 @@ fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
             return self;
         }
 
-        fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
+        fn deinit(self: *Self, allocator: *mem.Allocator) void {
             self.groups.deinit(allocator);
         }
 
@@ -306,25 +371,36 @@ fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
                 .callback = callback,
                 .len = @intCast(u32, events.len),
             }) catch return error.NoSpaceLeft; // TODO Use exhaustive switch.
-            std.mem.copy(u8, self.message.buffer[self.message.header.size..], data);
+            mem.copy(u8, self.message.buffer[self.message.header.size..], data);
             self.message.header.size += data.len;
         }
 
         fn deliver(self: *Self, message: *Message) void {
-            // Results are sorted by index field.
-            const results = std.mem.bytesAsSlice(Result, message.buffer);
-            var result_idx: u32 = 0;
-            var item_idx: u32 = 0;
-            for (self.groups.items) |group| {
-                const group_first_result = result_idx;
-                while (results[result_idx].index < item_idx + group.len) : (result_idx += 1) {
-                    // Mutate the result index in-place to be relative to this group:
-                    results[result_idx].index -= item_idx;
+            if (Result == Account) {
+                const accounts = mem.bytesAsSlice(Account, message.buffer);
+                var account_idx: usize = 0;
+                for (self.groups.items) |group| {
+                    const group_accounts = accounts[account_idx..][0..group.len];
+                    group.callback(group.user_data, operation, mem.sliceAsBytes(group_accounts));
+                    account_idx += group.len;
                 }
-                group.callback(group.user_data, operation, std.mem.sliceAsBytes(results[group_first_result..result_idx]));
-                item_idx += group.len;
+                assert(account_idx == accounts.len);
+            } else {
+                // Results are sorted by index field.
+                const results = mem.bytesAsSlice(Result, message.buffer);
+                var result_idx: u32 = 0;
+                var item_idx: u32 = 0;
+                for (self.groups.items) |group| {
+                    const group_first_result = result_idx;
+                    while (results[result_idx].index < item_idx + group.len) : (result_idx += 1) {
+                        // Mutate the result index in-place to be relative to this group:
+                        results[result_idx].index -= item_idx;
+                    }
+                    group.callback(group.user_data, operation, mem.sliceAsBytes(results[group_first_result..result_idx]));
+                    item_idx += group.len;
+                }
+                assert(result_idx == results.len);
             }
-            assert(result_idx == results.len);
         }
     };
 }
