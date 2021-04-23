@@ -263,7 +263,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
         allocator,
         id,
         cluster,
-        configuration[0..],
+        "127.0.0.1", // TODO Decode configuration as an ascii string from config object.
         &message_bus,
     ) catch {
         throw(env, "Failed to initialize Client.") catch return null;

@@ -1,6 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const vr = @import("vr.zig");
+
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Message = @import("message_bus.zig").Message;
 const Operation = @import("state_machine.zig").Operation;
@@ -28,11 +30,14 @@ pub const Client = struct {
         allocator: *std.mem.Allocator,
         id: u128,
         cluster: u128,
-        configuration: []MessageBus.Address,
+        configuration_raw: []const u8,
         message_bus: *MessageBus,
     ) !Client {
         assert(id > 0);
         assert(cluster > 0);
+
+        const configuration = try vr.parse_configuration(allocator, configuration_raw);
+        errdefer allocator.free(configuration);
         assert(configuration.len > 0);
 
         const self = Client{
