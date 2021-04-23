@@ -7,6 +7,9 @@ const Transfer = @import("./tigerbeetle.zig").Transfer;
 const TransferFlags = @import("./tigerbeetle.zig").TransferFlags;
 const CommitFlags = @import("./tigerbeetle.zig").CommitFlags;
 const Commit = @import("./tigerbeetle.zig").Commit;
+const CreateAccountResults = @import("./tigerbeetle.zig").CreateAccountResults;
+const CreateTransferResults = @import("./tigerbeetle.zig").CreateTransferResults;
+const CommitTransferResults = @import("./tigerbeetle.zig").CommitTransferResults;
 const Operation = @import("./state_machine.zig").Operation;
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Client = @import("client.zig").Client;
@@ -16,36 +19,46 @@ const c = @cImport({
     @cInclude("node_api.h");
 });
 
+//
+// N-API Globals
+//
+var napi_undefined: c.napi_value = undefined;
+
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
-    var function: c.napi_value = undefined;
-    if (c.napi_create_function(env, null, 0, batch, null, &function) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to create function batch().");
-        return null;
-    }
+    napi_register_function(env, exports, "init", init);
+    napi_register_function(env, exports, "batch", batch);
+    napi_register_function(env, exports, "deinit", deinit);
 
-    if (c.napi_set_named_property(env, exports, "batch", function) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to add function to exports");
-        return null;
-    }
-
-    var init_function: c.napi_value = undefined;
-    if (c.napi_create_function(env, null, 0, init, null, &init_function) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to create function init().");
-        return null;
-    }
-
-    if (c.napi_set_named_property(env, exports, "init", init_function) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to add function to exports");
+    if (c.napi_get_undefined(env, &napi_undefined) != .napi_ok) {
+        _ = c.napi_throw_error(env, null, "Failed to get \"undefined\"");
         return null;
     }
 
     return exports;
 }
 
+fn napi_register_function (env: c.napi_env, exports: c.napi_value, comptime name: [*:0]const u8, function: fn (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value) void {
+    var napi_function: c.napi_value = undefined;
+    if (c.napi_create_function(env, null, 0, function, null, &napi_function) != .napi_ok) {
+        _ = c.napi_throw_error(env, null, "Failed to create function " ++ name ++ "().");
+        return;
+    }
+
+    if (c.napi_set_named_property(env, exports, name, napi_function) != .napi_ok) {
+        _ = c.napi_throw_error(env, null, "Failed to add " ++ name ++ "() to exports.");
+        return;
+    }
+}
+
 //
 // Helper functions to encode and decode JS object
 //
+const UserData = packed struct {
+    env: c.napi_env,
+    callback_reference: c.napi_ref,
+};
+
 const ThrowError = error{ExceptionThrown};
 
 fn throw(env: c.napi_env, comptime message: [*:0]const u8) ThrowError {
@@ -131,7 +144,7 @@ fn decode_context(env: c.napi_env, value: c.napi_value) !*Client {
 
 /// This will create a reference in V8 with a ref_count of 1.
 /// This reference will be destroyed when we return the server response to JS.
-fn decode_callback(env: c.napi_env, value: c.napi_value) !usize {
+fn decode_callback(env: c.napi_env, value: c.napi_value) !UserData {
     var callback_type: c.napi_valuetype = undefined;
     if (c.napi_typeof(env, value, &callback_type) != .napi_ok) {
         return throw(env, "Failed to check callback type.");
@@ -142,7 +155,11 @@ fn decode_callback(env: c.napi_env, value: c.napi_value) !usize {
     if (c.napi_create_reference(env, value, 1, &callback_reference) != .napi_ok) {
         return throw(env, "Failed to create reference to callback.");
     }
-    return @ptrToInt(callback_reference);
+
+    return UserData{
+        .env = env,
+        .callback_reference = callback_reference,
+    };
 }
 
 fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !T {
@@ -226,6 +243,94 @@ fn decode_slice_from_array(env: c.napi_env, object: c.napi_value, operation: Ope
     };
 }
 
+fn create_napi_array(env: c.napi_env, length: u32, comptime error_message: [*:0]const u8) !c.napi_value {
+    var result: c.napi_value = undefined;
+    if (c.napi_create_array_with_length(env, length, &result) != .napi_ok){
+        throw(env, error_message) catch return null;
+    }
+
+    return result;
+}
+
+fn set_napi_array_element(env: c.napi_env, array: c.napi_value, index: u32, value: c.napi_value, comptime error_message: [*:0]const u8) !void {
+    const napi_index = try create_napi_uint32(env, value, "Failed to create uint32");
+    if(c.napi_call_function(env, array, index, value) != .napi_ok) {
+        return throw(env,error_message);
+    }
+}
+
+fn create_napi_object(env: c.napi_env, comptime error_message: [*:0]const u8) !c.napi_value {
+    var result: c.napi_value = undefined;
+    if (c.napi_create_object(env, &result) != .napi_ok) {
+        return throw(env, error_message);
+    }
+
+    return result;
+}
+
+fn set_napi_object_property(env: c.napi_env, object: c.napi_value, value: c.napi_value, comptime key: [*:0]const u8, comptime error_message: [*:0]const u8) !void {
+    if (c.napi_set_named_property(env, object, key, value) != .napi_ok) {
+        return throw(env, error_message);
+    }
+}
+
+fn create_napi_error(env: c.napi_env, comptime message: [*:0]const u8) !c.napi_value {
+    var napi_error: c.napi_value = undefined;
+    var napi_message = try create_napi_utf8(env, message);
+    if (c.napi_create_error(env, null, napi_message, &napi_error) != .napi_ok) {
+        return throw(env, "Failed to create Error.");
+    }
+
+    return napi_error;
+}
+
+fn create_napi_utf8(env: c.napi_env, comptime message: [*:0]const u8) !c.napi_value {
+    var napi_string: c.napi_value = undefined;
+    if (c.napi_create_string_utf8(env, message, std.mem.len(message), &napi_string) != .napi_ok) {
+        return throw(env, "Failed to encode napi utf8.");
+    }
+
+    return napi_string;
+}
+
+fn create_napi_uint32(env: c.napi_env, value: u32, comptime error_message: [*:0]const u8) !c.napi_value {
+    var result: c.napi_value = undefined;
+    if (c.napi_create_uint32(env, value, &result) != .napi_ok) {
+        return throw(env, error_message);
+    }
+
+    return result;
+}
+
+fn encode_napi_results_array(comptime Result: type, env: c.napi_env, data: []const u8) !c.napi_value {
+    const results = std.mem.bytesAsSlice(Result, data);
+    const napi_array = try create_napi_array(env, @intCast(u32, results.len), "Failed to allocate array for results.");
+
+    switch (Result) {
+        CreateAccountResults, CreateTransferResults, CommitTransferResults => {
+            for (results) |result, i| {
+                const napi_object = try create_napi_object(env, "Failed to create result object");
+
+                const napi_index = try create_napi_uint32(env, result.index, "Failed to convert \"index\" to napi uint32.");
+                try set_napi_object_property(env, napi_object, napi_index, "index", "Failed to set property \"index\" of result.");
+
+                const napi_result = try create_napi_uint32(env, @enumToInt(result.result), "Failed to convert \"result\" to napi uint32.");
+                try set_napi_object_property(env, napi_object, napi_result, "result", "Failed to set property \"result\" of result.");
+            }
+        },
+        // TODO: handle account lookup
+        else => unreachable,
+    }
+
+    return napi_array;
+}
+
+fn delete_napi_reference(env: c.napi_env, reference: c.napi_ref) !void {
+    if (c.napi_delete_reference(env, reference) != .napi_ok) {
+        return throw(env, "Failed to delete callback reference.");
+    }
+}
+
 fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 20;
     var argv: [20]c.napi_value = undefined;
@@ -292,7 +397,7 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
 
     const client = decode_context(env, argv[0]) catch return null;
     const operation_int = decode_u32(env, argv[1], "operation") catch return null;
-    const user_callback = decode_callback(env, argv[3]) catch return null;
+    const user_data = decode_callback(env, argv[3]) catch return null;
 
     if (operation_int >= @typeInfo(Operation).Enum.fields.len) {
         throw(env, "Unknown operation.") catch return null;
@@ -306,15 +411,67 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     };
     defer allocator.free(events);
 
-    // TODO: map env and user_callback
-    // const userdata =
-
-    // client.batch(operation, events, userdata, &on_result);
-    client.hello_world();
+    client.batch(@bitCast(u128, user_data), on_result, operation, events);
 
     return null;
 }
 
-// func on_result (userdata: u64, results: []const u8) void {
-//     // retrieve callback
-// }
+fn on_result (user_data: u128, operation: Operation, results: []const u8) void {
+    const env = @bitCast(UserData, user_data).env;
+    const callback_reference = @bitCast(UserData, user_data).callback_reference;
+    var napi_callback: c.napi_value = undefined;
+    if (c.napi_get_reference_value(env, callback_reference, &napi_callback) != .napi_ok) {
+        throw(env, "Failed to get callback reference.") catch return;
+    }
+
+    var scope: c.napi_value = undefined;
+    if (c.napi_get_global(env, &scope) != .napi_ok) {
+        throw(env, "Failed to get \"this\" for results callback.") catch return;
+    }
+
+    const argc: usize = 2;
+    var argv: [argc]c.napi_value = undefined;
+
+    // if (client_error != null) {
+    //     // TODO: determine message according to error
+    //     const napi_error = create_napi_error(env, "Client could not send batch.") catch return;
+    //     argv[0] = napi_error;
+    //     argv[1] = napi_undefined;
+    // } else {
+    //     const napi_results = encode_napi_results_array(env, @bitCast([]Result, results)) catch return;
+    //     argv[0] = napi_undefined;
+    //     argv[1] = napi_results;
+    // }
+
+    const napi_results = switch (operation) {
+        .reserved, .init => {
+            throw(env, "Reserved operation.") catch return;
+        },
+        .create_accounts => encode_napi_results_array(CreateAccountResults, env, results) catch return,
+        .create_transfers => encode_napi_results_array(CreateTransferResults, env, results) catch return,
+        .commit_transfers => encode_napi_results_array(CommitTransferResults, env, results) catch return,
+        .lookup_accounts => encode_napi_results_array(Account, env, results) catch return,
+    };
+    argv[0] = napi_undefined;
+    argv[1] = napi_results;
+
+    // TODO: add error handling (but allow JS function to throw an exception)
+    _ = c.napi_call_function(env, scope, napi_callback, argc, argv[0..], null);
+
+    delete_napi_reference(env, callback_reference) catch return;
+}
+
+fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+    var argc: usize = 20;
+    var argv: [20]c.napi_value = undefined;
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
+        throw(env, "Failed to get args.") catch return null;
+    }
+
+    if (argc != 1) throw(env, "Function deinit() requires 1 argument exactly.") catch return null;
+
+    const client = decode_context(env, argv[0]) catch return null;
+    client.deinit();
+
+    return null;
+}
