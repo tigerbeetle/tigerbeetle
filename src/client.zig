@@ -8,6 +8,7 @@ const Message = @import("message_bus.zig").Message;
 const Operation = @import("state_machine.zig").Operation;
 const FixedArrayList = @import("fixed_array_list.zig").FixedArrayList;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
+const Header = @import("vr.zig").Header;
 
 // TODO Be explicit with what we import:
 usingnamespace @import("tigerbeetle.zig");
@@ -40,14 +41,15 @@ pub const Client = struct {
         errdefer allocator.free(configuration);
         assert(configuration.len > 0);
 
-        const self = Client{
+        var self = Client{
             .allocator = allocator,
             .id = id,
             .cluster = cluster,
             .configuration = configuration,
             .message_bus = message_bus,
-            .batch_manager = try BatchManager.init(allocator, message_bus),
+            .batch_manager = undefined,
         };
+        self.batch_manager = try BatchManager.init(self);
 
         return self;
     }
@@ -96,6 +98,23 @@ pub const Client = struct {
 
         self.batch_manager.deliver(self.message_bus, message);
     }
+
+    fn init_header(self: Client, header: *Header, operation: Operation) void {
+        header.* = .{
+            .client = self.id,
+            .cluster = self.cluster,
+            .request = 1, // TODO: use request numbers properly
+            .command = .request,
+            .operation = operation,
+        };
+    }
+
+    fn send_message_to_replicas(self: *Client, message: *Message) void {
+        var replica: u16 = 0;
+        while (replica < self.configuration.len) : (replica += 1) {
+            self.message_bus.send_message_to_replica(message);
+        }
+    }
 };
 
 const BatchManager = struct {
@@ -113,11 +132,11 @@ const BatchManager = struct {
     create_accounts: BatchRing(Batch(.create_accounts, groups_max), batches_per_op) = .{},
     // TODO: other ops
 
-    fn init(allocator: *std.mem.Allocator, message_bus: *MessageBus) !BatchManager {
+    fn init(client: Client) !BatchManager {
         var self = BatchManager{};
 
         for (self.create_accounts.batches) |*batch| {
-            batch.* = try Batch(.create_accounts, groups_max).init(allocator, message_bus.get_message().?);
+            batch.* = try Batch(.create_accounts, groups_max).init(client);
         }
         // TODO: other ops
 
@@ -126,6 +145,7 @@ const BatchManager = struct {
 
     fn push(
         self: *BatchManager,
+        client: *Client,
         user_data: u64,
         callback: BatchCallback,
         operation: Operation,
@@ -138,7 +158,7 @@ const BatchManager = struct {
                 batch.push(user_data, callback, std.mem.bytesAsSlice(Account, data)) catch {
                     // The current batch is full, so mark it as complete and push it to the send queue.
                     self.create_accounts.mark_current_complete();
-                    self.push_to_send_queue(.{ .create_accounts = batch });
+                    self.push_to_send_queue(client, .{ .create_accounts = batch });
                     const new_batch = self.create_accounts.current() orelse return error.NoSpaceLeft;
                     // TODO: reject Client.batch calls with data > message_size_max.
                     new_batch.push(user_data, callback, std.mem.bytesAsSlice(Account, data)) catch unreachable;
@@ -148,34 +168,41 @@ const BatchManager = struct {
         }
     }
 
-    fn push_to_send_queue(self: *BatchManager, any_batch: AnyBatch) void {
+    fn push_to_send_queue(self: *BatchManager, client: *Client, any_batch: AnyBatch) void {
         const was_empty = self.send_queue.empty();
         // the send_queue is large enough to hold all batches
         self.send_queue.push(any_batch) catch unreachable;
 
         if (was_empty) {
-            // TODO send message
+            const message = switch (any_batch) {
+                .create_accounts => |batch| batch.message,
+                else => unreachable, // TODO
+            };
+
+            const body = message.buffer[@sizeOf(Header)..message.header.size];
+            message.header.set_checksum_body(body);
+            message.header.set_checksum();
+            client.send_message_to_replicas(message);
         }
     }
 
-    fn send_if_none_inflight(self: *BatchManager) void {
+    fn send_if_none_inflight(self: *BatchManager, client: *Client) void {
         if (!self.send_queue.empty()) return;
 
         if (self.create_accounts.current().?.group.items.len > 0) {
             self.create_accounts.mark_current_complete();
-            self.push_to_send_queue(.{ .create_accounts = batch });
+            self.push_to_send_queue(client, .{ .create_accounts = batch });
             return;
         }
         // TODO: other operations
     }
 
-    fn deliver(self: *BatchManager, message_bus: *MessageBus, message: *Message) void {
+    fn deliver(self: *BatchManager, client: *Client, message: *Message) void {
         switch (self.send_queue.pop().?) {
             .create_accounts => |*batch| {
                 batch.deliver(message);
                 assert(self.create_accounts.pop_complete() == batch);
-                // TODO: can this fail? can we just reuse the old message stored in the Batch?
-                batch.clear(message_bus, message_bus.get_message().?);
+                batch.clear(client);
             },
         }
     }
@@ -246,11 +273,13 @@ fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
         groups: Groups,
         message: *Message,
 
-        fn init(allocator: *std.mem.Allocator, message: *Message) !Self {
-            return Self{
-                .groups = try Groups.init(allocator),
-                .message = message.ref(),
+        fn init(client: Client) !Self {
+            const self = Self{
+                .groups = try Groups.init(client.allocator),
+                .message = client.message_bus.get_message().?,
             };
+            client.init_header(self.message.header, operation);
+            return self;
         }
 
         fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
@@ -258,10 +287,13 @@ fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
         }
 
         /// Clears all state, keeping the allocated memory.
-        fn clear(self: *Self, message_bus: *MessageBus, new_message: *Message) void {
-            message_bus.unref(self.message);
-            self.message = new_message.ref();
-            self.entries.clear();
+        fn clear(self: *Self, client: *Client) void {
+            self.groups.clear();
+            client.message_bus.unref(self.message);
+            // We just released what should be the last reference to our previous message.
+            // TODO: make sure this actually never fails.
+            self.message = client.message_bus.get_message().?;
+            client.init_header(self.message.header, operation);
         }
 
         fn push(self: *Self, user_data: u64, callback: BatchCallback, events: []Event) error{NoSpaceLeft}!void {
@@ -269,11 +301,13 @@ fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
             if (self.message.header.size + data.len > config.message_size_max) {
                 return error.NoSpaceLeft;
             }
-            self.entries.append(.{
+            self.groups.append(.{
                 .user_data = user_data,
                 .callback = callback,
                 .len = @intCast(u32, events.len),
             }) catch return error.NoSpaceLeft; // TODO Use exhaustive switch.
+            std.mem.copy(u8, self.message.buffer[self.message.header.size..], data);
+            self.message.header.size += data.len;
         }
 
         fn deliver(self: *Self, message: *Message) void {
