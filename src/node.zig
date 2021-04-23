@@ -38,7 +38,7 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     return exports;
 }
 
-fn napi_register_function (env: c.napi_env, exports: c.napi_value, comptime name: [*:0]const u8, function: fn (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value) void {
+fn napi_register_function(env: c.napi_env, exports: c.napi_value, comptime name: [*:0]const u8, function: fn (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value) void {
     var napi_function: c.napi_value = undefined;
     if (c.napi_create_function(env, null, 0, function, null, &napi_function) != .napi_ok) {
         _ = c.napi_throw_error(env, null, "Failed to create function " ++ name ++ "().");
@@ -134,12 +134,12 @@ fn decode_u32(env: c.napi_env, value: c.napi_value, comptime key: [*:0]const u8)
     return result;
 }
 
-fn decode_context(env: c.napi_env, value: c.napi_value) !*Client {
+fn decode_context(env: c.napi_env, value: c.napi_value) !*Context {
     var result: ?*c_void = null;
     if (c.napi_get_value_external(env, value, &result) != .napi_ok) {
         return throw(env, "Failed to get Client context pointer.");
     }
-    return @ptrCast(*Client, @alignCast(@alignOf(Client), result.?));
+    return @ptrCast(*Context, @alignCast(@alignOf(Context), result.?));
 }
 
 /// This will create a reference in V8 with a ref_count of 1.
@@ -245,7 +245,7 @@ fn decode_slice_from_array(env: c.napi_env, object: c.napi_value, operation: Ope
 
 fn create_napi_array(env: c.napi_env, length: u32, comptime error_message: [*:0]const u8) !c.napi_value {
     var result: c.napi_value = undefined;
-    if (c.napi_create_array_with_length(env, length, &result) != .napi_ok){
+    if (c.napi_create_array_with_length(env, length, &result) != .napi_ok) {
         throw(env, error_message) catch return null;
     }
 
@@ -254,8 +254,8 @@ fn create_napi_array(env: c.napi_env, length: u32, comptime error_message: [*:0]
 
 fn set_napi_array_element(env: c.napi_env, array: c.napi_value, index: u32, value: c.napi_value, comptime error_message: [*:0]const u8) !void {
     const napi_index = try create_napi_uint32(env, value, "Failed to create uint32");
-    if(c.napi_call_function(env, array, index, value) != .napi_ok) {
-        return throw(env,error_message);
+    if (c.napi_call_function(env, array, index, value) != .napi_ok) {
+        return throw(env, error_message);
     }
 }
 
@@ -341,49 +341,56 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 
     const id = decode_u128_from_object(env, argv[0], "client_id") catch return null;
     const cluster = decode_u128_from_object(env, argv[0], "cluster_id") catch return null;
-    // TODO: parse replica_addresses from args
-    const address = std.net.Address.parseIp4("127.0.0.1", 3001) catch {
-        throw(env, "Failed to parse arguments.") catch return null;
-    };
-
-    var configuration: [1]std.net.Address = undefined;
-    configuration[0] = address;
-
-    // TODO We need to share this IO instance across multiple clients to stay under kernel limits:
-    // This needs to become a global which we initialize within the N-API module constructor up top.
-    var io = IO.init(32, 0) catch {
-        throw(env, "Failed to initialize IO.") catch return null;
-    };
 
     const allocator = std.heap.c_allocator;
 
-    // TODO Move these initializers into a separate function that returns a Zig error.
-    // We can then use errdefer to make sure we deinit() everything correctly.
-    // At the same time, we can then catch and throw a JS exception in one place.
-    var message_bus: MessageBus = undefined;
-    message_bus.init(allocator, cluster, configuration[0..1], .{ .client = id }, &io) catch {
-        throw(env, "Failed to initialize MessageBus.") catch return null;
-    };
-    var client = Client.init(
-        allocator,
-        id,
-        cluster,
-        "127.0.0.1", // TODO Decode configuration as an ascii string from config object.
-        &message_bus,
-    ) catch {
+    const context = Context.create(env, allocator, id, cluster) catch {
+        // TODO: switch on err and provide more detailed messages
         throw(env, "Failed to initialize Client.") catch return null;
     };
-    message_bus.process = .{ .client = &client };
-
-    var context: c.napi_value = null;
-    if (c.napi_create_external(env, @ptrCast(*c_void, &client), null, null, &context) != .napi_ok) {
-        client.deinit();
-        message_bus.deinit();
-        throw(env, "Failed to initialize Client.") catch return null;
-    }
 
     return context;
 }
+
+const Context = struct {
+    io: IO,
+    configuration: [1]std.net.Address,
+    message_bus: MessageBus,
+    client: Client,
+
+    fn create(env: c.napi_env, allocator: *std.mem.Allocator, id: u128, cluster: u128) !c.napi_value {
+        const context = try allocator.create(Context);
+        errdefer allocator.destroy(context);
+
+        // TODO We need to share this IO instance across multiple clients to stay under kernel limits:
+        // This needs to become a global which we initialize within the N-API module constructor up top.
+        context.io = try IO.init(32, 0);
+        errdefer context.io.deinit();
+
+        // TODO: parse replica_addresses from args
+        context.configuration[0] = try std.net.Address.parseIp4("127.0.0.1", 3001);
+
+        try context.message_bus.init(allocator, cluster, &context.configuration, .{ .client = id }, &context.io);
+        errdefer context.message_bus.deinit();
+
+        context.client = try Client.init(
+            allocator,
+            id,
+            cluster,
+            "127.0.0.1", // TODO Decode configuration as an ascii string from config object.
+            &context.message_bus,
+        );
+        errdefer context.client.deinit();
+        context.message_bus.process = .{ .client = &context.client };
+
+        var ret: c.napi_value = null;
+        if (c.napi_create_external(env, context, null, null, &ret) != .napi_ok) {
+            return error.NapiCreateExternalFailed;
+        }
+
+        return ret;
+    }
+};
 
 fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 20;
@@ -395,7 +402,7 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     const allocator = std.heap.c_allocator;
     if (argc != 4) throw(env, "Function batch() requires 4 arguments exactly.") catch return null;
 
-    const client = decode_context(env, argv[0]) catch return null;
+    const context = decode_context(env, argv[0]) catch return null;
     const operation_int = decode_u32(env, argv[1], "operation") catch return null;
     const user_data = decode_callback(env, argv[3]) catch return null;
 
@@ -411,12 +418,12 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     };
     defer allocator.free(events);
 
-    client.batch(@bitCast(u128, user_data), on_result, operation, events);
+    context.client.batch(@bitCast(u128, user_data), on_result, operation, events);
 
     return null;
 }
 
-fn on_result (user_data: u128, operation: Operation, results: []const u8) void {
+fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
     const env = @bitCast(UserData, user_data).env;
     const callback_reference = @bitCast(UserData, user_data).callback_reference;
     var napi_callback: c.napi_value = undefined;
@@ -470,8 +477,9 @@ fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
 
     if (argc != 1) throw(env, "Function deinit() requires 1 argument exactly.") catch return null;
 
-    const client = decode_context(env, argv[0]) catch return null;
-    client.deinit();
+    const context = decode_context(env, argv[0]) catch return null;
+    context.client.deinit();
+    context.message_bus.deinit();
 
     return null;
 }
