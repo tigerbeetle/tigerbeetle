@@ -97,7 +97,7 @@ pub const Client = struct {
             return;
         }
 
-        self.batch_manager.deliver(self.message_bus, message);
+        self.batch_manager.deliver(self, message);
     }
 
     fn init_header(self: Client, header: *Header, operation: Operation) void {
@@ -258,9 +258,24 @@ const BatchManager = struct {
 
     fn deliver(self: *BatchManager, client: *Client, message: *Message) void {
         switch (self.send_queue.pop().?) {
-            .create_accounts => |*batch| {
+            .create_accounts => |batch| {
                 batch.deliver(message);
                 assert(self.create_accounts.pop_complete() == batch);
+                batch.clear(client);
+            },
+            .create_transfers => |batch| {
+                batch.deliver(message);
+                assert(self.create_transfers.pop_complete() == batch);
+                batch.clear(client);
+            },
+            .commit_transfers => |batch| {
+                batch.deliver(message);
+                assert(self.commit_transfers.pop_complete() == batch);
+                batch.clear(client);
+            },
+            .lookup_accounts => |batch| {
+                batch.deliver(message);
+                assert(self.lookup_accounts.pop_complete() == batch);
                 batch.clear(client);
             },
         }
@@ -292,10 +307,10 @@ fn BatchRing(comptime T: type, comptime size: usize) type {
         /// to it if any.
         fn pop_complete(self: *Self) ?*T {
             if (self.count == 0) return null;
-            const ret = self.buffer[self.index];
-            self.index = (self.index + 1) % self.buffer.len;
+            const ret_index = self.index;
+            self.index = (self.index + 1) % self.batches.len;
             self.count -= 1;
-            return ret;
+            return &self.batches[ret_index];
         }
     };
 }
@@ -377,17 +392,37 @@ fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
 
         fn deliver(self: *Self, message: *Message) void {
             if (Result == Account) {
-                const accounts = mem.bytesAsSlice(Account, message.buffer);
+                // Not all accounts looked up were necessarily found, however those found
+                // are in the same order as the looups we sent.
+                const accounts = mem.bytesAsSlice(Account, message.buffer[@sizeOf(Header)..message.header.size]);
+                const accounts_looked_up = mem.bytesAsSlice(u128, self.message.buffer[@sizeOf(Header)..message.header.size]);
+
                 var account_idx: usize = 0;
+                var accounts_looked_up_idx: usize = 0;
                 for (self.groups.items) |group| {
-                    const group_accounts = accounts[account_idx..][0..group.len];
-                    group.callback(group.user_data, operation, mem.sliceAsBytes(group_accounts));
-                    account_idx += group.len;
+                    const group_first_account = account_idx;
+                    const group_accounts_looked_up = accounts_looked_up[accounts_looked_up_idx..][0..group.len];
+
+                    // For each account received from the server, check against the accounts looked up
+                    // by this group in order.
+                    var group_accounts_looked_up_idx: usize = 0;
+                    while (true) {
+                        for (group_accounts_looked_up[group_accounts_looked_up_idx..]) |id, idx| {
+                            if (id == accounts[account_idx].id) {
+                                account_idx += 1;
+                                group_accounts_looked_up_idx += idx;
+                                break;
+                            }
+                        } else break;
+                    }
+                    const group_accounts_found = accounts[group_first_account..account_idx];
+                    group.callback(group.user_data, operation, mem.sliceAsBytes(group_accounts_found));
+                    accounts_looked_up_idx += group.len;
                 }
                 assert(account_idx == accounts.len);
             } else {
                 // Results are sorted by index field.
-                const results = mem.bytesAsSlice(Result, message.buffer);
+                const results = mem.bytesAsSlice(Result, message.buffer[@sizeOf(Header)..message.header.size]);
                 var result_idx: u32 = 0;
                 var item_idx: u32 = 0;
                 for (self.groups.items) |group| {
