@@ -15,6 +15,8 @@ const MessageBus = @import("message_bus.zig").MessageBus;
 const Client = @import("client.zig").Client;
 const IO = @import("io.zig").IO;
 
+const vr = @import("vr.zig");
+
 const c = @cImport({
     @cInclude("node_api.h");
 });
@@ -362,11 +364,11 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 
 const Context = struct {
     io: IO,
-    configuration: [1]std.net.Address,
+    configuration: [32]std.net.Address,
     message_bus: MessageBus,
     client: Client,
 
-    fn create(env: c.napi_env, allocator: *std.mem.Allocator, id: u128, cluster: u128, configuration: []const u8) !c.napi_value {
+    fn create(env: c.napi_env, allocator: *std.mem.Allocator, id: u128, cluster: u128, configuration_raw: []const u8) !c.napi_value {
         const context = try allocator.create(Context);
         errdefer allocator.destroy(context);
 
@@ -375,14 +377,19 @@ const Context = struct {
         context.io = try IO.init(32, 0);
         errdefer context.io.deinit();
 
-        try context.message_bus.init(allocator, cluster, &context.configuration, .{ .client = id }, &context.io);
+        const configuration = try vr.parse_configuration(allocator, configuration_raw);
+        errdefer allocator.free(configuration);
+        assert(configuration.len > 0);
+        for (configuration) |address, index| self.configuration[index] = address;
+
+        try context.message_bus.init(allocator, cluster, context.configuration[0..configuration.len], .{ .client = id }, &context.io);
         errdefer context.message_bus.deinit();
 
         context.client = try Client.init(
             allocator,
             id,
             cluster,
-            configuration,
+            configuration_raw,
             &context.message_bus,
         );
         errdefer context.client.deinit();
