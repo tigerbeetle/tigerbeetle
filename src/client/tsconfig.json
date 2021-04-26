@@ -16,5 +16,5 @@
     "suppressImplicitAnyIndexErrors": true,
     "outDir": "./dist"
   },
-  "include": ["src"]
+  "files": ["src/index.ts"]
 }
