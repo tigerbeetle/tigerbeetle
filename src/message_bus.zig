@@ -831,6 +831,7 @@ const Connection = struct {
                         if (old.state == .connected) old.terminate(.shutdown);
                     }
                     ret.entry.value = self;
+                    log.info("Received connection from {}\n", .{self.peer});
                 } else {
                     self.peer = .{ .replica = header.replica };
                     // If there is already a connection to this replica, terminate and replace it.

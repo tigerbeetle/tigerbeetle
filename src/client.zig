@@ -59,7 +59,7 @@ pub const Client = struct {
 
     pub fn tick(self: *Client) void {
         self.message_bus.tick();
-        self.batch_manager.send_if_none_inflight();
+        self.batch_manager.send_if_none_inflight(self);
     }
 
     pub fn batch(
@@ -238,25 +238,34 @@ const BatchManager = struct {
         if (!self.send_queue.empty()) return;
 
         // TODO: instead of sending the first non-empty batch we could send the largest one.
-        if (self.create_accounts.current().?.group.items.len > 0) {
-            self.create_accounts.mark_current_complete();
-            self.push_to_send_queue(client, .{ .create_accounts = batch });
-            return;
+        // TODO: helper to unwrap
+        if (self.create_accounts.current()) |batch| {
+            if (batch.groups.items.len > 0) {
+                self.create_accounts.mark_current_complete();
+                self.push_to_send_queue(client, .{ .create_accounts = batch });
+                return;
+            }
+        }        
+        if (self.create_transfers.current()) |batch| {
+            if (self.create_transfers.current().?.groups.items.len > 0) {
+                self.create_transfers.mark_current_complete();
+                self.push_to_send_queue(client, .{ .create_transfers = batch });
+                return;
+            }
         }
-        if (self.create_transfers.current().?.group.items.len > 0) {
-            self.create_transfers.mark_current_complete();
-            self.push_to_send_queue(client, .{ .create_transfers = batch });
-            return;
+        if (self.commit_transfers.current()) |batch| {
+            if (self.commit_transfers.current().?.groups.items.len > 0) {
+                self.commit_transfers.mark_current_complete();
+                self.push_to_send_queue(client, .{ .commit_transfers = batch });
+                return;
+            }
         }
-        if (self.commit_transfers.current().?.group.items.len > 0) {
-            self.commit_transfers.mark_current_complete();
-            self.push_to_send_queue(client, .{ .commit_transfers = batch });
-            return;
-        }
-        if (self.lookup_accounts.current().?.group.items.len > 0) {
-            self.lookup_accounts.mark_current_complete();
-            self.push_to_send_queue(client, .{ .lookup_accounts = batch });
-            return;
+        if(self.lookup_accounts.current()) |batch| {
+            if (self.lookup_accounts.current().?.groups.items.len > 0) {
+                self.lookup_accounts.mark_current_complete();
+                self.push_to_send_queue(client, .{ .lookup_accounts = batch });
+                return;
+            }
         }
     }
 

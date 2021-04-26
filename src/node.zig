@@ -28,10 +28,11 @@ var napi_undefined: c.napi_value = undefined;
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
     napi_register_function(env, exports, "init", init);
     napi_register_function(env, exports, "batch", batch);
+    napi_register_function(env, exports, "tick", tick);
     napi_register_function(env, exports, "deinit", deinit);
 
     if (c.napi_get_undefined(env, &napi_undefined) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to get \"undefined\"");
+        _ = c.napi_throw_error(env, null, "Failed to get \"undefined\".");
         return null;
     }
 
@@ -108,8 +109,14 @@ fn decode_u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [
 }
 
 fn decode_buffer_from_object(env: c.napi_env, object: c.napi_value, comptime key: [*:0]const u8) ![]const u8 {
+    var property: c.napi_value = undefined;
+    if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
+        return throw(env, key ++ " must be defined");
+    }
+
     var is_buffer: bool = undefined;
     assert(c.napi_is_buffer(env, property, &is_buffer) == .napi_ok);
+    
     if (!is_buffer) return throw(env, key ++ " must be a buffer");
 
     var data: ?*c_void = null;
@@ -341,10 +348,11 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 
     const id = decode_u128_from_object(env, argv[0], "client_id") catch return null;
     const cluster = decode_u128_from_object(env, argv[0], "cluster_id") catch return null;
+    const configuration = decode_buffer_from_object(env, argv[0], "replica_addresses") catch return null;
 
     const allocator = std.heap.c_allocator;
 
-    const context = Context.create(env, allocator, id, cluster) catch {
+    const context = Context.create(env, allocator, id, cluster, configuration) catch {
         // TODO: switch on err and provide more detailed messages
         throw(env, "Failed to initialize Client.") catch return null;
     };
@@ -358,7 +366,7 @@ const Context = struct {
     message_bus: MessageBus,
     client: Client,
 
-    fn create(env: c.napi_env, allocator: *std.mem.Allocator, id: u128, cluster: u128) !c.napi_value {
+    fn create(env: c.napi_env, allocator: *std.mem.Allocator, id: u128, cluster: u128, configuration: []const u8) !c.napi_value {
         const context = try allocator.create(Context);
         errdefer allocator.destroy(context);
 
@@ -367,9 +375,6 @@ const Context = struct {
         context.io = try IO.init(32, 0);
         errdefer context.io.deinit();
 
-        // TODO: parse replica_addresses from args
-        context.configuration[0] = try std.net.Address.parseIp4("127.0.0.1", 3001);
-
         try context.message_bus.init(allocator, cluster, &context.configuration, .{ .client = id }, &context.io);
         errdefer context.message_bus.deinit();
 
@@ -377,7 +382,7 @@ const Context = struct {
             allocator,
             id,
             cluster,
-            "127.0.0.1", // TODO Decode configuration as an ascii string from config object.
+            configuration,
             &context.message_bus,
         );
         errdefer context.client.deinit();
@@ -466,6 +471,22 @@ fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
     _ = c.napi_call_function(env, scope, napi_callback, argc, argv[0..], null);
 
     delete_napi_reference(env, callback_reference) catch return;
+}
+
+fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+    var argc: usize = 20;
+    var argv: [20]c.napi_value = undefined;
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
+        throw(env, "Failed to get args.") catch return null;
+    }
+
+    const allocator = std.heap.c_allocator;
+    if (argc != 1) throw(env, "Function tick() requires 1 argument exactly.") catch return null;
+
+    const context = decode_context(env, argv[0]) catch return null;
+
+    context.client.tick();
+    return null;
 }
 
 fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
