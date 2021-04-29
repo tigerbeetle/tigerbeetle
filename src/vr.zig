@@ -1232,6 +1232,7 @@ pub const Replica = struct {
         assert(configuration.len > 0);
         assert(configuration.len > f);
         assert(replica < configuration.len);
+        assert(f > 0 or configuration.len <= 2);
 
         var prepare_ok = try allocator.alloc(?*Message, configuration.len);
         errdefer allocator.free(prepare_ok);
@@ -1639,13 +1640,14 @@ pub const Replica = struct {
         assert(message.header.op == self.commit_max + 1);
 
         // Wait until we have `f + 1` messages (including ourself) for quorum:
+        const threshold = self.f + 1;
         const count = self.add_message_and_receive_quorum_exactly_once(
             self.prepare_ok_from_all_replicas,
             message,
-            self.f + 1,
+            threshold,
         ) orelse return;
 
-        assert(count == self.f + 1);
+        assert(count == threshold);
         log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
 
         self.commit_op(self.prepare_message.?);
@@ -1771,13 +1773,17 @@ pub const Replica = struct {
         assert(message.header.view == self.view);
 
         // Wait until we have `f` messages (excluding ourself) for quorum:
+        assert(self.configuration.len > 1);
+        assert(self.f > 0 or self.configuration.len == 2);
+        const threshold = std.math.max(1, self.f);
+
         const count = self.add_message_and_receive_quorum_exactly_once(
             self.start_view_change_from_other_replicas,
             message,
-            self.f,
+            threshold,
         ) orelse return;
 
-        assert(count == self.f);
+        assert(count == threshold);
         assert(self.start_view_change_from_other_replicas[self.replica] == null);
         log.debug("{}: on_start_view_change: quorum received", .{self.replica});
 
@@ -1825,13 +1831,14 @@ pub const Replica = struct {
         }
 
         // Wait until we have `f + 1` messages (including ourself) for quorum:
+        const threshold = self.f + 1;
         const count = self.add_message_and_receive_quorum_exactly_once(
             self.do_view_change_from_all_replicas,
             message,
-            self.f + 1,
+            threshold,
         ) orelse return;
 
-        assert(count == self.f + 1);
+        assert(count == threshold);
         assert(self.do_view_change_from_all_replicas[self.replica] != null);
         log.debug("{}: on_do_view_change: quorum received", .{self.replica});
 
@@ -2085,7 +2092,10 @@ pub const Replica = struct {
 
         // We require a `nack_prepare` from a majority of followers if our op is faulty:
         // Otherwise, we know we do not have the op and need only `f` other nacks.
-        const threshold = if (self.journal.faulty.bit(op)) self.f + 1 else self.f;
+        assert(self.configuration.len > 1);
+        assert(self.f > 0 or self.configuration.len == 2);
+        assert(self.f + 1 == (self.configuration.len - 1) / 2 + 1);
+        const threshold = if (self.journal.faulty.bit(op)) self.f + 1 else std.math.max(1, self.f);
 
         // Wait until we have `threshold` messages for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
@@ -2267,7 +2277,6 @@ pub const Replica = struct {
             else => unreachable,
         }
 
-        // TODO Improve this to work for "a cluster of one":
         assert(threshold >= 1);
         assert(threshold <= self.configuration.len);
 
