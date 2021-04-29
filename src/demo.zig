@@ -5,7 +5,6 @@ const assert = std.debug.assert;
 usingnamespace @import("tigerbeetle.zig");
 
 pub const Header = @import("vr.zig").Header;
-
 pub const Operation = @import("state_machine.zig").Operation;
 
 pub fn connect(port: u16) !std.os.fd_t {
