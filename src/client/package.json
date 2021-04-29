@@ -3,15 +3,17 @@
   "version": "0.2.0",
   "description": "mvp client for Tiger-Beetle",
   "main": "dist/index.js",
+  "typings": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "test": "echo Testing not set up"
   },
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "contributors": [
-    "Joran Dirk Greef <joran@ronomon.com>",
-    "Donovan Changfoot <donovan.changfoot@coil.com>"
+    "Donovan Changfoot <don@coil.com>",
+    "Isaac Freund <isaac.freund@coil.com>",
+    "Joran Dirk Greef <joran@coil.com>"
   ],
   "devDependencies": {
     "@types/node": "^14.14.41",
