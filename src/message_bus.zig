@@ -847,6 +847,7 @@ const Connection = struct {
                     ret.entry.value = self;
                     log.info("Received connection from {}\n", .{self.peer});
                 } else {
+                    // TODO Prepares may be forwarded so Header.replica does not identify the peer:
                     self.peer = .{ .replica = header.replica };
                     // If there is already a connection to this replica, terminate and replace it.
                     if (self.message_bus.replicas[self.peer.replica]) |old| {
