@@ -118,7 +118,7 @@ fn decode_buffer_from_object(env: c.napi_env, object: c.napi_value, comptime key
 
     var is_buffer: bool = undefined;
     assert(c.napi_is_buffer(env, property, &is_buffer) == .napi_ok);
-    
+
     if (!is_buffer) return throw(env, key ++ " must be a buffer");
 
     var data: ?*c_void = null;
@@ -382,7 +382,13 @@ const Context = struct {
         assert(configuration.len > 0);
         for (configuration) |address, index| context.configuration[index] = address;
 
-        try context.message_bus.init(allocator, cluster, context.configuration[0..configuration.len], .{ .client = id }, &context.io);
+        context.message_bus = try MessageBus.init(
+            allocator,
+            cluster,
+            context.configuration[0..configuration.len],
+            .{ .client = id },
+            &context.io,
+        );
         errdefer context.message_bus.deinit();
 
         context.client = try Client.init(
