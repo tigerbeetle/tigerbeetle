@@ -31,9 +31,7 @@ pub fn main() !void {
         config.journal_size_max,
         config.journal_headers_max,
     );
-    // TODO Use a comptime generator or have MessageBus.init() return self directly:
-    var message_bus: MessageBus = undefined;
-    try message_bus.init(
+    var message_bus = try MessageBus.init(
         arena,
         args.cluster,
         args.configuration,
@@ -50,6 +48,7 @@ pub fn main() !void {
         &message_bus,
         &state_machine,
     );
+    // TODO: Get rid of this wart by moving MessageBus inside Replica or otherwise.
     message_bus.process = .{ .replica = &replica };
 
     std.log.info("cluster={x} replica={}: listening on {}", .{
