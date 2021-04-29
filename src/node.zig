@@ -380,7 +380,7 @@ const Context = struct {
         const configuration = try vr.parse_configuration(allocator, configuration_raw);
         errdefer allocator.free(configuration);
         assert(configuration.len > 0);
-        for (configuration) |address, index| self.configuration[index] = address;
+        for (configuration) |address, index| context.configuration[index] = address;
 
         try context.message_bus.init(allocator, cluster, context.configuration[0..configuration.len], .{ .client = id }, &context.io);
         errdefer context.message_bus.deinit();
@@ -493,6 +493,7 @@ fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     const context = decode_context(env, argv[0]) catch return null;
 
     context.client.tick();
+    context.io.tick() catch unreachable;
     return null;
 }
 
