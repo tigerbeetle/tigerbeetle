@@ -60,6 +60,7 @@ pub fn main() !void {
 
     while (true) {
         replica.tick();
+        message_bus.tick();
         try io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
     }
 }

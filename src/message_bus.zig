@@ -206,10 +206,8 @@ pub const MessageBus = struct {
             },
         }
 
-        // TODO: rewrite ConcurrentRanges to not use async
-        // This nosuspend is only safe because we do not actually do any asynchronous disk IO yet.
-        var frame = async self.flush();
-        nosuspend await frame;
+        // Flush any messages queued by the process when `Process.tick()` was called:
+        self.flush_send_queue();
     }
 
     fn maybe_connect_to_replica(self: *MessageBus, replica: u16) void {
@@ -389,17 +387,24 @@ pub const MessageBus = struct {
         }
     }
 
-    pub fn flush(self: *MessageBus) void {
-        // Deliver messages the process has sent to itself.
-        // Iterate on a copy to avoid a potential infinite loop.
+    /// Deliver messages the process has sent to itself.
+    pub fn flush_send_queue(self: *MessageBus) void {
+        // Do not reset the send queue unnecessarily:
+        if (self.process_send_queue.empty()) return;
+
+        // Iterate on a copy to avoid a potential infinite loop:
         var copy = self.process_send_queue;
         self.process_send_queue = .{};
+
         while (copy.pop()) |message| {
+            defer self.unref(message);
+
             switch (self.process) {
-                .replica => |process| process.on_message(message),
+                // TODO Rewrite ConcurrentRanges to not use async:
+                // This nosuspend is only safe because we do not do any async disk IO yet.
+                .replica => |process| nosuspend await async process.on_message(message),
                 .client => unreachable,
             }
-            self.unref(message);
         }
     }
 
@@ -802,11 +807,16 @@ const Connection = struct {
         }
 
         switch (self.message_bus.process) {
-            // TODO: Rewrite ConcurrentRanges to not use async:
-            // This `nosuspend` is only safe because we do not do any asynchronous disk IO yet.
+            // TODO Rewrite ConcurrentRanges to not use async:
+            // This nosuspend is only safe because we do not do any async disk IO yet.
             .replica => |process| nosuspend await async process.on_message(message),
             .client => |process| process.on_message(message),
         }
+
+        // Flush any messages queued by `process.on_message()` above immediately:
+        // This optimization is critical for throughput, otherwise messages from a process to itself
+        // would be delayed by the tick interval until the next `tick()`.
+        self.message_bus.flush_send_queue();
     }
 
     fn set_peer(self: *Connection, header: *const Header) void {

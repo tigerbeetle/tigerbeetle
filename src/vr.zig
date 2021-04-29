@@ -1382,8 +1382,6 @@ pub const Replica = struct {
         if (self.repair_timeout.fired()) self.on_repair_timeout();
 
         self.repair_last_queued_message_if_any();
-
-        self.message_bus.tick();
     }
 
     /// Called by the MessageBus to deliver a message to the replica.
