@@ -122,7 +122,7 @@ pub const IO = struct {
                 error.SubmissionQueueFull => {
                     var completion = Completion{ .frame = @frame(), .result = 0 };
                     self.append_completion(&completion);
-                    suspend;
+                    suspend {}
                     continue;
                 },
             };
@@ -142,7 +142,7 @@ pub const IO = struct {
             const sqe = self.get_sqe();
             linux.io_uring_prep_accept(sqe, socket, address, address_size, os.SOCK_CLOEXEC);
             sqe.user_data = @ptrToInt(&completion);
-            suspend;
+            suspend {}
             if (completion.result < 0) {
                 switch (-completion.result) {
                     os.EINTR => continue,
@@ -172,7 +172,7 @@ pub const IO = struct {
         const sqe = self.get_sqe();
         linux.io_uring_prep_close(sqe, fd);
         sqe.user_data = @ptrToInt(&completion);
-        suspend;
+        suspend {}
         if (completion.result < 0) {
             switch (-completion.result) {
                 os.EINTR => return, // A success, see https://github.com/ziglang/zig/issues/2425.
@@ -198,7 +198,7 @@ pub const IO = struct {
             const sqe = self.get_sqe();
             linux.io_uring_prep_connect(sqe, socket, address, address_size);
             sqe.user_data = @ptrToInt(&completion);
-            suspend;
+            suspend {}
             if (completion.result < 0) {
                 switch (-completion.result) {
                     os.EINTR => continue,
@@ -233,7 +233,7 @@ pub const IO = struct {
             const sqe = self.get_sqe();
             linux.io_uring_prep_fsync(sqe, fd, 0);
             sqe.user_data = @ptrToInt(&completion);
-            suspend;
+            suspend {}
             if (completion.result < 0) {
                 switch (-completion.result) {
                     os.EINTR => continue,
@@ -265,7 +265,7 @@ pub const IO = struct {
             const sqe = self.get_sqe();
             linux.io_uring_prep_openat(sqe, dir_fd, &pathname_c, flags, mode);
             sqe.user_data = @ptrToInt(&completion);
-            suspend;
+            suspend {}
             if (completion.result < 0) {
                 switch (-completion.result) {
                     os.EINTR => continue,
@@ -304,7 +304,7 @@ pub const IO = struct {
             const sqe = self.get_sqe();
             linux.io_uring_prep_read(sqe, fd, buffer[0..buffer_limit(buffer.len)], offset);
             sqe.user_data = @ptrToInt(&completion);
-            suspend;
+            suspend {}
             if (completion.result < 0) {
                 switch (-completion.result) {
                     os.EINTR => continue,
@@ -334,7 +334,7 @@ pub const IO = struct {
             const sqe = self.get_sqe();
             linux.io_uring_prep_recv(sqe, socket, buffer, os.MSG_NOSIGNAL);
             sqe.user_data = @ptrToInt(&completion);
-            suspend;
+            suspend {}
             if (completion.result < 0) {
                 switch (-completion.result) {
                     os.EINTR => continue,
@@ -360,7 +360,7 @@ pub const IO = struct {
             const sqe = self.get_sqe();
             linux.io_uring_prep_send(sqe, socket, buffer, os.MSG_NOSIGNAL);
             sqe.user_data = @ptrToInt(&completion);
-            suspend;
+            suspend {}
             if (completion.result < 0) {
                 switch (-completion.result) {
                     os.EINTR => continue,
@@ -399,7 +399,7 @@ pub const IO = struct {
             const sqe = self.get_sqe();
             linux.io_uring_prep_timeout(sqe, &ts, 0, 0);
             sqe.user_data = @ptrToInt(&completion);
-            suspend;
+            suspend {}
             if (completion.result < 0) {
                 switch (-completion.result) {
                     os.EINTR => continue,
@@ -419,7 +419,7 @@ pub const IO = struct {
             const sqe = self.get_sqe();
             linux.io_uring_prep_write(sqe, fd, buffer[0..buffer_limit(buffer.len)], offset);
             sqe.user_data = @ptrToInt(&completion);
-            suspend;
+            suspend {}
             if (completion.result < 0) {
                 switch (-completion.result) {
                     os.EINTR => continue,

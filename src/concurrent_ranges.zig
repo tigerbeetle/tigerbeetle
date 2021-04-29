@@ -27,7 +27,7 @@ pub const ConcurrentRanges = struct {
                     overlapping_range,
                 });
                 overlapping_range.enqueue(range);
-                suspend;
+                suspend {}
             } else {
                 break;
             }
