@@ -1,9 +1,12 @@
 #!/bin/bash
 set -e
 
-ZIG_RELEASE="0.7.1"
-
-if [ "$1" == "master" ]; then
+# Default to master while we wait for the 0.8.0 release:
+# TODO When 0.8.0 arrives, we should make the release build the default.
+if [ "$1" == "tagged" ]; then
+    ZIG_RELEASE="0.7.1"
+    echo "Installing $ZIG_RELEASE release build..."
+else
     ZIG_RELEASE="builds"
     echo "Installing latest master build..."
 fi
@@ -40,12 +43,14 @@ tar -xf $ZIG_TARBALL
 rm $ZIG_TARBALL
 
 # Replace any existing Zig installation so that we can install or upgrade:
-echo "Installing $ZIG_DIRECTORY to /usr/local/lib/zig (requires root)..."
-sudo rm -rf /usr/local/lib/zig
-sudo mv $ZIG_DIRECTORY /usr/local/lib/zig
+echo "Installing $ZIG_DIRECTORY to .zig in current working directory..."
+rm -rf .zig
+mv $ZIG_DIRECTORY .zig
 
-# Symlink the Zig binary into /usr/local/bin, which should already be in the user's path:
-sudo ln -s -f /usr/local/lib/zig/zig /usr/local/bin/zig
+# Symlink the Zig binary into .bin, it's up to the user to add this to their path:
+mkdir -p .bin
+ZIG_BIN="$(pwd)/.bin/zig"
+ln -s -f "$(pwd)/.zig/zig" $ZIG_BIN
 
-ZIG_VERSION=`zig version`
-echo "Congratulations, you have successfully installed Zig $ZIG_VERSION. Enjoy!"
+ZIG_VERSION=`.bin/zig version`
+echo "Congratulations, you have successfully installed Zig $ZIG_VERSION to $ZIG_BIN. Enjoy!"
