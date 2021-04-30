@@ -2,30 +2,10 @@
 pub const deployment_environment = .development;
 
 /// The maximum log level in increasing order of verbosity (emergency=0, debug=7):
-pub const log_level = 6;
+pub const log_level = 7;
 
-/// A universally unique identifier (128-bit) to identify the cluster (must be random):
-/// This protects clients and nodes from accidentally talking to the wrong cluster.
-pub const cluster_id = 1000;
-
-/// The nodes in the cluster (minimum=1, maximum=10):
-/// Node IDs are universally unique identifiers (128-bit).
-/// Node IDs must be unique within a cluster, and should be unique across clusters in production.
-/// Node IP addresses must be loopback, or private IPv4 addresses for security within these ranges:
-///     10.0.0.0       -    10.255.255.255     (10.0.0.0/8)
-///     172.16.0.0     -    172.31.255.255     (172.16.0.0/12)
-///     192.168.0.0    -    192.168.255.255    (192.168.0.0/16)
-pub const nodes = .{
-    .{ .id = 1, .ip = "127.0.0.1", .port = 3001 },
-    .{ .id = 2, .ip = "127.0.0.1", .port = 3002 },
-    .{ .id = 3, .ip = "127.0.0.1", .port = 3003 },
-    .{ .id = 4, .ip = "127.0.0.1", .port = 3004 },
-};
-
-/// TODO Decide whether we want to pre-compile cluster_id and nodes configuration into the binary.
-/// The alternative would be to add a client command to connect to all nodes, and have each node
-/// write this configuration to the journal file. For now, while fleshing out the replication logic
-/// we are piggybacking on the pre-compiled config to skip the boilerplate.
+/// The maximum number of replicas allowed in a cluster.
+pub const replicas_max = 15;
 
 /// The minimum number of nodes required to form quorums for leader election or replication:
 /// Majority quorums are only required across leader election and replication phases (not within).
@@ -34,26 +14,16 @@ pub const nodes = .{
 /// 2. you can decrease quorum_replication below a majority, to optimize the common case.
 /// This improves latency by reducing the number of nodes required for synchronous replication.
 /// This reduces redundancy only in the short term, asynchronous replication will still continue.
-pub const quorum_leader_election = nodes.len - 1;
+pub const quorum_leader_election = -1;
 pub const quorum_replication = 2;
 
-/// The default server port to listen on:
+/// The default server port to listen on if not specified in `--replica-addresses`:
 pub const port = 3001;
 
-/// Whether to bind to successive port numbers if a port is already bound:
-/// This improves the user experience of launching a local development cluster.
-pub const port_hopping = switch (deployment_environment) {
-    .development => true,
-    else => false
-};
-
-/// The network interface address to listen on:
+/// The default network interface address to listen on if not specified in `--replica-addresses`:
 /// WARNING: Binding to all interfaces with "0.0.0.0" is dangerous and opens the server to anyone.
-/// In development, bind to the "127.0.0.1" loopback address to accept local connections only.
-pub const bind_address = switch (deployment_environment) {
-    .production => "0.0.0.0",
-    else => "127.0.0.1"
-};
+/// Bind to the "127.0.0.1" loopback address to accept local connections as a safe default only.
+pub const address = "127.0.0.1";
 
 /// Where journal files should be persisted:
 pub const data_directory = "/var/lib/tigerbeetle";
@@ -62,7 +32,7 @@ pub const data_directory = "/var/lib/tigerbeetle";
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const accounts_max = switch (deployment_environment) {
     .production => 1_000_000,
-    else => 100_000
+    else => 100_000,
 };
 
 /// The maximum number of transfers to store in memory before requiring cold data to be drained:
@@ -70,25 +40,8 @@ pub const accounts_max = switch (deployment_environment) {
 /// We allocate more capacity than the number of transfers for a safe hash table load factor.
 pub const transfers_max = switch (deployment_environment) {
     .production => 100_000_000,
-    else => 1_000_000
+    else => 1_000_000,
 };
-
-/// The maximum number of connections that can be accepted and held open by the server at any time:
-pub const connections_max = 32;
-
-/// TODO Limit connections per client or per node.
-
-/// The maximum size of a request or response in bytes:
-/// This is also the limit of all inflight data across multiple pipelined requests per connection.
-/// We may have one request of up to 4 MiB inflight or 4 pipelined requests of up to 1 MiB inflight.
-/// This impacts sequential disk write throughput, the larger the buffer the better.
-/// 4 MiB is 32,768 transfers, and a reasonable choice for sequential disk write throughput.
-/// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
-/// For a 1 Gbps NIC = 125 MiB/s throughput: 4 MiB / 125 * 1000ms = 32ms for the next request.
-/// This also impacts the amount of memory allocated at initialization by the server.
-/// e.g. connections_max * (request_size_max + response_size_max) = 32 * (4 + 4) = 256 MiB
-pub const request_size_max = 4 * 1024 * 1024;
-pub const response_size_max = 4 * 1024 * 1024;
 
 /// The maximum size of the journal file:
 /// This is pre-allocated and zeroed for performance when initialized.
@@ -97,17 +50,45 @@ pub const response_size_max = 4 * 1024 * 1024;
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
 pub const journal_size_max = switch (deployment_environment) {
     .production => 128 * 1024 * 1024 * 1024,
-    else => 256 * 1024 * 1024
+    else => 256 * 1024 * 1024,
 };
 
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
 /// We need this limit to allocate space for copies of batch headers at the start of the journal.
 /// These header copies enable us to disentangle corruption from crashes and recover accordingly.
-pub const journal_entries_max = switch (deployment_environment) {
+pub const journal_headers_max = switch (deployment_environment) {
     .production => 1024 * 1024,
-    else => 128 * 1024
+    else => 16384,
 };
+
+/// The maximum number of connections that can be accepted and held open by the server at any time:
+pub const connections_max = 32;
+
+/// The maximum size of a message in bytes:
+/// This is also the limit of all inflight data across multiple pipelined requests per connection.
+/// We may have one request of up to 4 MiB inflight or 4 pipelined requests of up to 1 MiB inflight.
+/// This impacts sequential disk write throughput, the larger the buffer the better.
+/// 4 MiB is 32,768 transfers, and a reasonable choice for sequential disk write throughput.
+/// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
+/// For a 1 Gbps NIC = 125 MiB/s throughput: 4 MiB / 125 * 1000ms = 32ms for the next request.
+/// This also impacts the amount of memory allocated at initialization by the server.
+pub const message_size_max = 4 * 1024 * 1024;
+
+/// The number of full-sized messages allocated at initialization by the message bus.
+pub const message_bus_messages_max = connections_max * 2;
+/// The number of header-sized messages allocated at initialization by the message bus.
+/// These are much smaller/cheaper and we can therefore have many of them.
+pub const message_bus_headers_max = connections_max * connection_send_queue_max;
+
+/// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
+/// Exponential backoff and full jitter are applied within this range.
+/// For more, see: https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+pub const connection_delay_min = 50;
+pub const connection_delay_max = 1000;
+
+/// The maximum number of outgoing messages that may be queued on a connection.
+pub const connection_send_queue_max = 3;
 
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
 pub const tcp_backlog = 64;
@@ -174,6 +155,6 @@ pub const sector_size = 4096;
 /// when they were never written to disk.
 pub const direct_io = true;
 
-/// Whether to re-order journal writes for better disk access locality (.elevator or .none):
-/// This can improve write throughput especially for spinning disks.
-pub const journal_disk_scheduler = .elevator;
+/// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
+/// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
+pub const tick_ms = 10;

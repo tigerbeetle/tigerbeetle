@@ -7,7 +7,7 @@ pub fn main() !void {
 
     const runs: usize = 5;
     const insertions: usize = 1000000;
-    const transfer: [128]u8 = [_]u8{ 0 } ** 128;
+    const transfer: [128]u8 = [_]u8{0} ** 128;
 
     var transfers = std.AutoHashMap(u128, @TypeOf(transfer)).init(allocator);
     try transfers.ensureCapacity(insertions * runs);
@@ -21,9 +21,9 @@ pub fn main() !void {
             transfers.putAssumeCapacity(id, transfer);
             id += 1;
         }
-        std.debug.print(
-            "{} hash table insertions in {}ms\n",
-            .{ insertions, std.time.milliTimestamp() - start }
-        );
+        std.debug.print("{} hash table insertions in {}ms\n", .{
+            insertions,
+            std.time.milliTimestamp() - start,
+        });
     }
 }

@@ -46,8 +46,7 @@ pub fn main() !void {
         var offset_submitted: usize = 0;
         var offset_completed: usize = 0;
 
-        event_loop:
-        while (true) {
+        event_loop: while (true) {
             // Consume groups of completed events:
             const count = try ring.copy_cqes(cqes[0..], 0);
             var i: usize = 0;
@@ -66,9 +65,9 @@ pub fn main() !void {
                         }
                     },
                     else => {
-                        std.debug.print("ERROR {}\n", .{ cqe });
+                        std.debug.print("ERROR {}\n", .{cqe});
                         std.os.exit(1);
-                    }
+                    },
                 }
             }
 
@@ -93,9 +92,12 @@ pub fn main() !void {
             syscalls += 1;
         }
 
-        std.debug.print(
-            "fs io_uring: write({})/fsync/read({}) * {} pages = {} syscalls in {}ms\n",
-            .{ page, page, pages, syscalls, std.time.milliTimestamp() - start }
-        );
+        std.debug.print("fs io_uring: write({})/fsync/read({}) * {} pages = {} syscalls: {}ms\n", .{
+            page,
+            page,
+            pages,
+            syscalls,
+            std.time.milliTimestamp() - start,
+        });
     }
 }

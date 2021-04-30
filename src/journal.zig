@@ -25,7 +25,12 @@ pub const Journal = struct {
         const file = try Journal.open(path);
         errdefer file.close();
 
-        var headers = try allocator.allocAdvanced(JournalHeader, config.sector_size, config.journal_entries_max, .exact);
+        var headers = try allocator.allocAdvanced(
+            JournalHeader,
+            config.sector_size,
+            config.journal_entries_max,
+            .exact,
+        );
         errdefer allocator.free(headers);
         mem.set(u8, mem.sliceAsBytes(headers), 0);
 
@@ -100,7 +105,10 @@ pub const Journal = struct {
         // Write the EOF entry to the last sector of the buffer:
         const entry_sector_size = Journal.sector_ceil(entry.size);
         assert(entry_sector_size == buffer.len - config.sector_size);
-        const eof = mem.bytesAsValue(JournalHeader, buffer[entry_sector_size..][0..@sizeOf(JournalHeader)]);
+        const eof = mem.bytesAsValue(
+            JournalHeader,
+            buffer[entry_sector_size..][0..@sizeOf(JournalHeader)],
+        );
         eof.* = .{
             .prev_checksum_meta = entry.checksum_meta,
             .offset = entry.offset + entry_sector_size,
@@ -262,14 +270,19 @@ pub const Journal = struct {
         assert(self.entries == 0);
         assert(self.offset == config.journal_entries_max * @sizeOf(JournalHeader));
 
-        var buffer = try self.allocator.allocAdvanced(u8, config.sector_size, config.request_size_max, .exact);
+        var buffer = try self.allocator.allocAdvanced(
+            u8,
+            config.sector_size,
+            config.request_size_max,
+            .exact,
+        );
         defer self.allocator.free(buffer);
         assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
         assert(@mod(buffer.len, config.sector_size) == 0);
         assert(@mod(config.journal_size_max, buffer.len) == 0);
         assert(buffer.len > @sizeOf(JournalHeader));
 
-        var state_output = try self.allocator.alloc(u8, config.response_size_max);
+        const state_output = try self.allocator.alloc(u8, config.message_size_max);
         defer self.allocator.free(state_output);
 
         // Read entry headers from the head of the journal:
@@ -286,7 +299,10 @@ pub const Journal = struct {
                 // TODO Repair headers at the head of the journal in memory.
                 // TODO Repair headers at the head of the journal on disk.
                 const d = &self.headers[self.entries];
-                const e = mem.bytesAsValue(JournalHeader, buffer[offset..][0..@sizeOf(JournalHeader)]);
+                const e = mem.bytesAsValue(
+                    JournalHeader,
+                    buffer[offset..][0..@sizeOf(JournalHeader)],
+                );
 
                 log.debug("d = {}", .{d});
                 log.debug("e = {}", .{e});
@@ -381,7 +397,12 @@ pub const Journal = struct {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
         var allocator = &arena.allocator;
-        var buffer = try allocator.allocAdvanced(u8, config.sector_size, config.request_size_max, .exact);
+        var buffer = try allocator.allocAdvanced(
+            u8,
+            config.sector_size,
+            config.request_size_max,
+            .exact,
+        );
         defer allocator.free(buffer);
         mem.set(u8, buffer[0..], 0);
 
