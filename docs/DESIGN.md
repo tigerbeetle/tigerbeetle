@@ -1,39 +1,63 @@
 # Design Document
 
-This is a living document that keeps a (best effort) record of the design decisions behind TigerBeetle.
+This is a living document that keeps a (best effort) record of the design decisions behind TigerBeetle, a clustered accounting database. TigerBeetle is under active development. These design components are in various stages of completion and iteration cycle.
+
+## Mission
+
+**We want to make it easy for others to build the next generation of financial services and applications without having to cobble together an accounting or ledger system of record from scratch.**
+
+We are implementing the latest research and technology to deliver unprecedented safety, durability and performance while reducing operational cost by orders of magnitude and providing a fantastic developer experience.
+
+## Safety
+
+TigerBeetle is designed to a higher safety standard than a general-purpose relational database such as MySQL or an in-memory database such as Redis:
+
+* Strict consistency, CRCs and crash safety are not enough.
+
+* TigerBeetle **detects and repairs disk corruption** ([3.45% per 32 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), **detects and repairs misdirected writes** where the disk firmware writes to the wrong sector ([0.042% per 17 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), and **prevents data tampering** with hash-chained cryptographic checksums.
+
+* TigerBeetle **uses Direct I/O** to avoid cache coherency bugs in the kernel page cache after an EIO fsync error.
+
+* TigerBeetle **exceeds the fsync durability of a single disk** and the hardware of a single server because disk firmware can have bugs and because single server systems fail all the time.
+
+* TigerBeetle **provides strict serializability**, the gold standard of consistency, as a replicated state machine, and as a cluster of TigerBeetle servers, for fault-tolerance.
+
+* TigerBeetle **performs synchronous replication** to a quorum of TigerBeetle servers using [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf), a distributed consensus protocol and member of the Multi-Paxos family, to handle automated leader election and eliminate split brain.
+
+* TigerBeetle is “fault-aware” and **recovers from local storage failures in the context of the global consensus protocol**, providing [more safety than replicated state machines such as ZooKeeper and LogCabin](https://www.youtube.com/watch?v=fDY6Wi0GcPs). For example, TigerBeetle disentangles corruption in the middle of the journal caused by bitrot from torn writes at the end of the journal caused by power failure.
+
+* TigerBeetle does not depend on synchronized system clocks, does not use leader leases, and **performs leader-based timestamping** so that your application can deal only with safe relative quantities of time with respect to transfer timeouts.
 
 ## Performance
 
 TigerBeetle provides more performance than a general-purpose relational database such as MySQL or an in-memory database such as Redis:
 
-* TigerBeetle **supports batching by design**. You can batch all the transfer prepares or commits you receive in a 50ms window and then send them all in a single network query to the database. This enables low-overhead networking, large sequential disk write patterns and amortized fsync across hundreds and thousands of account transfers.
+* TigerBeetle **uses small, simple fixed-size data structures** (accounts and transfers) and a tightly scoped domain.
 
-* TigerBeetle **performs all balance tracking logic in the database**. This is a paradigm shift where we move the code to the data, not the data to the code, and eliminates the need for complex caching logic outside the database. You can keep your application layer simple, and completely stateless.
+* TigerBeetle **performs all balance tracking logic in the database**. This is a paradigm shift where we move the code once to the data, not the data back and forth to the code in the critical path, and this eliminates the need for complicated caching logic outside the database. The “Accounting” business logic is built in to TigerBeetle so that you can keep your application layer simple, and completely stateless.
 
-* TigerBeetle **masks transient gray failure performance problems**. For example, if a disk write that typically takes 4ms suddenly starts taking 4 seconds because the disk is slowly failing, TigerBeetle will use redundancy to mask the gray failure automatically without the user seeing any 4 second latency spike. This is a relatively new performance technique known as "tail tolerance" in the literature and something not provided by most existing databases.
+* TigerBeetle **supports batching by design**. You can batch all the transfer prepares or commits that you receive in a fixed 10ms window (or in a dynamic 1ms through 10ms window according to load) and then send them all in a single network request to the database. This enables low-overhead networking, large sequential disk write patterns and amortized fsync and consensus across hundreds and thousands of transfers.
 
-> "The major availability breakdowns and performance anomalies we see in cloud environments tend to be caused by subtle underlying faults, i.e. gray failure (slowly failing hardware) rather than fail-stop failure."
+> Everything is a batch. It's your choice whether a batch contains 100 transfers or 10,000 transfers but our early measurements show that latency is also better for the latter. 50ms for a hundred transfers vs 20ms for ten thousand, thanks to Little's Law. TigerBeetle is able to amortize the cost of I/O for increasing latency returns, even for fairly large batch sizes, by avoiding the worse queueing delay cost incurred by small batches.
 
-## Safety
+* However, even if your system is not under load, TigerBeetle **optimizes the latency of small batches**. After copying from the kernel's TCP receive buffer (TigerBeetle does not do user-space TCP), TigerBeetle **does zero-copy Direct I/O** from network protocol to disk, to state machine and back, primarily to reduce memory pressure and avoid L1-L3 cache pollution.
 
-TigerBeetle provides more safety than a general-purpose relational database such as MySQL or an in-memory database such as Redis:
+* TigerBeetle **uses io_uring for zero-syscall networking and storage I/O**. The cost of a syscall in terms of context switches adds up quickly for a few thousand transfers.
 
-* Strict consistency, CRCs and crash safety are not enough.
+* TigerBeetle **does zero-deserialization** by using fixed-size data structures, that are optimized for cache line alignment to **minimize L1-L3 cache misses**.
 
-* TigerBeetle **detects disk corruption** (3.45% per 32 months, PER DISK) and **detects misdirected writes**, where the disk firmware writes to the wrong sector (0.042% per 17 months, PER DISK), and **prevents data tampering** using cryptographic checksums.
+* TigerBeetle **takes advantage of Flexible Paxos** to reduce the cost of synchronous replication down to a single remote replica (in addition to the leader) and then **uses asynchronous replication** between the remaining followers. This improves write availability, without sacrificing strict serializability or durability guarantees. This can also reduce server deployment cost by up to 20% since a 4-node cluster under Flexible Paxos can now provide the same `f=2` guarantee for the replication quorum compared with a 5-node cluster.
 
-* TigerBeetle **does not trust the fsync of a single disk**, or the hardware of a single node. Disk firmware and operating systems frequently have broken fsync, and single node systems fail all the time. TigerBeetle **performs synchronous replication** to a quorum of nodes.
+* TigerBeetle **masks transient gray failure performance problems**. For example, if a disk write that typically takes 4ms starts taking 4 seconds because the disk is slowly failing, TigerBeetle will use cluster redundancy to mask the gray failure automatically without the user seeing any 4 second latency spike. This is a relatively new performance technique known as "tail tolerance" in the literature and something not provided by most existing databases.
 
-As a replicated state machine:
-
-* TigerBeetle **does not truncate the journal at the first corrupt disk sector**, but **recovers from local corruption without violating the global consensus protocol**, providing more safety than replicated state machines such as ZooKeeper and LogCabin.
+> ["The major availability breakdowns and performance anomalies we see in cloud environments tend to be caused by subtle underlying faults, i.e. gray failure (slowly failing hardware) rather than fail-stop failure."](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
 
 ## Developer-Friendly
 
-TigerBeetle does all the typical ledger validation, balance tracking, persistence and replication for you, all you have to do is:
+TigerBeetle does all the typical ledger validation, balance tracking, persistence and replication for you, all you have to do is use the TigerBeetle client to:
 
-1. send in a batch of prepares to TigerBeetle (in a single network hop), and then
-2. send in a batch of commits to TigerBeetle (in a single network hop).
+1. send in a batch of prepares to TigerBeetle (in a single network request), and then
+2. send in a batch of commits to TigerBeetle (in a single network request).
 
 ## Architecture
 
@@ -60,16 +84,11 @@ Our architecture then becomes three easy steps:
 
 That's how TigerBeetle **eliminates gray failure in the leader's local disk**, and how TigerBeetle **eliminates gray failure in the network links to the replication nodes**.
 
-Like LMAX, TigerBeetle uses separate threads for server networking, replication and in-memory business logic, with strict single-threading to enforce the single writer principle and prevent multi-threaded access to data. Again, like LMAX, TigerBeetle uses ring buffers to move event batches from networking to replication to logic threads for lockless communication.
+Like LMAX, TigerBeetle uses a thread-per-core design for optimal performance, with strict single-threading to enforce the single writer principle and avoid the costs of multi-threaded coordinated access to data.
 
-### Leader Modes
+### Data Center Cluster or Application Embedded Library
 
-While the TigerBeetle leader can be run as a networked client-server database engine,
-TigerBeetle takes inspiration from SQLite by enabling the TigerBeetle leader itself to be embedded as an in-process library within the application to eliminate gray failure in the network link to the leader:
-
-* Applications like Mojaloop that must transform individual HTTP requests into batches of transfers may find that HTTP is a bottleneck, and may want to operate the TigerBeetle leader in **networked mode** to have multiple stateless client processes drive high levels of load to saturate TigerBeetle.
-
-* Applications that can drive high levels of load from a single client process may want to operate the TigerBeetle leader in **embedded mode** to eliminate gray failure completely.
+While TigerBeetle would typically be deployed as a networked client-server database cluster in the cloud or on-premise data center, TigerBeetle takes inspiration from SQLite and we want to enable the core disk safety and ledger logic of TigerBeetle to be embeddable as an in-process library within any mobile or desktop application that needs a financial system of record.
 
 ## Data Structures
 
@@ -98,13 +117,18 @@ Events are **immutable data structures** that **instantiate or mutate state data
        credit_account_id: 16 bytes (128-bit)
                 custom_1: 16 bytes (128-bit) [optional, e.g. enforce a foreign key relation on a pre-existing `transfer` state]
                 custom_2: 16 bytes (128-bit) [optional, e.g. a short description for the transfer]
-                custom_3: 16 bytes (128-bit) [optional, e.g. an ILPv4 condition to validate a subsequent `commit-transfer` event]
+                custom_3: 16 bytes (128-bit) [optional, e.g. two custom slots may store a 256-bit ILPv4 condition to validate against the preimage of the corresponding `commit-transfer` event]
                    flags:  8 bytes ( 64-bit) [optional, to modify the usage of custom slots, and for future feature expansion]
                   amount:  8 bytes ( 64-bit) [required, an unsigned integer in the unit of value of the debit and credit accounts, which must be the same for both accounts]
                  timeout:  8 bytes ( 64-bit) [optional, a quantity of time, i.e. an offset in nanoseconds from timestamp]
                timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
 } = 128 bytes (2 CPU cache lines)
 ```
+
+The three `custom_1/2/3` slots above and below are similar to CPU registers. Their usage is modified
+by the `flags` field. Custom slots are either opaque to TigerBeetle or interpreted by TigerBeetle
+according to their usage. Custom slots are 128-bit and may be joined together to form a 256-bit
+register, for example to support ILPv4 conditions and preimages.
 
 **commit_transfer**: Commit a transfer between accounts (maps to a "fulfill"). A transfer can be accepted or rejected by toggling a bit in the `flags` field.
 
@@ -113,7 +137,7 @@ Events are **immutable data structures** that **instantiate or mutate state data
                       id: 16 bytes (128-bit)
                 custom_1: 16 bytes (128-bit) [optional, e.g. enforce a foreign key relation on a pre-existing `transfer` state]
                 custom_2: 16 bytes (128-bit) [optional, e.g. a short description for the accept or reject]
-                custom_3: 16 bytes (128-bit) [optional, e.g. an ILPv4 preimage to validate against the condition of a previous `commit-transfer` event]
+                custom_3: 16 bytes (128-bit) [optional, e.g. two custom slots may store a 256-bit ILPv4 preimage to validate against the condition of the corresponding `create-transfer` event]
                    flags:  8 bytes ( 64-bit) [optional, used to indicate transfer success/failure, to modify usage of custom slots, and for future feature expansion]
                timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
 } = 80 bytes (2 CPU cache lines)
@@ -238,9 +262,9 @@ The intention of this design decision is to reduce the blast radius in the worst
 
 ## Protocol
 
-While the TigerBeetle leader can be embedded in-process with an `execute(command: integer, batch: buffer)` function signature to execute commands and event batches, there is also a TCP wire protocol to use the TigerBeetle as a remote network server database.
+*Please note that we are in the process of moving to a 128-byte header to implement Viewstamped Replication.*
 
-The TCP wire protocol is:
+The current TCP wire protocol is:
 
 * a fixed-size header that can be used for requests or responses,
 * followed by variable-length data.
@@ -333,7 +357,7 @@ C is a natural choice, however Zig retains C ABI interoperability, offers relief
 
 Two things got us interested in tiger beetles as a species:
 
-1. Tiger beetles are ridiculously fast... a tiger beetle can run at a speed of 9 km/h, about 125 body lengths per second. That’s 20 times faster than an Olympic sprinter when you scale speed to body length, **a fantastic speed-to-size ratio**.
+1. Tiger beetles are ridiculously fast... a tiger beetle can run at a speed of 9 km/h, about 125 body lengths per second. That’s 20 times faster than an Olympic sprinter when you scale speed to body length, **a fantastic speed-to-size ratio**. To put this in perspective, a human would need to run at 480 miles per hour to keep up.
 
 2. Tiger beetles thrive in different environments, from trees and woodland paths, to sea and lake shores, with the largest of tiger beetles living primarily in the dry regions of Southern Africa... and that's what we want for TigerBeetle, **something that's fast and safe to deploy everywhere**.
 
@@ -377,11 +401,15 @@ of Hours of Disk and SSD Deployments](https://www.usenix.org/system/files/confer
 
 * [Amazon Aurora Under The Hood - Quorum Membership](https://aws.amazon.com/blogs/database/amazon-aurora-under-the-hood-quorum-membership/)
 
+* [Viewstamped Replication Revisited](http://pmg.csail.mit.edu/papers/vr-revisited.pdf)
+
 * [Viewstamped Replication: The Less-Famous Consensus Protocol](https://brooker.co.za/blog/2014/05/19/vr.html)
 
 * [Viewstamped Replication Explained](https://blog.brunobonacci.com/2018/07/15/viewstamped-replication-explained/)
 
 * [ZFS: The Last Word in File Systems (Jeff Bonwick and Bill Moore)](https://www.youtube.com/watch?v=NRoUC9P1PmA) - On disk failure and corruption, the need for checksums... and checksums to check the checksums, and the power of copy-on-write for crash-safety.
+
+* [An Analysis of Latent Sector Errors in Disk Drives](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)
 
 * [SDC 2018 - Protocol-Aware Recovery for Consensus-Based Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs) - Why replicated state machines need to distinguish between a crash and corruption, and why it would be disastrous to truncate the journal when encountering a checksum mismatch.
 
