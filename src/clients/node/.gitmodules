@@ -1,0 +1,3 @@
+[submodule "src/tigerbeetle"]
+	path = src/tigerbeetle
+	url = https://github.com/coilhq/tigerbeetle
