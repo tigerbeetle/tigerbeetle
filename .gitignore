@@ -7,6 +7,4 @@ demos/bitcast/transfers
 dist/
 journal
 main
-node_modules/
-yarn-error.log
 zig-cache

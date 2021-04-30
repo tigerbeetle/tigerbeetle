@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const crypto = std.crypto;
-const log = std.log.scoped(.state);
+const log = std.log.scoped(.state_machine);
 const mem = std.mem;
 const Allocator = mem.Allocator;
 
@@ -10,13 +10,29 @@ usingnamespace @import("tigerbeetle.zig");
 const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);
 
-pub const State = struct {
+pub const Operation = packed enum(u8) {
+    // We reserve command "0" to detect an accidental zero byte being interpreted as an operation:
+    reserved,
+    init,
+
+    create_accounts,
+    create_transfers,
+    commit_transfers,
+    lookup_accounts,
+
+    pub fn jsonStringify(self: Command, options: StringifyOptions, writer: anytype) !void {
+        try std.fmt.format(writer, "\"{}\"", .{@tagName(self)});
+    }
+};
+
+pub const StateMachine = struct {
     allocator: *Allocator,
-    timestamp: u64,
+    prepare_timestamp: u64,
+    commit_timestamp: u64,
     accounts: HashMapAccounts,
     transfers: HashMapTransfers,
 
-    pub fn init(allocator: *Allocator, accounts_max: usize, transfers_max: usize) !State {
+    pub fn init(allocator: *Allocator, accounts_max: usize, transfers_max: usize) !StateMachine {
         var accounts = HashMapAccounts.init(allocator);
         errdefer accounts.deinit();
         try accounts.ensureCapacity(@intCast(u32, accounts_max));
@@ -25,36 +41,75 @@ pub const State = struct {
         errdefer transfers.deinit();
         try transfers.ensureCapacity(@intCast(u32, transfers_max));
 
-        return State{
+        // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
+        // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
+
+        return StateMachine{
             .allocator = allocator,
-            .timestamp = 0,
+            .prepare_timestamp = 0,
+            .commit_timestamp = 0,
             .accounts = accounts,
             .transfers = transfers,
         };
     }
 
-    pub fn deinit(self: *State) void {
+    pub fn deinit(self: *StateMachine) void {
         self.accounts.deinit();
         self.transfers.deinit();
     }
 
-    pub fn apply(self: *State, command: Command, input: []const u8, output: []u8) usize {
-        return switch (command) {
-            .create_accounts => self.apply_create_accounts(input, output),
-            .create_transfers => self.apply_create_transfers(input, output),
-            .commit_transfers => self.apply_commit_transfers(input, output),
-            .lookup_accounts => self.apply_lookup_accounts(input, output),
+    pub fn prepare(self: *StateMachine, operation: Operation, batch: []u8) void {
+        switch (operation) {
+            .create_accounts => self.prepare_timestamps(Account, batch),
+            .create_transfers => self.prepare_timestamps(Transfer, batch),
+            .commit_transfers => self.prepare_timestamps(Commit, batch),
+            .lookup_accounts => {},
+            else => unreachable,
+        }
+    }
+
+    pub fn prepare_timestamps(self: *StateMachine, comptime T: type, batch: []u8) void {
+        // Guard against the wall clock going backwards by taking the max with timestamps issued:
+        self.prepare_timestamp = std.math.max(
+            self.prepare_timestamp,
+            @intCast(u64, std.time.nanoTimestamp()),
+        );
+        assert(self.prepare_timestamp > self.commit_timestamp);
+        var sum_reserved_timestamps: usize = 0;
+        for (mem.bytesAsSlice(T, batch)) |*event| {
+            sum_reserved_timestamps += event.timestamp;
+            self.prepare_timestamp += 1;
+            event.timestamp = self.prepare_timestamp;
+        }
+        // The client is responsible for ensuring that timestamps are reserved:
+        // Use a single branch condition to detect non-zero reserved timestamps.
+        // Summing then branching once is faster than branching every iteration of the loop.
+        assert(sum_reserved_timestamps == 0);
+    }
+
+    pub fn commit(
+        self: *StateMachine,
+        operation: Operation,
+        batch: []const u8,
+        results: []u8,
+    ) usize {
+        return switch (operation) {
+            .init => 0,
+            .create_accounts => self.apply_create_accounts(batch, results),
+            .create_transfers => self.apply_create_transfers(batch, results),
+            .commit_transfers => self.apply_commit_transfers(batch, results),
+            .lookup_accounts => self.apply_lookup_accounts(batch, results),
             else => unreachable,
         };
     }
 
-    pub fn apply_create_accounts(self: *State, input: []const u8, output: []u8) usize {
+    pub fn apply_create_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(Account, input);
         var results = mem.bytesAsSlice(CreateAccountResults, output);
         var results_count: usize = 0;
-        for (batch) |account, index| {
-            log.debug("create_accounts {}/{}: {}", .{ index + 1, batch.len, account });
-            const result = self.create_account(account);
+        for (batch) |event, index| {
+            log.debug("create_accounts {}/{}: {}", .{ index + 1, batch.len, event });
+            const result = self.create_account(event);
             log.debug("{}", .{result});
             if (result != .ok) {
                 results[results_count] = .{ .index = @intCast(u32, index), .result = result };
@@ -64,13 +119,13 @@ pub const State = struct {
         return results_count * @sizeOf(CreateAccountResults);
     }
 
-    pub fn apply_create_transfers(self: *State, input: []const u8, output: []u8) usize {
+    pub fn apply_create_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(Transfer, input);
         var results = mem.bytesAsSlice(CreateTransferResults, output);
         var results_count: usize = 0;
-        for (batch) |transfer, index| {
-            log.debug("create_transfers {}/{}: {}", .{ index + 1, batch.len, transfer });
-            const result = self.create_transfer(transfer);
+        for (batch) |event, index| {
+            log.debug("create_transfers {}/{}: {}", .{ index + 1, batch.len, event });
+            const result = self.create_transfer(event);
             log.debug("{}", .{result});
             if (result != .ok) {
                 results[results_count] = .{ .index = @intCast(u32, index), .result = result };
@@ -80,13 +135,13 @@ pub const State = struct {
         return results_count * @sizeOf(CreateTransferResults);
     }
 
-    pub fn apply_commit_transfers(self: *State, input: []const u8, output: []u8) usize {
+    pub fn apply_commit_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(Commit, input);
         var results = mem.bytesAsSlice(CommitTransferResults, output);
         var results_count: usize = 0;
-        for (batch) |commit, index| {
-            log.debug("commit_transfers {}/{}: {}", .{ index + 1, batch.len, commit });
-            const result = self.commit_transfer(commit);
+        for (batch) |event, index| {
+            log.debug("commit_transfers {}/{}: {}", .{ index + 1, batch.len, event });
+            const result = self.commit_transfer(event);
             log.debug("{}", .{result});
             if (result != .ok) {
                 results[results_count] = .{ .index = @intCast(u32, index), .result = result };
@@ -96,7 +151,7 @@ pub const State = struct {
         return results_count * @sizeOf(CommitTransferResults);
     }
 
-    pub fn apply_lookup_accounts(self: *State, input: []const u8, output: []u8) usize {
+    pub fn apply_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(u128, input);
         // TODO Do the same for other apply methods:
         var output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
@@ -111,8 +166,8 @@ pub const State = struct {
         return results_count * @sizeOf(Account);
     }
 
-    pub fn create_account(self: *State, a: Account) CreateAccountResult {
-        assert(a.timestamp > self.timestamp);
+    pub fn create_account(self: *StateMachine, a: Account) CreateAccountResult {
+        assert(a.timestamp > self.commit_timestamp);
 
         if (a.custom != 0) return .reserved_field_custom;
         if (a.padding != 0) return .reserved_field_padding;
@@ -151,13 +206,13 @@ pub const State = struct {
             return .exists;
         } else {
             hash_map_result.entry.value = a;
-            self.timestamp = a.timestamp;
+            self.commit_timestamp = a.timestamp;
             return .ok;
         }
     }
 
-    pub fn create_transfer(self: *State, t: Transfer) CreateTransferResult {
-        assert(t.timestamp > self.timestamp);
+    pub fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
+        assert(t.timestamp > self.commit_timestamp);
 
         if (t.flags.padding != 0) return .reserved_flag_padding;
         if (t.flags.accept and !t.flags.auto_commit) return .reserved_flag_accept;
@@ -229,13 +284,13 @@ pub const State = struct {
                 dr.debit_reserved += t.amount;
                 cr.credit_reserved += t.amount;
             }
-            self.timestamp = t.timestamp;
+            self.commit_timestamp = t.timestamp;
             return .ok;
         }
     }
 
-    pub fn commit_transfer(self: *State, c: Commit) CommitTransferResult {
-        assert(c.timestamp > self.timestamp);
+    pub fn commit_transfer(self: *StateMachine, c: Commit) CommitTransferResult {
+        assert(c.timestamp > self.commit_timestamp);
 
         if (c.flags.padding != 0) return .reserved_flag_padding;
         if (!c.flags.accept and !c.flags.reject) return .commit_must_accept_or_reject;
@@ -287,7 +342,7 @@ pub const State = struct {
             t.flags.reject = true;
         }
         assert(t.flags.accept or t.flags.reject);
-        self.timestamp = c.timestamp;
+        self.commit_timestamp = c.timestamp;
         return .ok;
     }
 
@@ -303,7 +358,7 @@ pub const State = struct {
     /// This pointer is invalidated if the hash map is resized by another insert, e.g. if we get a
     /// pointer, insert another account without capacity, and then modify this pointer... BOOM!
     /// This is a sharp tool but replaces a lookup, copy and update with a single lookup.
-    fn get_account(self: *State, id: u128) ?*Account {
+    fn get_account(self: *StateMachine, id: u128) ?*Account {
         if (self.accounts.getEntry(id)) |entry| {
             return &entry.value;
         } else {
@@ -312,7 +367,7 @@ pub const State = struct {
     }
 
     /// See the above comment for get_account().
-    fn get_transfer(self: *State, id: u128) ?*Transfer {
+    fn get_transfer(self: *StateMachine, id: u128) ?*Transfer {
         if (self.transfers.getEntry(id)) |entry| {
             return &entry.value;
         } else {

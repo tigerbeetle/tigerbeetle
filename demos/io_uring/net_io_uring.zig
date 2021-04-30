@@ -8,13 +8,13 @@ const io_uring_cqe = os.linux.io_uring_cqe;
 
 const Event = packed struct {
     fd: i32,
-    op: Op
+    op: Op,
 };
 
 const Op = enum(u32) {
     Accept,
     Recv,
-    Send
+    Send,
 };
 
 const port = 3001;
@@ -35,7 +35,7 @@ pub fn main() !void {
     try os.setsockopt(server, os.SOL_SOCKET, os.SO_REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
     try os.bind(server, &address.any, address.getOsSockLen());
     try os.listen(server, kernel_backlog);
-    std.debug.print("net: echo server: io_uring: listening on {}...\n", .{ address });
+    std.debug.print("net: echo server: io_uring: listening on {}...\n", .{address});
 
     var ring = try IO_Uring.init(512, 0);
     defer ring.deinit();
@@ -56,9 +56,9 @@ pub fn main() !void {
             const cqe = cqes[i];
             if (cqe.res < 0) {
                 switch (-cqe.res) {
-                    os.EPIPE => std.debug.print("EPIPE {}\n", .{ cqe }),
-                    os.ECONNRESET => std.debug.print("ECONNRESET {}\n", .{ cqe }),
-                    else => std.debug.print("ERROR {}\n", .{ cqe })
+                    os.EPIPE => std.debug.print("EPIPE {}\n", .{cqe}),
+                    os.ECONNRESET => std.debug.print("ECONNRESET {}\n", .{cqe}),
+                    else => std.debug.print("ERROR {}\n", .{cqe}),
                 }
                 os.exit(1);
             }
@@ -76,7 +76,7 @@ pub fn main() !void {
                 },
                 .Send => {
                     try recv(&ring, event.fd);
-                }
+                },
             }
         }
         _ = try ring.submit_and_wait(1);
