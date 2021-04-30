@@ -4,6 +4,16 @@
   "description": "Official TigerBeetle Node.js client",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
+  "files": [
+    ".gitmodules",
+    "LICENSE",
+    "README.md",
+    "package.json",
+    "tsconfig.json",
+    "yarn.lock",
+    "src/index.ts",
+    "src/node.zig"
+  ],
   "scripts": {
     "build": "tsc && zig build-lib -dynamic -lc -isystem /usr/include/node src/node.zig -femit-bin=dist/client.node"
   },
