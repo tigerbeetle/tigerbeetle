@@ -1,4 +1,6 @@
+.bin
 .vscode
+.zig
 demos/bitcast/bench-decode
 demos/bitcast/decode
 demos/bitcast/transfers
