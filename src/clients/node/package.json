@@ -12,7 +12,8 @@
     "tsconfig.json",
     "yarn.lock",
     "src/index.ts",
-    "src/node.zig"
+    "src/node.zig",
+    "scripts/get_node_headers"
   ],
   "bin": {
     "zig": "./bin/zig"
