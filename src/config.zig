@@ -2,7 +2,7 @@
 pub const deployment_environment = .development;
 
 /// The maximum log level in increasing order of verbosity (emergency=0, debug=7):
-pub const log_level = 7;
+pub const log_level = 6;
 
 /// The maximum number of replicas allowed in a cluster.
 pub const replicas_max = 15;
