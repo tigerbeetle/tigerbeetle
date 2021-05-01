@@ -7,3 +7,4 @@ journal
 main
 zig/
 zig-cache/
+zig-out/
