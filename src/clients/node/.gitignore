@@ -1,7 +1,6 @@
+build/
 dist/
 node_modules/
 yarn-error.log
 zig-cache/
-.zig/
-.bin/
-build
+zig/
