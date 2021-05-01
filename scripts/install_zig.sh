@@ -47,10 +47,8 @@ echo "Installing $ZIG_DIRECTORY to .zig in current working directory..."
 rm -rf .zig
 mv $ZIG_DIRECTORY .zig
 
-# Symlink the Zig binary into .bin, it's up to the user to add this to their path:
-mkdir -p .bin
-ZIG_BIN="$(pwd)/.bin/zig"
-ln -s -f "$(pwd)/.zig/zig" $ZIG_BIN
+# It's up to the user to add this to their path if they want to:
+ZIG_BIN="$(pwd)/.zig/zig"
 
-ZIG_VERSION=`.bin/zig version`
+ZIG_VERSION=`$ZIG_BIN version`
 echo "Congratulations, you have successfully installed Zig $ZIG_VERSION to $ZIG_BIN. Enjoy!"
