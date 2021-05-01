@@ -2,12 +2,13 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const tb = @import("tigerbeetle/src/tigerbeetle.zig");
+
 const Account = tb.Account;
 const AccountFlags = tb.AccountFlags;
 const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
-const CommitFlags = tb.CommitFlags;
 const Commit = tb.Commit;
+const CommitFlags = tb.CommitFlags;
 const CreateAccountResults = tb.CreateAccountResults;
 const CreateTransferResults = tb.CreateTransferResults;
 const CommitTransferResults = tb.CommitTransferResults;
@@ -23,22 +24,41 @@ const c = @cImport({
     @cInclude("node_api.h");
 });
 
-//
-// N-API Globals
-//
+// TODO Use Environment life cycle APIs to store these globals:
+// https://nodejs.org/api/n-api.html#n_api_environment_life_cycle_apis
 var napi_undefined: c.napi_value = undefined;
+var io: IO = undefined;
 
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
     napi_register_function(env, exports, "init", init);
+    napi_register_function(env, exports, "deinit", deinit);
     napi_register_function(env, exports, "batch", batch);
     napi_register_function(env, exports, "tick", tick);
-    napi_register_function(env, exports, "deinit", deinit);
 
     if (c.napi_get_undefined(env, &napi_undefined) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to get \"undefined\".");
+        _ = c.napi_throw_error(env, null, "Failed to capture the value of \"undefined\".");
         return null;
     }
+
+    // Be careful to size the SQ ring to only a few SQE entries and to share a single IO instance
+    // across multiple clients to stay under kernel limits:
+    //
+    // The memory required by io_uring is accounted under the rlimit memlocked option, which can be
+    // quite low on some setups (64K). The default is usually enough for most use cases, but
+    // bigger rings or things like registered buffers deplete it quickly. Root isn't under this
+    // restriction, but regular users are.
+    //
+    // Check `/etc/security/limits.conf` for user settings, or `/etc/systemd/user.conf` and
+    // `/etc/systemd/system.conf` for systemd setups.
+    io = IO.init(32, 0) catch |err| {
+        // TODO Include this Zig error as part of the JavaScript exception message:
+        // See also `fn tick()` within this file where we could do the same.
+        std.debug.print("IO.init: {}\n", .{err});
+        _ = c.napi_throw_error(env, null, "Failed to initialize io_uring.");
+        return null;
+    };
+    // TODO Call deinit() when this environment is torn down.
 
     return exports;
 }
@@ -374,17 +394,6 @@ const Context = struct {
         const context = try allocator.create(Context);
         errdefer allocator.destroy(context);
 
-        // We are careful to size the SQ ring to only a few SQE entries (32) and to share a single
-        // IO instance across multiple clients to stay under kernel limits:
-        // Memory required by io_uring is accounted under the rlimit memlocked option, which can be
-        // quite low on some setups (64K). The default is usually enough for most use cases, but
-        // bigger rings or things like registered buffers deplete it quickly. Root isn't under this
-        // restriction, but regular users are. Check `/etc/security/limits.conf` for user settings,
-        // or `/etc/systemd/user.conf` and `/etc/systemd/system.conf` for systemd setups.
-
-        context.io = try IO.init(32, 0);
-        errdefer context.io.deinit();
-
         const configuration = try vr.parse_configuration(allocator, configuration_raw);
         errdefer allocator.free(configuration);
         assert(configuration.len > 0);
@@ -395,7 +404,7 @@ const Context = struct {
             cluster,
             context.configuration[0..configuration.len],
             .{ .client = id },
-            &context.io,
+            &io,
         );
         errdefer context.message_bus.deinit();
 
@@ -507,7 +516,7 @@ fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     const context = decode_context(env, argv[0]) catch return null;
 
     context.client.tick();
-    context.io.tick() catch unreachable;
+    io.tick() catch unreachable; // TODO Use a block to throw an exception including the Zig error.
     return null;
 }
 
