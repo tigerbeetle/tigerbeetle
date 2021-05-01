@@ -2476,16 +2476,21 @@ pub const Replica = struct {
         assert(self.commit_min == prepare.header.op);
         if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
 
-        reply.header.command = .reply;
-        reply.header.operation = prepare.header.operation;
-        reply.header.nonce = prepare.header.checksum;
-        reply.header.client = prepare.header.client;
-        reply.header.request = prepare.header.request;
-        reply.header.cluster = self.cluster;
-        reply.header.replica = self.replica;
-        reply.header.view = self.view;
-        reply.header.commit = prepare.header.op;
-        reply.header.size = @sizeOf(Header) + reply_body_size;
+        reply.header.* = .{
+            .command = .reply,
+            .operation = prepare.header.operation,
+            .nonce = prepare.header.checksum,
+            .client = prepare.header.client,
+            .request = prepare.header.request,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+            .op = prepare.header.op,
+            .commit = prepare.header.op,
+            .size = @sizeOf(Header) + reply_body_size,
+        };
+        assert(reply.header.offset == 0);
+        assert(reply.header.epoch == 0);
 
         reply.header.set_checksum_body(reply.buffer[@sizeOf(Header)..reply.header.size]);
         reply.header.set_checksum();
