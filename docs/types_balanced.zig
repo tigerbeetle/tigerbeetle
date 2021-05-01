@@ -1,4 +1,4 @@
-/// Accounting = Accounting Books + Accounting Policy (designed and enforced by the accountant)
+/// Accounting = Accounting books + Accounting policy (designed and enforced by the accountant)
 /// TigerBeetle = Accounting books + Accounting policy (allows operator to declare invariants)
 
 /// Goals:
