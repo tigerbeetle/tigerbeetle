@@ -15,15 +15,12 @@
     "src/node.zig",
     "scripts/get_node_headers"
   ],
-  "bin": {
-    "zig": "./bin/zig"
-  },
   "scripts": {
-    "build": "tsc && zig build-lib -dynamic -lc -isystem ./node-$(node --version)/include/node src/node.zig -femit-bin=dist/client.node",
+    "build": "tsc && .zig/zig build-lib -dynamic -lc -isystem build/node-$(node --version)/include/node src/node.zig -femit-bin=dist/client.node",
     "clean": "rm -rf ./node_modules ./dist ./.zig ./.bin ./build",
     "install:tigerbeetle": "git submodule init && git submodule update",
-    "install:zig": "./src/tigerbeetle/scripts/install_zig tagged",
-    "preinstall": "yarn install:tigerbeetle && yarn install:zig && ./scripts/get_node_headers",
+    "install:zig": "./src/tigerbeetle/scripts/install_zig",
+    "preinstall": "yarn install:tigerbeetle && yarn install:zig && ./scripts/download_node_headers.sh",
     "postinstall": "yarn build"
   },
   "author": "Coil Technologies, Inc",
