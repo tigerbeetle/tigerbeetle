@@ -55,8 +55,13 @@ Later portable versions of TigerBeetle may supplement io_uring with kqueue for m
 ```bash
 git clone https://github.com/coilhq/tigerbeetle.git
 cd tigerbeetle
-scripts/upgrade_ubuntu_kernel
-scripts/install_zig
+scripts/upgrade_ubuntu_kernel.sh
+scripts/install_zig.sh
+```
+
+Add Zig to your path (you may want this in a shell startup script to persist across shell sessions):
+```
+PATH=$PATH:"$(pwd)/zig"
 ```
 
 Once you have upgraded your kernel on Ubuntu and installed Zig, you can launch the TigerBeetle server:
