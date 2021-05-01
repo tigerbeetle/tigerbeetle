@@ -374,8 +374,14 @@ const Context = struct {
         const context = try allocator.create(Context);
         errdefer allocator.destroy(context);
 
-        // TODO We need to share this IO instance across multiple clients to stay under kernel limits:
-        // This needs to become a global which we initialize within the N-API module constructor up top.
+        // We are careful to size the SQ ring to only a few SQE entries (32) and to share a single
+        // IO instance across multiple clients to stay under kernel limits:
+        // Memory required by io_uring is accounted under the rlimit memlocked option, which can be
+        // quite low on some setups (64K). The default is usually enough for most use cases, but
+        // bigger rings or things like registered buffers deplete it quickly. Root isn't under this
+        // restriction, but regular users are. Check `/etc/security/limits.conf` for user settings,
+        // or `/etc/systemd/user.conf` and `/etc/systemd/system.conf` for systemd setups.
+
         context.io = try IO.init(32, 0);
         errdefer context.io.deinit();
 
