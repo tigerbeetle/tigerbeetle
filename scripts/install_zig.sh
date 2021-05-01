@@ -43,12 +43,12 @@ tar -xf $ZIG_TARBALL
 rm $ZIG_TARBALL
 
 # Replace any existing Zig installation so that we can install or upgrade:
-echo "Installing $ZIG_DIRECTORY to .zig in current working directory..."
-rm -rf .zig
-mv $ZIG_DIRECTORY .zig
+echo "Installing $ZIG_DIRECTORY to 'zig' in current working directory..."
+rm -rf zig
+mv $ZIG_DIRECTORY zig
 
 # It's up to the user to add this to their path if they want to:
-ZIG_BIN="$(pwd)/.zig/zig"
+ZIG_BIN="$(pwd)/zig/zig"
 
 ZIG_VERSION=`$ZIG_BIN version`
 echo "Congratulations, you have successfully installed Zig $ZIG_VERSION to $ZIG_BIN. Enjoy!"

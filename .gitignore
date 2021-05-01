@@ -1,10 +1,9 @@
-.bin
 .vscode
-.zig
 demos/bitcast/bench-decode
 demos/bitcast/decode
 demos/bitcast/transfers
 dist/
 journal
 main
-zig-cache
+zig/
+zig-cache/
