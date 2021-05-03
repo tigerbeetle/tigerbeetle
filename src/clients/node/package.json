@@ -15,6 +15,9 @@
     "src/node.zig",
     "scripts/download_node_headers.sh"
   ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "scripts": {
     "build": "tsc && zig/zig build-lib -dynamic -lc -isystem build/node-$(node --version)/include/node src/node.zig -femit-bin=dist/client.node",
     "clean": "rm -rf build dist node_modules src/zig-cache zig",
