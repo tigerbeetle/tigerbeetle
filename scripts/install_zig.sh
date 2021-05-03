@@ -5,10 +5,10 @@ set -e
 # TODO When 0.8.0 arrives, we should make the release build the default.
 if [ "$1" == "tagged" ]; then
     ZIG_RELEASE="0.7.1"
-    echo "Installing $ZIG_RELEASE release build..."
+    echo "Installing Zig $ZIG_RELEASE release build..."
 else
     ZIG_RELEASE="builds"
-    echo "Installing latest master build..."
+    echo "Installing Zig latest master build..."
 fi
 
 # Determine the platform:
