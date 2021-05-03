@@ -3,7 +3,7 @@ interface Binding {
   init: (args: BindingInitArgs) => Context
   batch: (context: Context, operation: Operation, batch: Command[], result: ResultCallback) => void
   tick: (context: Context) => void,
-  destroy: (context: Context) => void
+  deinit: (context: Context) => void
 }
 
 interface BindingInitArgs {
@@ -288,7 +288,7 @@ export function createClient (args: InitArgs): Client {
   }
 
   const destroy = (): void => {
-    binding.destroy(context)
+    binding.deinit(context)
     if (_interval){
       clearInterval(_interval)
     }
