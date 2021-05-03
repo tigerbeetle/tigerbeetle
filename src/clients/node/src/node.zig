@@ -24,10 +24,47 @@ const c = @cImport({
     @cInclude("node_api.h");
 });
 
-// TODO Use Environment life cycle APIs to store these globals:
-// https://nodejs.org/api/n-api.html#n_api_environment_life_cycle_apis
-var napi_undefined: c.napi_value = undefined;
-var io: IO = undefined;
+const Globals = struct {
+    allocator:  *std.mem.Allocator,
+    io: IO,
+    napi_undefined: c.napi_value,
+
+    pub fn init(allocator: *std.mem.Allocator, env: c.napi_env) !*Globals {
+        const self = try allocator.create(Globals);
+        errdefer allocator.destroy(self);
+
+        self.allocator = allocator;
+
+        // Be careful to size the SQ ring to only a few SQE entries and to share a single IO instance
+        // across multiple clients to stay under kernel limits:
+        //
+        // The memory required by io_uring is accounted under the rlimit memlocked option, which can be
+        // quite low on some setups (64K). The default is usually enough for most use cases, but
+        // bigger rings or things like registered buffers deplete it quickly. Root isn't under this
+        // restriction, but regular users are.
+        //
+        // Check `/etc/security/limits.conf` for user settings, or `/etc/systemd/user.conf` and
+        // `/etc/systemd/system.conf` for systemd setups.
+        self.io = try IO.init(32, 0);
+        errdefer self.io.deinit();
+
+        if (c.napi_get_undefined(env, &self.napi_undefined) != .napi_ok) {
+            return throw(env, "Failed to capture the value of \"undefined\".");
+        }
+
+        return self;
+    }
+
+    pub fn deinit(self: *Globals) void {
+        self.io.deinit();
+        self.allocator.destroy(self); // TODO: @Isaac please review.
+    }
+
+    pub fn destroy(env: c.napi_env, data: ?*c_void, hint: ?*c_void) callconv(.C) void {
+        const self = @ptrCast(*Globals, @alignCast(@alignOf(Globals), data.?)); // TODO: @Isaac please review.
+        self.deinit();
+    }
+};
 
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
@@ -36,29 +73,17 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     napi_register_function(env, exports, "batch", batch);
     napi_register_function(env, exports, "tick", tick);
 
-    if (c.napi_get_undefined(env, &napi_undefined) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to capture the value of \"undefined\".");
-        return null;
-    }
-
-    // Be careful to size the SQ ring to only a few SQE entries and to share a single IO instance
-    // across multiple clients to stay under kernel limits:
-    //
-    // The memory required by io_uring is accounted under the rlimit memlocked option, which can be
-    // quite low on some setups (64K). The default is usually enough for most use cases, but
-    // bigger rings or things like registered buffers deplete it quickly. Root isn't under this
-    // restriction, but regular users are.
-    //
-    // Check `/etc/security/limits.conf` for user settings, or `/etc/systemd/user.conf` and
-    // `/etc/systemd/system.conf` for systemd setups.
-    io = IO.init(32, 0) catch |err| {
-        // TODO Include this Zig error as part of the JavaScript exception message:
-        // See also `fn tick()` within this file where we could do the same.
-        std.debug.print("IO.init: {}\n", .{err});
-        _ = c.napi_throw_error(env, null, "Failed to initialize io_uring.");
+    const allocator = std.heap.c_allocator;
+    var global = Globals.init(allocator, env) catch {
+        std.debug.print("Failed to initialise environment.\n", .{});
         return null;
     };
-    // TODO Call deinit() when this environment is torn down.
+    errdefer global.deinit();
+
+    if (c.napi_set_instance_data(env, @ptrCast(*c_void, @alignCast(@alignOf(u8), global)), Globals.destroy, null) != .napi_ok) { // TODO: @Isaac please review.
+        allocator.destroy(global);
+        throw(env, "Failed to initialize environment.") catch return null;
+    }
 
     return exports;
 }
@@ -79,6 +104,15 @@ fn napi_register_function(env: c.napi_env, exports: c.napi_value, comptime name:
 //
 // Helper functions to encode and decode JS object
 //
+fn decode_globals(env: c.napi_env) !*Globals {
+    var data: ?*c_void = null;
+    if (c.napi_get_instance_data(env, &data) != .napi_ok) {
+        return throw(env, "Failed to decode globals.");
+    }
+
+    return @ptrCast(*Globals, @alignCast(@alignOf(Globals), data.?));
+}
+
 const UserData = packed struct {
     env: c.napi_env,
     callback_reference: c.napi_ref,
@@ -111,7 +145,7 @@ fn decode_u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: 
     assert(c.napi_get_buffer_info(env, property, &data, &data_length) == .napi_ok);
     if (data_length != @sizeOf(u128)) return throw(env, key ++ " must be 128-bit");
 
-    return @ptrCast(*u128, @alignCast(@alignOf(u128), data.?)).*;
+    return @ptrCast(*u128, @alignCast(@alignOf(u128), data.?)).*; // TODO: @Isaac please review.
 }
 
 fn decode_u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [*:0]const u8) !u64 {
@@ -170,7 +204,7 @@ fn decode_context(env: c.napi_env, value: c.napi_value) !*Context {
     if (c.napi_get_value_external(env, value, &result) != .napi_ok) {
         return throw(env, "Failed to get Client context pointer.");
     }
-    return @ptrCast(*Context, @alignCast(@alignOf(Context), result.?));
+    return @ptrCast(*Context, @alignCast(@alignOf(Context), result.?)); // TODO: @Isaac please review.
 }
 
 /// This will create a reference in V8 with a ref_count of 1.
@@ -376,7 +410,8 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 
     const allocator = std.heap.c_allocator;
 
-    const context = Context.create(env, allocator, id, cluster, configuration) catch {
+    const globals = decode_globals(env) catch return null;
+    const context = Context.create(env, allocator, &globals.io, id, cluster, configuration) catch {
         // TODO: switch on err and provide more detailed messages
         throw(env, "Failed to initialize Client.") catch return null;
     };
@@ -385,14 +420,16 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 }
 
 const Context = struct {
-    io: IO,
+    io: *IO,
     configuration: [32]std.net.Address,
     message_bus: MessageBus,
     client: Client,
 
-    fn create(env: c.napi_env, allocator: *std.mem.Allocator, id: u128, cluster: u128, configuration_raw: []const u8) !c.napi_value {
+    fn create(env: c.napi_env, allocator: *std.mem.Allocator, io: *IO, id: u128, cluster: u128, configuration_raw: []const u8) !c.napi_value {
         const context = try allocator.create(Context);
         errdefer allocator.destroy(context);
+
+        context.io = io;
 
         const configuration = try vr.parse_configuration(allocator, configuration_raw);
         errdefer allocator.free(configuration);
@@ -404,7 +441,7 @@ const Context = struct {
             cluster,
             context.configuration[0..configuration.len],
             .{ .client = id },
-            &io,
+            context.io,
         );
         errdefer context.message_bus.deinit();
 
@@ -471,6 +508,7 @@ fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
         throw(env, "Failed to get \"this\" for results callback.") catch return;
     }
 
+    const globals = decode_globals(env) catch return;
     const argc: usize = 2;
     var argv: [argc]c.napi_value = undefined;
 
@@ -494,7 +532,7 @@ fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
         .commit_transfers => encode_napi_results_array(CommitTransferResults, env, results) catch return,
         .lookup_accounts => encode_napi_results_array(Account, env, results) catch return,
     };
-    argv[0] = napi_undefined;
+    argv[0] = globals.napi_undefined;
     argv[1] = napi_results;
 
     // TODO: add error handling (but allow JS function to throw an exception)
@@ -516,7 +554,7 @@ fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     const context = decode_context(env, argv[0]) catch return null;
 
     context.client.tick();
-    io.tick() catch unreachable; // TODO Use a block to throw an exception including the Zig error.
+    context.io.tick() catch unreachable; // TODO Use a block to throw an exception including the Zig error.
     return null;
 }
 
