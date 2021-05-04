@@ -1097,19 +1097,14 @@ pub const Replica = struct {
     /// The id of the cluster to which this replica belongs:
     cluster: u128,
 
-    /// An array containing the remote or local addresses of each of the 2f + 1 replicas:
-    /// Unlike the VRR paper, we do not sort the array but leave the order explicitly to the user.
-    /// There are several advantages to this:
-    /// * The operator may deploy a cluster with proximity in mind since replication follows order.
-    /// * A replica's IP address may be changed without reconfiguration.
-    /// This does require that the user specify the same order to all replicas.
-    configuration: []MessageBus.Address,
+    /// The number of replicas in the cluster:
+    replica_count: u16,
 
-    /// The index into the configuration where this replica's IP address is stored:
+    /// The index of this replica's address in the configuration array held by the MessageBus:
     replica: u16,
 
     /// The maximum number of replicas that may be faulty:
-    f: u32,
+    f: u16,
 
     /// The persistent log of hash-chained journal entries:
     journal: *Journal,
@@ -1217,36 +1212,37 @@ pub const Replica = struct {
     /// Incremented whenever `choose_any_other_replica()` is called.
     choose_any_other_replica_ticks: u64 = 0,
 
-    // TODO Limit integer types for `f` and `replica` to match their upper bounds in practice.
     pub fn init(
         allocator: *Allocator,
         cluster: u128,
-        configuration: []MessageBus.Address,
+        replica_count: u16,
         replica: u16,
-        f: u32,
         journal: *Journal,
         message_bus: *MessageBus,
         state_machine: *StateMachine,
     ) !Replica {
-        assert(cluster > 0);
-        assert(configuration.len > 0);
-        assert(configuration.len > f);
-        assert(replica < configuration.len);
-        assert(f > 0 or configuration.len <= 2);
+        // The smallest f such that 2f + 1 is less than or equal to the number of replicas.
+        const f = (replica_count - 1) / 2;
 
-        var prepare_ok = try allocator.alloc(?*Message, configuration.len);
+        assert(cluster > 0);
+        assert(replica_count > 0);
+        assert(replica_count > f);
+        assert(replica < replica_count);
+        assert(f > 0 or replica_count <= 2);
+
+        var prepare_ok = try allocator.alloc(?*Message, replica_count);
         errdefer allocator.free(prepare_ok);
         std.mem.set(?*Message, prepare_ok, null);
 
-        var start_view_change = try allocator.alloc(?*Message, configuration.len);
+        var start_view_change = try allocator.alloc(?*Message, replica_count);
         errdefer allocator.free(start_view_change);
         std.mem.set(?*Message, start_view_change, null);
 
-        var do_view_change = try allocator.alloc(?*Message, configuration.len);
+        var do_view_change = try allocator.alloc(?*Message, replica_count);
         errdefer allocator.free(do_view_change);
         std.mem.set(?*Message, do_view_change, null);
 
-        var nack_prepare = try allocator.alloc(?*Message, configuration.len);
+        var nack_prepare = try allocator.alloc(?*Message, replica_count);
         errdefer allocator.free(nack_prepare);
         std.mem.set(?*Message, nack_prepare, null);
 
@@ -1276,7 +1272,7 @@ pub const Replica = struct {
         var self = Replica{
             .allocator = allocator,
             .cluster = cluster,
-            .configuration = configuration,
+            .replica_count = replica_count,
             .replica = replica,
             .f = f,
             .journal = journal,
@@ -1361,7 +1357,7 @@ pub const Replica = struct {
 
     /// Returns the index into the configuration of the leader for a given view.
     pub fn leader_index(self: *Replica, view: u64) u16 {
-        return @intCast(u16, @mod(view, self.configuration.len));
+        return @intCast(u16, @mod(view, self.replica_count));
     }
 
     /// Time is measured in logical ticks that are incremented on every call to tick().
@@ -1405,7 +1401,7 @@ pub const Replica = struct {
             });
             return;
         }
-        assert(message.header.replica < self.configuration.len);
+        assert(message.header.replica < self.replica_count);
         switch (message.header.command) {
             .request => self.on_request(message),
             .prepare => self.on_prepare(message),
@@ -1771,8 +1767,8 @@ pub const Replica = struct {
         assert(message.header.view == self.view);
 
         // Wait until we have `f` messages (excluding ourself) for quorum:
-        assert(self.configuration.len > 1);
-        assert(self.f > 0 or self.configuration.len == 2);
+        assert(self.replica_count > 1);
+        assert(self.f > 0 or self.replica_count == 2);
         const threshold = std.math.max(1, self.f);
 
         const count = self.add_message_and_receive_quorum_exactly_once(
@@ -2090,9 +2086,9 @@ pub const Replica = struct {
 
         // We require a `nack_prepare` from a majority of followers if our op is faulty:
         // Otherwise, we know we do not have the op and need only `f` other nacks.
-        assert(self.configuration.len > 1);
-        assert(self.f > 0 or self.configuration.len == 2);
-        assert(self.f + 1 == (self.configuration.len - 1) / 2 + 1);
+        assert(self.replica_count > 1);
+        assert(self.f > 0 or self.replica_count == 2);
+        assert(self.f + 1 == (self.replica_count - 1) / 2 + 1);
         const threshold = if (self.journal.faulty.bit(op)) self.f + 1 else std.math.max(1, self.f);
 
         // Wait until we have `threshold` messages for quorum:
@@ -2257,7 +2253,7 @@ pub const Replica = struct {
         message: *Message,
         threshold: u32,
     ) ?usize {
-        assert(messages.len == self.configuration.len);
+        assert(messages.len == self.replica_count);
         assert(message.header.cluster == self.cluster);
         assert(message.header.view == self.view);
 
@@ -2276,7 +2272,7 @@ pub const Replica = struct {
         }
 
         assert(threshold >= 1);
-        assert(threshold <= self.configuration.len);
+        assert(threshold <= self.replica_count);
 
         const command: []const u8 = @tagName(message.header.command);
 
@@ -2366,11 +2362,11 @@ pub const Replica = struct {
     /// 2. whether the replica is connected and ready for sending in the MessageBus.
     fn choose_any_other_replica(self: *Replica) ?u16 {
         var count: usize = 0;
-        while (count < self.configuration.len) : (count += 1) {
+        while (count < self.replica_count) : (count += 1) {
             self.choose_any_other_replica_ticks += 1;
             const replica = @mod(
                 self.replica + self.choose_any_other_replica_ticks,
-                self.configuration.len,
+                self.replica_count,
             );
             if (replica == self.replica) continue;
             // TODO if (!MessageBus.can_send_to_replica(replica)) continue;
@@ -2507,7 +2503,7 @@ pub const Replica = struct {
     }
 
     fn count_quorum(self: *Replica, messages: []?*Message, command: Command, nonce: u128) usize {
-        assert(messages.len == self.configuration.len);
+        assert(messages.len == self.replica_count);
 
         var count: usize = 0;
         for (messages) |received, replica| {
@@ -3399,7 +3395,7 @@ pub const Replica = struct {
             return;
         }
 
-        const next = @mod(self.replica + 1, @intCast(u16, self.configuration.len));
+        const next = @mod(self.replica + 1, @intCast(u16, self.replica_count));
         if (next == self.leader_index(message.header.view)) {
             log.debug("{}: replicate: not replicating (completed)", .{self.replica});
             return;
@@ -3599,9 +3595,10 @@ pub const Replica = struct {
     }
 
     fn send_header_to_other_replicas(self: *Replica, header: Header) void {
-        for (self.configuration) |_, replica| {
+        var replica: u16 = 0;
+        while (replica < self.replica_count) : (replica += 1) {
             if (replica != self.replica) {
-                self.send_header_to_replica(@intCast(u16, replica), header);
+                self.send_header_to_replica(replica, header);
             }
         }
     }
@@ -3621,9 +3618,10 @@ pub const Replica = struct {
     }
 
     fn send_message_to_other_replicas(self: *Replica, message: *Message) void {
-        for (self.configuration) |_, replica| {
+        var replica: u16 = 0;
+        while (replica < self.replica_count) : (replica += 1) {
             if (replica != self.replica) {
-                self.send_message_to_replica(@intCast(u16, replica), message);
+                self.send_message_to_replica(replica, message);
             }
         }
     }
@@ -4038,6 +4036,12 @@ pub const Replica = struct {
     }
 };
 
+/// Returns An array containing the remote or local addresses of each of the 2f + 1 replicas:
+/// Unlike the VRR paper, we do not sort the array but leave the order explicitly to the user.
+/// There are several advantages to this:
+/// * The operator may deploy a cluster with proximity in mind since replication follows order.
+/// * A replica's IP address may be changed without reconfiguration.
+/// This does require that the user specify the same order to all replicas.
 /// The caller owns the memory of the returned slice of addresses.
 /// TODO Unit tests.
 /// TODO Integrate into `src/cli.zig`.
