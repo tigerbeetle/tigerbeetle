@@ -25,7 +25,7 @@ const c = @cImport({
 });
 
 const Globals = struct {
-    allocator:  *std.mem.Allocator,
+    allocator: *std.mem.Allocator,
     io: IO,
     napi_undefined: c.napi_value,
 
@@ -449,7 +449,7 @@ const Context = struct {
             allocator,
             id,
             cluster,
-            configuration_raw,
+            @intCast(u16, configuration.len),
             &context.message_bus,
         );
         errdefer context.client.deinit();
