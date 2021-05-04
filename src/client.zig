@@ -32,21 +32,17 @@ pub const Client = struct {
         allocator: *mem.Allocator,
         id: u128,
         cluster: u128,
-        configuration_raw: []const u8,
+        replica_count: u16,
         message_bus: *MessageBus,
     ) !Client {
         assert(id > 0);
         assert(cluster > 0);
 
-        const configuration = try vr.parse_configuration(allocator, configuration_raw);
-        errdefer allocator.free(configuration);
-        assert(configuration.len > 0);
-
         var self = Client{
             .allocator = allocator,
             .id = id,
             .cluster = cluster,
-            .configuration = configuration,
+            .replica_count = replica_count,
             .message_bus = message_bus,
             .batch_manager = undefined,
         };
