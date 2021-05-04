@@ -25,9 +25,6 @@ const Process = union(enum) {
 };
 
 pub const MessageBus = struct {
-    // TODO Standardize on one of these and use them everywhere:
-    pub const Address = std.net.Address;
-
     pool: MessagePool,
     io: *IO,
 

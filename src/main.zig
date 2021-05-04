@@ -18,9 +18,6 @@ pub fn main() !void {
 
     const args = cli.parse_args();
 
-    // The smallest f such that 2f + 1 is less than or equal to the number of replicas.
-    const f = (args.configuration.len - 1) / 2;
-
     var io = try IO.init(128, 0);
     var state_machine = try StateMachine.init(arena, config.accounts_max, config.transfers_max);
     var storage = try Storage.init(arena, config.journal_size_max);
@@ -41,9 +38,8 @@ pub fn main() !void {
     var replica = try Replica.init(
         arena,
         args.cluster,
-        args.configuration,
+        @intCast(u16, args.configuration.len),
         args.replica,
-        @intCast(u32, f),
         &journal,
         &message_bus,
         &state_machine,

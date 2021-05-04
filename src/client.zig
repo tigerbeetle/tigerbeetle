@@ -20,7 +20,7 @@ pub const Client = struct {
     allocator: *mem.Allocator,
     id: u128,
     cluster: u128,
-    configuration: []MessageBus.Address,
+    replica_count: u16,
     message_bus: *MessageBus,
 
     // TODO Ask the cluster for our last request number.
@@ -112,7 +112,7 @@ pub const Client = struct {
 
     fn send_message_to_replicas(self: *Client, message: *Message) void {
         var replica: u16 = 0;
-        while (replica < self.configuration.len) : (replica += 1) {
+        while (replica < self.replica_count) : (replica += 1) {
             self.message_bus.send_message_to_replica(replica, message);
         }
     }
@@ -245,7 +245,7 @@ const BatchManager = struct {
                 self.push_to_send_queue(client, .{ .create_accounts = batch });
                 return;
             }
-        }        
+        }
         if (self.create_transfers.current()) |batch| {
             if (self.create_transfers.current().?.groups.items.len > 0) {
                 self.create_transfers.mark_current_complete();
@@ -260,7 +260,7 @@ const BatchManager = struct {
                 return;
             }
         }
-        if(self.lookup_accounts.current()) |batch| {
+        if (self.lookup_accounts.current()) |batch| {
             if (self.lookup_accounts.current().?.groups.items.len > 0) {
                 self.lookup_accounts.mark_current_complete();
                 self.push_to_send_queue(client, .{ .lookup_accounts = batch });
