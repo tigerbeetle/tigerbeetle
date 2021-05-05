@@ -3538,6 +3538,7 @@ pub const Replica = struct {
 
     fn send_prepare_to_replica(self: *Replica, replica: u16, op: u64, checksum: ?u128) void {
         assert(self.status == .normal or self.status == .view_change);
+        assert(replica != self.replica);
 
         assert(!self.sending_prepare);
         self.sending_prepare = true;
