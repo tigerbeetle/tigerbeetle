@@ -11,12 +11,21 @@ else
     echo "Installing Zig latest master build..."
 fi
 
-# Determine the platform:
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    ZIG_TARGET="zig-macos-x86_64"
+# Determine the architecture:
+if [[ `uname -m` == 'arm64' ]]; then
+    ZIG_ARCH="aarch64"
 else
-    ZIG_TARGET="zig-linux-x86"
+    ZIG_ARCH="x86_64"
 fi
+
+# Determine the operating system:
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    ZIG_OS="macos"
+else
+    ZIG_OS="linux"
+fi
+
+ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"
 
 # Determine the 0.7.1 or latest master build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
 if command -v wget &> /dev/null; then
