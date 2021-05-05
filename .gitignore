@@ -5,6 +5,7 @@ demos/bitcast/transfers
 dist/
 journal
 main
+tigerbeetle
 zig/
 zig-cache/
 zig-out/
