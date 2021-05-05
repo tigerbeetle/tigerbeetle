@@ -11,12 +11,13 @@ do
     ./tigerbeetle $CLUSTER_ID $REPLICA_ADDRESSES --replica-index=$I > /dev/null 2>&1 &
 done
 
+# Wait for replicas to start, listen and connect:
 sleep 2
+
 echo ""
 echo "Benchmarking..."
 zig run -OReleaseSafe src/benchmark.zig
 echo ""
-sleep 1
 
 for I in 0 1
 do
