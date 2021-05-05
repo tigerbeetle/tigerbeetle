@@ -5,7 +5,7 @@ const mem = std.mem;
 const vr = @import("vr.zig");
 const Header = vr.Header;
 
-const MessageBus = @import("message_bus.zig").MessageBus;
+const ClientMessageBus = @import("message_bus.zig").ClientMessageBus;
 const Message = @import("message_bus.zig").Message;
 const Operation = @import("state_machine.zig").Operation;
 const FixedArrayList = @import("fixed_array_list.zig").FixedArrayList;
@@ -21,7 +21,7 @@ pub const Client = struct {
     id: u128,
     cluster: u128,
     replica_count: u16,
-    message_bus: *MessageBus,
+    message_bus: *ClientMessageBus,
 
     // TODO Ask the cluster for our last request number.
     request: u32 = 0,
@@ -33,7 +33,7 @@ pub const Client = struct {
         id: u128,
         cluster: u128,
         replica_count: u16,
-        message_bus: *MessageBus,
+        message_bus: *ClientMessageBus,
     ) !Client {
         assert(id > 0);
         assert(cluster > 0);

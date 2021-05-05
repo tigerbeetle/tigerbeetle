@@ -32,7 +32,7 @@ pub fn main() !void {
         arena,
         args.cluster,
         args.configuration,
-        .{ .replica = args.replica },
+        args.replica,
         &io,
     );
     var replica = try Replica.init(
@@ -45,7 +45,7 @@ pub fn main() !void {
         &state_machine,
     );
     // TODO: Get rid of this wart by moving MessageBus inside Replica or otherwise.
-    message_bus.process = .{ .replica = &replica };
+    message_bus.process.replica = &replica;
 
     std.log.info("cluster={x} replica={}: listening on {}", .{
         args.cluster,
