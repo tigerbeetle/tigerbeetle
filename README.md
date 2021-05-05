@@ -56,29 +56,32 @@ Later portable versions of TigerBeetle may supplement io_uring with kqueue for m
 git clone https://github.com/coilhq/tigerbeetle.git
 cd tigerbeetle
 scripts/upgrade_ubuntu_kernel.sh
-scripts/install_zig.sh
+scripts/install.sh
 ```
 
-Add Zig to your path (you may want this in a shell startup script to persist across shell sessions):
+## Launch a Local Cluster
+
+Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
+
 ```
-PATH=$PATH:"$(pwd)/zig"
+./tigerbeetle --cluster-id=0a5ca1ab1ebee11e --replica-addresses=3001,3002,3003 --replica-index=0
+./tigerbeetle --cluster-id=0a5ca1ab1ebee11e --replica-addresses=3001,3002,3003 --replica-index=1
+./tigerbeetle --cluster-id=0a5ca1ab1ebee11e --replica-addresses=3001,3002,3003 --replica-index=2
 ```
 
-Once you have upgraded your kernel on Ubuntu and installed Zig, you can launch the TigerBeetle server:
+Run the TigerBeetle binary to see all command line arguments:
 
 ```bash
-./tigerbeetle
+./tigerbeetle --help
 ```
 
 ## Benchmark
 
-With a fresh running TigerBeetle server, you are ready to benchmark!
+With a running TigerBeetle cluster, you are ready to benchmark!
 
 ```bash
-zig run src/benchmark.zig -O ReleaseSafe
+scripts/benchmark.sh
 ```
-
-After each run of the benchmark, you must delete TigerBeetle's `journal` data file and restart the server to ensure a clean journal. The benchmark will abort if any accounts or transfers already exist.
 
 ## Clients
 
