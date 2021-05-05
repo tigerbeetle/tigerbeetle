@@ -12,14 +12,14 @@ else
 fi
 
 # Determine the architecture:
-if [[ `uname -m` == 'arm64' ]]; then
+if [ `uname -m` == 'arm64' ] || [ `uname -m` == 'aarch64' ]; then
     ZIG_ARCH="aarch64"
 else
     ZIG_ARCH="x86_64"
 fi
 
 # Determine the operating system:
-if [[ "$OSTYPE" == "darwin"* ]]; then
+if [ "$OSTYPE" == "darwin"* ]; then
     ZIG_OS="macos"
 else
     ZIG_OS="linux"
