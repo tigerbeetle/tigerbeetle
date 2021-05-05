@@ -1,10 +1,12 @@
-/// Accounting = Accounting books + Accounting policy (designed and enforced by the accountant)
-/// TigerBeetle = Accounting books + Accounting policy (allows operator to declare invariants)
-
+/// Accounting = accounting books + accounting policy (designed and enforced by the accountant)
+/// TigerBeetle = accounting books + accounting policy (allows the operator to declare invariants)
+///
+/// This is the key reason that TigerBeetle's Account struct is more than only credits and debits.
+///
 /// Goals:
 ///
 /// 1. Improve the product experience, get away from polymorphism.
-/// At the same time, improve the way TigerBeetle integrates with the greater accounting system.
+/// At the same time, improve the way TigerBeetle integrates with third party systems.
 ///
 /// 2. Simplify and reduce the size of data structures for performance, and reduced memory use.
 /// At the same time, balance this with the accounting policy features we want to support.
@@ -18,18 +20,18 @@
 /// We also want to make distributed accounting policy easy: two-phase commit transfers.
 /// We can't imagine TigerBeetle without first-class support for Interledger.
 
-/// 64 bytes:
-/// Saves 64 bytes compared to the 128 byte struct we had before.
-/// Reduces number of fields from 15 fields to 8 fields.
-/// We drop support for arbritrary net debit/credit balance limits.
-/// Net debit/credit balance limits are still supported and activated by flag.
-/// However, these now simply enforce a limit of 0 on the net balance.
-/// This guides operators towards prepaid accounts where they need NDC > 0, i.e. some risk.
-/// The advantage of prepaid accounts is auditability, every limit change becomes a transfer.
-pub const Account = extern struct {
+/// 128 bytes:
+/// A 64-byte Account may not improve performance significantly, and drops too much functionality.
+/// Reduces cognitive complexity by reducing the number of fields from 15 fields to 10 fields.
+/// Supports referencing at least two third-party UUIDs, e.g. for tuple accounts: A Payable To B.
+/// Supports referencing external entities, where multiple accounts reference the same entity.
+/// Supports a description for system inventory codes.
+pub const Account = packed struct {
     id: u128,
+    user_data: [64]u8,
     flags: u32,
-    unit_of_value: u32,
+    description: u16,
+    unit: u16,
     debits_reserved: u64,
     debits_accepted: u64,
     credits_reserved: u64,
@@ -37,7 +39,7 @@ pub const Account = extern struct {
     timestamp: u64 = 0,
 };
 
-/// 96 bytes (64 + 32)
+/// 128 bytes (64 + 32)
 /// Saves 32 bytes compared to the 128 byte struct we had before.
 /// Reduces number of fields from 10 fields to 9 fields.
 /// No loss of any accounting policy features.
@@ -50,7 +52,7 @@ pub const Transfer = extern struct {
     id: u128,
     debit_account_id: u128,
     credit_account_id: u128,
-    user_data: [16]u8, // 128-bit: An ILPv4 condition (truncated), or third-party UUID.
+    user_data: [48]u8, // 128-bit: A third-party UUID.
     flags: u32,
     description: u32, // A system inventory code describing the reason for the transfer.
     amount: u64,
@@ -63,7 +65,7 @@ pub const Transfer = extern struct {
 /// Reduces number of fields from 6 fields to 5 fields.
 pub const Commit = extern struct {
     id: u128,
-    user_data: [32]u8, // 256-bit: An ILPv4 preimage, or third-party UUIDs.
+    user_data_256: [32]u8, // 256-bit: An ILPv4 preimage, or third-party UUIDs.
     flags: u32,
     description: u32, // A system inventory code describing the reason for the accept or reject.
     timestamp: u64 = 0,
