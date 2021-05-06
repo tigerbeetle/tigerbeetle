@@ -19,10 +19,11 @@ pub const Message = MessagePool.Message;
 
 const SendQueue = RingBuffer(*Message, config.connection_send_queue_max);
 
-pub const MessageBus = MessageBusImpl(.replica);
-pub const ClientMessageBus = MessageBusImpl(.client);
+pub const MessageBusReplica = MessageBusImpl(.replica);
+pub const MessageBusClient = MessageBusImpl(.client);
 
 const ProcessType = enum { replica, client };
+
 fn MessageBusImpl(comptime process_type: ProcessType) type {
     return struct {
         const Self = @This();
