@@ -1,6 +1,6 @@
 # tigerbeetle
 
-*TigerBeetle is a purpose-built accounting database, designed for high-throughput low-latency two-phase prepare/commit transfers between accounts.*
+*TigerBeetle is a purpose-built financial accounting database, designed for high-throughput low-latency two-phase prepare/commit transfers between accounts.*
 
 Watch a video introduction of TigerBeetle given to the [Interledger](https://interledger.org/) community on 25 November 2020:
 
@@ -22,7 +22,7 @@ While investigating a few existing systems it became clear that the majority of 
 
 Furthermore, these systems may achieve performance but at the expense of reliability, especially in the face of hardware failure, corruption and misdirected writes, a compromise that is unacceptable for a system-of-record for financial accounts.
 
-## The Solution - A Purpose-Built Accounting Database
+## The Solution - A Purpose-Built Financial Accounting Database
 
 Our survey led us to conclude that, while there are mechanisms available to shard account balances to parallelize updates and improve performance, there are still significant performance gains to be had in designing a database that is purpose built for storing balances and processing updates in a reliable manner.
 
