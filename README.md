@@ -50,7 +50,7 @@ The [beta version](https://github.com/coilhq/tigerbeetle/tree/beta) of **TigerBe
 
 **Prerequisites:** The current beta version of TigerBeetle targets Linux and takes advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via [io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on recent versions of Linux with an updated kernel.
 
-Later portable versions of TigerBeetle may supplement io_uring with kqueue for macOS and FreeBSD support, or IOCP for Windows support.
+Later portable versions of TigerBeetle may supplement `io_uring` with `kqueue` for macOS and FreeBSD support, or `IOCP` for Windows support.
 
 ```bash
 git clone https://github.com/coilhq/tigerbeetle.git
@@ -58,7 +58,7 @@ cd tigerbeetle
 scripts/install.sh
 ```
 
-If you want to run Parallels on macOS on a M1 chip, we recommend the server install image of [Ubuntu 20.10 Groovy Gorilla for ARM64](https://releases.ubuntu.com/20.10/), which ships with Linux 5.8 and which will support installing Parallels Tools easily.
+If you want to run Parallels on macOS on an M1 chip, we recommend the [server install image of Ubuntu 20.10 Groovy Gorilla for ARM64](https://releases.ubuntu.com/20.10/), which ships with Linux 5.8 and which will support installing Parallels Tools easily.
 
 ## Benchmark
 
