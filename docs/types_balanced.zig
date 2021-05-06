@@ -21,7 +21,7 @@
 /// We can't imagine TigerBeetle without first-class support for Interledger.
 
 /// 128 bytes:
-/// A 64-byte Account may not improve performance significantly, and drops too much functionality.
+/// A 64-byte Account will not improve performance significantly, and drops too much functionality.
 /// Reduces cognitive complexity by reducing the number of fields from 15 fields to 10 fields.
 /// Supports referencing at least two third-party UUIDs, e.g. for tuple accounts: A Payable To B.
 /// Supports referencing external entities, where multiple accounts reference the same entity.
@@ -39,9 +39,8 @@ pub const Account = packed struct {
     timestamp: u64 = 0,
 };
 
-/// 128 bytes (64 + 32)
-/// Saves 32 bytes compared to the 128 byte struct we had before.
-/// Reduces number of fields from 10 fields to 9 fields.
+/// 128 bytes:
+/// Reduces the number of fields from 10 fields to 9 fields.
 /// No loss of any accounting policy features.
 ///
 /// Adds a `description`, essential for the classic journal entry tuple (date, description, amount):
@@ -52,7 +51,7 @@ pub const Transfer = extern struct {
     id: u128,
     debit_account_id: u128,
     credit_account_id: u128,
-    user_data: [48]u8, // 128-bit: A third-party UUID.
+    user_data: [48]u8,
     flags: u32,
     description: u32, // A system inventory code describing the reason for the transfer.
     amount: u64,
@@ -62,7 +61,7 @@ pub const Transfer = extern struct {
 
 /// 64 bytes
 /// Saves 16 bytes compared to 80 byte struct we had before.
-/// Reduces number of fields from 6 fields to 5 fields.
+/// Reduces the number of fields from 6 fields to 5 fields.
 pub const Commit = extern struct {
     id: u128,
     user_data_256: [32]u8, // 256-bit: An ILPv4 preimage, or third-party UUIDs.
