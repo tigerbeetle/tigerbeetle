@@ -979,7 +979,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     on_send,
                     &self.send_completion,
                     self.fd,
-                    message.buffer[self.send_progress..][0..message.header.size],
+                    message.buffer[self.send_progress..message.header.size],
                     os.MSG_NOSIGNAL,
                 );
             }
