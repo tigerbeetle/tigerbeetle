@@ -6,7 +6,7 @@ pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level)
 const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
 const Client = @import("client.zig").Client;
-const MessageBus = @import("message_bus.zig").MessageBus;
+const MessageBus = @import("message_bus.zig").MessageBusClient;
 
 pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);

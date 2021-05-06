@@ -6,9 +6,7 @@ pub const log_level: std.log.Level = .debug;
 
 const config = @import("config.zig");
 
-// TODO: This currently needs to be switched out manually.
-const MessageBus = @import("message_bus.zig").MessageBus;
-//const MessageBus = @import("test_message_bus.zig").MessageBus;
+const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const Message = @import("message_bus.zig").Message;
 
 const ConcurrentRanges = @import("concurrent_ranges.zig").ConcurrentRanges;

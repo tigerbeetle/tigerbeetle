@@ -9,7 +9,7 @@ const vr = @import("vr.zig");
 const Replica = vr.Replica;
 const Storage = vr.Storage;
 const Journal = vr.Journal;
-const MessageBus = @import("message_bus.zig").MessageBus;
+const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const StateMachine = @import("state_machine.zig").StateMachine;
 
 pub fn main() !void {
