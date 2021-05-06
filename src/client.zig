@@ -11,8 +11,13 @@ const Operation = @import("state_machine.zig").Operation;
 const FixedArrayList = @import("fixed_array_list.zig").FixedArrayList;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
-// TODO Be explicit with what we import:
-usingnamespace @import("tigerbeetle.zig");
+const tb = @import("tigerbeetle.zig");
+const Account = tb.Account;
+const Transfer = tb.Transfer;
+const Commit = tb.Commit;
+const CreateAccountResults = tb.CreateAccountResults;
+const CreateTransferResults = tb.CreateTransferResults;
+const CommitTransferResults = tb.CommitTransferResults;
 
 const log = std.log;
 
@@ -195,19 +200,17 @@ const BatchManager = struct {
                     new_batch.push(user_data, callback, mem.bytesAsSlice(Commit, data)) catch unreachable;
                 };
             },
-            .lookup_accounts => unreachable,
-            // TODO: compilation error
-            // {
-            //     const batch = self.lookup_accounts.current() orelse return error.NoSpaceLeft;
-            //     batch.push(user_data, callback, mem.bytesAsSlice(u128, data)) catch {
-            //         // The current batch is full, so mark it as complete and push it to the send queue.
-            //         self.lookup_accounts.mark_current_complete();
-            //         self.push_to_send_queue(client, .{ .lookup_accounts = batch });
-            //         const new_batch = self.lookup_accounts.current() orelse return error.NoSpaceLeft;
-            //         // TODO: reject Client.batch calls with data > message_size_max.
-            //         new_batch.push(user_data, callback, mem.bytesAsSlice(u128, data)) catch unreachable;
-            //     };
-            // },
+            .lookup_accounts => {
+                const batch = self.lookup_accounts.current() orelse return error.NoSpaceLeft;
+                batch.push(user_data, callback, mem.bytesAsSlice(u128, data)) catch {
+                    // The current batch is full, so mark it as complete and push it to the send queue.
+                    self.lookup_accounts.mark_current_complete();
+                    self.push_to_send_queue(client, .{ .lookup_accounts = batch });
+                    const new_batch = self.lookup_accounts.current() orelse return error.NoSpaceLeft;
+                    // TODO: reject Client.batch calls with data > message_size_max.
+                    new_batch.push(user_data, callback, mem.bytesAsSlice(u128, data)) catch unreachable;
+                };
+            },
         }
     }
 
@@ -218,9 +221,8 @@ const BatchManager = struct {
 
         if (was_empty) {
             const message = switch (any_batch) {
-                .create_accounts => |batch| batch.message,
+                .create_accounts, .create_transfers, .commit_transfers, .lookup_accounts => |batch| batch.message,
                 else => unreachable,
-                // TODO: handle other command types
             };
 
             const body = message.buffer[@sizeOf(Header)..message.header.size];
