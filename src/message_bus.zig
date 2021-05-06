@@ -203,9 +203,10 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     // Only replicas accept connections from other replicas and clients:
                     self.maybe_accept();
 
-                    // This should always be flushed completely in the flush_send_queue()
-                    // call made after delivering a message received over a socket.
-                    assert(self.process.send_queue.empty());
+                    // Even though we call this after delivering all messages received over
+                    // a socket, it is necessary to call here as well in case a replica sends
+                    // a message to itself in Replica.tick().
+                    self.flush_send_queue();
                 },
                 .client => {
                     // The client connects to all replicas.
