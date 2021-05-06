@@ -203,8 +203,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     // Only replicas accept connections from other replicas and clients:
                     self.maybe_accept();
 
-                    // Flush any messages queued by the process when `Process.tick()` was called:
-                    self.flush_send_queue();
+                    // This should always be flushed completely in the flush_send_queue()
+                    // call made after delivering a message received over a socket.
+                    assert(self.process.send_queue.empty());
                 },
                 .client => {
                     // The client connects to all replicas.
@@ -402,19 +403,30 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
         pub fn flush_send_queue(self: *Self) void {
             comptime assert(process_type == .replica);
 
-            // Do not reset the send queue unnecessarily:
-            if (self.process.send_queue.empty()) return;
+            // There are currently 3 cases in which a replica will send a message to itself:
+            // 1. In on_request, the leader sends a prepare to itself, and
+            //    subsequent prepare timeout retries will never resend to self.
+            // 2. In on_prepare, after writing to storage, the leader sends a
+            //    prepare_ok back to itself.
+            // 3. In on_start_view_change, after receiving a quorum of start_view_change
+            //    messages, the new leader sends a do_view_change to itself.
+            // Therefore we should never enter an infinite loop here. To catch the case in which we
+            // do so that we can learn from it, assert that we never iterate more than 100 times.
+            var i: usize = 0;
+            while (i < 100) : (i += 1) {
+                if (self.process.send_queue.empty()) return;
 
-            // Iterate on a copy to avoid a potential infinite loop:
-            var copy = self.process.send_queue;
-            self.process.send_queue = .{};
+                var copy = self.process.send_queue;
+                self.process.send_queue = .{};
 
-            while (copy.pop()) |message| {
-                defer self.unref(message);
-                // TODO Rewrite ConcurrentRanges to not use async:
-                // This nosuspend is only safe because we do not do any async disk IO yet.
-                nosuspend await async self.process.replica.on_message(message);
+                while (copy.pop()) |message| {
+                    defer self.unref(message);
+                    // TODO Rewrite ConcurrentRanges to not use async:
+                    // This nosuspend is only safe because we do not do any async disk IO yet.
+                    nosuspend await async self.process.replica.on_message(message);
+                }
             }
+            unreachable;
         }
 
         /// Calculates exponential backoff with full jitter according to the formula:
