@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
+const config = @import("config.zig");
 const vr = @import("vr.zig");
 const Header = vr.Header;
 
@@ -202,13 +203,14 @@ const BatchManager = struct {
             },
             .lookup_accounts => {
                 const batch = self.lookup_accounts.current() orelse return error.NoSpaceLeft;
-                batch.push(user_data, callback, mem.bytesAsSlice(u128, data)) catch {
+                const alignedData = @alignCast(16, data);
+                batch.push(user_data, callback, mem.bytesAsSlice(u128, alignedData)) catch {
                     // The current batch is full, so mark it as complete and push it to the send queue.
                     self.lookup_accounts.mark_current_complete();
                     self.push_to_send_queue(client, .{ .lookup_accounts = batch });
                     const new_batch = self.lookup_accounts.current() orelse return error.NoSpaceLeft;
                     // TODO: reject Client.batch calls with data > message_size_max.
-                    new_batch.push(user_data, callback, mem.bytesAsSlice(u128, data)) catch unreachable;
+                    new_batch.push(user_data, callback, mem.bytesAsSlice(u128, alignedData)) catch unreachable;
                 };
             },
         }
@@ -221,8 +223,10 @@ const BatchManager = struct {
 
         if (was_empty) {
             const message = switch (any_batch) {
-                .create_accounts, .create_transfers, .commit_transfers, .lookup_accounts => |batch| batch.message,
-                else => unreachable,
+                .create_accounts => |batch| batch.message,
+                .create_transfers => |batch| batch.message,
+                .commit_transfers => |batch| batch.message,
+                .lookup_accounts => |batch| batch.message,
             };
 
             const body = message.buffer[@sizeOf(Header)..message.header.size];
@@ -417,9 +421,9 @@ fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
                     // For each account received from the server, check against the accounts looked up
                     // by this group in order.
                     var group_accounts_looked_up_idx: usize = 0;
-                    while (true) {
+                    while (group_accounts_looked_up_idx < group_accounts_looked_up.len) {
                         for (group_accounts_looked_up[group_accounts_looked_up_idx..]) |id, idx| {
-                            if (id == accounts[account_idx].id) {
+                            if (account_idx < accounts.len and id == accounts[account_idx].id) {
                                 account_idx += 1;
                                 group_accounts_looked_up_idx += idx;
                                 break;
@@ -438,7 +442,7 @@ fn Batch(comptime operation: Operation, comptime groups_max: usize) type {
                 var item_idx: u32 = 0;
                 for (self.groups.items) |group| {
                     const group_first_result = result_idx;
-                    while (results[result_idx].index < item_idx + group.len) : (result_idx += 1) {
+                    while (result_idx < results.len and results[result_idx].index < item_idx + group.len) : (result_idx += 1) {
                         // Mutate the result index in-place to be relative to this group:
                         results[result_idx].index -= item_idx;
                     }
