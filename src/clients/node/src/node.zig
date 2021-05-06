@@ -14,7 +14,7 @@ const CreateTransferResults = tb.CreateTransferResults;
 const CommitTransferResults = tb.CommitTransferResults;
 
 const Operation = @import("tigerbeetle/src/state_machine.zig").Operation;
-const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBus;
+const ClientMessageBus = @import("tigerbeetle/src/message_bus.zig").ClientMessageBus;
 const Client = @import("tigerbeetle/src/client.zig").Client;
 const IO = @import("tigerbeetle/src/io.zig").IO;
 
@@ -422,7 +422,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 const Context = struct {
     io: *IO,
     configuration: [32]std.net.Address,
-    message_bus: MessageBus,
+    message_bus: ClientMessageBus,
     client: Client,
 
     fn create(env: c.napi_env, allocator: *std.mem.Allocator, io: *IO, id: u128, cluster: u128, configuration_raw: []const u8) !c.napi_value {
@@ -436,11 +436,11 @@ const Context = struct {
         assert(configuration.len > 0);
         for (configuration) |address, index| context.configuration[index] = address;
 
-        context.message_bus = try MessageBus.init(
+        context.message_bus = try ClientMessageBus.init(
             allocator,
             cluster,
             context.configuration[0..configuration.len],
-            .{ .client = id },
+            id,
             context.io,
         );
         errdefer context.message_bus.deinit();
