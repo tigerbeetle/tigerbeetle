@@ -48,16 +48,27 @@ The [beta version](https://github.com/coilhq/tigerbeetle/tree/beta) of **TigerBe
 
 ## QuickStart
 
-The current beta version of TigerBeetle targets Linux and takes advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via [io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on recent versions of Linux with an updated kernel.
+**Prerequisites:** The current beta version of TigerBeetle targets Linux and takes advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via [io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on recent versions of Linux with an updated kernel.
 
 Later portable versions of TigerBeetle may supplement io_uring with kqueue for macOS and FreeBSD support, or IOCP for Windows support.
 
 ```bash
 git clone https://github.com/coilhq/tigerbeetle.git
 cd tigerbeetle
-scripts/upgrade_ubuntu_kernel.sh
 scripts/install.sh
 ```
+
+If you want to run Parallels on macOS on a M1 chip, we recommend the server install image of [Ubuntu 20.10 Groovy Gorilla for ARM64](https://releases.ubuntu.com/20.10/), which ships with Linux 5.8 and which will support installing Parallels Tools easily.
+
+## Benchmark
+
+With TigerBeetle installed, you are ready to benchmark!
+
+```bash
+scripts/benchmark.sh
+```
+
+*If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
 ## Launch a Local Cluster
 
@@ -75,18 +86,13 @@ Run the TigerBeetle binary to see all command line arguments:
 ./tigerbeetle --help
 ```
 
-## Benchmark
-
-With a running TigerBeetle cluster, you are ready to benchmark!
-
-```bash
-scripts/benchmark.sh
-```
-
 ## Clients
 
-* [client](./src/client) is a TigerBeetle client written in Typescript (pending a few updates to support recent network protocol changes).
-* [toy.zig](./src/toy.zig) is a TigerBeetle client written in Zig, which we used to create [six demos you can work your way through and modify](./docs/DEEP_DIVE.md) to explore TigerBeetle's commands.
+* [tigerbeetle-node](https://github.com/coilhq/tigerbeetle-node) is a TigerBeetle Node.js client written in TypeScript (and Zig with [Node's N-API](https://nodejs.org/api/n-api.html) for ABI stability).
+
+* [client.zig](./src/client.zig) is a TigerBeetle Zig client.
+
+* [demo.zig](./src/demo.zig) is a lightweight TigerBeetle client for demonstration purposes only, which we used to create [six demos you can work your way through and modify](./docs/DEEP_DIVE.md) to explore TigerBeetle's commands.
 
 ## Performance Demos
 
