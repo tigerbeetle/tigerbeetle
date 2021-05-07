@@ -156,10 +156,14 @@ pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [*:0
 
 pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]const u8) !u128 {
     // A BigInt's value (using ^ to mean exponent) is (words[0] * (2^64)^0 + words[1] * (2^64)^1 + ...)
+
+    // V8 says that the words are little endian. If we were on a big endian machine
+    // we would need to convert, but big endian is not supported by tigerbeetle.
+    var result: u128 = 0;
     var sign_bit: c_int = undefined;
-    var words: [2]u64 align(@alignOf(u128)) = undefined;
+    const words = @ptrCast(*[2]u64, &result);
     var word_count: usize = 2;
-    switch (c.napi_get_value_bigint_words(env, value, &sign_bit, &word_count, &words)) {
+    switch (c.napi_get_value_bigint_words(env, value, &sign_bit, &word_count, words)) {
         .napi_ok => {},
         .napi_bigint_expected => return throw(env, name ++ " must be a BigInt"),
         else => unreachable,
@@ -167,12 +171,7 @@ pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]
     if (sign_bit != 0) return throw(env, name ++ " must be positive");
     if (word_count > 2) return throw(env, name ++ " must fit in 128 bits");
 
-    // V8 says that the words are little endian. If we were on a big endian machine
-    // we would need to convert, but big endian is not supported by tigerbeetle.
-    if (word_count == 0) return 0;
-    if (word_count == 1) return words[0];
-    assert(word_count == 2);
-    return @ptrCast(*u128, &words).*;
+    return result;
 }
 
 pub fn u32_from_value(env: c.napi_env, val: c.napi_value, comptime key: [*:0]const u8) !u32 {
