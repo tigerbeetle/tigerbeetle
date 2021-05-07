@@ -22,45 +22,35 @@ const IO = @import("tigerbeetle/src/io.zig").IO;
 
 const vr = @import("tigerbeetle/src/vr.zig");
 
+var globals: Globals = undefined;
+
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
-    translate.register_function(env, exports, "init", init);
-    translate.register_function(env, exports, "deinit", deinit);
-    translate.register_function(env, exports, "batch", batch);
-    translate.register_function(env, exports, "tick", tick);
+    translate.register_function(env, exports, "init", init) catch return null;
+    translate.register_function(env, exports, "deinit", deinit) catch return null;
+    translate.register_function(env, exports, "batch", batch) catch return null;
+    translate.register_function(env, exports, "tick", tick) catch return null;
 
-    const allocator = std.heap.c_allocator;
-    var global = Globals.init(allocator, env) catch {
-        std.debug.print("Failed to initialise environment.\n", .{});
-        return null;
-    };
-    errdefer global.deinit();
+    globals.init(env) catch return null;
 
-    translate.set_instance_data(
-        env,
-        @ptrCast(*c_void, @alignCast(@alignOf(u8), global)),
-        Globals.destroy,
-    ) catch {
-        allocator.destroy(global);
+    if (c.napi_add_env_cleanup_hook(env, cleanup_globals_hook, null) != .napi_ok) {
+        translate.throw(env, "Failed to add cleanup hook") catch {};
         return null;
-    };
+    }
 
     return exports;
 }
 
-/// Helper functions to encode and decode JS object
+fn cleanup_globals_hook(arg: ?*c_void) callconv(.C) void {
+    assert(arg == null);
+    globals.deinit();
+}
+
 const Globals = struct {
-    allocator: *std.mem.Allocator,
     io: IO,
     napi_undefined: c.napi_value,
 
-    pub fn init(allocator: *std.mem.Allocator, env: c.napi_env) !*Globals {
-        const self = try allocator.create(Globals);
-        errdefer allocator.destroy(self);
-
-        self.allocator = allocator;
-        self.napi_undefined = try translate.capture_undefined(env);
-
+    pub fn init(self: *Globals, env: c.napi_env) !void {
         // Be careful to size the SQ ring to only a few SQE entries and to share a single IO instance
         // across multiple clients to stay under kernel limits:
         //
@@ -71,26 +61,20 @@ const Globals = struct {
         //
         // Check `/etc/security/limits.conf` for user settings, or `/etc/systemd/user.conf` and
         // `/etc/systemd/system.conf` for systemd setups.
-        self.io = try IO.init(32, 0);
+        self.io = IO.init(32, 0) catch {
+            return translate.throw(env, "Failed to initialize io_uring");
+        };
         errdefer self.io.deinit();
 
-        return self;
+        if (c.napi_get_undefined(env, &self.napi_undefined) != .napi_ok) {
+            return translate.throw(env, "Failed to capture the value of \"undefined\".");
+        }
     }
 
     pub fn deinit(self: *Globals) void {
         self.io.deinit();
-        self.allocator.destroy(self); // TODO: @Isaac please review.
-    }
-
-    pub fn destroy(env: c.napi_env, data: ?*c_void, hint: ?*c_void) callconv(.C) void {
-        const self = globalsCast(data.?); // TODO: @Isaac please review.
-        self.deinit();
     }
 };
-
-fn globalsCast(globals_raw: *c_void) *Globals {
-    return @ptrCast(*Globals, @alignCast(@alignOf(Globals), globals_raw)); // TODO: @Isaac please review.
-}
 
 const Context = struct {
     io: *IO,
@@ -288,7 +272,6 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     const allocator = std.heap.c_allocator;
 
     const globals_raw = translate.globals(env) catch return null;
-    const globals = globalsCast(globals_raw.?); // TODO: @Isaac, please review
     const context = Context.create(env, allocator, &globals.io, id, cluster, configuration) catch {
         // TODO: switch on err and provide more detailed messages
         translate.throw(env, "Failed to initialize Client.") catch return null;
@@ -335,7 +318,6 @@ fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
     const napi_callback = translate.reference_value(env, callback_reference, "Failed to get callback reference.") catch return;
     const scope = translate.scope(env, "Failed to get \"this\" for results callback.") catch return;
     const globals_raw = translate.globals(env) catch return;
-    const globals = globalsCast(globals_raw.?); // TODO: @Isaac, please review
     const argc: usize = 2;
     var argv: [argc]c.napi_value = undefined;
 

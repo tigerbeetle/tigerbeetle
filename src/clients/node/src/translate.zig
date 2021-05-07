@@ -2,16 +2,19 @@ const std = @import("std");
 const assert = std.debug.assert;
 const c = @import("c.zig");
 
-pub fn register_function(env: c.napi_env, exports: c.napi_value, comptime name: [*:0]const u8, function: fn (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value) void {
+pub fn register_function(
+    env: c.napi_env,
+    exports: c.napi_value,
+    comptime name: [*:0]const u8,
+    function: fn (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value,
+) !void {
     var napi_function: c.napi_value = undefined;
     if (c.napi_create_function(env, null, 0, function, null, &napi_function) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to create function " ++ name ++ "().");
-        return;
+        return throw(env, "Failed to create function " ++ name ++ "().");
     }
 
     if (c.napi_set_named_property(env, exports, name, napi_function) != .napi_ok) {
-        _ = c.napi_throw_error(env, null, "Failed to add " ++ name ++ "() to exports.");
-        return;
+        return throw(env, "Failed to add " ++ name ++ "() to exports.");
     }
 }
 
