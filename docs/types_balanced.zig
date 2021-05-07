@@ -22,16 +22,16 @@
 
 /// 128 bytes:
 /// A 64-byte Account will not improve performance significantly, and drops too much functionality.
-/// Reduces cognitive complexity by reducing the number of fields from 15 fields to 10 fields.
-/// Supports referencing at least two third-party UUIDs, e.g. for tuple accounts: A Payable To B.
-/// Supports referencing external entities, where multiple accounts reference the same entity.
-/// Supports a description for system inventory codes.
-pub const Account = packed struct {
+/// Reduces cognitive complexity by reducing the number of fields from 15 fields to 11 fields.
+/// Enables referencing at least two third-party UUIDs, e.g. for tuple accounts: A Payable To B.
+/// Enables referencing external entities, where multiple accounts reference the same entity.
+pub const Account = extern struct {
     id: u128,
-    user_data: [64]u8,
+    user_data: u128, // Opaque, e.g. a third-party identifier to link this account (many-to-one) to an external entity.
+    reserved: [48]u8,
+    unit: u16, // This used to be 32-bits which was overkill, we've borrowed 16-bits from this to make space for a chart of accounts `code`.
+    code: u16, // A chart of accounts code describing the type of the account (e.g. liquidity account, settlement account, payable account etc.).
     flags: u32,
-    description: u16,
-    unit: u16,
     debits_reserved: u64,
     debits_accepted: u64,
     credits_reserved: u64,
@@ -43,7 +43,8 @@ pub const Account = packed struct {
 /// Reduces the number of fields from 10 fields to 9 fields.
 /// No loss of any accounting policy features.
 ///
-/// Adds a `description`, essential for the classic journal entry tuple (date, description, amount):
+///
+/// Adds a `code`, essential for the classic journal entry tuple (date, description, amount):
 /// We would have done this with a flag and a `user_data` slot, but this way we avoid polymorphism.
 ///
 /// We swap transfers to being auto-commit by default, so two-phase commit transfers are explicit.
@@ -51,9 +52,10 @@ pub const Transfer = extern struct {
     id: u128,
     debit_account_id: u128,
     credit_account_id: u128,
-    user_data: [48]u8,
+    user_data: u128, // Opaque, e.g. a third-party identifier to link this transfer (many-to-one) to an external entity.
+    reserved: [32]u8, // Reserved for TigerBeetle accounting primitives.
+    code: u32, // A chart of accounts code describing the type of the transfer (e.g. deposit, settlement etc.).
     flags: u32,
-    description: u32, // A system inventory code describing the reason for the transfer.
     amount: u64,
     timeout: u64,
     timestamp: u64 = 0,
@@ -64,16 +66,22 @@ pub const Transfer = extern struct {
 /// Reduces the number of fields from 6 fields to 5 fields.
 pub const Commit = extern struct {
     id: u128,
-    user_data_256: [32]u8, // 256-bit: An ILPv4 preimage, or third-party UUIDs.
+    reserved: [32]u8, // Reserved for TigerBeetle accounting primitives.
+    code: u32, // A chart of accounts code describing the reason for the commit accept/reject.
     flags: u32,
-    description: u32, // A system inventory code describing the reason for the accept or reject.
     timestamp: u64 = 0,
 };
 
 test "sizeOf" {
     const std = @import("std");
+    const assert = std.debug.assert;
+
     std.debug.print("\n", .{});
     std.debug.print("sizeOf(Account)={}\n", .{@sizeOf(Account)});
     std.debug.print("sizeOf(Transfer)={}\n", .{@sizeOf(Transfer)});
     std.debug.print("sizeOf(Commit)={}\n", .{@sizeOf(Commit)});
+
+    assert(@sizeOf(Account) == 128);
+    assert(@sizeOf(Transfer) == 128);
+    assert(@sizeOf(Commit) == 64);
 }
