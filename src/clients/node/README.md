@@ -16,8 +16,8 @@ A client needs to be configured with a `client_id`, `cluster_id` and `replica_ad
 import { createClient } from 'tigerbeetle-node'
 
 const client = createClient({
-  client_id: Buffer.alloc(16).fill(123),
-  cluster_id: Buffer.from('1ee1be1eaba15c0a', 'hex'),
+  client_id: 123n,
+  cluster_id: 0x1ee1be1eaba15c0an,
   replica_addresses: ['3001', '3002', '3003']
 })
 ```
@@ -28,8 +28,8 @@ One of the ways TigerBeetle achieves its performance is through batching. This i
 
 ```js
 const account = {
-    id: Buffer.alloc(16).fill(137),
-    custom: Buffer.alloc(16, 0),
+    id: 137n,
+    custom: 0n,
     flags: 0n,
     unit: 1n,
     debit_accepted: 0n,
@@ -60,12 +60,12 @@ The unsuccessful result above shows that the command in index 1 failed with erro
 **Creating a transfer**
 ```js
 const transfer = {
-    id: Buffer.alloc(16).fill(1),
-    debit_account_id: Buffer.alloc(16).fill(1),
-    credit_account_id: Buffer.alloc(16).fill(2),
-    custom_1: Buffer.alloc(16).fill(0),
-    custom_2: Buffer.alloc(16).fill(0),
-    custom_3: Buffer.alloc(16).fill(0),
+    id: 1n,
+    debit_account_id: 1n,
+    credit_account_id: 2n,
+    custom_1: 0n,
+    custom_2: 0n,
+    custom_3: 0n,
     flags: 0n,
     amount: 10n,
     timeout: 10000000000n // in nano-seconds
@@ -101,10 +101,10 @@ The flags field will determine the type of commit viz. accept or reject.
 | accept | reject |
 ```js
 const commit = {
-    id: Buffer.alloc(16).fill(136),
-    custom_1: Buffer.alloc(16).fill(0),
-    custom_2: Buffer.alloc(16).fill(0),
-    custom_3: Buffer.alloc(16).fill(0),
+    id: 136n,
+    custom_1: 0n,
+    custom_2: 0n,
+    custom_3: 0n,
     flags: 1n,
 }
 const result = await client.commitTransfer([commit])

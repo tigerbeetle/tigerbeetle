@@ -127,22 +127,13 @@ pub fn buffer_from_object(
     return @ptrCast([*]u8, data.?)[0..data_length];
 }
 
-pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [*:0]const u8) !u128 {
+pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u128 {
     var property: c.napi_value = undefined;
     if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
-    var is_buffer: bool = undefined;
-    assert(c.napi_is_buffer(env, property, &is_buffer) == .napi_ok);
-    if (!is_buffer) return throw(env, key ++ " must be a Buffer");
-
-    var data: ?*c_void = null;
-    var data_length: usize = undefined;
-    assert(c.napi_get_buffer_info(env, property, &data, &data_length) == .napi_ok);
-    if (data_length != @sizeOf(u128)) return throw(env, key ++ " must be 128-bit");
-
-    return @ptrCast(*u128, @alignCast(@alignOf(u128), data.?)).*; // TODO: @Isaac please review.
+    return u128_from_value(env, property, key);
 }
 
 pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [*:0]const u8) !u64 {
@@ -163,17 +154,25 @@ pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [*:0
     return result;
 }
 
-pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime error_message: [*:0]const u8) !u128 {
-    var is_buffer: bool = undefined;
-    assert(c.napi_is_buffer(env, value, &is_buffer) == .napi_ok);
-    if (!is_buffer) return throw(env, error_message);
+pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]const u8) !u128 {
+    // A BigInt's value (using ^ to mean exponent) is (words[0] * (2^64)^0 + words[1] * (2^64)^1 + ...)
+    var sign_bit: c_int = undefined;
+    var words: [2]u64 align(@alignOf(u128)) = undefined;
+    var word_count: usize = 2;
+    switch (c.napi_get_value_bigint_words(env, value, &sign_bit, &word_count, &words)) {
+        .napi_ok => {},
+        .napi_bigint_expected => return throw(env, name ++ " must be a BigInt"),
+        else => unreachable,
+    }
+    if (sign_bit != 0) return throw(env, name ++ " must be positive");
+    if (word_count > 2) return throw(env, name ++ " must fit in 128 bits");
 
-    var data: ?*c_void = null;
-    var data_length: usize = undefined;
-    assert(c.napi_get_buffer_info(env, value, &data, &data_length) == .napi_ok);
-    if (data_length != @sizeOf(u128)) return throw(env, error_message ++ " Must be 128-bit.");
-
-    return @ptrCast(*u128, @alignCast(@alignOf(u128), data.?)).*; // TODO: @Isaac please review.
+    // V8 says that the words are little endian. If we were on a big endian machine
+    // we would need to convert, but big endian is not supported by tigerbeetle.
+    if (word_count == 0) return 0;
+    if (word_count == 1) return words[0];
+    assert(word_count == 2);
+    return @ptrCast(*u128, &words).*;
 }
 
 pub fn u32_from_value(env: c.napi_env, val: c.napi_value, comptime key: [*:0]const u8) !u32 {
@@ -196,9 +195,16 @@ pub fn u128_into_object(
     val: u128,
     comptime error_message: [*:0]const u8,
 ) !void {
-    const buffer = try create_buffer(env, std.mem.asBytes(&val), error_message);
+    // A BigInt's value (using ^ to mean exponent) is (words[0] * (2^64)^0 + words[1] * (2^64)^1 + ...)
 
-    if (c.napi_set_named_property(env, object, key, buffer) != .napi_ok) {
+    // V8 says that the words are little endian. If we were on a big endian machine
+    // we would need to convert, but big endian is not supported by tigerbeetle.
+    var bigint: c.napi_value = undefined;
+    if (c.napi_create_bigint_words(env, 0, 2, @ptrCast(*const [2]u64, &val), &bigint) != .napi_ok) {
+        return throw(env, error_message);
+    }
+
+    if (c.napi_set_named_property(env, object, key, bigint) != .napi_ok) {
         return throw(env, error_message);
     }
 }

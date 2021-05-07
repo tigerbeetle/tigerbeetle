@@ -156,7 +156,7 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
             .credit_reserved_limit = try translate.u64_from_object(env, object, "credit_reserved_limit"),
             .credit_accepted_limit = try translate.u64_from_object(env, object, "credit_accepted_limit"),
         },
-        u128 => try translate.u128_from_value(env, object, "Account lookup must be an id."),
+        u128 => try translate.u128_from_value(env, object, "Account lookup"),
         else => unreachable,
     };
 }

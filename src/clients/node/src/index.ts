@@ -7,36 +7,36 @@ interface Binding {
 }
 
 interface BindingInitArgs {
-  client_id: Buffer,
-  cluster_id: Buffer,
+  client_id: bigint, // u128
+  cluster_id: bigint, // u128
   replica_addresses: Buffer,
 }
 
 export interface InitArgs {
-  client_id: Buffer,
-  cluster_id: Buffer,
+  client_id: bigint, // u128
+  cluster_id: bigint, // u128
   replica_addresses: Array<string | number>,
 }
 
 export type Context = object
 
 export type Account = {
-  id: Buffer
-  custom: Buffer
-  flags: bigint
-  unit: bigint
-  debit_accepted: bigint
-  debit_reserved: bigint
-  credit_accepted: bigint
-  credit_reserved: bigint
-  debit_accepted_limit: bigint
-  debit_reserved_limit: bigint
-  credit_accepted_limit: bigint
-  credit_reserved_limit: bigint
+  id: bigint // u128
+  custom: bigint // u128
+  flags: bigint // u64
+  unit: bigint // u64
+  debit_accepted: bigint // u64
+  debit_reserved: bigint // u64
+  credit_accepted: bigint // u64
+  credit_reserved: bigint // u64
+  debit_accepted_limit: bigint // u64
+  debit_reserved_limit: bigint // u64
+  credit_accepted_limit: bigint // u64
+  credit_reserved_limit: bigint // u64
 }
 
 export type CreateAccount = Account & {
-  timeout: bigint
+  timeout: bigint // u64
 }
 
 export enum CreateAccountError {
@@ -63,15 +63,15 @@ export type CreateAccountResult = {
 }
 
 export type CreateTransfer = {
-  id: Buffer,
-  debit_account_id: Buffer,
-  credit_account_id: Buffer,
-  custom_1: Buffer,
-  custom_2: Buffer,
-  custom_3: Buffer,
-  flags: bigint,
-  amount: bigint,
-  timeout: bigint,
+  id: bigint, // u128
+  debit_account_id: bigint, // u128
+  credit_account_id: bigint, // u128
+  custom_1: bigint, // u128
+  custom_2: bigint, // u128
+  custom_3: bigint, // u128
+  flags: bigint, // u64
+  amount: bigint, // u64
+  timeout: bigint, // u64
 }
 
 export enum CreateTransferError {
@@ -108,11 +108,11 @@ export type CreateTransferResult = {
 }
 
 export type CommitTransfer = {
-  id: Buffer,
-  custom_1: Buffer,
-  custom_2: Buffer,
-  custom_3: Buffer,
-  flags: bigint,
+  id: bigint, // u128
+  custom_1: bigint, // u128
+  custom_2: bigint, // u128
+  custom_3: bigint, // u128
+  flags: bigint, // u64
 }
 
 export enum CommitTransferError {
@@ -143,7 +143,7 @@ export type CommitTransferResult = {
   error: CommitTransferError,
 }
 
-export type AccountLookup = Buffer
+export type AccountLookup = bigint // u128
 
 export enum AccountLookupError {
   not_found,
@@ -191,8 +191,8 @@ const isSameArgs = (args: InitArgs): boolean => {
     }
   })
 
-  return Buffer.compare(args.client_id, _args.client_id) === 0 &&
-          Buffer.compare(args.cluster_id, _args.cluster_id) === 0 &&
+  return args.client_id === _args.client_id &&
+          args.cluster_id === _args.cluster_id &&
           isSameReplicas
 }
 
@@ -307,6 +307,6 @@ export function createClient (args: InitArgs): Client {
   _interval = setInterval(() => {
     binding.tick(context)
   }, 50)
- 
+
   return _client
 }
