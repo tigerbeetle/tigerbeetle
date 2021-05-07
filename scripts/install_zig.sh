@@ -19,7 +19,7 @@ else
 fi
 
 # Determine the operating system:
-if [ "$OSTYPE" == "darwin"* ]; then
+if [[ "$OSTYPE" == "darwin"* ]]; then
     ZIG_OS="macos"
 else
     ZIG_OS="linux"
