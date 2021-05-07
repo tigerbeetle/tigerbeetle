@@ -40,7 +40,7 @@ export type CreateAccount = Account & {
 }
 
 export enum CreateAccountError {
-    exists,
+    exists = 1,
     exists_with_different_unit,
     exists_with_different_limits,
     exists_with_different_custom_field,
@@ -75,7 +75,7 @@ export type CreateTransfer = {
 }
 
 export enum CreateTransferError {
-  exists,
+  exists = 1,
   exists_with_different_debit_account_id,
   exists_with_different_credit_account_id,
   exists_with_different_custom_fields,
@@ -116,7 +116,7 @@ export type CommitTransfer = {
 }
 
 export enum CommitTransferError {
-  reserved_field_custom,
+  reserved_field_custom = 1,
   reserved_field_timestamp,
   reserved_flag_padding,
   commit_must_accept_or_reject,
