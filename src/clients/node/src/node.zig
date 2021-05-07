@@ -119,7 +119,7 @@ const Context = struct {
 };
 
 fn contextCast(context_raw: *c_void) !*Context {
-    return @ptrCast(*Context, @alignCast(@alignOf(Context), context_raw)); // TODO: @Isaac please review.
+    return @ptrCast(*Context, @alignCast(@alignOf(Context), context_raw));
 }
 
 fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !T {
@@ -291,7 +291,7 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     if (argc != 4) translate.throw(env, "Function batch() requires 4 arguments exactly.") catch return null;
 
     const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
-    const context = contextCast(context_raw.?) catch return null; // TODO: @Isaac, please review
+    const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
     const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
 
@@ -361,7 +361,7 @@ fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     if (argc != 1) translate.throw(env, "Function tick() requires 1 argument exactly.") catch return null;
 
     const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
-    const context = contextCast(context_raw.?) catch return null; // TODO: @Isaac, please review
+    const context = contextCast(context_raw.?) catch return null;
 
     context.client.tick();
     context.io.tick() catch unreachable; // TODO Use a block to throw an exception including the Zig error.
@@ -378,7 +378,7 @@ fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
     if (argc != 1) translate.throw(env, "Function deinit() requires 1 argument exactly.") catch return null;
 
     const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
-    const context = contextCast(context_raw.?) catch return null; // TODO: @Isaac, please review
+    const context = contextCast(context_raw.?) catch return null;
     context.client.deinit();
     context.message_bus.deinit();
 
