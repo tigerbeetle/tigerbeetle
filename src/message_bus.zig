@@ -859,6 +859,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 switch (self.peer) {
                     .none => unreachable,
                     .unknown => {
+                        // TODO Rework these branch conditions to be only for a replica process:
                         // The only command sent by clients is the request command.
                         if (process_type == .replica and header.command == .request) {
                             self.peer = .{ .client = header.client };
@@ -872,10 +873,11 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                             }
                             ret.entry.value = self;
                             log.info("Received connection from {}\n", .{self.peer});
-                        } else {
-                            assert(header.command != .request);
-                            // TODO: Prepares may be forwarded so Header.replica
-                            // does not identify the peer:
+                        } else if (
+                            process_type == .replica and
+                            header.command == .ping and
+                            header.client == 0
+                        ) {
                             self.peer = .{ .replica = header.replica };
                             // If there is already a connection to this replica,
                             // terminate and replace it.

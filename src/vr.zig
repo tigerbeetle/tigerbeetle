@@ -26,6 +26,9 @@ pub const Status = enum {
 pub const Command = packed enum(u8) {
     reserved,
 
+    ping,
+    pong,
+
     request,
     prepare,
     prepare_ok,
@@ -1183,6 +1186,11 @@ pub const Replica = struct {
     /// Whether the leader is expecting to receive a nack_prepare and for which op:
     nack_prepare_op: ?u64 = null,
 
+    /// The number of ticks before a leader or follower broadcasts a ping to the other replicas:
+    /// TODO Explain why we need this (MessageBus handshaking, leapfrogging faulty replicas,
+    /// deciding whether starting a view change would be detrimental under some network partitions).
+    ping_timeout: Timeout,
+
     /// The number of ticks without enough prepare_ok's before the leader resends a prepare:
     /// TODO Adjust this dynamically to match sliding window EWMA of recent network latencies.
     prepare_timeout: Timeout,
@@ -1285,6 +1293,11 @@ pub const Replica = struct {
             .do_view_change_from_all_replicas = do_view_change,
             .nack_prepare_from_other_replicas = nack_prepare,
 
+            .ping_timeout = Timeout{
+                .name = "ping_timeout",
+                .replica = replica,
+                .after = 100,
+            },
             .prepare_timeout = Timeout{
                 .name = "prepare_timeout",
                 .replica = replica,
@@ -1322,10 +1335,12 @@ pub const Replica = struct {
         assert(self.status == .normal);
         if (self.leader()) {
             log.debug("{}: init: leader", .{self.replica});
+            self.ping_timeout.start();
             self.commit_timeout.start();
             self.repair_timeout.start();
         } else {
             log.debug("{}: init: follower", .{self.replica});
+            self.ping_timeout.start();
             self.normal_timeout.start();
             self.repair_timeout.start();
         }
@@ -1361,6 +1376,7 @@ pub const Replica = struct {
     /// Time is measured in logical ticks that are incremented on every call to tick().
     /// This eliminates a dependency on the system time and enables deterministic testing.
     pub fn tick(self: *Replica) void {
+        self.ping_timeout.tick();
         self.prepare_timeout.tick();
         self.commit_timeout.tick();
         self.normal_timeout.tick();
@@ -1368,6 +1384,7 @@ pub const Replica = struct {
         self.view_change_message_timeout.tick();
         self.repair_timeout.tick();
 
+        if (self.ping_timeout.fired()) self.on_ping_timeout();
         if (self.prepare_timeout.fired()) self.on_prepare_timeout();
         if (self.commit_timeout.fired()) self.on_commit_timeout();
         if (self.normal_timeout.fired()) self.on_normal_timeout();
@@ -1401,6 +1418,8 @@ pub const Replica = struct {
         }
         assert(message.header.replica < self.replica_count);
         switch (message.header.command) {
+            .ping => self.on_ping(message),
+            .pong => self.on_pong(message),
             .request => self.on_request(message),
             .prepare => self.on_prepare(message),
             .prepare_ok => self.on_prepare_ok(message),
@@ -1415,6 +1434,44 @@ pub const Replica = struct {
             .nack_prepare => self.on_nack_prepare(message),
             else => unreachable,
         }
+    }
+
+    fn on_ping(self: *Replica, message: *const Message) void {
+        if (self.status != .normal and self.status != .view_change) return;
+
+        assert(self.status == .normal or self.status == .view_change);
+
+        var pong = Header{
+            .command = .pong,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+        };
+
+        if (message.header.client > 0) {
+            assert(message.header.replica == 0);
+
+            pong.client = message.header.client;
+            // 4.5 Client Recovery
+            // If a client crashes and recovers it must start up with a request number larger than
+            // what it had before it failed. It fetches its latest number from the replicas and adds
+            // 2 to this value to be sure the new request number is big enough. Adding 2 ensures
+            // that its next request will have a unique number even in the odd case where the latest
+            // request it sent before it failed is still in transit (since that request will have as
+            // its request number the number the client learns plus 1).
+            //
+            // TODO Lookup latest request number from client table:
+            pong.request = 0;
+            self.message_bus.send_header_to_client(message.header.client, pong);
+        } else if (message.header.replica == self.replica) {
+            log.warn("{}: on_ping: ignoring (self)", .{self.replica});
+        } else {
+            self.message_bus.send_header_to_replica(message.header.replica, pong);
+        }
+    }
+
+    fn on_pong(self: *Replica, message: *const Message) void {
+        // TODO Update cluster connectivity stats.
     }
 
     /// The primary advances op-number, adds the request to the end of the log, and updates the
@@ -2146,6 +2203,23 @@ pub const Replica = struct {
         assert(op_max.? >= op_min.?);
 
         self.repair();
+    }
+
+    fn on_ping_timeout(self: *Replica) void {
+        self.ping_timeout.reset();
+
+        // TODO We may want to ping for connectivity during a view change.
+        assert(self.status == .normal);
+        assert(self.leader() or self.follower());
+
+        var ping = Header{
+            .command = .ping,
+            .cluster = self.cluster,
+            .replica = self.replica,
+            .view = self.view,
+        };
+
+        self.send_header_to_other_replicas(ping);
     }
 
     fn on_prepare_timeout(self: *Replica) void {
@@ -3786,6 +3860,7 @@ pub const Replica = struct {
         if (self.leader()) {
             log.debug("{}: transition_to_normal_status: leader", .{self.replica});
 
+            self.ping_timeout.start();
             self.commit_timeout.start();
             self.normal_timeout.stop();
             self.view_change_timeout.stop();
@@ -3794,6 +3869,7 @@ pub const Replica = struct {
         } else {
             log.debug("{}: transition_to_normal_status: follower", .{self.replica});
 
+            self.ping_timeout.start();
             self.commit_timeout.stop();
             self.normal_timeout.start();
             self.view_change_timeout.stop();
@@ -3822,6 +3898,7 @@ pub const Replica = struct {
         self.view = new_view;
         self.status = .view_change;
 
+        self.ping_timeout.stop();
         self.commit_timeout.stop();
         self.normal_timeout.stop();
         self.view_change_timeout.start();
