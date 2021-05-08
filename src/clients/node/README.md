@@ -17,7 +17,7 @@ import { createClient } from 'tigerbeetle-node'
 
 const client = createClient({
   client_id: 123n,
-  cluster_id: 0x1ee1be1eaba15c0an,
+  cluster_id: 0x0a5ca1ab1ebee11en,
   replica_addresses: ['3001', '3002', '3003']
 })
 ```
