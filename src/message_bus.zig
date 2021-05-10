@@ -766,7 +766,13 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                         return null;
                     }
 
-                    self.set_peer(bus, header);
+                    switch (process_type) {
+                        // Replicas may forward messages from clients or from other replicas so we
+                        // may therefore receive messages from a peer before we know who they are:
+                        .replica => self.maybe_set_peer(bus, header),
+                        // The client connects only to replicas and should set peer when connecting:
+                        .client => assert(self.peer == .replica),
+                    }
 
                     self.recv_checked_header = true;
                 }
@@ -848,51 +854,46 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 }
             }
 
-            fn set_peer(self: *Connection, bus: *Self, header: *const Header) void {
-                assert(self.state == .connected);
-                assert(self.fd != -1);
+            fn maybe_set_peer(self: *Connection, bus: *Self, header: *const Header) void {
+                comptime assert(process_type == .replica);
 
                 assert(bus.cluster == header.cluster);
                 assert(bus.connections_used > 0);
 
-                switch (self.peer) {
-                    .none => unreachable,
-                    .unknown => {
-                        // TODO Rework these branch conditions to be only for a replica process:
-                        // The only command sent by clients is the request command.
-                        if (process_type == .replica and header.command == .request) {
-                            self.peer = .{ .client = header.client };
-                            const ret = bus.process.clients.getOrPutAssumeCapacity(header.client);
-                            // Terminate the old connection if there is one and it is active.
-                            if (ret.found_existing) {
-                                const old = ret.entry.value;
-                                assert(old.peer == .client);
-                                assert(old.state == .connected or old.state == .terminating);
-                                if (old.state == .connected) old.terminate(bus, .shutdown);
-                            }
-                            ret.entry.value = self;
-                            log.info("Received connection from {}\n", .{self.peer});
-                        } else if (
-                            process_type == .replica and
-                            header.command == .ping and
-                            header.client == 0
-                        ) {
-                            self.peer = .{ .replica = header.replica };
-                            // If there is already a connection to this replica,
-                            // terminate and replace it.
-                            if (bus.replicas[self.peer.replica]) |old| {
-                                assert(old.peer == .replica);
-                                assert(old.peer.replica == self.peer.replica);
-                                assert(old.state != .idle);
-                                if (old.state != .terminating) old.terminate(bus, .shutdown);
-                                bus.replicas[self.peer.replica] = null;
-                            }
-                            bus.replicas[self.peer.replica] = self;
+                assert(self.peer != .none);
+                assert(self.state == .connected);
+                assert(self.fd != -1);
+
+                if (self.peer != .unknown) return;
+
+                if (header.peer_type()) |peer_type| switch (peer_type) {
+                    .replica => {
+                        self.peer = .{ .replica = header.replica };
+                        // If there is a connection to this replica, terminate and replace it:
+                        if (bus.replicas[self.peer.replica]) |old| {
+                            assert(old.peer == .replica);
+                            assert(old.peer.replica == self.peer.replica);
+                            assert(old.state != .idle);
+                            if (old.state != .terminating) old.terminate(bus, .shutdown);
+                            bus.replicas[self.peer.replica] = null;
                         }
+                        bus.replicas[self.peer.replica] = self;
                     },
-                    .client => assert(header.command == .request),
-                    .replica => assert(header.command != .request),
-                }
+                    .client => {
+                        self.peer = .{ .client = header.client };
+                        const result = bus.process.clients.getOrPutAssumeCapacity(header.client);
+                        // If there is a connection to this client, terminate and replace it:
+                        if (result.found_existing) {
+                            const old = result.entry.value;
+                            assert(old.peer == .client);
+                            assert(old.state == .connected or old.state == .terminating);
+                            if (old.state != .terminating) old.terminate(bus, .shutdown);
+                        }
+                        result.entry.value = self;
+                    },
+                };
+
+                log.info("Received a connection from {}\n", .{self.peer});
             }
 
             /// Acquires a free message if necessary and then calls `recv()`.
