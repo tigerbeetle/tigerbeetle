@@ -878,6 +878,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                             bus.replicas[self.peer.replica] = null;
                         }
                         bus.replicas[self.peer.replica] = self;
+                        log.info("connection from replica {}", .{self.peer.replica});
                     },
                     .client => {
                         self.peer = .{ .client = header.client };
@@ -890,10 +891,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
                         }
                         result.entry.value = self;
+                        log.info("connection from client {}", .{self.peer.client});
                     },
                 };
-
-                log.info("Received a connection from {}\n", .{self.peer});
             }
 
             /// Acquires a free message if necessary and then calls `recv()`.
