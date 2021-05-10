@@ -1474,6 +1474,8 @@ pub const Replica = struct {
 
         assert(self.status == .normal or self.status == .view_change);
 
+        // TODO Drop pings that were not addressed to us.
+
         var pong = Header{
             .command = .pong,
             .cluster = self.cluster,
