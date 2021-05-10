@@ -22,8 +22,6 @@ const IO = @import("tigerbeetle/src/io.zig").IO;
 
 const vr = @import("tigerbeetle/src/vr.zig");
 
-var globals: Globals = undefined;
-
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
     translate.register_function(env, exports, "init", init) catch return null;
@@ -31,26 +29,40 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     translate.register_function(env, exports, "batch", batch) catch return null;
     translate.register_function(env, exports, "tick", tick) catch return null;
 
-    globals.init(env) catch return null;
-
-    if (c.napi_add_env_cleanup_hook(env, cleanup_globals_hook, null) != .napi_ok) {
-        translate.throw(env, "Failed to add cleanup hook") catch {};
+    const allocator = std.heap.c_allocator;
+    var global = Globals.init(allocator, env) catch {
+        std.debug.print("Failed to initialise environment.\n", .{});
         return null;
-    }
+    };
+    errdefer global.deinit();
+
+    // Tie the global state to this Node.js environment. This allows us to be thread safe.
+    // See https://nodejs.org/api/n-api.html#n_api_environment_life_cycle_apis.
+    // A cleanup function is registered as well that Node will call when the environment 
+    // is torn down. Be careful not to call this function again as it will overwrite the global state.
+    translate.set_instance_data(
+        env,
+        @ptrCast(*c_void, @alignCast(@alignOf(u8), global)),
+        Globals.destroy,
+    ) catch {
+        global.deinit();
+        return null;
+    };
 
     return exports;
 }
 
-fn cleanup_globals_hook(arg: ?*c_void) callconv(.C) void {
-    assert(arg == null);
-    globals.deinit();
-}
-
 const Globals = struct {
+    allocator: *std.mem.Allocator,
     io: IO,
     napi_undefined: c.napi_value,
 
-    pub fn init(self: *Globals, env: c.napi_env) !void {
+    pub fn init(allocator: *std.mem.Allocator, env: c.napi_env) !*Globals {
+        const self = try allocator.create(Globals);
+        errdefer allocator.destroy(self);
+
+        self.allocator = allocator;
+
         // Be careful to size the SQ ring to only a few SQE entries and to share a single IO instance
         // across multiple clients to stay under kernel limits:
         //
@@ -69,12 +81,24 @@ const Globals = struct {
         if (c.napi_get_undefined(env, &self.napi_undefined) != .napi_ok) {
             return translate.throw(env, "Failed to capture the value of \"undefined\".");
         }
+
+        return self;
     }
 
     pub fn deinit(self: *Globals) void {
         self.io.deinit();
+        self.allocator.destroy(self);
+    }
+
+    pub fn destroy(env: c.napi_env, data: ?*c_void, hint: ?*c_void) callconv(.C) void {
+        const self = globalsCast(data.?);
+        self.deinit();
     }
 };
+
+fn globalsCast(globals_raw: *c_void) *Globals {
+    return @ptrCast(*Globals, @alignCast(@alignOf(Globals), globals_raw));
+}
 
 const Context = struct {
     io: *IO,
@@ -272,6 +296,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     const allocator = std.heap.c_allocator;
 
     const globals_raw = translate.globals(env) catch return null;
+    const globals = globalsCast(globals_raw.?);
     const context = Context.create(env, allocator, &globals.io, id, cluster, configuration) catch {
         // TODO: switch on err and provide more detailed messages
         translate.throw(env, "Failed to initialize Client.") catch return null;
@@ -318,6 +343,7 @@ fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
     const napi_callback = translate.reference_value(env, callback_reference, "Failed to get callback reference.") catch return;
     const scope = translate.scope(env, "Failed to get \"this\" for results callback.") catch return;
     const globals_raw = translate.globals(env) catch return;
+    const globals = globalsCast(globals_raw.?);
     const argc: usize = 2;
     var argv: [argc]c.napi_value = undefined;
 
