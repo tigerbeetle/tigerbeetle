@@ -235,8 +235,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             for (self.connections) |*connection| {
                 if (connection.state == .idle) {
                     assert(connection.peer == .none);
-                    // This function immediately adds the connection to Self.replicas.
+                    // This function immediately adds the connection to self.replicas.
                     connection.connect_to_replica(self, replica);
+                    assert(connection.peer.replica == replica);
                     return;
                 }
             }
