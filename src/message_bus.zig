@@ -826,8 +826,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 }
 
                 if (message.header.command == .request or message.header.command == .prepare) {
-                    assert(process_type == .replica);
-
                     const sector_ceil = Journal.sector_ceil(message.header.size);
                     if (message.header.size != sector_ceil) {
                         assert(message.header.size < sector_ceil);
