@@ -262,18 +262,8 @@ pub const Header = packed struct {
                     return .replica;
                 }
             },
-            // These messages identify the peer as a replica:
-            .prepare_ok,
-            .reply,
-            .commit,
-            .start_view_change,
-            .do_view_change,
-            .start_view,
-            .request_start_view,
-            .request_headers,
-            .request_prepare,
-            .headers,
-            .nack_prepare => return .replica,
+            // All other messages identify the peer as a replica:
+            else => return .replica,
         }
     }
 
