@@ -75,6 +75,12 @@ pub const Client = struct {
         // Thereafter, we can extend our ping_timeout considerably.
         // The cluster can use this ping information to do LRU eviction from the client table when
         // it is overflowed by the number of unique client IDs.
+
+        // TODO Resend the request to the leader when the request_timeout fires.
+        // This covers for dropped packets, when the leader is still the leader.
+
+        // TODO Resend the request to the next replica and so on each time the reply_timeout fires.
+        // This anticipates the next view change, without the cost of broadcast against the cluster.
     }
 
     // TODO Rename this to request() and remove batching.
