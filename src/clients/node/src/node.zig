@@ -24,10 +24,10 @@ const vr = @import("tigerbeetle/src/vr.zig");
 
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
-    translate.register_function(env, exports, "init", init);
-    translate.register_function(env, exports, "deinit", deinit);
-    translate.register_function(env, exports, "batch", batch);
-    translate.register_function(env, exports, "tick", tick);
+    translate.register_function(env, exports, "init", init) catch return null;
+    translate.register_function(env, exports, "deinit", deinit) catch return null;
+    translate.register_function(env, exports, "batch", batch) catch return null;
+    translate.register_function(env, exports, "tick", tick) catch return null;
 
     const allocator = std.heap.c_allocator;
     var global = Globals.init(allocator, env) catch {
@@ -36,19 +36,22 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     };
     errdefer global.deinit();
 
+    // Tie the global state to this Node.js environment. This allows us to be thread safe.
+    // See https://nodejs.org/api/n-api.html#n_api_environment_life_cycle_apis.
+    // A cleanup function is registered as well that Node will call when the environment 
+    // is torn down. Be careful not to call this function again as it will overwrite the global state.
     translate.set_instance_data(
         env,
         @ptrCast(*c_void, @alignCast(@alignOf(u8), global)),
         Globals.destroy,
     ) catch {
-        allocator.destroy(global);
+        global.deinit();
         return null;
     };
 
     return exports;
 }
 
-/// Helper functions to encode and decode JS object
 const Globals = struct {
     allocator: *std.mem.Allocator,
     io: IO,
@@ -59,7 +62,6 @@ const Globals = struct {
         errdefer allocator.destroy(self);
 
         self.allocator = allocator;
-        self.napi_undefined = try translate.capture_undefined(env);
 
         // Be careful to size the SQ ring to only a few SQE entries and to share a single IO instance
         // across multiple clients to stay under kernel limits:
@@ -71,25 +73,31 @@ const Globals = struct {
         //
         // Check `/etc/security/limits.conf` for user settings, or `/etc/systemd/user.conf` and
         // `/etc/systemd/system.conf` for systemd setups.
-        self.io = try IO.init(32, 0);
+        self.io = IO.init(32, 0) catch {
+            return translate.throw(env, "Failed to initialize io_uring");
+        };
         errdefer self.io.deinit();
+
+        if (c.napi_get_undefined(env, &self.napi_undefined) != .napi_ok) {
+            return translate.throw(env, "Failed to capture the value of \"undefined\".");
+        }
 
         return self;
     }
 
     pub fn deinit(self: *Globals) void {
         self.io.deinit();
-        self.allocator.destroy(self); // TODO: @Isaac please review.
+        self.allocator.destroy(self);
     }
 
     pub fn destroy(env: c.napi_env, data: ?*c_void, hint: ?*c_void) callconv(.C) void {
-        const self = globalsCast(data.?); // TODO: @Isaac please review.
+        const self = globalsCast(data.?);
         self.deinit();
     }
 };
 
 fn globalsCast(globals_raw: *c_void) *Globals {
-    return @ptrCast(*Globals, @alignCast(@alignOf(Globals), globals_raw)); // TODO: @Isaac please review.
+    return @ptrCast(*Globals, @alignCast(@alignOf(Globals), globals_raw));
 }
 
 const Context = struct {
@@ -135,7 +143,7 @@ const Context = struct {
 };
 
 fn contextCast(context_raw: *c_void) !*Context {
-    return @ptrCast(*Context, @alignCast(@alignOf(Context), context_raw)); // TODO: @Isaac please review.
+    return @ptrCast(*Context, @alignCast(@alignOf(Context), context_raw));
 }
 
 fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !T {
@@ -172,7 +180,7 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
             .credit_reserved_limit = try translate.u64_from_object(env, object, "credit_reserved_limit"),
             .credit_accepted_limit = try translate.u64_from_object(env, object, "credit_accepted_limit"),
         },
-        u128 => try translate.u128_from_value(env, object, "Account lookup must be an id."),
+        u128 => try translate.u128_from_value(env, object, "Account lookup"),
         else => unreachable,
     };
 }
@@ -288,7 +296,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     const allocator = std.heap.c_allocator;
 
     const globals_raw = translate.globals(env) catch return null;
-    const globals = globalsCast(globals_raw.?); // TODO: @Isaac, please review
+    const globals = globalsCast(globals_raw.?);
     const context = Context.create(env, allocator, &globals.io, id, cluster, configuration) catch {
         // TODO: switch on err and provide more detailed messages
         translate.throw(env, "Failed to initialize Client.") catch return null;
@@ -308,7 +316,7 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     if (argc != 4) translate.throw(env, "Function batch() requires 4 arguments exactly.") catch return null;
 
     const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
-    const context = contextCast(context_raw.?) catch return null; // TODO: @Isaac, please review
+    const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
     const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
 
@@ -335,7 +343,7 @@ fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
     const napi_callback = translate.reference_value(env, callback_reference, "Failed to get callback reference.") catch return;
     const scope = translate.scope(env, "Failed to get \"this\" for results callback.") catch return;
     const globals_raw = translate.globals(env) catch return;
-    const globals = globalsCast(globals_raw.?); // TODO: @Isaac, please review
+    const globals = globalsCast(globals_raw.?);
     const argc: usize = 2;
     var argv: [argc]c.napi_value = undefined;
 
@@ -379,7 +387,7 @@ fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     if (argc != 1) translate.throw(env, "Function tick() requires 1 argument exactly.") catch return null;
 
     const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
-    const context = contextCast(context_raw.?) catch return null; // TODO: @Isaac, please review
+    const context = contextCast(context_raw.?) catch return null;
 
     context.client.tick();
     context.io.tick() catch unreachable; // TODO Use a block to throw an exception including the Zig error.
@@ -396,7 +404,7 @@ fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
     if (argc != 1) translate.throw(env, "Function deinit() requires 1 argument exactly.") catch return null;
 
     const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
-    const context = contextCast(context_raw.?) catch return null; // TODO: @Isaac, please review
+    const context = contextCast(context_raw.?) catch return null;
     context.client.deinit();
     context.message_bus.deinit();
 
