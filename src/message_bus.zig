@@ -875,7 +875,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                             assert(old.peer.replica == self.peer.replica);
                             assert(old.state != .idle);
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
-                            bus.replicas[self.peer.replica] = null;
                         }
                         bus.replicas[self.peer.replica] = self;
                         log.info("connection from replica {}", .{self.peer.replica});
@@ -887,6 +886,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                         if (result.found_existing) {
                             const old = result.entry.value;
                             assert(old.peer == .client);
+                            assert(old.peer.client == self.peer.client);
                             assert(old.state == .connected or old.state == .terminating);
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
                         }
