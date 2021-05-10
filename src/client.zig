@@ -69,6 +69,12 @@ pub const Client = struct {
 
         // TODO Resend the request to the next replica and so on each time the reply_timeout fires.
         // This anticipates the next view change, without the cost of broadcast against the cluster.
+
+        // TODO Tick ping_timeout and send ping if necessary to all replicas.
+        // We need to keep doing this until we discover our latest request_number.
+        // Thereafter, we can extend our ping_timeout considerably.
+        // The cluster can use this ping information to do LRU eviction from the client table when
+        // it is overflowed by the number of unique client IDs.
     }
 
     // TODO Rename this to request() and remove batching.
