@@ -29,6 +29,7 @@ pub const Client = struct {
     replica_count: u16,
     message_bus: *MessageBus,
 
+    // TODO Track the latest view number received in .pong and .reply messages.
     // TODO Ask the cluster for our last request number.
     request: u32 = 0,
 
@@ -62,8 +63,16 @@ pub const Client = struct {
     pub fn tick(self: *Client) void {
         self.message_bus.tick();
         self.batch_manager.send_if_none_inflight(self);
+
+        // TODO Resend the request to the leader when the request_timeout fires.
+        // This covers for dropped packets, when the leader is still the leader.
+
+        // TODO Resend the request to the next replica and so on each time the reply_timeout fires.
+        // This anticipates the next view change, without the cost of broadcast against the cluster.
     }
 
+    // TODO Rename this to request() and remove batching.
+    // TODO A client is allowed at most one inflight request at a time, queue concurrent requests.
     pub fn batch(
         self: *Client,
         user_data: u128,
@@ -110,6 +119,12 @@ pub const Client = struct {
             .command = .request,
             .operation = operation,
         };
+    }
+
+    fn send_message_to_leader(self: *Client, message: *Message) void {
+        // TODO Use the latest view number modulo the configuration length to find the leader.
+        // For now, replica 0 will forward onto the latest leader.
+        self.message_bus.send_message_to_replica(0, message);
     }
 
     fn send_message_to_replicas(self: *Client, message: *Message) void {
@@ -232,7 +247,7 @@ const BatchManager = struct {
             const body = message.buffer[@sizeOf(Header)..message.header.size];
             message.header.set_checksum_body(body);
             message.header.set_checksum();
-            client.send_message_to_replicas(message);
+            client.send_message_to_leader(message);
         }
     }
 
