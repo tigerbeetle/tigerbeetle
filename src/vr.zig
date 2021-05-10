@@ -104,7 +104,8 @@ pub const Header = packed struct {
     /// than once; it is also used by the client to discard duplicate responses to its requests.
     request: u32 = 0,
 
-    /// The index of the replica in the cluster configuration array that sent this message:
+    /// The index of the replica in the cluster configuration array that originated this message:
+    /// This only identifies the ultimate author because messages may be forwarded amongst replicas.
     replica: u16 = 0,
 
     /// The VR protocol command for this message:
@@ -242,6 +243,38 @@ pub const Header = packed struct {
             },
         }
         return null;
+    }
+
+    /// Returns whether the immediate sender is a replica or client (if this can be determined).
+    /// Some commands such as .request or .prepare may be forwarded on to other replicas so that
+    /// Header.replica or Header.client only identifies the ultimate origin, not the latest peer.
+    pub fn peer_type(self: *const Header) ?enum { replica, client } {
+        switch (self.command) {
+            .reserved => unreachable,
+            // These messages cannot identify the peer as they may have been forwarded:
+            .request, .prepare => return null,
+            // These messages identify the peer as either a replica or a client:
+            .ping, .pong => {
+                if (self.client > 0) {
+                    assert(self.replica == 0);
+                    return .client;
+                } else {
+                    return .replica;
+                }
+            },
+            // These messages identify the peer as a replica:
+            .prepare_ok,
+            .reply,
+            .commit,
+            .start_view_change,
+            .do_view_change,
+            .start_view,
+            .request_start_view,
+            .request_headers,
+            .request_prepare,
+            .headers,
+            .nack_prepare => return .replica,
+        }
     }
 
     pub fn reserved() Header {
@@ -1451,7 +1484,6 @@ pub const Replica = struct {
         if (message.header.client > 0) {
             assert(message.header.replica == 0);
 
-            pong.client = message.header.client;
             // 4.5 Client Recovery
             // If a client crashes and recovers it must start up with a request number larger than
             // what it had before it failed. It fetches its latest number from the replicas and adds
