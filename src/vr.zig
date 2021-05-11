@@ -248,11 +248,11 @@ pub const Header = packed struct {
     /// Returns whether the immediate sender is a replica or client (if this can be determined).
     /// Some commands such as .request or .prepare may be forwarded on to other replicas so that
     /// Header.replica or Header.client only identifies the ultimate origin, not the latest peer.
-    pub fn peer_type(self: *const Header) ?enum { replica, client } {
+    pub fn peer_type(self: *const Header) enum { unknown, replica, client } {
         switch (self.command) {
             .reserved => unreachable,
             // These messages cannot identify the peer as they may have been forwarded:
-            .request, .prepare => return null,
+            .request, .prepare => return .unknown,
             // These messages identify the peer as either a replica or a client:
             .ping, .pong => {
                 if (self.client > 0) {
