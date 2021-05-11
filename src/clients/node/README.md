@@ -1,5 +1,7 @@
 # tigerbeetle-node
-TigerBeetle client for NodeJS
+[TigerBeetle](https://github.com/coilhq/tigerbeetle) client for NodeJS
+
+**Note:** We will be making breaking changes to our data types in the next few days. 
 
 ## Installation
 **Prerequisites:** The current version of the client reuses components from TigerBeetle. As such it targets Linux kernel v5.6 or newer. Node >= 14.0.0 is also required.
@@ -10,7 +12,6 @@ Later portable versions of TigerBeetle may supplement `io_uring` with `kqueue` f
 yarn add tigerbeetle-node
 ```
 
-**Note:** We will be making breaking changes to our data types in the next few weeks. 
 
 ## Usage
 A client needs to be configured with a `client_id`, `cluster_id` and `replica_addresses`. This instantiates the client where memory is allocated to internally buffer commands to be sent. For the moment, only one client can be instantiated globally per process. Future releases will allow multiple client instantiations.
