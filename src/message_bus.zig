@@ -226,14 +226,14 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             }
 
             // Obtain a connection struct for our new replica connection.
-            // If there is an unused connection, use that. Otherwise drop
+            // If there is a free connection, use that. Otherwise drop
             // a client or unknown connection to make space. Prefer dropping
             // a client connection to an unknown one as the unknown peer may
             // be a replica. Since shutting a connection down does not happen
             // instantly, simply return after starting the shutdown and try again
             // on the next tick().
             for (self.connections) |*connection| {
-                if (connection.state == .idle) {
+                if (connection.state == .free) {
                     assert(connection.peer == .none);
                     // This will immediately add the connection to self.replicas,
                     // or else will return early if a socket file descriptor cannot be obtained:
@@ -279,7 +279,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             if (self.connections_used == self.connections.len) return;
             assert(self.connections_used < self.connections.len);
             self.process.accept_connection = for (self.connections) |*connection| {
-                if (connection.state == .idle) {
+                if (connection.state == .free) {
                     assert(connection.peer == .none);
                     connection.state = .accepting;
                     break connection;
@@ -304,7 +304,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             assert(self.process.accept_connection != null);
             defer self.process.accept_connection = null;
             const fd = result catch |err| {
-                self.process.accept_connection.?.state = .idle;
+                self.process.accept_connection.?.state = .free;
                 // TODO: some errors should probably be fatal
                 log.err("accept failed: {}", .{err});
                 return;
@@ -470,10 +470,10 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 replica: u16,
             } = .none,
             state: enum {
-                /// The connection is currently inactive, peer is none.
-                idle,
-                /// This connection has been reserved for an in progress accept operation,
-                /// peer is none.
+                /// The connection is not in use, with peer set to `.none`.
+                free,
+                /// The connection has been reserved for an in progress accept operation,
+                /// with peer set to `.none`.
                 accepting,
                 /// The peer is a replica and a connect operation has been started
                 /// but not yet competed.
@@ -482,7 +482,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 connected,
                 /// The connection is being terminated but cleanup has not yet finished.
                 terminating,
-            } = .idle,
+            } = .free,
             /// This is guaranteed to be valid only while state is connected.
             /// It will be reset to -1 during the shutdown process and is always -1 if the
             /// connection is unused (i.e. peer == .none). We use -1 instead of undefined here
@@ -523,7 +523,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 if (process_type == .replica) assert(replica != bus.process.replica.replica);
 
                 assert(self.peer == .none);
-                assert(self.state == .idle);
+                assert(self.state == .free);
                 assert(self.fd == -1);
 
                 // The first replica's network address family determines the
@@ -660,7 +660,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 switch (self.state) {
                     .connected, .connecting => {},
                     .terminating => return,
-                    .idle, .accepting => unreachable,
+                    .free, .accepting => unreachable,
                 }
                 self.send_queue.push(message.ref()) catch |err| switch (err) {
                     error.NoSpaceLeft => {
@@ -689,7 +689,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             /// I'll be back! (when the Connection is reused after being fully closed)
             pub fn terminate(self: *Connection, bus: *Self, how: enum { shutdown, close }) void {
                 assert(self.peer != .none);
-                assert(self.state != .idle);
+                assert(self.state != .free);
                 assert(self.fd != -1);
                 switch (how) {
                     .shutdown => {
@@ -879,7 +879,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                         if (bus.replicas[self.peer.replica]) |old| {
                             assert(old.peer == .replica);
                             assert(old.peer.replica == self.peer.replica);
-                            assert(old.state != .idle);
+                            assert(old.state != .free);
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
                         }
                         bus.replicas[self.peer.replica] = self;
