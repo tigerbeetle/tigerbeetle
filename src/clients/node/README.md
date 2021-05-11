@@ -46,18 +46,18 @@ const account = {
     timestamp: 0n, // Reserved: This will be set by the server.
 }
 
-const result = await client.createAccount([account])
+const results = await client.createAccounts([account])
 ```
 Successfully executed commands return an empty array whilst unsuccessful ones return an array with errors for **only the ones that failed**. An error will point to the index in the submitted array of the failed command.
 ```js
-  const result = await client.createAccount([account1, account2, account3])
+  const results = await client.createAccounts([account1, account2, account3])
 
   // Successful result
-  // result = []
+  // results = []
   //
   // Unsuccessful result
-  // result = [{ index: 1, error: 1 }]
-  const { error } = result[0]
+  // results = [{ index: 1, error: 1 }]
+  const { error } = results[0]
   switch (error) {
     case CreateAccountError.exists: {
 
@@ -70,10 +70,10 @@ The unsuccessful result above shows that the command in index 1 failed with erro
 
 The `id` of the account is used for lookups.
 ```js
-  const result = await client.lookupAccounts([137n])
+  const results = await client.lookupAccounts([137n])
 
   /**
-   * const result = [{
+   * const results = [{
    *   id: 137n,
    *   custom: 0n,
    *   flags: 0n,
@@ -104,7 +104,7 @@ const transfer = {
     timeout: 10000000000n // in nano-seconds
 }
 
-const result = await client.createTransfer([transfer])
+const results = await client.createTransfers([transfer])
 ```
 The `flags` field is a bit field that determines the flavour of transfer you want to create.
 | bit 0  | bit 1  | bit 2       |
@@ -149,5 +149,5 @@ const commit = {
     custom_3: 0n,
     flags,
 }
-const result = await client.commitTransfer([commit])
+const results = await client.commitTransfers([commit])
 ```

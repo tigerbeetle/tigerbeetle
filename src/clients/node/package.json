@@ -4,6 +4,10 @@
   "description": "Official TigerBeetle Node.js client",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/coilhq/tigerbeetle-node.git"
+  },
   "files": [
     ".gitmodules",
     "LICENSE",
