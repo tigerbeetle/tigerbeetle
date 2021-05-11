@@ -770,7 +770,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
                     switch (process_type) {
                         // Replicas may forward messages from clients or from other replicas so we
-                        // may therefore receive messages from a peer before we know who they are:
+                        // may receive messages from a peer before we know who they are:
                         .replica => self.maybe_set_peer(bus, header),
                         // The client connects only to replicas and should set peer when connecting:
                         .client => assert(self.peer == .replica),
