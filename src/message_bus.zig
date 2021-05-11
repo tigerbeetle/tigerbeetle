@@ -462,7 +462,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             peer: union(enum) {
                 /// No peer is currently connected.
                 none: void,
-                /// A connection is established but the first header has not yet been received.
+                /// A connection is established but an unambiguous header has not yet been received.
                 unknown: void,
                 /// The peer is a client with the given id.
                 client: u128,
