@@ -235,9 +235,10 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             for (self.connections) |*connection| {
                 if (connection.state == .idle) {
                     assert(connection.peer == .none);
-                    // This function immediately adds the connection to self.replicas.
+                    // This will immediately add the connection to self.replicas,
+                    // or else will return early if a socket file descriptor cannot be obtained:
+                    // TODO See if we can clean this up to remove/expose the early return branch.
                     connection.connect_to_replica(self, replica);
-                    assert(connection.peer.replica == replica);
                     return;
                 }
             }
@@ -520,6 +521,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             /// Failure is silent and returns the connection to an unused state.
             pub fn connect_to_replica(self: *Connection, bus: *Self, replica: u16) void {
                 if (process_type == .replica) assert(replica != bus.process.replica.replica);
+
                 assert(self.peer == .none);
                 assert(self.state == .idle);
                 assert(self.fd == -1);
