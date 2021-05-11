@@ -866,7 +866,8 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
                 if (self.peer != .unknown) return;
 
-                if (header.peer_type()) |peer_type| switch (peer_type) {
+                switch (header.peer_type()) {
+                    .unknown => return,
                     .replica => {
                         self.peer = .{ .replica = header.replica };
                         // If there is a connection to this replica, terminate and replace it:
@@ -893,7 +894,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                         result.entry.value = self;
                         log.info("connection from client {}", .{self.peer.client});
                     },
-                };
+                }
             }
 
             /// Acquires a free message if necessary and then calls `recv()`.
