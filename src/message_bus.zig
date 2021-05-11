@@ -1072,10 +1072,14 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                             .client => unreachable,
                         },
                         .replica => {
-                            assert(bus.replicas[self.peer.replica] != null);
                             // A newer replica connection may have replaced this one:
                             if (bus.replicas[self.peer.replica] == self) {
                                 bus.replicas[self.peer.replica] = null;
+                            } else {
+                                // A newer replica connection may even leapfrog this connection and
+                                // then be terminated and set to null before we can get here:
+                                assert(bus.replicas[self.peer.replica] != null or
+                                    bus.replicas[self.peer.replica] == null);
                             }
                         },
                     }
