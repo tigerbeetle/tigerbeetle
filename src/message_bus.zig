@@ -771,6 +771,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     switch (process_type) {
                         // Replicas may forward messages from clients or from other replicas so we
                         // may receive messages from a peer before we know who they are:
+                        // This has the same effect as an asymmetric network where, for a short time
+                        // bounded by the time it takes to ping, we can hear from a peer before we
+                        // can send back to them.
                         .replica => self.maybe_set_peer(bus, header),
                         // The client connects only to replicas and should set peer when connecting:
                         .client => assert(self.peer == .replica),
