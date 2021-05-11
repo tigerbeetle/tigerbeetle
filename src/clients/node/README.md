@@ -7,8 +7,10 @@ TigerBeetle client for NodeJS
 Later portable versions of TigerBeetle may supplement `io_uring` with `kqueue` for macOS and FreeBSD support, or `IOCP` for Windows support.
 
 ```sh
-yarn install tigerbeetle-node
+yarn add tigerbeetle-node
 ```
+
+**Note:** We will be making breaking changes to our data types in the next few weeks. 
 
 ## Usage
 A client needs to be configured with a `client_id`, `cluster_id` and `replica_addresses`. This instantiates the client where memory is allocated to internally buffer commands to be sent. For the moment, only one client can be instantiated globally per process. Future releases will allow multiple client instantiations.
@@ -31,7 +33,7 @@ const account = {
     id: 137n,
     custom: 0n,
     flags: 0n,
-    unit: 1n,
+    unit: 1n, // unit of value
     debit_accepted: 0n,
     debit_reserved: 0n,
     credit_accepted: 0n,
@@ -40,7 +42,7 @@ const account = {
     debit_reserved_limit: 10000000n,
     credit_accepted_limit: 10000000n,
     credit_reserved_limit: 10000000n,
-    timeout: 1n,
+    timestamp: 0n, // Reserved: This will be set by the server.
 }
 
 const result = await client.createAccount([account])
@@ -54,8 +56,38 @@ Successfully executed commands return an empty array whilst unsuccessful ones re
   //
   // Unsuccessful result
   // result = [{ index: 1, error: 1 }]
+  const { error } = result[0]
+  switch (error) {
+    case CreateAccountError.exists: {
+
+    }
+  }
 ```
 The unsuccessful result above shows that the command in index 1 failed with error 1. This means that `account1` and `account3` were created successfully but not `account2`.
+
+**Account lookup**
+
+The `id` of the account is used for lookups.
+```js
+  const result = await client.lookupAccounts([137n])
+
+  /**
+   * const result = [{
+   *   id: 137n,
+   *   custom: 0n,
+   *   flags: 0n,
+   *   unit: 1n,
+   *   debit_accepted: 0n,
+   *   debit_reserved: 0n,
+   *   credit_accepted: 0n,
+   *   credit_reserved: 0n,
+   *   debit_accepted_limit: 10000000n,
+   *   debit_reserved_limit: 10000000n,
+   *   credit_accepted_limit: 10000000n,
+   *   credit_reserved_limit: 10000000n
+   * }]
+   */
+```
 
 **Creating a transfer**
 ```js
@@ -82,30 +114,39 @@ By default (`flags = 0n`), a two-phase transfer is created i.e. after the transf
 
 An `auto-committing` transfer can also be created where a subsequent commit is not necessary by setting bit 0 and bit 2. This would be akin to creating a journal entry. Similarly, if you want the transfer to be automatically rejected then set bit 1 and bit 2.
 ```js
-  // auto-committing transfer
+  enum CreateTransferFlags {
+    accept = (1 << 0),
+    reject = (1 << 1),
+    auto_commit = (1 << 2)
+  }
+
+// auto-committing transfer
   let flags = 0n
-  flags |= (1 << 0)
-  flags |= (1 << 2)
+  flags |= TransferFlags.accept
+  flags |= TransferFlags.auto_commit
 
   // auto-rejected transfer
   let flags = 0n
-  flags |= (1 << 1)
-  flags |= (1 << 2)
+  flags |= TransferFlags.reject
+  flags |= TransferFlags.auto_commit
 ```
 Future releases will support supplying TigerBeetle with a condition that will be used to validate a corresponding fulfillment for two-phase transfers.
 
 **Committing a transfer**
+
 The flags field will determine the type of commit viz. accept or reject.
 | bit 0  | bit 1  |
 |--------|--------|
 | accept | reject |
 ```js
+let flags = 0n
+flags |= CommitFlags.accept
 const commit = {
     id: 136n,
     custom_1: 0n,
     custom_2: 0n,
     custom_3: 0n,
-    flags: 1n,
+    flags,
 }
 const result = await client.commitTransfer([commit])
 ```

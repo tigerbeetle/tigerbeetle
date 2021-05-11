@@ -24,7 +24,7 @@ export type Account = {
   id: bigint // u128
   custom: bigint // u128
   flags: bigint // u64
-  unit: bigint // u64
+  unit: bigint // u64, unit of value
   debit_accepted: bigint // u64
   debit_reserved: bigint // u64
   credit_accepted: bigint // u64
@@ -36,7 +36,7 @@ export type Account = {
 }
 
 export type CreateAccount = Account & {
-  timeout: bigint // u64
+  timestamp: bigint // u64
 }
 
 export enum CreateAccountError {
@@ -71,7 +71,13 @@ export type CreateTransfer = {
   custom_3: bigint, // u128
   flags: bigint, // u64
   amount: bigint, // u64
-  timeout: bigint, // u64
+  timeout: bigint, // u64, in nano-seconds
+}
+
+export enum CreateTransferFlags {
+  accept = (1 << 0),
+  reject = (1 << 1),
+  auto_commit = (1 << 2)
 }
 
 export enum CreateTransferError {
@@ -113,6 +119,11 @@ export type CommitTransfer = {
   custom_2: bigint, // u128
   custom_3: bigint, // u128
   flags: bigint, // u64
+}
+
+export enum CommitFlags {
+  accept = (1 << 0),
+  reject = (1 << 1)
 }
 
 export enum CommitTransferError {
