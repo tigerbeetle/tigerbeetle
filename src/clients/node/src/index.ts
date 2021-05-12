@@ -1,7 +1,7 @@
 const binding: Binding = require('./client.node')
 interface Binding {
   init: (args: BindingInitArgs) => Context
-  batch: (context: Context, operation: Operation, batch: Command[], result: ResultCallback) => void
+  request: (context: Context, operation: Operation, batch: Command[], result: ResultCallback) => void
   tick: (context: Context) => void,
   deinit: (context: Context) => void
 }
@@ -181,7 +181,7 @@ export interface Client {
   createTransfers: (batch: CreateTransfer[]) => Promise<CreateTransferResult[]>
   commitTransfers: (batch: CommitTransfer[]) => Promise<CommitTransferResult[]>
   lookupAccounts: (batch: AccountLookup[]) => Promise<AccountLookupResult[]>
-  batch: (operation: Operation, batch: Command[], callback: ResultCallback) => void
+  request: (operation: Operation, batch: Command[], callback: ResultCallback) => void
   destroy: () => void
 }
 
@@ -226,8 +226,8 @@ export function createClient (args: InitArgs): Client {
     replica_addresses: Buffer.from(args.replica_addresses.join(','))
   })
 
-  const batch = (operation: Operation, batch: Command[], callback: ResultCallback) => {
-    binding.batch(context, operation, batch, callback)
+  const request = (operation: Operation, batch: Command[], callback: ResultCallback) => {
+    binding.request(context, operation, batch, callback)
   }
 
   const createAccounts = async (batch: CreateAccount[]): Promise<CreateAccountResult[]> => {
@@ -240,7 +240,7 @@ export function createClient (args: InitArgs): Client {
       }
 
       try {
-        binding.batch(context, Operation.CREATE_ACCOUNT, batch, callback)
+        binding.request(context, Operation.CREATE_ACCOUNT, batch, callback)
       } catch (error) {
         reject(error)
       }
@@ -257,7 +257,7 @@ export function createClient (args: InitArgs): Client {
       }
 
       try {
-        binding.batch(context, Operation.CREATE_TRANSFER, batch, callback)
+        binding.request(context, Operation.CREATE_TRANSFER, batch, callback)
       } catch (error) {
         reject(error)
       }
@@ -274,7 +274,7 @@ export function createClient (args: InitArgs): Client {
       }
 
       try {
-        binding.batch(context, Operation.COMMIT_TRANSFER, batch, callback)
+        binding.request(context, Operation.COMMIT_TRANSFER, batch, callback)
       } catch (error) {
         reject(error)
       }
@@ -291,7 +291,7 @@ export function createClient (args: InitArgs): Client {
       }
 
       try {
-        binding.batch(context, Operation.ACCOUNT_LOOKUP, batch, callback)
+        binding.request(context, Operation.ACCOUNT_LOOKUP, batch, callback)
       } catch (error) {
         reject(error)
       }
@@ -311,7 +311,7 @@ export function createClient (args: InitArgs): Client {
     createTransfers,
     commitTransfers,
     lookupAccounts,
-    batch,
+    request,
     destroy
   }
 

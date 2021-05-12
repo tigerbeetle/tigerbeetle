@@ -22,23 +22,25 @@ const IO = @import("tigerbeetle/src/io.zig").IO;
 
 const vr = @import("tigerbeetle/src/vr.zig");
 
+pub const log_level: std.log.Level = .info;
+
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
     translate.register_function(env, exports, "init", init) catch return null;
     translate.register_function(env, exports, "deinit", deinit) catch return null;
-    translate.register_function(env, exports, "batch", batch) catch return null;
+    translate.register_function(env, exports, "request", request) catch return null;
     translate.register_function(env, exports, "tick", tick) catch return null;
 
     const allocator = std.heap.c_allocator;
     var global = Globals.init(allocator, env) catch {
-        std.debug.print("Failed to initialise environment.\n", .{});
+        std.log.emerg("Failed to initialise environment.\n", .{});
         return null;
     };
     errdefer global.deinit();
 
     // Tie the global state to this Node.js environment. This allows us to be thread safe.
     // See https://nodejs.org/api/n-api.html#n_api_environment_life_cycle_apis.
-    // A cleanup function is registered as well that Node will call when the environment 
+    // A cleanup function is registered as well that Node will call when the environment
     // is torn down. Be careful not to call this function again as it will overwrite the global state.
     translate.set_instance_data(
         env,
@@ -201,7 +203,7 @@ fn decode_from_array(comptime T: type, env: c.napi_env, array: c.napi_value) ![]
         events[i] = try decode_from_object(T, env, entry);
     }
 
-    for (events) |event| std.debug.print("Decoded event {}\n", .{event});
+    for (events) |event| std.log.debug("Decoded event {}\n", .{event});
 
     return std.mem.sliceAsBytes(events);
 }
@@ -210,7 +212,7 @@ fn decode_slice_from_array(env: c.napi_env, object: c.napi_value, operation: Ope
     const allocator = std.heap.c_allocator;
     return switch (operation) {
         .reserved, .init => {
-            std.debug.print("Reserved operation {}", .{operation});
+            std.log.err("Reserved operation {}", .{operation});
             return translate.throw(env, "Reserved operation.");
         },
         .create_accounts => try decode_from_array(Account, env, object),
@@ -305,7 +307,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     return context;
 }
 
-fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 20;
     var argv: [20]c.napi_value = undefined;
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
@@ -313,7 +315,7 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     }
 
     const allocator = std.heap.c_allocator;
-    if (argc != 4) translate.throw(env, "Function batch() requires 4 arguments exactly.") catch return null;
+    if (argc != 4) translate.throw(env, "Function request() requires 4 arguments exactly.") catch return null;
 
     const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
     const context = contextCast(context_raw.?) catch return null;
@@ -332,7 +334,7 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     };
     defer allocator.free(events);
 
-    context.client.batch(@bitCast(u128, user_data), on_result, operation, events);
+    context.client.request(@bitCast(u128, user_data), on_result, operation, events);
 
     return null;
 }
