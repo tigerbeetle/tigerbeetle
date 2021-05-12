@@ -12,6 +12,16 @@ Later portable versions of TigerBeetle may supplement `io_uring` with `kqueue` f
 yarn add tigerbeetle-node
 ```
 
+**Development**
+
+Follow these steps to get up and running when cloning the repo:
+
+```sh
+git clone https://github.com/coilhq/tigerbeetle-node.git
+git submodule update --init
+yarn
+yarn build
+```
 
 ## Usage
 A client needs to be configured with a `client_id`, `cluster_id` and `replica_addresses`. This instantiates the client where memory is allocated to internally buffer commands to be sent. For the moment, only one client can be instantiated globally per process. Future releases will allow multiple client instantiations.
