@@ -134,6 +134,9 @@ pub const Client = struct {
     }
 
     fn send_message_to_leader(self: *Client, message: *Message) void {
+        // TODO For this to work, we need to send pings to the cluster every N ticks.
+        // Otherwise, the latest leader will have our connection.peer set to .unknown.
+
         // TODO Use the latest view number modulo the configuration length to find the leader.
         // For now, replica 0 will forward onto the latest leader.
         self.message_bus.send_message_to_replica(0, message);
@@ -259,7 +262,7 @@ const BatchManager = struct {
             const body = message.buffer[@sizeOf(Header)..message.header.size];
             message.header.set_checksum_body(body);
             message.header.set_checksum();
-            client.send_message_to_leader(message);
+            client.send_message_to_replicas(message);
         }
     }
 
