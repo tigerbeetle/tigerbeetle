@@ -1515,7 +1515,9 @@ pub const Replica = struct {
         }
 
         if (self.follower()) {
-            if (message.header.view < self.view) {
+            // TODO Re-enable this dead branch when the Client starts pinging the cluster.
+            // Otherwise, we will trip our one-request-at-a-time limit.
+            if (message.header.view < self.view and false) {
                 log.debug("{}: on_request: forwarding (follower)", .{self.replica});
                 self.send_message_to_replica(self.leader_index(self.view), message);
             } else {
