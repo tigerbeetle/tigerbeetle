@@ -399,6 +399,8 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
             if (self.process.clients.get(client_id)) |connection| {
                 connection.send_message(self, message);
+            } else {
+                log.debug("no connection to client {x}", .{client_id});
             }
         }
 
