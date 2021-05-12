@@ -17,7 +17,8 @@
     "src/c.zig",
     "src/index.ts",
     "src/node.zig",
-    "src/tigerbeetle",
+    "src/tigerbeetle/src",
+    "src/tigerbeetle/scripts",
     "src/translate.zig",
     "scripts/download_node_headers.sh"
   ],
