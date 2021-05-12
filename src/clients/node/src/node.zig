@@ -28,7 +28,7 @@ pub const log_level: std.log.Level = .info;
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
     translate.register_function(env, exports, "init", init) catch return null;
     translate.register_function(env, exports, "deinit", deinit) catch return null;
-    translate.register_function(env, exports, "batch", batch) catch return null;
+    translate.register_function(env, exports, "request", request) catch return null;
     translate.register_function(env, exports, "tick", tick) catch return null;
 
     const allocator = std.heap.c_allocator;
@@ -307,7 +307,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     return context;
 }
 
-fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 20;
     var argv: [20]c.napi_value = undefined;
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
@@ -315,7 +315,7 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     }
 
     const allocator = std.heap.c_allocator;
-    if (argc != 4) translate.throw(env, "Function batch() requires 4 arguments exactly.") catch return null;
+    if (argc != 4) translate.throw(env, "Function request() requires 4 arguments exactly.") catch return null;
 
     const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
     const context = contextCast(context_raw.?) catch return null;
