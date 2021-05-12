@@ -1509,6 +1509,11 @@ pub const Replica = struct {
             return;
         }
 
+        if (message.header.view > self.view) {
+            log.debug("{}: on_request: ignoring (newer view)", .{self.replica});
+            return;
+        }
+
         if (self.follower()) {
             if (message.header.view < self.view) {
                 log.debug("{}: on_request: forwarding (follower)", .{self.replica});
