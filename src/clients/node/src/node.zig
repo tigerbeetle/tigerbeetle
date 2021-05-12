@@ -332,7 +332,7 @@ fn batch(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value 
     };
     defer allocator.free(events);
 
-    context.client.batch(@bitCast(u128, user_data), on_result, operation, events);
+    context.client.request(@bitCast(u128, user_data), on_result, operation, events);
 
     return null;
 }
