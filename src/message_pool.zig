@@ -21,6 +21,7 @@ const message_size_max_padded = config.message_size_max + config.sector_size;
 /// and config.message_bus_headers_max values determine the size of this pool.
 pub const MessagePool = struct {
     pub const Message = struct {
+        // TODO: replace this with a header() function to save memory
         header: *Header,
         /// Unless this Message is header only, this buffer is in aligned to config.sector_size
         /// and casting to that alignment in order to perform Direct I/O is safe.
@@ -32,6 +33,10 @@ pub const MessagePool = struct {
         pub fn ref(message: *Message) *Message {
             message.references += 1;
             return message;
+        }
+
+        pub fn body(message: *Message) []u8 {
+            return message.buffer[@sizeOf(Header)..message.header.size];
         }
 
         fn header_only(message: Message) bool {
