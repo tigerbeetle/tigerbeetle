@@ -40,7 +40,11 @@ pub const Client = struct {
     // TODO Ask the cluster for our last request number.
     request_number: u32 = 0,
 
-    request_queue: RingBuffer(Request, config.message_bus_messages_max) = .{},
+    /// Leave one Message free to receive with
+    request_queue: RingBuffer(Request, config.message_bus_messages_max - 1) = .{},
+    request_timeout: vr.Timeout,
+
+    ping_timeout: vr.Timeout,
 
     pub fn init(
         allocator: *mem.Allocator,
@@ -58,7 +62,19 @@ pub const Client = struct {
             .cluster = cluster,
             .replica_count = replica_count,
             .message_bus = message_bus,
+            .request_timeout = .{
+                .name = "request_timeout",
+                .replica = std.math.maxInt(u16),
+                .after = 10,
+            },
+            .ping_timeout = .{
+                .name = "ping_timeout",
+                .replica = std.math.maxInt(u16),
+                .after = 10,
+            },
         };
+
+        self.ping_timeout.start();
 
         return self;
     }
@@ -67,6 +83,12 @@ pub const Client = struct {
 
     pub fn tick(self: *Client) void {
         self.message_bus.tick();
+
+        self.request_timeout.tick();
+        if (self.request_timeout.fired()) self.on_request_timeout();
+
+        self.ping_timeout.tick();
+        if (self.ping_timeout.fired()) self.on_ping_timeout();
 
         // TODO Resend the request to the leader when the request_timeout fires.
         // This covers for dropped packets, when the leader is still the leader.
@@ -110,7 +132,28 @@ pub const Client = struct {
         };
 
         // If the queue was empty, there is no currently inflight message, so send this one.
-        if (was_empty) self.send_message_to_replicas(message);
+        if (was_empty) self.send_request(message);
+    }
+
+    fn on_request_timeout(self: *Client) void {
+        const current_request = self.request_queue.peek() orelse return;
+        self.send_request(current_request.message);
+    }
+
+    fn send_request(self: *Client, request_message: *Message) void {
+        self.send_message_to_replicas(request_message);
+        self.request_timeout.start();
+    }
+
+    fn on_reply(self: *Client, reply: *Message) void {
+        const done = self.request_queue.pop().?;
+        done.callback(done.user_data, done.operation, reply.body());
+        self.message_bus.unref(done.message);
+        self.request_timeout.stop();
+
+        if (self.request_queue.peek()) |next_request| {
+            self.send_request(next_request.message);
+        }
     }
 
     pub fn on_message(self: *Client, message: *Message) void {
@@ -127,22 +170,45 @@ pub const Client = struct {
             });
             return;
         }
-        if (message.header.command != .reply) {
-            log.warn("{}: on_message: unexpected command {}", .{ self.id, message.header.command });
-            return;
-        }
-        if (message.header.request < self.request_number) {
-            log.debug("{}: on_message: duplicate reply {}", .{ self.id, message.header.request });
-            return;
-        }
+        switch (message.header.command) {
+            .reply => {
+                if (message.header.request < self.request_number) {
+                    log.debug("{}: on_message: duplicate reply {}", .{ self.id, message.header.request });
+                    return;
+                }
 
-        const completed = self.request_queue.pop().?;
-        completed.callback(completed.user_data, completed.operation, message.body());
-        self.message_bus.unref(completed.message);
-
-        if (self.request_queue.peek()) |next_request| {
-            self.send_message_to_replicas(next_request.message);
+                self.on_reply(message);
+            },
+            .ping => self.on_ping(message),
+            .pong => {
+                // TODO: when we implement proper request number usage, we will
+                // need to get the request number from a pong message on startup.
+            },
+            else => {
+                log.warn("{}: on_message: unexpected command {}", .{ self.id, message.header.command });
+            },
         }
+    }
+
+    fn on_ping_timeout(self: *Client) void {
+        self.ping_timeout.reset();
+
+        const ping = Header{
+            .command = .ping,
+            .cluster = self.cluster,
+            .client = self.id,
+        };
+
+        self.send_header_to_replicas(ping);
+    }
+
+    fn on_ping(self: Client, ping: *const Message) void {
+        const pong: Header = .{
+            .command = .pong,
+            .cluster = self.cluster,
+            .client = self.id,
+        };
+        self.message_bus.send_header_to_replica(ping.header.replica, pong);
     }
 
     /// Initialize header fields and set the checksums
@@ -174,6 +240,13 @@ pub const Client = struct {
         var replica: u16 = 0;
         while (replica < self.replica_count) : (replica += 1) {
             self.message_bus.send_message_to_replica(replica, message);
+        }
+    }
+
+    fn send_header_to_replicas(self: *Client, header: Header) void {
+        var replica: u16 = 0;
+        while (replica < self.replica_count) : (replica += 1) {
+            self.message_bus.send_header_to_replica(replica, header);
         }
     }
 };

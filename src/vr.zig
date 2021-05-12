@@ -1070,8 +1070,9 @@ pub const BitSet = struct {
     }
 };
 
-const Timeout = struct {
+pub const Timeout = struct {
     name: []const u8,
+    /// TODO: get rid of this field as this is used by Client as well
     replica: u16,
     after: u64,
     ticks: u64 = 0,
