@@ -1510,8 +1510,14 @@ pub const Replica = struct {
         }
 
         if (self.follower()) {
-            // TODO Add an optimization to tell the client the view (and leader) ahead of a timeout.
-            log.debug("{}: on_request: ignoring (follower)", .{self.replica});
+            if (message.header.view < self.view) {
+                log.debug("{}: on_request: forwarding (follower)", .{self.replica});
+                self.send_message_to_replica(self.leader_index(self.view), message);
+            } else {
+                // The message has the same view, but was routed to the wrong replica.
+                // Don't amplify traffic, let the client retry to another replica.
+                log.warn("{}: on_request: ignoring (follower)", .{self.replica});
+            }
             return;
         }
 
@@ -3731,9 +3737,13 @@ pub const Replica = struct {
             message.header,
         });
         switch (message.header.command) {
-            .prepare => {
+            .request => {
                 // We do not assert message.header.replica as we would for send_header_to_replica()
-                // because we typically forward messages sent by another replica (i.e. the leader).
+                // because we may forward .request or .prepare messages.
+                assert(self.status == .normal);
+                assert(message.header.view <= self.view);
+            },
+            .prepare => {
                 switch (self.status) {
                     .normal => assert(message.header.view <= self.view),
                     .view_change => assert(message.header.view < self.view),
