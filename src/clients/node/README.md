@@ -78,9 +78,10 @@ The unsuccessful result above shows that the command in index 1 failed with erro
 
 **Account lookup**
 
-The `id` of the account is used for lookups.
+The `id` of the account is used for lookups. Only matched accounts are returned.
 ```js
-  const results = await client.lookupAccounts([137n])
+  // account 137n exists, 138n does not
+  const results = await client.lookupAccounts([137n, 138n])
 
   /**
    * const results = [{

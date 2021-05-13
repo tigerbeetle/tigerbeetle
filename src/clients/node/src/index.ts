@@ -156,17 +156,8 @@ export type CommitTransferResult = {
 
 export type AccountLookup = bigint // u128
 
-export enum AccountLookupError {
-  not_found,
-}
-
-export type AccountLookupResult = Account | {
-  index: number,
-  error: AccountLookupError
-}
-
 export type Command = CreateAccount | CreateTransfer | CommitTransfer | AccountLookup
-export type Result = CreateAccountResult | CreateTransferResult | CommitTransferResult | AccountLookupResult
+export type Result = CreateAccountResult | CreateTransferResult | CommitTransferResult | Account
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export enum Operation {
@@ -180,7 +171,7 @@ export interface Client {
   createAccounts: (batch: CreateAccount[]) => Promise<CreateAccountResult[]>
   createTransfers: (batch: CreateTransfer[]) => Promise<CreateTransferResult[]>
   commitTransfers: (batch: CommitTransfer[]) => Promise<CommitTransferResult[]>
-  lookupAccounts: (batch: AccountLookup[]) => Promise<AccountLookupResult[]>
+  lookupAccounts: (batch: AccountLookup[]) => Promise<Account[]>
   request: (operation: Operation, batch: Command[], callback: ResultCallback) => void
   destroy: () => void
 }
@@ -281,9 +272,9 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const lookupAccounts = async (batch: AccountLookup[]): Promise<AccountLookupResult[]> => {
+  const lookupAccounts = async (batch: AccountLookup[]): Promise<Account[]> => {
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: AccountLookupResult[]) => {
+      const callback = (error: undefined | Error, results: Account[]) => {
         if (error) {
           reject(error)
         }
