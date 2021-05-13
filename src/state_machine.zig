@@ -9,6 +9,7 @@ usingnamespace @import("tigerbeetle.zig");
 
 const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);
+const HashMapCommits = std.AutoHashMap(u128, Commit);
 
 pub const Operation = packed enum(u8) {
     // We reserve command "0" to detect an accidental zero byte being interpreted as an operation:
@@ -31,6 +32,7 @@ pub const StateMachine = struct {
     commit_timestamp: u64,
     accounts: HashMapAccounts,
     transfers: HashMapTransfers,
+    commits: HashMapCommits,
 
     pub fn init(allocator: *Allocator, accounts_max: usize, transfers_max: usize) !StateMachine {
         var accounts = HashMapAccounts.init(allocator);
@@ -41,6 +43,12 @@ pub const StateMachine = struct {
         errdefer transfers.deinit();
         try transfers.ensureCapacity(@intCast(u32, transfers_max));
 
+        // TODO Add config for commits_max to enable non-two-phase-commit systems to save memory.
+        const commits_max = transfers_max;
+        var commits = HashMapCommits.init(allocator);
+        errdefer commits.deinit();
+        try commits.ensureCapacity(@intCast(u32, commits_max));
+
         // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
         // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
 
@@ -50,6 +58,7 @@ pub const StateMachine = struct {
             .commit_timestamp = 0,
             .accounts = accounts,
             .transfers = transfers,
+            .commits = commits,
         };
     }
 
@@ -169,43 +178,25 @@ pub const StateMachine = struct {
     pub fn create_account(self: *StateMachine, a: Account) CreateAccountResult {
         assert(a.timestamp > self.commit_timestamp);
 
-        if (a.custom != 0) return .reserved_field_custom;
-        if (a.padding != 0) return .reserved_field_padding;
-
+        if (!zeroed(&a.reserved)) return .reserved_field;
         if (a.flags.padding != 0) return .reserved_flag_padding;
 
         // Opening balances may never exceed limits:
-        if (a.exceeds_debit_reserved_limit(0)) return .exceeds_debit_reserved_limit;
-        if (a.exceeds_debit_accepted_limit(0)) return .exceeds_debit_accepted_limit;
-        if (a.exceeds_credit_reserved_limit(0)) return .exceeds_credit_reserved_limit;
-        if (a.exceeds_credit_accepted_limit(0)) return .exceeds_credit_accepted_limit;
+        if (a.debits_exceed_credits(0)) return .exceeds_credits;
+        if (a.credits_exceed_debits(0)) return .exceeds_debits;
 
-        // Accounts may never reserve more than they could possibly accept:
-        if (a.debit_accepted_limit > 0 and a.debit_reserved_limit > a.debit_accepted_limit) {
-            return .debit_reserved_limit_exceeds_debit_accepted_limit;
-        }
-        if (a.credit_accepted_limit > 0 and a.credit_reserved_limit > a.credit_accepted_limit) {
-            return .credit_reserved_limit_exceeds_credit_accepted_limit;
-        }
-
-        var hash_map_result = self.accounts.getOrPutAssumeCapacity(a.id);
-        if (hash_map_result.found_existing) {
-            const exists = hash_map_result.entry.value;
+        var insert = self.accounts.getOrPutAssumeCapacity(a.id);
+        if (insert.found_existing) {
+            const exists = insert.entry.value;
             if (exists.unit != a.unit) return .exists_with_different_unit;
-            if (exists.debit_reserved_limit != a.debit_reserved_limit or
-                exists.debit_accepted_limit != a.debit_accepted_limit or
-                exists.credit_reserved_limit != a.credit_reserved_limit or
-                exists.credit_accepted_limit != a.credit_accepted_limit)
-            {
-                return .exists_with_different_limits;
-            }
-            if (exists.custom != a.custom) return .exists_with_different_custom_field;
-            if (@bitCast(u64, exists.flags) != @bitCast(u64, a.flags)) {
+            if (exists.code != a.code) return .exists_with_different_code;
+            if (@bitCast(u32, exists.flags) != @bitCast(u32, a.flags)) {
                 return .exists_with_different_flags;
             }
+            if (exists.user_data != a.user_data) return .exists_with_different_user_data;
             return .exists;
         } else {
-            hash_map_result.entry.value = a;
+            insert.entry.value = a;
             self.commit_timestamp = a.timestamp;
             return .ok;
         }
@@ -215,16 +206,10 @@ pub const StateMachine = struct {
         assert(t.timestamp > self.commit_timestamp);
 
         if (t.flags.padding != 0) return .reserved_flag_padding;
-        if (t.flags.accept and !t.flags.auto_commit) return .reserved_flag_accept;
-        if (t.flags.reject) return .reserved_flag_reject;
-        if (t.flags.auto_commit) {
-            if (!t.flags.accept) return .auto_commit_must_accept;
-            if (t.timeout != 0) return .auto_commit_cannot_timeout;
+        if (t.timeout != 0 and !t.flags.two_phase_commit) {
+            return .timeout_reserved_for_two_phase_commit;
         }
-        if (t.custom_1 != 0 or t.custom_2 != 0) {
-            if (!t.flags.condition) return .reserved_field_custom;
-        }
-        if (t.custom_3 != 0) return .reserved_field_custom;
+        if (!t.flags.condition and !zeroed(&t.reserved)) return .reserved_field;
 
         if (t.amount == 0) return .amount_is_zero;
 
@@ -243,46 +228,37 @@ pub const StateMachine = struct {
         if (dr.unit != cr.unit) return .accounts_have_different_units;
 
         // TODO We need a lookup before inserting in case transfer exists and would overflow limits.
-        if (!t.flags.auto_commit) {
-            if (dr.exceeds_debit_reserved_limit(t.amount)) return .exceeds_debit_reserved_limit;
-            if (cr.exceeds_credit_reserved_limit(t.amount)) return .exceeds_credit_reserved_limit;
-        }
-        if (dr.exceeds_debit_accepted_limit(t.amount)) return .exceeds_debit_accepted_limit;
-        if (cr.exceeds_credit_accepted_limit(t.amount)) return .exceeds_credit_accepted_limit;
+        // If the transfer exists, then we should rather return .exists as an error.
+        if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
+        if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
 
-        var hash_map_result = self.transfers.getOrPutAssumeCapacity(t.id);
-        if (hash_map_result.found_existing) {
-            const exists = hash_map_result.entry.value;
+        var insert = self.transfers.getOrPutAssumeCapacity(t.id);
+        if (insert.found_existing) {
+            const exists = insert.entry.value;
             if (exists.debit_account_id != t.debit_account_id) {
                 return .exists_with_different_debit_account_id;
             }
             if (exists.credit_account_id != t.credit_account_id) {
                 return .exists_with_different_credit_account_id;
             }
-            if (exists.custom_1 != t.custom_1 or
-                exists.custom_2 != t.custom_2 or
-                exists.custom_3 != t.custom_3)
-            {
-                return .exists_with_different_custom_fields;
-            }
             if (exists.amount != t.amount) return .exists_with_different_amount;
-            if (exists.timeout != t.timeout) return .exists_with_different_timeout;
-            if (@bitCast(u64, exists.flags) != @bitCast(u64, t.flags)) {
-                if (!exists.flags.auto_commit and !t.flags.auto_commit) {
-                    if (exists.flags.accept) return .exists_and_already_committed_and_accepted;
-                    if (exists.flags.reject) return .exists_and_already_committed_and_rejected;
-                }
+            if (@bitCast(u32, exists.flags) != @bitCast(u32, t.flags)) {
                 return .exists_with_different_flags;
             }
+            if (exists.user_data != t.user_data) return .exists_with_different_user_data;
+            if (@bitCast(u256, exists.reserved) != @bitCast(u256, t.reserved)) {
+                return .exists_with_different_reserved_field;
+            }
+            if (exists.timeout != t.timeout) return .exists_with_different_timeout;
             return .exists;
         } else {
-            hash_map_result.entry.value = t;
-            if (t.flags.auto_commit) {
-                dr.debit_accepted += t.amount;
-                cr.credit_accepted += t.amount;
+            insert.entry.value = t;
+            if (t.flags.two_phase_commit) {
+                dr.debits_reserved += t.amount;
+                cr.credits_reserved += t.amount;
             } else {
-                dr.debit_reserved += t.amount;
-                cr.credit_reserved += t.amount;
+                dr.debits_accepted += t.amount;
+                cr.credits_accepted += t.amount;
             }
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -292,22 +268,19 @@ pub const StateMachine = struct {
     pub fn commit_transfer(self: *StateMachine, c: Commit) CommitTransferResult {
         assert(c.timestamp > self.commit_timestamp);
 
+        if (!c.flags.preimage and !zeroed(&c.reserved)) return .reserved_field;
         if (c.flags.padding != 0) return .reserved_flag_padding;
         if (!c.flags.accept and !c.flags.reject) return .commit_must_accept_or_reject;
         if (c.flags.accept and c.flags.reject) return .commit_cannot_accept_and_reject;
 
-        if (c.custom_1 != 0 or c.custom_2 != 0) {
-            if (!c.flags.preimage) return .reserved_field_custom;
-        }
-        if (c.custom_3 != 0) return .reserved_field_custom;
-
         var t = self.get_transfer(c.id) orelse return .transfer_not_found;
         assert(c.timestamp > t.timestamp);
 
-        if (t.flags.accept or t.flags.reject) {
-            if (t.flags.auto_commit) return .already_auto_committed;
-            if (t.flags.accept and c.flags.reject) return .already_committed_but_accepted;
-            if (t.flags.reject and c.flags.accept) return .already_committed_but_rejected;
+        if (!t.flags.two_phase_commit) return .transfer_not_two_phase_commit;
+
+        if (self.get_commit(c.id)) |exists| {
+            if (exists.flags.accept and c.flags.reject) return .already_committed_but_accepted;
+            if (exists.flags.reject and c.flags.accept) return .already_committed_but_rejected;
             return .already_committed;
         }
 
@@ -315,6 +288,7 @@ pub const StateMachine = struct {
 
         if (t.flags.condition) {
             if (!c.flags.preimage) return .condition_requires_preimage;
+            // TODO Verify condition.
         } else if (c.flags.preimage) {
             return .preimage_requires_condition;
         }
@@ -324,26 +298,31 @@ pub const StateMachine = struct {
         assert(t.timestamp > dr.timestamp);
         assert(t.timestamp > cr.timestamp);
 
-        assert(!t.flags.auto_commit);
-        if (dr.debit_reserved < t.amount) return .debit_amount_was_not_reserved;
-        if (cr.credit_reserved < t.amount) return .credit_amount_was_not_reserved;
+        assert(t.flags.two_phase_commit);
+        if (dr.debits_reserved < t.amount) return .debit_amount_was_not_reserved;
+        if (cr.credits_reserved < t.amount) return .credit_amount_was_not_reserved;
 
-        if (dr.exceeds_debit_accepted_limit(t.amount)) return .exceeds_debit_accepted_limit;
-        if (dr.exceeds_credit_accepted_limit(t.amount)) return .exceeds_credit_accepted_limit;
+        // TODO Should we check limits again here?
+        // On the one hand, it's possible for a subsequent transfer to change balances.
+        // On the other hand, the spirit of two-phase commit is that we reserve resources upfront.
 
-        dr.debit_reserved -= t.amount;
-        cr.credit_reserved -= t.amount;
-        if (c.flags.accept) {
-            t.flags.accept = true;
-            dr.debit_accepted += t.amount;
-            cr.credit_accepted += t.amount;
+        // TODO We can combine this lookup with the previous lookup if we return `error!void`:
+        var insert = self.commits.getOrPutAssumeCapacity(c.id);
+        if (insert.found_existing) {
+            unreachable;
         } else {
-            assert(c.flags.reject);
-            t.flags.reject = true;
+            insert.entry.value = c;
+            dr.debits_reserved -= t.amount;
+            cr.credits_reserved -= t.amount;
+            if (c.flags.accept) {
+                dr.debits_accepted += t.amount;
+                cr.credits_accepted += t.amount;
+            } else {
+                assert(c.flags.reject);
+            }
+            self.commit_timestamp = c.timestamp;
+            return .ok;
         }
-        assert(t.flags.accept or t.flags.reject);
-        self.commit_timestamp = c.timestamp;
-        return .ok;
     }
 
     pub fn valid_preimage(condition: u256, preimage: u256) bool {
@@ -366,7 +345,7 @@ pub const StateMachine = struct {
         }
     }
 
-    /// See the above comment for get_account().
+    /// See the comment for get_account().
     fn get_transfer(self: *StateMachine, id: u128) ?*Transfer {
         if (self.transfers.getEntry(id)) |entry| {
             return &entry.value;
@@ -374,4 +353,19 @@ pub const StateMachine = struct {
             return null;
         }
     }
+
+    /// See the comment for get_account().
+    fn get_commit(self: *StateMachine, id: u128) ?*Commit {
+        if (self.commits.getEntry(id)) |entry| {
+            return &entry.value;
+        } else {
+            return null;
+        }
+    }
 };
+
+fn zeroed(slice: []const u8) bool {
+    // TODO Remove all loop branching for comptime known types: 48 bytes, 32 bytes.
+    // e.g. Unroll to 3x16 or 2x16 comparisons.
+    return std.mem.allEqual(u8, slice, 0);
+}
