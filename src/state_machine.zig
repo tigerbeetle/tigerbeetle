@@ -197,6 +197,10 @@ pub const StateMachine = struct {
         }
     }
 
+    fn create_account_rollback(self: *StateMachine, a: Account) void {
+        self.accounts.removeAssertDiscard(a.id);
+    }
+
     fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
         assert(t.timestamp > self.commit_timestamp);
 
@@ -260,6 +264,19 @@ pub const StateMachine = struct {
         }
     }
 
+    fn create_transfer_rollback(self: *StateMachine, t: Transfer) void {
+        var dr = self.get_account(t.debit_account_id).?;
+        var cr = self.get_account(t.credit_account_id).?;
+        if (t.flags.two_phase_commit) {
+            dr.debits_reserved -= t.amount;
+            cr.credits_reserved -= t.amount;
+        } else {
+            dr.debits_accepted -= t.amount;
+            cr.credits_accepted -= t.amount;
+        }
+        self.transfers.removeAssertDiscard(t.id);
+    }
+
     fn commit_transfer(self: *StateMachine, c: Commit) CommitTransferResult {
         assert(c.timestamp > self.commit_timestamp);
 
@@ -318,6 +335,21 @@ pub const StateMachine = struct {
             self.commit_timestamp = c.timestamp;
             return .ok;
         }
+    }
+
+    fn commit_transfer_rollback(self: *StateMachine, c: Commit) void {
+        var t = self.get_transfer(c.id).?;
+        var dr = self.get_account(t.debit_account_id).?;
+        var cr = self.get_account(t.credit_account_id).?;
+        dr.debits_reserved += t.amount;
+        cr.credits_reserved += t.amount;
+        if (c.flags.accept) {
+            dr.debits_accepted -= t.amount;
+            cr.credits_accepted -= t.amount;
+        } else {
+            assert(c.flags.reject);
+        }
+        self.commits.removeAssertDiscard(c.id);
     }
 
     fn valid_preimage(condition: u256, preimage: u256) bool {

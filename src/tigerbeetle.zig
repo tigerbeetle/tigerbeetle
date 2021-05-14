@@ -53,9 +53,10 @@ pub const Account = packed struct {
 };
 
 pub const AccountFlags = packed struct {
+    linked: bool = false,
     debits_must_not_exceed_credits: bool = false,
     credits_must_not_exceed_debits: bool = false,
-    padding: u30 = 0,
+    padding: u29 = 0,
 
     comptime {
         assert(@sizeOf(AccountFlags) == @sizeOf(u32));
@@ -112,9 +113,10 @@ pub const Transfer = packed struct {
 };
 
 pub const TransferFlags = packed struct {
+    linked: bool = false,
     two_phase_commit: bool = false,
     condition: bool = false,
-    padding: u30 = 0,
+    padding: u29 = 0,
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u32));
@@ -165,10 +167,11 @@ pub const Commit = packed struct {
 };
 
 pub const CommitFlags = packed struct {
+    linked: bool = false,
     accept: bool = false,
     reject: bool = false,
     preimage: bool = false,
-    padding: u29 = 0,
+    padding: u28 = 0,
 
     comptime {
         assert(@sizeOf(CommitFlags) == @sizeOf(u32));
