@@ -4,13 +4,15 @@ const config = @import("config.zig");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 
 const cli = @import("cli.zig");
+
 const IO = @import("io.zig").IO;
-const vr = @import("vr.zig");
-const Replica = vr.Replica;
-const Storage = vr.Storage;
-const Journal = vr.Journal;
+const Storage = @import("storage.zig").Storage;
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const StateMachine = @import("state_machine.zig").StateMachine;
+
+const vr = @import("vr.zig");
+const Replica = vr.Replica;
+const Journal = vr.Journal;
 
 pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
