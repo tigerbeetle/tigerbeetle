@@ -77,7 +77,7 @@ pub const StateMachine = struct {
         }
     }
 
-    pub fn prepare_timestamps(self: *StateMachine, comptime T: type, batch: []u8) void {
+    fn prepare_timestamps(self: *StateMachine, comptime T: type, batch: []u8) void {
         // Guard against the wall clock going backwards by taking the max with timestamps issued:
         self.prepare_timestamp = std.math.max(
             self.prepare_timestamp,
@@ -112,7 +112,7 @@ pub const StateMachine = struct {
         };
     }
 
-    pub fn apply_create_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
+    fn apply_create_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(Account, input);
         var results = mem.bytesAsSlice(CreateAccountResults, output);
         var results_count: usize = 0;
@@ -128,7 +128,7 @@ pub const StateMachine = struct {
         return results_count * @sizeOf(CreateAccountResults);
     }
 
-    pub fn apply_create_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
+    fn apply_create_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(Transfer, input);
         var results = mem.bytesAsSlice(CreateTransferResults, output);
         var results_count: usize = 0;
@@ -144,7 +144,7 @@ pub const StateMachine = struct {
         return results_count * @sizeOf(CreateTransferResults);
     }
 
-    pub fn apply_commit_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
+    fn apply_commit_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(Commit, input);
         var results = mem.bytesAsSlice(CommitTransferResults, output);
         var results_count: usize = 0;
@@ -160,7 +160,7 @@ pub const StateMachine = struct {
         return results_count * @sizeOf(CommitTransferResults);
     }
 
-    pub fn apply_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
+    fn apply_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(u128, input);
         // TODO Do the same for other apply methods:
         var output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
@@ -175,7 +175,7 @@ pub const StateMachine = struct {
         return results_count * @sizeOf(Account);
     }
 
-    pub fn create_account(self: *StateMachine, a: Account) CreateAccountResult {
+    fn create_account(self: *StateMachine, a: Account) CreateAccountResult {
         assert(a.timestamp > self.commit_timestamp);
 
         if (!zeroed(&a.reserved)) return .reserved_field;
@@ -202,7 +202,7 @@ pub const StateMachine = struct {
         }
     }
 
-    pub fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
+    fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
         assert(t.timestamp > self.commit_timestamp);
 
         if (t.flags.padding != 0) return .reserved_flag_padding;
@@ -265,7 +265,7 @@ pub const StateMachine = struct {
         }
     }
 
-    pub fn commit_transfer(self: *StateMachine, c: Commit) CommitTransferResult {
+    fn commit_transfer(self: *StateMachine, c: Commit) CommitTransferResult {
         assert(c.timestamp > self.commit_timestamp);
 
         if (!c.flags.preimage and !zeroed(&c.reserved)) return .reserved_field;
@@ -325,7 +325,7 @@ pub const StateMachine = struct {
         }
     }
 
-    pub fn valid_preimage(condition: u256, preimage: u256) bool {
+    fn valid_preimage(condition: u256, preimage: u256) bool {
         var target: [32]u8 = undefined;
         crypto.hash.sha2.Sha256.hash(@bitCast([32]u8, preimage)[0..], target[0..], .{});
         return mem.eql(u8, target[0..], @bitCast([32]u8, condition)[0..]);
