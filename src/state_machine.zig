@@ -67,17 +67,17 @@ pub const StateMachine = struct {
         self.transfers.deinit();
     }
 
-    pub fn prepare(self: *StateMachine, operation: Operation, batch: []u8) void {
+    pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) void {
         switch (operation) {
-            .create_accounts => self.prepare_timestamps(Account, batch),
-            .create_transfers => self.prepare_timestamps(Transfer, batch),
-            .commit_transfers => self.prepare_timestamps(Commit, batch),
+            .create_accounts => self.prepare_timestamps(Account, input),
+            .create_transfers => self.prepare_timestamps(Transfer, input),
+            .commit_transfers => self.prepare_timestamps(Commit, input),
             .lookup_accounts => {},
             else => unreachable,
         }
     }
 
-    fn prepare_timestamps(self: *StateMachine, comptime T: type, batch: []u8) void {
+    fn prepare_timestamps(self: *StateMachine, comptime Event: type, input: []u8) void {
         // Guard against the wall clock going backwards by taking the max with timestamps issued:
         self.prepare_timestamp = std.math.max(
             self.prepare_timestamp,
@@ -85,7 +85,7 @@ pub const StateMachine = struct {
         );
         assert(self.prepare_timestamp > self.commit_timestamp);
         var sum_reserved_timestamps: usize = 0;
-        for (mem.bytesAsSlice(T, batch)) |*event| {
+        for (mem.bytesAsSlice(Event, input)) |*event| {
             sum_reserved_timestamps += event.timestamp;
             self.prepare_timestamp += 1;
             event.timestamp = self.prepare_timestamp;
@@ -99,68 +99,63 @@ pub const StateMachine = struct {
     pub fn commit(
         self: *StateMachine,
         operation: Operation,
-        batch: []const u8,
-        results: []u8,
+        input: []const u8,
+        output: []u8,
     ) usize {
         return switch (operation) {
             .init => 0,
-            .create_accounts => self.apply_create_accounts(batch, results),
-            .create_transfers => self.apply_create_transfers(batch, results),
-            .commit_transfers => self.apply_commit_transfers(batch, results),
-            .lookup_accounts => self.apply_lookup_accounts(batch, results),
+            .create_accounts => self.execute(.create_accounts, input, output),
+            .create_transfers => self.execute(.create_transfers, input, output),
+            .commit_transfers => self.execute(.commit_transfers, input, output),
+            .lookup_accounts => self.execute_lookup_accounts(input, output),
             else => unreachable,
         };
     }
 
-    fn apply_create_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
-        const batch = mem.bytesAsSlice(Account, input);
-        var results = mem.bytesAsSlice(CreateAccountResults, output);
-        var results_count: usize = 0;
-        for (batch) |event, index| {
-            log.debug("create_accounts {}/{}: {}", .{ index + 1, batch.len, event });
-            const result = self.create_account(event);
-            log.debug("{}", .{result});
+    fn execute(
+        self: *StateMachine,
+        comptime operation: Operation,
+        input: []const u8,
+        output: []u8,
+    ) usize {
+        const Event = switch (operation) {
+            .create_accounts => Account,
+            .create_transfers => Transfer,
+            .commit_transfers => Commit,
+            else => unreachable,
+        };
+        const Result = switch (operation) {
+            .create_accounts => CreateAccountResults,
+            .create_transfers => CreateTransferResults,
+            .commit_transfers => CommitTransferResults,
+            else => unreachable,
+        };
+        const events = std.mem.bytesAsSlice(Event, input);
+        var results = std.mem.bytesAsSlice(Result, output);
+        var count: usize = 0;
+        for (events) |event, index| {
+            const result = switch (operation) {
+                .create_accounts => self.create_account(event),
+                .create_transfers => self.create_transfer(event),
+                .commit_transfers => self.commit_transfer(event),
+                else => unreachable,
+            };
+            log.debug("{s} {}/{}: {}: {}", .{
+                @tagName(operation),
+                index + 1,
+                events.len,
+                result,
+                event,
+            });
             if (result != .ok) {
-                results[results_count] = .{ .index = @intCast(u32, index), .result = result };
-                results_count += 1;
+                results[count] = .{ .index = @intCast(u32, index), .result = result };
+                count += 1;
             }
         }
-        return results_count * @sizeOf(CreateAccountResults);
+        return @sizeOf(Result) * count;
     }
 
-    fn apply_create_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
-        const batch = mem.bytesAsSlice(Transfer, input);
-        var results = mem.bytesAsSlice(CreateTransferResults, output);
-        var results_count: usize = 0;
-        for (batch) |event, index| {
-            log.debug("create_transfers {}/{}: {}", .{ index + 1, batch.len, event });
-            const result = self.create_transfer(event);
-            log.debug("{}", .{result});
-            if (result != .ok) {
-                results[results_count] = .{ .index = @intCast(u32, index), .result = result };
-                results_count += 1;
-            }
-        }
-        return results_count * @sizeOf(CreateTransferResults);
-    }
-
-    fn apply_commit_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
-        const batch = mem.bytesAsSlice(Commit, input);
-        var results = mem.bytesAsSlice(CommitTransferResults, output);
-        var results_count: usize = 0;
-        for (batch) |event, index| {
-            log.debug("commit_transfers {}/{}: {}", .{ index + 1, batch.len, event });
-            const result = self.commit_transfer(event);
-            log.debug("{}", .{result});
-            if (result != .ok) {
-                results[results_count] = .{ .index = @intCast(u32, index), .result = result };
-                results_count += 1;
-            }
-        }
-        return results_count * @sizeOf(CommitTransferResults);
-    }
-
-    fn apply_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
+    fn execute_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(u128, input);
         // TODO Do the same for other apply methods:
         var output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
