@@ -145,7 +145,7 @@ fn send(fd: std.os.fd_t, operation: Operation, body: []u8, comptime Result: anyt
         };
         ping.set_checksum_body(&[0]u8{});
         ping.set_checksum();
-        
+
         assert((try std.os.sendto(fd, std.mem.asBytes(&ping), 0, null, 0)) == @sizeOf(Header));
     }
 
