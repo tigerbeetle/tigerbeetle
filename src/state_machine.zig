@@ -71,17 +71,37 @@ pub const StateMachine = struct {
         self.commits.deinit();
     }
 
+    pub fn Event(comptime operation: Operation) type {
+        return switch (operation) {
+            .create_accounts => Account,
+            .create_transfers => Transfer,
+            .commit_transfers => Commit,
+            .lookup_accounts => u128,
+            else => unreachable,
+        };
+    }
+
+    pub fn Result(comptime operation: Operation) type {
+        return switch (operation) {
+            .create_accounts => CreateAccountResults,
+            .create_transfers => CreateTransferResults,
+            .commit_transfers => CommitTransferResults,
+            .lookup_accounts => Account,
+            else => unreachable,
+        };
+    }
+
     pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) void {
         switch (operation) {
-            .create_accounts => self.prepare_timestamps(Account, input),
-            .create_transfers => self.prepare_timestamps(Transfer, input),
-            .commit_transfers => self.prepare_timestamps(Commit, input),
+            .create_accounts => self.prepare_timestamps(.create_accounts, input),
+            .create_transfers => self.prepare_timestamps(.create_transfers, input),
+            .commit_transfers => self.prepare_timestamps(.commit_transfers, input),
             .lookup_accounts => {},
             else => unreachable,
         }
     }
 
-    fn prepare_timestamps(self: *StateMachine, comptime Event: type, input: []u8) void {
+    fn prepare_timestamps(self: *StateMachine, comptime operation: Operation, input: []u8) void {
         // Guard against the wall clock going backwards by taking the max with timestamps issued:
         self.prepare_timestamp = std.math.max(
             self.prepare_timestamp,
@@ -89,7 +109,8 @@ pub const StateMachine = struct {
         );
         assert(self.prepare_timestamp > self.commit_timestamp);
         var sum_reserved_timestamps: usize = 0;
-        for (mem.bytesAsSlice(Event, input)) |*event| {
+        var events = mem.bytesAsSlice(Event(operation), input);
+        for (events) |*event| {
             sum_reserved_timestamps += event.timestamp;
             self.prepare_timestamp += 1;
             event.timestamp = self.prepare_timestamp;
@@ -122,20 +143,9 @@ pub const StateMachine = struct {
         input: []const u8,
         output: []u8,
     ) usize {
-        const Event = switch (operation) {
-            .create_accounts => Account,
-            .create_transfers => Transfer,
-            .commit_transfers => Commit,
-            else => unreachable,
-        };
-        const Result = switch (operation) {
-            .create_accounts => CreateAccountResults,
-            .create_transfers => CreateTransferResults,
-            .commit_transfers => CommitTransferResults,
-            else => unreachable,
-        };
-        const events = std.mem.bytesAsSlice(Event, input);
-        var results = std.mem.bytesAsSlice(Result, output);
+        comptime assert(operation != .lookup_accounts);
+        const events = std.mem.bytesAsSlice(Event(operation), input);
+        var results = std.mem.bytesAsSlice(Result(operation), output);
         var count: usize = 0;
         for (events) |event, index| {
             const result = switch (operation) {
@@ -156,7 +166,25 @@ pub const StateMachine = struct {
                 count += 1;
             }
         }
-        return @sizeOf(Result) * count;
+        return @sizeOf(Result(operation)) * count;
+    }
+
+    fn rollback(self: *StateMachine, comptime operation: Operation, input: []const u8) void {
+        const events = std.mem.bytesAsSlice(Event(operation), input);
+        for (events) |event, index| {
+            switch (operation) {
+                .create_accounts => self.create_account_rollback(event),
+                .create_transfers => self.create_transfer_rollback(event),
+                .commit_transfers => self.commit_transfer_rollback(event),
+                else => unreachable,
+            }
+            log.debug("{s} {}/{}: rollback: {}", .{
+                @tagName(operation),
+                index + 1,
+                events.len,
+                event,
+            });
+        }
     }
 
     fn execute_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
