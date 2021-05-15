@@ -147,8 +147,16 @@ pub const StateMachine = struct {
         const events = std.mem.bytesAsSlice(Event(operation), input);
         var results = std.mem.bytesAsSlice(Result(operation), output);
         var count: usize = 0;
+
+        var chain: ?usize = null;
+        var chain_broken = false;
+
         for (events) |event, index| {
-            const result = switch (operation) {
+            if (event.flags.linked and chain == null) {
+                chain = index;
+                assert(chain_broken == false);
+            }
+            const result = if (chain_broken) .linked_event_failed else switch (operation) {
                 .create_accounts => self.create_account(event),
                 .create_transfers => self.create_transfer(event),
                 .commit_transfers => self.commit_transfer(event),
@@ -162,29 +170,74 @@ pub const StateMachine = struct {
                 event,
             });
             if (result != .ok) {
+                if (chain) |chain_start_index| {
+                    if (!chain_broken) {
+                        chain_broken = true;
+                        // Rollback events in LIFO order, excluding the event that broke the chain:
+                        self.rollback(operation, input, chain_start_index, index);
+                        // Add errors for rolled back events in FIFO order:
+                        var chain_index = chain_start_index;
+                        while (chain_index < index) : (chain_index += 1) {
+                            results[count] = .{
+                                .index = @intCast(u32, chain_index),
+                                .result = .linked_event_failed,
+                            };
+                            count += 1;
+                        }
+                    }
+                }
                 results[count] = .{ .index = @intCast(u32, index), .result = result };
                 count += 1;
             }
+            if (!event.flags.linked and chain != null) {
+                chain = null;
+                chain_broken = false;
+            }
         }
+        // TODO client.zig: Validate that batch chains are always well-formed and closed.
+        // This is programming error and we should raise an exception for this in the client ASAP.
+        assert(chain == null);
+        assert(chain_broken == false);
+
         return @sizeOf(Result(operation)) * count;
     }
 
-    fn rollback(self: *StateMachine, comptime operation: Operation, input: []const u8) void {
+    fn rollback(
+        self: *StateMachine,
+        comptime operation: Operation,
+        input: []const u8,
+        chain_start_index: usize,
+        chain_error_index: usize,
+    ) void {
         const events = std.mem.bytesAsSlice(Event(operation), input);
-        for (events) |event, index| {
+
+        // We commit events in FIFO order.
+        // We must therefore rollback events in LIFO order with a reverse loop.
+        // We do not rollback `self.commit_timestamp` to ensure that subsequent events were
+        // timestamped correctly.
+        var index = chain_error_index;
+        while (index > chain_start_index) {
+            index -= 1;
+
+            assert(index >= chain_start_index);
+            assert(index < chain_error_index);
+            const event = events[index];
+            assert(event.timestamp <= self.commit_timestamp);
+
             switch (operation) {
                 .create_accounts => self.create_account_rollback(event),
                 .create_transfers => self.create_transfer_rollback(event),
                 .commit_transfers => self.commit_transfer_rollback(event),
                 else => unreachable,
             }
-            log.debug("{s} {}/{}: rollback: {}", .{
+            log.debug("{s} {}/{}: rollback(): {}", .{
                 @tagName(operation),
                 index + 1,
                 events.len,
                 event,
             });
         }
+        assert(index == chain_start_index);
     }
 
     fn execute_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
@@ -427,4 +480,83 @@ fn zeroed(slice: []const u8) bool {
     // TODO Remove all loop branching for comptime known types: 48 bytes, 32 bytes.
     // e.g. Unroll to 3x16 or 2x16 comparisons.
     return std.mem.allEqual(u8, slice, 0);
+}
+
+const testing = std.testing;
+
+test "linked accounts" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = &arena.allocator;
+
+    const accounts_max = 5;
+    const transfers_max = 0;
+    const commits_max = 0;
+
+    var state_machine = try StateMachine.init(allocator, accounts_max, transfers_max, commits_max);
+    defer state_machine.deinit();
+
+    var accounts = [_]Account{
+        // An individual event (successful):
+        std.mem.zeroInit(Account, .{ .id = 7, .code = 200 }),
+
+        // A chain of 4 events (the last event in the chain closes the chain with linked=false):
+        std.mem.zeroInit(Account, .{ .id = 0, .flags = .{ .linked = true } }), // Commit/rollback.
+        std.mem.zeroInit(Account, .{ .id = 1, .flags = .{ .linked = true } }), // Commit/rollback.
+        std.mem.zeroInit(Account, .{ .id = 0, .flags = .{ .linked = true } }), // Fail with .exists.
+        std.mem.zeroInit(Account, .{ .id = 2 }), // Fail without committing.
+
+        // An individual event (successful):
+        // This should not see any effect from the failed chain above.
+        std.mem.zeroInit(Account, .{ .id = 0, .code = 200 }),
+
+        // A chain of 2 events (the first event fails the chain):
+        std.mem.zeroInit(Account, .{ .id = 0, .flags = .{ .linked = true } }),
+        std.mem.zeroInit(Account, .{ .id = 1 }),
+
+        // An individual event (successful):
+        std.mem.zeroInit(Account, .{ .id = 1, .code = 200 }),
+
+        // A chain of 2 events (the last event fails the chain):
+        std.mem.zeroInit(Account, .{ .id = 2, .flags = .{ .linked = true } }),
+        std.mem.zeroInit(Account, .{ .id = 0 }),
+
+        // A chain of 2 events (successful):
+        std.mem.zeroInit(Account, .{ .id = 2, .flags = .{ .linked = true } }),
+        std.mem.zeroInit(Account, .{ .id = 3 }),
+    };
+
+    const input = std.mem.asBytes(&accounts);
+    const output = try allocator.alloc(u8, 4096);
+
+    state_machine.prepare(.create_accounts, input);
+    const size = state_machine.commit(.create_accounts, input, output);
+    const results = std.mem.bytesAsSlice(CreateAccountResults, output[0..size]);
+
+    testing.expectEqualSlices(
+        CreateAccountResults,
+        &[_]CreateAccountResults{
+            CreateAccountResults{ .index = 1, .result = .linked_event_failed },
+            CreateAccountResults{ .index = 2, .result = .linked_event_failed },
+            CreateAccountResults{ .index = 3, .result = .exists },
+            CreateAccountResults{ .index = 4, .result = .linked_event_failed },
+
+            CreateAccountResults{ .index = 6, .result = .exists_with_different_code },
+            CreateAccountResults{ .index = 7, .result = .linked_event_failed },
+
+            CreateAccountResults{ .index = 9, .result = .linked_event_failed },
+            CreateAccountResults{ .index = 10, .result = .exists_with_different_code },
+        },
+        results,
+    );
+
+    testing.expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
+    testing.expectEqual(accounts[5], state_machine.get_account(accounts[5].id).?.*);
+    testing.expectEqual(accounts[8], state_machine.get_account(accounts[8].id).?.*);
+    testing.expectEqual(accounts[11], state_machine.get_account(accounts[11].id).?.*);
+    testing.expectEqual(accounts[12], state_machine.get_account(accounts[12].id).?.*);
+    testing.expectEqual(@as(u32, 5), state_machine.accounts.count());
+
+    // TODO How can we test that events were in fact rolled back in LIFO order?
+    // All our rollback handlers appear to be commutative.
 }

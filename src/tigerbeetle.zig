@@ -53,6 +53,16 @@ pub const Account = packed struct {
 };
 
 pub const AccountFlags = packed struct {
+    /// When the .linked flag is specified, it links an event with the next event in the batch, to
+    /// create a chain of events, of arbitrary length, which all succeed or fail together. The tail
+    /// of a chain is denoted by the first event without this flag. The last event in a batch may
+    /// therefore never have the .linked flag set as this would leave a chain open-ended. Multiple
+    /// chains or individual events may coexist within a batch to succeed or fail independently.
+    /// Events within a chain are executed within order, or are rolled back on error, so that the
+    /// effect of each event in the chain is visible to the next, and so that the chain is either
+    /// visible or invisible as a unit to subsequent events after the chain. The event that was the
+    /// first to break the chain will have a unique error result. Other events in the chain will
+    /// have their error result set to .linked_event_failed.
     linked: bool = false,
     debits_must_not_exceed_credits: bool = false,
     credits_must_not_exceed_debits: bool = false,
@@ -192,6 +202,7 @@ pub const CommitFlags = packed struct {
 
 pub const CreateAccountResult = packed enum(u32) {
     ok,
+    linked_event_failed,
     exists,
     exists_with_different_user_data,
     exists_with_different_unit,
@@ -205,6 +216,7 @@ pub const CreateAccountResult = packed enum(u32) {
 
 pub const CreateTransferResult = packed enum(u32) {
     ok,
+    linked_event_failed,
     exists,
     exists_with_different_debit_account_id,
     exists_with_different_credit_account_id,
@@ -232,6 +244,7 @@ pub const CreateTransferResult = packed enum(u32) {
 
 pub const CommitTransferResult = packed enum(u32) {
     ok,
+    linked_event_failed,
     reserved_field,
     reserved_flag_padding,
     commit_must_accept_or_reject,
