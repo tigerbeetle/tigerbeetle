@@ -43,6 +43,7 @@ pub fn run() !void {
             allocator,
             config.accounts_max,
             config.transfers_max,
+            config.commits_max,
         );
     }
 
