@@ -24,12 +24,12 @@ pub const Account = packed struct {
     }
 
     pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
-        return (self.flags.debits_must_not_exceed_credits and
+        return (self.flags.credits_must_exceed_debits and
             self.debits_reserved + self.debits_accepted + amount > self.credits_accepted);
     }
 
     pub fn credits_exceed_debits(self: *const Account, amount: u64) bool {
-        return (self.flags.credits_must_not_exceed_debits and
+        return (self.flags.debits_must_exceed_credits and
             self.credits_reserved + self.credits_accepted + amount > self.debits_accepted);
     }
 
@@ -64,8 +64,8 @@ pub const AccountFlags = packed struct {
     /// first to break the chain will have a unique error result. Other events in the chain will
     /// have their error result set to .linked_event_failed.
     linked: bool = false,
-    debits_must_not_exceed_credits: bool = false,
-    credits_must_not_exceed_debits: bool = false,
+    credits_must_exceed_debits: bool = false,
+    debits_must_exceed_credits: bool = false,
     padding: u29 = 0,
 
     comptime {
