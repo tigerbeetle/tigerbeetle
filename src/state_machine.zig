@@ -399,9 +399,9 @@ pub const StateMachine = struct {
         if (dr.debits_reserved < t.amount) return .debit_amount_was_not_reserved;
         if (cr.credits_reserved < t.amount) return .credit_amount_was_not_reserved;
 
-        // TODO Should we check limits again here?
-        // On the one hand, it's possible for a subsequent transfer to change balances.
-        // On the other hand, the spirit of two-phase commit is that we reserve resources upfront.
+        // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
+        assert(dr.debits_exceed_credits(0));
+        assert(cr.credits_exceed_debits(0));
 
         // TODO We can combine this lookup with the previous lookup if we return `error!void`:
         var insert = self.commits.getOrPutAssumeCapacity(c.id);
