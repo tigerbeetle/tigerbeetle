@@ -34,7 +34,12 @@ pub const StateMachine = struct {
     transfers: HashMapTransfers,
     commits: HashMapCommits,
 
-    pub fn init(allocator: *Allocator, accounts_max: usize, transfers_max: usize) !StateMachine {
+    pub fn init(
+        allocator: *Allocator,
+        accounts_max: usize,
+        transfers_max: usize,
+        commits_max: usize,
+    ) !StateMachine {
         var accounts = HashMapAccounts.init(allocator);
         errdefer accounts.deinit();
         try accounts.ensureCapacity(@intCast(u32, accounts_max));
@@ -43,8 +48,6 @@ pub const StateMachine = struct {
         errdefer transfers.deinit();
         try transfers.ensureCapacity(@intCast(u32, transfers_max));
 
-        // TODO Add config for commits_max to enable non-two-phase-commit systems to save memory.
-        const commits_max = transfers_max;
         var commits = HashMapCommits.init(allocator);
         errdefer commits.deinit();
         try commits.ensureCapacity(@intCast(u32, commits_max));
@@ -65,6 +68,7 @@ pub const StateMachine = struct {
     pub fn deinit(self: *StateMachine) void {
         self.accounts.deinit();
         self.transfers.deinit();
+        self.commits.deinit();
     }
 
     pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) void {
