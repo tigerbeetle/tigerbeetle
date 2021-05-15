@@ -79,11 +79,11 @@ pub const Transfer = packed struct {
     user_data: u128,
     /// Reserved for accounting policy primitives:
     reserved: [32]u8,
+    timeout: u64,
     /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement):
     code: u32,
     flags: TransferFlags,
     amount: u64,
-    timeout: u64,
     timestamp: u64 = 0,
 
     comptime {
