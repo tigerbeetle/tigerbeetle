@@ -400,8 +400,8 @@ pub const StateMachine = struct {
         if (cr.credits_reserved < t.amount) return .credit_amount_was_not_reserved;
 
         // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
-        assert(dr.debits_exceed_credits(0));
-        assert(cr.credits_exceed_debits(0));
+        assert(!dr.debits_exceed_credits(0));
+        assert(!cr.credits_exceed_debits(0));
 
         // TODO We can combine this lookup with the previous lookup if we return `error!void`:
         var insert = self.commits.getOrPutAssumeCapacity(c.id);
