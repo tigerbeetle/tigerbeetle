@@ -71,16 +71,16 @@ pub fn parse_args(allocator: *std.mem.Allocator) Args {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
             os.exit(0);
         } else {
-            print_error_exit("unexpected argument '{s}'", .{arg});
+            print_error_exit("unexpected argument: '{s}'", .{arg});
         }
     }
 
     const raw_cluster = maybe_cluster orelse
-        print_error_exit("the --cluster-id option is required", .{});
+        print_error_exit("required argument: --cluster-id", .{});
     const raw_configuration = maybe_configuration orelse
-        print_error_exit("the --replica-addresses option is required", .{});
+        print_error_exit("required argument: --replica-addresses", .{});
     const raw_replica = maybe_replica orelse
-        print_error_exit("the --replica-index option is required", .{});
+        print_error_exit("required argument: --replica-index", .{});
 
     const cluster = parse_cluster(raw_cluster);
     const configuration = parse_configuration(allocator, raw_configuration);
@@ -105,10 +105,10 @@ fn print_error_exit(comptime fmt_string: []const u8, args: anytype) noreturn {
 fn parse_flag(comptime flag: []const u8, arg: []const u8) []const u8 {
     const value = arg[flag.len..];
     if (value.len < 2) {
-        print_error_exit("{s} requires a value.", .{flag});
+        print_error_exit("{s} argument requires a value", .{flag});
     }
     if (value[0] != '=') {
-        print_error_exit("expected '=' after {s} but found '{c}'.", .{ flag, value[0] });
+        print_error_exit("expected '=' after {s} but found '{c}'", .{ flag, value[0] });
     }
     return value[1..];
 }
@@ -116,14 +116,14 @@ fn parse_flag(comptime flag: []const u8, arg: []const u8) []const u8 {
 fn parse_cluster(raw_cluster: []const u8) u128 {
     const cluster = fmt.parseUnsigned(u128, raw_cluster, 16) catch |err| switch (err) {
         error.Overflow => print_error_exit(
-            \\value provided to --cluster-id does not fit in a 128bit unsigned integer.
+            \\--cluster-id: value does not fit into a 128-bit unsigned integer
         , .{}),
         error.InvalidCharacter => print_error_exit(
-            \\value provided to --cluster-id contains an invalid character.
+            \\--cluster-id: value contains an invalid character
         , .{}),
     };
     if (cluster == 0) {
-        print_error_exit("a value of 0 is not permitted for --cluster-id.", .{});
+        print_error_exit("--cluster-id: a value of 0 is not permitted", .{});
     }
     return cluster;
 }
@@ -142,8 +142,8 @@ fn parse_configuration(allocator: *std.mem.Allocator, raw_configuration: []const
         error.AddressHasMoreThanOneColon => {
             print_error_exit("--replica-addresses: invalid address with more than one colon", .{});
         },
-        error.PortOverflow => print_error_exit("--replica-addresses: a port exceeds 65535", .{}),
-        error.PortInvalid => print_error_exit("--replica-addresses: invalid port number", .{}),
+        error.PortOverflow => print_error_exit("--replica-addresses: port exceeds 65535", .{}),
+        error.PortInvalid => print_error_exit("--replica-addresses: invalid port", .{}),
         error.AddressInvalid => print_error_exit("--replica-addresses: invalid IPv4 address", .{}),
         error.OutOfMemory => print_error_exit("--replica-addresses: out of memory", .{}),
     };
@@ -153,15 +153,15 @@ fn parse_replica(raw_replica: []const u8, configuration_len: u16) u16 {
     comptime assert(config.replicas_max <= std.math.maxInt(u16));
     const replica = fmt.parseUnsigned(u16, raw_replica, 10) catch |err| switch (err) {
         error.Overflow => print_error_exit(
-            \\value provided to --replica-index greater than length of address array.
+            \\--replica-index: value greater than length of address array
         , .{}),
         error.InvalidCharacter => print_error_exit(
-            \\value provided to --replica-index contains an invalid character.
+            \\--replica-index: value contains an invalid character
         , .{}),
     };
     if (replica >= configuration_len) {
         print_error_exit(
-            \\value provided to --replica-index greater than length of address array.
+            \\--replica-index: value greater than length of address array
         , .{});
     }
     return replica;
