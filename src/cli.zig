@@ -6,6 +6,7 @@ const net = std.net;
 const os = std.os;
 
 const config = @import("config.zig");
+const vr = @import("vr.zig");
 
 const usage = fmt.comptimePrint(
     \\Usage: tigerbeetle [options]
@@ -49,11 +50,9 @@ pub const Args = struct {
     replica: u16,
 };
 
-var configuration_storage: [config.replicas_max]net.Address = undefined;
-
-/// Parse the command line arguments passed to tigerbeetle.
+/// Parse the command line arguments passed to the tigerbeetle binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args() Args {
+pub fn parse_args(allocator: *std.mem.Allocator) Args {
     var maybe_cluster: ?[]const u8 = null;
     var maybe_configuration: ?[]const u8 = null;
     var maybe_replica: ?[]const u8 = null;
@@ -84,7 +83,7 @@ pub fn parse_args() Args {
         print_error_exit("the --replica-index option is required", .{});
 
     const cluster = parse_cluster(raw_cluster);
-    const configuration = parse_configuration(raw_configuration);
+    const configuration = parse_configuration(allocator, raw_configuration);
     const replica = parse_replica(raw_replica, @intCast(u16, configuration.len));
 
     return .{
@@ -124,72 +123,30 @@ fn parse_cluster(raw_cluster: []const u8) u128 {
         , .{}),
     };
     if (cluster == 0) {
-        print_error_exit("a value of 0 is not permitted for --cluster-id", .{});
+        print_error_exit("a value of 0 is not permitted for --cluster-id.", .{});
     }
     return cluster;
 }
 
-/// Parse and store the configuration in the global configuration_storage array,
-/// returning a slice into that array.
-fn parse_configuration(raw_configuration: []const u8) []net.Address {
-    var comma_it = mem.split(raw_configuration, ",");
-    var i: usize = 0;
-    while (comma_it.next()) |entry| : (i += 1) {
-        if (entry.len == 0) {
-            print_error_exit("--replica-addresses must not have a trailing comma", .{});
-        }
-        if (i == config.replicas_max) {
-            print_error_exit("max {d} addresses are allowed for --replica-addresses", .{
+/// Parse and allocate the configuration returning a slice into that array.
+fn parse_configuration(allocator: *std.mem.Allocator, raw_configuration: []const u8) []net.Address {
+    return vr.parse_configuration(allocator, raw_configuration) catch |err| switch (err) {
+        error.AddressHasTrailingComma => {
+            print_error_exit("--replica-addresses: invalid trailing comma", .{});
+        },
+        error.AddressLimitExceeded => {
+            print_error_exit("--replica-addresses: too many addresses, at most {d} are allowed", .{
                 config.replicas_max,
             });
-        }
-        var colon_it = mem.split(entry, ":");
-        // the split iterator will always return non-null once even if the delimiter is not found.
-        const raw_ipv4 = colon_it.next().?;
-        if (colon_it.next()) |raw_port| {
-            if (colon_it.next() != null) {
-                print_error_exit("more than one colon in address array entry '{s}'", .{entry});
-            }
-            const port = fmt.parseUnsigned(u16, raw_port, 10) catch |err| switch (err) {
-                error.Overflow => {
-                    print_error_exit("'{s}' is greater than the maximum port number (65535).", .{
-                        raw_port,
-                    });
-                },
-                error.InvalidCharacter => {
-                    print_error_exit("invalid character in port '{s}'.", .{raw_port});
-                },
-            };
-            configuration_storage[i] = net.Address.parseIp4(raw_ipv4, port) catch {
-                print_error_exit("'{s}' is not a valid IPv4 address.", .{raw_ipv4});
-            };
-        } else {
-            // There was no colon in entry so there are now two cases:
-            // 1. an IPv4 address with the default port
-            // 2. a port with the default IPv4 address.
-
-            // Try to parse as a port first
-            if (fmt.parseUnsigned(u16, entry, 10)) |port| {
-                configuration_storage[i] = net.Address.parseIp4(
-                    config.address,
-                    port,
-                ) catch unreachable;
-            } else |err| switch (err) {
-                error.Overflow => {
-                    print_error_exit("'{s}' is greater than the maximum port number (65535).", .{
-                        entry,
-                    });
-                },
-                error.InvalidCharacter => {
-                    // Found something that was not a digit, try parsing as an IPv4 instead.
-                    configuration_storage[i] = net.Address.parseIp4(entry, config.port) catch {
-                        print_error_exit("'{s}' is not a valid IPv4 address.", .{entry});
-                    };
-                },
-            }
-        }
-    }
-    return configuration_storage[0..i];
+        },
+        error.AddressHasMoreThanOneColon => {
+            print_error_exit("--replica-addresses: invalid address with more than one colon", .{});
+        },
+        error.PortOverflow => print_error_exit("--replica-addresses: a port exceeds 65535", .{}),
+        error.PortInvalid => print_error_exit("--replica-addresses: invalid port number", .{}),
+        error.AddressInvalid => print_error_exit("--replica-addresses: invalid IPv4 address", .{}),
+        error.OutOfMemory => print_error_exit("--replica-addresses: out of memory", .{}),
+    };
 }
 
 fn parse_replica(raw_replica: []const u8, configuration_len: u16) u16 {
