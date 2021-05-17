@@ -16,7 +16,7 @@ pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const arena = &arena_allocator.allocator;
 
-    const args = cli.parse_args();
+    const args = cli.parse_args(arena);
 
     var io = try IO.init(128, 0);
     var state_machine = try StateMachine.init(arena, config.accounts_max, config.transfers_max);
