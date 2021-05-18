@@ -384,7 +384,7 @@ pub const StateMachine = struct {
 
         if (t.flags.condition) {
             if (!c.flags.preimage) return .condition_requires_preimage;
-            // TODO Verify condition.
+            if (!valid_preimage(t.reserved, c.reserved)) return .preimage_invalid;
         } else if (c.flags.preimage) {
             return .preimage_requires_condition;
         }
@@ -436,12 +436,6 @@ pub const StateMachine = struct {
         self.commits.removeAssertDiscard(c.id);
     }
 
-    fn valid_preimage(condition: u256, preimage: u256) bool {
-        var target: [32]u8 = undefined;
-        crypto.hash.sha2.Sha256.hash(@bitCast([32]u8, preimage)[0..], target[0..], .{});
-        return mem.eql(u8, target[0..], @bitCast([32]u8, condition)[0..]);
-    }
-
     /// This is our core private method for changing balances.
     /// Returns a live pointer to an Account entry in the accounts hash map.
     /// This is intended to lookup an Account and modify balances directly by reference.
@@ -474,6 +468,17 @@ pub const StateMachine = struct {
         }
     }
 };
+
+// TODO Optimize this by precomputing hashes outside and before committing to the state machine.
+// If we see that a batch of commits contains commits with preimages, then we will:
+// Divide the batch into subsets, dispatch these to multiple threads, store the result in a bitset.
+// Then we can simply provide the result bitset to the state machine when committing.
+// This will improve crypto performance significantly by a factor of 8x.
+fn valid_preimage(condition: [32]u8, preimage: [32]u8) bool {
+    var target: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(&preimage, &target, .{});
+    return std.crypto.utils.timingSafeEql([32]u8, target, condition);
+}
 
 /// Optimizes for the common case, where the array is zeroed, with a single comparison branch.
 fn zeroed_32_bytes(a: [32]u8) bool {
