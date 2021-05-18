@@ -242,7 +242,6 @@ pub const StateMachine = struct {
 
     fn execute_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = mem.bytesAsSlice(u128, input);
-        // TODO Do the same for other apply methods:
         var output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
         var results = mem.bytesAsSlice(Account, output[0..output_len]);
         var results_count: usize = 0;
@@ -258,7 +257,7 @@ pub const StateMachine = struct {
     fn create_account(self: *StateMachine, a: Account) CreateAccountResult {
         assert(a.timestamp > self.commit_timestamp);
 
-        if (!zeroed(&a.reserved)) return .reserved_field;
+        if (!zeroed_48_bytes(a.reserved)) return .reserved_field;
         if (a.flags.padding != 0) return .reserved_flag_padding;
 
         // Opening balances may never exceed limits:
@@ -274,6 +273,9 @@ pub const StateMachine = struct {
                 return .exists_with_different_flags;
             }
             if (exists.user_data != a.user_data) return .exists_with_different_user_data;
+            if (!equal_48_bytes(exists.reserved, a.reserved)) {
+                return .exists_with_different_reserved_field;
+            }
             return .exists;
         } else {
             insert.entry.value = a;
@@ -293,7 +295,7 @@ pub const StateMachine = struct {
         if (t.timeout != 0 and !t.flags.two_phase_commit) {
             return .timeout_reserved_for_two_phase_commit;
         }
-        if (!t.flags.condition and !zeroed(&t.reserved)) return .reserved_field;
+        if (!t.flags.condition and !zeroed_32_bytes(t.reserved)) return .reserved_field;
 
         if (t.amount == 0) return .amount_is_zero;
 
@@ -330,7 +332,7 @@ pub const StateMachine = struct {
                 return .exists_with_different_flags;
             }
             if (exists.user_data != t.user_data) return .exists_with_different_user_data;
-            if (@bitCast(u256, exists.reserved) != @bitCast(u256, t.reserved)) {
+            if (!equal_32_bytes(exists.reserved, t.reserved)) {
                 return .exists_with_different_reserved_field;
             }
             if (exists.timeout != t.timeout) return .exists_with_different_timeout;
@@ -365,7 +367,7 @@ pub const StateMachine = struct {
     fn commit_transfer(self: *StateMachine, c: Commit) CommitTransferResult {
         assert(c.timestamp > self.commit_timestamp);
 
-        if (!c.flags.preimage and !zeroed(&c.reserved)) return .reserved_field;
+        if (!c.flags.preimage and !zeroed_32_bytes(c.reserved)) return .reserved_field;
         if (c.flags.padding != 0) return .reserved_flag_padding;
         if (!c.flags.accept and !c.flags.reject) return .commit_must_accept_or_reject;
         if (c.flags.accept and c.flags.reject) return .commit_cannot_accept_and_reject;
@@ -476,13 +478,112 @@ pub const StateMachine = struct {
     }
 };
 
-fn zeroed(slice: []const u8) bool {
-    // TODO Remove all loop branching for comptime known types: 48 bytes, 32 bytes.
-    // e.g. Unroll to 3x16 or 2x16 comparisons.
-    return std.mem.allEqual(u8, slice, 0);
+/// Optimizes for the common case, where the array is zeroed, with a single comparison branch.
+fn zeroed_32_bytes(a: [32]u8) bool {
+    const x = @bitCast([2]u128, a);
+    return x[0] + x[1] == 0;
+}
+
+fn zeroed_48_bytes(a: [48]u8) bool {
+    const x = @bitCast([3]u128, a);
+    return x[0] + x[1] + x[2] == 0;
+}
+
+/// Optimizes for the common case, where the arrays are equal, with a single comparison branch.
+fn equal_32_bytes(a: [32]u8, b: [32]u8) bool {
+    const x = @bitCast([2]u128, a);
+    const y = @bitCast([2]u128, b);
+    return (x[0] ^ y[0]) + (x[1] ^ y[1]) == 0;
+}
+
+fn equal_48_bytes(a: [48]u8, b: [48]u8) bool {
+    const x = @bitCast([3]u128, a);
+    const y = @bitCast([3]u128, b);
+    return (x[0] ^ y[0]) + (x[1] ^ y[1]) + (x[2] ^ y[2]) == 0;
 }
 
 const testing = std.testing;
+
+test "zeroed" {
+    testing.expectEqual(false, zeroed_32_bytes(@bitCast([32]u8, [_]u128{ 0, 1 })));
+    testing.expectEqual(false, zeroed_32_bytes(@bitCast([32]u8, [_]u128{ 1, 0 })));
+    testing.expectEqual(true, zeroed_32_bytes(@bitCast([32]u8, [_]u128{ 0, 0 })));
+
+    testing.expectEqual(false, zeroed_48_bytes(@bitCast([48]u8, [_]u128{ 0, 0, 1 })));
+    testing.expectEqual(false, zeroed_48_bytes(@bitCast([48]u8, [_]u128{ 0, 1, 0 })));
+    testing.expectEqual(false, zeroed_48_bytes(@bitCast([48]u8, [_]u128{ 1, 0, 0 })));
+    testing.expectEqual(true, zeroed_48_bytes(@bitCast([48]u8, [_]u128{ 0, 0, 0 })));
+}
+
+test "equal" {
+    testing.expectEqual(false, equal_32_bytes(
+        @bitCast([32]u8, [_]u128{ 1, 0 }),
+        @bitCast([32]u8, [_]u128{ 0, 0 }),
+    ));
+    testing.expectEqual(false, equal_32_bytes(
+        @bitCast([32]u8, [_]u128{ 0, 1 }),
+        @bitCast([32]u8, [_]u128{ 0, 0 }),
+    ));
+    testing.expectEqual(false, equal_32_bytes(
+        @bitCast([32]u8, [_]u128{ 0, 0 }),
+        @bitCast([32]u8, [_]u128{ 1, 0 }),
+    ));
+    testing.expectEqual(false, equal_32_bytes(
+        @bitCast([32]u8, [_]u128{ 0, 0 }),
+        @bitCast([32]u8, [_]u128{ 0, 1 }),
+    ));
+
+    testing.expectEqual(true, equal_32_bytes(
+        @bitCast([32]u8, [_]u128{ 0, 0 }),
+        @bitCast([32]u8, [_]u128{ 0, 0 }),
+    ));
+    testing.expectEqual(true, equal_32_bytes(
+        @bitCast([32]u8, [_]u128{ 1, 0 }),
+        @bitCast([32]u8, [_]u128{ 1, 0 }),
+    ));
+    testing.expectEqual(true, equal_32_bytes(
+        @bitCast([32]u8, [_]u128{ 1, 1 }),
+        @bitCast([32]u8, [_]u128{ 1, 1 }),
+    ));
+
+    testing.expectEqual(false, equal_48_bytes(
+        @bitCast([48]u8, [_]u128{ 1, 0, 0 }),
+        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
+    ));
+    testing.expectEqual(false, equal_48_bytes(
+        @bitCast([48]u8, [_]u128{ 0, 1, 0 }),
+        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
+    ));
+    testing.expectEqual(false, equal_48_bytes(
+        @bitCast([48]u8, [_]u128{ 0, 0, 1 }),
+        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
+    ));
+    testing.expectEqual(false, equal_48_bytes(
+        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
+        @bitCast([48]u8, [_]u128{ 1, 0, 0 }),
+    ));
+    testing.expectEqual(false, equal_48_bytes(
+        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
+        @bitCast([48]u8, [_]u128{ 0, 1, 0 }),
+    ));
+    testing.expectEqual(false, equal_48_bytes(
+        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
+        @bitCast([48]u8, [_]u128{ 0, 0, 1 }),
+    ));
+
+    testing.expectEqual(true, equal_48_bytes(
+        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
+        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
+    ));
+    testing.expectEqual(true, equal_48_bytes(
+        @bitCast([48]u8, [_]u128{ 1, 0, 0 }),
+        @bitCast([48]u8, [_]u128{ 1, 0, 0 }),
+    ));
+    testing.expectEqual(true, equal_48_bytes(
+        @bitCast([48]u8, [_]u128{ 1, 1, 1 }),
+        @bitCast([48]u8, [_]u128{ 1, 1, 1 }),
+    ));
+}
 
 test "linked accounts" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

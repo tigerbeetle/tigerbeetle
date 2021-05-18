@@ -205,6 +205,7 @@ pub const CreateAccountResult = packed enum(u32) {
     linked_event_failed,
     exists,
     exists_with_different_user_data,
+    exists_with_different_reserved_field,
     exists_with_different_unit,
     exists_with_different_code,
     exists_with_different_flags,
