@@ -289,7 +289,10 @@ pub const StateMachine = struct {
         assert(t.timestamp > self.commit_timestamp);
 
         if (t.flags.padding != 0) return .reserved_flag_padding;
-        if (t.timeout != 0 and !t.flags.two_phase_commit) {
+        if (t.flags.two_phase_commit) {
+            // Otherwise reserved amounts may never be released:
+            if (t.timeout == 0) return .two_phase_commit_must_timeout;
+        } else if (t.timeout != 0) {
             return .timeout_reserved_for_two_phase_commit;
         }
         if (!t.flags.condition and !zeroed_32_bytes(t.reserved)) return .reserved_field;

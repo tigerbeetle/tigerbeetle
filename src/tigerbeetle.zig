@@ -240,6 +240,7 @@ pub const CreateTransferResult = packed enum(u32) {
     amount_is_zero,
     exceeds_credits,
     exceeds_debits,
+    two_phase_commit_must_timeout,
     timeout_reserved_for_two_phase_commit,
 };
 

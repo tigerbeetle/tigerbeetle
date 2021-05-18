@@ -49,7 +49,7 @@ pub fn main() !void {
             .code = 0,
             .flags = .{ .two_phase_commit = true },
             .amount = 1,
-            .timeout = 0,
+            .timeout = std.time.ns_per_hour,
         };
     }
 
