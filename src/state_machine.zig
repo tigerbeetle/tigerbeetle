@@ -1,9 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const crypto = std.crypto;
 const log = std.log.scoped(.state_machine);
-const mem = std.mem;
-const Allocator = mem.Allocator;
 
 usingnamespace @import("tigerbeetle.zig");
 
@@ -27,7 +24,7 @@ pub const Operation = packed enum(u8) {
 };
 
 pub const StateMachine = struct {
-    allocator: *Allocator,
+    allocator: *std.mem.Allocator,
     prepare_timestamp: u64,
     commit_timestamp: u64,
     accounts: HashMapAccounts,
@@ -35,7 +32,7 @@ pub const StateMachine = struct {
     commits: HashMapCommits,
 
     pub fn init(
-        allocator: *Allocator,
+        allocator: *std.mem.Allocator,
         accounts_max: usize,
         transfers_max: usize,
         commits_max: usize,
@@ -109,7 +106,7 @@ pub const StateMachine = struct {
         );
         assert(self.prepare_timestamp > self.commit_timestamp);
         var sum_reserved_timestamps: usize = 0;
-        var events = mem.bytesAsSlice(Event(operation), input);
+        var events = std.mem.bytesAsSlice(Event(operation), input);
         for (events) |*event| {
             sum_reserved_timestamps += event.timestamp;
             self.prepare_timestamp += 1;
@@ -241,9 +238,9 @@ pub const StateMachine = struct {
     }
 
     fn execute_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
-        const batch = mem.bytesAsSlice(u128, input);
+        const batch = std.mem.bytesAsSlice(u128, input);
         var output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
-        var results = mem.bytesAsSlice(Account, output[0..output_len]);
+        var results = std.mem.bytesAsSlice(Account, output[0..output_len]);
         var results_count: usize = 0;
         for (batch) |id, index| {
             if (self.get_account(id)) |result| {
