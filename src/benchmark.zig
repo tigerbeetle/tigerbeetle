@@ -147,6 +147,14 @@ fn send(fd: std.os.fd_t, operation: Operation, body: []u8, comptime Result: anyt
         ping.set_checksum();
 
         assert((try std.os.sendto(fd, std.mem.asBytes(&ping), 0, null, 0)) == @sizeOf(Header));
+
+        var pong: [@sizeOf(Header)]u8 = undefined;
+        var pong_size: u64 = 0;
+        while (pong_size < @sizeOf(Header)) {
+            var pong_bytes = try std.os.recvfrom(fd, pong[pong_size..], 0, null, null);
+            if (pong_bytes == 0) @panic("server closed the connection (while waiting for pong)");
+            pong_size += pong_bytes;
+        }
     }
 
     request_number += 1;
