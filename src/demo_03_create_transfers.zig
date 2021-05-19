@@ -7,22 +7,19 @@ pub fn main() !void {
     const fd = try connect(config.port);
     defer std.os.close(fd);
 
-    var auto_commit_transfers = [_]Transfer{
+    var transfers = [_]Transfer{
         Transfer{
             .id = 1000,
             .debit_account_id = 1,
             .credit_account_id = 2,
-            .custom_1 = 0,
-            .custom_2 = 0,
-            .custom_3 = 0,
-            .flags = .{
-                .accept = true,
-                .auto_commit = true,
-            },
-            .amount = 1000,
+            .user_data = 0,
+            .reserved = [_]u8{0} ** 32,
             .timeout = 0,
+            .code = 0,
+            .flags = .{},
+            .amount = 1000,
         },
     };
 
-    try send(fd, .create_transfers, auto_commit_transfers, CreateTransfersResult);
+    try send(fd, .create_transfers, transfers, CreateTransfersResult);
 }

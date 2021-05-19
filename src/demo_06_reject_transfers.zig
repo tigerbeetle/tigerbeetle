@@ -10,9 +10,8 @@ pub fn main() !void {
     var commits = [_]Commit{
         Commit{
             .id = 1001,
-            .custom_1 = 0,
-            .custom_2 = 0,
-            .custom_3 = 0,
+            .reserved = [_]u8{0} ** 32,
+            .code = 0,
             .flags = .{ .reject = true },
         },
     };
