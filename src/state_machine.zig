@@ -483,112 +483,40 @@ fn valid_preimage(condition: [32]u8, preimage: [32]u8) bool {
     return std.crypto.utils.timingSafeEql([32]u8, target, condition);
 }
 
-/// Optimizes for the common case, where the array is zeroed, with a single comparison branch.
+/// Optimizes for the common case, where the array is zeroed. Completely branchless.
 fn zeroed_32_bytes(a: [32]u8) bool {
-    const x = @bitCast([2]u128, a);
-    return x[0] + x[1] == 0;
+    const x = @bitCast([4]u64, a);
+    return (x[0] | x[1] | x[2] | x[3]) == 0;
 }
 
 fn zeroed_48_bytes(a: [48]u8) bool {
-    const x = @bitCast([3]u128, a);
-    return x[0] + x[1] + x[2] == 0;
+    const x = @bitCast([6]u64, a);
+    return (x[0] | x[1] | x[2] | x[3] | x[4] | x[5]) == 0;
 }
 
-/// Optimizes for the common case, where the arrays are equal, with a single comparison branch.
+/// Optimizes for the common case, where the arrays are equal. Completely branchless.
 fn equal_32_bytes(a: [32]u8, b: [32]u8) bool {
-    const x = @bitCast([2]u128, a);
-    const y = @bitCast([2]u128, b);
-    return (x[0] ^ y[0]) + (x[1] ^ y[1]) == 0;
+    const x = @bitCast([4]u64, a);
+    const y = @bitCast([4]u64, b);
+
+    const c = (x[0] ^ y[0]) | (x[1] ^ y[1]);
+    const d = (x[2] ^ y[2]) | (x[3] ^ y[3]);
+
+    return (c | d) == 0;
 }
 
 fn equal_48_bytes(a: [48]u8, b: [48]u8) bool {
-    const x = @bitCast([3]u128, a);
-    const y = @bitCast([3]u128, b);
-    return (x[0] ^ y[0]) + (x[1] ^ y[1]) + (x[2] ^ y[2]) == 0;
+    const x = @bitCast([6]u64, a);
+    const y = @bitCast([6]u64, b);
+
+    const c = (x[0] ^ y[0]) | (x[1] ^ y[1]);
+    const d = (x[2] ^ y[2]) | (x[3] ^ y[3]);
+    const e = (x[4] ^ y[4]) | (x[5] ^ y[5]);
+
+    return (c | d | e) == 0;
 }
 
 const testing = std.testing;
-
-test "zeroed" {
-    testing.expectEqual(false, zeroed_32_bytes(@bitCast([32]u8, [_]u128{ 0, 1 })));
-    testing.expectEqual(false, zeroed_32_bytes(@bitCast([32]u8, [_]u128{ 1, 0 })));
-    testing.expectEqual(true, zeroed_32_bytes(@bitCast([32]u8, [_]u128{ 0, 0 })));
-
-    testing.expectEqual(false, zeroed_48_bytes(@bitCast([48]u8, [_]u128{ 0, 0, 1 })));
-    testing.expectEqual(false, zeroed_48_bytes(@bitCast([48]u8, [_]u128{ 0, 1, 0 })));
-    testing.expectEqual(false, zeroed_48_bytes(@bitCast([48]u8, [_]u128{ 1, 0, 0 })));
-    testing.expectEqual(true, zeroed_48_bytes(@bitCast([48]u8, [_]u128{ 0, 0, 0 })));
-}
-
-test "equal" {
-    testing.expectEqual(false, equal_32_bytes(
-        @bitCast([32]u8, [_]u128{ 1, 0 }),
-        @bitCast([32]u8, [_]u128{ 0, 0 }),
-    ));
-    testing.expectEqual(false, equal_32_bytes(
-        @bitCast([32]u8, [_]u128{ 0, 1 }),
-        @bitCast([32]u8, [_]u128{ 0, 0 }),
-    ));
-    testing.expectEqual(false, equal_32_bytes(
-        @bitCast([32]u8, [_]u128{ 0, 0 }),
-        @bitCast([32]u8, [_]u128{ 1, 0 }),
-    ));
-    testing.expectEqual(false, equal_32_bytes(
-        @bitCast([32]u8, [_]u128{ 0, 0 }),
-        @bitCast([32]u8, [_]u128{ 0, 1 }),
-    ));
-
-    testing.expectEqual(true, equal_32_bytes(
-        @bitCast([32]u8, [_]u128{ 0, 0 }),
-        @bitCast([32]u8, [_]u128{ 0, 0 }),
-    ));
-    testing.expectEqual(true, equal_32_bytes(
-        @bitCast([32]u8, [_]u128{ 1, 0 }),
-        @bitCast([32]u8, [_]u128{ 1, 0 }),
-    ));
-    testing.expectEqual(true, equal_32_bytes(
-        @bitCast([32]u8, [_]u128{ 1, 1 }),
-        @bitCast([32]u8, [_]u128{ 1, 1 }),
-    ));
-
-    testing.expectEqual(false, equal_48_bytes(
-        @bitCast([48]u8, [_]u128{ 1, 0, 0 }),
-        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
-    ));
-    testing.expectEqual(false, equal_48_bytes(
-        @bitCast([48]u8, [_]u128{ 0, 1, 0 }),
-        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
-    ));
-    testing.expectEqual(false, equal_48_bytes(
-        @bitCast([48]u8, [_]u128{ 0, 0, 1 }),
-        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
-    ));
-    testing.expectEqual(false, equal_48_bytes(
-        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
-        @bitCast([48]u8, [_]u128{ 1, 0, 0 }),
-    ));
-    testing.expectEqual(false, equal_48_bytes(
-        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
-        @bitCast([48]u8, [_]u128{ 0, 1, 0 }),
-    ));
-    testing.expectEqual(false, equal_48_bytes(
-        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
-        @bitCast([48]u8, [_]u128{ 0, 0, 1 }),
-    ));
-
-    testing.expectEqual(true, equal_48_bytes(
-        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
-        @bitCast([48]u8, [_]u128{ 0, 0, 0 }),
-    ));
-    testing.expectEqual(true, equal_48_bytes(
-        @bitCast([48]u8, [_]u128{ 1, 0, 0 }),
-        @bitCast([48]u8, [_]u128{ 1, 0, 0 }),
-    ));
-    testing.expectEqual(true, equal_48_bytes(
-        @bitCast([48]u8, [_]u128{ 1, 1, 1 }),
-        @bitCast([48]u8, [_]u128{ 1, 1, 1 }),
-    ));
-}
 
 test "linked accounts" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -639,7 +567,7 @@ test "linked accounts" {
     const size = state_machine.commit(.create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountResults, output[0..size]);
 
-    testing.expectEqualSlices(
+    try testing.expectEqualSlices(
         CreateAccountResults,
         &[_]CreateAccountResults{
             CreateAccountResults{ .index = 1, .result = .linked_event_failed },
@@ -656,13 +584,66 @@ test "linked accounts" {
         results,
     );
 
-    testing.expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
-    testing.expectEqual(accounts[5], state_machine.get_account(accounts[5].id).?.*);
-    testing.expectEqual(accounts[8], state_machine.get_account(accounts[8].id).?.*);
-    testing.expectEqual(accounts[11], state_machine.get_account(accounts[11].id).?.*);
-    testing.expectEqual(accounts[12], state_machine.get_account(accounts[12].id).?.*);
-    testing.expectEqual(@as(u32, 5), state_machine.accounts.count());
+    try testing.expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
+    try testing.expectEqual(accounts[5], state_machine.get_account(accounts[5].id).?.*);
+    try testing.expectEqual(accounts[8], state_machine.get_account(accounts[8].id).?.*);
+    try testing.expectEqual(accounts[11], state_machine.get_account(accounts[11].id).?.*);
+    try testing.expectEqual(accounts[12], state_machine.get_account(accounts[12].id).?.*);
+    try testing.expectEqual(@as(u32, 5), state_machine.accounts.count());
 
     // TODO How can we test that events were in fact rolled back in LIFO order?
     // All our rollback handlers appear to be commutative.
+}
+
+fn test_routine_zeroed(comptime len: usize) !void {
+    const routine = switch (len) {
+        32 => zeroed_32_bytes,
+        48 => zeroed_48_bytes,
+        else => unreachable,
+    };
+    var a = [_]u8{0} ** len;
+    var i: usize = 0;
+    while (i < a.len) : (i += 1) {
+        a[i] = 1;
+        try testing.expectEqual(false, routine(a));
+        a[i] = 0;
+    }
+    try testing.expectEqual(true, routine(a));
+}
+
+fn test_routine_equal(comptime len: usize) !void {
+    const routine = switch (len) {
+        32 => equal_32_bytes,
+        48 => equal_48_bytes,
+        else => unreachable,
+    };
+    var a = [_]u8{0} ** len;
+    var b = [_]u8{0} ** len;
+    var i: usize = 0;
+    while (i < a.len) : (i += 1) {
+        a[i] = 1;
+        try testing.expectEqual(false, routine(a, b));
+        a[i] = 0;
+
+        b[i] = 1;
+        try testing.expectEqual(false, routine(a, b));
+        b[i] = 0;
+    }
+    try testing.expectEqual(true, routine(a, b));
+}
+
+test "zeroed_32_bytes" {
+    try test_routine_zeroed(32);
+}
+
+test "zeroed_48_bytes" {
+    try test_routine_zeroed(48);
+}
+
+test "equal_32_bytes" {
+    try test_routine_equal(32);
+}
+
+test "equal_48_bytes" {
+    try test_routine_equal(48);
 }
