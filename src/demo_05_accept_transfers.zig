@@ -24,5 +24,5 @@ pub fn main() !void {
         },
     };
 
-    try send(fd, .commit_transfers, commits, CommitTransferResults);
+    try send(fd, .commit_transfers, commits, CommitTransfersResult);
 }

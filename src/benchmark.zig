@@ -73,7 +73,7 @@ pub fn main() !void {
 
     // Create our two accounts if necessary:
     std.debug.print("creating accounts...\n", .{});
-    try send(fd, .create_accounts, std.mem.asBytes(accounts[0..]), CreateAccountResults);
+    try send(fd, .create_accounts, std.mem.asBytes(accounts[0..]), CreateAccountsResult);
 
     // Start the benchmark:
     const start = std.time.milliTimestamp();
@@ -88,7 +88,7 @@ pub fn main() !void {
             fd,
             .create_transfers,
             std.mem.asBytes(batch_transfers[0..]),
-            CreateTransferResults,
+            CreateTransfersResult,
         );
 
         const ms2 = std.time.milliTimestamp();
@@ -99,7 +99,7 @@ pub fn main() !void {
 
         // Commit this batch:
         var batch_commits = commits[offset..][0..10000];
-        try send(fd, .commit_transfers, std.mem.asBytes(batch_commits[0..]), CommitTransferResults);
+        try send(fd, .commit_transfers, std.mem.asBytes(batch_commits[0..]), CommitTransfersResult);
 
         const ms3 = std.time.milliTimestamp();
         var commit_transfers_latency = ms3 - ms2;

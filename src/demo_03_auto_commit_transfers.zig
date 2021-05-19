@@ -24,5 +24,5 @@ pub fn main() !void {
         },
     };
 
-    try send(fd, .create_transfers, auto_commit_transfers, CreateTransferResults);
+    try send(fd, .create_transfers, auto_commit_transfers, CreateTransfersResult);
 }

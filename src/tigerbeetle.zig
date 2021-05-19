@@ -269,12 +269,12 @@ pub const CommitTransferResult = packed enum(u32) {
     preimage_invalid,
 };
 
-pub const CreateAccountResults = packed struct {
+pub const CreateAccountsResult = packed struct {
     index: u32,
     result: CreateAccountResult,
 
     comptime {
-        assert(@sizeOf(CreateAccountResults) == 8);
+        assert(@sizeOf(CreateAccountsResult) == 8);
     }
 
     pub fn jsonStringify(
@@ -289,12 +289,12 @@ pub const CreateAccountResults = packed struct {
     }
 };
 
-pub const CreateTransferResults = packed struct {
+pub const CreateTransfersResult = packed struct {
     index: u32,
     result: CreateTransferResult,
 
     comptime {
-        assert(@sizeOf(CreateTransferResults) == 8);
+        assert(@sizeOf(CreateTransfersResult) == 8);
     }
 
     pub fn jsonStringify(
@@ -309,12 +309,12 @@ pub const CreateTransferResults = packed struct {
     }
 };
 
-pub const CommitTransferResults = packed struct {
+pub const CommitTransfersResult = packed struct {
     index: u32,
     result: CommitTransferResult,
 
     comptime {
-        assert(@sizeOf(CommitTransferResults) == 8);
+        assert(@sizeOf(CommitTransfersResult) == 8);
     }
 
     pub fn jsonStringify(
