@@ -32,5 +32,5 @@ pub fn main() !void {
         },
     };
 
-    try send(fd, .create_transfers, transfers, CreateTransferResults);
+    try send(fd, .create_transfers, transfers, CreateTransfersResult);
 }

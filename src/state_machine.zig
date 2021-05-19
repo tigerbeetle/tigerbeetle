@@ -80,9 +80,9 @@ pub const StateMachine = struct {
 
     pub fn Result(comptime operation: Operation) type {
         return switch (operation) {
-            .create_accounts => CreateAccountResults,
-            .create_transfers => CreateTransferResults,
-            .commit_transfers => CommitTransferResults,
+            .create_accounts => CreateAccountsResult,
+            .create_transfers => CreateTransfersResult,
+            .commit_transfers => CommitTransfersResult,
             .lookup_accounts => Account,
             else => unreachable,
         };
@@ -565,21 +565,21 @@ test "linked accounts" {
 
     state_machine.prepare(.create_accounts, input);
     const size = state_machine.commit(.create_accounts, input, output);
-    const results = std.mem.bytesAsSlice(CreateAccountResults, output[0..size]);
+    const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try testing.expectEqualSlices(
-        CreateAccountResults,
-        &[_]CreateAccountResults{
-            CreateAccountResults{ .index = 1, .result = .linked_event_failed },
-            CreateAccountResults{ .index = 2, .result = .linked_event_failed },
-            CreateAccountResults{ .index = 3, .result = .exists },
-            CreateAccountResults{ .index = 4, .result = .linked_event_failed },
+        CreateAccountsResult,
+        &[_]CreateAccountsResult{
+            CreateAccountsResult{ .index = 1, .result = .linked_event_failed },
+            CreateAccountsResult{ .index = 2, .result = .linked_event_failed },
+            CreateAccountsResult{ .index = 3, .result = .exists },
+            CreateAccountsResult{ .index = 4, .result = .linked_event_failed },
 
-            CreateAccountResults{ .index = 6, .result = .exists_with_different_code },
-            CreateAccountResults{ .index = 7, .result = .linked_event_failed },
+            CreateAccountsResult{ .index = 6, .result = .exists_with_different_code },
+            CreateAccountsResult{ .index = 7, .result = .linked_event_failed },
 
-            CreateAccountResults{ .index = 9, .result = .linked_event_failed },
-            CreateAccountResults{ .index = 10, .result = .exists_with_different_code },
+            CreateAccountsResult{ .index = 9, .result = .linked_event_failed },
+            CreateAccountsResult{ .index = 10, .result = .exists_with_different_code },
         },
         results,
     );

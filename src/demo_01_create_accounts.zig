@@ -38,5 +38,5 @@ pub fn main() !void {
         },
     };
 
-    try send(fd, .create_accounts, accounts, CreateAccountResults);
+    try send(fd, .create_accounts, accounts, CreateAccountsResult);
 }

@@ -15,9 +15,9 @@ const tb = @import("tigerbeetle.zig");
 const Account = tb.Account;
 const Transfer = tb.Transfer;
 const Commit = tb.Commit;
-const CreateAccountResults = tb.CreateAccountResults;
-const CreateTransferResults = tb.CreateTransferResults;
-const CommitTransferResults = tb.CommitTransferResults;
+const CreateAccountsResult = tb.CreateAccountsResult;
+const CreateTransfersResult = tb.CreateTransfersResult;
+const CommitTransfersResult = tb.CommitTransfersResult;
 
 const log = std.log;
 
