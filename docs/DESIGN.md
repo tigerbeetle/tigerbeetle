@@ -131,7 +131,7 @@ Events are **immutable data structures** that **instantiate or mutate state data
           commit_transfer {
                       id: 16 bytes (128-bit)
                 reserved: 32 bytes (256-bit) [optional, e.g. a SHA256 preimage to validate against the condition of the corresponding `create-transfer` event]
-                   flags:  8 bytes ( 64-bit) [optional, used to indicate transfer success/failure, to modify usage of custom slots, and for future feature expansion]
+                   flags:  8 bytes ( 64-bit) [optional, used to indicate transfer success/failure, whether or not this is dependent on another commit, and for future feature expansion]
                timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
 } = 64 bytes (1 CPU cache line)
 ```
