@@ -141,6 +141,7 @@ pub const StateMachine = struct {
         output: []u8,
     ) usize {
         comptime assert(operation != .lookup_accounts);
+
         const events = std.mem.bytesAsSlice(Event(operation), input);
         var results = std.mem.bytesAsSlice(Result(operation), output);
         var count: usize = 0;
@@ -170,7 +171,7 @@ pub const StateMachine = struct {
                 if (chain) |chain_start_index| {
                     if (!chain_broken) {
                         chain_broken = true;
-                        // Rollback events in LIFO order, excluding the event that broke the chain:
+                        // Rollback events in LIFO order, excluding this event that broke the chain:
                         self.rollback(operation, input, chain_start_index, index);
                         // Add errors for rolled back events in FIFO order:
                         var chain_index = chain_start_index;
@@ -181,6 +182,8 @@ pub const StateMachine = struct {
                             };
                             count += 1;
                         }
+                    } else {
+                        assert(result == .linked_event_failed);
                     }
                 }
                 results[count] = .{ .index = @intCast(u32, index), .result = result };
@@ -210,7 +213,7 @@ pub const StateMachine = struct {
 
         // We commit events in FIFO order.
         // We must therefore rollback events in LIFO order with a reverse loop.
-        // We do not rollback `self.commit_timestamp` to ensure that subsequent events were
+        // We do not rollback `self.commit_timestamp` to ensure that subsequent events are
         // timestamped correctly.
         var index = chain_error_index;
         while (index > chain_start_index) {
