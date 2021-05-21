@@ -1,9 +1,5 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const builtin = std.builtin;
-const crypto = std.crypto;
-const mem = std.mem;
-const StringifyOptions = std.json.StringifyOptions;
 
 pub const config = @import("config.zig");
 
@@ -43,7 +39,7 @@ pub const Account = packed struct {
         return Account.exceeds(self.credit_accepted, amount, self.credit_accepted_limit);
     }
 
-    pub fn jsonStringify(self: Account, options: StringifyOptions, writer: anytype) !void {
+    pub fn jsonStringify(self: Account, options: std.json.StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"id\":{},", .{self.id});
         try std.fmt.format(writer, "\"custom\":\"{x:0>32}\",", .{self.custom});
@@ -67,7 +63,11 @@ pub const Account = packed struct {
 pub const AccountFlags = packed struct {
     padding: u64 = 0,
 
-    pub fn jsonStringify(self: AccountFlags, options: StringifyOptions, writer: anytype) !void {
+    pub fn jsonStringify(
+        self: AccountFlags,
+        options: std.json.StringifyOptions,
+        writer: anytype,
+    ) !void {
         try writer.writeAll("{}");
     }
 };
@@ -84,7 +84,11 @@ pub const Transfer = packed struct {
     timeout: u64,
     timestamp: u64 = 0,
 
-    pub fn jsonStringify(self: Transfer, options: StringifyOptions, writer: anytype) !void {
+    pub fn jsonStringify(
+        self: Transfer,
+        options: std.json.StringifyOptions,
+        writer: anytype,
+    ) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"id\":{},", .{self.id});
         try std.fmt.format(writer, "\"debit_account_id\":{},", .{self.debit_account_id});
@@ -109,7 +113,11 @@ pub const TransferFlags = packed struct {
     condition: bool = false,
     padding: u60 = 0,
 
-    pub fn jsonStringify(self: TransferFlags, options: StringifyOptions, writer: anytype) !void {
+    pub fn jsonStringify(
+        self: TransferFlags,
+        options: std.json.StringifyOptions,
+        writer: anytype,
+    ) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"accept\":{},", .{self.accept});
         try std.fmt.format(writer, "\"reject\":{},", .{self.reject});
@@ -127,7 +135,11 @@ pub const Commit = packed struct {
     flags: CommitFlags,
     timestamp: u64 = 0,
 
-    pub fn jsonStringify(self: Commit, options: StringifyOptions, writer: anytype) !void {
+    pub fn jsonStringify(
+        self: Commit,
+        options: std.json.StringifyOptions,
+        writer: anytype,
+    ) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"id\":{},", .{self.id});
         try std.fmt.format(writer, "\"custom_1\":{},", .{self.custom_1});
@@ -147,7 +159,11 @@ pub const CommitFlags = packed struct {
     preimage: bool = false,
     padding: u61 = 0,
 
-    pub fn jsonStringify(self: CommitFlags, options: StringifyOptions, writer: anytype) !void {
+    pub fn jsonStringify(
+        self: CommitFlags,
+        options: std.json.StringifyOptions,
+        writer: anytype,
+    ) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"accept\":{},", .{self.accept});
         try std.fmt.format(writer, "\"reject\":{},", .{self.reject});
@@ -234,7 +250,7 @@ pub const CreateAccountResults = packed struct {
 
     pub fn jsonStringify(
         self: CreateAccountResults,
-        options: StringifyOptions,
+        options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
         try writer.writeAll("{");
@@ -250,7 +266,7 @@ pub const CreateTransferResults = packed struct {
 
     pub fn jsonStringify(
         self: CreateTransferResults,
-        options: StringifyOptions,
+        options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
         try writer.writeAll("{");
@@ -266,7 +282,7 @@ pub const CommitTransferResults = packed struct {
 
     pub fn jsonStringify(
         self: CommitTransferResults,
-        options: StringifyOptions,
+        options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
         try writer.writeAll("{");
