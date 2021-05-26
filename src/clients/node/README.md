@@ -11,6 +11,10 @@ Later portable versions of TigerBeetle may supplement `io_uring` with `kqueue` f
 ```sh
 yarn add tigerbeetle-node
 ```
+or
+```sh
+npm install tigerbeetle-node
+```
 
 **Development**
 
@@ -20,7 +24,6 @@ Follow these steps to get up and running when cloning the repo:
 git clone https://github.com/coilhq/tigerbeetle-node.git
 git submodule update --init
 yarn
-yarn build
 ```
 
 ## Usage
