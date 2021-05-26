@@ -8,6 +8,7 @@
     "type": "git",
     "url": "git+https://github.com/coilhq/tigerbeetle-node.git"
   },
+  "preferUnplugged": true,
   "files": [
     "LICENSE",
     "README.md",
@@ -17,13 +18,15 @@
     ".yarn/releases",
     ".yarnrc.yml",
     "dist",
+    "!dist/client.node",
     "src/c.zig",
     "src/index.ts",
     "src/node.zig",
     "src/tigerbeetle/src",
     "src/tigerbeetle/scripts",
     "src/translate.zig",
-    "scripts/download_node_headers.sh"
+    "scripts/download_node_headers.sh",
+    "scripts/postinstall.sh"
   ],
   "engines": {
     "node": ">=14.0.0"
@@ -35,7 +38,7 @@
     "build:zig": "mkdir -p dist &&  zig/zig build-lib -dynamic -lc -isystem build/node-$(node --version)/include/node src/node.zig -femit-bin=dist/client.node",
     "clean": "rm -rf build dist node_modules src/zig-cache zig",
     "install:zig": "./src/tigerbeetle/scripts/install_zig.sh",
-    "postinstall": "yarn install:zig && ./scripts/download_node_headers.sh && yarn build:zig"
+    "postinstall": "./scripts/postinstall.sh"
   },
   "author": "Coil Technologies, Inc",
   "license": "Apache-2.0",
