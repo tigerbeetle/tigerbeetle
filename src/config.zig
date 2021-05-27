@@ -35,13 +35,17 @@ pub const accounts_max = switch (deployment_environment) {
     else => 100_000,
 };
 
-/// The maximum number of transfers to store in memory before requiring cold data to be drained:
+/// The maximum number of transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 /// We allocate more capacity than the number of transfers for a safe hash table load factor.
 pub const transfers_max = switch (deployment_environment) {
     .production => 100_000_000,
     else => 1_000_000,
 };
+
+/// The maximum number of two-phase commits to store in memory:
+/// This impacts the amount of memory allocated at initialization by the server.
+pub const commits_max = transfers_max;
 
 /// The maximum size of the journal file:
 /// This is pre-allocated and zeroed for performance when initialized.

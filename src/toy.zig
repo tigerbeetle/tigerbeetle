@@ -46,7 +46,7 @@ pub fn main() !void {
         },
     };
 
-    try send(fd, .create_accounts, mem.asBytes(accounts[0..]), CreateAccountResults);
+    try send(fd, .create_accounts, mem.asBytes(accounts[0..]), CreateAccountsResult);
 
     var transfers = [_]Transfer{Transfer{
         .id = 4,
@@ -60,7 +60,7 @@ pub fn main() !void {
         .timeout = 0,
     }};
 
-    try send(fd, .create_transfers, mem.asBytes(transfers[0..]), CreateTransferResults);
+    try send(fd, .create_transfers, mem.asBytes(transfers[0..]), CreateTransfersResult);
 
     var commits = [_]Commit{Commit{
         .id = transfers[0].id,
@@ -70,7 +70,7 @@ pub fn main() !void {
         .flags = .{ .accept = true },
     }};
 
-    try send(fd, .commit_transfers, mem.asBytes(commits[0..]), CommitTransferResults);
+    try send(fd, .commit_transfers, mem.asBytes(commits[0..]), CommitTransfersResult);
 
     var auto_commit_transfers = [_]Transfer{Transfer{
         .id = 5,
@@ -87,7 +87,7 @@ pub fn main() !void {
         .timeout = 0,
     }};
 
-    try send(fd, .create_transfers, mem.asBytes(auto_commit_transfers[0..]), CreateTransferResults);
+    try send(fd, .create_transfers, mem.asBytes(auto_commit_transfers[0..]), CreateTransfersResult);
 }
 
 var request_id: u128 = 0;

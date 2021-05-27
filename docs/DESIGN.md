@@ -115,32 +115,25 @@ Events are **immutable data structures** that **instantiate or mutate state data
                       id: 16 bytes (128-bit)
         debit_account_id: 16 bytes (128-bit)
        credit_account_id: 16 bytes (128-bit)
-                custom_1: 16 bytes (128-bit) [optional, e.g. enforce a foreign key relation on a pre-existing `transfer` state]
-                custom_2: 16 bytes (128-bit) [optional, e.g. a short description for the transfer]
-                custom_3: 16 bytes (128-bit) [optional, e.g. two custom slots may store a 256-bit ILPv4 condition to validate against the preimage of the corresponding `commit-transfer` event]
-                   flags:  8 bytes ( 64-bit) [optional, to modify the usage of custom slots, and for future feature expansion]
+               user_data: 16 bytes (128-bit) [optional, e.g. opaque third-party identifier to link this transfer (many-to-one) to an external entity]
+                reserved: 32 bytes (256-bit) [optional, e.g. a SHA256 condition to validate against the preimage of the corresponding `commit-transfer` event]
+                 timeout:  8 bytes ( 64-bit) [required for two phase commit, a quantity of time, i.e. an offset in nanoseconds from timestamp]
+                    code:  4 bytes ( 32-bit) [optional, a chart of accounts code describing the reason for the transfer e.g. deposit, settlement]
+                   flags:  4 bytes ( 32-bit) [optional, to modify the usage of the reserved field, and for future feature expansion]
                   amount:  8 bytes ( 64-bit) [required, an unsigned integer in the unit of value of the debit and credit accounts, which must be the same for both accounts]
-                 timeout:  8 bytes ( 64-bit) [optional, a quantity of time, i.e. an offset in nanoseconds from timestamp]
                timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
 } = 128 bytes (2 CPU cache lines)
 ```
-
-The three `custom_1/2/3` slots above and below are similar to CPU registers. Their usage is modified
-by the `flags` field. Custom slots are either opaque to TigerBeetle or interpreted by TigerBeetle
-according to their usage. Custom slots are 128-bit and may be joined together to form a 256-bit
-register, for example to support ILPv4 conditions and preimages.
 
 **commit_transfer**: Commit a transfer between accounts (maps to a "fulfill"). A transfer can be accepted or rejected by toggling a bit in the `flags` field.
 
 ```
           commit_transfer {
                       id: 16 bytes (128-bit)
-                custom_1: 16 bytes (128-bit) [optional, e.g. enforce a foreign key relation on a pre-existing `transfer` state]
-                custom_2: 16 bytes (128-bit) [optional, e.g. a short description for the accept or reject]
-                custom_3: 16 bytes (128-bit) [optional, e.g. two custom slots may store a 256-bit ILPv4 preimage to validate against the condition of the corresponding `create-transfer` event]
-                   flags:  8 bytes ( 64-bit) [optional, used to indicate transfer success/failure, to modify usage of custom slots, and for future feature expansion]
+                reserved: 32 bytes (256-bit) [optional, e.g. a SHA256 preimage to validate against the condition of the corresponding `create-transfer` event]
+                   flags:  8 bytes ( 64-bit) [optional, used to indicate transfer success/failure, whether or not this is dependent on another commit, and for future feature expansion]
                timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
-} = 80 bytes (2 CPU cache lines)
+} = 64 bytes (1 CPU cache line)
 ```
 
 **create_account**: Create an account.
@@ -148,26 +141,23 @@ register, for example to support ILPv4 conditions and preimages.
 * We use the terms `credit` and `debit` instead of "payable" or "receivable" since the meaning of a credit balance depends on whether the account is an asset or liability, income or expense.
 * An `accepted` amount refers to an amount posted by a committed transfer.
 * A `reserved` amount refers to an inflight amount posted by a created transfer only, where the commit is still outstanding, and where the transfer timeout has not yet fired.
-* The total debit balance of an account is given by adding `debit_accepted` plus `debit_reserved`, and both these individual amounts must be less than their respective limits. Likewise for the total credit balance of an account.
+* The total debit balance of an account is given by adding `debits_accepted` plus `debits_reserved`. Likewise for the total credit balance of an account.
 * The total balance of an account can be derived by subtracting the total credit balance from the total debit balance.
 * We keep both sides of the ledger (debit and credit) separate to avoid dealing with signed numbers, and to preserve more information about the nature of an account. For example, two accounts could have the same balance of 0, but one account could have 1,000,000 units on both sides of the ledger, whereas another account could have 1 unit on both sides, both balancing out to 0.
-* Once created, an account may be changed only through transfer events, for auditing purposes and to avoid complications from changing account invariants. Thus, limits may be changed only by creating a new account.
+* Once created, an account may be changed only through transfer events, to keep a paper trail that is critical for auditing.
 
 ```
            create_account {
                       id: 16 bytes (128-bit)
-                  custom: 16 bytes (128-bit) [optional, opaque to TigerBeetle]
-                   flags:  8 bytes ( 64-bit) [optional, used to modify usage of custom slot, and for future feature expansion]
-                    unit:  8 bytes ( 64-bit) [optional, opaque to TigerBeetle, a unit of value, e.g. gold bars or marbles]
-          debit_reserved:  8 bytes ( 64-bit)
-          debit_accepted:  8 bytes ( 64-bit)
-         credit_reserved:  8 bytes ( 64-bit)
-         credit_accepted:  8 bytes ( 64-bit)
-    debit_reserved_limit:  8 bytes ( 64-bit) [optional, a non-zero limit]
-    debit_accepted_limit:  8 bytes ( 64-bit) [optional, a non-zero limit]
-   credit_reserved_limit:  8 bytes ( 64-bit) [optional, a non-zero limit]
-   credit_accepted_limit:  8 bytes ( 64-bit) [optional, a non-zero limit]
-                 padding:  8 bytes ( 64-bit) [reserved]
+               user_data: 16 bytes (128-bit) [optional, opaque third-party identifier to link this account (many-to-one) to an external entity]
+                reserved: 48 bytes (384-bit) [reserved for future accounting policy primitives]
+                    unit:  2 bytes ( 16-bit) [optional, opaque unit of value, e.g. gold bars or marbles]
+                    code:  2 bytes ( 16-bit) [optional, opaque chart of accounts code to describe the type of account, e.g. a clearing account]
+                   flags:  4 bytes ( 32-bit) [optional, net balance limits: e.g. debits_must_not_exceed_credits or credits_must_not_exceed_debits]
+         debits_reserved:  8 bytes ( 64-bit)
+         debits_accepted:  8 bytes ( 64-bit)
+        credits_reserved:  8 bytes ( 64-bit)
+        credits_accepted:  8 bytes ( 64-bit)
                timestamp:  8 bytes ( 64-bit) [reserved]
 } = 128 bytes (2 CPU cache lines)
 ```
@@ -262,22 +252,17 @@ The intention of this design decision is to reduce the blast radius in the worst
 
 ## Protocol
 
-*Please note that we are in the process of moving to a 128-byte header to implement Viewstamped Replication.*
-
 The current TCP wire protocol is:
 
 * a fixed-size header that can be used for requests or responses,
 * followed by variable-length data.
 
 ```
-HEADER (64 bytes)
-16 bytes CHECKSUM META (remaining HEADER)
-16 bytes CHECKSUM DATA
-16 bytes ID (to match responses to requests and enable multiplexing in future)
- 8 bytes MAGIC (for protocol versioning)
- 4 bytes COMMAND
- 4 bytes SIZE (of DATA if any)
-DATA (multiple of 64 bytes)
+HEADER (128 bytes)
+16 bytes CHECKSUM (of remaining HEADER)
+16 bytes CHECKSUM BODY
+[...see src/vr.zig for the rest of the Header definition...]
+DATA (multiples of 64 bytes)
 ................................................................................
 ................................................................................
 ................................................................................
@@ -304,27 +289,14 @@ The `DATA` in **the response** to a `create_transfer` command looks like this:
 
 ### Protocol Design Decisions
 
-The header is a multiple of 64 bytes because we want to keep the subsequent data
-aligned to 64-byte cache line boundaries. We don't want any structure to
-straddle multiple cache lines unnecessarily.
+The header is a multiple of 128 bytes because we want to keep the subsequent data aligned to 64-byte cache line boundaries. We don't want any structure to straddle multiple cache lines unnecessarily.
 
-We order the header struct as we do to keep any future C implementations
-padding-free.
-
-The ID means we can switch to any reliable, unordered protocol in future. This
-is useful where you want to multiplex messages with different priorities. For
-example, huge batches would cause head-of-line blocking on a TCP connection,
-blocking critical control-plane messages.
-
-The MAGIC means we can do backwards-incompatible upgrades incrementally, without
-shutting down the whole TigerBeetle system. The MAGIC also lets us discard any
-obviously bad traffic without doing any checksum calculations.
+We order the header struct as we do to keep any future C implementations padding-free.
 
 We use BLAKE3 as our checksum, truncating the checksum to 128 bits.
 
-The reason we use two checksums instead of only a single checksum across header
-and data is that we need a reliable way to know the size of the data to expect,
-before we start receiving the data.
+The reason we use two checksums instead of only a single checksum across header and data is that we
+need a reliable way to know the size of the data to expect, before we start receiving the data.
 
 Here is an example showing the risk of a single checksum for the recipient:
 
@@ -414,3 +386,5 @@ of Hours of Disk and SSD Deployments](https://www.usenix.org/system/files/confer
 * [SDC 2018 - Protocol-Aware Recovery for Consensus-Based Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs) - Why replicated state machines need to distinguish between a crash and corruption, and why it would be disastrous to truncate the journal when encountering a checksum mismatch.
 
 * [Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf) - Why we use Direct I/O in TigerBeetle and why the kernel page cache is a dangerous way to recover the journal, even when restarting from an fsync() failure panic.
+
+* [Coil's Mojaloop Performance Work 2020](https://docs.mojaloop.io/documentation/discussions/Mojaloop%20Performance%202020.pdf) - By Don Changfoot and Joran Dirk Greef, a performance analysis of Mojaloop's central ledger that sparked the idea for "an accounting database" as Adrian Hope-Bailie put it. And the rest, as they say, is history!
