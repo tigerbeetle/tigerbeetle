@@ -5,63 +5,72 @@ pub const config = @import("config.zig");
 
 pub const Account = packed struct {
     id: u128,
-    custom: u128,
+    /// Opaque third-party identifier to link this account (many-to-one) to an external entity:
+    user_data: u128,
+    /// Reserved for accounting policy primitives:
+    reserved: [48]u8,
+    unit: u16,
+    /// A chart of accounts code describing the type of account (e.g. clearing, settlement):
+    code: u16,
     flags: AccountFlags,
-    unit: u64,
-    debit_reserved: u64,
-    debit_accepted: u64,
-    credit_reserved: u64,
-    credit_accepted: u64,
-    debit_reserved_limit: u64,
-    debit_accepted_limit: u64,
-    credit_reserved_limit: u64,
-    credit_accepted_limit: u64,
-    padding: u64 = 0,
+    debits_reserved: u64,
+    debits_accepted: u64,
+    credits_reserved: u64,
+    credits_accepted: u64,
     timestamp: u64 = 0,
 
-    pub fn exceeds(balance: u64, amount: u64, limit: u64) bool {
-        return limit > 0 and balance + amount > limit;
+    comptime {
+        assert(@sizeOf(Account) == 128);
     }
 
-    pub fn exceeds_debit_reserved_limit(self: *const Account, amount: u64) bool {
-        return Account.exceeds(self.debit_reserved, amount, self.debit_reserved_limit);
+    pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
+        return (self.flags.debits_must_not_exceed_credits and
+            self.debits_reserved + self.debits_accepted + amount > self.credits_accepted);
     }
 
-    pub fn exceeds_debit_accepted_limit(self: *const Account, amount: u64) bool {
-        return Account.exceeds(self.debit_accepted, amount, self.debit_accepted_limit);
-    }
-
-    pub fn exceeds_credit_reserved_limit(self: *const Account, amount: u64) bool {
-        return Account.exceeds(self.credit_reserved, amount, self.credit_reserved_limit);
-    }
-
-    pub fn exceeds_credit_accepted_limit(self: *const Account, amount: u64) bool {
-        return Account.exceeds(self.credit_accepted, amount, self.credit_accepted_limit);
+    pub fn credits_exceed_debits(self: *const Account, amount: u64) bool {
+        return (self.flags.credits_must_not_exceed_debits and
+            self.credits_reserved + self.credits_accepted + amount > self.debits_accepted);
     }
 
     pub fn jsonStringify(self: Account, options: std.json.StringifyOptions, writer: anytype) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"id\":{},", .{self.id});
-        try std.fmt.format(writer, "\"custom\":\"{x:0>32}\",", .{self.custom});
+        try std.fmt.format(writer, "\"user_data\":\"{x:0>32}\",", .{self.user_data});
+        try std.fmt.format(writer, "\"reserved\":\"{x:0>48}\",", .{self.reserved});
+        try std.fmt.format(writer, "\"unit\":{},", .{self.unit});
+        try std.fmt.format(writer, "\"code\":{},", .{self.code});
         try writer.writeAll("\"flags\":");
         try std.json.stringify(self.flags, .{}, writer);
         try writer.writeAll(",");
-        try std.fmt.format(writer, "\"unit\":{},", .{self.unit});
-        try std.fmt.format(writer, "\"debit_reserved\":{},", .{self.debit_reserved});
-        try std.fmt.format(writer, "\"debit_accepted\":{},", .{self.debit_accepted});
-        try std.fmt.format(writer, "\"credit_reserved\":{},", .{self.credit_reserved});
-        try std.fmt.format(writer, "\"credit_accepted\":{},", .{self.credit_accepted});
-        try std.fmt.format(writer, "\"debit_reserved_limit\":{},", .{self.debit_reserved_limit});
-        try std.fmt.format(writer, "\"debit_accepted_limit\":{},", .{self.debit_accepted_limit});
-        try std.fmt.format(writer, "\"credit_reserved_limit\":{},", .{self.credit_reserved_limit});
-        try std.fmt.format(writer, "\"credit_accepted_limit\":{},", .{self.credit_accepted_limit});
+        try std.fmt.format(writer, "\"debits_reserved\":{},", .{self.debits_reserved});
+        try std.fmt.format(writer, "\"debits_accepted\":{},", .{self.debits_accepted});
+        try std.fmt.format(writer, "\"credits_reserved\":{},", .{self.credits_reserved});
+        try std.fmt.format(writer, "\"credits_accepted\":{},", .{self.credits_accepted});
         try std.fmt.format(writer, "\"timestamp\":\"{}\"", .{self.timestamp});
         try writer.writeAll("}");
     }
 };
 
 pub const AccountFlags = packed struct {
-    padding: u64 = 0,
+    /// When the .linked flag is specified, it links an event with the next event in the batch, to
+    /// create a chain of events, of arbitrary length, which all succeed or fail together. The tail
+    /// of a chain is denoted by the first event without this flag. The last event in a batch may
+    /// therefore never have the .linked flag set as this would leave a chain open-ended. Multiple
+    /// chains or individual events may coexist within a batch to succeed or fail independently.
+    /// Events within a chain are executed within order, or are rolled back on error, so that the
+    /// effect of each event in the chain is visible to the next, and so that the chain is either
+    /// visible or invisible as a unit to subsequent events after the chain. The event that was the
+    /// first to break the chain will have a unique error result. Other events in the chain will
+    /// have their error result set to .linked_event_failed.
+    linked: bool = false,
+    debits_must_not_exceed_credits: bool = false,
+    credits_must_not_exceed_debits: bool = false,
+    padding: u29 = 0,
+
+    comptime {
+        assert(@sizeOf(AccountFlags) == @sizeOf(u32));
+    }
 
     pub fn jsonStringify(
         self: AccountFlags,
@@ -76,13 +85,20 @@ pub const Transfer = packed struct {
     id: u128,
     debit_account_id: u128,
     credit_account_id: u128,
-    custom_1: u128,
-    custom_2: u128,
-    custom_3: u128,
+    /// Opaque third-party identifier to link this transfer (many-to-one) to an external entity:
+    user_data: u128,
+    /// Reserved for accounting policy primitives:
+    reserved: [32]u8,
+    timeout: u64,
+    /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement):
+    code: u32,
     flags: TransferFlags,
     amount: u64,
-    timeout: u64,
     timestamp: u64 = 0,
+
+    comptime {
+        assert(@sizeOf(Transfer) == 128);
+    }
 
     pub fn jsonStringify(
         self: Transfer,
@@ -93,9 +109,9 @@ pub const Transfer = packed struct {
         try std.fmt.format(writer, "\"id\":{},", .{self.id});
         try std.fmt.format(writer, "\"debit_account_id\":{},", .{self.debit_account_id});
         try std.fmt.format(writer, "\"credit_account_id\":{},", .{self.credit_account_id});
-        try std.fmt.format(writer, "\"custom_1\":\"{x:0>32}\",", .{self.custom_1});
-        try std.fmt.format(writer, "\"custom_2\":\"{x:0>32}\",", .{self.custom_2});
-        try std.fmt.format(writer, "\"custom_3\":\"{x:0>32}\",", .{self.custom_3});
+        try std.fmt.format(writer, "\"user_data\":\"{x:0>32}\",", .{self.user_data});
+        try std.fmt.format(writer, "\"reserved\":\"{x:0>64}\",", .{self.reserved});
+        try std.fmt.format(writer, "\"code\":{},", .{self.code});
         try writer.writeAll("\"flags\":");
         try std.json.stringify(self.flags, .{}, writer);
         try writer.writeAll(",");
@@ -107,11 +123,14 @@ pub const Transfer = packed struct {
 };
 
 pub const TransferFlags = packed struct {
-    accept: bool = false,
-    reject: bool = false,
-    auto_commit: bool = false,
+    linked: bool = false,
+    two_phase_commit: bool = false,
     condition: bool = false,
-    padding: u60 = 0,
+    padding: u29 = 0,
+
+    comptime {
+        assert(@sizeOf(TransferFlags) == @sizeOf(u32));
+    }
 
     pub fn jsonStringify(
         self: TransferFlags,
@@ -129,11 +148,16 @@ pub const TransferFlags = packed struct {
 
 pub const Commit = packed struct {
     id: u128,
-    custom_1: u128,
-    custom_2: u128,
-    custom_3: u128,
+    /// Reserved for accounting policy primitives:
+    reserved: [32]u8,
+    /// A chart of accounts code describing the reason for the accept/reject:
+    code: u32,
     flags: CommitFlags,
     timestamp: u64 = 0,
+
+    comptime {
+        assert(@sizeOf(Commit) == 64);
+    }
 
     pub fn jsonStringify(
         self: Commit,
@@ -142,9 +166,8 @@ pub const Commit = packed struct {
     ) !void {
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"id\":{},", .{self.id});
-        try std.fmt.format(writer, "\"custom_1\":{},", .{self.custom_1});
-        try std.fmt.format(writer, "\"custom_2\":{},", .{self.custom_2});
-        try std.fmt.format(writer, "\"custom_3\":{},", .{self.custom_3});
+        try std.fmt.format(writer, "\"reserved\":\"{x:0>64}\",", .{self.reserved});
+        try std.fmt.format(writer, "\"code\":{},", .{self.code});
         try writer.writeAll("\"flags\":");
         try std.json.stringify(self.flags, .{}, writer);
         try writer.writeAll(",");
@@ -154,10 +177,14 @@ pub const Commit = packed struct {
 };
 
 pub const CommitFlags = packed struct {
-    accept: bool = false,
+    linked: bool = false,
     reject: bool = false,
     preimage: bool = false,
-    padding: u61 = 0,
+    padding: u29 = 0,
+
+    comptime {
+        assert(@sizeOf(CommitFlags) == @sizeOf(u32));
+    }
 
     pub fn jsonStringify(
         self: CommitFlags,
@@ -174,36 +201,34 @@ pub const CommitFlags = packed struct {
 
 pub const CreateAccountResult = packed enum(u32) {
     ok,
+    linked_event_failed,
     exists,
+    exists_with_different_user_data,
+    exists_with_different_reserved_field,
     exists_with_different_unit,
-    exists_with_different_limits,
-    exists_with_different_custom_field,
+    exists_with_different_code,
     exists_with_different_flags,
-    reserved_field_custom,
-    reserved_field_padding,
-    reserved_field_timestamp,
+    exceeds_credits,
+    exceeds_debits,
+    reserved_field,
     reserved_flag_padding,
-    exceeds_debit_reserved_limit,
-    exceeds_debit_accepted_limit,
-    exceeds_credit_reserved_limit,
-    exceeds_credit_accepted_limit,
-    debit_reserved_limit_exceeds_debit_accepted_limit,
-    credit_reserved_limit_exceeds_credit_accepted_limit,
 };
 
 pub const CreateTransferResult = packed enum(u32) {
     ok,
+    linked_event_failed,
     exists,
     exists_with_different_debit_account_id,
     exists_with_different_credit_account_id,
-    exists_with_different_custom_fields,
+    exists_with_different_user_data,
+    exists_with_different_reserved_field,
+    exists_with_different_code,
     exists_with_different_amount,
     exists_with_different_timeout,
     exists_with_different_flags,
     exists_and_already_committed_and_accepted,
     exists_and_already_committed_and_rejected,
-    reserved_field_custom,
-    reserved_field_timestamp,
+    reserved_field,
     reserved_flag_padding,
     reserved_flag_accept,
     reserved_flag_reject,
@@ -212,22 +237,19 @@ pub const CreateTransferResult = packed enum(u32) {
     accounts_are_the_same,
     accounts_have_different_units,
     amount_is_zero,
-    exceeds_debit_reserved_limit,
-    exceeds_debit_accepted_limit,
-    exceeds_credit_reserved_limit,
-    exceeds_credit_accepted_limit,
-    auto_commit_must_accept,
-    auto_commit_cannot_timeout,
+    exceeds_credits,
+    exceeds_debits,
+    two_phase_commit_must_timeout,
+    timeout_reserved_for_two_phase_commit,
 };
 
 pub const CommitTransferResult = packed enum(u32) {
     ok,
-    reserved_field_custom,
-    reserved_field_timestamp,
+    linked_event_failed,
+    reserved_field,
     reserved_flag_padding,
-    commit_must_accept_or_reject,
-    commit_cannot_accept_and_reject,
     transfer_not_found,
+    transfer_not_two_phase_commit,
     transfer_expired,
     already_auto_committed,
     already_committed,
@@ -237,16 +259,20 @@ pub const CommitTransferResult = packed enum(u32) {
     credit_account_not_found,
     debit_amount_was_not_reserved,
     credit_amount_was_not_reserved,
-    exceeds_debit_accepted_limit,
-    exceeds_credit_accepted_limit,
+    exceeds_credits,
+    exceeds_debits,
     condition_requires_preimage,
     preimage_requires_condition,
     preimage_invalid,
 };
 
-pub const CreateAccountResults = packed struct {
+pub const CreateAccountsResult = packed struct {
     index: u32,
     result: CreateAccountResult,
+
+    comptime {
+        assert(@sizeOf(CreateAccountsResult) == 8);
+    }
 
     pub fn jsonStringify(
         self: CreateAccountResults,
@@ -260,9 +286,13 @@ pub const CreateAccountResults = packed struct {
     }
 };
 
-pub const CreateTransferResults = packed struct {
+pub const CreateTransfersResult = packed struct {
     index: u32,
     result: CreateTransferResult,
+
+    comptime {
+        assert(@sizeOf(CreateTransfersResult) == 8);
+    }
 
     pub fn jsonStringify(
         self: CreateTransferResults,
@@ -276,9 +306,13 @@ pub const CreateTransferResults = packed struct {
     }
 };
 
-pub const CommitTransferResults = packed struct {
+pub const CommitTransfersResult = packed struct {
     index: u32,
     result: CommitTransferResult,
+
+    comptime {
+        assert(@sizeOf(CommitTransfersResult) == 8);
+    }
 
     pub fn jsonStringify(
         self: CommitTransferResults,
@@ -299,18 +333,4 @@ comptime {
     if (std.Target.current.cpu.arch.endian() != std.builtin.Endian.Little) {
         @compileError("big-endian systems not supported");
     }
-}
-
-const testing = std.testing;
-
-test "data structure sizes" {
-    testing.expectEqual(@as(usize, 8), @sizeOf(AccountFlags));
-    testing.expectEqual(@as(usize, 128), @sizeOf(Account));
-    testing.expectEqual(@as(usize, 8), @sizeOf(TransferFlags));
-    testing.expectEqual(@as(usize, 128), @sizeOf(Transfer));
-    testing.expectEqual(@as(usize, 8), @sizeOf(CommitFlags));
-    testing.expectEqual(@as(usize, 80), @sizeOf(Commit));
-    testing.expectEqual(@as(usize, 8), @sizeOf(CreateAccountResults));
-    testing.expectEqual(@as(usize, 8), @sizeOf(CreateTransferResults));
-    testing.expectEqual(@as(usize, 8), @sizeOf(CommitTransferResults));
 }

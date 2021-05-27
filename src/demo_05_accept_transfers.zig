@@ -10,19 +10,17 @@ pub fn main() !void {
     var commits = [_]Commit{
         Commit{
             .id = 1001,
-            .custom_1 = 0,
-            .custom_2 = 0,
-            .custom_3 = 0,
-            .flags = .{ .accept = true },
+            .reserved = [_]u8{0} ** 32,
+            .code = 0,
+            .flags = .{},
         },
         Commit{
             .id = 1002,
-            .custom_1 = 0,
-            .custom_2 = 0,
-            .custom_3 = 0,
-            .flags = .{ .accept = true },
+            .reserved = [_]u8{0} ** 32,
+            .code = 0,
+            .flags = .{},
         },
     };
 
-    try send(fd, .commit_transfers, commits, CommitTransferResults);
+    try send(fd, .commit_transfers, commits, CommitTransfersResult);
 }

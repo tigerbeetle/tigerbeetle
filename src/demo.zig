@@ -1,5 +1,4 @@
 const std = @import("std");
-const log = std.log;
 const assert = std.debug.assert;
 
 usingnamespace @import("tigerbeetle.zig");
@@ -13,11 +12,38 @@ pub fn connect(port: u16) !std.os.fd_t {
     return connection.handle;
 }
 
+// TODO We can share most of what follows with `src/benchmark.zig`:
+
 pub const cluster_id: u128 = 746649394563965214; // a5ca1ab1ebee11e
 pub const client_id: u128 = 123;
 pub var request_number: u32 = 0;
+var sent_ping = false;
 
 pub fn send(fd: std.os.fd_t, operation: Operation, batch: anytype, Results: anytype) !void {
+    // This is required to greet the cluster and identify the connection as being from a client:
+    if (!sent_ping) {
+        sent_ping = true;
+
+        var ping = Header{
+            .command = .ping,
+            .cluster = cluster_id,
+            .client = client_id,
+            .view = 0,
+        };
+        ping.set_checksum_body(&[0]u8{});
+        ping.set_checksum();
+
+        assert((try std.os.sendto(fd, std.mem.asBytes(&ping), 0, null, 0)) == @sizeOf(Header));
+
+        var pong: [@sizeOf(Header)]u8 = undefined;
+        var pong_size: u64 = 0;
+        while (pong_size < @sizeOf(Header)) {
+            var pong_bytes = try std.os.recvfrom(fd, pong[pong_size..], 0, null, null);
+            if (pong_bytes == 0) @panic("server closed the connection (while waiting for pong)");
+            pong_size += pong_bytes;
+        }
+    }
+
     request_number += 1;
 
     var body = std.mem.asBytes(batch[0..]);
@@ -50,7 +76,7 @@ pub fn send(fd: std.os.fd_t, operation: Operation, batch: anytype, Results: anyt
     //const stdout = std.io.getStdOut().writer();
     //try response.jsonStringify(.{}, stdout);
     //try stdout.writeAll("\n");
-    log.info("{}", .{response});
+    std.debug.print("{}\n", .{response});
 
     assert(response.valid_checksum());
     assert(recv_bytes >= response.size);
@@ -62,6 +88,6 @@ pub fn send(fd: std.os.fd_t, operation: Operation, batch: anytype, Results: anyt
         // TODO
         //try result.jsonStringify(.{}, stdout);
         //try stdout.writeAll("\n");
-        log.info("{}", .{result});
+        std.debug.print("{}\n", .{result});
     }
 }

@@ -21,7 +21,12 @@ pub fn main() !void {
     const args = cli.parse_args(arena);
 
     var io = try IO.init(128, 0);
-    var state_machine = try StateMachine.init(arena, config.accounts_max, config.transfers_max);
+    var state_machine = try StateMachine.init(
+        arena,
+        config.accounts_max,
+        config.transfers_max,
+        config.commits_max,
+    );
     var storage = try Storage.init(arena, config.journal_size_max);
     var journal = try Journal.init(
         arena,

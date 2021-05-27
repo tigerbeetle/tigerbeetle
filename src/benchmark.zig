@@ -9,31 +9,27 @@ pub const Operation = @import("state_machine.zig").Operation;
 var accounts = [_]Account{
     Account{
         .id = 1,
-        .custom = 0,
-        .flags = .{},
+        .user_data = 0,
+        .reserved = [_]u8{0} ** 48,
         .unit = 2,
-        .debit_reserved = 0,
-        .debit_accepted = 0,
-        .credit_reserved = 0,
-        .credit_accepted = 0,
-        .debit_reserved_limit = 1000_000_000,
-        .debit_accepted_limit = 1000_000_000,
-        .credit_reserved_limit = 0,
-        .credit_accepted_limit = 0,
+        .code = 0,
+        .flags = .{},
+        .debits_reserved = 0,
+        .debits_accepted = 0,
+        .credits_reserved = 0,
+        .credits_accepted = 0,
     },
     Account{
         .id = 2,
-        .custom = 0,
-        .flags = .{},
+        .user_data = 0,
+        .reserved = [_]u8{0} ** 48,
         .unit = 2,
-        .debit_reserved = 0,
-        .debit_accepted = 0,
-        .credit_reserved = 0,
-        .credit_accepted = 0,
-        .debit_reserved_limit = 0,
-        .debit_accepted_limit = 0,
-        .credit_reserved_limit = 1000_000_000,
-        .credit_accepted_limit = 1000_000_000,
+        .code = 0,
+        .flags = .{},
+        .debits_reserved = 0,
+        .debits_accepted = 0,
+        .credits_reserved = 0,
+        .credits_accepted = 0,
     },
 };
 
@@ -48,12 +44,12 @@ pub fn main() !void {
             .id = index,
             .debit_account_id = accounts[0].id,
             .credit_account_id = accounts[1].id,
-            .custom_1 = 0,
-            .custom_2 = 0,
-            .custom_3 = 0,
-            .flags = .{},
+            .user_data = 0,
+            .reserved = [_]u8{0} ** 32,
+            .code = 0,
+            .flags = .{ .two_phase_commit = true },
             .amount = 1,
-            .timeout = 0,
+            .timeout = std.time.ns_per_hour,
         };
     }
 
@@ -62,9 +58,8 @@ pub fn main() !void {
     for (commits) |*commit, index| {
         commit.* = .{
             .id = index,
-            .custom_1 = 0,
-            .custom_2 = 0,
-            .custom_3 = 0,
+            .reserved = [_]u8{0} ** 32,
+            .code = 0,
             .flags = .{ .accept = true },
         };
     }
@@ -78,7 +73,7 @@ pub fn main() !void {
 
     // Create our two accounts if necessary:
     std.debug.print("creating accounts...\n", .{});
-    try send(fd, .create_accounts, std.mem.asBytes(accounts[0..]), CreateAccountResults);
+    try send(fd, .create_accounts, std.mem.asBytes(accounts[0..]), CreateAccountsResult);
 
     // Start the benchmark:
     const start = std.time.milliTimestamp();
@@ -93,7 +88,7 @@ pub fn main() !void {
             fd,
             .create_transfers,
             std.mem.asBytes(batch_transfers[0..]),
-            CreateTransferResults,
+            CreateTransfersResult,
         );
 
         const ms2 = std.time.milliTimestamp();
@@ -104,7 +99,7 @@ pub fn main() !void {
 
         // Commit this batch:
         var batch_commits = commits[offset..][0..10000];
-        try send(fd, .commit_transfers, std.mem.asBytes(batch_commits[0..]), CommitTransferResults);
+        try send(fd, .commit_transfers, std.mem.asBytes(batch_commits[0..]), CommitTransfersResult);
 
         const ms3 = std.time.milliTimestamp();
         var commit_transfers_latency = ms3 - ms2;
@@ -135,8 +130,33 @@ pub fn main() !void {
 const cluster_id: u128 = 746649394563965214; // a5ca1ab1ebee11e
 const client_id: u128 = 123;
 var request_number: u32 = 0;
+var sent_ping = false;
 
 fn send(fd: std.os.fd_t, operation: Operation, body: []u8, comptime Result: anytype) !void {
+    // This is required to greet the cluster and identify the connection as being from a client:
+    if (!sent_ping) {
+        sent_ping = true;
+
+        var ping = Header{
+            .command = .ping,
+            .cluster = cluster_id,
+            .client = client_id,
+            .view = 0,
+        };
+        ping.set_checksum_body(&[0]u8{});
+        ping.set_checksum();
+
+        assert((try std.os.sendto(fd, std.mem.asBytes(&ping), 0, null, 0)) == @sizeOf(Header));
+
+        var pong: [@sizeOf(Header)]u8 = undefined;
+        var pong_size: u64 = 0;
+        while (pong_size < @sizeOf(Header)) {
+            var pong_bytes = try std.os.recvfrom(fd, pong[pong_size..], 0, null, null);
+            if (pong_bytes == 0) @panic("server closed the connection (while waiting for pong)");
+            pong_size += pong_bytes;
+        }
+    }
+
     request_number += 1;
 
     var request = Header{
