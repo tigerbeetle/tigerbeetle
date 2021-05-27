@@ -178,10 +178,9 @@ pub const Commit = packed struct {
 
 pub const CommitFlags = packed struct {
     linked: bool = false,
-    accept: bool = false,
     reject: bool = false,
     preimage: bool = false,
-    padding: u28 = 0,
+    padding: u29 = 0,
 
     comptime {
         assert(@sizeOf(CommitFlags) == @sizeOf(u32));
@@ -249,8 +248,6 @@ pub const CommitTransferResult = packed enum(u32) {
     linked_event_failed,
     reserved_field,
     reserved_flag_padding,
-    commit_must_accept_or_reject,
-    commit_cannot_accept_and_reject,
     transfer_not_found,
     transfer_not_two_phase_commit,
     transfer_expired,

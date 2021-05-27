@@ -372,8 +372,6 @@ pub const StateMachine = struct {
 
         if (!c.flags.preimage and !zeroed_32_bytes(c.reserved)) return .reserved_field;
         if (c.flags.padding != 0) return .reserved_flag_padding;
-        if (!c.flags.accept and !c.flags.reject) return .commit_must_accept_or_reject;
-        if (c.flags.accept and c.flags.reject) return .commit_cannot_accept_and_reject;
 
         var t = self.get_transfer(c.id) orelse return .transfer_not_found;
         assert(c.timestamp > t.timestamp);
@@ -381,8 +379,8 @@ pub const StateMachine = struct {
         if (!t.flags.two_phase_commit) return .transfer_not_two_phase_commit;
 
         if (self.get_commit(c.id)) |exists| {
-            if (exists.flags.accept and c.flags.reject) return .already_committed_but_accepted;
-            if (exists.flags.reject and c.flags.accept) return .already_committed_but_rejected;
+            if (!exists.flags.reject and c.flags.reject) return .already_committed_but_accepted;
+            if (exists.flags.reject and !c.flags.reject) return .already_committed_but_rejected;
             return .already_committed;
         }
 
@@ -416,11 +414,9 @@ pub const StateMachine = struct {
             insert.entry.value = c;
             dr.debits_reserved -= t.amount;
             cr.credits_reserved -= t.amount;
-            if (c.flags.accept) {
+            if (!c.flags.reject) {
                 dr.debits_accepted += t.amount;
                 cr.credits_accepted += t.amount;
-            } else {
-                assert(c.flags.reject);
             }
             self.commit_timestamp = c.timestamp;
             return .ok;
@@ -433,11 +429,9 @@ pub const StateMachine = struct {
         var cr = self.get_account(t.credit_account_id).?;
         dr.debits_reserved += t.amount;
         cr.credits_reserved += t.amount;
-        if (c.flags.accept) {
+        if (!c.flags.reject) {
             dr.debits_accepted -= t.amount;
             cr.credits_accepted -= t.amount;
-        } else {
-            assert(c.flags.reject);
         }
         self.commits.removeAssertDiscard(c.id);
     }
