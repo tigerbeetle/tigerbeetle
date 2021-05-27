@@ -76,7 +76,7 @@ pub const connections_max = 32;
 pub const message_size_max = 4 * 1024 * 1024;
 
 /// The number of full-sized messages allocated at initialization by the message bus.
-pub const message_bus_messages_max = connections_max * 2;
+pub const message_bus_messages_max = connections_max * 4;
 /// The number of header-sized messages allocated at initialization by the message bus.
 /// These are much smaller/cheaper and we can therefore have many of them.
 pub const message_bus_headers_max = connections_max * connection_send_queue_max;
