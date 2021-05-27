@@ -12,13 +12,13 @@ pub fn main() !void {
             .id = 1001,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = .{ .accept = true },
+            .flags = .{},
         },
         Commit{
             .id = 1002,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = .{ .accept = true },
+            .flags = .{},
         },
     };
 
