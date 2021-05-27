@@ -48,13 +48,17 @@ pub const Client = struct {
 
     pub fn init(
         allocator: *mem.Allocator,
-        id: u128,
         cluster: u128,
         replica_count: u16,
         message_bus: *MessageBus,
     ) !Client {
-        assert(id > 0);
         assert(cluster > 0);
+        assert(replica_count > 0);
+
+        // We require the client ID to be non-zero for client requests.
+        // The probability of this actually being zero is unlikely (more likely a CSPRNG bug):
+        var id = std.crypto.random.int(u128);
+        assert(id > 0);
 
         var self = Client{
             .allocator = allocator,
