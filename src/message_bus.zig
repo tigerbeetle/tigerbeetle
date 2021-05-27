@@ -617,9 +617,11 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 bus.replicas_connect_attempts[self.peer.replica] = 0;
 
                 self.assert_recv_send_initial_state(bus);
+                // This will terminate the connection if there are no messages available:
                 self.get_recv_message_and_recv(bus);
                 // A message may have been queued for sending while we were connecting:
-                self.send(bus);
+                // TODO Should we relax recv() and send() to return if `self.state != .connected`?
+                if (self.state == .connected) self.send(bus);
             }
 
             /// Given a newly accepted fd, start receiving messages on it.
@@ -905,6 +907,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             }
 
             /// Acquires a free message if necessary and then calls `recv()`.
+            /// Terminates the connection if a free message cannot be obtained.
             /// If the connection has a `recv_message` and the message being parsed is
             /// at pole position then calls `recv()` immediately, otherwise copies any
             /// partially received message into a new Message and sets `recv_message`,
@@ -1016,6 +1019,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     self.maybe_close(bus);
                     return;
                 }
+                assert(self.state == .connected);
                 self.send_progress += result catch |err| {
                     // TODO: maybe don't need to close on *every* error
                     log.err("error sending message to replica at {}: {}", .{ self.peer, err });
