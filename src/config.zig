@@ -95,6 +95,8 @@ pub const connection_delay_max = 1000;
 pub const connection_send_queue_max = 3;
 
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
+/// If the backlog argument is greater than the value in `/proc/sys/net/core/somaxconn`, then it is
+/// silently truncated to that value. Since Linux 5.4, the default in this file is 4096.
 pub const tcp_backlog = 64;
 
 /// The maximum size of a kernel socket receive buffer in bytes (or 0 to use the system default):
