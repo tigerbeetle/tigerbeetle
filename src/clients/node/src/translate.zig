@@ -58,11 +58,11 @@ pub fn create_external(env: c.napi_env, context: *c_void) !c.napi_value {
 
 pub fn value_external(
     env: c.napi_env,
-    val: c.napi_value,
+    value: c.napi_value,
     comptime error_message: [*:0]const u8,
 ) !?*c_void {
     var result: ?*c_void = undefined;
-    if (c.napi_get_value_external(env, val, &result) != .napi_ok) {
+    if (c.napi_get_value_external(env, value, &result) != .napi_ok) {
         return throw(env, error_message);
     }
 
@@ -76,15 +76,15 @@ pub const UserData = packed struct {
 
 /// This will create a reference in V8 with a ref_count of 1.
 /// This reference will be destroyed when we return the server response to JS.
-pub fn user_data_from_value(env: c.napi_env, val: c.napi_value) !UserData {
+pub fn user_data_from_value(env: c.napi_env, value: c.napi_value) !UserData {
     var callback_type: c.napi_valuetype = undefined;
-    if (c.napi_typeof(env, val, &callback_type) != .napi_ok) {
+    if (c.napi_typeof(env, value, &callback_type) != .napi_ok) {
         return throw(env, "Failed to check callback type.");
     }
     if (callback_type != .napi_function) return throw(env, "Callback must be a Function.");
 
     var callback_reference: c.napi_ref = undefined;
-    if (c.napi_create_reference(env, val, 1, &callback_reference) != .napi_ok) {
+    if (c.napi_create_reference(env, value, 1, &callback_reference) != .napi_ok) {
         return throw(env, "Failed to create reference to callback.");
     }
 
@@ -113,18 +113,44 @@ pub fn buffer_from_object(
         return throw(env, key ++ " must be defined");
     }
 
+    return buffer_from_value(env, property, key);
+}
+
+pub fn buffer_from_value(
+    env: c.napi_env,
+    value: c.napi_value,
+    comptime key: [*:0]const u8,
+) ![] u8 {
     var is_buffer: bool = undefined;
-    assert(c.napi_is_buffer(env, property, &is_buffer) == .napi_ok);
+    assert(c.napi_is_buffer(env, value, &is_buffer) == .napi_ok);
 
     if (!is_buffer) return throw(env, key ++ " must be a buffer");
 
     var data: ?*c_void = null;
     var data_length: usize = undefined;
-    assert(c.napi_get_buffer_info(env, property, &data, &data_length) == .napi_ok);
+    assert(c.napi_get_buffer_info(env, value, &data, &data_length) == .napi_ok);
 
     if (data_length < 1) return throw(env, key ++ " must not be empty");
 
     return @ptrCast([*]u8, data.?)[0..data_length];
+}
+
+pub fn copy_buffer_of_length_from_object(env: c.napi_env, object: c.napi_value, comptime length: u8, comptime key: [:0]const u8) ![length]u8 {
+    var property: c.napi_value = undefined;
+    if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
+        return throw(env, key ++ " must be defined");
+    }
+
+    const data = try buffer_from_value(env, property, key);
+    if (data.len != length) {
+        return throw(env, key ++ " has incorrect length.");
+    }
+
+    // copy this out of V8 as the underlying data lifetime is not guaranteed.
+    var result: [length]u8 = undefined;
+    std.mem.copy(u8, result[0..], data[0..]);
+
+    return result;
 }
 
 pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u128 {
@@ -136,22 +162,22 @@ pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0
     return u128_from_value(env, property, key);
 }
 
-pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [*:0]const u8) !u64 {
+pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u64 {
     var property: c.napi_value = undefined;
     if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
-    var result: u64 = undefined;
-    var lossless: bool = undefined;
-    switch (c.napi_get_value_bigint_uint64(env, property, &result, &lossless)) {
-        .napi_ok => {},
-        .napi_bigint_expected => return throw(env, key ++ " must be an unsigned 64-bit BigInt"),
-        else => unreachable,
-    }
-    if (!lossless) return throw(env, key ++ " conversion was lossy");
+    return u64_from_value(env, property, key);
+}
 
-    return result;
+pub fn u32_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u32 {
+    var property: c.napi_value = undefined;
+    if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
+        return throw(env, key ++ " must be defined");
+    }
+
+    return u32_from_value(env, property, key);
 }
 
 pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]const u8) !u128 {
@@ -174,24 +200,55 @@ pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]
     return result;
 }
 
-pub fn u32_from_value(env: c.napi_env, val: c.napi_value, comptime key: [*:0]const u8) !u32 {
+pub fn u64_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]const u8) !u64 {
+    var result: u64 = undefined;
+    var lossless: bool = undefined;
+    switch (c.napi_get_value_bigint_uint64(env, value, &result, &lossless)) {
+        .napi_ok => {},
+        .napi_bigint_expected => return throw(env, name ++ " must be an unsigned 64-bit BigInt"),
+        else => unreachable,
+    }
+    if (!lossless) return throw(env, name ++ " conversion was lossy");
+
+    return result;
+}
+ 
+pub fn u32_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]const u8) !u32 {
     var result: u32 = undefined;
     // TODO Check whether this will coerce signed numbers to a u32:
     // In that case we need to use the appropriate napi method to do more type checking here.
     // We want to make sure this is: unsigned, and an integer.
-    switch (c.napi_get_value_uint32(env, val, &result)) {
+    switch (c.napi_get_value_uint32(env, value, &result)) {
         .napi_ok => {},
-        .napi_number_expected => return throw(env, key ++ " must be a number"),
+        .napi_number_expected => return throw(env, name ++ " must be a number"),
         else => unreachable,
     }
     return result;
+}
+
+pub fn byte_slice_into_object(
+    env: c.napi_env,
+    object: c.napi_value,
+    comptime key: [*:0]const u8,
+    value: []const u8,
+    comptime error_message: [*:0]const u8,
+) !void {
+    var result: c.napi_value = undefined;
+    // create a copy that is managed by V8.
+    if (c.napi_create_buffer_copy(env, value.len, value.ptr, null, &result) != .napi_ok) {
+        return throw(env, error_message ++ " Failed to allocate Buffer in V8.");
+    }
+
+    if (c.napi_set_named_property(env, object, key, result) != .napi_ok) {
+        return throw(env, error_message);
+    }
 }
 
 pub fn u128_into_object(
     env: c.napi_env,
     object: c.napi_value,
     comptime key: [*:0]const u8,
-    val: u128,
+    value: u128,
     comptime error_message: [*:0]const u8,
 ) !void {
     // A BigInt's value (using ^ to mean exponent) is (words[0] * (2^64)^0 + words[1] * (2^64)^1 + ...)
@@ -199,7 +256,7 @@ pub fn u128_into_object(
     // V8 says that the words are little endian. If we were on a big endian machine
     // we would need to convert, but big endian is not supported by tigerbeetle.
     var bigint: c.napi_value = undefined;
-    if (c.napi_create_bigint_words(env, 0, 2, @ptrCast(*const [2]u64, &val), &bigint) != .napi_ok) {
+    if (c.napi_create_bigint_words(env, 0, 2, @ptrCast(*const [2]u64, &value), &bigint) != .napi_ok) {
         return throw(env, error_message);
     }
 
@@ -212,11 +269,11 @@ pub fn u64_into_object(
     env: c.napi_env,
     object: c.napi_value,
     comptime key: [*:0]const u8,
-    val: u64,
+    value: u64,
     comptime error_message: [*:0]const u8,
 ) !void {
     var result: c.napi_value = undefined;
-    if (c.napi_create_bigint_uint64(env, val, &result) != .napi_ok) {
+    if (c.napi_create_bigint_uint64(env, value, &result) != .napi_ok) {
         return throw(env, error_message);
     }
 
@@ -229,11 +286,11 @@ pub fn u32_into_object(
     env: c.napi_env,
     object: c.napi_value,
     comptime key: [*:0]const u8,
-    val: u32,
+    value: u32,
     comptime error_message: [*:0]const u8,
 ) !void {
     var result: c.napi_value = undefined;
-    if (c.napi_create_uint32(env, val, &result) != .napi_ok) {
+    if (c.napi_create_uint32(env, value, &result) != .napi_ok) {
         return throw(env, error_message);
     }
 
@@ -253,16 +310,16 @@ pub fn create_object(env: c.napi_env, comptime error_message: [*:0]const u8) !c.
 
 fn create_buffer(
     env: c.napi_env,
-    val: []const u8,
+    value: []const u8,
     comptime error_message: [*:0]const u8,
 ) !c.napi_value {
     var data: ?*c_void = undefined;
     var result: c.napi_value = undefined;
-    if (c.napi_create_buffer(env, val.len, &data, &result) != .napi_ok) {
+    if (c.napi_create_buffer(env, value.len, &data, &result) != .napi_ok) {
         return throw(env, error_message);
     }
 
-    std.mem.copy(u8, @ptrCast([*]u8, data.?)[0..val.len], val[0..val.len]);
+    std.mem.copy(u8, @ptrCast([*]u8, data.?)[0..value.len], value[0..value.len]);
 
     return result;
 }
@@ -284,10 +341,10 @@ pub fn set_array_element(
     env: c.napi_env,
     array: c.napi_value,
     index: u32,
-    val: c.napi_value,
+    value: c.napi_value,
     comptime error_message: [*:0]const u8,
 ) !void {
-    if (c.napi_set_element(env, array, index, val) != .napi_ok) {
+    if (c.napi_set_element(env, array, index, value) != .napi_ok) {
         return throw(env, error_message);
     }
 }

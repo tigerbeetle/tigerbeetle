@@ -7,13 +7,11 @@ interface Binding {
 }
 
 interface BindingInitArgs {
-  client_id: bigint, // u128
   cluster_id: bigint, // u128
   replica_addresses: Buffer,
 }
 
 export interface InitArgs {
-  client_id: bigint, // u128
   cluster_id: bigint, // u128
   replica_addresses: Array<string | number>,
 }
@@ -22,39 +20,39 @@ export type Context = object
 
 export type Account = {
   id: bigint // u128
-  custom: bigint // u128
-  flags: bigint // u64
-  unit: bigint // u64, unit of value
-  debit_accepted: bigint // u64
-  debit_reserved: bigint // u64
-  credit_accepted: bigint // u64
-  credit_reserved: bigint // u64
-  debit_accepted_limit: bigint // u64
-  debit_reserved_limit: bigint // u64
-  credit_accepted_limit: bigint // u64
-  credit_reserved_limit: bigint // u64
+  user_data: bigint // u128
+  reserved: Buffer // [48]u8
+  unit: number // u16, unit of value
+  code: number // u16, A chart of accounts code describing the type of account (e.g. clearing, settlement)
+  flags: number // u32
+  debits_reserved: bigint // u64
+  debits_accepted: bigint // u64
+  credits_reserved: bigint // u64
+  credits_accepted: bigint // u64
 }
 
 export type CreateAccount = Account & {
   timestamp: bigint // u64
 }
 
+export enum CreateAccountFlags {
+  linked = (1 << 0),
+  debits_must_not_exceed_credits = (1 << 1),
+  credits_must_not_exceed_debits = (1 << 2)
+}
+
 export enum CreateAccountError {
-    exists = 1,
+    linked_event_failed = 1,
+    exists,
+    exists_with_different_user_data,
+    exists_with_different_reserved_field,
     exists_with_different_unit,
-    exists_with_different_limits,
-    exists_with_different_custom_field,
+    exists_with_different_code,
     exists_with_different_flags,
-    reserved_field_custom,
-    reserved_field_padding,
-    reserved_field_timestamp,
+    exceeds_credits,
+    exceeds_debits,
+    reserved_field,
     reserved_flag_padding,
-    exceeds_debit_reserved_limit,
-    exceeds_debit_accepted_limit,
-    exceeds_credit_reserved_limit,
-    exceeds_credit_accepted_limit,
-    debit_reserved_limit_exceeds_debit_accepted_limit,
-    credit_reserved_limit_exceeds_credit_accepted_limit,
 }
 
 export type CreateAccountResult = {
@@ -66,32 +64,34 @@ export type CreateTransfer = {
   id: bigint, // u128
   debit_account_id: bigint, // u128
   credit_account_id: bigint, // u128
-  custom_1: bigint, // u128
-  custom_2: bigint, // u128
-  custom_3: bigint, // u128
-  flags: bigint, // u64
-  amount: bigint, // u64
+  user_data: bigint, // u128
+  reserved: Buffer, // [32]u8
   timeout: bigint, // u64, in nano-seconds
+  code: number, // u16 accounting system code to describe the type of transfer (e.g. settlement)
+  flags: number, // u32
+  amount: bigint, // u64,
 }
 
 export enum CreateTransferFlags {
-  accept = (1 << 0),
-  reject = (1 << 1),
-  auto_commit = (1 << 2)
+  linked = (1 << 0),
+  two_phase_commit = (1 << 1),
+  condition = (1 << 2) // whether or not a condition will be supplied
 }
 
 export enum CreateTransferError {
-  exists = 1,
+  linked_event_failed = 1,
+  exists,
   exists_with_different_debit_account_id,
   exists_with_different_credit_account_id,
-  exists_with_different_custom_fields,
+  exists_with_different_user_data,
+  exists_with_different_reserved_field,
+  exists_with_different_code,
   exists_with_different_amount,
   exists_with_different_timeout,
   exists_with_different_flags,
   exists_and_already_committed_and_accepted,
   exists_and_already_committed_and_rejected,
-  reserved_field_custom,
-  reserved_field_timestamp,
+  reserved_field,
   reserved_flag_padding,
   reserved_flag_accept,
   reserved_flag_reject,
@@ -100,12 +100,10 @@ export enum CreateTransferError {
   accounts_are_the_same,
   accounts_have_different_units,
   amount_is_zero,
-  exceeds_debit_reserved_limit,
-  exceeds_debit_accepted_limit,
-  exceeds_credit_reserved_limit,
-  exceeds_credit_accepted_limit,
-  auto_commit_must_accept,
-  auto_commit_cannot_timeout,
+  exceeds_credits,
+  exceeds_debits,
+  two_phase_commit_must_timeout,
+  timeout_reserved_for_two_phase_commit,
 }
 
 export type CreateTransferResult = {
@@ -115,24 +113,23 @@ export type CreateTransferResult = {
 
 export type CommitTransfer = {
   id: bigint, // u128
-  custom_1: bigint, // u128
-  custom_2: bigint, // u128
-  custom_3: bigint, // u128
-  flags: bigint, // u64
+  reserved: Buffer, // [32]u8
+  code: number, // u32 accounting system code describing the reason for accept/reject
+  flags: number, // u32
 }
 
 export enum CommitFlags {
-  accept = (1 << 0),
-  reject = (1 << 1)
+  linked = (1 << 0),
+  reject = (1 << 1),
+  preimage = (1 << 2) // whether or not a pre-image will be supplied
 }
 
 export enum CommitTransferError {
-  reserved_field_custom = 1,
-  reserved_field_timestamp,
+  linked_event_failed = 1,
+  reserved_field,
   reserved_flag_padding,
-  commit_must_accept_or_reject,
-  commit_cannot_accept_and_reject,
   transfer_not_found,
+  transfer_not_two_phase_commit,
   transfer_expired,
   already_auto_committed,
   already_committed,
@@ -142,8 +139,8 @@ export enum CommitTransferError {
   credit_account_not_found,
   debit_amount_was_not_reserved,
   credit_amount_was_not_reserved,
-  exceeds_debit_accepted_limit,
-  exceeds_credit_accepted_limit,
+  exceeds_credits,
+  exceeds_debits,
   condition_requires_preimage,
   preimage_requires_condition,
   preimage_invalid,
@@ -193,13 +190,14 @@ const isSameArgs = (args: InitArgs): boolean => {
     }
   })
 
-  return args.client_id === _args.client_id &&
-          args.cluster_id === _args.cluster_id &&
+  return args.cluster_id === _args.cluster_id &&
           isSameReplicas
 }
 
 let _client: Client | undefined = undefined
 let _interval: NodeJS.Timeout | undefined = undefined
+// here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+let _pinged = false
 // TODO: allow creation of clients if the arguments are different. Will require changes in node.zig as well.
 export function createClient (args: InitArgs): Client {
   const duplicateArgs = isSameArgs(args)
@@ -222,6 +220,15 @@ export function createClient (args: InitArgs): Client {
   }
 
   const createAccounts = async (batch: CreateAccount[]): Promise<CreateAccountResult[]> => {
+    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    if (!_pinged) {
+      await new Promise<void>(resolve => {
+        setTimeout(() => {
+          _pinged = true
+          resolve()
+        }, 600)
+      })
+    }
     return new Promise((resolve, reject) => {
       const callback = (error: undefined | Error, results: CreateAccountResult[]) => {
         if (error) {
@@ -239,6 +246,15 @@ export function createClient (args: InitArgs): Client {
   }
 
   const createTransfers = async (batch: CreateTransfer[]): Promise<CreateTransferResult[]> => {
+    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    if (!_pinged) {
+      await new Promise<void>(resolve => {
+        setTimeout(() => {
+          _pinged = true
+          resolve()
+        }, 600)
+      })
+    }
     return new Promise((resolve, reject) => {
       const callback = (error: undefined | Error, results: CreateTransferResult[]) => {
         if (error) {
@@ -256,6 +272,15 @@ export function createClient (args: InitArgs): Client {
   }
 
   const commitTransfers = async (batch: CommitTransfer[]): Promise<CommitTransferResult[]> => {
+    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    if (!_pinged) {
+      await new Promise<void>(resolve => {
+        setTimeout(() => {
+          _pinged = true
+          resolve()
+        }, 600)
+      })
+    }
     return new Promise((resolve, reject) => {
       const callback = (error: undefined | Error, results: CommitTransferResult[]) => {
         if (error) {
@@ -308,7 +333,7 @@ export function createClient (args: InitArgs): Client {
 
   _interval = setInterval(() => {
     binding.tick(context)
-  }, 50)
+  }, 15)
 
   return _client
 }
