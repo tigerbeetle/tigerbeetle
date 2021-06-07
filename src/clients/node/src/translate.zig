@@ -181,12 +181,7 @@ pub fn u32_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]
 }
 
 pub fn u16_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u16 {
-    var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
-        return throw(env, key ++ " must be defined");
-    }
-
-    const result = try u32_from_value(env, property, key);
+    const result = try u32_from_object(env, object, key);
     if (result > 65535) {
         return throw(env, key ++ " must be a u16.");
     }
