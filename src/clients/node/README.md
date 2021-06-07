@@ -1,8 +1,6 @@
 # tigerbeetle-node
 [TigerBeetle](https://github.com/coilhq/tigerbeetle) client for NodeJS
 
-**Note:** We will be making breaking changes to our data types in the next few days. 
-
 ## Installation
 **Prerequisites:** The current version of the client reuses components from TigerBeetle. As such it targets Linux kernel v5.6 or newer. Node >= 14.0.0 is also required.
 
@@ -43,42 +41,38 @@ One of the ways TigerBeetle achieves its performance is through batching. This i
 ```js
 const account = {
     id: 137n, // u64
+    user_data: 0n, // u128, opaque third-party identifier to link this account (many-to-one) to an external entity:
     reserved: Buffer.alloc(48, 0), // [48]u8
-    user_data: 0n,
-    code: 718, // u16, a chart of accounts code describing the type of account (e.g. clearing, settlement)
     unit: 1,   // u16, unit of value
+    code: 718, // u16, a chart of accounts code describing the type of account (e.g. clearing, settlement)
     flags: 0,  // u32
-    credits_accepted: 0n, // u64
-    credits_reserved: 0n, // u64
-    debits_accepted: 0n,  // u64
     debits_reserved: 0n,  // u64
+    debits_accepted: 0n,  // u64
+    credits_reserved: 0n, // u64
+    credits_accepted: 0n, // u64
     timestamp: 0n, // u64, Reserved: This will be set by the server.
 }
 
-const results = await client.createAccounts([account])
+const errors = await client.createAccounts([account])
 ```
 Successfully executed commands return an empty array whilst unsuccessful ones return an array with errors for **only the ones that failed**. An error will point to the index in the submitted array of the failed command.
 ```js
-  const results = await client.createAccounts([account1, account2, account3])
+  const errors = await client.createAccounts([account1, account2, account3])
 
-  // Successful result
-  // results = []
-  //
-  // Unsuccessful result
-  // results = [{ index: 1, error: 1 }]
-  const { error } = results[0]
-  switch (error) {
+  // errors = [{ index: 1, code: 1 }]
+  const error = errors[0]
+  switch (error.code) {
     case CreateAccountError.exists: {
-
+      console.error(`Batch event at ${error.index} already exists.`)
     }
   }
 ```
-The unsuccessful result above shows that the command in index 1 failed with error 1. This means that `account1` and `account3` were created successfully but not `account2`.
+The example above shows that the command in index 1 failed with error 1. This means that `account1` and `account3` were created successfully but not `account2`.
 
 The `flags` on an account provide a way for you to enforce policies by toggling the bits below.
-| bit 0  | bit 1                          | bit 2                                 |
-|--------|--------------------------------|---------------------------------------|
-| linked | debits_must_not_exceed_credits | credits_must_not_exceed_debits-commit |
+| bit 0    | bit 1                            | bit 2                                   |
+|----------|----------------------------------|-----------------------------------------|
+| `linked` | `debits_must_not_exceed_credits` | `credits_must_not_exceed_debits` |
 
 The creation of an account can be linked to the successful creation of another by setting the `linked` flag (see [linked events](#linked-events)). By setting `debits_must_not_exceed_credits`, then any transfer such that `debits_accepted + debits_reserved + amount > credit_accepted` will fail. Similarly for `credits_must_not_exceed_debits`.
 ```js
@@ -97,20 +91,21 @@ The creation of an account can be linked to the successful creation of another b
 The `id` of the account is used for lookups. Only matched accounts are returned.
 ```js
   // account 137n exists, 138n does not
-  const results = await client.lookupAccounts([137n, 138n])
+  const accounts = await client.lookupAccounts([137n, 138n])
 
   /**
-   * const results = [{
+   * const accounts = [{
    *   id: 137n,
-   *   reserved: Buffer,
    *   user_data: 0n,
-   *   code: 718,
+   *   reserved: Buffer,
    *   unit: 1,
+   *   code: 718,
    *   flags: 0,
-   *   credits_accepted: 0n,
-   *   credits_reserved: 0n,
-   *   debits_accepted: 0n,
    *   debits_reserved: 0n,
+   *   debits_accepted: 0n,
+   *   credits_reserved: 0n,
+   *   credits_accepted: 0n,
+   *   timestamp: 1623062009212508993n,
    * }]
    */
 ```
@@ -129,16 +124,17 @@ const transfer = {
     code: 1,  // u32, a chart of accounts code describing the reason for the transfer (e.g. deposit, settlement)
     flags: 0, // u32
     amount: 10n, // u64
+    timestamp: 0n, //u64, Reserved: This will be set by the server.
 }
 
-const results = await client.createTransfers([transfer])
+const errors = await client.createTransfers([transfer])
 ```
 Two-phase transfers are supported natively by toggling the appropriate flag. TigerBeetle will then adjust the `credits_reserved` and `debits_reserved` fields of the appropriate accounts. A corresponding commit transfer then needs to be sent to accept or reject the transfer.
-| bit 0  | bit 1            | bit 2            |
-|--------|------------------|------------------|
-| linked | two_phase_commit | condition-commit |
+| bit 0    | bit 1              | bit 2            |
+|----------|--------------------|------------------|
+| `linked` | `two_phase_commit` | `condition`      |
 
-The `condition-commit` flag signals to TigerBeetle that a 256-bit cryptographic condition will be supplied in the `reserved` field. This will be validated against a supplied pre-image when the transfer is committed. Transfers within a batch may also be linked (see [linked events](#linked-events)).
+The `condition` flag signals to TigerBeetle that a 256-bit cryptographic condition will be supplied in the `reserved` field. This will be validated against a supplied pre-image when the transfer is committed. Transfers within a batch may also be linked (see [linked events](#linked-events)).
 ```js
   enum CreateTransferFlags {
     linked = (1 << 0>>),
@@ -159,21 +155,20 @@ The `condition-commit` flag signals to TigerBeetle that a 256-bit cryptographic 
 ### Committing a transfer
 
 This is used to commit a two-phase transfer.
-| bit 0  | bit 1  | bit 2    |
-|--------|--------|----------|
-| linked | reject | preimage |
+| bit 0    | bit 1    | bit 2      |
+|----------|----------|------------|
+| `linked` | `reject` | `preimage` |
 
-By default (`flags = 0`), it will accept the transfer. TigerBeetle will atomically rollback the changes to `debit_reserved` and `credit_reserved` of the appropriate accounts and apply them to the `debit_accepted` and `credit_accepted` balances. If the `preimage` bit is set then TigerBeetle will look for it in the `reserved` field and validate it against the `condition` from the associated transfer. If this validation fails, or `reject` is set, then the changes to the `reserved` balances are atomically rolled back.
+By default (`flags = 0`), it will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_reserved` and `credits_reserved` of the appropriate accounts and apply them to the `debits_accepted` and `credits_accepted` balances. If the `preimage` bit is set then TigerBeetle will look for it in the `reserved` field and validate it against the `condition` from the associated transfer. If this validation fails, or `reject` is set, then the changes to the `reserved` balances are atomically rolled back.
 ```js
-let flags = 0n
-flags |= CommitFlags.reject
 const commit = {
     id: 1n,   // must correspond to the transfer id
     reserved: Buffer.alloc(32, 0),
     code: 1,  // accounting system code to identify type of transfer
-    flags,
+    flags: 0,
+    timestamp: 0n, // Reserved: This will be set by the server.
 }
-const results = await client.commitTransfers([commit])
+const errors = await client.commitTransfers([commit])
 ```
 
 ### Linked events
@@ -206,8 +201,7 @@ batch.push({ id: 3n, ..., flags: 0 })
 batch.push({ id: 3n, ..., flags: linkedFlag })
 batch.push({ id: 4n, ..., flags: 0 })
 
-// Results
-const results = await client.createTransfers(batch)
+const errors = await client.createTransfers(batch)
 
 /**
  * [

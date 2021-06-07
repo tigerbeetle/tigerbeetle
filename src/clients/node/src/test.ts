@@ -1,5 +1,13 @@
 import assert, { AssertionError } from 'assert'
-import { CommitFlags, CommitTransfer, CreateAccount, CreateAccountError, createClient, CreateTransfer, CreateTransferFlags, CreateTransferError } from '.'
+import { CommitFlags,
+  Commit,
+  Account,
+  createClient,
+  Transfer,
+  TransferFlags,
+  CreateTransferError,
+  CreateAccountError
+} from '.'
 
 const client = createClient({
   cluster_id: 0x0a5ca1ab1ebee11en,
@@ -9,7 +17,7 @@ const client = createClient({
 // Test data
 const Zeroed32Bytes = Buffer.alloc(32, 0)
 const Zeroed48Bytes = Buffer.alloc(48, 0)
-const accountA: CreateAccount = {
+const accountA: Account = {
   id: 17n,
   reserved: Zeroed48Bytes,
   user_data: 0n,
@@ -20,9 +28,9 @@ const accountA: CreateAccount = {
   credits_reserved: 0n,
   debits_accepted: 0n,
   debits_reserved: 0n,
-  timestamp: 0n
+  timestamp: 0n // this will be set correctly by the TigerBeetle server
 }
-const accountB: CreateAccount = {
+const accountB: Account = {
   id: 19n,
   reserved: Zeroed48Bytes,
   user_data: 0n,
@@ -33,7 +41,7 @@ const accountB: CreateAccount = {
   credits_reserved: 0n,
   debits_accepted: 0n,
   debits_reserved: 0n,
-  timestamp: 0n
+  timestamp: 0n // this will be set correctly by the TigerBeetle server
 }
 
 const tests: Array<{ name: string, fn: () => Promise<void> }> = []
@@ -44,50 +52,72 @@ test.skip = (name: string, fn: () => Promise<void>) => {
   console.log(name + ': SKIPPED')
 }
 
-test('can create accounts', async (): Promise<void> => {
-  const results = await client.createAccounts([accountA])
+test('range checks `unit` and `code` on Account to be u16', async (): Promise<void> => {
+  const account = { ...accountA, id: 0n, unit: 65535 + 1 }
 
-  assert.strictEqual(results.length, 0)
+  const unitError = await client.createAccounts([account]).catch(error => error)
+  assert.strictEqual(unitError.message, 'unit must be a u16.')
+
+  account.unit = 0
+  account.code = 65535 + 1
+  const codeError = await client.createAccounts([account]).catch(error => error)
+  assert.strictEqual(codeError.message, 'code must be a u16.')
+
+  const accounts = await client.lookupAccounts([0n])
+  assert.strictEqual(accounts.length, 0)
+})
+
+test('can create accounts', async (): Promise<void> => {
+  const errors = await client.createAccounts([accountA])
+
+  assert.strictEqual(errors.length, 0)
 })
 
 test('can return error', async (): Promise<void> => {
-  const results = await client.createAccounts([accountA, accountB])
+  const errors = await client.createAccounts([accountA, accountB])
 
-  assert.strictEqual(results.length, 1)
-  assert.deepStrictEqual(results[0], { index: 0, error: CreateAccountError.exists })
+  assert.strictEqual(errors.length, 1)
+  assert.deepStrictEqual(errors[0], { index: 0, code: CreateAccountError.exists })
+})
+
+test('throws error if timestamp is not set to 0n', async (): Promise<void> => {
+  const account = { ...accountA, timestamp: 2n, id: 3n }
+  await assert.rejects(client.createAccounts([account]))
 })
 
 test('can lookup accounts', async (): Promise<void> => {
-  const results = await client.lookupAccounts([accountA.id, accountB.id])
+  const accounts = await client.lookupAccounts([accountA.id, accountB.id])
 
-  assert.strictEqual(results.length, 2)
-  const result1 = results[0]
-  assert.strictEqual(result1.id, 17n)
-  assert.ok(result1.reserved.equals(Zeroed48Bytes))
-  assert.strictEqual(result1.user_data, 0n)
-  assert.strictEqual(result1.code, 718)
-  assert.strictEqual(result1.unit, 1)
-  assert.strictEqual(result1.flags, 0)
-  assert.strictEqual(result1.credits_accepted, 0n)
-  assert.strictEqual(result1.credits_reserved, 0n)
-  assert.strictEqual(result1.debits_accepted, 0n)
-  assert.strictEqual(result1.debits_reserved, 0n)
+  assert.strictEqual(accounts.length, 2)
+  const account1 = accounts[0]
+  assert.strictEqual(account1.id, 17n)
+  assert.ok(account1.reserved.equals(Zeroed48Bytes))
+  assert.strictEqual(account1.user_data, 0n)
+  assert.strictEqual(account1.code, 718)
+  assert.strictEqual(account1.unit, 1)
+  assert.strictEqual(account1.flags, 0)
+  assert.strictEqual(account1.credits_accepted, 0n)
+  assert.strictEqual(account1.credits_reserved, 0n)
+  assert.strictEqual(account1.debits_accepted, 0n)
+  assert.strictEqual(account1.debits_reserved, 0n)
+  assert.ok(account1.timestamp > 0n)
 
-  const result2 = results[1]
-  assert.strictEqual(result2.id, 19n)
-  assert.ok(result2.reserved.equals(Zeroed48Bytes))
-  assert.strictEqual(result2.user_data, 0n)
-  assert.strictEqual(result2.code, 719)
-  assert.strictEqual(result2.unit, 1)
-  assert.strictEqual(result2.flags, 0)
-  assert.strictEqual(result2.credits_accepted, 0n)
-  assert.strictEqual(result2.credits_reserved, 0n)
-  assert.strictEqual(result2.debits_accepted, 0n)
-  assert.strictEqual(result2.debits_reserved, 0n)
+  const account2 = accounts[1]
+  assert.strictEqual(account2.id, 19n)
+  assert.ok(account2.reserved.equals(Zeroed48Bytes))
+  assert.strictEqual(account2.user_data, 0n)
+  assert.strictEqual(account2.code, 719)
+  assert.strictEqual(account2.unit, 1)
+  assert.strictEqual(account2.flags, 0)
+  assert.strictEqual(account2.credits_accepted, 0n)
+  assert.strictEqual(account2.credits_reserved, 0n)
+  assert.strictEqual(account2.debits_accepted, 0n)
+  assert.strictEqual(account2.debits_reserved, 0n)
+  assert.ok(account2.timestamp > 0n)
 })
 
 test('can create a transfer', async (): Promise<void> => {
-  const transfer: CreateTransfer = {
+  const transfer: Transfer = {
     id: 0n,
     amount: 100n,
     code: 1,
@@ -97,10 +127,11 @@ test('can create a transfer', async (): Promise<void> => {
     user_data: 0n,
     reserved: Zeroed32Bytes,
     timeout: 0n,
+    timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
-  const results = await client.createTransfers([transfer])
-  assert.strictEqual(results.length, 0)
+  const errors = await client.createTransfers([transfer])
+  assert.strictEqual(errors.length, 0)
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
@@ -117,8 +148,8 @@ test('can create a transfer', async (): Promise<void> => {
 
 test('can create a two-phase transfer', async (): Promise<void> => {
   let flags = 0
-  flags |= CreateTransferFlags.two_phase_commit
-  const transfer: CreateTransfer = {
+  flags |= TransferFlags.two_phase_commit
+  const transfer: Transfer = {
     id: 1n,
     amount: 50n,
     code: 1,
@@ -128,10 +159,11 @@ test('can create a two-phase transfer', async (): Promise<void> => {
     user_data: 0n,
     reserved: Zeroed32Bytes,
     timeout: BigInt(2e9),
+    timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
-  const results = await client.createTransfers([transfer])
-  assert.strictEqual(results.length, 0)
+  const errors = await client.createTransfers([transfer])
+  assert.strictEqual(errors.length, 0)
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
@@ -147,15 +179,16 @@ test('can create a two-phase transfer', async (): Promise<void> => {
 })
 
 test('can commit a two-phase transfer', async (): Promise<void> => {
-  const commit: CommitTransfer = {
+  const commit: Commit = {
     id: 1n, // must match the id of the create transfer
     code: 1,
     flags: 0, // defaults to accept
-    reserved: Zeroed32Bytes
+    reserved: Zeroed32Bytes,
+    timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
-  const results = await client.commitTransfers([commit])
-  assert.strictEqual(results.length, 0)
+  const errors = await client.commitTransfers([commit])
+  assert.strictEqual(errors.length, 0)
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
@@ -172,34 +205,32 @@ test('can commit a two-phase transfer', async (): Promise<void> => {
 
 test('can reject a two-phase transfer', async (): Promise<void> => {
   // create a two-phase transfer
-  let flags = 0
-  flags |= CreateTransferFlags.two_phase_commit
-  const transfer: CreateTransfer = {
+  const transfer: Transfer = {
     id: 3n,
     amount: 50n,
     code: 1,
     credit_account_id: accountA.id,
     debit_account_id: accountB.id,
-    flags,
+    flags: TransferFlags.two_phase_commit,
     user_data: 0n,
     reserved: Zeroed32Bytes,
     timeout: BigInt(1e9),
+    timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
-  const transferResults = await client.createTransfers([transfer])
-  assert.strictEqual(transferResults.length, 0)
+  const transferErrors = await client.createTransfers([transfer])
+  assert.strictEqual(transferErrors.length, 0)
 
   // send in the reject
-  flags = 0
-  flags |= CommitFlags.reject
-  const reject: CommitTransfer = {
+  const reject: Commit = {
     id: 3n,
     code: 1,
-    flags,
-    reserved: Zeroed32Bytes
+    flags: CommitFlags.reject,
+    reserved: Zeroed32Bytes,
+    timestamp: 0n,// this will be set correctly by the TigerBeetle server
   }
 
-  const results = await client.commitTransfers([reject])
-  assert.strictEqual(results.length, 0)
+  const errors = await client.commitTransfers([reject])
+  assert.strictEqual(errors.length, 0)
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
@@ -215,20 +246,19 @@ test('can reject a two-phase transfer', async (): Promise<void> => {
 })
 
 test('can link transfers', async (): Promise<void> => {
-  let flags = 0
-  flags |= CreateTransferFlags.linked // points to transfer2
-  const transfer1: CreateTransfer = {
+  const transfer1: Transfer = {
     id: 4n,
     amount: 100n,
     code: 1,
     credit_account_id: accountA.id,
     debit_account_id: accountB.id,
-    flags,
+    flags: TransferFlags.linked, // points to transfer2
     user_data: 0n,
     reserved: Zeroed32Bytes,
     timeout: 0n,
+    timestamp: 0n, // will be set correctly by the TigerBeetle server
   }
-  const transfer2: CreateTransfer = {
+  const transfer2: Transfer = {
     id: 4n,
     amount: 100n,
     code: 1,
@@ -240,12 +270,13 @@ test('can link transfers', async (): Promise<void> => {
     user_data: 0n,
     reserved: Zeroed32Bytes,
     timeout: 0n,
+    timestamp: 0n, // will be set correctly by the TigerBeetle server
   }
 
-  const results = await client.createTransfers([transfer1, transfer2])
-  assert.strictEqual(results.length, 2)
-  assert.deepStrictEqual(results[0], { index: 0, error: CreateTransferError.linked_event_failed })
-  assert.deepStrictEqual(results[1], { index: 1, error: CreateTransferError.exists_with_different_flags })
+  const errors = await client.createTransfers([transfer1, transfer2])
+  assert.strictEqual(errors.length, 2)
+  assert.deepStrictEqual(errors[0], { index: 0, code: CreateTransferError.linked_event_failed })
+  assert.deepStrictEqual(errors[1], { index: 1, code: CreateTransferError.exists_with_different_flags })
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)

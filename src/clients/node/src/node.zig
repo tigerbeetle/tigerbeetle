@@ -123,7 +123,7 @@ const Context = struct {
             allocator,
             cluster,
             context.configuration[0..configuration.len],
-            1, // value for client from ProcessType enum (see message_bus.zig)
+            std.crypto.random.int(u128),
             context.io,
         );
         errdefer context.message_bus.deinit();
@@ -139,8 +139,6 @@ const Context = struct {
 
         const ret = try translate.create_external(env, context);
 
-        std.log.debug("Created context\n", .{});
-
         return ret;
     }
 };
@@ -149,36 +147,48 @@ fn contextCast(context_raw: *c_void) !*Context {
     return @ptrCast(*Context, @alignCast(@alignOf(Context), context_raw));
 }
 
+fn validate_timestamp(env: c.napi_env, object: c.napi_value) !u64 {
+    const timestamp = try translate.u64_from_object(env, object, "timestamp");
+    if (timestamp != 0) {
+        return translate.throw(env, "Timestamp should be set as 0 as this will be set correctly by the Server.");
+    }
+
+    return timestamp;
+}
+
 fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !T {
     return switch (T) {
         Commit => Commit{
             .id = try translate.u128_from_object(env, object, "id"),
-            .reserved = try translate.copy_buffer_of_length_from_object(env, object, 32, "reserved"),
+            .reserved = try translate.bytes_from_object(env, object, 32, "reserved"),
             .code = try translate.u32_from_object(env, object, "code"),
             .flags = @bitCast(CommitFlags, try translate.u32_from_object(env, object, "flags")),
+            .timestamp = try validate_timestamp(env, object),
         },
         Transfer => Transfer{
             .id = try translate.u128_from_object(env, object, "id"),
             .debit_account_id = try translate.u128_from_object(env, object, "debit_account_id"),
             .credit_account_id = try translate.u128_from_object(env, object, "credit_account_id"),
             .user_data = try translate.u128_from_object(env, object, "user_data"),
-            .reserved = try translate.copy_buffer_of_length_from_object(env, object, 32, "reserved"),
+            .reserved = try translate.bytes_from_object(env, object, 32, "reserved"),
             .timeout = try translate.u64_from_object(env, object, "timeout"),
             .code = try translate.u32_from_object(env, object, "code"),
             .flags = @bitCast(TransferFlags, try translate.u32_from_object(env, object, "flags")),
             .amount = try translate.u64_from_object(env, object, "amount"),
+            .timestamp = try validate_timestamp(env, object),
         },
         Account => Account{
             .id = try translate.u128_from_object(env, object, "id"),
             .user_data = try translate.u128_from_object(env, object, "user_data"),
-            .reserved = try translate.copy_buffer_of_length_from_object(env, object, 48, "reserved"),
-            .unit = @intCast(u16, try translate.u32_from_object(env, object, "unit")),
-            .code = @intCast(u16, try translate.u32_from_object(env, object, "code")),
+            .reserved = try translate.bytes_from_object(env, object, 48, "reserved"),
+            .unit = try translate.u16_from_object(env, object, "unit"),
+            .code = try translate.u16_from_object(env, object, "code"),
             .flags = @bitCast(AccountFlags, try translate.u32_from_object(env, object, "flags")),
             .debits_reserved = try translate.u64_from_object(env, object, "debits_reserved"),
             .debits_accepted = try translate.u64_from_object(env, object, "debits_accepted"),
             .credits_reserved = try translate.u64_from_object(env, object, "credits_reserved"),
             .credits_accepted = try translate.u64_from_object(env, object, "credits_accepted"),
+            .timestamp = try validate_timestamp(env, object),
         },
         u128 => try translate.u128_from_value(env, object, "Account lookup"),
         else => unreachable,
@@ -237,7 +247,7 @@ fn encode_napi_results_array(
 
                 try translate.u32_into_object(env, napi_object, "index", result.index, "Failed to set property \"index\" of result.");
 
-                try translate.u32_into_object(env, napi_object, "error", @enumToInt(result.result), "Failed to set property \"error\" of result.");
+                try translate.u32_into_object(env, napi_object, "code", @enumToInt(result.result), "Failed to set property \"code\" of result.");
 
                 try translate.set_array_element(env, napi_array, i, napi_object, "Failed to set element in results array.");
             }
@@ -268,6 +278,8 @@ fn encode_napi_results_array(
 
                 try translate.u64_into_object(env, napi_object, "credits_accepted", result.credits_accepted, "Failed to set property \"credits_accepted\" of account lookup result.");
 
+                try translate.u64_into_object(env, napi_object, "timestamp", result.timestamp, "Failed to set property \"timestamp\" of account lookup result.");
+
                 try translate.set_array_element(env, napi_array, i, napi_object, "Failed to set element in results array.");
             }
         },
@@ -286,7 +298,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     if (argc != 1) translate.throw(env, "Function init() must receive 1 argument exactly.") catch return null;
 
     const cluster = translate.u128_from_object(env, argv[0], "cluster_id") catch return null;
-    const configuration = translate.buffer_from_object(env, argv[0], "replica_addresses") catch return null;
+    const configuration = translate.slice_from_object(env, argv[0], "replica_addresses") catch return null;
 
     const allocator = std.heap.c_allocator;
 

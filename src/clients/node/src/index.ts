@@ -29,50 +29,48 @@ export type Account = {
   debits_accepted: bigint // u64
   credits_reserved: bigint // u64
   credits_accepted: bigint // u64
+  timestamp: bigint // u64, Set this to 0n - the actual value will be set by TigerBeetle server
 }
 
-export type CreateAccount = Account & {
-  timestamp: bigint // u64
-}
-
-export enum CreateAccountFlags {
+export enum AccountFlags {
   linked = (1 << 0),
   debits_must_not_exceed_credits = (1 << 1),
   credits_must_not_exceed_debits = (1 << 2)
 }
 
 export enum CreateAccountError {
-    linked_event_failed = 1,
-    exists,
-    exists_with_different_user_data,
-    exists_with_different_reserved_field,
-    exists_with_different_unit,
-    exists_with_different_code,
-    exists_with_different_flags,
-    exceeds_credits,
-    exceeds_debits,
-    reserved_field,
-    reserved_flag_padding,
+  linked_event_failed = 1,
+  exists,
+  exists_with_different_user_data,
+  exists_with_different_reserved_field,
+  exists_with_different_unit,
+  exists_with_different_code,
+  exists_with_different_flags,
+  exceeds_credits,
+  exceeds_debits,
+  reserved_field,
+  reserved_flag_padding,
 }
 
-export type CreateAccountResult = {
+export type CreateAccountsResult = {
   index: number,
-  error: CreateAccountError,
+  code: CreateAccountError,
 }
 
-export type CreateTransfer = {
+export type Transfer = {
   id: bigint, // u128
   debit_account_id: bigint, // u128
   credit_account_id: bigint, // u128
   user_data: bigint, // u128
   reserved: Buffer, // [32]u8
   timeout: bigint, // u64, in nano-seconds
-  code: number, // u16 accounting system code to describe the type of transfer (e.g. settlement)
+  code: number, // u32 accounting system code to describe the type of transfer (e.g. settlement)
   flags: number, // u32
   amount: bigint, // u64,
+  timestamp: bigint, // u64, Set this to 0n - the actual value will be set by TigerBeetle server
 }
 
-export enum CreateTransferFlags {
+export enum TransferFlags {
   linked = (1 << 0),
   two_phase_commit = (1 << 1),
   condition = (1 << 2) // whether or not a condition will be supplied
@@ -93,8 +91,6 @@ export enum CreateTransferError {
   exists_and_already_committed_and_rejected,
   reserved_field,
   reserved_flag_padding,
-  reserved_flag_accept,
-  reserved_flag_reject,
   debit_account_not_found,
   credit_account_not_found,
   accounts_are_the_same,
@@ -106,16 +102,17 @@ export enum CreateTransferError {
   timeout_reserved_for_two_phase_commit,
 }
 
-export type CreateTransferResult = {
+export type CreateTransfersResult = {
   index: number,
-  error: CreateTransferError,
+  code: CreateTransferError,
 }
 
-export type CommitTransfer = {
+export type Commit = {
   id: bigint, // u128
   reserved: Buffer, // [32]u8
   code: number, // u32 accounting system code describing the reason for accept/reject
   flags: number, // u32
+  timestamp: bigint, // u64, Set this to 0n - the actual value will be set by TigerBeetle server
 }
 
 export enum CommitFlags {
@@ -146,15 +143,15 @@ export enum CommitTransferError {
   preimage_invalid,
 }
 
-export type CommitTransferResult = {
+export type CommitTransfersResult = {
   index: number,
-  error: CommitTransferError,
+  code: CommitTransferError,
 }
 
 export type AccountLookup = bigint // u128
 
-export type Command = CreateAccount | CreateTransfer | CommitTransfer | AccountLookup
-export type Result = CreateAccountResult | CreateTransferResult | CommitTransferResult | Account
+export type Command = Account | Transfer | Commit | AccountLookup
+export type Result = CreateAccountsResult | CreateTransfersResult | CommitTransfersResult | Account
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export enum Operation {
@@ -165,9 +162,9 @@ export enum Operation {
 }
 
 export interface Client {
-  createAccounts: (batch: CreateAccount[]) => Promise<CreateAccountResult[]>
-  createTransfers: (batch: CreateTransfer[]) => Promise<CreateTransferResult[]>
-  commitTransfers: (batch: CommitTransfer[]) => Promise<CommitTransferResult[]>
+  createAccounts: (batch: Account[]) => Promise<CreateAccountsResult[]>
+  createTransfers: (batch: Transfer[]) => Promise<CreateTransfersResult[]>
+  commitTransfers: (batch: Commit[]) => Promise<CommitTransfersResult[]>
   lookupAccounts: (batch: AccountLookup[]) => Promise<Account[]>
   request: (operation: Operation, batch: Command[], callback: ResultCallback) => void
   destroy: () => void
@@ -219,7 +216,7 @@ export function createClient (args: InitArgs): Client {
     binding.request(context, operation, batch, callback)
   }
 
-  const createAccounts = async (batch: CreateAccount[]): Promise<CreateAccountResult[]> => {
+  const createAccounts = async (batch: Account[]): Promise<CreateAccountsResult[]> => {
     // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
@@ -230,7 +227,7 @@ export function createClient (args: InitArgs): Client {
       })
     }
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CreateAccountResult[]) => {
+      const callback = (error: undefined | Error, results: CreateAccountsResult[]) => {
         if (error) {
           reject(error)
         }
@@ -245,7 +242,7 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const createTransfers = async (batch: CreateTransfer[]): Promise<CreateTransferResult[]> => {
+  const createTransfers = async (batch: Transfer[]): Promise<CreateTransfersResult[]> => {
     // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
@@ -256,7 +253,7 @@ export function createClient (args: InitArgs): Client {
       })
     }
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CreateTransferResult[]) => {
+      const callback = (error: undefined | Error, results: CreateTransfersResult[]) => {
         if (error) {
           reject(error)
         }
@@ -271,7 +268,7 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const commitTransfers = async (batch: CommitTransfer[]): Promise<CommitTransferResult[]> => {
+  const commitTransfers = async (batch: Commit[]): Promise<CommitTransfersResult[]> => {
     // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
@@ -282,7 +279,7 @@ export function createClient (args: InitArgs): Client {
       })
     }
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CommitTransferResult[]) => {
+      const callback = (error: undefined | Error, results: CommitTransfersResult[]) => {
         if (error) {
           reject(error)
         }
