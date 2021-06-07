@@ -1,7 +1,7 @@
 const binding: Binding = require('./client.node')
 interface Binding {
   init: (args: BindingInitArgs) => Context
-  request: (context: Context, operation: Operation, batch: Command[], result: ResultCallback) => void
+  request: (context: Context, operation: Operation, batch: Event[], result: ResultCallback) => void
   tick: (context: Context) => void,
   deinit: (context: Context) => void
 }
@@ -52,7 +52,7 @@ export enum CreateAccountError {
   reserved_flag_padding,
 }
 
-export type CreateAccountsResult = {
+export type CreateAccountsError = {
   index: number,
   code: CreateAccountError,
 }
@@ -102,7 +102,7 @@ export enum CreateTransferError {
   timeout_reserved_for_two_phase_commit,
 }
 
-export type CreateTransfersResult = {
+export type CreateTransfersError = {
   index: number,
   code: CreateTransferError,
 }
@@ -143,15 +143,15 @@ export enum CommitTransferError {
   preimage_invalid,
 }
 
-export type CommitTransfersResult = {
+export type CommitTransfersError = {
   index: number,
   code: CommitTransferError,
 }
 
-export type AccountLookup = bigint // u128
+export type AccountID = bigint // u128
 
-export type Command = Account | Transfer | Commit | AccountLookup
-export type Result = CreateAccountsResult | CreateTransfersResult | CommitTransfersResult | Account
+export type Event = Account | Transfer | Commit | AccountID
+export type Result = CreateAccountsError | CreateTransfersError | CommitTransfersError | Account
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export enum Operation {
@@ -162,11 +162,11 @@ export enum Operation {
 }
 
 export interface Client {
-  createAccounts: (batch: Account[]) => Promise<CreateAccountsResult[]>
-  createTransfers: (batch: Transfer[]) => Promise<CreateTransfersResult[]>
-  commitTransfers: (batch: Commit[]) => Promise<CommitTransfersResult[]>
-  lookupAccounts: (batch: AccountLookup[]) => Promise<Account[]>
-  request: (operation: Operation, batch: Command[], callback: ResultCallback) => void
+  createAccounts: (batch: Account[]) => Promise<CreateAccountsError[]>
+  createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
+  commitTransfers: (batch: Commit[]) => Promise<CommitTransfersError[]>
+  lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
+  request: (operation: Operation, batch: Event[], callback: ResultCallback) => void
   destroy: () => void
 }
 
@@ -212,11 +212,11 @@ export function createClient (args: InitArgs): Client {
     replica_addresses: Buffer.from(args.replica_addresses.join(','))
   })
 
-  const request = (operation: Operation, batch: Command[], callback: ResultCallback) => {
+  const request = (operation: Operation, batch: Event[], callback: ResultCallback) => {
     binding.request(context, operation, batch, callback)
   }
 
-  const createAccounts = async (batch: Account[]): Promise<CreateAccountsResult[]> => {
+  const createAccounts = async (batch: Account[]): Promise<CreateAccountsError[]> => {
     // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
@@ -227,7 +227,7 @@ export function createClient (args: InitArgs): Client {
       })
     }
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CreateAccountsResult[]) => {
+      const callback = (error: undefined | Error, results: CreateAccountsError[]) => {
         if (error) {
           reject(error)
         }
@@ -242,7 +242,7 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const createTransfers = async (batch: Transfer[]): Promise<CreateTransfersResult[]> => {
+  const createTransfers = async (batch: Transfer[]): Promise<CreateTransfersError[]> => {
     // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
@@ -253,7 +253,7 @@ export function createClient (args: InitArgs): Client {
       })
     }
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CreateTransfersResult[]) => {
+      const callback = (error: undefined | Error, results: CreateTransfersError[]) => {
         if (error) {
           reject(error)
         }
@@ -268,7 +268,7 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const commitTransfers = async (batch: Commit[]): Promise<CommitTransfersResult[]> => {
+  const commitTransfers = async (batch: Commit[]): Promise<CommitTransfersError[]> => {
     // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
@@ -279,7 +279,7 @@ export function createClient (args: InitArgs): Client {
       })
     }
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CommitTransfersResult[]) => {
+      const callback = (error: undefined | Error, results: CommitTransfersError[]) => {
         if (error) {
           reject(error)
         }
@@ -294,7 +294,7 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const lookupAccounts = async (batch: AccountLookup[]): Promise<Account[]> => {
+  const lookupAccounts = async (batch: AccountID[]): Promise<Account[]> => {
     return new Promise((resolve, reject) => {
       const callback = (error: undefined | Error, results: Account[]) => {
         if (error) {

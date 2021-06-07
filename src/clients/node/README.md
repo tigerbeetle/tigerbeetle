@@ -24,7 +24,7 @@ yarn
 ```
 
 ## Usage
-A client needs to be configured with a `cluster_id` and `replica_addresses`. This instantiates the client where memory is allocated to internally buffer commands to be sent. For the moment, only one client can be instantiated globally per process. Future releases will allow multiple client instantiations.
+A client needs to be configured with a `cluster_id` and `replica_addresses`. This instantiates the client where memory is allocated to internally buffer events to be sent. For the moment, only one client can be instantiated globally per process. Future releases will allow multiple client instantiations.
 ```js
 import { createClient } from 'tigerbeetle-node'
 
@@ -34,7 +34,7 @@ const client = createClient({
 })
 ```
 
-One of the ways TigerBeetle achieves its performance is through batching. This is reflected in the below function interfaces where each one takes in an array of commands.
+One of the ways TigerBeetle achieves its performance is through batching. This is reflected in the below function interfaces where each one takes in an array of events.
 
 ### Account Creation
 
@@ -55,7 +55,7 @@ const account = {
 
 const errors = await client.createAccounts([account])
 ```
-Successfully executed commands return an empty array whilst unsuccessful ones return an array with errors for **only the ones that failed**. An error will point to the index in the submitted array of the failed command.
+Successfully executed events return an empty array whilst unsuccessful ones return an array with errors for **only the ones that failed**. An error will point to the index in the submitted array of the failed event.
 ```js
   const errors = await client.createAccounts([account1, account2, account3])
 
@@ -67,7 +67,7 @@ Successfully executed commands return an empty array whilst unsuccessful ones re
     }
   }
 ```
-The example above shows that the command in index 1 failed with error 1. This means that `account1` and `account3` were created successfully but not `account2`.
+The example above shows that the event in index 1 failed with error 1. This means that `account1` and `account3` were created successfully but not `account2`.
 
 The `flags` on an account provide a way for you to enforce policies by toggling the bits below.
 | bit 0    | bit 1                            | bit 2                                   |
@@ -173,7 +173,7 @@ const errors = await client.commitTransfers([commit])
 
 ### Linked events
 
-When the `linked` flag is specified for the `createAccount`, `createTransfer`, `commitTransfer` commands, it links an event with the next event in the batch, to create a chain of events, of arbitrary length, which all succeed or fail together. The tail of a chain is denoted by the first event without this flag. The last event in a batch may therefore never have the `linked` flag set as this would leave a chain open-ended. Multiple chains or individual events may coexist within a batch to succeed or fail independently. Events within a chain are executed within order, or are rolled back on error, so that the effect of each event in the chain is visible to the next, and so that the chain is either visible or invisible as a unit to subsequent events after the chain. The event that was the first to break the chain will have a unique error result. Other events in the chain will have their error result set to `linked_event_failed`.
+When the `linked` flag is specified for the `createAccount`, `createTransfer`, `commitTransfer` event, it links an event with the next event in the batch, to create a chain of events, of arbitrary length, which all succeed or fail together. The tail of a chain is denoted by the first event without this flag. The last event in a batch may therefore never have the `linked` flag set as this would leave a chain open-ended. Multiple chains or individual events may coexist within a batch to succeed or fail independently. Events within a chain are executed within order, or are rolled back on error, so that the effect of each event in the chain is visible to the next, and so that the chain is either visible or invisible as a unit to subsequent events after the chain. The event that was the first to break the chain will have a unique error result. Other events in the chain will have their error result set to `linked_event_failed`.
 
 ```js
 let batch = []
