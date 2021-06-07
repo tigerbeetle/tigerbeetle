@@ -5,7 +5,7 @@ const c = @import("c.zig");
 pub fn register_function(
     env: c.napi_env,
     exports: c.napi_value,
-    comptime name: [*:0]const u8,
+    comptime name: [:0]const u8,
     function: fn (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value,
 ) !void {
     var napi_function: c.napi_value = undefined;
@@ -18,7 +18,7 @@ pub fn register_function(
     }
 }
 
-pub fn throw(env: c.napi_env, comptime message: [*:0]const u8) error{ExceptionThrown} {
+pub fn throw(env: c.napi_env, comptime message: [:0]const u8) error{ExceptionThrown} {
     var result = c.napi_throw_error(env, null, message);
     switch (result) {
         .napi_ok, .napi_pending_exception => {},
@@ -59,7 +59,7 @@ pub fn create_external(env: c.napi_env, context: *c_void) !c.napi_value {
 pub fn value_external(
     env: c.napi_env,
     value: c.napi_value,
-    comptime error_message: [*:0]const u8,
+    comptime error_message: [:0]const u8,
 ) !?*c_void {
     var result: ?*c_void = undefined;
     if (c.napi_get_value_external(env, value, &result) != .napi_ok) {
@@ -103,23 +103,23 @@ pub fn globals(env: c.napi_env) !?*c_void {
     return data;
 }
 
-pub fn buffer_from_object(
+pub fn slice_from_object(
     env: c.napi_env,
     object: c.napi_value,
-    comptime key: [*:0]const u8,
+    comptime key: [:0]const u8,
 ) ![]const u8 {
     var property: c.napi_value = undefined;
     if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
-    return buffer_from_value(env, property, key);
+    return slice_from_value(env, property, key);
 }
 
-pub fn buffer_from_value(
+pub fn slice_from_value(
     env: c.napi_env,
     value: c.napi_value,
-    comptime key: [*:0]const u8,
+    comptime key: [:0]const u8,
 ) ![] u8 {
     var is_buffer: bool = undefined;
     assert(c.napi_is_buffer(env, value, &is_buffer) == .napi_ok);
@@ -135,13 +135,13 @@ pub fn buffer_from_value(
     return @ptrCast([*]u8, data.?)[0..data_length];
 }
 
-pub fn copy_buffer_of_length_from_object(env: c.napi_env, object: c.napi_value, comptime length: u8, comptime key: [:0]const u8) ![length]u8 {
+pub fn bytes_from_object(env: c.napi_env, object: c.napi_value, comptime length: u8, comptime key: [:0]const u8) ![length]u8 {
     var property: c.napi_value = undefined;
     if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
-    const data = try buffer_from_value(env, property, key);
+    const data = try slice_from_value(env, property, key);
     if (data.len != length) {
         return throw(env, key ++ " has incorrect length.");
     }
@@ -178,6 +178,20 @@ pub fn u32_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]
     }
 
     return u32_from_value(env, property, key);
+}
+
+pub fn u16_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u16 {
+    var property: c.napi_value = undefined;
+    if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
+        return throw(env, key ++ " must be defined");
+    }
+
+    const result = try u32_from_value(env, property, key);
+    if (result > 65535) {
+        return throw(env, key ++ " must be a u16.");
+    }
+
+    return @intCast(u16, result);
 }
 
 pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]const u8) !u128 {
@@ -229,9 +243,9 @@ pub fn u32_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]c
 pub fn byte_slice_into_object(
     env: c.napi_env,
     object: c.napi_value,
-    comptime key: [*:0]const u8,
+    comptime key: [:0]const u8,
     value: []const u8,
-    comptime error_message: [*:0]const u8,
+    comptime error_message: [:0]const u8,
 ) !void {
     var result: c.napi_value = undefined;
     // create a copy that is managed by V8.
@@ -247,9 +261,9 @@ pub fn byte_slice_into_object(
 pub fn u128_into_object(
     env: c.napi_env,
     object: c.napi_value,
-    comptime key: [*:0]const u8,
+    comptime key: [:0]const u8,
     value: u128,
-    comptime error_message: [*:0]const u8,
+    comptime error_message: [:0]const u8,
 ) !void {
     // A BigInt's value (using ^ to mean exponent) is (words[0] * (2^64)^0 + words[1] * (2^64)^1 + ...)
 
@@ -268,9 +282,9 @@ pub fn u128_into_object(
 pub fn u64_into_object(
     env: c.napi_env,
     object: c.napi_value,
-    comptime key: [*:0]const u8,
+    comptime key: [:0]const u8,
     value: u64,
-    comptime error_message: [*:0]const u8,
+    comptime error_message: [:0]const u8,
 ) !void {
     var result: c.napi_value = undefined;
     if (c.napi_create_bigint_uint64(env, value, &result) != .napi_ok) {
@@ -285,9 +299,9 @@ pub fn u64_into_object(
 pub fn u32_into_object(
     env: c.napi_env,
     object: c.napi_value,
-    comptime key: [*:0]const u8,
+    comptime key: [:0]const u8,
     value: u32,
-    comptime error_message: [*:0]const u8,
+    comptime error_message: [:0]const u8,
 ) !void {
     var result: c.napi_value = undefined;
     if (c.napi_create_uint32(env, value, &result) != .napi_ok) {
@@ -299,7 +313,7 @@ pub fn u32_into_object(
     }
 }
 
-pub fn create_object(env: c.napi_env, comptime error_message: [*:0]const u8) !c.napi_value {
+pub fn create_object(env: c.napi_env, comptime error_message: [:0]const u8) !c.napi_value {
     var result: c.napi_value = undefined;
     if (c.napi_create_object(env, &result) != .napi_ok) {
         return throw(env, error_message);
@@ -311,7 +325,7 @@ pub fn create_object(env: c.napi_env, comptime error_message: [*:0]const u8) !c.
 fn create_buffer(
     env: c.napi_env,
     value: []const u8,
-    comptime error_message: [*:0]const u8,
+    comptime error_message: [:0]const u8,
 ) !c.napi_value {
     var data: ?*c_void = undefined;
     var result: c.napi_value = undefined;
@@ -327,7 +341,7 @@ fn create_buffer(
 pub fn create_array(
     env: c.napi_env,
     length: u32,
-    comptime error_message: [*:0]const u8,
+    comptime error_message: [:0]const u8,
 ) !c.napi_value {
     var result: c.napi_value = undefined;
     if (c.napi_create_array_with_length(env, length, &result) != .napi_ok) {
@@ -342,7 +356,7 @@ pub fn set_array_element(
     array: c.napi_value,
     index: u32,
     value: c.napi_value,
-    comptime error_message: [*:0]const u8,
+    comptime error_message: [:0]const u8,
 ) !void {
     if (c.napi_set_element(env, array, index, value) != .napi_ok) {
         return throw(env, error_message);
@@ -375,7 +389,7 @@ pub fn delete_reference(env: c.napi_env, reference: c.napi_ref) !void {
     }
 }
 
-pub fn create_error(env: c.napi_env, comptime message: [*:0]const u8) !c.napi_value {
+pub fn create_error(env: c.napi_env, comptime message: [:0]const u8) !c.napi_value {
     var napi_string: napi.value = undefined;
     if (c.napi_create_string_utf8(env, message, std.mem.len(message), &napi_string) != .napi_ok) {
         return napi.throw(env, "Failed to encode napi utf8.");
@@ -401,7 +415,7 @@ pub fn call_function(
     }
 }
 
-pub fn scope(env: c.napi_env, comptime error_message: [*:0]const u8) !c.napi_value {
+pub fn scope(env: c.napi_env, comptime error_message: [:0]const u8) !c.napi_value {
     var result: c.napi_value = undefined;
     if (c.napi_get_global(env, &result) != .napi_ok) {
         return throw(env, error_message);
@@ -413,7 +427,7 @@ pub fn scope(env: c.napi_env, comptime error_message: [*:0]const u8) !c.napi_val
 pub fn reference_value(
     env: c.napi_env,
     callback_reference: c.napi_ref,
-    comptime error_message: [*:0]const u8,
+    comptime error_message: [:0]const u8,
 ) !c.napi_value {
     var result: c.napi_value = undefined;
     if (c.napi_get_reference_value(env, callback_reference, &result) != .napi_ok) {
