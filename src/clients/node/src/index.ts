@@ -1,19 +1,17 @@
 const binding: Binding = require('./client.node')
 interface Binding {
   init: (args: BindingInitArgs) => Context
-  request: (context: Context, operation: Operation, batch: Command[], result: ResultCallback) => void
+  request: (context: Context, operation: Operation, batch: Event[], result: ResultCallback) => void
   tick: (context: Context) => void,
   deinit: (context: Context) => void
 }
 
 interface BindingInitArgs {
-  client_id: bigint, // u128
   cluster_id: bigint, // u128
   replica_addresses: Buffer,
 }
 
 export interface InitArgs {
-  client_id: bigint, // u128
   cluster_id: bigint, // u128
   replica_addresses: Array<string | number>,
 }
@@ -22,117 +20,113 @@ export type Context = object
 
 export type Account = {
   id: bigint // u128
-  custom: bigint // u128
-  flags: bigint // u64
-  unit: bigint // u64, unit of value
-  debit_accepted: bigint // u64
-  debit_reserved: bigint // u64
-  credit_accepted: bigint // u64
-  credit_reserved: bigint // u64
-  debit_accepted_limit: bigint // u64
-  debit_reserved_limit: bigint // u64
-  credit_accepted_limit: bigint // u64
-  credit_reserved_limit: bigint // u64
+  user_data: bigint // u128
+  reserved: Buffer // [48]u8
+  unit: number // u16, unit of value
+  code: number // u16, A chart of accounts code describing the type of account (e.g. clearing, settlement)
+  flags: number // u32
+  debits_reserved: bigint // u64
+  debits_accepted: bigint // u64
+  credits_reserved: bigint // u64
+  credits_accepted: bigint // u64
+  timestamp: bigint // u64, Set this to 0n - the actual value will be set by TigerBeetle server
 }
 
-export type CreateAccount = Account & {
-  timestamp: bigint // u64
+export enum AccountFlags {
+  linked = (1 << 0),
+  debits_must_not_exceed_credits = (1 << 1),
+  credits_must_not_exceed_debits = (1 << 2)
 }
 
 export enum CreateAccountError {
-    exists = 1,
-    exists_with_different_unit,
-    exists_with_different_limits,
-    exists_with_different_custom_field,
-    exists_with_different_flags,
-    reserved_field_custom,
-    reserved_field_padding,
-    reserved_field_timestamp,
-    reserved_flag_padding,
-    exceeds_debit_reserved_limit,
-    exceeds_debit_accepted_limit,
-    exceeds_credit_reserved_limit,
-    exceeds_credit_accepted_limit,
-    debit_reserved_limit_exceeds_debit_accepted_limit,
-    credit_reserved_limit_exceeds_credit_accepted_limit,
+  linked_event_failed = 1,
+  exists,
+  exists_with_different_user_data,
+  exists_with_different_reserved_field,
+  exists_with_different_unit,
+  exists_with_different_code,
+  exists_with_different_flags,
+  exceeds_credits,
+  exceeds_debits,
+  reserved_field,
+  reserved_flag_padding,
 }
 
-export type CreateAccountResult = {
+export type CreateAccountsError = {
   index: number,
-  error: CreateAccountError,
+  code: CreateAccountError,
 }
 
-export type CreateTransfer = {
+export type Transfer = {
   id: bigint, // u128
   debit_account_id: bigint, // u128
   credit_account_id: bigint, // u128
-  custom_1: bigint, // u128
-  custom_2: bigint, // u128
-  custom_3: bigint, // u128
-  flags: bigint, // u64
-  amount: bigint, // u64
+  user_data: bigint, // u128
+  reserved: Buffer, // [32]u8
   timeout: bigint, // u64, in nano-seconds
+  code: number, // u32 accounting system code to describe the type of transfer (e.g. settlement)
+  flags: number, // u32
+  amount: bigint, // u64,
+  timestamp: bigint, // u64, Set this to 0n - the actual value will be set by TigerBeetle server
 }
 
-export enum CreateTransferFlags {
-  accept = (1 << 0),
-  reject = (1 << 1),
-  auto_commit = (1 << 2)
+export enum TransferFlags {
+  linked = (1 << 0),
+  two_phase_commit = (1 << 1),
+  condition = (1 << 2) // whether or not a condition will be supplied
 }
 
 export enum CreateTransferError {
-  exists = 1,
+  linked_event_failed = 1,
+  exists,
   exists_with_different_debit_account_id,
   exists_with_different_credit_account_id,
-  exists_with_different_custom_fields,
+  exists_with_different_user_data,
+  exists_with_different_reserved_field,
+  exists_with_different_code,
   exists_with_different_amount,
   exists_with_different_timeout,
   exists_with_different_flags,
   exists_and_already_committed_and_accepted,
   exists_and_already_committed_and_rejected,
-  reserved_field_custom,
-  reserved_field_timestamp,
+  reserved_field,
   reserved_flag_padding,
-  reserved_flag_accept,
-  reserved_flag_reject,
   debit_account_not_found,
   credit_account_not_found,
   accounts_are_the_same,
   accounts_have_different_units,
   amount_is_zero,
-  exceeds_debit_reserved_limit,
-  exceeds_debit_accepted_limit,
-  exceeds_credit_reserved_limit,
-  exceeds_credit_accepted_limit,
-  auto_commit_must_accept,
-  auto_commit_cannot_timeout,
+  exceeds_credits,
+  exceeds_debits,
+  two_phase_commit_must_timeout,
+  timeout_reserved_for_two_phase_commit,
 }
 
-export type CreateTransferResult = {
+export type CreateTransfersError = {
   index: number,
-  error: CreateTransferError,
+  code: CreateTransferError,
 }
 
-export type CommitTransfer = {
+export type Commit = {
   id: bigint, // u128
-  custom_1: bigint, // u128
-  custom_2: bigint, // u128
-  custom_3: bigint, // u128
-  flags: bigint, // u64
+  reserved: Buffer, // [32]u8
+  code: number, // u32 accounting system code describing the reason for accept/reject
+  flags: number, // u32
+  timestamp: bigint, // u64, Set this to 0n - the actual value will be set by TigerBeetle server
 }
 
 export enum CommitFlags {
-  accept = (1 << 0),
-  reject = (1 << 1)
+  linked = (1 << 0),
+  reject = (1 << 1),
+  preimage = (1 << 2) // whether or not a pre-image will be supplied
 }
 
 export enum CommitTransferError {
-  reserved_field_custom = 1,
-  reserved_field_timestamp,
+  linked_event_failed = 1,
+  reserved_field,
   reserved_flag_padding,
-  commit_must_accept_or_reject,
-  commit_cannot_accept_and_reject,
   transfer_not_found,
+  transfer_not_two_phase_commit,
   transfer_expired,
   already_auto_committed,
   already_committed,
@@ -142,22 +136,22 @@ export enum CommitTransferError {
   credit_account_not_found,
   debit_amount_was_not_reserved,
   credit_amount_was_not_reserved,
-  exceeds_debit_accepted_limit,
-  exceeds_credit_accepted_limit,
+  exceeds_credits,
+  exceeds_debits,
   condition_requires_preimage,
   preimage_requires_condition,
   preimage_invalid,
 }
 
-export type CommitTransferResult = {
+export type CommitTransfersError = {
   index: number,
-  error: CommitTransferError,
+  code: CommitTransferError,
 }
 
-export type AccountLookup = bigint // u128
+export type AccountID = bigint // u128
 
-export type Command = CreateAccount | CreateTransfer | CommitTransfer | AccountLookup
-export type Result = CreateAccountResult | CreateTransferResult | CommitTransferResult | Account
+export type Event = Account | Transfer | Commit | AccountID
+export type Result = CreateAccountsError | CreateTransfersError | CommitTransfersError | Account
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export enum Operation {
@@ -168,11 +162,11 @@ export enum Operation {
 }
 
 export interface Client {
-  createAccounts: (batch: CreateAccount[]) => Promise<CreateAccountResult[]>
-  createTransfers: (batch: CreateTransfer[]) => Promise<CreateTransferResult[]>
-  commitTransfers: (batch: CommitTransfer[]) => Promise<CommitTransferResult[]>
-  lookupAccounts: (batch: AccountLookup[]) => Promise<Account[]>
-  request: (operation: Operation, batch: Command[], callback: ResultCallback) => void
+  createAccounts: (batch: Account[]) => Promise<CreateAccountsError[]>
+  createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
+  commitTransfers: (batch: Commit[]) => Promise<CommitTransfersError[]>
+  lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
+  request: (operation: Operation, batch: Event[], callback: ResultCallback) => void
   destroy: () => void
 }
 
@@ -193,13 +187,14 @@ const isSameArgs = (args: InitArgs): boolean => {
     }
   })
 
-  return args.client_id === _args.client_id &&
-          args.cluster_id === _args.cluster_id &&
+  return args.cluster_id === _args.cluster_id &&
           isSameReplicas
 }
 
 let _client: Client | undefined = undefined
 let _interval: NodeJS.Timeout | undefined = undefined
+// here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+let _pinged = false
 // TODO: allow creation of clients if the arguments are different. Will require changes in node.zig as well.
 export function createClient (args: InitArgs): Client {
   const duplicateArgs = isSameArgs(args)
@@ -217,13 +212,22 @@ export function createClient (args: InitArgs): Client {
     replica_addresses: Buffer.from(args.replica_addresses.join(','))
   })
 
-  const request = (operation: Operation, batch: Command[], callback: ResultCallback) => {
+  const request = (operation: Operation, batch: Event[], callback: ResultCallback) => {
     binding.request(context, operation, batch, callback)
   }
 
-  const createAccounts = async (batch: CreateAccount[]): Promise<CreateAccountResult[]> => {
+  const createAccounts = async (batch: Account[]): Promise<CreateAccountsError[]> => {
+    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    if (!_pinged) {
+      await new Promise<void>(resolve => {
+        setTimeout(() => {
+          _pinged = true
+          resolve()
+        }, 600)
+      })
+    }
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CreateAccountResult[]) => {
+      const callback = (error: undefined | Error, results: CreateAccountsError[]) => {
         if (error) {
           reject(error)
         }
@@ -238,9 +242,18 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const createTransfers = async (batch: CreateTransfer[]): Promise<CreateTransferResult[]> => {
+  const createTransfers = async (batch: Transfer[]): Promise<CreateTransfersError[]> => {
+    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    if (!_pinged) {
+      await new Promise<void>(resolve => {
+        setTimeout(() => {
+          _pinged = true
+          resolve()
+        }, 600)
+      })
+    }
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CreateTransferResult[]) => {
+      const callback = (error: undefined | Error, results: CreateTransfersError[]) => {
         if (error) {
           reject(error)
         }
@@ -255,9 +268,18 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const commitTransfers = async (batch: CommitTransfer[]): Promise<CommitTransferResult[]> => {
+  const commitTransfers = async (batch: Commit[]): Promise<CommitTransfersError[]> => {
+    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    if (!_pinged) {
+      await new Promise<void>(resolve => {
+        setTimeout(() => {
+          _pinged = true
+          resolve()
+        }, 600)
+      })
+    }
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CommitTransferResult[]) => {
+      const callback = (error: undefined | Error, results: CommitTransfersError[]) => {
         if (error) {
           reject(error)
         }
@@ -272,7 +294,7 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const lookupAccounts = async (batch: AccountLookup[]): Promise<Account[]> => {
+  const lookupAccounts = async (batch: AccountID[]): Promise<Account[]> => {
     return new Promise((resolve, reject) => {
       const callback = (error: undefined | Error, results: Account[]) => {
         if (error) {
@@ -308,7 +330,7 @@ export function createClient (args: InitArgs): Client {
 
   _interval = setInterval(() => {
     binding.tick(context)
-  }, 50)
+  }, 15)
 
   return _client
 }
