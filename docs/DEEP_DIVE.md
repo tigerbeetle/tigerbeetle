@@ -36,7 +36,7 @@ For newer than 5.7.15, you can also find the full list of [mainline releases her
 scripts/install.sh
 ```
 
-You can also re-run `scripts/install_zig.sh master` to update your Zig to latest master. Zig has a rapid release cadence at present and we are tracking master to keep pace.
+You can also re-run `scripts/install_zig.sh latest` if you want to update your Zig to the latest build. Zig has a rapid release cadence at present and we are tracking the latest build to keep pace.
 
 ## Simulate non-pristine lab conditions
 

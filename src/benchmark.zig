@@ -60,7 +60,7 @@ pub fn main() !void {
             .id = index,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = .{ .accept = true },
+            .flags = .{},
         };
     }
 
@@ -115,8 +115,8 @@ pub fn main() !void {
     }
 
     const ms = std.time.milliTimestamp() - start;
-    std.debug.print("=============================\n", .{});
-    std.debug.print("{} transfers per second\n\n", .{
+    std.debug.print("============================================\n", .{});
+    std.debug.print("{} two-phase commit transfers per second\n\n", .{
         @divFloor(@intCast(i64, transfers.len * 1000), ms),
     });
     std.debug.print("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{

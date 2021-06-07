@@ -1,14 +1,12 @@
 #!/bin/bash
 set -e
 
-# Default to master while we wait for the 0.8.0 release:
-# TODO When 0.8.0 arrives, we should make the release build the default.
-if [ "$1" == "tagged" ]; then
-    ZIG_RELEASE="0.7.1"
-    echo "Installing Zig $ZIG_RELEASE release build..."
-else
+if [ "$1" == "latest" ]; then
     ZIG_RELEASE="builds"
-    echo "Installing Zig latest master build..."
+    echo "Installing Zig latest build..."
+else
+    ZIG_RELEASE="0.8.0"
+    echo "Installing Zig $ZIG_RELEASE release build..."
 fi
 
 # Determine the architecture:
@@ -27,7 +25,7 @@ fi
 
 ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"
 
-# Determine the 0.7.1 or latest master build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
+# Determine the build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
 if command -v wget &> /dev/null; then
     ZIG_URL=`wget --quiet -O - https://ziglang.org/download/index.json | grep "$ZIG_TARGET" | grep "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
 else
