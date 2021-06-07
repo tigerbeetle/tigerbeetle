@@ -9,10 +9,16 @@ const HashMapTransfers = std.AutoHashMap(u128, Transfer);
 const HashMapCommits = std.AutoHashMap(u128, Commit);
 
 pub const Operation = packed enum(u8) {
-    // We reserve command "0" to detect an accidental zero byte being interpreted as an operation:
+    /// Operations required by our VR protocol:
+    ///
+    /// We reserve "0" to prevent any accidental zero byte from being interpreted as an operation.
     reserved,
+    /// Used to init the journal hash chain with a universally unique per-cluster entry.
     init,
+    /// Used to register an ephemeral client with the cluster for linearizability within a session.
+    register,
 
+    /// Operations exposed by TigerBeetle:
     create_accounts,
     create_transfers,
     commit_transfers,
