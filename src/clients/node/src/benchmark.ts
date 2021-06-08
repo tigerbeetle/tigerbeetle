@@ -89,6 +89,8 @@ const main = async () => {
   await client.createAccounts([accountA, accountB])
   const accountResults = await client.lookupAccounts([accountA.id, accountB.id])
   assert(accountResults.length === 2)
+  assert(accountResults[0].debits_accepted === 0n)
+  assert(accountResults[1].debits_accepted === 0n)
   
   console.log(`starting benchmark. MAX_TRANSFERS=${MAX_TRANSFERS} REQUEST_BATCH_SIZE=${MAX_REQUEST_BATCH_SIZE} NUMBER_OF_BATCHES=${transfers.length}`)
   let maxCreateTransfersLatency = 0
