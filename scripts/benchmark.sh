@@ -4,7 +4,7 @@ set -e
 COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
-zig build -Drelease-safe
+zig/zig build -Drelease-safe
 mv zig-out/bin/tigerbeetle .
 
 function onerror {
@@ -39,5 +39,5 @@ sleep 1
 
 echo ""
 echo "Benchmarking..."
-zig run -OReleaseSafe src/benchmark.zig
+zig/zig run -OReleaseSafe src/benchmark.zig
 echo ""

@@ -230,8 +230,6 @@ pub const CreateTransferResult = packed enum(u32) {
     exists_and_already_committed_and_rejected,
     reserved_field,
     reserved_flag_padding,
-    reserved_flag_accept,
-    reserved_flag_reject,
     debit_account_not_found,
     credit_account_not_found,
     accounts_are_the_same,

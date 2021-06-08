@@ -266,7 +266,7 @@ pub const StateMachine = struct {
 
         var insert = self.accounts.getOrPutAssumeCapacity(a.id);
         if (insert.found_existing) {
-            const exists = insert.entry.value;
+            const exists = insert.value_ptr.*;
             if (exists.unit != a.unit) return .exists_with_different_unit;
             if (exists.code != a.code) return .exists_with_different_code;
             if (@bitCast(u32, exists.flags) != @bitCast(u32, a.flags)) {
@@ -278,14 +278,14 @@ pub const StateMachine = struct {
             }
             return .exists;
         } else {
-            insert.entry.value = a;
+            insert.value_ptr.* = a;
             self.commit_timestamp = a.timestamp;
             return .ok;
         }
     }
 
     fn create_account_rollback(self: *StateMachine, a: Account) void {
-        self.accounts.removeAssertDiscard(a.id);
+        assert(self.accounts.remove(a.id));
     }
 
     fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
@@ -323,7 +323,7 @@ pub const StateMachine = struct {
 
         var insert = self.transfers.getOrPutAssumeCapacity(t.id);
         if (insert.found_existing) {
-            const exists = insert.entry.value;
+            const exists = insert.value_ptr.*;
             if (exists.debit_account_id != t.debit_account_id) {
                 return .exists_with_different_debit_account_id;
             }
@@ -341,7 +341,7 @@ pub const StateMachine = struct {
             if (exists.timeout != t.timeout) return .exists_with_different_timeout;
             return .exists;
         } else {
-            insert.entry.value = t;
+            insert.value_ptr.* = t;
             if (t.flags.two_phase_commit) {
                 dr.debits_reserved += t.amount;
                 cr.credits_reserved += t.amount;
@@ -364,7 +364,7 @@ pub const StateMachine = struct {
             dr.debits_accepted -= t.amount;
             cr.credits_accepted -= t.amount;
         }
-        self.transfers.removeAssertDiscard(t.id);
+        assert(self.transfers.remove(t.id));
     }
 
     fn commit_transfer(self: *StateMachine, c: Commit) CommitTransferResult {
@@ -411,7 +411,7 @@ pub const StateMachine = struct {
         if (insert.found_existing) {
             unreachable;
         } else {
-            insert.entry.value = c;
+            insert.value_ptr.* = c;
             dr.debits_reserved -= t.amount;
             cr.credits_reserved -= t.amount;
             if (!c.flags.reject) {
@@ -433,39 +433,27 @@ pub const StateMachine = struct {
             dr.debits_accepted -= t.amount;
             cr.credits_accepted -= t.amount;
         }
-        self.commits.removeAssertDiscard(c.id);
+        assert(self.commits.remove(c.id));
     }
 
     /// This is our core private method for changing balances.
-    /// Returns a live pointer to an Account entry in the accounts hash map.
+    /// Returns a live pointer to an Account in the accounts hash map.
     /// This is intended to lookup an Account and modify balances directly by reference.
     /// This pointer is invalidated if the hash map is resized by another insert, e.g. if we get a
     /// pointer, insert another account without capacity, and then modify this pointer... BOOM!
     /// This is a sharp tool but replaces a lookup, copy and update with a single lookup.
     fn get_account(self: *StateMachine, id: u128) ?*Account {
-        if (self.accounts.getEntry(id)) |entry| {
-            return &entry.value;
-        } else {
-            return null;
-        }
+        return self.accounts.getPtr(id);
     }
 
     /// See the comment for get_account().
     fn get_transfer(self: *StateMachine, id: u128) ?*Transfer {
-        if (self.transfers.getEntry(id)) |entry| {
-            return &entry.value;
-        } else {
-            return null;
-        }
+        return self.transfers.getPtr(id);
     }
 
     /// See the comment for get_account().
     fn get_commit(self: *StateMachine, id: u128) ?*Commit {
-        if (self.commits.getEntry(id)) |entry| {
-            return &entry.value;
-        } else {
-            return null;
-        }
+        return self.commits.getPtr(id);
     }
 };
 
