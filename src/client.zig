@@ -123,6 +123,8 @@ pub const Client = struct {
     ) void {
         const message = self.message_bus.get_message() orelse
             @panic("TODO: bubble up an error/drop the request");
+        defer self.message_bus.unref(message);
+
         self.init_message(message, operation, data);
 
         const was_empty = self.request_queue.empty();
