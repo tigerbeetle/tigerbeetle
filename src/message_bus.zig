@@ -894,13 +894,13 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                         const result = bus.process.clients.getOrPutAssumeCapacity(header.client);
                         // If there is a connection to this client, terminate and replace it:
                         if (result.found_existing) {
-                            const old = result.entry.value;
+                            const old = result.value_ptr.*;
                             assert(old.peer == .client);
                             assert(old.peer.client == self.peer.client);
                             assert(old.state == .connected or old.state == .terminating);
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
                         }
-                        result.entry.value = self;
+                        result.value_ptr.* = self;
                         log.info("connection from client {}", .{self.peer.client});
                     },
                 }
@@ -1077,7 +1077,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                         .none => unreachable,
                         .unknown => {},
                         .client => switch (process_type) {
-                            .replica => bus.process.clients.removeAssertDiscard(self.peer.client),
+                            .replica => assert(bus.process.clients.remove(self.peer.client)),
                             .client => unreachable,
                         },
                         .replica => {
