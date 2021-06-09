@@ -1726,8 +1726,7 @@ pub const Replica = struct {
         // ignore or forward a client request if we know that we have the reply in our client table.
         // We assume this is safe (even without regard to status below) since commits are immutable.
         // This improves latency and reduces traffic.
-
-        // This may resend the reply if this is the latest request:
+        // This may resend the reply if this is the latest committed request:
         if (self.ignore_request_message_duplicate(message)) return true;
 
         if (self.status != .normal) {
@@ -1750,7 +1749,7 @@ pub const Replica = struct {
 
         // The client stores the session number in the nonce of the header. This information is only
         // available to the active leader. There is not enough space in the header to propagate this
-        // through the prepare as we repurpose the nonce to hash chain the previous prepare.
+        // through to the prepare as we must repurpose the nonce to hash chain the previous prepare.
         const session = message.header.nonce;
         const request = message.header.request;
 
@@ -1765,7 +1764,7 @@ pub const Replica = struct {
         if (self.client_table.getEntry(message.header.client)) |entry| {
             // If we are going to drop duplicate requests or resend the latest committed reply,
             // then be sure that we do so for the same client and for the correct request.
-            // There is alot at stake.
+            // There is always alot at stake.
             assert(entry.value.reply.header.command == .reply);
             assert(message.header.client == entry.key);
             assert(message.header.client == entry.value.reply.header.client);
