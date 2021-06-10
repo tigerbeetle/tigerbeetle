@@ -38,7 +38,8 @@ pub const Client = struct {
 
     // TODO Track the latest view number received in .pong and .reply messages.
     // TODO Ask the cluster for our last request number.
-    request_number: u32 = 0,
+    request_number_min: u32 = 0,
+    request_number_max: u32 = 0,
 
     /// Leave one Message free to receive with
     request_queue: RingBuffer(Request, config.message_bus_messages_max - 1) = .{},
@@ -125,7 +126,20 @@ pub const Client = struct {
             @panic("TODO: bubble up an error/drop the request");
         defer self.message_bus.unref(message);
 
-        self.init_message(message, operation, data);
+        self.request_number_max += 1;
+        log.debug("{} request: request_number_max={}", .{ self.id, self.request_number_max });
+        message.header.* = .{
+            .client = self.id,
+            .cluster = self.cluster,
+            .request = self.request_number_max,
+            .command = .request,
+            .operation = operation,
+            .size = @intCast(u32, @sizeOf(Header) + data.len),
+        };
+        const body = message.buffer[@sizeOf(Header)..][0..data.len];
+        std.mem.copy(u8, body, data);
+        message.header.set_checksum_body(body);
+        message.header.set_checksum();
 
         const was_empty = self.request_queue.empty();
         self.request_queue.push(.{
@@ -143,19 +157,54 @@ pub const Client = struct {
 
     fn on_request_timeout(self: *Client) void {
         const current_request = self.request_queue.peek() orelse return;
-        self.send_request(current_request.message);
+
+        log.debug("Retrying timed out request {o}.", .{current_request.message.header});
+        self.request_timeout.stop();
+        self.retry_request(current_request.message);
     }
 
-    fn send_request(self: *Client, request_message: *Message) void {
-        self.send_message_to_replicas(request_message);
+    fn send(self: *Client, message: *Message, isRetry: bool) void {
+        if (!isRetry) self.request_number_min += 1;
+        log.debug("{} send: request_number_min={}", .{ self.id, self.request_number_min });
+        assert(message.header.valid_checksum());
+        assert(message.header.request == self.request_number_min);
+        assert(message.header.client == self.id);
+        assert(message.header.cluster == self.cluster);
+        assert(!self.request_timeout.ticking);
+
+        self.send_message_to_replicas(message);
         self.request_timeout.start();
     }
 
+    fn send_request(self: *Client, message: *Message) void {
+        self.send(message, false);
+    }
+
+    fn retry_request(self: *Client, message: *Message) void {
+        self.send(message, true);
+    }
+
     fn on_reply(self: *Client, reply: *Message) void {
-        const done = self.request_queue.pop().?;
-        done.callback(done.user_data, done.operation, reply.body());
-        self.message_bus.unref(done.message);
+        assert(reply.header.valid_checksum());
+        assert(reply.header.valid_checksum_body(reply.body()));
+
+        const queued_request = self.request_queue.peek().?;
+        if (reply.header.client != self.id or reply.header.cluster != self.cluster) {
+            log.debug("{} on_reply: Dropping unsolicited message.", .{self.id});
+            return;
+        }
+
+        if (reply.header.request < queued_request.message.header.request) {
+            log.debug("{} on_reply: Dropping duplicate message. request_number_min={}", .{ self.id, self.request_number_min });
+            return;
+        }
+        assert(reply.header.request == queued_request.message.header.request);
+        assert(reply.header.operation == queued_request.operation);
+
         self.request_timeout.stop();
+        queued_request.callback(queued_request.user_data, queued_request.operation, reply.body());
+        _ = self.request_queue.pop().?;
+        self.message_bus.unref(queued_request.message);
 
         if (self.request_queue.peek()) |next_request| {
             self.send_request(next_request.message);
@@ -177,14 +226,7 @@ pub const Client = struct {
             return;
         }
         switch (message.header.command) {
-            .reply => {
-                if (message.header.request < self.request_number) {
-                    log.debug("{}: on_message: duplicate reply {}", .{ self.id, message.header.request });
-                    return;
-                }
-
-                self.on_reply(message);
-            },
+            .reply => self.on_reply(message),
             .ping => self.on_ping(message),
             .pong => {
                 // TODO: when we implement proper request number usage, we will
@@ -215,22 +257,6 @@ pub const Client = struct {
             .client = self.id,
         };
         self.message_bus.send_header_to_replica(ping.header.replica, pong);
-    }
-
-    /// Initialize header fields and set the checksums
-    fn init_message(self: Client, message: *Message, operation: Operation, data: []const u8) void {
-        message.header.* = .{
-            .client = self.id,
-            .cluster = self.cluster,
-            .request = 1, // TODO: use request numbers properly
-            .command = .request,
-            .operation = operation,
-            .size = @intCast(u32, @sizeOf(Header) + data.len),
-        };
-        const body = message.buffer[@sizeOf(Header)..][0..data.len];
-        std.mem.copy(u8, body, data);
-        message.header.set_checksum_body(body);
-        message.header.set_checksum();
     }
 
     fn send_message_to_leader(self: *Client, message: *Message) void {
