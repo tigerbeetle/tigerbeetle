@@ -6,6 +6,10 @@ usingnamespace @import("tigerbeetle.zig");
 pub const Header = @import("vr.zig").Header;
 pub const Operation = @import("state_machine.zig").Operation;
 
+const MAX_TRANSFERS = 1_000_000;
+const BATCH_SIZE = 10_000;
+const IS_TWO_PHASE_COMMIT = false;
+
 var accounts = [_]Account{
     Account{
         .id = 1,
@@ -38,7 +42,7 @@ pub fn main() !void {
     defer arena.deinit();
 
     // Pre-allocate a million transfers:
-    var transfers = try arena.allocator.alloc(Transfer, 1_000_000);
+    var transfers = try arena.allocator.alloc(Transfer, MAX_TRANSFERS);
     for (transfers) |*transfer, index| {
         transfer.* = .{
             .id = index,
@@ -47,21 +51,23 @@ pub fn main() !void {
             .user_data = 0,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = .{ .two_phase_commit = true },
+            .flags = if (IS_TWO_PHASE_COMMIT) .{ .two_phase_commit = true } else .{},
             .amount = 1,
-            .timeout = std.time.ns_per_hour,
+            .timeout = if (IS_TWO_PHASE_COMMIT) std.time.ns_per_hour else 0,
         };
     }
 
     // Pre-allocate a million commits:
-    var commits = try arena.allocator.alloc(Commit, 1_000_000);
-    for (commits) |*commit, index| {
-        commit.* = .{
-            .id = index,
-            .reserved = [_]u8{0} ** 32,
-            .code = 0,
-            .flags = .{},
-        };
+    var commits: ?[]Commit = if (IS_TWO_PHASE_COMMIT) try arena.allocator.alloc(Commit, MAX_TRANSFERS) else null;
+    if (commits) |all_commits| {
+        for (all_commits) |*commit, index| {
+            commit.* = .{
+                .id = index,
+                .reserved = [_]u8{0} ** 32,
+                .code = 0,
+                .flags = .{},
+            };
+        }
     }
 
     var addr = try std.net.Address.parseIp4("127.0.0.1", config.port);
@@ -97,14 +103,21 @@ pub fn main() !void {
             max_create_transfers_latency = create_transfers_latency;
         }
 
-        // Commit this batch:
-        var batch_commits = commits[offset..][0..10000];
-        try send(fd, .commit_transfers, std.mem.asBytes(batch_commits[0..]), CommitTransfersResult);
+        if (commits) |all_commits| {
+            // Commit this batch:
+            var batch_commits = all_commits[offset..][0..10000];
+            try send(
+                fd,
+                .commit_transfers,
+                std.mem.asBytes(batch_commits[0..]),
+                CommitTransfersResult,
+            );
 
-        const ms3 = std.time.milliTimestamp();
-        var commit_transfers_latency = ms3 - ms2;
-        if (commit_transfers_latency > max_commit_transfers_latency) {
-            max_commit_transfers_latency = commit_transfers_latency;
+            const ms3 = std.time.milliTimestamp();
+            var commit_transfers_latency = ms3 - ms2;
+            if (commit_transfers_latency > max_commit_transfers_latency) {
+                max_commit_transfers_latency = commit_transfers_latency;
+            }
         }
 
         offset += batch_transfers.len;
@@ -116,8 +129,10 @@ pub fn main() !void {
 
     const ms = std.time.milliTimestamp() - start;
     std.debug.print("============================================\n", .{});
-    std.debug.print("{} two-phase commit transfers per second\n\n", .{
+    const transfer_type = if (IS_TWO_PHASE_COMMIT) "two-phase commit" else "";
+    std.debug.print("{} {s} transfers per second\n\n", .{
         @divFloor(@intCast(i64, transfers.len * 1000), ms),
+        transfer_type,
     });
     std.debug.print("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
         max_create_transfers_latency,
