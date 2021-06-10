@@ -19,6 +19,8 @@ const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const MAX_TRANSFERS: u32 = 1_000_000;
 const BATCH_SIZE: u32 = 10_000;
 const IS_TWO_PHASE_COMMIT = false;
+const BENCHMARK = if (IS_TWO_PHASE_COMMIT) 500_000 else 1_000_000;
+const RESULT_TOLERANCE = 10; // percent
 const BATCHES: f32 = MAX_TRANSFERS / BATCH_SIZE;
 const TOTAL_BATCHES = @ceil(BATCHES);
 
@@ -55,6 +57,9 @@ var max_create_transfers_latency: i64 = 0;
 var max_commit_transfers_latency: i64 = 0;
 
 pub fn main() !void {
+    if (std.builtin.mode != .ReleaseFast or std.builtin.mode != .ReleaseSafe) {
+        log.warn("The client has not been built in ReleaseSafe or ReleaseFast mode.\n", .{});
+    }
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = &arena.allocator;
@@ -142,9 +147,10 @@ pub fn main() !void {
 
     var ms = queue.end.? - queue.start.?;
     const transfer_type = if (IS_TWO_PHASE_COMMIT) "two-phase commit" else "";
+    const result: i64 = @divFloor(@intCast(i64, transfers.len * 1000), ms);
     log.info("============================================", .{});
     log.info("{} {s} transfers per second\n", .{
-        @divFloor(@intCast(i64, transfers.len * 1000), ms),
+        result,
         transfer_type,
     });
     log.info("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
@@ -153,6 +159,10 @@ pub fn main() !void {
     log.info("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
         queue.max_commits_latency,
     });
+
+    if (result < @divFloor(@intCast(i64, BENCHMARK * (100 - RESULT_TOLERANCE)), 100)) {
+        log.warn("There has been a performance regression. previous benchmark={}\n", .{BENCHMARK});
+    }
 }
 
 const Batch = struct {
