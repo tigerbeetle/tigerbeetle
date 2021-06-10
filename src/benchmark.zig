@@ -9,6 +9,8 @@ pub const Operation = @import("state_machine.zig").Operation;
 const MAX_TRANSFERS = 1_000_000;
 const BATCH_SIZE = 10_000;
 const IS_TWO_PHASE_COMMIT = false;
+const BENCHMARK = if (IS_TWO_PHASE_COMMIT) 500_000 else 1_000_000;
+const RESULT_TOLERANCE = 10; // percent
 
 var accounts = [_]Account{
     Account{
@@ -38,6 +40,9 @@ var accounts = [_]Account{
 };
 
 pub fn main() !void {
+    if (std.builtin.mode != .ReleaseFast or std.builtin.mode != .ReleaseSafe) {
+        std.debug.warn("The client has not been built in ReleaseSafe or ReleaseFast mode.\n", .{});
+    }
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -130,8 +135,9 @@ pub fn main() !void {
     const ms = std.time.milliTimestamp() - start;
     std.debug.print("============================================\n", .{});
     const transfer_type = if (IS_TWO_PHASE_COMMIT) "two-phase commit" else "";
+    const result: i64 = @divFloor(@intCast(i64, transfers.len * 1000), ms);
     std.debug.print("{} {s} transfers per second\n\n", .{
-        @divFloor(@intCast(i64, transfers.len * 1000), ms),
+        result,
         transfer_type,
     });
     std.debug.print("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
@@ -140,6 +146,10 @@ pub fn main() !void {
     std.debug.print("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
         max_commit_transfers_latency,
     });
+
+    if (result < @divFloor(@intCast(i64, BENCHMARK * (100 - RESULT_TOLERANCE)), 100)) {
+        std.debug.warn("There has been a performance regression. previous benchmark={}\n", .{BENCHMARK});
+    }
 }
 
 const cluster_id: u128 = 746649394563965214; // a5ca1ab1ebee11e
