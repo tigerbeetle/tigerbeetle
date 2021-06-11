@@ -1,16 +1,31 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const config = @import("config.zig");
 
-usingnamespace @import("tigerbeetle.zig");
+const cli = @import("cli.zig");
+const IO = @import("io.zig").IO;
+const Client = @import("client.zig").Client;
+const MessageBus = @import("message_bus.zig").MessageBusClient;
+const TigerBeetle = @import("tigerbeetle.zig");
+const Transfer = TigerBeetle.Transfer;
+const Commit = TigerBeetle.Commit;
+const Account = TigerBeetle.Account;
+const CreateAccountsResult = TigerBeetle.CreateAccountsResult;
+const CreateTransfersResult = TigerBeetle.CreateTransfersResult;
+const Operation = @import("state_machine.zig").Operation;
+const Header = @import("vr.zig").Header;
+const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
-pub const Header = @import("vr.zig").Header;
-pub const Operation = @import("state_machine.zig").Operation;
-
-const MAX_TRANSFERS = 1_000_000;
-const BATCH_SIZE = 10_000;
+const MAX_TRANSFERS: u32 = 1_000_000;
+const BATCH_SIZE: u32 = 10_000;
 const IS_TWO_PHASE_COMMIT = false;
 const BENCHMARK = if (IS_TWO_PHASE_COMMIT) 500_000 else 1_000_000;
 const RESULT_TOLERANCE = 10; // percent
+const BATCHES: f32 = MAX_TRANSFERS / BATCH_SIZE;
+const TOTAL_BATCHES = @ceil(BATCHES);
+
+const log = std.log;
+pub const log_level: std.log.Level = .info;
 
 var accounts = [_]Account{
     Account{
@@ -38,13 +53,32 @@ var accounts = [_]Account{
         .credits_accepted = 0,
     },
 };
+var max_create_transfers_latency: i64 = 0;
+var max_commit_transfers_latency: i64 = 0;
 
 pub fn main() !void {
-    if (std.builtin.mode != .ReleaseFast or std.builtin.mode != .ReleaseSafe) {
-        std.debug.warn("The client has not been built in ReleaseSafe or ReleaseFast mode.\n", .{});
+    std.debug.print("builtin {o}\n", .{std.builtin.mode});
+    if (std.builtin.mode != .ReleaseSafe and std.builtin.mode != .ReleaseFast) {
+        log.warn("The client has not been built in ReleaseSafe or ReleaseFast mode.\n", .{});
     }
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    const allocator = &arena.allocator;
+
+    const client_id: u128 = 123;
+    const cluster_id: u128 = 746649394563965214; // a5ca1ab1ebee11e
+    var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
+    var io = try IO.init(32, 0);
+    var message_bus = try MessageBus.init(allocator, cluster_id, address[0..], client_id, &io);
+    defer message_bus.deinit();
+    var client = try Client.init(
+        allocator,
+        cluster_id,
+        @intCast(u16, address.len),
+        &message_bus,
+    );
+    defer client.deinit();
+    message_bus.process = .{ .client = &client };
 
     // Pre-allocate a million transfers:
     var transfers = try arena.allocator.alloc(Transfer, MAX_TRANSFERS);
@@ -75,159 +109,185 @@ pub fn main() !void {
         }
     }
 
-    var addr = try std.net.Address.parseIp4("127.0.0.1", config.port);
-    std.debug.print("connecting to {}...\n", .{addr});
-    var connection = try std.net.tcpConnectToAddress(addr);
-    const fd = connection.handle;
-    defer std.os.close(fd);
-    std.debug.print("connected to tigerbeetle\n", .{});
+    try wait_for_connect(&client, &io);
 
-    // Create our two accounts if necessary:
     std.debug.print("creating accounts...\n", .{});
-    try send(fd, .create_accounts, std.mem.asBytes(accounts[0..]), CreateAccountsResult);
+    var queue = TimedQueue.init(&client, &io);
+    try queue.push(.{
+        .operation = Operation.create_accounts,
+        .data = std.mem.sliceAsBytes(accounts[0..]),
+    });
+    try queue.execute();
+    assert(queue.end != null);
+    assert(queue.batches.empty());
 
-    // Start the benchmark:
-    const start = std.time.milliTimestamp();
-    var max_create_transfers_latency: i64 = 0;
-    var max_commit_transfers_latency: i64 = 0;
-    var offset: u64 = 0;
-    while (offset < transfers.len) {
-        // Create a batch of 10,000 transfers:
-        const ms1 = std.time.milliTimestamp();
-        var batch_transfers = transfers[offset..][0..10000];
-        try send(
-            fd,
-            .create_transfers,
-            std.mem.asBytes(batch_transfers[0..]),
-            CreateTransfersResult,
-        );
+    log.info("batching transfers...", .{});
+    var count: u64 = 0;
+    queue.reset();
+    while (count < transfers.len) {
+        try queue.push(.{
+            .operation = .create_transfers,
+            .data = std.mem.sliceAsBytes(transfers[count..][0..BATCH_SIZE]),
+        });
 
-        const ms2 = std.time.milliTimestamp();
-        var create_transfers_latency = ms2 - ms1;
-        if (create_transfers_latency > max_create_transfers_latency) {
-            max_create_transfers_latency = create_transfers_latency;
+        if (IS_TWO_PHASE_COMMIT) {
+            try queue.push(.{
+                .operation = .commit_transfers,
+                .data = std.mem.sliceAsBytes(commits.?[count..][0..BATCH_SIZE]),
+            });
         }
 
-        if (commits) |all_commits| {
-            // Commit this batch:
-            var batch_commits = all_commits[offset..][0..10000];
-            try send(
-                fd,
-                .commit_transfers,
-                std.mem.asBytes(batch_commits[0..]),
-                CommitTransfersResult,
-            );
-
-            const ms3 = std.time.milliTimestamp();
-            var commit_transfers_latency = ms3 - ms2;
-            if (commit_transfers_latency > max_commit_transfers_latency) {
-                max_commit_transfers_latency = commit_transfers_latency;
-            }
-        }
-
-        offset += batch_transfers.len;
-        if (@mod(offset, 100000) == 0) {
-            var space = if (offset == 1000000) "" else " ";
-            std.debug.print("{s}{} transfers...\n", .{ space, offset });
-        }
+        count += BATCH_SIZE;
     }
+    assert(count == MAX_TRANSFERS);
 
-    const ms = std.time.milliTimestamp() - start;
-    std.debug.print("============================================\n", .{});
+    log.info("starting benchmark...", .{});
+    try queue.execute();
+    assert(queue.end != null);
+    assert(queue.batches.empty());
+
+    var ms = queue.end.? - queue.start.?;
     const transfer_type = if (IS_TWO_PHASE_COMMIT) "two-phase commit" else "";
     const result: i64 = @divFloor(@intCast(i64, transfers.len * 1000), ms);
-    std.debug.print("{} {s} transfers per second\n\n", .{
+    log.info("============================================", .{});
+    log.info("{} {s} transfers per second\n", .{
         result,
         transfer_type,
     });
-    std.debug.print("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
-        max_create_transfers_latency,
+    log.info("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
+        queue.max_transfers_latency,
     });
-    std.debug.print("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
-        max_commit_transfers_latency,
+    log.info("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
+        queue.max_commits_latency,
     });
 
     if (result < @divFloor(@intCast(i64, BENCHMARK * (100 - RESULT_TOLERANCE)), 100)) {
-        std.debug.warn("There has been a performance regression. previous benchmark={}\n", .{BENCHMARK});
+        log.warn("There has been a performance regression. previous benchmark={}\n", .{BENCHMARK});
     }
 }
 
-const cluster_id: u128 = 746649394563965214; // a5ca1ab1ebee11e
-const client_id: u128 = 123;
-var request_number: u32 = 0;
-var sent_ping = false;
+const Batch = struct {
+    operation: Operation,
+    data: []u8,
+};
 
-fn send(fd: std.os.fd_t, operation: Operation, body: []u8, comptime Result: anytype) !void {
-    // This is required to greet the cluster and identify the connection as being from a client:
-    if (!sent_ping) {
-        sent_ping = true;
+const TimedQueue = struct {
+    batch_start: ?i64,
+    start: ?i64,
+    end: ?i64,
+    max_transfers_latency: i64,
+    max_commits_latency: i64,
+    client: *Client,
+    io: *IO,
+    batches: if (IS_TWO_PHASE_COMMIT) RingBuffer(Batch, 2 * TOTAL_BATCHES) else RingBuffer(Batch, TOTAL_BATCHES),
 
-        var ping = Header{
-            .command = .ping,
-            .cluster = cluster_id,
-            .client = client_id,
-            .view = 0,
+    pub fn init(client: *Client, io: *IO) TimedQueue {
+        var self = TimedQueue{
+            .batch_start = null,
+            .start = null,
+            .end = null,
+            .max_transfers_latency = 0,
+            .max_commits_latency = 0,
+            .client = client,
+            .io = io,
+            .batches = .{},
         };
-        ping.set_checksum_body(&[0]u8{});
-        ping.set_checksum();
 
-        assert((try std.os.sendto(fd, std.mem.asBytes(&ping), 0, null, 0)) == @sizeOf(Header));
+        return self;
+    }
 
-        var pong: [@sizeOf(Header)]u8 = undefined;
-        var pong_size: u64 = 0;
-        while (pong_size < @sizeOf(Header)) {
-            var pong_bytes = try std.os.recvfrom(fd, pong[pong_size..], 0, null, null);
-            if (pong_bytes == 0) @panic("server closed the connection (while waiting for pong)");
-            pong_size += pong_bytes;
+    pub fn reset(self: *TimedQueue) void {
+        self.batch_start = null;
+        self.start = null;
+        self.end = null;
+        self.max_transfers_latency = 0;
+        self.max_commits_latency = 0;
+    }
+
+    pub fn push(self: *TimedQueue, batch: Batch) !void {
+        try self.batches.push(batch);
+    }
+
+    pub fn execute(self: *TimedQueue) !void {
+        assert(self.start == null);
+        assert(!self.batches.empty());
+        self.reset();
+        log.debug("executing batches...", .{});
+
+        var batch: ?Batch = self.batches.peek();
+        const now = std.time.milliTimestamp();
+        self.start = now;
+        if (batch) |*starting_batch| {
+            log.debug("sending first batch...", .{});
+            self.batch_start = now;
+            self.client.request(
+                @intCast(u128, @ptrToInt(self)),
+                TimedQueue.lap,
+                starting_batch.operation,
+                starting_batch.data,
+            );
+        }
+
+        while (!self.batches.empty()) {
+            self.client.tick();
+            try self.io.run_for_ns(5 * std.time.ns_per_ms);
         }
     }
 
-    request_number += 1;
-
-    var request = Header{
-        .cluster = cluster_id,
-        .client = client_id,
-        .view = 0,
-        .request = request_number,
-        .command = .request,
-        .operation = operation,
-        .size = @intCast(u32, @sizeOf(Header) + body.len),
-    };
-    request.set_checksum_body(body[0..]);
-    request.set_checksum();
-
-    const header = std.mem.asBytes(&request);
-    assert((try std.os.sendto(fd, header[0..], 0, null, 0)) == header.len);
-    if (body.len > 0) {
-        assert((try std.os.sendto(fd, body[0..], 0, null, 0)) == body.len);
-    }
-
-    var recv: [1024 * 1024]u8 = undefined;
-    var recv_size: u64 = 0;
-    while (recv_size < @sizeOf(Header)) {
-        var recv_bytes = try std.os.recvfrom(fd, recv[recv_size..], 0, null, null);
-        if (recv_bytes == 0) @panic("server closed the connection (while waiting for header)");
-        recv_size += recv_bytes;
-    }
-
-    var response = std.mem.bytesAsValue(Header, recv[0..@sizeOf(Header)]);
-    var print_response = response.size > @sizeOf(Header);
-    if (print_response) std.debug.print("{}\n", .{response});
-    assert(response.valid_checksum());
-
-    while (recv_size < response.size) {
-        var recv_bytes = try std.os.recvfrom(fd, recv[recv_size..], 0, null, null);
-        if (recv_bytes == 0) @panic("server closed the connection (while waiting for body)");
-        recv_size += recv_bytes;
-    }
-
-    const response_body = recv[@sizeOf(Header)..response.size];
-    assert(response.valid_checksum_body(response_body));
-
-    if (print_response) {
-        for (std.mem.bytesAsSlice(Result, response_body)) |result| {
-            std.debug.print("{}\n", .{result});
+    pub fn lap(user_data: u128, operation: Operation, results: []const u8) void {
+        const now = std.time.milliTimestamp();
+        assert(results.len == 0);
+        if (log_level == .debug) {
+            const response = std.mem.bytesAsSlice(CreateAccountsResult, results);
+            log.debug("{o}", .{response});
         }
-        @panic("restart the cluster to do a 'clean slate' benchmark");
+
+        const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
+        const completed_batch: ?Batch = self.batches.pop();
+        assert(completed_batch != null);
+        assert(completed_batch.?.operation == operation);
+
+        log.debug("completed batch operation={} start={}", .{ completed_batch.?.operation, self.batch_start });
+        const latency = now - self.batch_start.?;
+        switch (operation) {
+            .create_accounts => {},
+            .create_transfers => {
+                if (latency > self.max_transfers_latency) {
+                    self.max_transfers_latency = latency;
+                }
+            },
+            .commit_transfers => {
+                if (latency > self.max_commits_latency) {
+                    self.max_commits_latency = latency;
+                }
+            },
+            else => unreachable,
+        }
+
+        var batch: ?Batch = self.batches.peek();
+        if (batch) |*next_batch| {
+            self.batch_start = std.time.milliTimestamp();
+            self.client.request(
+                @intCast(u128, @ptrToInt(self)),
+                TimedQueue.lap,
+                next_batch.operation,
+                next_batch.data,
+            );
+        } else {
+            log.debug("stopping timer...", .{});
+            self.end = now;
+        }
+    }
+};
+
+fn wait_for_connect(client: *Client, io: *IO) !void {
+    var ticks: u32 = 0;
+    while (ticks < 20) : (ticks += 1) {
+        client.tick();
+        // We tick IO outside of client so that an IO instance can be shared by multiple clients:
+        // Otherwise we will hit io_uring memory restrictions too quickly.
+        try io.tick();
+
+        std.time.sleep(10 * std.time.ns_per_ms);
     }
 }
