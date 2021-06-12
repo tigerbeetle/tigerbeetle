@@ -66,7 +66,7 @@ pub fn main() !void {
     const allocator = &arena.allocator;
 
     const client_id: u128 = 123;
-    const cluster_id: u128 = 746649394563965214; // a5ca1ab1ebee11e
+    const cluster_id: u32 = 1;
     var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
     var io = try IO.init(32, 0);
     var message_bus = try MessageBus.init(allocator, cluster_id, address[0..], client_id, &io);
@@ -74,7 +74,7 @@ pub fn main() !void {
     var client = try Client.init(
         allocator,
         cluster_id,
-        @intCast(u16, address.len),
+        @intCast(u8, address.len),
         &message_bus,
     );
     defer client.deinit();
