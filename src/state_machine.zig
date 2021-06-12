@@ -133,7 +133,8 @@ pub const StateMachine = struct {
         output: []u8,
     ) usize {
         return switch (operation) {
-            .init => 0,
+            .init => unreachable,
+            .register => 0,
             .create_accounts => self.execute(.create_accounts, input, output),
             .create_transfers => self.execute(.create_transfers, input, output),
             .commit_transfers => self.execute(.commit_transfers, input, output),
