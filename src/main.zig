@@ -25,7 +25,7 @@ pub fn main() !void {
 
     switch (cli.parse_args(arena)) {
         .init => |args| try init(arena, args.cluster, args.replica, args.dir_fd),
-        .start => |args| try start(arena, args.cluster, args.replica, args.configuration, args.dir_fd),
+        .start => |args| try start(arena, args.cluster, args.replica, args.addresses, args.dir_fd),
     }
 }
 
@@ -52,14 +52,16 @@ fn init(arena: *mem.Allocator, cluster: u128, replica: u16, dir_fd: os.fd_t) !vo
 /// Run as a replica server defined by the given args
 fn start(
     arena: *mem.Allocator,
-    cluster: u128,
-    replica_index: u16,
-    configuration: []std.net.Address,
+    cluster: u32,
+    replica_index: u8,
+    addresses: []std.net.Address,
     dir_fd: os.fd_t,
 ) !void {
     // Add 1 for the terminating null byte
     var buffer: [filename_len + 1]u8 = undefined;
-    const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica_index }) catch unreachable;
+    const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica_index }) catch {
+        unreachable;
+    };
     assert(filename.len == filename_len);
 
     // TODO Expose data file size on the CLI.
@@ -81,14 +83,14 @@ fn start(
     var message_bus = try MessageBus.init(
         arena,
         cluster,
-        configuration,
+        addresses,
         replica_index,
         &io,
     );
     var replica = try Replica.init(
         arena,
         cluster,
-        @intCast(u16, configuration.len),
+        @intCast(u8, addresses.len),
         replica_index,
         &time,
         &storage,
@@ -101,7 +103,7 @@ fn start(
     std.log.info("cluster={x} replica={}: listening on {}", .{
         cluster,
         replica_index,
-        configuration[replica_index],
+        addresses[replica_index],
     });
 
     while (true) {
