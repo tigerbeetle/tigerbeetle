@@ -10,7 +10,7 @@ import {
 const MAX_TRANSFERS = 1000000
 const MAX_REQUEST_BATCH_SIZE = 10000
 const IS_TWO_PHASE_COMMIT = false
-const BENCHMARK = IS_TWO_PHASE_COMMIT ? 125000 : 250000
+const PREVIOUS_RESULT = IS_TWO_PHASE_COMMIT ? 125000 : 250000
 const RESULT_TOLERANCE = 10 // percent
 
 const client = createClient({
@@ -137,8 +137,8 @@ const main = async () => {
   assert(accounts[0].debits_accepted === BigInt(MAX_TRANSFERS))
   assert(accounts[1].credits_accepted === BigInt(MAX_TRANSFERS))
 
-  if (result < BENCHMARK * (100 - RESULT_TOLERANCE)/100) {
-    console.warn(`There has been a performance regression. Previous benchmark=${BENCHMARK}`)
+  if (result < PREVIOUS_RESULT * (100 - RESULT_TOLERANCE)/100) {
+    console.warn(`There has been a performance regression. Previous benchmark=${PREVIOUS_RESULT}`)
   }
 }
 
