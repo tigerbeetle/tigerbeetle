@@ -19,6 +19,7 @@ const Clock = vr.Clock;
 const Journal = vr.Journal;
 const Timeout = vr.Timeout;
 const Command = vr.Command;
+const Version = vr.Version;
 
 pub const Status = enum {
     normal,
@@ -209,19 +210,21 @@ pub const Replica = struct {
         std.mem.set(?*Message, nack_prepare, null);
 
         var init_prepare = Header{
-            .nonce = 0,
+            .parent = 0,
             .client = 0,
+            .context = 0,
+            .request = 0,
             .cluster = cluster,
+            .epoch = 0,
             .view = 0,
             .op = 0,
             .commit = 0,
             .offset = 0,
             .size = @sizeOf(Header),
-            .epoch = 0,
-            .request = 0,
             .replica = 0,
             .command = .prepare,
             .operation = .init,
+            .version = Version,
         };
         init_prepare.set_checksum_body(&[0]u8{});
         init_prepare.set_checksum();
@@ -483,7 +486,8 @@ pub const Replica = struct {
         self.state_machine.prepare(message.header.operation.to_state_machine_op(StateMachine), body);
 
         var latest_entry = self.journal.entry_for_op_exact(self.op).?;
-        message.header.nonce = latest_entry.checksum;
+        message.header.parent = latest_entry.checksum;
+        message.header.context = message.header.checksum;
         message.header.view = self.view;
         message.header.op = self.op + 1;
         message.header.commit = self.commit_max;
@@ -575,7 +579,7 @@ pub const Replica = struct {
             self.replica,
             self.op,
             message.header.op,
-            message.header.nonce,
+            message.header.parent,
             message.header.checksum,
         });
         assert(message.header.op == self.op + 1);
@@ -624,8 +628,8 @@ pub const Replica = struct {
         }
 
         if (self.prepare_message) |prepare_message| {
-            if (message.header.nonce != prepare_message.header.checksum) {
-                log.debug("{}: on_prepare_ok: ignoring (different nonce)", .{self.replica});
+            if (message.header.context != prepare_message.header.checksum) {
+                log.debug("{}: on_prepare_ok: ignoring (different context)", .{self.replica});
                 return;
             }
         } else {
@@ -638,8 +642,8 @@ pub const Replica = struct {
         assert(self.leader());
 
         assert(message.header.command == .prepare_ok);
-        assert(message.header.nonce == self.prepare_message.?.header.checksum);
         assert(message.header.client == self.prepare_message.?.header.client);
+        assert(message.header.context == self.prepare_message.?.header.checksum);
         assert(message.header.cluster == self.prepare_message.?.header.cluster);
         assert(message.header.view == self.prepare_message.?.header.view);
         assert(message.header.op == self.prepare_message.?.header.op);
@@ -695,7 +699,7 @@ pub const Replica = struct {
 
         // We may not always have the latest commit entry but if we do these checksums must match:
         if (self.journal.entry_for_op_exact(message.header.commit)) |commit_entry| {
-            if (commit_entry.checksum == message.header.nonce) {
+            if (commit_entry.checksum == message.header.context) {
                 log.debug("{}: on_commit: verified commit checksum", .{self.replica});
             } else {
                 @panic("commit checksum verification failed");
@@ -981,10 +985,8 @@ pub const Replica = struct {
         assert(message.header.replica != self.replica);
 
         const op = message.header.op;
-        var checksum: ?u128 = message.header.nonce;
-        if (self.leader_index(self.view) == self.replica and message.header.nonce == 0) {
-            checksum = null;
-        }
+        var checksum: ?u128 = message.header.context;
+        if (self.leader_index(self.view) == self.replica and checksum.? == 0) checksum = null;
 
         if (self.journal.entry_for_op_exact_with_checksum(op, checksum)) |entry| {
             assert(entry.op == op);
@@ -1019,11 +1021,11 @@ pub const Replica = struct {
             }
             self.send_header_to_replica(message.header.replica, .{
                 .command = .nack_prepare,
+                .context = checksum.?,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
                 .op = op,
-                .nonce = checksum.?,
             });
         }
     }
@@ -1060,8 +1062,8 @@ pub const Replica = struct {
 
         response.header.* = .{
             .command = .headers,
-            // We echo the nonce back to the replica so that they can match up our response:
-            .nonce = message.header.nonce,
+            // We echo the context back to the replica so that they can match up our response:
+            .context = message.header.context,
             .cluster = self.cluster,
             .replica = self.replica,
             .view = self.view,
@@ -1106,7 +1108,8 @@ pub const Replica = struct {
         }
 
         // Followers may not send a `nack_prepare` for a different checksum:
-        assert(message.header.nonce == checksum);
+        // TODO However our op may change in between sending the request and getting the nack.
+        assert(message.header.context == checksum);
 
         // We require a `nack_prepare` from a majority of followers if our op is faulty:
         // Otherwise, we know we do not have the op and need only `f` other nacks.
@@ -1248,7 +1251,7 @@ pub const Replica = struct {
 
         self.send_header_to_other_replicas(.{
             .command = .commit,
-            .nonce = latest_committed_entry.checksum,
+            .context = latest_committed_entry.checksum,
             .cluster = self.cluster,
             .replica = self.replica,
             .view = self.view,
@@ -1303,7 +1306,7 @@ pub const Replica = struct {
             .prepare_ok => {
                 assert(self.status == .normal);
                 assert(self.leader());
-                assert(message.header.nonce == self.prepare_message.?.header.checksum);
+                assert(message.header.context == self.prepare_message.?.header.checksum);
             },
             .start_view_change => assert(self.status == .view_change),
             .do_view_change, .nack_prepare => {
@@ -1337,7 +1340,7 @@ pub const Replica = struct {
         messages[message.header.replica] = message.ref();
 
         // Count the number of unique messages now received:
-        const count = self.count_quorum(messages, message.header.command, message.header.nonce);
+        const count = self.count_quorum(messages, message.header.command, message.header.context);
         log.debug("{}: on_{s}: {} message(s)", .{ self.replica, command, count });
 
         // Wait until we have exactly `threshold` messages for quorum:
@@ -1532,8 +1535,8 @@ pub const Replica = struct {
         reply.header.* = .{
             .command = .reply,
             .operation = prepare.header.operation,
-            .nonce = prepare.header.checksum,
             .client = prepare.header.client,
+            .context = prepare.header.context,
             .request = prepare.header.request,
             .cluster = self.cluster,
             .replica = self.replica,
@@ -1559,14 +1562,14 @@ pub const Replica = struct {
         }
     }
 
-    fn count_quorum(self: *Replica, messages: []?*Message, command: Command, nonce: u128) usize {
+    fn count_quorum(self: *Replica, messages: []?*Message, command: Command, context: u128) usize {
         assert(messages.len == self.replica_count);
 
         var count: usize = 0;
         for (messages) |received, replica| {
             if (received) |m| {
                 assert(m.header.command == command);
-                assert(m.header.nonce == nonce);
+                assert(m.header.context == context);
                 assert(m.header.cluster == self.cluster);
                 assert(m.header.replica == replica);
                 assert(m.header.view == self.view);
@@ -1660,9 +1663,9 @@ pub const Replica = struct {
                     log.warn("{}: on_{s}: ignoring (follower)", .{ self.replica, command });
                     return true;
                 },
-                // Only the leader may answer a request for a prepare without a nonce:
-                .request_prepare => if (message.header.nonce == 0) {
-                    log.warn("{}: on_{s}: ignoring (no nonce)", .{ self.replica, command });
+                // Only the leader may answer a request for a prepare without a context:
+                .request_prepare => if (message.header.context == 0) {
+                    log.warn("{}: on_{s}: ignoring (no context)", .{ self.replica, command });
                     return true;
                 },
                 else => {},
@@ -1747,10 +1750,7 @@ pub const Replica = struct {
         assert(message.header.command == .request);
         assert(message.header.client > 0);
 
-        // The client stores the session number in the nonce of the header. This information is only
-        // available to the active leader. There is not enough space in the header to propagate this
-        // through to the prepare as we must repurpose the nonce to hash chain the previous prepare.
-        const session = message.header.nonce;
+        const session = message.header.context;
         const request = message.header.request;
 
         if (message.header.operation == .register) {
@@ -1950,7 +1950,7 @@ pub const Replica = struct {
             self.op,
             header.op - 1,
             self.journal.entry_for_op_exact(self.op).?.checksum,
-            header.nonce,
+            header.parent,
         });
 
         self.op = header.op - 1;
@@ -1974,7 +1974,7 @@ pub const Replica = struct {
         assert(a.command == .prepare);
         assert(b.command == .prepare);
         assert(a.cluster == b.cluster);
-        if (a.view == b.view and a.op + 1 == b.op and a.checksum != b.nonce) {
+        if (a.view == b.view and a.op + 1 == b.op and a.checksum != b.parent) {
             assert(a.valid_checksum());
             assert(b.valid_checksum());
             log.emerg("{}: panic_if_hash_chain_would_break: a: {}", .{ self.replica, a });
@@ -2033,13 +2033,13 @@ pub const Replica = struct {
             // since only `on_prepare()` can do this, not `repair_header()` in `on_headers()`.
             self.send_header_to_replica(self.leader_index(self.view), .{
                 .command = .request_prepare,
+                // We cannot yet know the checksum of the prepare so we set the context to 0:
+                // The context is optional when requesting from the leader but required otherwise.
+                .context = 0,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
                 .op = self.commit_max,
-                // We cannot yet know the nonce so we set it to 0:
-                // The nonce is optional when requesting from the leader but required otherwise.
-                .nonce = 0,
             });
             return;
         }
@@ -2231,7 +2231,7 @@ pub const Replica = struct {
         if (self.journal.next_entry(header)) |next| {
             self.panic_if_hash_chain_would_break_in_the_same_view(header, next);
 
-            if (header.checksum == next.nonce) {
+            if (header.checksum == next.parent) {
                 assert(header.view <= next.view);
                 assert(header.op + 1 == next.op);
                 // We don't break with `next` but this is no guarantee that `next` does not break.
@@ -2263,7 +2263,7 @@ pub const Replica = struct {
 
         while (entry.op < self.op) {
             if (self.journal.next_entry(entry)) |next| {
-                if (entry.checksum == next.nonce) {
+                if (entry.checksum == next.parent) {
                     assert(entry.view <= next.view);
                     assert(entry.op + 1 == next.op);
                     entry = next;
@@ -2383,13 +2383,13 @@ pub const Replica = struct {
 
         const request_prepare = Header{
             .command = .request_prepare,
+            // If we request a prepare from a follower, as below, it is critical to pass a checksum:
+            // Otherwise we could receive different prepares for the same op number.
+            .context = self.journal.entry_for_op_exact(op).?.checksum,
             .cluster = self.cluster,
             .replica = self.replica,
             .view = self.view,
             .op = op,
-            // If we request a prepare from a follower, as below, it is critical to pass a checksum:
-            // Otherwise we could receive different prepares for the same op number.
-            .nonce = self.journal.entry_for_op_exact(op).?.checksum,
         };
 
         if (self.status == .view_change and op > self.commit_max) {
@@ -2412,7 +2412,7 @@ pub const Replica = struct {
             }
             log.debug("{}: repair_prepare: requesting uncommitted op={}", .{ self.replica, op });
             assert(self.nack_prepare_op.? == op);
-            assert(request_prepare.nonce != 0);
+            assert(request_prepare.context != 0);
             self.send_header_to_other_replicas(request_prepare);
         } else {
             log.debug("{}: repair_prepare: requesting committed op={}", .{ self.replica, op });
@@ -2420,7 +2420,7 @@ pub const Replica = struct {
             // Any uncommitted ops should have already been dealt with.
             // We never roll back committed ops, and thus never regard any `nack_prepare` responses.
             assert(self.nack_prepare_op == null);
-            assert(request_prepare.nonce != 0);
+            assert(request_prepare.context != 0);
             if (self.choose_any_other_replica()) |replica| {
                 self.send_header_to_replica(replica, request_prepare);
             }
@@ -2562,8 +2562,8 @@ pub const Replica = struct {
             // TODO We could surprise the new leader with this, if it is preparing a different op.
             self.send_header_to_replica(self.leader_index(self.view), .{
                 .command = .prepare_ok,
-                .nonce = header.checksum,
                 .client = header.client,
+                .context = header.checksum,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = header.view,
@@ -2947,7 +2947,7 @@ pub const Replica = struct {
 
             if (self.journal.entry_for_op_exact(op)) |a| {
                 assert(a.op + 1 == b.op);
-                if (a.checksum == b.nonce) {
+                if (a.checksum == b.parent) {
                     assert(self.ascending_viewstamps(a, b));
                     b = a;
                 } else {
