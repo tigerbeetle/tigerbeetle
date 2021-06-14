@@ -330,7 +330,7 @@ export function createClient (args: InitArgs): Client {
 
   _interval = setInterval(() => {
     binding.tick(context)
-  }, 15)
+  }, 5)
 
   return _client
 }
