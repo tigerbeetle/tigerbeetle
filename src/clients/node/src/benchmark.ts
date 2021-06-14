@@ -9,6 +9,9 @@ import {
 
 const MAX_TRANSFERS = 1000000
 const MAX_REQUEST_BATCH_SIZE = 10000
+const IS_TWO_PHASE_COMMIT = false
+const BENCHMARK = IS_TWO_PHASE_COMMIT ? 125000 : 250000
+const RESULT_TOLERANCE = 10 // percent
 
 const client = createClient({
   cluster_id: 0x0a5ca1ab1ebee11en,
@@ -64,23 +67,25 @@ while (count < MAX_TRANSFERS) {
       code: 0,
       reserved: Zeroed32Bytes,
       user_data: 0n,
-      flags: TransferFlags.two_phase_commit,
+      flags: IS_TWO_PHASE_COMMIT ? TransferFlags.two_phase_commit : 0,
       amount: 1n,
-      timeout: BigInt(2e9),
+      timeout: IS_TWO_PHASE_COMMIT ? BigInt(2e9) : 0n,
       timestamp: 0n,
     })
   
-    commitBatch.push({
-      id: BigInt(count),
-      reserved: Buffer.alloc(32, 0),
-      code: 0,
-      flags: 0,
-      timestamp: 0n,
-    })
+    if (IS_TWO_PHASE_COMMIT) {
+      commitBatch.push({
+        id: BigInt(count),
+        reserved: Buffer.alloc(32, 0),
+        code: 0,
+        flags: 0,
+        timestamp: 0n,
+      })
+    }
   }
 
   transfers.push(transferBatch)
-  commits.push(commitBatch)
+  if (IS_TWO_PHASE_COMMIT) commits.push(commitBatch)
 }
 assert(count === MAX_TRANSFERS)
 
@@ -109,25 +114,32 @@ const main = async () => {
       maxCreateTransfersLatency = createTransferLatency
     }
 
-    const commitResults = await client.commitTransfers(commits[i])
-    assert(commitResults.length === 0)
+    if (IS_TWO_PHASE_COMMIT) {
+      const commitResults = await client.commitTransfers(commits[i])
+      assert(commitResults.length === 0)
 
-    const ms3 = Date.now()
-    const commitTransferLatency = ms3 - ms2
-    if (commitTransferLatency > maxCommitTransfersLatency) {
-      maxCommitTransfersLatency = commitTransferLatency
+      const ms3 = Date.now()
+      const commitTransferLatency = ms3 - ms2
+      if (commitTransferLatency > maxCommitTransfersLatency) {
+        maxCommitTransfersLatency = commitTransferLatency
+      }
     }
   }
 
   const ms = Date.now() - start
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
+  const result = Math.floor((1000 * MAX_TRANSFERS)/ms)
   console.log("=============================")
-  console.log(`transfers per second: ${Math.floor((1000 * MAX_TRANSFERS)/ms)}`)
+  console.log(`${IS_TWO_PHASE_COMMIT ? 'two-phase ' : ''}transfers per second: ${result}`)
   console.log(`create transfers max p100 latency per 10 000 transfers = ${maxCreateTransfersLatency}ms`)
   console.log(`commit transfers max p100 latency per 10 000 transfers = ${maxCommitTransfersLatency}ms`)
   assert(accounts.length === 2)
   assert(accounts[0].debits_accepted === BigInt(MAX_TRANSFERS))
   assert(accounts[1].credits_accepted === BigInt(MAX_TRANSFERS))
+
+  if (result < BENCHMARK * (100 - RESULT_TOLERANCE)/100) {
+    console.warn(`There has been a performance regression. Previous benchmark=${BENCHMARK}`)
+  }
 }
 
 main().catch(error => { 
