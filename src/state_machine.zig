@@ -13,7 +13,7 @@ pub const Operation = packed enum(u8) {
     ///
     /// We reserve "0" to prevent any accidental zero byte from being interpreted as an operation.
     reserved,
-    /// Used to init the journal hash chain with a universally unique per-cluster entry.
+    /// Used to initialize the hash chain with a universally unique per-cluster entry.
     init,
     /// Used to register an ephemeral client with the cluster for linearizability within a session.
     register,
