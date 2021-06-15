@@ -53,8 +53,10 @@ pub const IO = struct {
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the __kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
+        // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
+        // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
+        // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
         var current_ts: os.timespec = undefined;
-        // Any kernel that supports io_uring supports CLOCK_MONOTONIC as well:
         os.clock_gettime(os.CLOCK_MONOTONIC, &current_ts) catch unreachable;
         // The absolute CLOCK_MONOTONIC time after which we may return from this function:
         const timeout_ts: os.__kernel_timespec = .{
