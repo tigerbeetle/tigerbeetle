@@ -1,0 +1,17 @@
+name: Benchmark
+
+on: [push]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+      - name: Install Zig
+        run: |
+          ${{ github.workspace }}/scripts/install_zig.sh
+      - name: Benchmark
+        run: |
+          ${{ github.workspace }}/scripts/benchmark.sh 
+
