@@ -21,9 +21,20 @@ const CommitTransfersResult = tb.CommitTransfersResult;
 
 const log = std.log;
 
+pub const ClientError = packed enum(u32) {
+    max_message_size_exceeded,
+    batch_not_queued,
+};
+
+const empty_result: [0]u8 = .{};
 pub const Client = struct {
     const Request = struct {
-        const Callback = fn (user_data: u128, operation: Operation, results: []const u8) void;
+        const Callback = fn (
+            user_data: u128,
+            operation: Operation,
+            results: []const u8,
+            client_error: ?u32,
+        ) void;
         user_data: u128,
         callback: Callback,
         operation: Operation,
@@ -70,12 +81,12 @@ pub const Client = struct {
             .request_timeout = .{
                 .name = "request_timeout",
                 .replica = std.math.maxInt(u16),
-                .after = 10,
+                .after = 1000,
             },
             .ping_timeout = .{
                 .name = "ping_timeout",
                 .replica = std.math.maxInt(u16),
-                .after = 10,
+                .after = 1000,
             },
         };
 
@@ -120,11 +131,19 @@ pub const Client = struct {
         user_data: u128,
         callback: Request.Callback,
         operation: Operation,
-        data: []const u8,
+        message: *Message,
+        body_length: usize,
     ) void {
-        const message = self.message_bus.get_message() orelse
-            @panic("TODO: bubble up an error/drop the request");
-        defer self.message_bus.unref(message);
+        const message_size = @intCast(u32, @sizeOf(Header) + body_length);
+        if (message_size > config.message_size_max) {
+            callback(
+                user_data,
+                operation,
+                empty_result[0..],
+                @enumToInt(ClientError.max_message_size_exceeded),
+            );
+            return;
+        }
 
         self.request_number_max += 1;
         log.debug("{} request: request_number_max={}", .{ self.id, self.request_number_max });
@@ -134,10 +153,9 @@ pub const Client = struct {
             .request = self.request_number_max,
             .command = .request,
             .operation = operation,
-            .size = @intCast(u32, @sizeOf(Header) + data.len),
+            .size = message_size,
         };
-        const body = message.buffer[@sizeOf(Header)..][0..data.len];
-        std.mem.copy(u8, body, data);
+        const body = message.buffer[@sizeOf(Header)..][0..body_length];
         message.header.set_checksum_body(body);
         message.header.set_checksum();
 
@@ -148,11 +166,27 @@ pub const Client = struct {
             .operation = operation,
             .message = message.ref(),
         }) catch {
-            @panic("TODO: bubble up an error/drop the request");
+            callback(
+                user_data,
+                operation,
+                empty_result[0..],
+                @enumToInt(ClientError.batch_not_queued),
+            );
+            return;
         };
 
         // If the queue was empty, there is no currently inflight message, so send this one.
         if (was_empty) self.send_request(message);
+    }
+
+    /// Helper function to get an available message from the message bus.
+    pub fn get_message(self: *Client) ?*Message {
+        return self.message_bus.get_message();
+    }
+
+    /// Helper function to get the message bus to unref the message.
+    pub fn unref(self: *Client, message: *Message) void {
+        self.message_bus.unref(message);
     }
 
     fn on_request_timeout(self: *Client) void {
@@ -195,14 +229,22 @@ pub const Client = struct {
         }
 
         if (reply.header.request < queued_request.message.header.request) {
-            log.debug("{} on_reply: Dropping duplicate message. request_number_min={}", .{ self.id, self.request_number_min });
+            log.debug(
+                "{} on_reply: Dropping duplicate message. request_number_min={}",
+                .{ self.id, self.request_number_min },
+            );
             return;
         }
         assert(reply.header.request == queued_request.message.header.request);
         assert(reply.header.operation == queued_request.operation);
 
         self.request_timeout.stop();
-        queued_request.callback(queued_request.user_data, queued_request.operation, reply.body());
+        queued_request.callback(
+            queued_request.user_data,
+            queued_request.operation,
+            reply.body(),
+            null,
+        );
         _ = self.request_queue.pop().?;
         self.message_bus.unref(queued_request.message);
 
@@ -233,7 +275,10 @@ pub const Client = struct {
                 // need to get the request number from a pong message on startup.
             },
             else => {
-                log.warn("{}: on_message: unexpected command {}", .{ self.id, message.header.command });
+                log.warn(
+                    "{}: on_message: unexpected command {}",
+                    .{ self.id, message.header.command },
+                );
             },
         }
     }
