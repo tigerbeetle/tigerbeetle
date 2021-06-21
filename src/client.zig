@@ -22,7 +22,7 @@ const CommitTransfersResult = tb.CommitTransfersResult;
 const log = std.log;
 
 pub const ClientError = error{
-    BatchNotQueued,
+    TooManyOutstandingRequests,
 };
 
 pub const Client = struct {
@@ -155,11 +155,14 @@ pub const Client = struct {
             .operation = operation,
             .message = message.ref(),
         }) catch |err| switch (err) {
-            .NoSpaceLeft => callback(
-                user_data,
-                operation,
-                error.BatchNotQueued,
-            ),
+            error.NoSpaceLeft => {
+                callback(
+                    user_data,
+                    operation,
+                    error.TooManyOutstandingRequests,
+                );
+                return;
+            },
             else => unreachable,
         };
 
