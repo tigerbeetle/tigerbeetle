@@ -40,7 +40,7 @@ One of the ways TigerBeetle achieves its performance is through batching. This i
 
 ```js
 const account = {
-    id: 137n, // u64
+    id: 137n, // u128
     user_data: 0n, // u128, opaque third-party identifier to link this account (many-to-one) to an external entity:
     reserved: Buffer.alloc(48, 0), // [48]u8
     unit: 1,   // u16, unit of value
@@ -115,9 +115,9 @@ The `id` of the account is used for lookups. Only matched accounts are returned.
 This creates a journal entry between two accounts.
 ```js
 const transfer = {
-    id: 1n, // u64
-    debit_account_id: 1n,  // u64
-    credit_account_id: 2n, // u64
+    id: 1n, // u128
+    debit_account_id: 1n,  // u128
+    credit_account_id: 2n, // u128
     user_data: 0n, // u128, opaque third-party identifier to link this transfer (many-to-one) to an external entity 
     reserved: Buffer.alloc(32, 0), // two-phase condition can go in here
     timeout: 0n, // u64, in nano-seconds. 
@@ -162,11 +162,11 @@ This is used to commit a two-phase transfer.
 By default (`flags = 0`), it will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_reserved` and `credits_reserved` of the appropriate accounts and apply them to the `debits_accepted` and `credits_accepted` balances. If the `preimage` bit is set then TigerBeetle will look for it in the `reserved` field and validate it against the `condition` from the associated transfer. If this validation fails, or `reject` is set, then the changes to the `reserved` balances are atomically rolled back.
 ```js
 const commit = {
-    id: 1n,   // must correspond to the transfer id
-    reserved: Buffer.alloc(32, 0),
-    code: 1,  // accounting system code to identify type of transfer
-    flags: 0,
-    timestamp: 0n, // Reserved: This will be set by the server.
+    id: 1n,   // u128, must correspond to the transfer id
+    reserved: Buffer.alloc(32, 0), // [32]u8
+    code: 1,  // u32, accounting system code to identify type of transfer
+    flags: 0, // u32
+    timestamp: 0n, // u64, Reserved: This will be set by the server.
 }
 const errors = await client.commitTransfers([commit])
 ```
