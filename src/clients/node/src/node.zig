@@ -15,10 +15,13 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 const CommitTransfersResult = tb.CommitTransfersResult;
 
+const Header = @import("tigerbeetle/src/vr.zig").Header;
 const Operation = @import("tigerbeetle/src/state_machine.zig").Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
 const Client = @import("tigerbeetle/src/client.zig").Client;
+const ClientError = @import("tigerbeetle/src/client.zig").ClientError;
 const IO = @import("tigerbeetle/src/io.zig").IO;
+const config = @import("tigerbeetle/src/config.zig");
 
 const vr = @import("tigerbeetle/src/vr.zig");
 
@@ -29,6 +32,7 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     translate.register_function(env, exports, "init", init) catch return null;
     translate.register_function(env, exports, "deinit", deinit) catch return null;
     translate.register_function(env, exports, "request", request) catch return null;
+    translate.register_function(env, exports, "raw_request", raw_request) catch return null;
     translate.register_function(env, exports, "tick", tick) catch return null;
 
     const allocator = std.heap.c_allocator;
@@ -41,7 +45,8 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     // Tie the global state to this Node.js environment. This allows us to be thread safe.
     // See https://nodejs.org/api/n-api.html#n_api_environment_life_cycle_apis.
     // A cleanup function is registered as well that Node will call when the environment
-    // is torn down. Be careful not to call this function again as it will overwrite the global state.
+    // is torn down. Be careful not to call this function again as it will overwrite the global
+    // state.
     translate.set_instance_data(
         env,
         @ptrCast(*c_void, @alignCast(@alignOf(u8), global)),
@@ -65,11 +70,11 @@ const Globals = struct {
 
         self.allocator = allocator;
 
-        // Be careful to size the SQ ring to only a few SQE entries and to share a single IO instance
-        // across multiple clients to stay under kernel limits:
+        // Be careful to size the SQ ring to only a few SQE entries and to share a single IO
+        // instance across multiple clients to stay under kernel limits:
         //
-        // The memory required by io_uring is accounted under the rlimit memlocked option, which can be
-        // quite low on some setups (64K). The default is usually enough for most use cases, but
+        // The memory required by io_uring is accounted under the rlimit memlocked option, which can
+        // be quite low on some setups (64K). The default is usually enough for most use cases, but
         // bigger rings or things like registered buffers deplete it quickly. Root isn't under this
         // restriction, but regular users are.
         //
@@ -108,7 +113,13 @@ const Context = struct {
     message_bus: MessageBus,
     client: Client,
 
-    fn create(env: c.napi_env, allocator: *std.mem.Allocator, io: *IO, cluster: u128, configuration_raw: []const u8) !c.napi_value {
+    fn create(
+        env: c.napi_env,
+        allocator: *std.mem.Allocator,
+        io: *IO,
+        cluster: u128,
+        configuration_raw: []const u8,
+    ) !c.napi_value {
         const context = try allocator.create(Context);
         errdefer allocator.destroy(context);
 
@@ -150,7 +161,10 @@ fn contextCast(context_raw: *c_void) !*Context {
 fn validate_timestamp(env: c.napi_env, object: c.napi_value) !u64 {
     const timestamp = try translate.u64_from_object(env, object, "timestamp");
     if (timestamp != 0) {
-        return translate.throw(env, "Timestamp should be set as 0 as this will be set correctly by the Server.");
+        return translate.throw(
+            env,
+            "Timestamp should be set as 0 as this will be set correctly by the Server.",
+        );
     }
 
     return timestamp;
@@ -195,39 +209,44 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
     };
 }
 
-fn decode_from_array(comptime T: type, env: c.napi_env, array: c.napi_value) ![]u8 {
+pub fn decode_events(
+    env: c.napi_env,
+    array: c.napi_value,
+    operation: Operation,
+    output: []u8,
+) !usize {
+    return switch (operation) {
+        .create_accounts => try decode_events_from_array(env, array, Account, output),
+        .create_transfers => try decode_events_from_array(env, array, Transfer, output),
+        .commit_transfers => try decode_events_from_array(env, array, Commit, output),
+        .lookup_accounts => try decode_events_from_array(env, array, u128, output),
+        else => unreachable,
+    };
+}
+
+fn decode_events_from_array(
+    env: c.napi_env,
+    array: c.napi_value,
+    comptime T: type,
+    output: []u8,
+) !usize {
     const array_length = try translate.array_length(env, array);
     if (array_length < 1) return translate.throw(env, "Batch must contain at least one event.");
 
-    const allocator = std.heap.c_allocator;
-    const events = allocator.alloc(T, array_length) catch {
-        return translate.throw(env, "Failed to allocate memory for batch in client.");
-    };
-    errdefer allocator.free(events);
+    const body_length = @sizeOf(T) * array_length;
+    if (@sizeOf(Header) + body_length > config.message_size_max) {
+        return translate.throw(env, "Batch is larger than the maximum message size.");
+    }
+
+    var results = std.mem.bytesAsSlice(T, output);
 
     var i: u32 = 0;
     while (i < array_length) : (i += 1) {
         const entry = try translate.array_element(env, array, i);
-        events[i] = try decode_from_object(T, env, entry);
+        results[i] = try decode_from_object(T, env, entry);
     }
 
-    for (events) |event| std.log.debug("Decoded event {}\n", .{event});
-
-    return std.mem.sliceAsBytes(events);
-}
-
-fn decode_slice_from_array(env: c.napi_env, object: c.napi_value, operation: Operation) ![]u8 {
-    const allocator = std.heap.c_allocator;
-    return switch (operation) {
-        .reserved, .init => {
-            std.log.err("Reserved operation {}", .{operation});
-            return translate.throw(env, "Reserved operation.");
-        },
-        .create_accounts => try decode_from_array(Account, env, object),
-        .create_transfers => try decode_from_array(Transfer, env, object),
-        .commit_transfers => try decode_from_array(Commit, env, object),
-        .lookup_accounts => try decode_from_array(u128, env, object),
-    };
+    return body_length;
 }
 
 fn encode_napi_results_array(
@@ -236,51 +255,151 @@ fn encode_napi_results_array(
     data: []const u8,
 ) !c.napi_value {
     const results = std.mem.bytesAsSlice(Result, data);
-    const napi_array = try translate.create_array(env, @intCast(u32, results.len), "Failed to allocate array for results.");
+    const napi_array = try translate.create_array(
+        env,
+        @intCast(u32, results.len),
+        "Failed to allocate array for results.",
+    );
 
     switch (Result) {
         CreateAccountsResult, CreateTransfersResult, CommitTransfersResult => {
             var i: u32 = 0;
             while (i < results.len) : (i += 1) {
                 const result = results[i];
-                const napi_object = try translate.create_object(env, "Failed to create result object");
+                const napi_object = try translate.create_object(
+                    env,
+                    "Failed to create result object",
+                );
 
-                try translate.u32_into_object(env, napi_object, "index", result.index, "Failed to set property \"index\" of result.");
+                try translate.u32_into_object(
+                    env,
+                    napi_object,
+                    "index",
+                    result.index,
+                    "Failed to set property \"index\" of result.",
+                );
 
-                try translate.u32_into_object(env, napi_object, "code", @enumToInt(result.result), "Failed to set property \"code\" of result.");
+                try translate.u32_into_object(
+                    env,
+                    napi_object,
+                    "code",
+                    @enumToInt(result.result),
+                    "Failed to set property \"code\" of result.",
+                );
 
-                try translate.set_array_element(env, napi_array, i, napi_object, "Failed to set element in results array.");
+                try translate.set_array_element(
+                    env,
+                    napi_array,
+                    i,
+                    napi_object,
+                    "Failed to set element in results array.",
+                );
             }
         },
         else => {
             var i: u32 = 0;
             while (i < results.len) : (i += 1) {
                 const result = results[i];
-                const napi_object = try translate.create_object(env, "Failed to create account lookup result object.");
+                const napi_object = try translate.create_object(
+                    env,
+                    "Failed to create account lookup result object.",
+                );
 
-                try translate.u128_into_object(env, napi_object, "id", result.id, "Failed to set property \"id\" of account lookup result.");
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "id",
+                    result.id,
+                    "Failed to set property \"id\" of account lookup result.",
+                );
 
-                try translate.u128_into_object(env, napi_object, "user_data", result.user_data, "Failed to set property \"user_data\" of account lookup result.");
-                
-                try translate.byte_slice_into_object(env, napi_object, "reserved", &result.reserved, "Failed to set property \"reserved\" of account lookup result.");
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "user_data",
+                    result.user_data,
+                    "Failed to set property \"user_data\" of account lookup result.",
+                );
 
-                try translate.u32_into_object(env, napi_object, "unit", @intCast(u32, result.unit), "Failed to set property \"unit\" of account lookup result.");
+                try translate.byte_slice_into_object(
+                    env,
+                    napi_object,
+                    "reserved",
+                    &result.reserved,
+                    "Failed to set property \"reserved\" of account lookup result.",
+                );
 
-                try translate.u32_into_object(env, napi_object, "code", @intCast(u32, result.code), "Failed to set property \"code\" of account lookup result.");
+                try translate.u32_into_object(
+                    env,
+                    napi_object,
+                    "unit",
+                    @intCast(u32, result.unit),
+                    "Failed to set property \"unit\" of account lookup result.",
+                );
 
-                try translate.u32_into_object(env, napi_object, "flags", @bitCast(u32, result.flags), "Failed to set property \"flags\" of account lookup result.");
+                try translate.u32_into_object(
+                    env,
+                    napi_object,
+                    "code",
+                    @intCast(u32, result.code),
+                    "Failed to set property \"code\" of account lookup result.",
+                );
 
-                try translate.u64_into_object(env, napi_object, "debits_reserved", result.debits_reserved, "Failed to set property \"debits_reserved\" of account lookup result.");
+                try translate.u32_into_object(
+                    env,
+                    napi_object,
+                    "flags",
+                    @bitCast(u32, result.flags),
+                    "Failed to set property \"flags\" of account lookup result.",
+                );
 
-                try translate.u64_into_object(env, napi_object, "debits_accepted", result.debits_accepted, "Failed to set property \"debits_accepted\" of account lookup result.");
+                try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "debits_reserved",
+                    result.debits_reserved,
+                    "Failed to set property \"debits_reserved\" of account lookup result.",
+                );
 
-                try translate.u64_into_object(env, napi_object, "credits_reserved", result.credits_reserved, "Failed to set property \"credits_reserved\" of account lookup result.");
+                try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "debits_accepted",
+                    result.debits_accepted,
+                    "Failed to set property \"debits_accepted\" of account lookup result.",
+                );
 
-                try translate.u64_into_object(env, napi_object, "credits_accepted", result.credits_accepted, "Failed to set property \"credits_accepted\" of account lookup result.");
+                try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "credits_reserved",
+                    result.credits_reserved,
+                    "Failed to set property \"credits_reserved\" of account lookup result.",
+                );
 
-                try translate.u64_into_object(env, napi_object, "timestamp", result.timestamp, "Failed to set property \"timestamp\" of account lookup result.");
+                try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "credits_accepted",
+                    result.credits_accepted,
+                    "Failed to set property \"credits_accepted\" of account lookup result.",
+                );
 
-                try translate.set_array_element(env, napi_array, i, napi_object, "Failed to set element in results array.");
+                try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "timestamp",
+                    result.timestamp,
+                    "Failed to set property \"timestamp\" of account lookup result.",
+                );
+
+                try translate.set_array_element(
+                    env,
+                    napi_array,
+                    i,
+                    napi_object,
+                    "Failed to set element in results array.",
+                );
             }
         },
     }
@@ -295,10 +414,17 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
-    if (argc != 1) translate.throw(env, "Function init() must receive 1 argument exactly.") catch return null;
+    if (argc != 1) translate.throw(
+        env,
+        "Function init() must receive 1 argument exactly.",
+    ) catch return null;
 
     const cluster = translate.u128_from_object(env, argv[0], "cluster_id") catch return null;
-    const configuration = translate.slice_from_object(env, argv[0], "replica_addresses") catch return null;
+    const configuration = translate.slice_from_object(
+        env,
+        argv[0],
+        "replica_addresses",
+    ) catch return null;
 
     const allocator = std.heap.c_allocator;
 
@@ -312,6 +438,8 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     return context;
 }
 
+/// This function decodes and validates an array of Node objects, one-by-one, directly into an 
+/// available message before requesting the client to send it.
 fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 20;
     var argv: [20]c.napi_value = undefined;
@@ -319,10 +447,16 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
         translate.throw(env, "Failed to get args.") catch return null;
     }
 
-    const allocator = std.heap.c_allocator;
-    if (argc != 4) translate.throw(env, "Function request() requires 4 arguments exactly.") catch return null;
+    if (argc != 4) translate.throw(
+        env,
+        "Function request() requires 4 arguments exactly.",
+    ) catch return null;
 
-    const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
+    const context_raw = translate.value_external(
+        env,
+        argv[0],
+        "Failed to get Client Context pointer.",
+    ) catch return null;
     const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
     const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
@@ -331,55 +465,147 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
         translate.throw(env, "Unknown operation.") catch return null;
     }
 
+    const message = context.client.get_message() orelse {
+        translate.throw(
+            env,
+            "Message pool has been exhausted.",
+        ) catch return null;
+    };
+    defer context.client.unref(message);
+
     const operation = @intToEnum(Operation, @intCast(u8, operation_int));
-    const events = decode_slice_from_array(env, argv[2], operation) catch |err| switch (err) {
+    const body_length = decode_events(
+        env,
+        argv[2],
+        operation,
+        message.buffer[@sizeOf(Header)..],
+    ) catch |err| switch (err) {
         error.ExceptionThrown => {
             return null;
         },
     };
-    defer allocator.free(events);
 
-    context.client.request(@bitCast(u128, user_data), on_result, operation, events);
+    context.client.request(@bitCast(u128, user_data), on_result, operation, message, body_length);
 
     return null;
 }
 
-fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
+/// The batch has already been encoded into a byte slice. This means that we only have to do one 
+/// copy directly into an available message. No validation of the encoded data is performed except
+/// that it will fit into the message buffer.
+fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+    var argc: usize = 20;
+    var argv: [20]c.napi_value = undefined;
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
+        translate.throw(env, "Failed to get args.") catch return null;
+    }
+
+    if (argc != 4) translate.throw(
+        env,
+        "Function request() requires 4 arguments exactly.",
+    ) catch return null;
+
+    const context_raw = translate.value_external(
+        env,
+        argv[0],
+        "Failed to get Client Context pointer.",
+    ) catch return null;
+    const context = contextCast(context_raw.?) catch return null;
+    const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
+    const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
+
+    if (operation_int >= @typeInfo(Operation).Enum.fields.len) {
+        translate.throw(env, "Unknown operation.") catch return null;
+    }
+    const operation = @intToEnum(Operation, @intCast(u8, operation_int));
+
+    const message = context.client.get_message() orelse {
+        translate.throw(
+            env,
+            "Message pool has been exhausted.",
+        ) catch return null;
+    };
+    defer context.client.unref(message);
+
+    const body_length = translate.bytes_from_buffer(
+        env,
+        argv[2],
+        message.buffer[@sizeOf(Header)..],
+        "raw_batch",
+    ) catch |err| switch (err) {
+        error.ExceptionThrown => {
+            return null;
+        },
+    };
+
+    context.client.request(@bitCast(u128, user_data), on_result, operation, message, body_length);
+
+    return null;
+}
+
+fn create_client_error(env: c.napi_env, client_error: ClientError) !c.napi_value {
+    return switch (client_error) {
+        error.TooManyOutstandingRequests => try translate.create_error(
+            env,
+            "Too many outstanding requests - message pool exhausted.",
+        ),
+    };
+}
+
+fn on_result(user_data: u128, operation: Operation, results: ClientError![]const u8) void {
     const env = @bitCast(translate.UserData, user_data).env;
     const callback_reference = @bitCast(translate.UserData, user_data).callback_reference;
-    const napi_callback = translate.reference_value(env, callback_reference, "Failed to get callback reference.") catch return;
-    const scope = translate.scope(env, "Failed to get \"this\" for results callback.") catch return;
+    const napi_callback = translate.reference_value(
+        env,
+        callback_reference,
+        "Failed to get callback reference.",
+    ) catch return;
+    const scope = translate.scope(
+        env,
+        "Failed to get \"this\" for results callback.",
+    ) catch return;
     const globals_raw = translate.globals(env) catch return;
     const globals = globalsCast(globals_raw.?);
     const argc: usize = 2;
     var argv: [argc]c.napi_value = undefined;
 
-    // if (client_error != null) {
-    //     // TODO: determine message according to error
-    //     const napi_error = create_napi_error(env, "Client could not send batch.") catch return;
-    //     argv[0] = napi_error;
-    //     argv[1] = napi_undefined;
-    // } else {
-    //     const napi_results = encode_napi_results_array(env, @bitCast([]Result, results)) catch return;
-    //     argv[0] = napi_undefined;
-    //     argv[1] = napi_results;
-    // }
+    if (results) |value| {
+        const napi_results = switch (operation) {
+            .reserved, .init => {
+                translate.throw(env, "Reserved operation.") catch return;
+            },
+            .create_accounts => encode_napi_results_array(
+                CreateAccountsResult,
+                env,
+                value,
+            ) catch return,
+            .create_transfers => encode_napi_results_array(
+                CreateTransfersResult,
+                env,
+                value,
+            ) catch return,
+            .commit_transfers => encode_napi_results_array(
+                CommitTransfersResult,
+                env,
+                value,
+            ) catch return,
+            .lookup_accounts => encode_napi_results_array(Account, env, value) catch return,
+        };
 
-    const napi_results = switch (operation) {
-        .reserved, .init => {
-            translate.throw(env, "Reserved operation.") catch return;
-        },
-        .create_accounts => encode_napi_results_array(CreateAccountsResult, env, results) catch return,
-        .create_transfers => encode_napi_results_array(CreateTransfersResult, env, results) catch return,
-        .commit_transfers => encode_napi_results_array(CommitTransfersResult, env, results) catch return,
-        .lookup_accounts => encode_napi_results_array(Account, env, results) catch return,
+        argv[0] = globals.napi_undefined;
+        argv[1] = napi_results;
+    } else |err| {
+        argv[0] = create_client_error(env, err) catch {
+            translate.throw(env, "Failed to create Node Error.") catch return;
+        };
+        argv[1] = globals.napi_undefined;
+    }
+
+    translate.call_function(env, scope, napi_callback, argc, argv[0..]) catch {
+        translate.throw(env, "Failed to call JS results callback.") catch return;
     };
-    argv[0] = globals.napi_undefined;
-    argv[1] = napi_results;
 
-    // TODO: add error handling (but allow JS function to throw an exception)
-    translate.call_function(env, scope, napi_callback, argc, argv[0..]) catch return;
-
+    // TODO: should we throw a JS exception? We've already called the JS callback.
     translate.delete_reference(env, callback_reference) catch return;
 }
 
@@ -391,13 +617,25 @@ fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     }
 
     const allocator = std.heap.c_allocator;
-    if (argc != 1) translate.throw(env, "Function tick() requires 1 argument exactly.") catch return null;
+    if (argc != 1) translate.throw(
+        env,
+        "Function tick() requires 1 argument exactly.",
+    ) catch return null;
 
-    const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
+    const context_raw = translate.value_external(
+        env,
+        argv[0],
+        "Failed to get Client Context pointer.",
+    ) catch return null;
     const context = contextCast(context_raw.?) catch return null;
 
     context.client.tick();
-    context.io.tick() catch unreachable; // TODO Use a block to throw an exception including the Zig error.
+    context.io.tick() catch |err| switch (err) {
+        // TODO exhaustive switch
+        else => {
+            translate.throw(env, "Failed to tick IO.") catch return null;
+        },
+    };
     return null;
 }
 
@@ -408,9 +646,16 @@ fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
         translate.throw(env, "Failed to get args.") catch return null;
     }
 
-    if (argc != 1) translate.throw(env, "Function deinit() requires 1 argument exactly.") catch return null;
+    if (argc != 1) translate.throw(
+        env,
+        "Function deinit() requires 1 argument exactly.",
+    ) catch return null;
 
-    const context_raw = translate.value_external(env, argv[0], "Failed to get Client Context pointer.") catch return null;
+    const context_raw = translate.value_external(
+        env,
+        argv[0],
+        "Failed to get Client Context pointer.",
+    ) catch return null;
     const context = contextCast(context_raw.?) catch return null;
     context.client.deinit();
     context.message_bus.deinit();

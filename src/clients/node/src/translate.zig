@@ -18,14 +18,15 @@ pub fn register_function(
     }
 }
 
-pub fn throw(env: c.napi_env, comptime message: [:0]const u8) error{ExceptionThrown} {
+const TranslationErrors = error{ExceptionThrown};
+pub fn throw(env: c.napi_env, comptime message: [:0]const u8) TranslationErrors {
     var result = c.napi_throw_error(env, null, message);
     switch (result) {
         .napi_ok, .napi_pending_exception => {},
         else => unreachable,
     }
 
-    return error.ExceptionThrown;
+    return TranslationErrors.ExceptionThrown;
 }
 
 pub fn capture_undefined(env: c.napi_env) !c.napi_value {
@@ -120,7 +121,7 @@ pub fn slice_from_value(
     env: c.napi_env,
     value: c.napi_value,
     comptime key: [:0]const u8,
-) ![] u8 {
+) ![]u8 {
     var is_buffer: bool = undefined;
     assert(c.napi_is_buffer(env, value, &is_buffer) == .napi_ok);
 
@@ -135,7 +136,12 @@ pub fn slice_from_value(
     return @ptrCast([*]u8, data.?)[0..data_length];
 }
 
-pub fn bytes_from_object(env: c.napi_env, object: c.napi_value, comptime length: u8, comptime key: [:0]const u8) ![length]u8 {
+pub fn bytes_from_object(
+    env: c.napi_env,
+    object: c.napi_value,
+    comptime length: u8,
+    comptime key: [:0]const u8,
+) ![length]u8 {
     var property: c.napi_value = undefined;
     if (c.napi_get_named_property(env, object, key, &property) != .napi_ok) {
         return throw(env, key ++ " must be defined");
@@ -151,6 +157,26 @@ pub fn bytes_from_object(env: c.napi_env, object: c.napi_value, comptime length:
     std.mem.copy(u8, result[0..], data[0..]);
 
     return result;
+}
+
+pub fn bytes_from_buffer(
+    env: c.napi_env,
+    buffer: c.napi_value,
+    output: []u8,
+    comptime key: [:0]const u8,
+) !usize {
+    const data = try slice_from_value(env, buffer, key);
+    if (data.len < 1) {
+        return throw(env, key ++ " must not be empty.");
+    }
+    if (data.len > output.len) {
+        return throw(env, key ++ " exceeds max message size.");
+    }
+
+    // copy this out of V8 as the underlying data lifetime is not guaranteed.
+    std.mem.copy(u8, output[0..], data[0..]);
+
+    return data.len;
 }
 
 pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u128 {
@@ -221,7 +247,7 @@ pub fn u64_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]c
 
     return result;
 }
- 
+
 pub fn u32_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]const u8) !u32 {
     var result: u32 = undefined;
     // TODO Check whether this will coerce signed numbers to a u32:
@@ -265,7 +291,13 @@ pub fn u128_into_object(
     // V8 says that the words are little endian. If we were on a big endian machine
     // we would need to convert, but big endian is not supported by tigerbeetle.
     var bigint: c.napi_value = undefined;
-    if (c.napi_create_bigint_words(env, 0, 2, @ptrCast(*const [2]u64, &value), &bigint) != .napi_ok) {
+    if (c.napi_create_bigint_words(
+        env,
+        0,
+        2,
+        @ptrCast(*const [2]u64, &value),
+        &bigint,
+    ) != .napi_ok) {
         return throw(env, error_message);
     }
 
@@ -384,15 +416,18 @@ pub fn delete_reference(env: c.napi_env, reference: c.napi_ref) !void {
     }
 }
 
-pub fn create_error(env: c.napi_env, comptime message: [:0]const u8) !c.napi_value {
-    var napi_string: napi.value = undefined;
+pub fn create_error(
+    env: c.napi_env,
+    comptime message: [:0]const u8,
+) TranslationErrors!c.napi_value {
+    var napi_string: c.napi_value = undefined;
     if (c.napi_create_string_utf8(env, message, std.mem.len(message), &napi_string) != .napi_ok) {
-        return napi.throw(env, "Failed to encode napi utf8.");
+        return TranslationErrors.ExceptionThrown;
     }
 
     var napi_error: c.napi_value = undefined;
     if (c.napi_create_error(env, null, napi_string, &napi_error) != .napi_ok) {
-        return napi.throw(env, "Failed to create Error.");
+        return TranslationErrors.ExceptionThrown;
     }
 
     return napi_error;
