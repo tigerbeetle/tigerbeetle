@@ -22,18 +22,15 @@ const CommitTransfersResult = tb.CommitTransfersResult;
 const log = std.log;
 
 pub const ClientError = packed enum(u32) {
-    max_message_size_exceeded,
-    batch_not_queued,
+    BatchNotQueued,
 };
 
-const empty_result: [0]u8 = .{};
 pub const Client = struct {
     const Request = struct {
         const Callback = fn (
             user_data: u128,
             operation: Operation,
-            results: []const u8,
-            client_error: ?u32,
+            results: ClientError![]const u8,
         ) void;
         user_data: u128,
         callback: Callback,
@@ -81,12 +78,12 @@ pub const Client = struct {
             .request_timeout = .{
                 .name = "request_timeout",
                 .replica = std.math.maxInt(u16),
-                .after = 1000,
+                .after = 100,
             },
             .ping_timeout = .{
                 .name = "ping_timeout",
                 .replica = std.math.maxInt(u16),
-                .after = 1000,
+                .after = 100,
             },
         };
 
@@ -132,21 +129,13 @@ pub const Client = struct {
         callback: Request.Callback,
         operation: Operation,
         message: *Message,
-        body_length: usize,
+        body_size: usize,
     ) void {
-        const message_size = @intCast(u32, @sizeOf(Header) + body_length);
-        if (message_size > config.message_size_max) {
-            callback(
-                user_data,
-                operation,
-                empty_result[0..],
-                @enumToInt(ClientError.max_message_size_exceeded),
-            );
-            return;
-        }
+        const message_size = @intCast(u32, @sizeOf(Header) + body_size);
+        assert(message_size <= config.message_size_max);
 
         self.request_number_max += 1;
-        log.debug("{} request: request_number_max={}", .{ self.id, self.request_number_max });
+        log.debug("{} request: setting request={}", .{ self.id, self.request_number_max });
         message.header.* = .{
             .client = self.id,
             .cluster = self.cluster,
@@ -155,7 +144,7 @@ pub const Client = struct {
             .operation = operation,
             .size = message_size,
         };
-        const body = message.buffer[@sizeOf(Header)..][0..body_length];
+        const body = message.buffer[@sizeOf(Header)..][0..body_size];
         message.header.set_checksum_body(body);
         message.header.set_checksum();
 
@@ -165,14 +154,13 @@ pub const Client = struct {
             .callback = callback,
             .operation = operation,
             .message = message.ref(),
-        }) catch {
-            callback(
+        }) catch |err| switch (err) {
+            .NoSpaceLeft => callback(
                 user_data,
                 operation,
-                empty_result[0..],
-                @enumToInt(ClientError.batch_not_queued),
-            );
-            return;
+                error.BatchNotQueued,
+            ),
+            else => unreachable,
         };
 
         // If the queue was empty, there is no currently inflight message, so send this one.
@@ -230,8 +218,8 @@ pub const Client = struct {
 
         if (reply.header.request < queued_request.message.header.request) {
             log.debug(
-                "{} on_reply: Dropping duplicate message. request_number_min={}",
-                .{ self.id, self.request_number_min },
+                "{} on_reply: Dropping duplicate message. request={}",
+                .{ self.id, reply.header.request },
             );
             return;
         }
@@ -243,7 +231,6 @@ pub const Client = struct {
             queued_request.user_data,
             queued_request.operation,
             reply.body(),
-            null,
         );
         _ = self.request_queue.pop().?;
         self.message_bus.unref(queued_request.message);
