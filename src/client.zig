@@ -21,7 +21,7 @@ const CommitTransfersResult = tb.CommitTransfersResult;
 
 const log = std.log;
 
-pub const ClientError = packed enum(u32) {
+pub const ClientError = error{
     BatchNotQueued,
 };
 
