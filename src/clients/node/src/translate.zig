@@ -18,15 +18,15 @@ pub fn register_function(
     }
 }
 
-const TranslationErrors = error{ExceptionThrown};
-pub fn throw(env: c.napi_env, comptime message: [:0]const u8) TranslationErrors {
+const TranslationError = error{ExceptionThrown};
+pub fn throw(env: c.napi_env, comptime message: [:0]const u8) TranslationError {
     var result = c.napi_throw_error(env, null, message);
     switch (result) {
         .napi_ok, .napi_pending_exception => {},
         else => unreachable,
     }
 
-    return TranslationErrors.ExceptionThrown;
+    return TranslationError.ExceptionThrown;
 }
 
 pub fn capture_undefined(env: c.napi_env) !c.napi_value {
@@ -152,7 +152,7 @@ pub fn bytes_from_object(
         return throw(env, key ++ " has incorrect length.");
     }
 
-    // copy this out of V8 as the underlying data lifetime is not guaranteed.
+    // Copy this out of V8 as the underlying data lifetime is not guaranteed.
     var result: [length]u8 = undefined;
     std.mem.copy(u8, result[0..], data[0..]);
 
@@ -173,7 +173,7 @@ pub fn bytes_from_buffer(
         return throw(env, key ++ " exceeds max message size.");
     }
 
-    // copy this out of V8 as the underlying data lifetime is not guaranteed.
+    // Copy this out of V8 as the underlying data lifetime is not guaranteed.
     std.mem.copy(u8, output[0..], data[0..]);
 
     return data.len;
@@ -419,15 +419,15 @@ pub fn delete_reference(env: c.napi_env, reference: c.napi_ref) !void {
 pub fn create_error(
     env: c.napi_env,
     comptime message: [:0]const u8,
-) TranslationErrors!c.napi_value {
+) TranslationError!c.napi_value {
     var napi_string: c.napi_value = undefined;
     if (c.napi_create_string_utf8(env, message, std.mem.len(message), &napi_string) != .napi_ok) {
-        return TranslationErrors.ExceptionThrown;
+        return TranslationError.ExceptionThrown;
     }
 
     var napi_error: c.napi_value = undefined;
     if (c.napi_create_error(env, null, napi_string, &napi_error) != .napi_ok) {
-        return TranslationErrors.ExceptionThrown;
+        return TranslationError.ExceptionThrown;
     }
 
     return napi_error;
@@ -440,8 +440,13 @@ pub fn call_function(
     argc: usize,
     argv: [*]c.napi_value,
 ) !void {
-    if (c.napi_call_function(env, this, callback, argc, argv, null) != .napi_ok) {
-        return throw(env, "Failed to invoke results callback.");
+    const result = c.napi_call_function(env, this, callback, argc, argv, null);
+    switch (result) {
+        .napi_ok => {},
+        // the user's callback may throw a JS exception or call other functions that do so. We
+        // therefore don't throw another error.
+        .napi_pending_exception => {},
+        else => return throw(env, "Failed to invoke results callback."),
     }
 }
 

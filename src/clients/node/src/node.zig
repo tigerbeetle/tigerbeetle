@@ -238,7 +238,9 @@ fn decode_events_from_array(
         return translate.throw(env, "Batch is larger than the maximum message size.");
     }
 
-    var results = std.mem.bytesAsSlice(T, output);
+    // We take a slice on `output` to ensure that its length is a multiple of @sizeOf(T) to prevent
+    // a safety-checked runtime panic from `bytesAsSlice` for non-multiple sizes.
+    var results = std.mem.bytesAsSlice(T, output[0..body_length]);
 
     var i: u32 = 0;
     while (i < array_length) : (i += 1) {
@@ -409,8 +411,8 @@ fn encode_napi_results_array(
 
 /// Add-on code
 fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
-    var argc: usize = 20;
-    var argv: [20]c.napi_value = undefined;
+    var argc: usize = 1;
+    var argv: [1]c.napi_value = undefined;
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
@@ -441,8 +443,8 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 /// This function decodes and validates an array of Node objects, one-by-one, directly into an 
 /// available message before requesting the client to send it.
 fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
-    var argc: usize = 20;
-    var argv: [20]c.napi_value = undefined;
+    var argc: usize = 4;
+    var argv: [4]c.napi_value = undefined;
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
@@ -459,7 +461,6 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
     ) catch return null;
     const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
-    const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
 
     if (operation_int >= @typeInfo(Operation).Enum.fields.len) {
         translate.throw(env, "Unknown operation.") catch return null;
@@ -468,7 +469,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
     const message = context.client.get_message() orelse {
         translate.throw(
             env,
-            "Message pool has been exhausted.",
+            "Too many requests outstanding.",
         ) catch return null;
     };
     defer context.client.unref(message);
@@ -480,11 +481,13 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
         operation,
         message.buffer[@sizeOf(Header)..],
     ) catch |err| switch (err) {
-        error.ExceptionThrown => {
-            return null;
-        },
+        error.ExceptionThrown => return null,
     };
 
+    // This will create a reference (in V8) to the user's JS callback that we must eventually also
+    // free in order to avoid a leak. We therefore do this last to ensure we cannot fail after
+    // taking this reference.
+    const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
     context.client.request(@bitCast(u128, user_data), on_result, operation, message, body_length);
 
     return null;
@@ -494,8 +497,8 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
 /// copy directly into an available message. No validation of the encoded data is performed except
 /// that it will fit into the message buffer.
 fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
-    var argc: usize = 20;
-    var argv: [20]c.napi_value = undefined;
+    var argc: usize = 4;
+    var argv: [4]c.napi_value = undefined;
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
@@ -512,7 +515,6 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     ) catch return null;
     const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
-    const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
 
     if (operation_int >= @typeInfo(Operation).Enum.fields.len) {
         translate.throw(env, "Unknown operation.") catch return null;
@@ -522,7 +524,7 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     const message = context.client.get_message() orelse {
         translate.throw(
             env,
-            "Message pool has been exhausted.",
+            "Too many requests outstanding.",
         ) catch return null;
     };
     defer context.client.unref(message);
@@ -533,11 +535,13 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
         message.buffer[@sizeOf(Header)..],
         "raw_batch",
     ) catch |err| switch (err) {
-        error.ExceptionThrown => {
-            return null;
-        },
+        error.ExceptionThrown => return null,
     };
 
+    // This will create a reference (in V8) to the user's JS callback that we must eventually also
+    // free in order to avoid a leak. We therefore do this last to ensure we cannot fail after
+    // taking this reference.
+    const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
     context.client.request(@bitCast(u128, user_data), on_result, operation, message, body_length);
 
     return null;
@@ -553,8 +557,14 @@ fn create_client_error(env: c.napi_env, client_error: ClientError) !c.napi_value
 }
 
 fn on_result(user_data: u128, operation: Operation, results: ClientError![]const u8) void {
+    // A reference to the user's JS callback was made in `request` or `raw_request`. This MUST be
+    // cleaned up regardless of the result of this function.
     const env = @bitCast(translate.UserData, user_data).env;
     const callback_reference = @bitCast(translate.UserData, user_data).callback_reference;
+    defer translate.delete_reference(env, callback_reference) catch {
+        std.log.warn("on_result: Failed to delete reference to user's JS callback.", .{});
+    };
+
     const napi_callback = translate.reference_value(
         env,
         callback_reference,
@@ -604,14 +614,11 @@ fn on_result(user_data: u128, operation: Operation, results: ClientError![]const
     translate.call_function(env, scope, napi_callback, argc, argv[0..]) catch {
         translate.throw(env, "Failed to call JS results callback.") catch return;
     };
-
-    // TODO: should we throw a JS exception? We've already called the JS callback.
-    translate.delete_reference(env, callback_reference) catch return;
 }
 
 fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
-    var argc: usize = 20;
-    var argv: [20]c.napi_value = undefined;
+    var argc: usize = 1;
+    var argv: [1]c.napi_value = undefined;
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
@@ -640,8 +647,8 @@ fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 }
 
 fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
-    var argc: usize = 20;
-    var argv: [20]c.napi_value = undefined;
+    var argc: usize = 1;
+    var argv: [1]c.napi_value = undefined;
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
