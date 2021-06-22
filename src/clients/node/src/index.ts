@@ -2,6 +2,7 @@ const binding: Binding = require('./client.node')
 interface Binding {
   init: (args: BindingInitArgs) => Context
   request: (context: Context, operation: Operation, batch: Event[], result: ResultCallback) => void
+  raw_request: (context: Context, operation: Operation, raw_batch: Buffer, result: ResultCallback) => void
   tick: (context: Context) => void,
   deinit: (context: Context) => void
 }
@@ -167,6 +168,7 @@ export interface Client {
   commitTransfers: (batch: Commit[]) => Promise<CommitTransfersError[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   request: (operation: Operation, batch: Event[], callback: ResultCallback) => void
+  rawRequest: (operation: Operation, rawBatch: Buffer, callback: ResultCallback) => void
   destroy: () => void
 }
 
@@ -214,6 +216,10 @@ export function createClient (args: InitArgs): Client {
 
   const request = (operation: Operation, batch: Event[], callback: ResultCallback) => {
     binding.request(context, operation, batch, callback)
+  }
+
+  const rawRequest = (operation: Operation, rawBatch: Buffer, callback: ResultCallback) => {
+    binding.raw_request(context, operation, rawBatch, callback)
   }
 
   const createAccounts = async (batch: Account[]): Promise<CreateAccountsError[]> => {
@@ -325,6 +331,7 @@ export function createClient (args: InitArgs): Client {
     commitTransfers,
     lookupAccounts,
     request,
+    rawRequest,
     destroy
   }
 
