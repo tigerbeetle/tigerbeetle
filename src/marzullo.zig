@@ -158,8 +158,6 @@ fn test_smallest_interval_and_majority(
     smallest_interval: Marzullo.Interval,
     majority: bool,
 ) !void {
-    const testing = std.testing;
-
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_allocator.deinit();
     const allocator = &arena_allocator.allocator;
@@ -174,22 +172,18 @@ fn test_smallest_interval_and_majority(
     }
 
     var interval = Marzullo.smallest_interval(tuples);
-    try testing.expectEqual(smallest_interval, interval);
-    try testing.expectEqual(majority, interval.majority());
+    try std.testing.expectEqual(smallest_interval, interval);
+    try std.testing.expectEqual(majority, interval.majority());
 }
 
 test {
-    const testing = std.testing;
-    const Interval = Marzullo.Interval;
-    const Tuple = Marzullo.Tuple;
-
     try test_smallest_interval_and_majority(
         &[_]i64{
             11, 13,
             10, 12,
             8,  12,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 11,
             .upper_bound = 12,
             .sources_true = 3,
@@ -204,7 +198,7 @@ test {
             11, 13,
             14, 15,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 11,
             .upper_bound = 12,
             .sources_true = 2,
@@ -219,7 +213,7 @@ test {
             -1,  1,
             0,   0,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 0,
             .upper_bound = 0,
             .sources_true = 3,
@@ -235,7 +229,7 @@ test {
             10, 11,
             8,  10,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 10,
             .upper_bound = 10,
             .sources_true = 3,
@@ -252,7 +246,7 @@ test {
             10, 12,
             8,  9,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 8,
             .upper_bound = 9,
             .sources_true = 2,
@@ -269,7 +263,7 @@ test {
             7,  12,
             10, 11,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 10,
             .upper_bound = 11,
             .sources_true = 2,
@@ -285,7 +279,7 @@ test {
             -12, -7,
             -11, -10,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = -11,
             .upper_bound = -10,
             .sources_true = 2,
@@ -297,7 +291,7 @@ test {
     // A cluster of one with no remote sources.
     try test_smallest_interval_and_majority(
         &[_]i64{},
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 0,
             .upper_bound = 0,
             .sources_true = 0,
@@ -311,7 +305,7 @@ test {
         &[_]i64{
             1, 3,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 0,
             .upper_bound = 0,
             .sources_true = 1,
@@ -326,7 +320,7 @@ test {
             1, 3,
             2, 2,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 2,
             .upper_bound = 2,
             .sources_true = 2,
@@ -341,7 +335,7 @@ test {
             1, 3,
             4, 5,
         },
-        Interval{
+        Marzullo.Interval{
             .lower_bound = 4,
             .upper_bound = 5,
             .sources_true = 1,
