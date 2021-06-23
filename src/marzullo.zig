@@ -116,9 +116,9 @@ pub const Marzullo = struct {
             } else if (count == best and tuples[i + 1].bound == .upper) {
                 // This is a tie for best overlap. Both intervals have the same number of sources.
                 // We want to choose the smaller of the two intervals:
-                const alternative = tuples[i + 1].offset - tuples[i].offset;
+                const alternative = tuples[i + 1].offset - tuple.offset;
                 if (alternative < interval.upper_bound - interval.lower_bound) {
-                    interval.lower_bound = tuples[i].offset;
+                    interval.lower_bound = tuple.offset;
                     interval.upper_bound = tuples[i + 1].offset;
                 }
             }
