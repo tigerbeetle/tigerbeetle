@@ -48,9 +48,10 @@ pub const Marzullo = struct {
 
     /// A tuple represents either the lower or upper end of a bound, and is fed as input to the
     /// Marzullo algorithm to compute the smallest interval across all tuples.
-    /// For example, given a clock offset to a remote replica of 3s and a round trip time of 1s,
-    /// we might create two tuples, the lower bound having an offset of 2.5s and the upper bound
-    /// having an offset of 3.5s, to represent the error introduced by the round trip time.
+    /// For example, given a clock offset to a remote replica of 3s, a round trip time of 1s, and
+    /// a maximum tolerance between clocks of 100ms on either side, we might create two tuples, the
+    /// lower bound having an offset of 2.4s and the upper bound having an offset of 3.6s,
+    /// to represent the error introduced by the round trip time and by the clocks themselves.
     pub const Tuple = struct {
         source: u8,
         offset: i64,
