@@ -23,14 +23,25 @@ pub const Marzullo = struct {
         sources_false: u8,
 
         /// Whether the largest number of sources in this interval also constitutes a majority.
+        ///
         /// For example, if a replica is a member of a cluster of 5 replicas and samples the clock
         /// offsets of 4 remote replicas (so that `sources=4`), then a majority will consist of at
         /// least 3 of these remote replica sources being in agreement.
+        ///
         /// This implies that a cluster of 3 replicas requires all 3 replicas to be alive in order
         /// to estimate a majority interval on the cluster time. We cannot have agreement if
         /// 1 replica is down, because there is no tiebreaker between the remaining two replicas.
+        ///
+        /// Returns true when there are no remote sources (i.e. a cluster of one).
+        /// The caller is responsible for ensuring that enough sources are present.
         pub fn majority(self: *Interval) bool {
-            const sources = self.sources_true + self.sources_false;
+            const sources: u8 = self.sources_true + self.sources_false;
+            // A cluster of one or two (with no or only one remote source) has no tiebreaker:
+            if (sources == 0 or sources == 1) {
+                assert(self.lower_bound == 0);
+                assert(self.upper_bound == 0);
+                return true;
+            }
             return self.sources_true > @divTrunc(sources, 2);
         }
     };
@@ -57,45 +68,39 @@ pub const Marzullo = struct {
         const sources = @divExact(tuples.len, bounds);
         assert(sources <= std.math.maxInt(u8));
 
-        if (sources == 0) {
-            assert(tuples.len == 0);
+        // Use the local clock with no offset adjustments for a cluster of one or two:
+        if (sources == 0 or sources == 1) {
             return Interval{
                 .lower_bound = 0,
                 .upper_bound = 0,
-                .sources_true = 0,
+                .sources_true = @intCast(u8, sources),
                 .sources_false = 0,
             };
         }
 
         std.sort.insertionSort(Tuple, tuples, {}, less_than);
 
-        // Double-check that our sort implementation is working correctly:
-        // TODO Assert that each source appears at most once, so that we don't double-count sources.
-        var last_tuple: ?Tuple = null;
-        for (tuples) |b, i| {
-            if (last_tuple) |a| {
-                assert(a.offset <= b.offset);
-                if (a.offset == b.offset and a.source == b.source) {
-                    assert(a.bound == .lower and b.bound == .upper);
-                }
-            }
-            last_tuple = b;
-        }
-        assert(last_tuple.?.bound == .upper);
-
         // Here is a description of the algorithm:
         // https://en.wikipedia.org/wiki/Marzullo%27s_algorithm#Method
         var best: i64 = 0;
         var count: i64 = 0;
-
-        var interval = Interval{
-            .lower_bound = undefined,
-            .upper_bound = undefined,
-            .sources_true = 0,
-            .sources_false = 0,
-        };
+        var previous: ?Tuple = null;
+        var interval: Interval = undefined;
 
         for (tuples) |tuple, i| {
+            // Verify that our sort implementation is correct:
+            if (previous) |p| {
+                assert(p.offset <= tuple.offset);
+                if (p.offset == tuple.offset) {
+                    if (p.bound != tuple.bound) {
+                        assert(p.bound == .lower and tuple.bound == .upper);
+                    } else {
+                        assert(p.source < tuple.source);
+                    }
+                }
+            }
+            previous = tuple;
+
             // Update the current number of overlapping intervals:
             count -= switch (tuple.bound) {
                 .lower => @as(i64, -1),
@@ -117,6 +122,7 @@ pub const Marzullo = struct {
                 }
             }
         }
+        assert(previous.?.bound == .upper);
 
         // The number of false sources (ones which do not overlap the optimal interval) is the
         // number of sources minus the value of `best`:
@@ -168,7 +174,7 @@ fn test_smallest_interval_and_majority(
 
     var interval = Marzullo.smallest_interval(tuples);
     try testing.expectEqual(smallest_interval, interval);
-    try testing.expectEqual(true, interval.majority());
+    try testing.expectEqual(majority, interval.majority());
 }
 
 test {
@@ -178,9 +184,9 @@ test {
 
     try test_smallest_interval_and_majority(
         &[_]i64{
-            8,  12,
             11, 13,
             10, 12,
+            8,  12,
         },
         Interval{
             .lower_bound = 11,
@@ -224,9 +230,9 @@ test {
     // The upper bound of the first interval overlaps inclusively with the lower of the last.
     try test_smallest_interval_and_majority(
         &[_]i64{
-            8,  10,
             8,  12,
             10, 11,
+            8,  10,
         },
         Interval{
             .lower_bound = 10,
@@ -241,9 +247,9 @@ test {
     // However, while this shares the same number of sources, it is not the smallest interval.
     try test_smallest_interval_and_majority(
         &[_]i64{
-            8,  9,
             8,  12,
             10, 12,
+            8,  9,
         },
         Interval{
             .lower_bound = 8,
@@ -285,5 +291,61 @@ test {
             .sources_false = 1,
         },
         true,
+    );
+
+    // A cluster of one with no remote sources.
+    try test_smallest_interval_and_majority(
+        &[_]i64{},
+        Interval{
+            .lower_bound = 0,
+            .upper_bound = 0,
+            .sources_true = 0,
+            .sources_false = 0,
+        },
+        true,
+    );
+
+    // A cluster of two with one remote source has no tiebreaker.
+    try test_smallest_interval_and_majority(
+        &[_]i64{
+            1, 3,
+        },
+        Interval{
+            .lower_bound = 0,
+            .upper_bound = 0,
+            .sources_true = 1,
+            .sources_false = 0,
+        },
+        true,
+    );
+
+    // A cluster of three with agreement.
+    try test_smallest_interval_and_majority(
+        &[_]i64{
+            1, 3,
+            2, 2,
+        },
+        Interval{
+            .lower_bound = 2,
+            .upper_bound = 2,
+            .sources_true = 2,
+            .sources_false = 0,
+        },
+        true,
+    );
+
+    // A cluster of three with no agreement, still returns the smallest interval, with no majority.
+    try test_smallest_interval_and_majority(
+        &[_]i64{
+            1, 3,
+            4, 5,
+        },
+        Interval{
+            .lower_bound = 4,
+            .upper_bound = 5,
+            .sources_true = 1,
+            .sources_false = 1,
+        },
+        false,
     );
 }
