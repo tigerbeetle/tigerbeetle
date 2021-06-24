@@ -8,7 +8,7 @@ const Header = vr.Header;
 
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const Message = @import("message_bus.zig").Message;
-const Operation = @import("state_machine.zig").Operation;
+const StateMachine = @import("state_machine.zig").StateMachine;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 const tb = @import("tigerbeetle.zig");
@@ -29,12 +29,12 @@ pub const Client = struct {
     const Request = struct {
         const Callback = fn (
             user_data: u128,
-            operation: Operation,
+            operation: StateMachine.Operation,
             results: ClientError![]const u8,
         ) void;
         user_data: u128,
         callback: Callback,
-        operation: Operation,
+        operation: StateMachine.Operation,
         message: *Message,
     };
 
@@ -127,7 +127,7 @@ pub const Client = struct {
         self: *Client,
         user_data: u128,
         callback: Request.Callback,
-        operation: Operation,
+        operation: StateMachine.Operation,
         message: *Message,
         body_size: usize,
     ) void {
@@ -141,7 +141,7 @@ pub const Client = struct {
             .cluster = self.cluster,
             .request = self.request_number_max,
             .command = .request,
-            .operation = operation,
+            .operation = vr.Operation.from_state_machine_op(StateMachine, operation),
             .size = message_size,
         };
         const body = message.buffer[@sizeOf(Header)..][0..body_size];
@@ -227,7 +227,7 @@ pub const Client = struct {
             return;
         }
         assert(reply.header.request == queued_request.message.header.request);
-        assert(reply.header.operation == queued_request.operation);
+        assert(reply.header.operation.to_state_machine_op(StateMachine) == queued_request.operation);
 
         self.request_timeout.stop();
         queued_request.callback(

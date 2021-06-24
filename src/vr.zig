@@ -5,8 +5,6 @@ const log = std.log.scoped(.vr);
 
 const config = @import("config.zig");
 
-const Operation = @import("state_machine.zig").Operation;
-
 pub const Replica = @import("vr/replica.zig").Replica;
 pub const Journal = @import("vr/journal.zig").Journal;
 
@@ -33,6 +31,37 @@ pub const Command = packed enum(u8) {
     request_prepare,
     headers,
     nack_prepare,
+};
+
+/// This type exists to avoid making the Header type dependant on the state
+/// machine used, which would cause awkward circular type dependencies.
+pub const Operation = enum(u8) {
+    /// The value 0 is required to be .reserved regardless of the state machine in order to
+    /// avoid interpretation of a suprious 0 byte as a valid operation.
+    reserved = 0,
+    /// The value 1 is required to be .init and is used for initialization of the cluster.
+    init = 1,
+    /// All other values are treated the same by the VR protocol and are free for the state
+    /// machine to use as it sees fit.
+    _,
+
+    pub fn to_state_machine_op(op: Operation, comptime StateMachine: type) StateMachine.Operation {
+        check_state_machine_op_type(StateMachine.Operation);
+        return @intToEnum(StateMachine.Operation, @enumToInt(op));
+    }
+
+    pub fn from_state_machine_op(comptime StateMachine: type, op: StateMachine.Operation) Operation {
+        return @intToEnum(Operation, @enumToInt(op));
+    }
+
+    fn check_state_machine_op_type(comptime Op: type) void {
+        if (!@hasField(Op, "reserved") or std.meta.fieldInfo(Op, .reserved).value != 0) {
+            @compileError("StateMachine.Operation must have a 'reserved' field with value 0!");
+        }
+        if (!@hasField(Op, "init") or std.meta.fieldInfo(Op, .init).value != 1) {
+            @compileError("StateMachine.Operation must have an 'init' field with value 1!");
+        }
+    }
 };
 
 /// Network message and journal entry header:
