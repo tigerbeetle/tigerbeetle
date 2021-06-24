@@ -12,7 +12,7 @@ const Commit = TigerBeetle.Commit;
 const Account = TigerBeetle.Account;
 const CreateAccountsResult = TigerBeetle.CreateAccountsResult;
 const CreateTransfersResult = TigerBeetle.CreateTransfersResult;
-const Operation = @import("state_machine.zig").Operation;
+const Operation = @import("state_machine.zig").StateMachine.Operation;
 const Header = @import("vr.zig").Header;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 

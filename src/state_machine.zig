@@ -8,22 +8,22 @@ const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);
 const HashMapCommits = std.AutoHashMap(u128, Commit);
 
-pub const Operation = packed enum(u8) {
-    // We reserve command "0" to detect an accidental zero byte being interpreted as an operation:
-    reserved,
-    init,
-
-    create_accounts,
-    create_transfers,
-    commit_transfers,
-    lookup_accounts,
-
-    pub fn jsonStringify(self: Command, options: StringifyOptions, writer: anytype) !void {
-        try std.fmt.format(writer, "\"{}\"", .{@tagName(self)});
-    }
-};
-
 pub const StateMachine = struct {
+    pub const Operation = packed enum(u8) {
+        // We reserve command "0" to detect an accidental zero byte being interpreted as an operation:
+        reserved,
+        init,
+
+        create_accounts,
+        create_transfers,
+        commit_transfers,
+        lookup_accounts,
+
+        pub fn jsonStringify(self: Command, options: StringifyOptions, writer: anytype) !void {
+            try std.fmt.format(writer, "\"{}\"", .{@tagName(self)});
+        }
+    };
+
     allocator: *std.mem.Allocator,
     prepare_timestamp: u64,
     commit_timestamp: u64,

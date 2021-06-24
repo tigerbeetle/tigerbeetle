@@ -459,7 +459,7 @@ pub const Replica = struct {
         log.debug("{}: on_request: request {}", .{ self.replica, message.header.checksum });
 
         var body = message.buffer[@sizeOf(Header)..message.header.size];
-        self.state_machine.prepare(message.header.operation, body);
+        self.state_machine.prepare(message.header.operation.to_state_machine_op(StateMachine), body);
 
         var latest_entry = self.journal.entry_for_op_exact(self.op).?;
 
@@ -1472,7 +1472,7 @@ pub const Replica = struct {
         defer self.message_bus.unref(reply);
 
         const reply_body_size = @intCast(u32, self.state_machine.commit(
-            prepare.header.operation,
+            prepare.header.operation.to_state_machine_op(StateMachine),
             prepare.buffer[@sizeOf(Header)..prepare.header.size],
             reply.buffer[@sizeOf(Header)..],
         ));
