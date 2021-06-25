@@ -30,6 +30,7 @@ pub const Marzullo = struct {
     /// lower bound having an offset of 2.4s and the upper bound having an offset of 3.6s,
     /// to represent the error introduced by the round trip time and by the clocks themselves.
     pub const Tuple = struct {
+        /// An identifier, the index of the clock source in the list of clock sources:
         source: u8,
         offset: i64,
         bound: enum {
@@ -40,11 +41,8 @@ pub const Marzullo = struct {
 
     /// Returns the smallest interval consistent with the largest number of sources.
     pub fn smallest_interval(tuples: []Tuple) Interval {
-        // There are two bounds (lower and upper) per clock offset sample.
-        const bounds = 2;
-
-        const sources = @divExact(tuples.len, bounds);
-        assert(sources <= std.math.maxInt(u8));
+        // There are two bounds (lower and upper) per clock offset source sample.
+        const sources = @intCast(u8, @divExact(tuples.len, 2));
 
         if (sources == 0) {
             return Interval{
@@ -55,6 +53,7 @@ pub const Marzullo = struct {
             };
         }
 
+        // Use a simpler sort implementation than the complexity of `std.sort.sort()` for safety:
         std.sort.insertionSort(Tuple, tuples, {}, less_than);
 
         // Here is a description of the algorithm:
@@ -79,10 +78,10 @@ pub const Marzullo = struct {
             previous = tuple;
 
             // Update the current number of overlapping intervals:
-            count -= switch (tuple.bound) {
-                .lower => @as(i64, -1),
-                .upper => @as(i64, 1),
-            };
+            switch (tuple.bound) {
+                .lower => count += 1,
+                .upper => count -= 1,
+            }
             // The last upper bound tuple will have a count of one less than the lower bound.
             // Therefore, we should never see count >= best for the last tuple:
             if (count > best) {
@@ -103,7 +102,6 @@ pub const Marzullo = struct {
 
         // The number of false sources (ones which do not overlap the optimal interval) is the
         // number of sources minus the value of `best`:
-        assert(best >= 0);
         assert(best <= sources);
         interval.sources_true = @intCast(u8, best);
         interval.sources_false = @intCast(u8, sources - @intCast(u8, best));
@@ -123,6 +121,8 @@ pub const Marzullo = struct {
         if (b.offset < a.offset) return false;
         if (a.bound == .lower and b.bound == .upper) return true;
         if (b.bound == .lower and a.bound == .upper) return false;
+        // Use the source index to break the tie and ensure the sort is fully specified and stable
+        // so that different sort algorithms sort the same way:
         if (a.source < b.source) return true;
         if (b.source < a.source) return false;
         return false;
