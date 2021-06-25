@@ -221,10 +221,15 @@ fn monotonic_timestamp() u64 {
     // see https://github.com/ziglang/zig/pull/933#discussion_r656021295.
     var ts: std.os.timespec = undefined;
     std.os.clock_gettime(std.os.CLOCK_BOOTTIME, &ts) catch unreachable;
-    return @intCast(u64, ts.tv_sec) * @as(u64, std.time.ns_per_s) + @intCast(u64, ts.tv_nsec);
-
-    // TODO Add a monotonic guard here to verify that clock is monotonic.
+    const m = @intCast(u64, ts.tv_sec) * @as(u64, std.time.ns_per_s) + @intCast(u64, ts.tv_nsec);
+    assert(m >= monotonic_timestamp_guard);
+    monotonic_timestamp_guard = m;
+    return m;
 }
+
+/// Hardware and/or software bugs can mean that the monotonic clock may regress.
+/// One example (of many): https://bugzilla.redhat.com/show_bug.cgi?id=448449
+var monotonic_timestamp_guard: u64 = 0;
 
 /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
 /// This clock is affected by discontinuous jumps in the system time.
