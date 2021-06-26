@@ -12,6 +12,8 @@ const StateMachine = @import("../state_machine.zig").StateMachine;
 
 const vr = @import("../vr.zig");
 const Header = vr.Header;
+const Clock = vr.Clock;
+const SystemTime = vr.SystemTime;
 const Journal = vr.Journal;
 const Timeout = vr.Timeout;
 const Command = vr.Command;
@@ -36,6 +38,9 @@ pub const Replica = struct {
 
     /// The maximum number of replicas that may be faulty:
     f: u16,
+
+    /// A distributed fault-tolerant clock to provide lower/upper bounds on the leader's wall clock:
+    clock: Clock,
 
     /// The persistent log of hash-chained journal entries:
     journal: *Journal,
@@ -153,6 +158,8 @@ pub const Replica = struct {
         cluster: u128,
         replica_count: u16,
         replica: u16,
+        time: *SystemTime,
+        // TODO We should actually provide Storage here, a Replica will always use the same Journal:
         journal: *Journal,
         message_bus: *MessageBus,
         state_machine: *StateMachine,
@@ -211,6 +218,13 @@ pub const Replica = struct {
             .replica_count = replica_count,
             .replica = replica,
             .f = f,
+            // TODO Drop these @intCasts when the client table branch lands:
+            .clock = try Clock.init(
+                allocator,
+                @intCast(u8, replica_count),
+                @intCast(u8, replica),
+                time,
+            ),
             .journal = journal,
             .message_bus = message_bus,
             .state_machine = state_machine,
@@ -306,6 +320,8 @@ pub const Replica = struct {
     /// Time is measured in logical ticks that are incremented on every call to tick().
     /// This eliminates a dependency on the system time and enables deterministic testing.
     pub fn tick(self: *Replica) void {
+        self.clock.tick();
+
         self.ping_timeout.tick();
         self.prepare_timeout.tick();
         self.commit_timeout.tick();
@@ -397,12 +413,23 @@ pub const Replica = struct {
         } else if (message.header.replica == self.replica) {
             log.warn("{}: on_ping: ignoring (self)", .{self.replica});
         } else {
+            // Copy the ping's monotonic timestamp across to our pong and add our wall clock sample:
+            pong.op = message.header.op;
+            pong.offset = @bitCast(u64, self.clock.realtime());
             self.message_bus.send_header_to_replica(message.header.replica, pong);
         }
     }
 
     fn on_pong(self: *Replica, message: *const Message) void {
-        // TODO Update cluster connectivity stats.
+        if (message.header.client > 0) return;
+        if (message.header.replica == self.replica) return;
+
+        const m0 = message.header.op;
+        const t1 = @bitCast(i64, message.header.offset);
+        const m2 = self.clock.monotonic();
+
+        // TODO Drop the @intCast when the client table branch lands.
+        self.clock.learn(@intCast(u8, message.header.replica), m0, t1, m2);
     }
 
     /// The primary advances op-number, adds the request to the end of the log, and updates the
@@ -1161,6 +1188,7 @@ pub const Replica = struct {
             .cluster = self.cluster,
             .replica = self.replica,
             .view = self.view,
+            .op = self.clock.monotonic(),
         };
 
         self.send_header_to_other_replicas(ping);

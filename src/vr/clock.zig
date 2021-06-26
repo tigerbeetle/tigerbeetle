@@ -2,14 +2,15 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.clock);
 
-const config = @import("config.zig");
+const config = @import("../config.zig");
 
-const clock_offset_tolerance: u64 = config.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
+const clock_offset_tolerance_min: u64 = config.clock_offset_tolerance_min_ms * std.time.ns_per_ms;
+const clock_offset_tolerance_max: u64 = config.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
 const epoch_max: u64 = config.clock_epoch_max_ms * std.time.ns_per_ms;
 const window_min: u64 = config.clock_synchronization_window_min_ms * std.time.ns_per_ms;
 const window_max: u64 = config.clock_synchronization_window_max_ms * std.time.ns_per_ms;
 
-const Marzullo = @import("marzullo.zig").Marzullo;
+const Marzullo = @import("../marzullo.zig").Marzullo;
 
 const Sample = struct {
     /// The relative difference between our wall clock reading and that of the remote clock source.
@@ -70,8 +71,7 @@ pub const Clock = struct {
     replica: u8,
 
     /// The underlying time source for this clock (system time or deterministic time).
-    /// TODO Replace this with SystemTime in production, or DeterministicTime in testing.
-    time: *DeterministicTime,
+    time: *SystemTime,
 
     /// An epoch from which the clock can read synchronized clock timestamps within safe bounds.
     /// At least `config.clock_synchronization_window_min_ms` is needed for this to be ready to use.
@@ -88,7 +88,7 @@ pub const Clock = struct {
         /// The size of the cluster, i.e. the number of clock sources (including this replica).
         replica_count: u8,
         replica: u8,
-        time: *DeterministicTime,
+        time: *SystemTime,
     ) !Clock {
         assert(replica_count > 0);
         assert(replica < replica_count);
@@ -178,12 +178,9 @@ pub const Clock = struct {
     }
 
     /// Called by `Replica.on_ping()` when responding to a ping with a pong.
-    /// We use synchronized time if possible, so that the cluster remembers true time as a whole.
-    /// Otherwise, if one or two replicas with accurate clocks fail we may be unable to synchronize.
-    /// We fall back to offering our wall clock reading if we do not yet have any synchronized time.
     /// This should never be used by the state machine, only for measuring clock offsets.
     pub fn realtime(self: *Self) i64 {
-        return self.realtime_synchronized() orelse self.time.realtime();
+        return self.time.realtime();
     }
 
     /// Called by `StateMachine.prepare_timestamp()` when the leader wants to timestamp a batch.
@@ -195,7 +192,7 @@ pub const Clock = struct {
         if (self.epoch.synchronized) |interval| {
             const elapsed = @intCast(i64, self.epoch.elapsed(self));
             return std.math.clamp(
-                self.time.realtime(),
+                self.realtime(),
                 self.epoch.realtime + elapsed + interval.lower_bound,
                 self.epoch.realtime + elapsed + interval.upper_bound,
             );
@@ -219,27 +216,27 @@ pub const Clock = struct {
     fn synchronize(self: *Self) void {
         assert(self.window.synchronized == null);
 
-        // Avoid polling the monotonic time if we know we have no new samples to synchronize on:
-        if (!self.window.learned) return;
-
         // Wait until the window has enough accurate samples:
         const elapsed = self.window.elapsed(self);
         if (elapsed < window_min) return;
         if (elapsed >= window_max) {
             // We took too long to synchronize the window, expire stale samples...
-            log.crit("expiring synchronization window after {}", .{std.fmt.fmtDuration(elapsed)});
+            // TODO Count the samples in a window and show them here and elsewhere for confidence.
+            log.crit("expiring failed synchronization window", .{});
             self.window.reset(self);
             return;
         }
 
+        if (!self.window.learned) return;
+        // Do not reset `learned` any earlier than this (before we have attempted to synchronize).
+        self.window.learned = false;
+
         // Starting with the most clock offset tolerance, while we have a majority, find the best
         // smallest interval with the least clock offset tolerance, reducing tolerance at each step:
-        var tolerance: u64 = clock_offset_tolerance;
-        var terminate = false;
+        // We cap the number of rounds to avoid runaway loops.
+        var tolerance: u64 = clock_offset_tolerance_max;
         var rounds: usize = 0;
-        // Do at least one round if tolerance=0 and cap the number of rounds to avoid runaway loops.
-        while (!terminate and rounds < 64) : (tolerance /= 2) {
-            if (tolerance == 0) terminate = true;
+        while (tolerance >= clock_offset_tolerance_min and rounds < 64) : (tolerance /= 2) {
             rounds += 1;
 
             var interval = Marzullo.smallest_interval(self.window_tuples(tolerance));
@@ -249,25 +246,22 @@ pub const Clock = struct {
             // The new interval may reduce the number of `sources_true` while also decreasing error.
             // In other words, provided we maintain a majority, we prefer tighter tolerance bounds.
             self.window.synchronized = interval;
-        }
 
-        // Do not reset `learned` any earlier than this (before we have attempted to synchronize).
-        self.window.learned = false;
+            if (tolerance == clock_offset_tolerance_min) break;
+        }
 
         // Wait for more accurate samples or until we timeout the window for lack of majority:
         if (self.window.synchronized == null) return;
-
-        var old_epoch_synchronized = self.epoch.synchronized;
 
         var new_window = self.epoch;
         new_window.reset(self);
         self.epoch = self.window;
         self.window = new_window;
 
-        self.after_synchronization(old_epoch_synchronized);
+        self.after_synchronization();
     }
 
-    fn after_synchronization(self: *Self, old_epoch_synchronized: ?Marzullo.Interval) void {
+    fn after_synchronization(self: *Self) void {
         const new_interval = self.epoch.synchronized.?;
 
         log.info("synchronized: truechimers={}/{} clock_offset={}..{} accuracy={}", .{
@@ -279,7 +273,7 @@ pub const Clock = struct {
         });
 
         const elapsed = @intCast(i64, self.epoch.elapsed(self));
-        const system = self.time.realtime();
+        const system = self.realtime();
         const lower = self.epoch.realtime + elapsed + new_interval.lower_bound;
         const upper = self.epoch.realtime + elapsed + new_interval.upper_bound;
         const cluster = std.math.clamp(system, lower, upper);
@@ -294,16 +288,6 @@ pub const Clock = struct {
             log.err("system time is {} ahead, clamping system time to cluster time", .{
                 fmtDurationSigned(system - upper),
             });
-        }
-
-        if (old_epoch_synchronized) |old_interval| {
-            const a = old_interval.upper_bound - old_interval.lower_bound;
-            const b = new_interval.upper_bound - new_interval.lower_bound;
-            if (b > a) {
-                log.notice("clock sources required {} more tolerance to synchronize", .{
-                    std.fmt.fmtDuration(@intCast(u64, b - a)),
-                });
-            }
         }
     }
 

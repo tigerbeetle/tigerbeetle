@@ -8,6 +8,9 @@ const config = @import("config.zig");
 const Operation = @import("state_machine.zig").Operation;
 
 pub const Replica = @import("vr/replica.zig").Replica;
+pub const Clock = @import("vr/clock.zig").Clock;
+pub const DeterministicTime = @import("vr/clock.zig").DeterministicTime;
+pub const SystemTime = @import("vr/clock.zig").SystemTime;
 pub const Journal = @import("vr/journal.zig").Journal;
 
 // TODO Command for client to fetch its latest request number from the cluster.
