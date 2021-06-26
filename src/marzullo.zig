@@ -41,7 +41,7 @@ pub const Marzullo = struct {
 
     /// Returns the smallest interval consistent with the largest number of sources.
     pub fn smallest_interval(tuples: []Tuple) Interval {
-        // There are two bounds (lower and upper) per clock offset source sample.
+        // There are two bounds (lower and upper) per source clock offset sample.
         const sources = @intCast(u8, @divExact(tuples.len, 2));
 
         if (sources == 0) {
