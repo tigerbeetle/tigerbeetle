@@ -12,6 +12,7 @@ const StateMachine = @import("state_machine.zig").StateMachine;
 
 const vr = @import("vr.zig");
 const Replica = vr.Replica;
+const SystemTime = vr.SystemTime;
 const Journal = vr.Journal;
 
 pub fn main() !void {
@@ -27,6 +28,7 @@ pub fn main() !void {
         config.transfers_max,
         config.commits_max,
     );
+    var time = SystemTime{};
     var storage = try Storage.init(arena, config.journal_size_max);
     var journal = try Journal.init(
         arena,
@@ -47,6 +49,7 @@ pub fn main() !void {
         args.cluster,
         @intCast(u16, args.configuration.len),
         args.replica,
+        &time,
         &journal,
         &message_bus,
         &state_machine,
