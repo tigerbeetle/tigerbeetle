@@ -165,16 +165,10 @@ pub const direct_io = true;
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = 10;
 
-/// TODO We need to switch to nanoseconds for these tolerances, so that we can express microseconds:
-/// We are currently more accurate than a millisecond on a local cluster.
-/// The minimum skew between two clocks to allow when considering them to be in agreement.
-/// Decreasing this increases the probability of clamping the system time to the cluster time.
-/// Increasing this reduces the accuracy of synchronized time.
-pub const clock_offset_tolerance_min_ms = 1;
-
 /// The maximum skew between two clocks to allow when considering them to be in agreement.
 /// The principle is that no two clocks tick exactly alike but some clocks more or less agree.
 /// The maximum skew across the cluster as a whole is this value times the total number of clocks.
+/// The cluster will be unavailable if the majority of clocks are all further than this value apart.
 /// Decreasing this reduces the probability of reaching agreement on synchronized time.
 /// Increasing this reduces the accuracy of synchronized time.
 pub const clock_offset_tolerance_max_ms = 10000;
