@@ -5,15 +5,14 @@ const log = std.log.scoped(.vr);
 
 const config = @import("../config.zig");
 
+const Time = @import("../time.zig").Time;
 const MessageBus = @import("../message_bus.zig").MessageBusReplica;
 const Message = @import("../message_bus.zig").Message;
-
 const StateMachine = @import("../state_machine.zig").StateMachine;
 
 const vr = @import("../vr.zig");
 const Header = vr.Header;
 const Clock = vr.Clock;
-const SystemTime = vr.SystemTime;
 const Journal = vr.Journal;
 const Timeout = vr.Timeout;
 const Command = vr.Command;
@@ -158,7 +157,7 @@ pub const Replica = struct {
         cluster: u128,
         replica_count: u16,
         replica: u16,
-        time: *SystemTime,
+        time: *Time,
         // TODO We should actually provide Storage here, a Replica will always use the same Journal:
         journal: *Journal,
         message_bus: *MessageBus,
