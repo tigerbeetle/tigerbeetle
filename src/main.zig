@@ -21,6 +21,10 @@ pub fn main() !void {
 
     const args = cli.parse_args(arena);
 
+    // TODO: allow_create and path should be exposed on the CLI
+    // TODO: expose journal size on the CLI
+    const journal_fd = try Storage.open_path("journal.tigerbeetle", true);
+
     var io = try IO.init(128, 0);
     var state_machine = try StateMachine.init(
         arena,
@@ -29,7 +33,7 @@ pub fn main() !void {
         config.commits_max,
     );
     var time = Time{};
-    var storage = try Storage.init(arena, config.journal_size_max);
+    var storage = try Storage.init(&io, journal_fd, config.journal_size_max);
     var journal = try Journal.init(
         arena,
         &storage,
