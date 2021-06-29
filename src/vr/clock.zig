@@ -296,7 +296,7 @@ pub const Clock = struct {
             if (tolerance == 0) terminate = true;
             rounds += 1;
 
-            var interval = Marzullo.smallest_interval(self.window_tuples(tolerance));
+            const interval = Marzullo.smallest_interval(self.window_tuples(tolerance));
             const majority = interval.sources_true > @divTrunc(self.window.sources.len, 2);
             if (!majority) break;
 
