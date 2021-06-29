@@ -95,6 +95,9 @@ pub const Clock = struct {
     /// A static allocation to convert window samples into tuple bounds for Marzullo's algorithm.
     marzullo_tuples: []Marzullo.Tuple,
 
+    /// A kill switch to revert to unsynchronized realtime.
+    synchronization_disabled: bool,
+
     pub fn init(
         allocator: *std.mem.Allocator,
         /// The size of the cluster, i.e. the number of clock sources (including this replica).
@@ -124,6 +127,7 @@ pub const Clock = struct {
             .epoch = epoch,
             .window = window,
             .marzullo_tuples = marzullo_tuples,
+            .synchronization_disabled = replica_count == 1, // A cluster of one cannot synchronize.
         };
 
         // Reset the current epoch to be unsynchronized,
@@ -140,6 +144,8 @@ pub const Clock = struct {
     /// * the remote replica's `realtime()` timestamp `t1`, and
     /// * our monotonic timestamp `m2` as captured by our `Replica.on_pong()` handler.
     pub fn learn(self: *Self, replica: u8, m0: u64, t1: i64, m2: u64) void {
+        if (self.synchronization_disabled) return;
+
         // A network routing fault must have replayed one of our outbound messages back against us:
         if (replica == self.replica) return;
 
@@ -207,7 +213,9 @@ pub const Clock = struct {
     /// This is complementary to NTP and allows clusters with very accurate time to make use of it,
     /// while providing guard rails for when NTP is partitioned or unable to correct quickly enough.
     pub fn realtime_synchronized(self: *Self) ?i64 {
-        if (self.epoch.synchronized) |interval| {
+        if (self.synchronization_disabled) {
+            return self.realtime();
+        } else if (self.epoch.synchronized) |interval| {
             const elapsed = @intCast(i64, self.epoch.elapsed(self));
             return std.math.clamp(
                 self.realtime(),
@@ -221,8 +229,9 @@ pub const Clock = struct {
 
     pub fn tick(self: *Self) void {
         self.time.tick();
-        self.synchronize();
 
+        if (self.synchronization_disabled) return;
+        self.synchronize();
         // Expire the current epoch if successive windows failed to synchronize:
         // Gradual clock drift prevents us from using an epoch for more than a few tens of seconds.
         if (self.epoch.elapsed(self) >= epoch_max) {
