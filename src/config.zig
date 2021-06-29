@@ -161,6 +161,11 @@ pub const sector_size = 4096;
 /// when they were never written to disk.
 pub const direct_io = true;
 
+/// The maximum number of concurrent read I/O operations to allow at once.
+pub const io_depth_read = 8;
+/// The maximum number of concurrent write I/O operations to allow at once.
+pub const io_depth_write = 8;
+
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = 10;
