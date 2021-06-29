@@ -6,6 +6,7 @@ const log = std.log.scoped(.vr);
 const config = @import("../config.zig");
 
 const Time = @import("../time.zig").Time;
+
 const MessageBus = @import("../message_bus.zig").MessageBusReplica;
 const Message = @import("../message_bus.zig").Message;
 const StateMachine = @import("../state_machine.zig").StateMachine;
@@ -82,21 +83,7 @@ pub const Replica = struct {
     prepare_message: ?*Message = null,
     prepare_attempt: u64 = 0,
 
-    appending: bool = false,
-    appending_frame: @Frame(write_to_journal) = undefined,
-
-    repairing: bool = false,
-    repairing_frame: @Frame(write_to_journal) = undefined,
-
     committing: bool = false,
-
-    sending_prepare: bool = false,
-    sending_prepare_frame: @Frame(send_prepare_to_replica) = undefined,
-
-    /// TODO Size repair_queue_max according to a reasonable bandwidth-delay product:
-    repair_queue: ?*Message = null,
-    repair_queue_len: usize = 0,
-    repair_queue_max: usize = 3,
 
     /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas:
     prepare_ok_from_all_replicas: []?*Message,
@@ -336,8 +323,6 @@ pub const Replica = struct {
         if (self.view_change_timeout.fired()) self.on_view_change_timeout();
         if (self.view_change_message_timeout.fired()) self.on_view_change_message_timeout();
         if (self.repair_timeout.fired()) self.on_repair_timeout();
-
-        self.repair_last_queued_message_if_any();
     }
 
     /// Called by the MessageBus to deliver a message to the replica.
@@ -601,7 +586,7 @@ pub const Replica = struct {
 
         if (self.follower()) {
             // A prepare may already be committed if requested by repair() so take the max:
-            self.commit_ops_through(std.math.max(message.header.commit, self.commit_max));
+            self.commit_ops(std.math.max(message.header.commit, self.commit_max));
         }
     }
 
@@ -710,7 +695,7 @@ pub const Replica = struct {
 
         self.normal_timeout.reset();
 
-        self.commit_ops_through(message.header.commit);
+        self.commit_ops(message.header.commit);
     }
 
     fn on_repair(self: *Replica, message: *Message) void {
@@ -771,10 +756,8 @@ pub const Replica = struct {
                 }
             }
 
-            if (self.repairing) return self.repair_later(message);
-
             log.debug("{}: on_repair: repairing journal", .{self.replica});
-            self.repairing_frame = async self.write_to_journal(message, &self.repairing);
+            self.write_prepare(message, .repair);
         }
     }
 
@@ -951,7 +934,7 @@ pub const Replica = struct {
 
         // TODO Send prepare_ok messages for uncommitted ops.
 
-        self.commit_ops_through(self.commit_max);
+        self.commit_ops(self.commit_max);
 
         self.repair();
     }
@@ -996,16 +979,19 @@ pub const Replica = struct {
 
         if (self.journal.entry_for_op_exact_with_checksum(op, checksum)) |entry| {
             assert(entry.op == op);
+            assert(checksum == null or entry.checksum == checksum.?);
 
             if (!self.journal.dirty.bit(op)) {
                 assert(!self.journal.faulty.bit(op));
 
-                if (self.sending_prepare) return;
-                self.sending_prepare_frame = async self.send_prepare_to_replica(
-                    message.header.replica,
+                self.journal.read_prepare(
+                    self,
+                    on_request_prepare_read,
                     op,
-                    checksum,
+                    entry.checksum,
+                    message.header.replica,
                 );
+
                 // We have guaranteed the prepare and our copy is clean (not safe to nack).
                 return;
             } else if (self.journal.faulty.bit(op)) {
@@ -1032,6 +1018,11 @@ pub const Replica = struct {
                 .nonce = checksum.?,
             });
         }
+    }
+
+    fn on_request_prepare_read(self: *Replica, prepare: ?*Message, destination_replica: ?u16) void {
+        const message = prepare orelse return;
+        self.send_message_to_replica(destination_replica.?, message);
     }
 
     fn on_request_headers(self: *Replica, message: *const Message) void {
@@ -1363,14 +1354,8 @@ pub const Replica = struct {
         assert(message.header.view == self.view);
         assert(message.header.op == self.op);
 
-        if (self.appending) {
-            log.debug("{}: append: skipping (slow journal outrun by quorum)", .{self.replica});
-            self.repair_later(message);
-            return;
-        }
-
         log.debug("{}: append: appending to journal", .{self.replica});
-        self.appending_frame = async self.write_to_journal(message, &self.appending);
+        self.write_prepare(message, .append);
     }
 
     /// Returns whether `b` succeeds `a` by having a newer view or same view and newer op.
@@ -1418,7 +1403,8 @@ pub const Replica = struct {
         return null;
     }
 
-    fn commit_ops_through(self: *Replica, commit: u64) void {
+    /// Commit ops up to commit number `commit` (inclusive).
+    fn commit_ops(self: *Replica, commit: u64) void {
         // TODO Restrict `view_change` status only to the leader purely as defense-in-depth.
         // Be careful of concurrency when doing this, as successive view changes can happen quickly.
         assert(self.status == .normal or self.status == .view_change);
@@ -1430,17 +1416,16 @@ pub const Replica = struct {
         // We have already committed this far:
         if (commit <= self.commit_min) return;
 
-        // Guard against multiple concurrent invocations of commit_ops_through():
+        // Guard against multiple concurrent invocations of commit_ops():
         if (self.committing) {
-            log.debug("{}: commit_ops_through: already committing...", .{self.replica});
+            log.debug("{}: commit_ops: already committing...", .{self.replica});
             return;
         }
 
         self.committing = true;
-        defer self.committing = false;
 
         if (commit > self.commit_max) {
-            log.debug("{}: commit_ops_through: advancing commit_max={}..{}", .{
+            log.debug("{}: commit_ops: advancing commit_max={}..{}", .{
                 self.replica,
                 self.commit_max,
                 commit,
@@ -1448,36 +1433,56 @@ pub const Replica = struct {
             self.commit_max = commit;
         }
 
-        if (!self.valid_hash_chain("commit_ops_through")) return;
+        if (!self.valid_hash_chain("commit_ops")) return;
         assert(!self.view_jump_barrier);
         assert(self.op >= self.commit_max);
 
+        self.commit_ops_read();
+    }
+
+    fn commit_ops_read(self: *Replica) void {
+        assert(self.committing);
+        assert(self.status == .normal or self.status == .view_change);
+        assert(self.commit_min <= self.commit_max);
+        assert(self.commit_min <= self.op);
+
         // We may receive commit numbers for ops we do not yet have (`commit_max > self.op`):
         // Even a naive state transfer may fail to correct for this.
-        while (self.commit_min < self.commit_max and self.commit_min < self.op) {
+        if (self.commit_min < self.commit_max and self.commit_min < self.op) {
             const op = self.commit_min + 1;
             const checksum = self.journal.entry_for_op_exact(op).?.checksum;
+            self.journal.read_prepare(self, commit_ops_commit, op, checksum, null);
+        } else {
+            self.commit_ops_finish();
+        }
+    }
 
-            if (self.create_prepare_message(op, checksum)) |prepare| {
-                defer self.message_bus.unref(prepare);
+    fn commit_ops_commit(self: *Replica, prepare: ?*Message, destination_replica: ?u16) void {
+        assert(self.committing);
 
-                // Things change quickly when we're reading from disk:
-                if (self.status != .normal and self.status != .view_change) return;
+        const message = prepare orelse return;
+        assert(destination_replica == null);
 
-                // Guard against any re-entrancy concurrent to reading this prepare from disk:
-                assert(op == self.commit_min + 1);
-                assert(prepare.header.op == op);
-                assert(prepare.header.checksum == checksum);
-
-                const commit_min = self.commit_min;
-                self.commit_op(prepare);
-                assert(self.commit_min == commit_min + 1);
-                assert(self.commit_min <= self.op);
-            } else {
-                return;
-            }
+        // Things change quickly when we're reading from disk:
+        if (self.status != .normal and self.status != .view_change) {
+            self.commit_ops_finish();
+            return;
         }
 
+        // Guard against any re-entrancy concurrent to reading this prepare from disk:
+        assert(message.header.op == self.commit_min + 1);
+
+        const commit_min = self.commit_min;
+        self.commit_op(message);
+        assert(self.commit_min == commit_min + 1);
+        assert(self.commit_min <= self.op);
+
+        self.commit_ops_read();
+    }
+
+    fn commit_ops_finish(self: *Replica) void {
+        assert(self.committing);
+        self.committing = false;
         // This is an optimization to expedite the view change without waiting for `repair_timeout`:
         if (self.status == .view_change and self.repairs_allowed()) self.repair();
     }
@@ -1604,104 +1609,6 @@ pub const Replica = struct {
         message.header.set_checksum();
 
         return message.ref();
-    }
-
-    /// The caller owns the returned message, if any, which has exactly 1 reference.
-    fn create_prepare_message(self: *Replica, op: u64, checksum: ?u128) ?*Message {
-        if (op > self.op) {
-            self.create_prepare_message_notice(op, checksum, "beyond self.op");
-            return null;
-        }
-
-        const exact = self.journal.entry_for_op_exact_with_checksum(op, checksum);
-        if (exact == null) {
-            self.create_prepare_message_notice(op, checksum, "no entry exactly");
-            return null;
-        }
-
-        if (self.journal.faulty.bit(op)) {
-            self.create_prepare_message_notice(op, checksum, "faulty");
-            return null;
-        }
-
-        if (self.journal.dirty.bit(op)) {
-            self.create_prepare_message_notice(op, checksum, "dirty");
-            return null;
-        }
-
-        // Do not use this pointer beyond the read() below, as the header memory may then change:
-        const entry = exact.?;
-
-        const sector_size = @intCast(u32, Journal.sector_ceil(entry.size));
-        assert(sector_size >= entry.size);
-
-        const message = self.message_bus.get_message() orelse {
-            self.create_prepare_message_notice(op, checksum, "no message available");
-            return null;
-        };
-        defer self.message_bus.unref(message);
-
-        // Skip the disk read if the header is all we need:
-        if (entry.size == @sizeOf(Header)) {
-            message.header.* = entry.*;
-            return message.ref();
-        }
-
-        assert(entry.offset + sector_size <= self.journal.size_circular_buffer);
-        self.journal.read_sectors(
-            message.buffer[0..sector_size],
-            self.journal.offset_in_circular_buffer(entry.offset),
-        );
-
-        if (!message.header.valid_checksum()) {
-            self.create_prepare_message_notice(op, checksum, "corrupt header after read");
-            return null;
-        }
-
-        const body = message.buffer[@sizeOf(Header)..message.header.size];
-        if (!message.header.valid_checksum_body(body)) {
-            self.create_prepare_message_notice(op, checksum, "corrupt body after read");
-            return null;
-        }
-
-        if (message.header.op != op) {
-            self.create_prepare_message_notice(op, checksum, "op changed during read");
-            return null;
-        }
-
-        if (checksum != null and message.header.checksum != checksum.?) {
-            self.create_prepare_message_notice(op, checksum, "checksum changed during read");
-            return null;
-        }
-
-        return message.ref();
-    }
-
-    fn create_prepare_message_notice(
-        self: *Replica,
-        op: u64,
-        checksum: ?u128,
-        notice: []const u8,
-    ) void {
-        log.notice("{}: create_prepare_message: op={} checksum={}: {s}", .{
-            self.replica,
-            op,
-            checksum,
-            notice,
-        });
-    }
-
-    fn discard_repair_queue(self: *Replica) void {
-        while (self.repair_queue) |message| {
-            log.notice("{}: discard_repair_queue: op={}", .{ self.replica, message.header.op });
-            assert(self.repair_queue_len > 0);
-            self.repair_queue = message.next;
-            self.repair_queue_len -= 1;
-
-            message.next = null;
-            self.message_bus.unref(message);
-        }
-        assert(self.repair_queue_len == 0);
     }
 
     fn ignore_repair_message(self: *Replica, message: *const Message) bool {
@@ -2008,7 +1915,7 @@ pub const Replica = struct {
         if (self.journal.dirty.len > 0) return self.repair_prepares();
 
         // Commit ops, which may in turn discover faulty prepares and drive more repairs:
-        if (self.commit_min < self.commit_max) return self.commit_ops_through(self.commit_max);
+        if (self.commit_min < self.commit_max) return self.commit_ops(self.commit_max);
 
         if (self.status == .view_change and self.leader_index(self.view) == self.replica) {
             // TODO Drive uncommitted ops to completion through replication to a majority:
@@ -2239,76 +2146,26 @@ pub const Replica = struct {
         return false;
     }
 
-    fn repair_last_queued_message_if_any(self: *Replica) void {
-        if (self.status != .normal and self.status != .view_change) return;
-        if (!self.repairs_allowed()) return;
-
-        while (!self.repairing) {
-            if (self.repair_queue) |message| {
-                defer self.message_bus.unref(message);
-
-                assert(self.repair_queue_len > 0);
-                self.repair_queue = message.next;
-                self.repair_queue_len -= 1;
-
-                message.next = null;
-                self.on_repair(message);
-                assert(self.repair_queue != message); // Catch an accidental requeue by on_repair().
-            } else {
-                assert(self.repair_queue_len == 0);
-                break;
-            }
-        }
-    }
-
-    fn repair_later(self: *Replica, message: *Message) void {
-        assert(self.repairs_allowed());
-        assert(self.appending or self.repairing);
-        assert(message.references > 0);
-        assert(message.header.command == .prepare);
-        assert(message.next == null);
-
-        if (!self.repairing) {
-            log.debug("{}: repair_later: repairing immediately", .{self.replica});
-            self.on_repair(message);
-            return;
-        }
-
-        log.debug("{}: repair_later: {} message(s)", .{ self.replica, self.repair_queue_len });
-
-        if (self.repair_queue_len == self.repair_queue_max) {
-            log.debug("{}: repair_later: dropping", .{self.replica});
-            return;
-        }
-
-        log.debug("{}: repair_later: queueing", .{self.replica});
-        assert(self.repair_queue_len < self.repair_queue_max);
-
-        message.next = self.repair_queue;
-        self.repair_queue = message.ref();
-        self.repair_queue_len += 1;
-    }
-
     fn repair_prepares(self: *Replica) void {
         assert(self.status == .normal or self.status == .view_change);
         assert(self.repairs_allowed());
         assert(self.journal.dirty.len > 0);
 
-        if (self.repair_queue_len == self.repair_queue_max) {
-            log.debug("{}: repair_prepares: waiting for repair queue to drain", .{self.replica});
+        if (self.journal.writes.available() == 0) {
+            log.debug("{}: repair_prepares: waiting for available IOP", .{self.replica});
             return;
         }
 
         // We may be appending to or repairing the journal concurrently.
         // We do not want to re-request any of these prepares unnecessarily.
         // TODO Add journal.writing bits to clear this up (and needed anyway).
-        if (self.appending or self.repairing) {
+        if (self.journal.writes.executing() > 0) {
             log.debug("{}: repair_prepares: waiting for dirty bits to settle", .{self.replica});
             return;
         }
 
-        // Request enough prepares to fill the repair queue:
-        var budget = self.repair_queue_max - self.repair_queue_len;
+        // Request enough prepares to utilize our max IO depth:
+        var budget = self.journal.writes.available();
         assert(budget > 0);
 
         var op = self.op + 1;
@@ -2576,23 +2433,6 @@ pub const Replica = struct {
             assert(header.operation != .init);
 
             self.send_prepare_ok(header);
-        }
-    }
-
-    fn send_prepare_to_replica(self: *Replica, replica: u16, op: u64, checksum: ?u128) void {
-        assert(self.status == .normal or self.status == .view_change);
-        assert(replica != self.replica);
-
-        assert(!self.sending_prepare);
-        self.sending_prepare = true;
-        defer self.sending_prepare = false;
-
-        if (self.create_prepare_message(op, checksum)) |message| {
-            defer self.message_bus.unref(message);
-
-            assert(message.header.op == op);
-            assert(checksum == null or message.header.checksum == checksum.?);
-            self.send_message_to_replica(replica, message);
         }
     }
 
@@ -3016,7 +2856,7 @@ pub const Replica = struct {
                 // state transfer. However, while strictly safe, this impairs safety in terms of
                 // durability, and adds unnecessary repair overhead if the ops were committed.
                 //
-                // We rather impose a view jump barrier to keep `commit_ops_through()` from
+                // We rather impose a view jump barrier to keep `commit_ops()` from
                 // committing. This preserves and maximizes durability and minimizes repair traffic.
                 //
                 // This view jump barrier is cleared or may be resolved, respectively, as soon as:
@@ -3055,34 +2895,37 @@ pub const Replica = struct {
         }
     }
 
-    fn write_to_journal(self: *Replica, message: *Message, lock: *bool) void {
-        assert(lock.* == false);
-        lock.* = true;
-        defer lock.* = false;
-
+    fn write_prepare(self: *Replica, message: *Message, trigger: Journal.Write.Trigger) void {
         assert(message.references > 0);
         assert(message.header.command == .prepare);
         assert(message.header.view <= self.view);
         assert(message.header.op <= self.op);
 
         if (!self.journal.has(message.header)) {
-            log.debug("{}: write_to_journal: ignoring (header changed)", .{self.replica});
+            log.debug("{}: write_prepare: ignoring (header changed)", .{self.replica});
             return;
         }
 
-        if (self.journal.dirty.bit(message.header.op)) {
-            self.journal.write(message);
-        } else {
-            // Any function that sets the faulty bit should also set the dirty bit:
-            assert(!self.journal.faulty.bit(message.header.op));
-            log.debug("{}: write_to_journal: skipping (clean)", .{self.replica});
-            // Continue through below to send a prepare_ok message if necessary.
-        }
+        self.journal.write_prepare(self, write_prepare_on_write, message, trigger);
+    }
+
+    fn write_prepare_on_write(
+        self: *Replica,
+        wrote: ?*Message,
+        trigger: Journal.Write.Trigger,
+    ) void {
+        // null indicates that we did not complete the write for some reason.
+        const message = wrote orelse return;
 
         self.send_prepare_ok(message.header);
 
-        // If this was a repair, continue immediately to repair the next prepare:
-        // This is an optimization to eliminate waiting until the next repair timeout.
-        if (lock == &self.repairing) self.repair();
+        switch (trigger) {
+            .append => {},
+            // If this was a repair, continue immediately to repair the next prepare:
+            // This is an optimization to eliminate waiting until the next repair timeout.
+            // TODO: this should only happen during certain times (e.g. a
+            // view change), we don't yet check this.
+            .repair => self.repair(),
+        }
     }
 };
