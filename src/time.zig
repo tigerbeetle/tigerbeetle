@@ -21,9 +21,10 @@ pub const Time = struct {
         // For more detail and why CLOCK_MONOTONIC_RAW is even worse than CLOCK_MONOTONIC,
         // see https://github.com/ziglang/zig/pull/933#discussion_r656021295.
         var ts: std.os.timespec = undefined;
-        std.os.clock_gettime(std.os.CLOCK_BOOTTIME, &ts) catch unreachable;
+        std.os.clock_gettime(std.os.CLOCK_BOOTTIME, &ts) catch @panic("CLOCK_BOOTTIME required");
         const m = @intCast(u64, ts.tv_sec) * std.time.ns_per_s + @intCast(u64, ts.tv_nsec);
-        assert(m >= self.monotonic_guard);
+        // "Oops!...I Did It Again"
+        if (m < self.monotonic_guard) @panic("a hardware/kernel bug regressed the monotonic clock");
         self.monotonic_guard = m;
         return m;
     }
