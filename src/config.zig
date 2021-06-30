@@ -164,3 +164,29 @@ pub const direct_io = true;
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = 10;
+
+/// The maximum skew between two clocks to allow when considering them to be in agreement.
+/// The principle is that no two clocks tick exactly alike but some clocks more or less agree.
+/// The maximum skew across the cluster as a whole is this value times the total number of clocks.
+/// The cluster will be unavailable if the majority of clocks are all further than this value apart.
+/// Decreasing this reduces the probability of reaching agreement on synchronized time.
+/// Increasing this reduces the accuracy of synchronized time.
+pub const clock_offset_tolerance_max_ms = 10000;
+
+/// The amount of time before the clock's synchronized epoch is expired.
+/// If the epoch is expired before it can be replaced with a new synchronized epoch, then this most
+/// likely indicates either a network partition or else too many clock faults across the cluster.
+/// A new synchronized epoch will be installed as soon as these conditions resolve.
+pub const clock_epoch_max_ms = 60000;
+
+/// The amount of time to wait for enough accurate samples before synchronizing the clock.
+/// The more samples we can take per remote clock source, the more accurate our estimation becomes.
+/// This impacts cluster startup time as the leader must first wait for synchronization to complete.
+pub const clock_synchronization_window_min_ms = 2000;
+
+/// The amount of time without agreement before the clock window is expired and a new window opened.
+/// This happens where some samples have been collected but not enough to reach agreement.
+/// The quality of samples degrades as they age so at some point we throw them away and start over.
+/// This eliminates the impact of gradual clock drift on our clock offset (clock skew) measurements.
+/// If a window expires because of this then it is likely that the clock epoch will also be expired.
+pub const clock_synchronization_window_max_ms = 20000;

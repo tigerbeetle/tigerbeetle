@@ -6,6 +6,7 @@ pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level)
 const cli = @import("cli.zig");
 
 const IO = @import("io.zig").IO;
+const Time = @import("time.zig").Time;
 const Storage = @import("storage.zig").Storage;
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const StateMachine = @import("state_machine.zig").StateMachine;
@@ -27,6 +28,7 @@ pub fn main() !void {
         config.transfers_max,
         config.commits_max,
     );
+    var time = Time{};
     var storage = try Storage.init(arena, config.journal_size_max);
     var journal = try Journal.init(
         arena,
@@ -47,6 +49,7 @@ pub fn main() !void {
         args.cluster,
         @intCast(u16, args.configuration.len),
         args.replica,
+        &time,
         &journal,
         &message_bus,
         &state_machine,
