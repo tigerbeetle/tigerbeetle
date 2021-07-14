@@ -34,6 +34,12 @@ pub const Journal = struct {
         message: *Message,
         trigger: Trigger,
 
+        /// True if this Write has acquired a lock on a sector of headers.
+        /// This also means that the Write is currently writing sectors or queuing to do so.
+        header_sector_locked: bool = false,
+        /// Linked list of Writes waiting to acquire the same logical header range as this Write.
+        header_sector_next: ?*Write = null,
+
         /// This is reset to undefined and reused for each Storage.write_sectors() call.
         range: Range,
 
@@ -44,10 +50,15 @@ pub const Journal = struct {
             // as the type of Journal.headers_iops ensures that each buffer is properly aligned.
             return @alignCast(config.sector_size, &journal.headers_iops[i]);
         }
+
+        fn header_sector_same(write: *Journal.Write, other: *Journal.Write) bool {
+            return write_prepare_header_offset(write.message) ==
+                write_prepare_header_offset(other.message);
+        }
     };
 
     /// State that needs to be persisted while waiting for an overlapping
-    /// concurrent write to complete.
+    /// concurrent write to complete. This is a range on the physical disk.
     const Range = struct {
         completion: Storage.Write,
         callback: fn (write: *Journal.Write) void,
@@ -58,7 +69,7 @@ pub const Journal = struct {
         /// be queued up in this linked list.
         next: ?*Range = null,
         /// True if a Storage.write_sectors() operation is in progress for this buffer/offset.
-        writing: bool,
+        locked: bool,
 
         fn overlaps(self: *const Range, other: *const Range) bool {
             if (self.offset < other.offset) {
@@ -669,6 +680,9 @@ pub const Journal = struct {
         const self = write.replica.journal;
         const message = write.message;
 
+        assert(write.header_sector_locked);
+        self.write_prepare_unlock_header_sector(write);
+
         if (!self.has(message.header)) {
             self.write_prepare_debug(message.header, "entry changed while writing headers");
             self.write_prepare_release(write, null);
@@ -715,19 +729,52 @@ pub const Journal = struct {
         };
     }
 
-    fn write_prepare_header(self: *Journal, write: *Write) void {
-        // TODO Snapshots
+    /// Attempt to lock the in-memory sector containing the header being written.
+    /// If the sector is already locked, add this write to the wait queue.
+    fn write_prepare_header(self: *Journal, write: *Journal.Write) void {
+        assert(!write.header_sector_locked);
+        assert(write.header_sector_next == null);
+
+        var it = self.writes.iterate();
+        while (it.next()) |other| {
+            if (other == write) continue;
+            if (!other.header_sector_locked) continue;
+
+            if (other.header_sector_same(write)) {
+                write.header_sector_next = other.header_sector_next;
+                other.header_sector_next = write;
+                return;
+            }
+        }
+
+        write.header_sector_locked = true;
+        self.write_prepare_on_lock_header_sector(write);
+    }
+
+    /// Release the lock held by a write on an in-memory header sector and pass
+    /// it to a waiting Write, if any.
+    fn write_prepare_unlock_header_sector(self: *Journal, write: *Journal.Write) void {
+        assert(write.header_sector_locked);
+        write.header_sector_locked = false;
+
+        // Unlike the ranges of physical memory we lock when writing to disk,
+        // these header sector locks are always an exact match, so there's no
+        // need to re-check the waiting writes against all other writes.
+        if (write.header_sector_next) |waiting| {
+            write.header_sector_next = null;
+
+            assert(waiting.header_sector_locked == false);
+            waiting.header_sector_locked = true;
+            self.write_prepare_on_lock_header_sector(waiting);
+        }
+        assert(write.header_sector_next == null);
+    }
+
+    fn write_prepare_on_lock_header_sector(self: *Journal, write: *Write) void {
+        assert(write.header_sector_locked);
 
         const message = write.message;
         const offset = write_prepare_header_offset(write.message);
-
-        // We must acquire the concurrent range using the sector offset and len:
-        // Different headers may share the same sector without any op_min or op_max overlap.
-        // TODO Use a callback to acquire the range instead of suspend/resume:
-        //var range = Range{ .offset = offset, .len = len };
-        //self.writing_headers.acquire(&range);
-        //defer self.writing_headers.release(&range);
-
         std.mem.copy(
             u8,
             write.headers(self),
@@ -862,21 +909,21 @@ pub const Journal = struct {
             .completion = undefined,
             .buffer = buffer,
             .offset = offset,
-            .writing = false,
+            .locked = false,
         };
-        self.queue_range(write);
+        self.lock_sectors(write);
     }
 
     /// Start the write on the current range or add it to the proper queue
     /// if an overlapping range is currently being written.
-    fn queue_range(self: *Journal, write: *Journal.Write) void {
-        assert(!write.range.writing);
+    fn lock_sectors(self: *Journal, write: *Journal.Write) void {
+        assert(!write.range.locked);
         assert(write.range.next == null);
 
         var it = self.writes.iterate();
         while (it.next()) |other| {
             if (other == write) continue;
-            if (!other.range.writing) continue;
+            if (!other.range.locked) continue;
 
             if (other.range.overlaps(&write.range)) {
                 write.range.next = other.range.next;
@@ -885,7 +932,7 @@ pub const Journal = struct {
             }
         }
 
-        write.range.writing = true;
+        write.range.locked = true;
         self.storage.write_sectors(
             write_sectors_on_write,
             &write.range.completion,
@@ -899,16 +946,16 @@ pub const Journal = struct {
         const write = @fieldParentPtr(Journal.Write, "range", range);
         const self = write.replica.journal;
 
-        assert(write.range.writing);
-        write.range.writing = false;
+        assert(write.range.locked);
+        write.range.locked = false;
 
         // Drain the list of ranges that were waiting on this range to complete.
         while (range.next) |waiting| {
-            assert(waiting.writing == false);
+            assert(waiting.locked == false);
             range.next = waiting.next;
             waiting.next = null;
 
-            self.queue_range(@fieldParentPtr(Journal.Write, "range", waiting));
+            self.lock_sectors(@fieldParentPtr(Journal.Write, "range", waiting));
             assert(range.next == waiting.next);
         }
         assert(range.next == null);
