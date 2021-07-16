@@ -25,8 +25,8 @@ pub const port = 3001;
 /// Bind to the "127.0.0.1" loopback address to accept local connections as a safe default only.
 pub const address = "127.0.0.1";
 
-/// Where journal files should be persisted:
-pub const data_directory = "/var/lib/tigerbeetle";
+/// Where data files should be persisted:
+pub const directory = "/var/lib/tigerbeetle";
 
 /// The maximum number of accounts to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
