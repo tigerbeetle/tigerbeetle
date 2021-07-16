@@ -21,9 +21,22 @@ pub fn main() !void {
 
     const args = cli.parse_args(arena);
 
-    // TODO: allow_create and path should be exposed on the CLI
-    // TODO: expose journal size on the CLI
-    const journal_fd = try Storage.open_path("journal.tigerbeetle", true);
+    // TODO Allow_create and path should be exposed on the CLI.
+    // TODO Expose data file size on the CLI.
+    // TODO Use config.directory or args.directory instead of the cwd.
+    // Open the cwd as a real file descriptor that we can fsync, to fsync the file inode:
+    const dir_fd = try std.os.openatZ(std.os.AT_FDCWD, ".", std.os.O_CLOEXEC | std.os.O_RDONLY, 0);
+    // TODO Data file, e.g. "cluster_4294967295_replica_255.tigerbeetle":
+    const relative_path = "journal.tigerbeetle";
+
+    const must_create = try Storage.does_not_exist(dir_fd, relative_path);
+    const storage_fd = try Storage.open(
+        arena,
+        dir_fd,
+        relative_path,
+        config.journal_size_max, // TODO Double-check that we have space for redundant headers.
+        must_create,
+    );
 
     var io = try IO.init(128, 0);
     var state_machine = try StateMachine.init(
@@ -33,7 +46,7 @@ pub fn main() !void {
         config.commits_max,
     );
     var time = Time{};
-    var storage = try Storage.init(&io, journal_fd, config.journal_size_max);
+    var storage = try Storage.init(config.journal_size_max, storage_fd, &io);
     var journal = try Journal.init(
         arena,
         &storage,
