@@ -10,12 +10,12 @@ pub const MemStorage = struct {
     memory: []align(config.sector_size) u8,
     size: u64,
 
-    pub fn init(allocator: *Allocator, size: u64) !Storage {
+    pub fn init(allocator: *Allocator, size: u64) !MemStorage {
         var memory = try allocator.allocAdvanced(u8, config.sector_size, size, .exact);
         errdefer allocator.free(memory);
         std.mem.set(u8, memory, 0);
 
-        return Storage{
+        return MemStorage{
             .allocator = allocator,
             .memory = memory,
             .size = size,
@@ -52,7 +52,7 @@ pub const MemStorage = struct {
         }
     }
 
-    pub fn read(self: *Storage, buffer: []u8, offset: u64) void {
+    pub fn read(self: *MemStorage, buffer: []u8, offset: u64) void {
         self.assert_bounds_and_alignment(buffer, offset);
 
         if (self.read_all(buffer, offset)) |bytes_read| {
@@ -101,7 +101,7 @@ pub const MemStorage = struct {
         }
     }
 
-    pub fn write(self: *Storage, buffer: []const u8, offset: u64) void {
+    pub fn write(self: *MemStorage, buffer: []const u8, offset: u64) void {
         self.assert_bounds_and_alignment(buffer, offset);
         self.write_all(buffer, offset) catch |err| switch (err) {
             // We assume that the disk will attempt to reallocate a spare sector for any LSE.
@@ -114,7 +114,7 @@ pub const MemStorage = struct {
         };
     }
 
-    fn assert_bounds_and_alignment(self: *Storage, buffer: []const u8, offset: u64) void {
+    fn assert_bounds_and_alignment(self: *MemStorage, buffer: []const u8, offset: u64) void {
         assert(buffer.len > 0);
         assert(offset + buffer.len <= self.size);
 
@@ -125,12 +125,12 @@ pub const MemStorage = struct {
         assert(@mod(offset, config.sector_size) == 0);
     }
 
-    fn read_all(self: *Storage, buffer: []u8, offset: u64) !u64 {
+    fn read_all(self: *MemStorage, buffer: []u8, offset: u64) !u64 {
         std.mem.copy(u8, buffer, self.memory[offset .. offset + buffer.len]);
         return buffer.len;
     }
 
-    fn write_all(self: *Storage, buffer: []const u8, offset: u64) !void {
+    fn write_all(self: *MemStorage, buffer: []const u8, offset: u64) !void {
         std.mem.copy(u8, self.memory[offset .. offset + buffer.len], buffer);
     }
 };
