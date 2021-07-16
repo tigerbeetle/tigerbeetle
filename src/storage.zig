@@ -39,15 +39,15 @@ pub const Storage = struct {
         offset: u64,
     };
 
-    io: *IO,
-    fd: os.fd_t,
     size: u64,
+    fd: os.fd_t,
+    io: *IO,
 
-    pub fn init(io: *IO, fd: os.fd_t, size: u64) !Storage {
+    pub fn init(size: u64, fd: os.fd_t, io: *IO) !Storage {
         return Storage{
-            .io = io,
-            .fd = fd,
             .size = size,
+            .fd = fd,
+            .io = io,
         };
     }
 
@@ -251,30 +251,134 @@ pub const Storage = struct {
 
     // Static helper functions to handle journal file creation/configuration:
 
-    pub fn open_path(relative_path: [:0]const u8, allow_create: bool) !os.fd_t {
+    // TODO Remove this when we add an explicit init command.
+    // This is just here so long to allow TigerBeetle to know whether to create the data file.
+    pub fn does_not_exist(dir_fd: os.fd_t, relative_path: [:0]const u8) !bool {
         assert(!std.fs.path.isAbsolute(relative_path));
-        // TODO: Use config.data_directory when in release mode
-        const fd = try open_or_create_with_options(std.fs.cwd().fd, relative_path, allow_create);
-        // TODO Open parent directory to fsync the directory inode (and recurse for all ancestors).
+
+        var flags: u32 = os.O_CLOEXEC | os.O_RDONLY;
+        var mode: os.mode_t = 0;
+
+        const fd = os.openatZ(dir_fd, relative_path, flags, mode) catch |err| switch (err) {
+            error.FileNotFound => return true,
+            else => return err,
+        };
+        defer os.close(fd);
+
+        return false;
+    }
+
+    /// Opens or creates a journal file:
+    /// - For reading and writing.
+    /// - For Direct I/O (if possible in development mode, but required in production mode).
+    /// - Obtains an advisory exclusive lock to the file descriptor.
+    /// - Allocates the file contiguously on disk if this is supported by the file system.
+    /// - Ensures that the file data (and file inode in the parent directory) is durable on disk.
+    ///   The caller is responsible for ensuring that the parent directory inode is durable.
+    /// - Verifies that the file size matches the expected file size before returning.
+    pub fn open(
+        allocator: *std.mem.Allocator,
+        dir_fd: os.fd_t,
+        relative_path: [:0]const u8,
+        size: u64,
+        must_create: bool,
+    ) !os.fd_t {
+        assert(relative_path.len > 0);
+        assert(size >= config.sector_size);
+        assert(size % config.sector_size == 0);
+
+        // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
+        // This is much stronger than an advisory exclusive lock, and is required on some platforms.
+
+        var flags: u32 = os.O_CLOEXEC | os.O_RDWR | os.O_DSYNC;
+        var mode: os.mode_t = 0;
+
+        // TODO Document this and investigate whether this is in fact correct to set here.
+        if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O_LARGEFILE;
+
+        if (config.direct_io) {
+            const direct_io_supported = try Storage.fs_supports_direct_io(dir_fd);
+            if (direct_io_supported) {
+                flags |= os.O_DIRECT;
+            } else if (config.deployment_environment == .development) {
+                log.warn("file system does not support Direct I/O", .{});
+            } else {
+                // We require Direct I/O for safety to handle fsync failure correctly, and therefore
+                // panic in production if it is not supported.
+                @panic("file system does not support Direct I/O");
+            }
+        }
+
+        if (must_create) {
+            log.info("creating {s}...", .{relative_path});
+            flags |= os.O_CREAT;
+            flags |= os.O_EXCL;
+            mode = 0o666;
+        } else {
+            log.info("opening {s}...", .{relative_path});
+        }
+
+        // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
+        assert((flags & os.O_DSYNC) > 0);
+
+        // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
+        assert(!std.fs.path.isAbsolute(relative_path));
+        const fd = try os.openatZ(dir_fd, relative_path, flags, mode);
+        errdefer os.close(fd);
+
+        // TODO Check that the file is actually a file.
+
+        // Obtain an advisory exclusive lock that works only if all processes actually use flock().
+        try os.flock(fd, os.LOCK_EX);
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
-        // Some file systems will not support fallocate(), that's fine, but could mean more seeks.
-        if (allow_create) {
-            log.debug("pre-allocating {Bi}...", .{config.journal_size_max});
-            Storage.fallocate(fd, 0, 0, config.journal_size_max) catch |err| switch (err) {
-                error.OperationNotSupported => {
-                    log.notice("file system does not support fallocate()", .{});
-                },
-                else => |e| return e,
-            };
-        }
+        // If the file system does not support `fallocate()`, then this could mean more seeks or a
+        // panic if we run out of disk space (ENOSPC).
+        if (must_create) try Storage.allocate(allocator, fd, size);
+
+        // The best fsync strategy is always to fsync before reading because this prevents us from
+        // making decisions on data that was never durably written by a previously crashed process.
+        // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
+        // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
+        try os.fsync(fd);
+
+        // We fsync the parent directory to ensure that the file inode is durably written.
+        // The caller is responsible for the parent directory inode stored under the grandparent.
+        // We always do this when opening because we don't know if this was done before crashing.
+        try os.fsync(dir_fd);
+
+        const stat = try os.fstat(fd);
+        if (stat.size != size) @panic("data file inode size was truncated or corrupted");
 
         return fd;
     }
 
+    /// Allocates a file contiguously using fallocate() if supported.
+    /// Alternatively, writes to the last sector so that at least the file size is correct.
+    pub fn allocate(allocator: *std.mem.Allocator, fd: os.fd_t, size: u64) !void {
+        log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
+        Storage.fallocate(fd, 0, 0, @intCast(i64, size)) catch |err| switch (err) {
+            error.OperationNotSupported => {
+                log.warn("file system does not support fallocate(), an ENOSPC will panic", .{});
+                log.notice("allocating by writing to the last sector of the file instead...", .{});
+
+                const sector_size = config.sector_size;
+                const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
+
+                // Handle partial writes where the physical sector is less than a logical sector:
+                const offset = size - sector.len;
+                var written: usize = 0;
+                while (written < sector.len) {
+                    written += try os.pwrite(fd, sector[written..], offset + written);
+                }
+            },
+            else => return err,
+        };
+    }
+
     fn fallocate(fd: i32, mode: i32, offset: i64, length: i64) !void {
         while (true) {
-            const rc = os.linux.fallocate(fd, 0, 0, config.journal_size_max);
+            const rc = os.linux.fallocate(fd, mode, offset, length);
             switch (os.linux.getErrno(rc)) {
                 0 => return,
                 os.linux.EBADF => return error.FileDescriptorInvalid,
@@ -294,49 +398,9 @@ pub const Storage = struct {
         }
     }
 
-    /// Opens or creates a journal file:
-    /// - For reading and writing.
-    /// - For Direct I/O (if possible in development mode, but required in production mode).
-    /// - Obtains an advisory exclusive lock to the file descriptor.
-    fn open_or_create_with_options(dir_fd: os.fd_t, path: [:0]const u8, allow_create: bool) !os.fd_t {
-        // TODO: use O_EXCL when opening as a block device
-        var flags: u32 = os.O_CLOEXEC | os.O_RDWR | os.O_DSYNC;
-        var mode: os.mode_t = 0;
-
-        if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O_LARGEFILE;
-
-        if (config.direct_io) {
-            const direct_io_supported = try fs_supports_direct_io(dir_fd);
-            if (direct_io_supported) {
-                flags |= os.O_DIRECT;
-            } else if (config.deployment_environment == .development) {
-                log.warn("file system does not support direct i/o", .{});
-            } else {
-                @panic("file system does not support direct i/o");
-            }
-        }
-
-        if (allow_create) {
-            log.info("creating {s}...", .{path});
-            flags |= os.O_CREAT;
-            flags |= os.O_EXCL;
-            mode = 0o666;
-        }
-
-        // This is critical since we rely on O_DSYNC to fsync():
-        assert((flags & os.O_DSYNC) > 0);
-
-        const fd = try os.openatZ(dir_fd, path, flags, mode);
-        errdefer os.close(fd);
-
-        try os.flock(fd, os.LOCK_EX);
-
-        return fd;
-    }
-
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
     /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
-    pub fn fs_supports_direct_io(dir_fd: std.os.fd_t) !bool {
+    fn fs_supports_direct_io(dir_fd: std.os.fd_t) !bool {
         if (!@hasDecl(std.os, "O_DIRECT")) return false;
 
         const path = "fs_supports_direct_io";
