@@ -301,23 +301,6 @@ pub const Storage = struct {
 
     // Static helper functions to handle data file creation/opening/allocation:
 
-    // TODO Remove this when we add an explicit init command.
-    // This is just here so long to allow TigerBeetle to know whether to create the data file.
-    pub fn does_not_exist(dir_fd: os.fd_t, relative_path: [:0]const u8) !bool {
-        assert(!std.fs.path.isAbsolute(relative_path));
-
-        var flags: u32 = os.O_CLOEXEC | os.O_RDONLY;
-        var mode: os.mode_t = 0;
-
-        const fd = os.openatZ(dir_fd, relative_path, flags, mode) catch |err| switch (err) {
-            error.FileNotFound => return true,
-            else => return err,
-        };
-        defer os.close(fd);
-
-        return false;
-    }
-
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (if possible in development mode, but required in production mode).
@@ -327,7 +310,6 @@ pub const Storage = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open(
-        allocator: *std.mem.Allocator,
         dir_fd: os.fd_t,
         relative_path: [:0]const u8,
         size: u64,
@@ -384,7 +366,7 @@ pub const Storage = struct {
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
         // panic if we run out of disk space (ENOSPC).
-        if (must_create) try Storage.allocate(allocator, fd, size);
+        if (must_create) try Storage.allocate(fd, size);
 
         // The best fsync strategy is always to fsync before reading because this prevents us from
         // making decisions on data that was never durably written by a previously crashed process.
@@ -405,7 +387,7 @@ pub const Storage = struct {
 
     /// Allocates a file contiguously using fallocate() if supported.
     /// Alternatively, writes to the last sector so that at least the file size is correct.
-    pub fn allocate(allocator: *std.mem.Allocator, fd: os.fd_t, size: u64) !void {
+    pub fn allocate(fd: os.fd_t, size: u64) !void {
         log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
         Storage.fallocate(fd, 0, 0, @intCast(i64, size)) catch |err| switch (err) {
             error.OperationNotSupported => {
