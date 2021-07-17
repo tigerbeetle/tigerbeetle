@@ -35,7 +35,7 @@ const filename_fmt = "cluster_{d:0>10}_replica_{d:0>3}.tigerbeetle";
 const filename_len = fmt.count(filename_fmt, .{ 0, 0 });
 
 /// Create a .tigerbeetle data file for the given args and exit
-fn init(arena: *mem.Allocator, cluster: u128, replica: u16, dir_fd: os.fd_t) !void {
+fn init(arena: *mem.Allocator, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
     // Add 1 for the terminating null byte
     var buffer: [filename_len + 1]u8 = undefined;
     const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica }) catch unreachable;
