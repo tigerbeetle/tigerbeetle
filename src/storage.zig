@@ -348,12 +348,12 @@ pub const Storage = struct {
         }
 
         if (must_create) {
-            log.info("creating {s}...", .{relative_path});
+            log.info("creating \"{s}\"...", .{relative_path});
             flags |= os.O_CREAT;
             flags |= os.O_EXCL;
             mode = 0o666;
         } else {
-            log.info("opening {s}...", .{relative_path});
+            log.info("opening \"{s}\"...", .{relative_path});
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
@@ -362,6 +362,7 @@ pub const Storage = struct {
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
         const fd = try os.openatZ(dir_fd, relative_path, flags, mode);
+        // TODO Return a proper error message when the path exists or does not exist (init/start).
         errdefer os.close(fd);
 
         // TODO Check that the file is actually a file.
