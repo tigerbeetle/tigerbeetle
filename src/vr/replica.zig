@@ -482,8 +482,10 @@ pub const Replica = struct {
 
         log.debug("{}: on_request: request {}", .{ self.replica, message.header.checksum });
 
+        // TODO Use Clock's synchronized time or drop request if not synchronized.
+
         var body = message.buffer[@sizeOf(Header)..message.header.size];
-        self.state_machine.prepare(message.header.operation.to_state_machine_op(StateMachine), body);
+        self.state_machine.prepare(message.header.operation.cast(StateMachine), body);
 
         var latest_entry = self.journal.entry_for_op_exact(self.op).?;
         message.header.parent = latest_entry.checksum;
@@ -1516,7 +1518,7 @@ pub const Replica = struct {
         defer self.message_bus.unref(reply);
 
         const reply_body_size = @intCast(u32, self.state_machine.commit(
-            prepare.header.operation.to_state_machine_op(StateMachine),
+            prepare.header.operation.cast(StateMachine),
             prepare.buffer[@sizeOf(Header)..prepare.header.size],
             reply.buffer[@sizeOf(Header)..],
         ));
@@ -1729,6 +1731,7 @@ pub const Replica = struct {
         // ignore or forward a client request if we know that we have the reply in our client table.
         // We assume this is safe (even without regard to status below) since commits are immutable.
         // This improves latency and reduces traffic.
+
         // This may resend the reply if this is the latest committed request:
         if (self.ignore_request_message_duplicate(message)) return true;
 
