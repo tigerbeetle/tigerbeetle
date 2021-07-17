@@ -89,8 +89,8 @@ pub const Command = union(enum) {
 /// Exits the program with a non-zero exit code if an error is found.
 pub fn parse_args(allocator: *std.mem.Allocator) Command {
     var maybe_cluster: ?[]const u8 = null;
-    var maybe_addresses: ?[]const u8 = null;
     var maybe_replica: ?[]const u8 = null;
+    var maybe_addresses: ?[]const u8 = null;
     var maybe_directory: ?[:0]const u8 = null;
 
     var args = std.process.args();
@@ -109,10 +109,10 @@ pub fn parse_args(allocator: *std.mem.Allocator) Command {
     while (args.nextPosix()) |arg| {
         if (mem.startsWith(u8, arg, "--cluster")) {
             maybe_cluster = parse_flag("--cluster", arg);
-        } else if (mem.startsWith(u8, arg, "--addresses")) {
-            maybe_addresses = parse_flag("--addresses", arg);
         } else if (mem.startsWith(u8, arg, "--replica")) {
             maybe_replica = parse_flag("--replica", arg);
+        } else if (mem.startsWith(u8, arg, "--addresses")) {
+            maybe_addresses = parse_flag("--addresses", arg);
         } else if (mem.startsWith(u8, arg, "--directory")) {
             maybe_directory = parse_flag("--directory", arg);
         } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
@@ -135,6 +135,10 @@ pub fn parse_args(allocator: *std.mem.Allocator) Command {
 
     switch (command) {
         .init => {
+            if (maybe_addresses != null) {
+                fatal("--addresses: supported only by 'start' command", .{});
+            }
+
             return .{ .init = .{
                 .cluster = cluster,
                 .replica = replica,
@@ -164,7 +168,7 @@ pub fn parse_args(allocator: *std.mem.Allocator) Command {
 /// then exit with an exit code of 1.
 fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
-    stderr.print("error: " ++ fmt_string ++ "\n\n" ++ usage, args) catch {};
+    stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
     os.exit(1);
 }
 
