@@ -1768,12 +1768,12 @@ pub const Replica = struct {
             // If we are going to drop duplicate requests or resend the latest committed reply,
             // then be sure that we do so for the correct request. There is alot at stake.
             assert(entry.reply.header.command == .reply);
-            assert(message.header.client == entry.reply.header.client);
+            assert(entry.reply.header.client == message.header.client);
 
             if (session == 0) {
                 assert(message.header.operation == .register);
                 log.debug("{}: on_request: duplicate or stale .register request", .{self.replica});
-                // Use the request number below to determine whether to resend the reply.
+                // Do not return here. Use the request number below to decide to resend the reply.
             } else if (session < entry.session) {
                 // TODO Send eviction message to client.
                 // We may be behind the cluster, but the client is definitely behind us.
@@ -1785,8 +1785,6 @@ pub const Replica = struct {
                 // always has all committed information. However, this function may be called by any
                 // replica (leader or follower) in any status, so that we may not actually have all
                 // committed information, and the client may well be ahead of us.
-                // In other words, this function is an optimization:
-                // Reply if we have the committed reply for this request, otherwise do nothing.
                 return false;
             }
 
@@ -1795,7 +1793,9 @@ pub const Replica = struct {
                 log.debug("{}: on_request: stale request", .{self.replica});
                 return true;
             } else if (request == entry.reply.header.request) {
-                assert(message.header.operation == entry.reply.header.operation);
+                assert(session == entry.session);
+                assert(entry.reply.header.operation == message.header.operation);
+                assert(entry.reply.header.context == message.header.checksum);
 
                 log.debug("{}: on_request: resending reply to duplicate request", .{self.replica});
                 self.message_bus.send_message_to_client(message.header.client, entry.reply);
@@ -1805,7 +1805,6 @@ pub const Replica = struct {
                 // TODO There is an optimization here where if we are the leader we could detect
                 // that we have been partitioned from the cluster and drop the message instead of
                 // flooding the network with prepares that will never be acked.
-                // For example, if we are the leader and we see
                 return false;
             }
         } else if (message.header.operation == .register) {
@@ -1854,7 +1853,7 @@ pub const Replica = struct {
         } else if (message.header.view < self.view) {
             // The client may not know who the leader is, or may be retrying after a leader failure.
             // We forward to the new leader ahead of any client retry timeout to reduce latency.
-            // Since the client is already connected to all replicas, the client will receive the
+            // Since the client is already connected to all replicas, the client may yet receive the
             // reply from the new leader directly.
             log.debug("{}: on_request: forwarding (follower)", .{self.replica});
             self.send_message_to_replica(self.leader_index(self.view), message);
