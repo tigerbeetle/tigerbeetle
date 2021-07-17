@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const fmt = std.fmt;
 const mem = std.mem;
 const os = std.os;
+const log = std.log;
 
 const config = @import("config.zig");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
@@ -29,8 +30,8 @@ pub fn main() !void {
     }
 }
 
-// Pad the cluster id (in hex) and the replica index with 0s
-const filename_fmt = "cluster_{x:0>8}_replica_{d:0>5}.tigerbeetle";
+// Pad the cluster id number and the replica index with 0s
+const filename_fmt = "cluster_{d:0>10}_replica_{d:0>3}.tigerbeetle";
 const filename_len = fmt.count(filename_fmt, .{ 0, 0 });
 
 /// Create a .tigerbeetle data file for the given args and exit
@@ -47,6 +48,8 @@ fn init(arena: *mem.Allocator, cluster: u128, replica: u16, dir_fd: os.fd_t) !vo
         config.journal_size_max, // TODO Double-check that we have space for redundant headers.
         true,
     );
+
+    log.info("initialized data file", .{});
 }
 
 /// Run as a replica server defined by the given args
@@ -100,7 +103,7 @@ fn start(
     // TODO: Get rid of this wart by moving MessageBus inside Replica or otherwise.
     message_bus.process.replica = &replica;
 
-    std.log.info("cluster={x} replica={}: listening on {}", .{
+    log.info("cluster={x} replica={}: listening on {}", .{
         cluster,
         replica_index,
         addresses[replica_index],
