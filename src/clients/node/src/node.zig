@@ -109,7 +109,7 @@ fn globalsCast(globals_raw: *c_void) *Globals {
 
 const Context = struct {
     io: *IO,
-    addresses: [32]std.net.Address,
+    configuration: [32]std.net.Address,
     message_bus: MessageBus,
     client: Client,
 
@@ -117,23 +117,23 @@ const Context = struct {
         env: c.napi_env,
         allocator: *std.mem.Allocator,
         io: *IO,
-        cluster: u32,
-        addresses_raw: []const u8,
+        cluster: u128,
+        configuration_raw: []const u8,
     ) !c.napi_value {
         const context = try allocator.create(Context);
         errdefer allocator.destroy(context);
 
         context.io = io;
 
-        const addresses = try vr.parse_addresses(allocator, addresses_raw);
-        errdefer allocator.free(addresses);
-        assert(addresses.len > 0);
-        for (addresses) |address, index| context.addresses[index] = address;
+        const configuration = try vr.parse_configuration(allocator, configuration_raw);
+        errdefer allocator.free(configuration);
+        assert(configuration.len > 0);
+        for (configuration) |address, index| context.configuration[index] = address;
 
         context.message_bus = try MessageBus.init(
             allocator,
             cluster,
-            context.addresses[0..configuration.len],
+            context.configuration[0..configuration.len],
             std.crypto.random.int(u128),
             context.io,
         );
@@ -142,7 +142,7 @@ const Context = struct {
         context.client = try Client.init(
             allocator,
             cluster,
-            @intCast(u8, addresses.len),
+            @intCast(u16, configuration.len),
             &context.message_bus,
         );
         errdefer context.client.deinit();
@@ -421,8 +421,8 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
         "Function init() must receive 1 argument exactly.",
     ) catch return null;
 
-    const cluster = translate.u32_from_object(env, argv[0], "cluster_id") catch return null;
-    const addresses = translate.slice_from_object(
+    const cluster = translate.u128_from_object(env, argv[0], "cluster_id") catch return null;
+    const configuration = translate.slice_from_object(
         env,
         argv[0],
         "replica_addresses",
@@ -432,8 +432,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 
     const globals_raw = translate.globals(env) catch return null;
     const globals = globalsCast(globals_raw.?);
-
-    const context = Context.create(env, allocator, &globals.io, cluster, addresses) catch {
+    const context = Context.create(env, allocator, &globals.io, cluster, configuration) catch {
         // TODO: switch on err and provide more detailed messages
         translate.throw(env, "Failed to initialize Client.") catch return null;
     };
