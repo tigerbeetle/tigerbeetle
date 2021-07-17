@@ -53,19 +53,17 @@ pub const Operation = enum(u8) {
     /// Operations exported by the state machine (all other values are free):
     _,
 
-    pub fn to_state_machine_op(op: Operation, comptime StateMachine: type) StateMachine.Operation {
-        check_state_machine_op_type(StateMachine.Operation);
-        return @intToEnum(StateMachine.Operation, @enumToInt(op));
+    pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
+        check_state_machine_operations(StateMachine.Operation);
+        return @intToEnum(StateMachine.Operation, @enumToInt(self));
     }
 
-    pub fn from_state_machine_op(
-        comptime StateMachine: type,
-        op: StateMachine.Operation,
-    ) Operation {
+    pub fn init(comptime StateMachine: type, op: StateMachine.Operation) Operation {
+        check_state_machine_operations(StateMachine.Operation);
         return @intToEnum(Operation, @enumToInt(op));
     }
 
-    fn check_state_machine_op_type(comptime Op: type) void {
+    fn check_state_machine_operations(comptime Op: type) void {
         if (!@hasField(Op, "reserved") or std.meta.fieldInfo(Op, .reserved).value != 0) {
             @compileError("StateMachine.Operation must have a 'reserved' field with value 0");
         }

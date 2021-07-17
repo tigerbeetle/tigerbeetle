@@ -140,7 +140,7 @@ pub const Client = struct {
             .cluster = self.cluster,
             .request = self.request_number_max,
             .command = .request,
-            .operation = vr.Operation.from_state_machine_op(StateMachine, operation),
+            .operation = vr.Operation.init(StateMachine, operation),
             .size = message_size,
         };
         const body = message.buffer[@sizeOf(Header)..][0..body_size];
@@ -227,7 +227,7 @@ pub const Client = struct {
             return;
         }
         assert(reply.header.request == queued_request.message.header.request);
-        assert(reply.header.operation.to_state_machine_op(StateMachine) == queued_request.operation);
+        assert(reply.header.operation.cast(StateMachine) == queued_request.operation);
 
         self.request_timeout.stop();
         queued_request.callback(
