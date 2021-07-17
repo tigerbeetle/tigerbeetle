@@ -6,6 +6,7 @@ dist/
 journal
 main
 tigerbeetle
+cluster_*_replica_*.tigerbeetle
 zig/
 zig-cache/
 zig-out/
