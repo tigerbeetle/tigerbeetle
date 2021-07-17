@@ -856,8 +856,8 @@ pub const Journal = struct {
         }
         if (self.previous_entry(header)) |previous| {
             assert(previous.command == .prepare);
-            if (previous.checksum != header.nonce) {
-                log.debug("{}: journal: write_prepare_header_once: no hash chain", .{
+            if (previous.checksum != header.parent) {
+                log.debug("{}: journal: write_headers_once: no hash chain", .{
                     self.replica,
                 });
                 return false;
