@@ -1504,12 +1504,11 @@ pub const Replica = struct {
             reply.buffer[@sizeOf(Header)..],
         ));
 
-        //TODO: @tagName(prepare.header.operation) giving 'invalid enum'
-        log.debug("{}: commit_op: executing op={} checksum={} ({})", .{
+        log.debug("{}: commit_op: executing op={} checksum={} ({s})", .{
             self.replica,
             prepare.header.op,
             prepare.header.checksum,
-            prepare.header.operation,
+            @tagName(prepare.header.operation.to_state_machine_op(StateMachine)),
         });
 
         self.commit_min += 1;

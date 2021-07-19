@@ -253,11 +253,6 @@ const TimedQueue = struct {
                 log.debug("response={o}", .{response});
             }
 
-            // TODO: remove once client table is implemented.
-            if (operation != Operation.create_accounts) {
-                assert(value.len == 0);
-            }
-
             const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
             const completed_batch: ?Batch = self.batches.pop();
             assert(completed_batch != null);
