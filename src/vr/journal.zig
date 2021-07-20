@@ -37,15 +37,16 @@ pub const Journal = struct {
         /// True if this Write has acquired a lock on a sector of headers.
         /// This also means that the Write is currently writing sectors or queuing to do so.
         header_sector_locked: bool = false,
-        /// Linked list of Writes waiting to acquire the same logical header range as this Write.
+        /// Linked list of Writes waiting to acquire the same header sector as this Write.
         header_sector_next: ?*Write = null,
 
         /// This is reset to undefined and reused for each Storage.write_sectors() call.
         range: Range,
 
-        const SectorBuffer = *align(config.sector_size) [config.sector_size]u8;
-        fn headers(write: *Journal.Write, journal: *Journal) SectorBuffer {
-            const i = (@ptrToInt(write) - @ptrToInt(&journal.writes.items)) / @sizeOf(Journal.Write);
+        const Sector = *align(config.sector_size) [config.sector_size]u8;
+        fn header_sector(write: *Journal.Write, journal: *Journal) Sector {
+            assert(journal.writes.items.len == journal.headers_iops.len);
+            const i = @divExact(@ptrToInt(write) - @ptrToInt(&journal.writes.items), @sizeOf(Journal.Write));
             // TODO: the compiler should probably be smart enough to avoid needing this align cast
             // as the type of Journal.headers_iops ensures that each buffer is properly aligned.
             return @alignCast(config.sector_size, &journal.headers_iops[i]);
@@ -86,7 +87,15 @@ pub const Journal = struct {
     size: u64,
     size_headers: u64,
     size_circular_buffer: u64,
+
     headers: []align(config.sector_size) Header,
+    /// We copy-on-write to these buffers when writing, as in-memory headers may change concurrently.
+    /// The buffers belong to the IOP at the corresponding index in IOPS.
+    headers_iops: *align(config.sector_size) [config.io_depth_write][config.sector_size]u8,
+    /// Apart from the header written with the entry, we also store two redundant copies of each
+    /// header at different locations on disk, and we alternate between these for each append.
+    /// This tracks which version (0 or 1) should be written to next:
+    headers_version: u1 = 0,
 
     /// Statically allocated read IO operation context data.
     reads: IOPS(Read, config.io_depth_read) = .{},
@@ -106,15 +115,6 @@ pub const Journal = struct {
     /// A faulty bit requires the dirty bit to also be set so that functions need not check both.
     /// A faulty bit is used then only to qualify the severity of the dirty bit.
     faulty: BitSet,
-
-    /// We copy-on-write to these buffers when writing, as in-memory headers may change concurrently.
-    /// The buffers belong to the IOP at the corresponding index in IOPS.
-    headers_iops: *align(config.sector_size) [config.io_depth_write][config.sector_size]u8,
-
-    /// Apart from the header written with the entry, we also store two redundant copies of each
-    /// header at different locations on disk, and we alternate between these for each append.
-    /// This tracks which version (0 or 1) should be written to next:
-    headers_version: u1 = 0,
 
     pub fn init(
         allocator: *Allocator,
@@ -438,7 +438,7 @@ pub const Journal = struct {
             return;
         }
 
-        // Do not use this pointer beyond the this function's scope, as the
+        // Do not use this pointer beyond this function's scope, as the
         // header memory may then change:
         const exact = replica.journal.entry_for_op_exact_with_checksum(op, checksum) orelse {
             self.read_prepare_notice(op, checksum, "no entry exactly");
@@ -476,6 +476,7 @@ pub const Journal = struct {
         }
 
         const read = self.reads.acquire() orelse {
+            self.read_prepare_notice(op, checksum, "no iop available");
             callback(replica, null, null);
             return;
         };
@@ -490,12 +491,12 @@ pub const Journal = struct {
             .destination_replica = destination_replica,
         };
 
-        assert(exact.offset + physical_size <= replica.journal.size_circular_buffer);
+        assert(exact.offset + physical_size <= self.size_circular_buffer);
 
         const buffer = message.buffer[0..physical_size];
-        const offset = replica.journal.offset_in_circular_buffer(exact.offset);
+        const offset = self.offset_in_circular_buffer(exact.offset);
 
-        // Memory must not be owned by replica.headers as replica.headers may be modified concurrently:
+        // Memory must not be owned by `self.headers` as these may be modified concurrently:
         assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
             @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + self.size_headers);
 
@@ -638,6 +639,7 @@ pub const Journal = struct {
         }
 
         const write = self.writes.acquire() orelse {
+            self.write_prepare_debug(message.header, "no iop available");
             callback(replica, null, trigger);
             return;
         };
@@ -676,6 +678,77 @@ pub const Journal = struct {
         self.write_prepare_header(write);
     }
 
+    /// Attempt to lock the in-memory sector containing the header being written.
+    /// If the sector is already locked, add this write to the wait queue.
+    fn write_prepare_header(self: *Journal, write: *Journal.Write) void {
+        assert(!write.header_sector_locked);
+        assert(write.header_sector_next == null);
+
+        var it = self.writes.iterate();
+        while (it.next()) |other| {
+            if (other == write) continue;
+            if (!other.header_sector_locked) continue;
+
+            if (other.header_sector_same(write)) {
+                write.header_sector_next = other.header_sector_next;
+                other.header_sector_next = write;
+                return;
+            }
+        }
+
+        write.header_sector_locked = true;
+        self.write_prepare_on_lock_header_sector(write);
+    }
+
+    fn write_prepare_on_lock_header_sector(self: *Journal, write: *Write) void {
+        assert(write.header_sector_locked);
+
+        const message = write.message;
+        const offset = write_prepare_header_offset(write.message);
+        std.mem.copy(
+            u8,
+            write.header_sector(self),
+            std.mem.sliceAsBytes(self.headers)[offset..][0..config.sector_size],
+        );
+
+        log.debug("{}: journal: write_header: op={} sectors[{}..{}]", .{
+            self.replica,
+            message.header.op,
+            offset,
+            offset + config.sector_size,
+        });
+
+        // TODO Snapshots
+        if (self.write_prepare_header_once(message.header)) {
+            const version = self.write_headers_increment_version();
+            self.write_prepare_header_to_version(write, write_prepare_on_write_header, version, write.header_sector(self), offset);
+        } else {
+            // Versions must be incremented upfront:
+            // If we don't increment upfront we could end up writing to the same copy twice.
+            // We would then lose the redundancy required to locate headers or even overwrite all copies.
+            const version = self.write_headers_increment_version();
+            _ = self.write_headers_increment_version();
+            switch (version) {
+                0 => self.write_prepare_header_to_version(write, write_prepare_on_write_header_version_0, 0, write.header_sector(self), offset),
+                1 => self.write_prepare_header_to_version(write, write_prepare_on_write_header_version_1, 1, write.header_sector(self), offset),
+            }
+        }
+    }
+
+    fn write_prepare_on_write_header_version_0(write: *Journal.Write) void {
+        const self = write.replica.journal;
+        const offset = write_prepare_header_offset(write.message);
+        // Pass the opposite version bit from the one we just finished writing.
+        self.write_prepare_header_to_version(write, write_prepare_on_write_header, 1, write.header_sector(self), offset);
+    }
+
+    fn write_prepare_on_write_header_version_1(write: *Journal.Write) void {
+        const self = write.replica.journal;
+        const offset = write_prepare_header_offset(write.message);
+        // Pass the opposite version bit from the one we just finished writing.
+        self.write_prepare_header_to_version(write, write_prepare_on_write_header, 0, write.header_sector(self), offset);
+    }
+
     fn write_prepare_on_write_header(write: *Journal.Write) void {
         const self = write.replica.journal;
         const message = write.message;
@@ -696,6 +769,25 @@ pub const Journal = struct {
         self.faulty.clear(message.header.op);
 
         self.write_prepare_release(write, message);
+    }
+
+    /// Release the lock held by a write on an in-memory header sector and pass
+    /// it to a waiting Write, if any.
+    fn write_prepare_unlock_header_sector(self: *Journal, write: *Journal.Write) void {
+        assert(write.header_sector_locked);
+        write.header_sector_locked = false;
+
+        // Unlike the ranges of physical memory we lock when writing to disk,
+        // these header sector locks are always an exact match, so there's no
+        // need to re-check the waiting writes against all other writes.
+        if (write.header_sector_next) |waiting| {
+            write.header_sector_next = null;
+
+            assert(waiting.header_sector_locked == false);
+            waiting.header_sector_locked = true;
+            self.write_prepare_on_lock_header_sector(waiting);
+        }
+        assert(write.header_sector_next == null);
     }
 
     fn write_prepare_release(self: *Journal, write: *Journal.Write, wrote: ?*Message) void {
@@ -729,99 +821,9 @@ pub const Journal = struct {
         };
     }
 
-    /// Attempt to lock the in-memory sector containing the header being written.
-    /// If the sector is already locked, add this write to the wait queue.
-    fn write_prepare_header(self: *Journal, write: *Journal.Write) void {
-        assert(!write.header_sector_locked);
-        assert(write.header_sector_next == null);
-
-        var it = self.writes.iterate();
-        while (it.next()) |other| {
-            if (other == write) continue;
-            if (!other.header_sector_locked) continue;
-
-            if (other.header_sector_same(write)) {
-                write.header_sector_next = other.header_sector_next;
-                other.header_sector_next = write;
-                return;
-            }
-        }
-
-        write.header_sector_locked = true;
-        self.write_prepare_on_lock_header_sector(write);
-    }
-
-    /// Release the lock held by a write on an in-memory header sector and pass
-    /// it to a waiting Write, if any.
-    fn write_prepare_unlock_header_sector(self: *Journal, write: *Journal.Write) void {
-        assert(write.header_sector_locked);
-        write.header_sector_locked = false;
-
-        // Unlike the ranges of physical memory we lock when writing to disk,
-        // these header sector locks are always an exact match, so there's no
-        // need to re-check the waiting writes against all other writes.
-        if (write.header_sector_next) |waiting| {
-            write.header_sector_next = null;
-
-            assert(waiting.header_sector_locked == false);
-            waiting.header_sector_locked = true;
-            self.write_prepare_on_lock_header_sector(waiting);
-        }
-        assert(write.header_sector_next == null);
-    }
-
-    fn write_prepare_on_lock_header_sector(self: *Journal, write: *Write) void {
-        assert(write.header_sector_locked);
-
-        const message = write.message;
-        const offset = write_prepare_header_offset(write.message);
-        std.mem.copy(
-            u8,
-            write.headers(self),
-            std.mem.sliceAsBytes(self.headers)[offset..][0..config.sector_size],
-        );
-
-        log.debug("{}: journal: write_header: op={} sectors[{}..{}]", .{
-            self.replica,
-            message.header.op,
-            offset,
-            offset + config.sector_size,
-        });
-
-        // TODO Snapshots
-        if (self.write_prepare_header_once(message.header)) {
-            const version = self.write_headers_increment_version();
-            self.write_prepare_header_to_version(write, write_prepare_on_write_header, version, write.headers(self), offset);
-        } else {
-            // Versions must be incremented upfront:
-            // If we don't increment upfront we could end up writing to the same copy twice.
-            // We would then lose the redundancy required to locate headers or overwrite all copies.
-            const version = self.write_headers_increment_version();
-            _ = self.write_headers_increment_version();
-            switch (version) {
-                0 => self.write_prepare_header_to_version(write, write_prepare_on_write_header_version_0, 0, write.headers(self), offset),
-                1 => self.write_prepare_header_to_version(write, write_prepare_on_write_header_version_1, 1, write.headers(self), offset),
-            }
-        }
-    }
-
     fn write_prepare_header_offset(message: *Message) u64 {
         comptime assert(config.sector_size % @sizeOf(Header) == 0);
         return Journal.sector_floor(message.header.op * @sizeOf(Header));
-    }
-
-    fn write_prepare_on_write_header_version_0(write: *Journal.Write) void {
-        const self = write.replica.journal;
-        const offset = write_prepare_header_offset(write.message);
-        // Pass the opposite version bit from the one we just finished writing.
-        self.write_prepare_header_to_version(write, write_prepare_on_write_header, 1, write.headers(self), offset);
-    }
-
-    fn write_prepare_on_write_header_version_1(write: *Journal.Write) void {
-        const self = write.replica.journal;
-        const offset = write_prepare_header_offset(write.message);
-        // Pass the opposite version bit from the one we just finished writing.
-        self.write_prepare_header_to_version(write, write_prepare_on_write_header, 0, write.headers(self), offset);
     }
 
     fn write_headers_increment_version(self: *Journal) u1 {
@@ -840,7 +842,7 @@ pub const Journal = struct {
         // early if the write was canceled.
         assert(self.dirty.bit(header.op));
         if (header.command == .reserved) {
-            log.debug("{}: journal: write_headers_once: dirty reserved header", .{
+            log.debug("{}: journal: write_prepare_header_once: dirty reserved header", .{
                 self.replica,
             });
             return false;
@@ -848,7 +850,7 @@ pub const Journal = struct {
         if (self.previous_entry(header)) |previous| {
             assert(previous.command == .prepare);
             if (previous.checksum != header.nonce) {
-                log.debug("{}: journal: write_headers_once: no hash chain", .{
+                log.debug("{}: journal: write_prepare_header_once: no hash chain", .{
                     self.replica,
                 });
                 return false;
@@ -856,13 +858,13 @@ pub const Journal = struct {
             // TODO Add is_dirty(header)
             // TODO Snapshots
             if (self.dirty.bit(previous.op)) {
-                log.debug("{}: journal: write_headers_once: previous entry is dirty", .{
+                log.debug("{}: journal: write_prepare_header_once: previous entry is dirty", .{
                     self.replica,
                 });
                 return false;
             }
         } else {
-            log.debug("{}: journal: write_headers_once: no previous entry", .{
+            log.debug("{}: journal: write_prepare_header_once: no previous entry", .{
                 self.replica,
             });
             return false;
