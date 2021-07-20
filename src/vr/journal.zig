@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+const math = std.math;
 const log = std.log.scoped(.vr);
 
 const config = @import("../config.zig");
@@ -124,7 +125,7 @@ pub const Journal = struct {
         headers_count: u32,
     ) !Journal {
         if (@mod(size, config.sector_size) != 0) return error.SizeMustBeAMultipleOfSectorSize;
-        if (!std.math.isPowerOfTwo(headers_count)) return error.HeadersCountMustBeAPowerOfTwo;
+        if (!math.isPowerOfTwo(headers_count)) return error.HeadersCountMustBeAPowerOfTwo;
         assert(storage.size == size);
 
         const headers_per_sector = @divExact(config.sector_size, @sizeOf(Header));
@@ -981,12 +982,12 @@ pub const Journal = struct {
     }
 
     pub fn sector_floor(offset: u64) u64 {
-        const sectors = std.math.divFloor(u64, offset, config.sector_size) catch unreachable;
+        const sectors = math.divFloor(u64, offset, config.sector_size) catch unreachable;
         return sectors * config.sector_size;
     }
 
     pub fn sector_ceil(offset: u64) u64 {
-        const sectors = std.math.divCeil(u64, offset, config.sector_size) catch unreachable;
+        const sectors = math.divCeil(u64, offset, config.sector_size) catch unreachable;
         return sectors * config.sector_size;
     }
 };
@@ -1040,13 +1041,13 @@ pub const BitSet = struct {
 /// Take a u6 to limit to 64 items max (2^6 = 64)
 pub fn IOPS(comptime T: type, comptime size: u6) type {
     const Map = std.meta.Int(.unsigned, size);
-    const MapLog2 = std.math.Log2Int(Map);
+    const MapLog2 = math.Log2Int(Map);
     return struct {
         const Self = @This();
 
         items: [size]T = undefined,
         /// 1 bits are free items
-        free: Map = std.math.maxInt(Map),
+        free: Map = math.maxInt(Map),
 
         pub fn acquire(self: *Self) ?*T {
             const i = @ctz(Map, self.free);
@@ -1064,13 +1065,13 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
         }
 
         /// Returns true if there is at least one IOP available
-        pub fn available(self: *const Self) std.math.Log2IntCeil(Map) {
+        pub fn available(self: *const Self) math.Log2IntCeil(Map) {
             return @popCount(Map, self.free);
         }
 
         /// Returns true if there is at least one IOP in use
-        pub fn executing(self: *const Self) std.math.Log2IntCeil(Map) {
-            return @popCount(Map, std.math.maxInt(Map)) - @popCount(Map, self.free);
+        pub fn executing(self: *const Self) math.Log2IntCeil(Map) {
+            return math.maxInt(math.Log2IntCeil(Map)) - @popCount(Map, self.free);
         }
 
         pub const Iterator = struct {
