@@ -2914,7 +2914,7 @@ pub const Replica = struct {
         wrote: ?*Message,
         trigger: Journal.Write.Trigger,
     ) void {
-        // null indicates that we did not complete the write for some reason.
+        // `null` indicates that we did not complete the write for some reason.
         const message = wrote orelse return;
 
         self.send_prepare_ok(message.header);
