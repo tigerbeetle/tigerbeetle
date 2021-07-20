@@ -941,6 +941,18 @@ pub const Journal = struct {
             write.range.buffer,
             write.range.offset,
         );
+        // We rely on the Storage.write_sectors() implementation being either always synchronous,
+        // in which case writes never actually need to be queued, or always always asynchronous,
+        // in which case write_sectors_on_write() doesn't have to handle lock_sectors()
+        // synchronously completing a write and making a nested write_sectors_on_write() call.
+        //
+        // We don't currently allow Storage implementations that are sometimes synchronous and
+        // sometimes asynchronous as we don't have a use case for such a Storage implementation
+        // and doing so would require a significant complexity increase in the Journal code.
+        switch (Storage.synchronicity) {
+            .always_synchronous => assert(!write.range.locked),
+            .always_asynchronous => assert(write.range.locked),
+        }
     }
 
     fn write_sectors_on_write(completion: *Storage.Write) void {

@@ -6,6 +6,12 @@ const log = std.log.scoped(.vr);
 const config = @import("config.zig");
 
 pub const MemStorage = struct {
+    /// See usage in Journal.write_sectors() for details.
+    pub const synchronicity: enum {
+        always_synchronous,
+        always_asynchronous,
+    } = .always_synchronous;
+
     allocator: *Allocator,
     memory: []align(config.sector_size) u8,
     size: u64,
