@@ -9,6 +9,12 @@ const IO = @import("io.zig").IO;
 const config = @import("config.zig");
 
 pub const Storage = struct {
+    /// See usage in Journal.write_sectors() for details.
+    pub const synchronicity: enum {
+        always_synchronous,
+        always_asynchronous,
+    } = .always_asynchronous;
+
     pub const Read = struct {
         completion: IO.Completion,
         callback: fn (read: *Storage.Read) void,
