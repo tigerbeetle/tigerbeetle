@@ -68,7 +68,7 @@ pub const Replica = struct {
     /// The maximum number of replicas that may be faulty:
     f: u8,
 
-    /// A distributed fault-tolerant clock to provide lower/upper bounds on the leader's wall clock:
+    /// A distributed fault-tolerant clock for lower and upper bounds on the leader's wall clock:
     clock: Clock,
 
     /// The persistent log of hash-chained journal entries:
@@ -192,6 +192,7 @@ pub const Replica = struct {
         var client_table = ClientTable.init(allocator);
         errdefer client_table.deinit();
         try client_table.ensureCapacity(@intCast(u32, config.clients_max));
+        assert(client_table.capacity() >= config.clients_max);
 
         var prepare_ok = try allocator.alloc(?*Message, replica_count);
         errdefer allocator.free(prepare_ok);
@@ -301,6 +302,14 @@ pub const Replica = struct {
             },
         };
 
+        // To reduce the probability of clustering, for efficient linear probing, the hash map will
+        // always overallocate capacity by a factor of two.
+        log.debug("{}: init: client_table.capacity()={} for config.clients_max={} entries", .{
+            self.replica,
+            self.client_table.capacity(),
+            config.clients_max,
+        });
+
         // We must initialize timeouts here, not in tick() on the first tick, because on_message()
         // can race with tick()... before timeouts have been initialized:
         assert(self.status == .normal);
@@ -369,7 +378,6 @@ pub const Replica = struct {
 
     /// Called by the MessageBus to deliver a message to the replica.
     pub fn on_message(self: *Replica, message: *Message) void {
-        log.debug("{}:", .{self.replica});
         log.debug("{}: on_message: view={} status={s} {}", .{
             self.replica,
             self.view,
@@ -465,6 +473,9 @@ pub const Replica = struct {
     /// the request, and k is the commit-number.
     fn on_request(self: *Replica, message: *Message) void {
         if (self.ignore_request_message(message)) return;
+
+        assert(self.status == .normal);
+        assert(self.leader());
 
         if (self.request_checksum) |request_checksum| {
             assert(message.header.command == .request);
@@ -1501,6 +1512,7 @@ pub const Replica = struct {
     }
 
     fn commit_op(self: *Replica, prepare: *const Message) void {
+        // TODO Can we add more checks around allowing commit_op() during a view change?
         assert(self.status == .normal or self.status == .view_change);
         assert(prepare.header.command == .prepare);
         assert(prepare.header.operation != .init);
@@ -1537,12 +1549,12 @@ pub const Replica = struct {
         reply.header.* = .{
             .command = .reply,
             .operation = prepare.header.operation,
+            .parent = prepare.header.context, // The prepare's context carries `request.checksum`.
             .client = prepare.header.client,
-            .context = prepare.header.context,
             .request = prepare.header.request,
-            .cluster = self.cluster,
-            .replica = self.replica,
-            .view = self.view,
+            .cluster = prepare.header.cluster,
+            .replica = prepare.header.replica,
+            .view = prepare.header.view,
             .op = prepare.header.op,
             .commit = prepare.header.op,
             .size = @sizeOf(Header) + reply_body_size,
@@ -1553,10 +1565,11 @@ pub const Replica = struct {
         reply.header.set_checksum_body(reply.buffer[@sizeOf(Header)..reply.header.size]);
         reply.header.set_checksum();
 
-        // TODO Add reply to the client table to answer future duplicate requests idempotently.
-        // Lookup client table entry using client id.
-        // If client's last request ID is <= this request ID, then update client table entry.
-        // Otherwise the client is already ahead of us, and we don't need to update the entry.
+        if (reply.header.operation == .register) {
+            self.create_client_table_entry(reply);
+        } else {
+            self.update_client_table_entry(reply);
+        }
 
         if (self.leader_index(self.view) == self.replica) {
             log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
@@ -1589,6 +1602,78 @@ pub const Replica = struct {
             }
         }
         return count;
+    }
+
+    /// Creates an entry in the client table when registering a new client session.
+    /// Asserts that the new session does not yet exist.
+    /// Evicts another entry deterministically, if necessary, to make space for the insert.
+    fn create_client_table_entry(self: *Replica, reply: *Message) void {
+        assert(reply.header.command == .reply);
+        assert(reply.header.operation == .register);
+        assert(reply.header.client > 0);
+        assert(reply.header.context == 0);
+        assert(reply.header.op == reply.header.commit);
+        assert(reply.header.size == @sizeOf(Header));
+
+        const session = reply.header.commit; // The commit number becomes the session number.
+        const request = reply.header.request;
+
+        assert(session > 0); // We reserved the `0` commit number for the cluster `.init` operation.
+        assert(request == 0);
+
+        // For correctness, it's critical that all replicas evict deterministically:
+        // We cannot depend on `HashMap.capacity()` since `HashMap.ensureCapacity()` may change
+        // across different versions of the Zig std lib. We therefore rely on `config.clients_max`,
+        // which must be the same across all replicas, and must not change after initing a cluster.
+        // We also do not depend on `HashMap.valueIterator()` being deterministic here. However, we
+        // do require that all entries have different commit numbers and are at least iterated.
+        // This ensures that we will always pick the entry with the oldest commit number.
+        // We also double-check that a client has only one entry in the hash map (or it's buggy).
+        const clients = self.client_table.count();
+        assert(clients <= config.clients_max);
+        if (clients == config.clients_max) {
+            var evictee: ?Header = null;
+            var iterated: usize = 0;
+            var iterator = self.client_table.valueIterator();
+            while (iterator.next()) |entry| {
+                assert(entry.reply.header.command == .reply);
+                assert(entry.reply.header.context == 0);
+                assert(entry.reply.header.op == entry.reply.header.commit);
+                assert(entry.reply.header.commit >= entry.session);
+
+                assert(evictee == null or (entry.reply.header.commit ^ evictee.?.commit) != 0);
+                assert(evictee == null or (entry.reply.header.client ^ evictee.?.client) != 0);
+
+                iterated += 1;
+                if (evictee == null or entry.reply.header.commit < evictee.?.commit) {
+                    evictee = entry.reply.header.*;
+                }
+            }
+            assert(iterated == clients);
+            log.notice("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
+                self.replica,
+                clients,
+                config.clients_max,
+                evictee.?.client,
+            });
+            assert(self.client_table.remove(evictee.?.client));
+            assert(!self.client_table.contains(evictee.?.client));
+        }
+
+        log.debug("{}: create_client_table_entry: client={} session={} request={}", .{
+            self.replica,
+            reply.header.client,
+            session,
+            request,
+        });
+
+        // Any duplicate .register requests should have received the same session number if the
+        // client table entry already existed, or been dropped if a session was being committed:
+        self.client_table.putAssumeCapacityNoClobber(reply.header.client, .{
+            .session = session,
+            .reply = reply.ref(),
+        });
+        assert(self.client_table.count() <= config.clients_max);
     }
 
     /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -1727,14 +1812,6 @@ pub const Replica = struct {
     fn ignore_request_message(self: *Replica, message: *Message) bool {
         assert(message.header.command == .request);
 
-        // We allow followers to reply to duplicate committed requests because we do not want to
-        // ignore or forward a client request if we know that we have the reply in our client table.
-        // We assume this is safe (even without regard to status below) since commits are immutable.
-        // This improves latency and reduces traffic.
-
-        // This may resend the reply if this is the latest committed request:
-        if (self.ignore_request_message_duplicate(message)) return true;
-
         if (self.status != .normal) {
             log.debug("{}: on_request: ignoring ({s})", .{ self.replica, self.status });
             return true;
@@ -1743,90 +1820,81 @@ pub const Replica = struct {
         // This may forward the request to a newer leader:
         if (self.ignore_request_message_follower(message)) return true;
 
+        // This may resend the reply if this is the latest committed request:
+        if (self.ignore_request_message_duplicate(message)) return true;
+
+        if (self.ignore_request_message_preparing(message)) return true;
+
         return false;
     }
 
-    /// Returns whether the request is stale or a duplicate of the latest committed request.
+    /// Returns whether the request is stale, or a duplicate of the latest committed request.
     /// Resends the reply to the latest request if the request has been committed.
-    /// May be called by any replica in any status: `.normal`, `.view_change`, `.recovering`.
-    fn ignore_request_message_duplicate(self: *Replica, message: *Message) bool {
+    fn ignore_request_message_duplicate(self: *Replica, message: *const Message) bool {
+        assert(self.status == .normal);
+        assert(self.leader());
+
         assert(message.header.command == .request);
         assert(message.header.client > 0);
-
-        const session = message.header.context;
-        const request = message.header.request;
-
-        if (message.header.operation == .register) {
-            assert(session == 0);
-            assert(request == 0);
-        } else {
-            assert(session > 0);
-            assert(request > 0);
-        }
-
+        assert(message.header.view <= self.view); // See ignore_request_message_follower().
+        assert(message.header.context == 0 or message.header.operation != .register);
+        assert(message.header.request == 0 or message.header.operation != .register);
+        
         if (self.client_table.getPtr(message.header.client)) |entry| {
-            // If we are going to drop duplicate requests or resend the latest committed reply,
-            // then be sure that we do so for the correct request. There is alot at stake.
             assert(entry.reply.header.command == .reply);
             assert(entry.reply.header.client == message.header.client);
 
-            if (session == 0) {
-                assert(message.header.operation == .register);
-                log.debug("{}: on_request: duplicate or stale .register request", .{self.replica});
-                // Do not return here. Use the request number below to decide to resend the reply.
-            } else if (session < entry.session) {
-                // TODO Send eviction message to client.
-                // We may be behind the cluster, but the client is definitely behind us.
-                log.debug("{}: on_request: stale session", .{self.replica});
+            if (message.header.operation == .register) {
+                // Fall through below to check if we should resend the .register session reply.
+            } else if (entry.session > message.header.context) {
+                // The client must not reuse the ephemeral client ID when registering a new session.
+                log.alert("{}: on_request: ignoring older session (client bug)", .{self.replica});
                 return true;
-            } else if (session > entry.session) {
-                // The session number is committed information. At first glance, it might seem that
-                // we may assert that the client's session is not newer than ours because the leader
-                // always has all committed information. However, this function may be called by any
-                // replica (leader or follower) in any status, so that we may not actually have all
-                // committed information, and the client may well be ahead of us.
-                return false;
+            } else if (entry.session < message.header.context) {
+                // This cannot be because of a partition since we check the client's view number.
+                log.alert("{}: on_request: ignoring newer session (client bug)", .{self.replica});
+                return true;
             }
 
-            if (request < entry.reply.header.request) {
-                // Do nothing further with this request (e.g. do not forward to the leader).
-                log.debug("{}: on_request: stale request", .{self.replica});
+            if (entry.reply.header.request > message.header.request) {
+                log.debug("{}: on_request: ignoring older request", .{self.replica});
                 return true;
-            } else if (request == entry.reply.header.request) {
-                assert(session == entry.session);
-                assert(entry.reply.header.operation == message.header.operation);
-                assert(entry.reply.header.context == message.header.checksum);
+            } else if (entry.reply.header.request == message.header.request) {
+                if (message.header.checksum == entry.reply.header.parent) {
+                    assert(entry.reply.header.operation == message.header.operation);
 
-                log.debug("{}: on_request: resending reply to duplicate request", .{self.replica});
-                self.message_bus.send_message_to_client(message.header.client, entry.reply);
-                return true;
+                    log.notice("{}: on_request: replying to duplicate request", .{self.replica});
+                    self.message_bus.send_message_to_client(message.header.client, entry.reply);
+                    return true;
+                } else {
+                    log.alert("{}: on_request: request collision (client bug)", .{self.replica});
+                    return true;
+                }
+            } else if (entry.reply.header.request + 1 == message.header.request) {
+                if (message.header.parent == entry.reply.header.checksum) {
+                    // The client has proved that they received our last reply.
+                    log.debug("{}: on_request: new request", .{self.replica});
+                    return false;
+                } else {
+                    // The client may have only one request inflight at a time.
+                    log.alert("{}: on_request: ignoring new request (client bug)", .{self.replica});
+                    return true;
+                }
             } else {
-                // The client is ahead of us or about to make the next request.
-                // TODO There is an optimization here where if we are the leader we could detect
-                // that we have been partitioned from the cluster and drop the message instead of
-                // flooding the network with prepares that will never be acked.
-                return false;
+                log.alert("{}: on_request: ignoring newer request (client bug)", .{self.replica});
+                return true;
             }
         } else if (message.header.operation == .register) {
-            // We always create a newer session for the client (if we are the leader).
+            log.debug("{}: on_request: new session", .{self.replica});
             return false;
         } else {
-            // Be sure that we have all commits to know whether or not the session has been evicted:
-            // Otherwise we may send an eviction message for a session that is yet to be registered.
-            if (self.status == .normal and self.leader()) {
-                // TODO Send eviction message to client.
-                // There is still the risk of sending an eviction message if we as the leader have
-                // been partitioned, simply don't know about a session and the client talks to us.
-                // We can ameliorate this risk by having clients include the view number and
-                // rejecting messages from clients with newer views.
-                log.debug("{}: on_request: no session", .{self.replica});
-                return true;
-            } else {
-                // If this message will ever be queued anywhere, then be sure that this function is
-                // evaluated again after the replica enters normal status, otherwise we may execute
-                // the same request twice.
-                return false;
-            }
+            // We must have all commits to know whether a session has been evicted. For example,
+            // there is the risk of sending an eviction message (even as the leader) if we are
+            // partitioned and don't yet know about a session. We solve this by having clients
+            // include the view number and rejecting messages from clients with newer views.
+            log.err("{}: on_request: no session", .{self.replica});
+            self.send_eviction_message_to_client(message.header.client);
+            return true;
         }
     }
 
@@ -1834,6 +1902,7 @@ pub const Replica = struct {
     /// Takes the client's perspective into account if the client is aware of a newer view.
     /// Forwards requests to the leader if the client has an older view.
     fn ignore_request_message_follower(self: *Replica, message: *Message) bool {
+        assert(self.status == .normal);
         assert(message.header.command == .request);
 
         // The client is aware of a newer view:
@@ -1872,6 +1941,11 @@ pub const Replica = struct {
 
         assert(self.follower());
         return true;
+    }
+
+    // TODO
+    fn ignore_request_message_preparing(self: *Replica, message: *const Message) bool {
+        return false;
     }
 
     fn ignore_view_change_message(self: *Replica, message: *const Message) bool {
@@ -2665,6 +2739,11 @@ pub const Replica = struct {
         self.message_bus.send_header_to_replica(replica, header);
     }
 
+    fn send_eviction_message_to_client(self: *Replica, client: u128) void {
+        // TODO
+        @panic("received more than config.clients_max connections");
+    }
+
     fn send_message_to_other_replicas(self: *Replica, message: *Message) void {
         var replica: u8 = 0;
         while (replica < self.replica_count) : (replica += 1) {
@@ -2899,6 +2978,44 @@ pub const Replica = struct {
         assert(self.nack_prepare_op == null);
 
         self.send_start_view_change();
+    }
+
+    fn update_client_table_entry(self: *Replica, reply: *Message) void {
+        assert(reply.header.command == .reply);
+        assert(reply.header.operation != .register);
+        assert(reply.header.client > 0);
+        assert(reply.header.context == 0);
+        assert(reply.header.op == reply.header.commit);
+        assert(reply.header.commit > 0);
+        assert(reply.header.request > 0);
+
+        // If no entry exists, then the session must have been evicted while being prepared.
+        if (self.client_table.getPtr(reply.header.client)) |entry| {
+            assert(entry.reply.header.command == .reply);
+            assert(entry.reply.header.context == 0);
+            assert(entry.reply.header.op == entry.reply.header.commit);
+            assert(entry.reply.header.commit >= entry.session);
+
+            assert(entry.reply.header.client == reply.header.client);
+            assert(entry.reply.header.request + 1 == reply.header.request);
+            assert(entry.reply.header.op < reply.header.op);
+            assert(entry.reply.header.commit < reply.header.commit);
+
+            // TODO Use this reply's prepare to cross-check against the entry's prepare, if we still
+            // have access to the prepare in the journal (it may have been snapshotted).
+
+            log.debug("{}: update_client_table_entry: client={} session={} request={}", .{
+                self.replica,
+                reply.header.client,
+                entry.session,
+                reply.header.request,
+            });
+
+            self.message_bus.unref(entry.reply);
+            entry.reply = reply.ref();
+        } else {
+            // TODO Send eviction message to client (if we are the leader).
+        }
     }
 
     /// Whether it is safe to commit or send prepare_ok messages.

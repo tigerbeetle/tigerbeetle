@@ -3,8 +3,9 @@ const assert = std.debug.assert;
 
 usingnamespace @import("tigerbeetle.zig");
 
-pub const Header = @import("vr.zig").Header;
-pub const Operation = @import("state_machine.zig").Operation;
+pub const vr = @import("vr.zig");
+pub const Header = vr.Header;
+pub const StateMachine = @import("state_machine.zig").StateMachine;
 
 pub fn connect(port: u16) !std.os.fd_t {
     var addr = try std.net.Address.parseIp4("127.0.0.1", port);
@@ -15,50 +16,38 @@ pub fn connect(port: u16) !std.os.fd_t {
 // TODO We can share most of what follows with `src/benchmark.zig`:
 
 pub const cluster_id: u32 = 0;
-pub const client_id: u128 = 123;
+pub const client_id: u128 = 135;
+pub var session_number: u64 = 0;
 pub var request_number: u32 = 0;
-var sent_ping = false;
+pub var request_checksum: u128 = 0;
+pub var reply_checksum: u128 = 0;
+pub var view_number: u32 = 0;
 
-pub fn send(fd: std.os.fd_t, operation: Operation, batch: anytype, Results: anytype) !void {
-    // This is required to greet the cluster and identify the connection as being from a client:
-    if (!sent_ping) {
-        sent_ping = true;
-
-        var ping = Header{
-            .command = .ping,
-            .cluster = cluster_id,
-            .client = client_id,
-            .view = 0,
-        };
-        ping.set_checksum_body(&[0]u8{});
-        ping.set_checksum();
-
-        assert((try std.os.sendto(fd, std.mem.asBytes(&ping), 0, null, 0)) == @sizeOf(Header));
-
-        var pong: [@sizeOf(Header)]u8 = undefined;
-        var pong_size: u64 = 0;
-        while (pong_size < @sizeOf(Header)) {
-            var pong_bytes = try std.os.recvfrom(fd, pong[pong_size..], 0, null, null);
-            if (pong_bytes == 0) @panic("server closed the connection (while waiting for pong)");
-            pong_size += pong_bytes;
-        }
-    }
-
-    request_number += 1;
+pub fn send(
+    fd: std.os.fd_t,
+    operation: StateMachine.Operation,
+    batch: anytype,
+    Results: anytype,
+) !void {
+    // Register a client session with the cluster before we make further requests:
+    if (session_number == 0) try register(fd);
 
     var body = std.mem.asBytes(batch[0..]);
 
     var request = Header{
         .cluster = cluster_id,
+        .parent = reply_checksum,
         .client = client_id,
-        .view = 0,
+        .context = session_number,
         .request = request_number,
+        .view = view_number,
         .command = .request,
-        .operation = operation,
+        .operation = vr.Operation.from(StateMachine, operation),
         .size = @intCast(u32, @sizeOf(Header) + body.len),
     };
     request.set_checksum_body(body[0..]);
     request.set_checksum();
+    request_checksum = request.checksum;
 
     const header = std.mem.asBytes(&request);
     assert((try std.os.sendto(fd, header[0..], 0, null, 0)) == header.len);
@@ -70,24 +59,72 @@ pub fn send(fd: std.os.fd_t, operation: Operation, batch: anytype, Results: anyt
     const recv_bytes = try std.os.recvfrom(fd, recv[0..], 0, null, null);
     assert(recv_bytes >= @sizeOf(Header));
 
-    var response = std.mem.bytesAsValue(Header, recv[0..@sizeOf(Header)]);
+    const reply_header = std.mem.bytesAsValue(Header, recv[0..@sizeOf(Header)]);
 
     // TODO Add jsonStringfy to vr.Header:
     //const stdout = std.io.getStdOut().writer();
     //try response.jsonStringify(.{}, stdout);
     //try stdout.writeAll("\n");
-    std.debug.print("{}\n", .{response});
+    std.debug.print("{}\n", .{reply_header});
 
-    assert(response.valid_checksum());
-    assert(recv_bytes >= response.size);
+    assert(reply_header.valid_checksum());
+    assert(reply_header.parent == request_checksum);
+    reply_checksum = reply_header.checksum;
+    assert(reply_header.view >= view_number);
+    view_number = reply_header.view;
+    assert(recv_bytes >= reply_header.size);
 
-    const response_body = recv[@sizeOf(Header)..response.size];
-    assert(response.valid_checksum_body(response_body));
+    const reply_body = recv[@sizeOf(Header)..reply_header.size];
+    assert(reply_header.valid_checksum_body(reply_body));
 
-    for (std.mem.bytesAsSlice(Results, response_body)) |result| {
+    for (std.mem.bytesAsSlice(Results, reply_body)) |result| {
         // TODO
         //try result.jsonStringify(.{}, stdout);
         //try stdout.writeAll("\n");
         std.debug.print("{}\n", .{result});
     }
+
+    request_number += 1;
+}
+
+fn register(fd: std.os.fd_t) !void {
+    assert(session_number == 0);
+    assert(request_number == 0);
+
+    var request = Header{
+        .command = .request,
+        .operation = .register,
+        .cluster = cluster_id,
+        .parent = reply_checksum,
+        .client = client_id,
+        .context = session_number,
+        .request = request_number,
+        .view = 0,
+    };
+    request.set_checksum_body(&[0]u8{});
+    request.set_checksum();
+    request_checksum = request.checksum;
+
+    assert((try std.os.sendto(fd, std.mem.asBytes(&request), 0, null, 0)) == @sizeOf(Header));
+
+    var reply: [@sizeOf(Header)]u8 = undefined;
+    var reply_size: u64 = 0;
+    while (reply_size < @sizeOf(Header)) {
+        var reply_bytes = try std.os.recvfrom(fd, reply[reply_size..], 0, null, null);
+        if (reply_bytes == 0) @panic("server closed the connection (while registering)");
+        reply_size += reply_bytes;
+    }
+    assert(reply_size >= @sizeOf(Header));
+
+    const reply_header = std.mem.bytesAsValue(Header, reply[0..@sizeOf(Header)]);
+    assert(reply_header.valid_checksum());
+    assert(reply_header.parent == request_checksum);
+    reply_checksum = reply_header.checksum;
+    assert(reply_header.view >= view_number);
+    view_number = reply_header.view;
+
+    std.debug.print("registered session number {}\n", .{reply_header});
+    session_number = reply_header.commit;
+
+    request_number += 1;
 }
