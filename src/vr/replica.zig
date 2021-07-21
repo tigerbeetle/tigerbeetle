@@ -11,6 +11,8 @@ const MessageBus = @import("../message_bus.zig").MessageBusReplica;
 const Message = @import("../message_bus.zig").Message;
 const StateMachine = @import("../state_machine.zig").StateMachine;
 
+const Storage = @import("../storage.zig").Storage;
+
 const vr = @import("../vr.zig");
 const Header = vr.Header;
 const Clock = vr.Clock;
@@ -43,7 +45,7 @@ pub const Replica = struct {
     clock: Clock,
 
     /// The persistent log of hash-chained journal entries:
-    journal: *Journal,
+    journal: Journal,
 
     /// An abstraction to send messages from the replica to itself or another replica or client.
     /// The recipient replica or client may be a local in-memory pointer or network-addressable.
@@ -145,8 +147,7 @@ pub const Replica = struct {
         replica_count: u16,
         replica: u16,
         time: *Time,
-        // TODO We should actually provide Storage here, a Replica will always use the same Journal:
-        journal: *Journal,
+        storage: *Storage,
         message_bus: *MessageBus,
         state_machine: *StateMachine,
     ) !Replica {
@@ -175,7 +176,6 @@ pub const Replica = struct {
         errdefer allocator.free(nack_prepare);
         std.mem.set(?*Message, nack_prepare, null);
 
-        // TODO Initialize the journal when initializing the cluster:
         var init_prepare = Header{
             .nonce = 0,
             .client = 0,
@@ -195,8 +195,6 @@ pub const Replica = struct {
         init_prepare.set_checksum();
         assert(init_prepare.valid_checksum());
         assert(init_prepare.invalid() == null);
-        journal.headers[0] = init_prepare;
-        journal.assert_headers_reserved_from(init_prepare.op + 1);
 
         var self = Replica{
             .allocator = allocator,
@@ -211,7 +209,14 @@ pub const Replica = struct {
                 @intCast(u8, replica),
                 time,
             ),
-            .journal = journal,
+            .journal = try Journal.init(
+                allocator,
+                storage,
+                replica,
+                config.journal_size_max,
+                config.journal_headers_max,
+                &init_prepare,
+            ),
             .message_bus = message_bus,
             .state_machine = state_machine,
             .view = init_prepare.view,
@@ -985,7 +990,6 @@ pub const Replica = struct {
                 assert(!self.journal.faulty.bit(op));
 
                 self.journal.read_prepare(
-                    self,
                     on_request_prepare_read,
                     op,
                     entry.checksum,
@@ -1451,7 +1455,7 @@ pub const Replica = struct {
         if (self.commit_min < self.commit_max and self.commit_min < self.op) {
             const op = self.commit_min + 1;
             const checksum = self.journal.entry_for_op_exact(op).?.checksum;
-            self.journal.read_prepare(self, commit_ops_commit, op, checksum, null);
+            self.journal.read_prepare(commit_ops_commit, op, checksum, null);
         } else {
             self.commit_ops_finish();
         }
@@ -2906,7 +2910,7 @@ pub const Replica = struct {
             return;
         }
 
-        self.journal.write_prepare(self, write_prepare_on_write, message, trigger);
+        self.journal.write_prepare(write_prepare_on_write, message, trigger);
     }
 
     fn write_prepare_on_write(

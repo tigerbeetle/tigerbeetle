@@ -78,13 +78,6 @@ fn start(
     );
     var time = Time{};
     var storage = try Storage.init(config.journal_size_max, storage_fd, &io);
-    var journal = try Journal.init(
-        arena,
-        &storage,
-        replica_index,
-        config.journal_size_max,
-        config.journal_headers_max,
-    );
     var message_bus = try MessageBus.init(
         arena,
         cluster,
@@ -98,7 +91,7 @@ fn start(
         @intCast(u16, configuration.len),
         replica_index,
         &time,
-        &journal,
+        &storage,
         &message_bus,
         &state_machine,
     );
