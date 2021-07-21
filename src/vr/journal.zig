@@ -16,7 +16,7 @@ const Replica = vr.Replica;
 
 pub const Journal = struct {
     pub const Read = struct {
-        replica: *Replica,
+        self: *Journal,
         completion: Storage.Read,
         callback: fn (self: *Replica, prepare: ?*Message, destination_replica: ?u16) void,
 
@@ -29,7 +29,7 @@ pub const Journal = struct {
     pub const Write = struct {
         pub const Trigger = enum { append, repair };
 
-        replica: *Replica,
+        self: *Journal,
         callback: fn (self: *Replica, wrote: ?*Message, trigger: Trigger) void,
 
         message: *Message,
@@ -123,6 +123,7 @@ pub const Journal = struct {
         replica: u16,
         size: u64,
         headers_count: u32,
+        init_prepare: *Header,
     ) !Journal {
         if (@mod(size, config.sector_size) != 0) return error.SizeMustBeAMultipleOfSectorSize;
         if (!math.isPowerOfTwo(headers_count)) return error.HeadersCountMustBeAPowerOfTwo;
@@ -188,6 +189,9 @@ pub const Journal = struct {
         assert(@mod(@ptrToInt(&self.headers[0]), config.sector_size) == 0);
         assert(self.dirty.bits.len == self.headers.len);
         assert(self.faulty.bits.len == self.headers.len);
+
+        self.headers[0] = init_prepare.*;
+        self.assert_headers_reserved_from(init_prepare.op + 1);
 
         return self;
     }
@@ -427,12 +431,12 @@ pub const Journal = struct {
 
     pub fn read_prepare(
         self: *Journal,
-        replica: *Replica,
         callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u16) void,
         op: u64,
         checksum: u128,
         destination_replica: ?u16,
     ) void {
+        const replica = @fieldParentPtr(Replica, "journal", self);
         if (op > replica.op) {
             self.read_prepare_notice(op, checksum, "beyond replica.op");
             callback(replica, null, null);
@@ -483,7 +487,7 @@ pub const Journal = struct {
         };
 
         read.* = .{
-            .replica = replica,
+            .self = self,
             .completion = undefined,
             .message = message.ref(),
             .callback = callback,
@@ -511,8 +515,8 @@ pub const Journal = struct {
 
     fn on_read(completion: *Storage.Read) void {
         const read = @fieldParentPtr(Journal.Read, "completion", completion);
-        const replica = read.replica;
-        const self = replica.journal;
+        const self = read.self;
+        const replica = @fieldParentPtr(Replica, "journal", self);
         const op = read.op;
         const checksum = read.checksum;
 
@@ -605,11 +609,12 @@ pub const Journal = struct {
 
     pub fn write_prepare(
         self: *Journal,
-        replica: *Replica,
         callback: fn (self: *Replica, wrote: ?*Message, trigger: Write.Trigger) void,
         message: *Message,
         trigger: Journal.Write.Trigger,
     ) void {
+        const replica = @fieldParentPtr(Replica, "journal", self);
+
         assert(message.header.command == .prepare);
         assert(message.header.size >= @sizeOf(Header));
         assert(message.header.size <= message.buffer.len);
@@ -648,7 +653,7 @@ pub const Journal = struct {
         self.write_prepare_debug(message.header, "starting");
 
         write.* = .{
-            .replica = replica,
+            .self = self,
             .callback = callback,
             .message = message.ref(),
             .trigger = trigger,
@@ -664,7 +669,7 @@ pub const Journal = struct {
     }
 
     fn write_prepare_on_write_message(write: *Journal.Write) void {
-        const self = write.replica.journal;
+        const self = write.self;
         const message = write.message;
 
         if (!self.has(message.header)) {
@@ -737,21 +742,21 @@ pub const Journal = struct {
     }
 
     fn write_prepare_on_write_header_version_0(write: *Journal.Write) void {
-        const self = write.replica.journal;
+        const self = write.self;
         const offset = write_prepare_header_offset(write.message);
         // Pass the opposite version bit from the one we just finished writing.
         self.write_prepare_header_to_version(write, write_prepare_on_write_header, 1, write.header_sector(self), offset);
     }
 
     fn write_prepare_on_write_header_version_1(write: *Journal.Write) void {
-        const self = write.replica.journal;
+        const self = write.self;
         const offset = write_prepare_header_offset(write.message);
         // Pass the opposite version bit from the one we just finished writing.
         self.write_prepare_header_to_version(write, write_prepare_on_write_header, 0, write.header_sector(self), offset);
     }
 
     fn write_prepare_on_write_header(write: *Journal.Write) void {
-        const self = write.replica.journal;
+        const self = write.self;
         const message = write.message;
 
         assert(write.header_sector_locked);
@@ -792,8 +797,9 @@ pub const Journal = struct {
     }
 
     fn write_prepare_release(self: *Journal, write: *Journal.Write, wrote: ?*Message) void {
-        write.callback(write.replica, wrote, write.trigger);
-        write.replica.message_bus.unref(write.message);
+        const replica = @fieldParentPtr(Replica, "journal", self);
+        write.callback(replica, wrote, write.trigger);
+        replica.message_bus.unref(write.message);
         self.writes.release(write);
     }
 
@@ -959,7 +965,7 @@ pub const Journal = struct {
     fn write_sectors_on_write(completion: *Storage.Write) void {
         const range = @fieldParentPtr(Range, "completion", completion);
         const write = @fieldParentPtr(Journal.Write, "range", range);
-        const self = write.replica.journal;
+        const self = write.self;
 
         assert(write.range.locked);
         write.range.locked = false;
