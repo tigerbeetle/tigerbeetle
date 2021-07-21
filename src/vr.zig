@@ -53,14 +53,14 @@ pub const Operation = enum(u8) {
     /// Operations exported by the state machine (all other values are free):
     _,
 
+    pub fn from(comptime StateMachine: type, op: StateMachine.Operation) Operation {
+        check_state_machine_operations(StateMachine.Operation);
+        return @intToEnum(Operation, @enumToInt(op));
+    }
+
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine.Operation);
         return @intToEnum(StateMachine.Operation, @enumToInt(self));
-    }
-
-    pub fn init(comptime StateMachine: type, op: StateMachine.Operation) Operation {
-        check_state_machine_operations(StateMachine.Operation);
-        return @intToEnum(Operation, @enumToInt(op));
     }
 
     fn check_state_machine_operations(comptime Op: type) void {

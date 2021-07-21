@@ -140,7 +140,7 @@ pub const Client = struct {
             .cluster = self.cluster,
             .request = self.request_number_max,
             .command = .request,
-            .operation = vr.Operation.init(StateMachine, operation),
+            .operation = vr.Operation.from(StateMachine, operation),
             .size = message_size,
         };
         const body = message.buffer[@sizeOf(Header)..][0..body_size];
