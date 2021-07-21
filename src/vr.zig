@@ -94,8 +94,8 @@ pub const Header = packed struct {
 
     /// A backpointer to the previous request or prepare checksum for hash chain verification.
     /// This provides a cryptographic guarantee for linearizability:
-    /// 1. across a client's requests, and
-    /// 2. across the distributed log of prepares.
+    /// 1. across our distributed log of prepares, and
+    /// 2. across a client's requests and our replies.
     /// This may also be used as the initialization vector for AEAD encryption at rest, provided
     /// that the leader ratchets the encryption key every view change to ensure that prepares
     /// reordered through a view change never repeat the same IV for the same encryption key.
@@ -122,7 +122,6 @@ pub const Header = packed struct {
     /// * A `request` sets this to the client's session number.
     /// * A `prepare` sets this to the checksum of the client's request.
     /// * A `prepare_ok` sets this to the checksum of the prepare being acked.
-    /// * A `reply` sets this to that of the `prepare` for end-to-end integrity at the client.
     /// * A `commit` sets this to the checksum of the latest committed prepare.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `nack_prepare` sets this to the checksum of the prepare being nacked.
@@ -244,7 +243,6 @@ pub const Header = packed struct {
 
     fn invalid_request(self: *const Header) ?[]const u8 {
         assert(self.command == .request);
-        if (self.parent != 0) return "parent != 0";
         if (self.client == 0) return "client == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
@@ -255,11 +253,15 @@ pub const Header = packed struct {
             .init => return "operation == .init",
             .register => {
                 // The first request a client makes must be to register with the cluster:
+                if (self.parent != 0) return "parent != 0";
                 if (self.context != 0) return "context != 0";
                 if (self.request != 0) return "request != 0";
+                // The .register operation carries no payload:
+                if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
             else => {
                 // Thereafter, the client must provide the session number in the context:
+                // These requests should set `parent` to the `checksum` of the previous reply.
                 if (self.context == 0) return "context == 0";
                 if (self.request == 0) return "request == 0";
             },
