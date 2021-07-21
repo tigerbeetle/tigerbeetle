@@ -92,6 +92,8 @@ pub const StateMachine = struct {
 
     pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) void {
         switch (operation) {
+            .init => unreachable,
+            .register => {},
             .create_accounts => self.prepare_timestamps(.create_accounts, input),
             .create_transfers => self.prepare_timestamps(.create_transfers, input),
             .commit_transfers => self.prepare_timestamps(.commit_transfers, input),
