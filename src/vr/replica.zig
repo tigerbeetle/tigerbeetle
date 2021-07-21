@@ -1517,18 +1517,18 @@ pub const Replica = struct {
         };
         defer self.message_bus.unref(reply);
 
+        log.debug("{}: commit_op: executing op={} checksum={} ({s})", .{
+            self.replica,
+            prepare.header.op,
+            prepare.header.checksum,
+            @tagName(prepare.header.operation.cast(StateMachine)),
+        });
+
         const reply_body_size = @intCast(u32, self.state_machine.commit(
             prepare.header.operation.cast(StateMachine),
             prepare.buffer[@sizeOf(Header)..prepare.header.size],
             reply.buffer[@sizeOf(Header)..],
         ));
-
-        log.debug("{}: commit_op: executing op={} checksum={} ({s})", .{
-            self.replica,
-            prepare.header.op,
-            prepare.header.checksum,
-            @tagName(prepare.header.operation.to_state_machine_op(StateMachine)),
-        });
 
         self.commit_min += 1;
         assert(self.commit_min == prepare.header.op);
