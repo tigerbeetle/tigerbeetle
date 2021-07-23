@@ -1839,7 +1839,7 @@ pub const Replica = struct {
         assert(message.header.view <= self.view); // See ignore_request_message_follower().
         assert(message.header.context == 0 or message.header.operation != .register);
         assert(message.header.request == 0 or message.header.operation != .register);
-        
+
         if (self.client_table.getPtr(message.header.client)) |entry| {
             assert(entry.reply.header.command == .reply);
             assert(entry.reply.header.client == message.header.client);
