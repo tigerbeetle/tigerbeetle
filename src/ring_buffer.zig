@@ -22,8 +22,13 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
             self.count += 1;
         }
 
-        /// Return but do not remove the next item, if any.
-        pub fn peek(self: *Self) ?*T {
+        /// Return, but do not remove, the next item, if any.
+        pub fn peek(self: *Self) ?T {
+            return (self.peek_ptr() orelse return null).*;
+        }
+
+        /// Return a pointer to, but do not remove, the next item, if any.
+        pub fn peek_ptr(self: *Self) ?*T {
             if (self.empty()) return null;
             return &self.buffer[self.index];
         }
@@ -52,7 +57,11 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
             ring: *Self,
             count: usize = 0,
 
-            pub fn next(it: *Iterator) ?*T {
+            pub fn next(it: *Iterator) ?T {
+                return (it.next_ptr() orelse return null).*;
+            }
+
+            pub fn next_ptr(it: *Iterator) ?*T {
                 assert(it.count <= it.ring.count);
                 if (it.count == it.ring.count) return null;
                 defer it.count += 1;
@@ -61,6 +70,7 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
         };
 
         /// Returns an iterator to iterate through all `count` items in the ring buffer.
+        /// The iterator is invalidated and unsafe if the ring buffer is modified.
         pub fn iterator(self: *Self) Iterator {
             return .{ .ring = self };
         }
@@ -76,13 +86,13 @@ test "push/peek/pop/full/empty" {
     testing.expect(fifo.empty());
 
     try fifo.push(1);
-    testing.expectEqual(@as(u32, 1), fifo.peek().?.*);
+    testing.expectEqual(@as(?u32, 1), fifo.peek());
 
     testing.expect(!fifo.full());
     testing.expect(!fifo.empty());
 
     try fifo.push(2);
-    testing.expectEqual(@as(u32, 1), fifo.peek().?.*);
+    testing.expectEqual(@as(?u32, 1), fifo.peek());
 
     try fifo.push(3);
     testing.expectError(error.NoSpaceLeft, fifo.push(4));
@@ -90,13 +100,15 @@ test "push/peek/pop/full/empty" {
     testing.expect(fifo.full());
     testing.expect(!fifo.empty());
 
-    testing.expectEqual(@as(u32, 1), fifo.peek().?.*);
+    testing.expectEqual(@as(?u32, 1), fifo.peek());
     testing.expectEqual(@as(?u32, 1), fifo.pop());
 
     testing.expect(!fifo.full());
     testing.expect(!fifo.empty());
 
-    testing.expectEqual(@as(?u32, 2), fifo.pop());
+    fifo.peek_ptr().?.* += 1000;
+
+    testing.expectEqual(@as(?u32, 1002), fifo.pop());
     testing.expectEqual(@as(?u32, 3), fifo.pop());
     testing.expectEqual(@as(?u32, null), fifo.pop());
 
@@ -112,7 +124,7 @@ fn test_iterator(comptime T: type, ring: *T, values: []const u32) void {
         var iterator = ring.iterator();
         var index: usize = 0;
         while (iterator.next()) |item| {
-            testing.expectEqual(values[index], item.*);
+            testing.expectEqual(values[index], item);
             index += 1;
         }
         testing.expectEqual(values.len, index);
@@ -139,13 +151,18 @@ test "iterator" {
     try ring.push(2);
     test_iterator(Ring, &ring, &[_]u32{ 1, 2 });
 
-    testing.expectEqual(@as(?u32, 1), ring.pop());
-    test_iterator(Ring, &ring, &[_]u32{2});
+    var iterator = ring.iterator();
+    while (iterator.next_ptr()) |item_ptr| {
+        item_ptr.* += 1000;
+    }
+
+    testing.expectEqual(@as(?u32, 1001), ring.pop());
+    test_iterator(Ring, &ring, &[_]u32{1002});
 
     try ring.push(3);
-    test_iterator(Ring, &ring, &[_]u32{ 2, 3 });
+    test_iterator(Ring, &ring, &[_]u32{ 1002, 3 });
 
-    testing.expectEqual(@as(?u32, 2), ring.pop());
+    testing.expectEqual(@as(?u32, 1002), ring.pop());
     test_iterator(Ring, &ring, &[_]u32{3});
 
     testing.expectEqual(@as(?u32, 3), ring.pop());
