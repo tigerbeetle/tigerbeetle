@@ -214,10 +214,9 @@ const TimedQueue = struct {
         self.reset();
         log.debug("executing batches...", .{});
 
-        const batch: ?*Batch = self.batches.peek();
         const now = std.time.milliTimestamp();
         self.start = now;
-        if (batch) |starting_batch| {
+        if (self.batches.peek_ptr()) |starting_batch| {
             log.debug("sending first batch...", .{});
             self.batch_start = now;
             var message = self.client.get_message() orelse {
@@ -279,8 +278,7 @@ const TimedQueue = struct {
             else => unreachable,
         }
 
-        var batch: ?*Batch = self.batches.peek();
-        if (batch) |next_batch| {
+        if (self.batches.peek_ptr()) |next_batch| {
             var message = self.client.get_message() orelse {
                 @panic("Client message pool has been exhausted.");
             };
