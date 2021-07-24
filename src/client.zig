@@ -181,7 +181,7 @@ pub const Client = struct {
     }
 
     fn on_request_timeout(self: *Client) void {
-        const current_request = self.request_queue.peek() orelse return;
+        const current_request = self.request_queue.peek_ptr() orelse return;
 
         log.debug("Retrying timed out request {o}.", .{current_request.message.header});
         self.request_timeout.stop();
@@ -213,11 +213,12 @@ pub const Client = struct {
         assert(reply.header.valid_checksum());
         assert(reply.header.valid_checksum_body(reply.body()));
 
-        const queued_request = self.request_queue.peek().?;
         if (reply.header.client != self.id or reply.header.cluster != self.cluster) {
             log.debug("{} on_reply: Dropping unsolicited message.", .{self.id});
             return;
         }
+
+        const queued_request = self.request_queue.peek_ptr().?;
 
         if (reply.header.request < queued_request.message.header.request) {
             log.debug(
@@ -238,7 +239,7 @@ pub const Client = struct {
         _ = self.request_queue.pop().?;
         self.message_bus.unref(queued_request.message);
 
-        if (self.request_queue.peek()) |next_request| {
+        if (self.request_queue.peek_ptr()) |next_request| {
             self.send_request(next_request.message);
         }
     }

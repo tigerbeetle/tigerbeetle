@@ -1026,9 +1026,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     self.terminate(bus, .shutdown);
                     return;
                 };
-                assert(self.send_progress <= self.send_queue.peek().?.header.size);
+                assert(self.send_progress <= self.send_queue.peek_ptr().?.*.header.size);
                 // If the message has been fully sent, move on to the next one.
-                if (self.send_progress == self.send_queue.peek().?.header.size) {
+                if (self.send_progress == self.send_queue.peek_ptr().?.*.header.size) {
                     self.send_progress = 0;
                     const message = self.send_queue.pop().?;
                     bus.unref(message);
