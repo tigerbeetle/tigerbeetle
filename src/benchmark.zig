@@ -214,7 +214,7 @@ const TimedQueue = struct {
         self.reset();
         log.debug("executing batches...", .{});
 
-        var batch: ?*Batch = self.batches.peek();
+        const batch: ?*Batch = self.batches.peek();
         const now = std.time.milliTimestamp();
         self.start = now;
         if (batch) |starting_batch| {
