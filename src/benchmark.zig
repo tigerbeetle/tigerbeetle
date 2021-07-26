@@ -247,63 +247,61 @@ const TimedQueue = struct {
 
     pub fn lap(user_data: u128, operation: Operation, results: ClientError![]const u8) void {
         const now = std.time.milliTimestamp();
-        if (results) |value| {
-            if (log_level == .debug) {
-                const response = std.mem.bytesAsSlice(CreateAccountsResult, value);
-                log.debug("response={o}", .{response});
-            }
+        const value = results catch |err| {
+            log.emerg("Client returned error={o}", .{@errorName(err)});
+            @panic("Client returned error during benchmarking.");
+        };
 
-            const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
-            const completed_batch: ?Batch = self.batches.pop();
-            assert(completed_batch != null);
-            assert(completed_batch.?.operation == operation);
+        log.debug("response={o}", .{std.mem.bytesAsSlice(CreateAccountsResult, value)});
 
-            log.debug("completed batch operation={} start={}", .{
-                completed_batch.?.operation,
-                self.batch_start,
-            });
-            const latency = now - self.batch_start.?;
-            switch (operation) {
-                .create_accounts => {},
-                .create_transfers => {
-                    if (latency > self.max_transfers_latency) {
-                        self.max_transfers_latency = latency;
-                    }
-                },
-                .commit_transfers => {
-                    if (latency > self.max_commits_latency) {
-                        self.max_commits_latency = latency;
-                    }
-                },
-                else => unreachable,
-            }
+        const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
+        const completed_batch: ?Batch = self.batches.pop();
+        assert(completed_batch != null);
+        assert(completed_batch.?.operation == operation);
 
-            var batch: ?Batch = self.batches.peek();
+        log.debug("completed batch operation={} start={}", .{
+            completed_batch.?.operation,
+            self.batch_start,
+        });
+        const latency = now - self.batch_start.?;
+        switch (operation) {
+            .create_accounts => {},
+            .create_transfers => {
+                if (latency > self.max_transfers_latency) {
+                    self.max_transfers_latency = latency;
+                }
+            },
+            .commit_transfers => {
+                if (latency > self.max_commits_latency) {
+                    self.max_commits_latency = latency;
+                }
+            },
+            else => unreachable,
+        }
+
+        var batch: ?Batch = self.batches.peek();
+        if (batch) |*next_batch| {
             var message = self.client.get_message() orelse {
                 @panic("Client message pool has been exhausted.");
             };
             defer self.client.unref(message);
 
-            if (batch) |*next_batch| {
-                std.mem.copy(
-                    u8,
-                    message.buffer[@sizeOf(Header)..],
-                    std.mem.sliceAsBytes(next_batch.data),
-                );
-                self.batch_start = std.time.milliTimestamp();
-                self.client.request(
-                    @intCast(u128, @ptrToInt(self)),
-                    TimedQueue.lap,
-                    next_batch.operation,
-                    message,
-                    next_batch.data.len,
-                );
-            } else {
-                log.debug("stopping timer...", .{});
-                self.end = now;
-            }
-        } else |_| {
-            @panic("Client returned error during benchmarking.");
+            std.mem.copy(
+                u8,
+                message.buffer[@sizeOf(Header)..],
+                std.mem.sliceAsBytes(next_batch.data),
+            );
+            self.batch_start = std.time.milliTimestamp();
+            self.client.request(
+                @intCast(u128, @ptrToInt(self)),
+                TimedQueue.lap,
+                next_batch.operation,
+                message,
+                next_batch.data.len,
+            );
+        } else {
+            log.debug("stopping timer...", .{});
+            self.end = now;
         }
     }
 };
