@@ -5,6 +5,7 @@ const config = @import("config.zig");
 const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
 const Client = @import("client.zig").Client;
+const ClientError = @import("client.zig").ClientError;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const TigerBeetle = @import("tigerbeetle.zig");
 const Transfer = TigerBeetle.Transfer;
@@ -57,7 +58,6 @@ var max_create_transfers_latency: i64 = 0;
 var max_commit_transfers_latency: i64 = 0;
 
 pub fn main() !void {
-    std.debug.print("builtin {o}\n", .{std.builtin.mode});
     if (std.builtin.mode != .ReleaseSafe and std.builtin.mode != .ReleaseFast) {
         log.warn("The client has not been built in ReleaseSafe or ReleaseFast mode.\n", .{});
     }
@@ -111,7 +111,7 @@ pub fn main() !void {
 
     try wait_for_connect(&client, &io);
 
-    std.debug.print("creating accounts...\n", .{});
+    log.info("creating accounts...", .{});
     var queue = TimedQueue.init(&client, &io);
     try queue.push(.{
         .operation = Operation.create_accounts,
@@ -220,11 +220,22 @@ const TimedQueue = struct {
         if (batch) |*starting_batch| {
             log.debug("sending first batch...", .{});
             self.batch_start = now;
+            var message = self.client.get_message() orelse {
+                @panic("Client message pool has been exhausted. Cannot execute batch.");
+            };
+            defer self.client.unref(message);
+
+            std.mem.copy(
+                u8,
+                message.buffer[@sizeOf(Header)..],
+                std.mem.sliceAsBytes(starting_batch.data),
+            );
             self.client.request(
                 @intCast(u128, @ptrToInt(self)),
                 TimedQueue.lap,
                 starting_batch.operation,
-                starting_batch.data,
+                message,
+                starting_batch.data.len,
             );
         }
 
@@ -234,20 +245,24 @@ const TimedQueue = struct {
         }
     }
 
-    pub fn lap(user_data: u128, operation: Operation, results: []const u8) void {
+    pub fn lap(user_data: u128, operation: Operation, results: ClientError![]const u8) void {
         const now = std.time.milliTimestamp();
-        assert(results.len == 0);
-        if (log_level == .debug) {
-            const response = std.mem.bytesAsSlice(CreateAccountsResult, results);
-            log.debug("{o}", .{response});
-        }
+        const value = results catch |err| {
+            log.emerg("Client returned error={o}", .{@errorName(err)});
+            @panic("Client returned error during benchmarking.");
+        };
+
+        log.debug("response={s}", .{std.mem.bytesAsSlice(CreateAccountsResult, value)});
 
         const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
         const completed_batch: ?Batch = self.batches.pop();
         assert(completed_batch != null);
         assert(completed_batch.?.operation == operation);
 
-        log.debug("completed batch operation={} start={}", .{ completed_batch.?.operation, self.batch_start });
+        log.debug("completed batch operation={} start={}", .{
+            completed_batch.?.operation,
+            self.batch_start,
+        });
         const latency = now - self.batch_start.?;
         switch (operation) {
             .create_accounts => {},
@@ -266,12 +281,23 @@ const TimedQueue = struct {
 
         var batch: ?Batch = self.batches.peek();
         if (batch) |*next_batch| {
+            var message = self.client.get_message() orelse {
+                @panic("Client message pool has been exhausted.");
+            };
+            defer self.client.unref(message);
+
+            std.mem.copy(
+                u8,
+                message.buffer[@sizeOf(Header)..],
+                std.mem.sliceAsBytes(next_batch.data),
+            );
             self.batch_start = std.time.milliTimestamp();
             self.client.request(
                 @intCast(u128, @ptrToInt(self)),
                 TimedQueue.lap,
                 next_batch.operation,
-                next_batch.data,
+                message,
+                next_batch.data.len,
             );
         } else {
             log.debug("stopping timer...", .{});

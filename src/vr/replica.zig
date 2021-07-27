@@ -1508,7 +1508,7 @@ pub const Replica = struct {
             self.replica,
             prepare.header.op,
             prepare.header.checksum,
-            @tagName(prepare.header.operation),
+            @tagName(prepare.header.operation.to_state_machine_op(StateMachine)),
         });
 
         self.commit_min += 1;
