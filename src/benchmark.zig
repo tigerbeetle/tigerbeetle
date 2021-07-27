@@ -252,7 +252,7 @@ const TimedQueue = struct {
             @panic("Client returned error during benchmarking.");
         };
 
-        log.debug("response={o}", .{std.mem.bytesAsSlice(CreateAccountsResult, value)});
+        log.debug("response={s}", .{std.mem.bytesAsSlice(CreateAccountsResult, value)});
 
         const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
         const completed_batch: ?Batch = self.batches.pop();
