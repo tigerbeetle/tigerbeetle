@@ -10,9 +10,10 @@ const vr = @import("vr.zig");
 const Header = vr.Header;
 
 // TODO: the message bus should not be dependant on the Journal or Replica types
+const StateMachine = @import("state_machine.zig").StateMachine;
 const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;
-const Replica = vr.Replica(Storage, Time);
+const Replica = vr.Replica(StateMachine, Storage, Time);
 const Journal = vr.Journal(Replica, Storage);
 
 const Client = @import("client.zig").Client;
