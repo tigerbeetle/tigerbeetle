@@ -11,8 +11,6 @@ pub const Version: u8 = 0;
 
 pub const Replica = @import("vr/replica.zig").Replica;
 pub const Clock = @import("vr/clock.zig").Clock;
-pub const DeterministicTime = @import("vr/clock.zig").DeterministicTime;
-pub const SystemTime = @import("vr/clock.zig").SystemTime;
 pub const Journal = @import("vr/journal.zig").Journal;
 
 /// Viewstamped Replication protocol commands:
