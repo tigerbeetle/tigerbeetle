@@ -8,8 +8,12 @@ const log = std.log.scoped(.message_bus);
 
 const vr = @import("vr.zig");
 const Header = vr.Header;
-const Journal = vr.Journal;
-const Replica = vr.Replica;
+
+// TODO: the message bus should not be dependant on the Journal or Replica types
+const Storage = @import("storage.zig").Storage;
+const Journal = vr.Journal(Storage);
+const Replica = vr.Replica(Storage);
+
 const Client = @import("client.zig").Client;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
