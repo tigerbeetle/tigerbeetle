@@ -190,6 +190,8 @@ pub const Journal = struct {
         assert(self.dirty.bits.len == self.headers.len);
         assert(self.faulty.bits.len == self.headers.len);
 
+        assert(init_prepare.valid_checksum());
+        assert(init_prepare.invalid() == null);
         self.headers[0] = init_prepare.*;
         self.assert_headers_reserved_from(init_prepare.op + 1);
 
