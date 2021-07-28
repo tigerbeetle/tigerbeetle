@@ -12,8 +12,7 @@ const Message = @import("../message_bus.zig").Message;
 const vr = @import("../vr.zig");
 const Header = vr.Header;
 
-pub fn Journal(comptime Storage: type) type {
-    const Replica = vr.Replica(Storage);
+pub fn Journal(comptime Replica: type, comptime Storage: type) type {
     return struct {
         const Self = @This();
 
