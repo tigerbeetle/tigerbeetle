@@ -5,8 +5,6 @@ const log = std.log.scoped(.vr);
 
 const config = @import("../config.zig");
 
-const Time = @import("../time.zig").Time;
-
 const MessageBus = @import("../message_bus.zig").MessageBusReplica;
 const Message = @import("../message_bus.zig").Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
@@ -14,8 +12,6 @@ const StateMachine = @import("../state_machine.zig").StateMachine;
 
 const vr = @import("../vr.zig");
 const Header = vr.Header;
-const Clock = vr.Clock;
-const Journal = vr.Journal;
 const Timeout = vr.Timeout;
 const Command = vr.Command;
 const Version = vr.Version;
@@ -66,9 +62,12 @@ const Prepare = struct {
 const QuorumMessages = [config.replicas_max]?*Message;
 const QuorumMessagesReset = [_]?*Message{null} ** config.replicas_max;
 
-pub fn Replica(comptime Storage: type) type {
+pub fn Replica(comptime Storage: type, comptime Time: type) type {
     return struct {
         const Self = @This();
+
+        const Journal = vr.Journal(Self, Storage);
+        const Clock = vr.Clock(Time);
 
         allocator: *Allocator,
 
@@ -88,7 +87,7 @@ pub fn Replica(comptime Storage: type) type {
         clock: Clock,
 
         /// The persistent log of hash-chained journal entries:
-        journal: Journal(Storage),
+        journal: Journal,
 
         /// An abstraction to send messages from the replica to itself or another replica or client.
         /// The recipient replica or client may be a local in-memory pointer or network-addressable.
@@ -189,7 +188,7 @@ pub fn Replica(comptime Storage: type) type {
             cluster: u32,
             replica_count: u8,
             replica: u8,
-            time: *Time,
+            time: Time,
             storage: *Storage,
             message_bus: *MessageBus,
             state_machine: *StateMachine,
@@ -239,7 +238,7 @@ pub fn Replica(comptime Storage: type) type {
                     replica,
                     time,
                 ),
-                .journal = try Journal(Storage).init(
+                .journal = try Journal.init(
                     allocator,
                     storage,
                     replica,
@@ -3279,7 +3278,7 @@ pub fn Replica(comptime Storage: type) type {
             }
         }
 
-        fn write_prepare(self: *Self, message: *Message, trigger: Journal(Storage).Write.Trigger) void {
+        fn write_prepare(self: *Self, message: *Message, trigger: Journal.Write.Trigger) void {
             assert(message.references > 0);
             assert(message.header.command == .prepare);
             assert(message.header.view <= self.view);
@@ -3296,7 +3295,7 @@ pub fn Replica(comptime Storage: type) type {
         fn write_prepare_on_write(
             self: *Self,
             wrote: ?*Message,
-            trigger: Journal(Storage).Write.Trigger,
+            trigger: Journal.Write.Trigger,
         ) void {
             // `null` indicates that we did not complete the write for some reason.
             const message = wrote orelse return;

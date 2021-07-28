@@ -17,8 +17,8 @@ const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const StateMachine = @import("state_machine.zig").StateMachine;
 
 const vr = @import("vr.zig");
-const Replica = vr.Replica(Storage);
-const Journal = vr.Journal(Storage);
+const Replica = vr.Replica(Storage, Time);
+const Journal = vr.Journal(Replica, Storage);
 
 pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -81,7 +81,6 @@ fn start(
         config.transfers_max,
         config.commits_max,
     );
-    var time = Time{};
     var storage = try Storage.init(config.journal_size_max, storage_fd, &io);
     var message_bus = try MessageBus.init(
         arena,
@@ -95,7 +94,7 @@ fn start(
         cluster,
         @intCast(u8, addresses.len),
         replica_index,
-        &time,
+        Time{},
         &storage,
         &message_bus,
         &state_machine,
