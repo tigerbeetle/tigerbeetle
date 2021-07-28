@@ -5,7 +5,7 @@ pub const deployment_environment = .development;
 pub const log_level = 7;
 
 /// The maximum number of replicas allowed in a cluster.
-pub const replicas_max = 16;
+pub const replicas_max = 6;
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
 /// This impacts the amount of memory allocated at initialization by the server.
@@ -90,6 +90,9 @@ pub const message_bus_messages_max = connections_max * 4;
 /// The number of header-sized messages allocated at initialization by the message bus.
 /// These are much smaller/cheaper and we can therefore have many of them.
 pub const message_bus_headers_max = connections_max * connection_send_queue_max;
+
+/// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
+pub const pipelining_max = 32;
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and full jitter are applied within this range.
