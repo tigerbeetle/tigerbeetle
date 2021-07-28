@@ -9,8 +9,8 @@ const Time = @import("../time.zig").Time;
 
 const MessageBus = @import("../message_bus.zig").MessageBusReplica;
 const Message = @import("../message_bus.zig").Message;
+const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const StateMachine = @import("../state_machine.zig").StateMachine;
-
 const Storage = @import("../storage.zig").Storage;
 
 const vr = @import("../vr.zig");
@@ -34,9 +34,9 @@ const ClientTable = std.AutoHashMap(u128, ClientTableEntry);
 /// 1. a correctness bug, where successive client crashes may cause request numbers to collide for
 /// different request payloads, resulting in requests receiving the wrong reply, and
 ///
-/// 2. a liveness bug, where if the client table is updated for `.request` and `.prepare` messages
-/// with the client's latest request number, then the client may be locked out from the cluster if
-/// the request is ever reordered through a view change.
+/// 2. a liveness bug, where if the client table is updated for request and prepare messages with
+/// the client's latest request number, then the client may be locked out from the cluster if the
+/// request is ever reordered through a view change.
 ///
 /// We therefore take a different approach with the implementation of our client table, to:
 ///
@@ -46,12 +46,26 @@ const ClientTable = std.AutoHashMap(u128, ClientTableEntry);
 /// 2. make a more careful distinction between uncommitted and committed request numbers,
 /// considering that uncommitted requests may not survive a view change.
 const ClientTableEntry = struct {
-    /// The client's session number as committed to the cluster by a .register request.
+    /// The client's session number as committed to the cluster by a register request.
     session: u64,
 
     /// The reply sent to the client's latest committed request.
     reply: *Message,
 };
+
+const Prepare = struct {
+    /// The current prepare message (used to cross-check prepare_ok messages, and for resending).
+    message: *Message,
+
+    /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas.
+    ok_from_all_replicas: QuorumMessages = QuorumMessagesReset,
+
+    /// Whether a quorum of prepare_ok messages has been received for this prepare.
+    ok_quorum_received: bool = false,
+};
+
+const QuorumMessages = [config.replicas_max]?*Message;
+const QuorumMessagesReset = [_]?*Message{null} ** config.replicas_max;
 
 pub const Replica = struct {
     allocator: *Allocator,
@@ -108,26 +122,23 @@ pub const Replica = struct {
     /// This is the commit number in terms of the VRR paper.
     commit_max: u64,
 
-    /// The current request's checksum (used for now to enforce one-at-a-time request processing):
-    request_checksum: ?u128 = null,
-
-    /// The current prepare message (used to cross-check prepare_ok messages, and for resending):
-    prepare_message: ?*Message = null,
-    prepare_attempt: u64 = 0,
-
     committing: bool = false,
 
-    /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas:
-    prepare_ok_from_all_replicas: []?*Message,
+    /// The leader's pipeline of inflight prepares waiting to commit (in First In, First Out order).
+    /// This allows us to pipeline without the complexity of out-of-order commits.
+    preparing: RingBuffer(Prepare, config.pipelining_max) = .{},
 
-    /// Unique start_view_change messages for the same view from OTHER replicas (excluding ourself):
-    start_view_change_from_other_replicas: []?*Message,
+    /// The number of retry attempts to resend the first prepare in the pipelining queue.
+    prepare_timeouts: u64 = 0,
 
-    /// Unique do_view_change messages for the same view from ALL replicas (including ourself):
-    do_view_change_from_all_replicas: []?*Message,
+    /// Unique start_view_change messages for the same view from OTHER replicas (excluding ourself).
+    start_view_change_from_other_replicas: QuorumMessages = QuorumMessagesReset,
 
-    /// Unique nack_prepare messages for the same view from OTHER replicas (excluding ourself):
-    nack_prepare_from_other_replicas: []?*Message,
+    /// Unique do_view_change messages for the same view from ALL replicas (including ourself).
+    do_view_change_from_all_replicas: QuorumMessages = QuorumMessagesReset,
+
+    /// Unique nack_prepare messages for the same view from OTHER replicas (excluding ourself).
+    nack_prepare_from_other_replicas: QuorumMessages = QuorumMessagesReset,
 
     /// Whether a replica has received a quorum of start_view_change messages for the view change:
     start_view_change_quorum: bool = false,
@@ -194,22 +205,6 @@ pub const Replica = struct {
         try client_table.ensureCapacity(@intCast(u32, config.clients_max));
         assert(client_table.capacity() >= config.clients_max);
 
-        var prepare_ok = try allocator.alloc(?*Message, replica_count);
-        errdefer allocator.free(prepare_ok);
-        std.mem.set(?*Message, prepare_ok, null);
-
-        var start_view_change = try allocator.alloc(?*Message, replica_count);
-        errdefer allocator.free(start_view_change);
-        std.mem.set(?*Message, start_view_change, null);
-
-        var do_view_change = try allocator.alloc(?*Message, replica_count);
-        errdefer allocator.free(do_view_change);
-        std.mem.set(?*Message, do_view_change, null);
-
-        var nack_prepare = try allocator.alloc(?*Message, replica_count);
-        errdefer allocator.free(nack_prepare);
-        std.mem.set(?*Message, nack_prepare, null);
-
         var init_prepare = Header{
             .parent = 0,
             .client = 0,
@@ -229,8 +224,6 @@ pub const Replica = struct {
         };
         init_prepare.set_checksum_body(&[0]u8{});
         init_prepare.set_checksum();
-        assert(init_prepare.valid_checksum());
-        assert(init_prepare.invalid() == null);
 
         var self = Replica{
             .allocator = allocator,
@@ -238,11 +231,10 @@ pub const Replica = struct {
             .replica_count = replica_count,
             .replica = replica,
             .f = f,
-            // TODO Drop these @intCasts when the client table branch lands:
             .clock = try Clock.init(
                 allocator,
-                @intCast(u8, replica_count),
-                @intCast(u8, replica),
+                replica_count,
+                replica,
                 time,
             ),
             .journal = try Journal.init(
@@ -260,11 +252,6 @@ pub const Replica = struct {
             .op = init_prepare.op,
             .commit_min = init_prepare.commit,
             .commit_max = init_prepare.commit,
-            .prepare_ok_from_all_replicas = prepare_ok,
-            .start_view_change_from_other_replicas = start_view_change,
-            .do_view_change_from_all_replicas = do_view_change,
-            .nack_prepare_from_other_replicas = nack_prepare,
-
             .ping_timeout = Timeout{
                 .name = "ping_timeout",
                 .replica = replica,
@@ -330,10 +317,6 @@ pub const Replica = struct {
 
     pub fn deinit(self: *Replica) void {
         self.client_table.deinit();
-        self.allocator.free(self.prepare_ok_from_all_replicas);
-        self.allocator.free(self.start_view_change_from_other_replicas);
-        self.allocator.free(self.do_view_change_from_all_replicas);
-        self.allocator.free(self.nack_prepare_from_other_replicas);
     }
 
     /// Returns whether the replica is a follower for the current view.
@@ -476,27 +459,24 @@ pub const Replica = struct {
 
         assert(self.status == .normal);
         assert(self.leader());
+        assert(self.commit_min == self.commit_max);
+        assert(self.commit_max + self.preparing.count == self.op);
 
-        if (self.request_checksum) |request_checksum| {
-            assert(message.header.command == .request);
-            if (message.header.checksum == request_checksum) {
-                log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
-                return;
-            }
-        }
+        assert(message.header.command == .request);
+        assert(message.header.view <= self.view); // The client's view may be behind ours.
 
-        // TODO Queue (or drop client requests after a limit) to handle one request at a time:
-        // TODO Clear this queue if we lose our leadership (critical for correctness).
-        assert(self.commit_min == self.commit_max and self.commit_max == self.op);
-        assert(self.request_checksum == null);
-        self.request_checksum = message.header.checksum;
+        const realtime = self.clock.realtime_synchronized() orelse {
+            log.debug("{}: on_request: dropping (clock not synchronized)", .{self.replica});
+            return;
+        };
 
         log.debug("{}: on_request: request {}", .{ self.replica, message.header.checksum });
 
-        // TODO Use Clock's synchronized time or drop request if not synchronized.
-
-        var body = message.buffer[@sizeOf(Header)..message.header.size];
-        self.state_machine.prepare(message.header.operation.cast(StateMachine), body);
+        self.state_machine.prepare(
+            realtime,
+            message.header.operation.cast(StateMachine),
+            message.body(),
+        );
 
         var latest_entry = self.journal.entry_for_op_exact(self.op).?;
         message.header.parent = latest_entry.checksum;
@@ -508,27 +488,30 @@ pub const Replica = struct {
         message.header.replica = self.replica;
         message.header.command = .prepare;
 
-        message.header.set_checksum_body(body);
+        message.header.set_checksum_body(message.body());
         message.header.set_checksum();
-
-        assert(message.header.checksum != self.request_checksum.?);
 
         log.debug("{}: on_request: prepare {}", .{ self.replica, message.header.checksum });
 
-        assert(self.prepare_message == null);
-        assert(self.prepare_attempt == 0);
-        for (self.prepare_ok_from_all_replicas) |received| assert(received == null);
-        assert(self.prepare_timeout.ticking == false);
+        self.preparing.push(.{ .message = message.ref() }) catch unreachable;
+        assert(self.preparing.count >= 1);
 
-        self.prepare_message = message.ref();
-        self.prepare_attempt = 0;
-        self.prepare_timeout.start();
+        // Do not restart the prepare timeout if it is already ticking for a prior inflight prepare:
+        if (self.preparing.count == 1) {
+            assert(!self.prepare_timeout.ticking);
+            self.prepare_timeout.start();
+        } else {
+            assert(self.prepare_timeout.ticking);
+        }
 
-        // Use the same replication code path for the leader and followers:
-        self.send_message_to_replica(self.replica, message);
+        self.on_prepare(message);
+
+        // We expect `on_prepare()` to increment `self.op` to match the leader's latest prepare:
+        // This is critical to ensure that pipelined prepares do not receive the same op number.
+        assert(self.op == message.header.op);
     }
 
-    /// Replication is simple, with a single code path for the leader and followers:
+    /// Replication is simple, with a single code path for the leader and followers.
     ///
     /// The leader starts by sending a prepare message to itself.
     ///
@@ -545,7 +528,7 @@ pub const Replica = struct {
     /// since that is the replica next in line to be leader, which will need to be up-to-date before
     /// it can start the next view.
     ///
-    /// At the same time, asynchronous replication keeps going, so that if our local disk is slow
+    /// At the same time, asynchronous replication keeps going, so that if our local disk is slow,
     /// then any latency spike will be masked by more remote prepare_ok messages as they come in.
     /// This gives automatic tail latency tolerance for storage latency spikes.
     ///
@@ -605,8 +588,6 @@ pub const Replica = struct {
             log.notice("{}: on_prepare: cleared view jump barrier", .{self.replica});
         }
 
-        // TODO Update client's information in the client table.
-
         self.replicate(message);
         self.append(message);
 
@@ -617,74 +598,67 @@ pub const Replica = struct {
     }
 
     fn on_prepare_ok(self: *Replica, message: *Message) void {
-        if (self.status != .normal) {
-            log.warn("{}: on_prepare_ok: ignoring ({})", .{ self.replica, self.status });
-            return;
-        }
-
-        if (message.header.view < self.view) {
-            log.debug("{}: on_prepare_ok: ignoring (older view)", .{self.replica});
-            return;
-        }
-
-        if (message.header.view > self.view) {
-            // Another replica is treating us as the leader for a view we do not know about.
-            // This may be caused by a fault in the network topology.
-            log.warn("{}: on_prepare_ok: ignoring (newer view)", .{self.replica});
-            return;
-        }
-
-        if (self.follower()) {
-            // This may be caused by a fault in the network topology.
-            log.warn("{}: on_prepare_ok: ignoring (follower)", .{self.replica});
-            return;
-        }
-
-        if (self.prepare_message) |prepare_message| {
-            if (message.header.context != prepare_message.header.checksum) {
-                log.debug("{}: on_prepare_ok: ignoring (different context)", .{self.replica});
-                return;
-            }
-        } else {
-            log.debug("{}: on_prepare_ok: ignoring (not preparing)", .{self.replica});
-            return;
-        }
+        if (self.ignore_prepare_ok(message)) return;
 
         assert(self.status == .normal);
         assert(message.header.view == self.view);
         assert(self.leader());
 
-        assert(message.header.command == .prepare_ok);
-        assert(message.header.client == self.prepare_message.?.header.client);
-        assert(message.header.context == self.prepare_message.?.header.checksum);
-        assert(message.header.cluster == self.prepare_message.?.header.cluster);
-        assert(message.header.view == self.prepare_message.?.header.view);
-        assert(message.header.op == self.prepare_message.?.header.op);
-        assert(message.header.commit == self.prepare_message.?.header.commit);
-        assert(message.header.offset == self.prepare_message.?.header.offset);
-        assert(message.header.epoch == self.prepare_message.?.header.epoch);
-        assert(message.header.request == self.prepare_message.?.header.request);
-        assert(message.header.operation == self.prepare_message.?.header.operation);
-        assert(message.header.op == self.op);
-        assert(message.header.op == self.commit_min + 1);
-        assert(message.header.op == self.commit_max + 1);
+        const prepare = self.preparing_for_prepare_ok(message) orelse return;
 
-        // Wait until we have `f + 1` messages (including ourself) for quorum:
+        assert(prepare.message.header.checksum == message.header.context);
+        assert(prepare.message.header.op >= self.commit_max + 1);
+        assert(prepare.message.header.op <= self.commit_max + self.preparing.count);
+        assert(prepare.message.header.op <= self.op);
+
+        // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
         const threshold = self.f + 1;
         const count = self.add_message_and_receive_quorum_exactly_once(
-            self.prepare_ok_from_all_replicas,
+            &prepare.ok_from_all_replicas,
             message,
             threshold,
         ) orelse return;
 
         assert(count == threshold);
+        assert(!prepare.ok_quorum_received);
+        prepare.ok_quorum_received = true;
+
         log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
+        // TODO Improve logging.
 
-        self.commit_op(self.prepare_message.?);
-        assert(self.commit_min == self.op);
-        assert(self.commit_max == self.op);
+        self.commit_from_preparing_pipeline_if_possible();
+    }
 
-        self.reset_quorum_prepare();
+    fn commit_from_preparing_pipeline_if_possible(self: *Replica) void {
+        assert(self.status == .normal);
+        assert(self.leader());
+
+        // TODO What about self.committing?
+
+        assert(self.preparing.count > 0);
+        while (self.preparing.peek_ptr()) |prepare| {
+            assert(self.commit_min == self.commit_max);
+            assert(self.commit_max + self.preparing.count == self.op);
+            assert(prepare.message.header.op == self.commit_max + 1);
+
+            if (!prepare.ok_quorum_received) return; // TODO log.debug
+
+            self.commit_op(prepare.message);
+
+            assert(self.commit_min == self.commit_max);
+            assert(self.commit_max == prepare.message.header.op);
+
+            // We must copy the message checksum before we pop (and invalidate the prepare pointer):
+            const checksum = prepare.message.header.checksum;
+            const popped = self.preparing.pop().?;
+            assert(popped.message.header.checksum == checksum);
+            self.message_bus.unref(popped.message);
+
+            // TODO Free ok messages.
+        }
+
+        assert(self.prepare_timeout.ticking);
+        if (self.preparing.count == 0) self.prepare_timeout.stop();
     }
 
     fn on_commit(self: *Replica, message: *const Message) void {
@@ -806,7 +780,7 @@ pub const Replica = struct {
         const threshold = std.math.max(1, self.f);
 
         const count = self.add_message_and_receive_quorum_exactly_once(
-            self.start_view_change_from_other_replicas,
+            &self.start_view_change_from_other_replicas,
             message,
             threshold,
         ) orelse return;
@@ -861,7 +835,7 @@ pub const Replica = struct {
         // Wait until we have `f + 1` messages (including ourself) for quorum:
         const threshold = self.f + 1;
         const count = self.add_message_and_receive_quorum_exactly_once(
-            self.do_view_change_from_all_replicas,
+            &self.do_view_change_from_all_replicas,
             message,
             threshold,
         ) orelse return;
@@ -1133,7 +1107,7 @@ pub const Replica = struct {
 
         // Wait until we have `threshold` messages for quorum:
         const count = self.add_message_and_receive_quorum_exactly_once(
-            self.nack_prepare_from_other_replicas,
+            &self.nack_prepare_from_other_replicas,
             message,
             threshold,
         ) orelse return;
@@ -1212,44 +1186,46 @@ pub const Replica = struct {
         // TODO Exponential backoff.
         // TODO Prevent flooding the network due to multiple concurrent rounds of replication.
         self.prepare_timeout.reset();
-        self.prepare_attempt += 1;
+        self.prepare_timeouts += 1;
 
         assert(self.status == .normal);
         assert(self.leader());
-        assert(self.request_checksum != null);
-        assert(self.prepare_message != null);
 
-        var message = self.prepare_message.?;
-        assert(message.header.view == self.view);
+        var prepare = self.preparing.peek_ptr().?;
+        assert(prepare.message.header.command == .prepare);
+        assert(prepare.message.header.op == self.commit_max + 1);
+        assert(prepare.message.header.view == self.view);
 
         // The list of remote replicas yet to send a prepare_ok:
-        var waiting: [32]u8 = undefined;
+        var waiting: [config.replicas_max]u8 = undefined;
         var waiting_len: usize = 0;
-        for (self.prepare_ok_from_all_replicas) |received, replica| {
+        for (prepare.ok_from_all_replicas[0..self.replica_count]) |received, replica| {
             if (received == null and replica != self.replica) {
                 waiting[waiting_len] = @intCast(u8, replica);
                 waiting_len += 1;
-                if (waiting_len == waiting.len) break;
             }
         }
 
         if (waiting_len == 0) {
             log.debug("{}: on_prepare_timeout: waiting for journal", .{self.replica});
-            assert(self.prepare_ok_from_all_replicas[self.replica] == null);
+            assert(prepare.ok_from_all_replicas[self.replica] == null);
             return;
         }
 
+        assert(waiting_len <= self.replica_count);
         for (waiting[0..waiting_len]) |replica| {
+            assert(replica < self.replica_count);
             log.debug("{}: on_prepare_timeout: waiting for replica {}", .{ self.replica, replica });
         }
 
         // Cycle through the list for each attempt to reach live replicas and get around partitions:
         // If only the first replica in the list was chosen... liveness would suffer if it was down!
-        var replica = waiting[@mod(self.prepare_attempt, waiting_len)];
+        assert(self.prepare_timeouts > 0);
+        var replica = waiting[@mod(self.prepare_timeouts, waiting_len)];
         assert(replica != self.replica);
 
         log.debug("{}: on_prepare_timeout: replicating to replica {}", .{ self.replica, replica });
-        self.send_message_to_replica(replica, message);
+        self.send_message_to_replica(replica, prepare.message);
     }
 
     fn on_commit_timeout(self: *Replica) void {
@@ -1307,19 +1283,18 @@ pub const Replica = struct {
 
     fn add_message_and_receive_quorum_exactly_once(
         self: *Replica,
-        messages: []?*Message,
+        messages: *QuorumMessages,
         message: *Message,
         threshold: u32,
     ) ?usize {
-        assert(messages.len == self.replica_count);
+        assert(messages.len == config.replicas_max);
         assert(message.header.cluster == self.cluster);
+        assert(message.header.replica < self.replica_count);
         assert(message.header.view == self.view);
-
         switch (message.header.command) {
             .prepare_ok => {
                 assert(self.status == .normal);
                 assert(self.leader());
-                assert(message.header.context == self.prepare_message.?.header.checksum);
             },
             .start_view_change => assert(self.status == .view_change),
             .do_view_change, .nack_prepare => {
@@ -1328,7 +1303,6 @@ pub const Replica = struct {
             },
             else => unreachable,
         }
-
         assert(threshold >= 1);
         assert(threshold <= self.replica_count);
 
@@ -1336,7 +1310,7 @@ pub const Replica = struct {
 
         // Do not allow duplicate messages to trigger multiple passes through a state transition:
         if (messages[message.header.replica]) |m| {
-            // Assert that this truly is a duplicate message and not a different message:
+            // Assert that this is a duplicate message and not a different message:
             assert(m.header.command == message.header.command);
             assert(m.header.replica == message.header.replica);
             assert(m.header.view == message.header.view);
@@ -1577,22 +1551,38 @@ pub const Replica = struct {
         }
     }
 
-    fn count_quorum(self: *Replica, messages: []?*Message, command: Command, context: u128) usize {
-        assert(messages.len == self.replica_count);
-
+    fn count_quorum(
+        self: *Replica,
+        messages: *QuorumMessages,
+        command: Command,
+        context: u128,
+    ) usize {
+        assert(messages.len == config.replicas_max);
         var count: usize = 0;
         for (messages) |received, replica| {
             if (received) |m| {
+                assert(replica < self.replica_count);
+                assert(m.header.cluster == self.cluster);
                 assert(m.header.command == command);
                 assert(m.header.context == context);
-                assert(m.header.cluster == self.cluster);
                 assert(m.header.replica == replica);
-                assert(m.header.view == self.view);
                 switch (command) {
-                    .prepare_ok => {},
-                    .start_view_change => assert(m.header.replica != self.replica),
-                    .do_view_change => {},
+                    .prepare_ok => {
+                        if (self.status == .normal) {
+                            assert(self.leader());
+                            assert(m.header.view == self.view);
+                        } else {
+                            assert(self.status == .view_change);
+                            assert(m.header.view < self.view);
+                        }
+                    },
+                    .start_view_change => {
+                        assert(m.header.replica != self.replica);
+                        assert(m.header.view == self.view);
+                    },
+                    .do_view_change => assert(m.header.view == self.view),
                     .nack_prepare => {
+                        // TODO See if we can restrict this branch further.
                         assert(m.header.replica != self.replica);
                         assert(m.header.op == self.nack_prepare_op.?);
                     },
@@ -1601,6 +1591,7 @@ pub const Replica = struct {
                 count += 1;
             }
         }
+        assert(count <= self.replica_count);
         return count;
     }
 
@@ -1710,6 +1701,33 @@ pub const Replica = struct {
         return message.ref();
     }
 
+    fn ignore_prepare_ok(self: *Replica, message: *const Message) bool {
+        if (self.status != .normal) {
+            log.debug("{}: on_prepare_ok: ignoring ({})", .{ self.replica, self.status });
+            return true;
+        }
+
+        if (message.header.view < self.view) {
+            log.debug("{}: on_prepare_ok: ignoring (older view)", .{self.replica});
+            return true;
+        }
+
+        if (message.header.view > self.view) {
+            // Another replica is treating us as the leader for a view we do not know about.
+            // This may be caused by a fault in the network topology.
+            log.warn("{}: on_prepare_ok: ignoring (newer view)", .{self.replica});
+            return true;
+        }
+
+        if (self.follower()) {
+            // This may be caused by a fault in the network topology.
+            log.warn("{}: on_prepare_ok: ignoring (follower)", .{self.replica});
+            return true;
+        }
+
+        return false;
+    }
+
     fn ignore_repair_message(self: *Replica, message: *const Message) bool {
         assert(message.header.command == .request_start_view or
             message.header.command == .request_headers or
@@ -1817,14 +1835,9 @@ pub const Replica = struct {
             return true;
         }
 
-        // This may forward the request to a newer leader:
         if (self.ignore_request_message_follower(message)) return true;
-
-        // This may resend the reply if this is the latest committed request:
         if (self.ignore_request_message_duplicate(message)) return true;
-
         if (self.ignore_request_message_preparing(message)) return true;
-
         return false;
     }
 
@@ -1943,8 +1956,33 @@ pub const Replica = struct {
         return true;
     }
 
-    // TODO
     fn ignore_request_message_preparing(self: *Replica, message: *const Message) bool {
+        assert(self.status == .normal);
+        assert(self.leader());
+
+        assert(message.header.command == .request);
+        assert(message.header.client > 0);
+        assert(message.header.view <= self.view); // See ignore_request_message_follower().
+
+        if (self.preparing_for_client(message.header.client)) |prepare| {
+            assert(prepare.message.header.command == .prepare);
+            assert(prepare.message.header.client == message.header.client);
+            assert(prepare.message.header.op > self.commit_max);
+
+            if (message.header.checksum == prepare.message.header.context) {
+                log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
+                return true;
+            } else {
+                log.alert("{}: on_request: ignoring (client attempted to fork)", .{self.replica});
+                return true;
+            }
+        }
+
+        if (self.preparing.full()) {
+            log.debug("{}: on_request: ignoring (pipeline full)", .{self.replica});
+            return true;
+        }
+
         return false;
     }
 
@@ -2057,6 +2095,61 @@ pub const Replica = struct {
             log.emerg("{}: panic_if_hash_chain_would_break: b: {}", .{ self.replica, b });
             @panic("hash chain would break");
         }
+    }
+
+    fn preparing_for_client(self: *Replica, client: u128) ?*Prepare {
+        assert(self.status == .normal);
+        assert(self.leader());
+
+        var op = self.commit_max + 1;
+        var parent = self.journal.entry_for_op_exact(self.commit_max).?.checksum;
+        var iterator = self.preparing.iterator();
+        while (iterator.next_ptr()) |prepare| {
+            assert(prepare.message.header.command == .prepare);
+            assert(prepare.message.header.op == op);
+            assert(prepare.message.header.parent == parent);
+            if (prepare.message.header.client == client) return prepare;
+            parent = prepare.message.header.checksum;
+            op += 1;
+        }
+
+        assert(self.preparing.count <= config.pipelining_max);
+        assert(self.preparing.count + self.commit_max == op - 1);
+        assert(self.preparing.count + self.commit_max == self.op);
+        assert(self.commit_min == self.commit_max);
+
+        return null;
+    }
+
+    fn preparing_for_prepare_ok(self: *Replica, ok: *const Message) ?*Prepare {
+        assert(ok.header.command == .prepare_ok);
+
+        assert(self.status == .normal);
+        assert(self.leader());
+
+        const prepare = self.preparing_for_client(ok.header.client) orelse {
+            log.debug("{}: preparing_for_prepare_ok: not preparing", .{self.replica});
+            return null;
+        };
+
+        if (ok.header.context != prepare.message.header.checksum) {
+            // This can be normal, for example, if an older prepare_ok for the client is replayed.
+            log.debug("{}: preparing_for_prepare_ok: different prepare checksum", .{self.replica});
+            return null;
+        }
+
+        assert(prepare.message.header.parent == ok.header.parent);
+        assert(prepare.message.header.client == ok.header.client);
+        assert(prepare.message.header.request == ok.header.request);
+        assert(prepare.message.header.cluster == ok.header.cluster);
+        assert(prepare.message.header.epoch == ok.header.epoch);
+        assert(prepare.message.header.view == ok.header.view);
+        assert(prepare.message.header.op == ok.header.op);
+        assert(prepare.message.header.commit == ok.header.commit);
+        assert(prepare.message.header.offset == ok.header.offset);
+        assert(prepare.message.header.operation == ok.header.operation);
+
+        return prepare;
     }
 
     /// Starting from the latest journal entry, backfill any missing or disconnected headers.
@@ -2396,7 +2489,7 @@ pub const Replica = struct {
 
         // We may be appending to or repairing the journal concurrently.
         // We do not want to re-request any of these prepares unnecessarily.
-        // TODO Add journal.writing bits to clear this up (and needed anyway).
+        // TODO Add journal.writing bits to clear this up (and needed anyway - why?).
         if (self.journal.writes.executing() > 0) {
             log.debug("{}: repair_prepares: waiting for dirty bits to settle", .{self.replica});
             return;
@@ -2480,11 +2573,14 @@ pub const Replica = struct {
                 assert(nack_prepare_op <= op);
                 if (nack_prepare_op != op) {
                     self.nack_prepare_op = op;
-                    self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
+                    self.reset_quorum_messages(
+                        &self.nack_prepare_from_other_replicas,
+                        .nack_prepare,
+                    );
                 }
             } else {
                 self.nack_prepare_op = op;
-                self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
+                self.reset_quorum_messages(&self.nack_prepare_from_other_replicas, .nack_prepare);
             }
             log.debug("{}: repair_prepare: requesting uncommitted op={}", .{ self.replica, op });
             assert(self.nack_prepare_op.? == op);
@@ -2543,10 +2639,12 @@ pub const Replica = struct {
         self.send_message_to_replica(next, message);
     }
 
-    fn reset_quorum_counter(self: *Replica, messages: []?*Message, command: Command) void {
+    fn reset_quorum_messages(self: *Replica, messages: *QuorumMessages, command: Command) void {
+        assert(messages.len == config.replicas_max);
         var count: usize = 0;
         for (messages) |*received, replica| {
             if (received.*) |message| {
+                assert(replica < self.replica_count);
                 assert(message.header.command == command);
                 assert(message.header.replica == replica);
                 assert(message.header.view <= self.view);
@@ -2555,37 +2653,39 @@ pub const Replica = struct {
             }
             received.* = null;
         }
+        assert(count <= self.replica_count);
         log.debug("{}: reset {} {s} message(s)", .{ self.replica, count, @tagName(command) });
     }
 
     fn reset_quorum_do_view_change(self: *Replica) void {
-        self.reset_quorum_counter(self.do_view_change_from_all_replicas, .do_view_change);
+        self.reset_quorum_messages(&self.do_view_change_from_all_replicas, .do_view_change);
         self.do_view_change_quorum = false;
     }
 
     fn reset_quorum_nack_prepare(self: *Replica) void {
-        self.reset_quorum_counter(self.nack_prepare_from_other_replicas, .nack_prepare);
+        self.reset_quorum_messages(&self.nack_prepare_from_other_replicas, .nack_prepare);
         self.nack_prepare_op = null;
     }
 
     fn reset_quorum_prepare(self: *Replica) void {
-        if (self.prepare_message) |message| {
-            self.request_checksum = null;
-            self.message_bus.unref(message);
-            self.prepare_message = null;
-            self.prepare_attempt = 0;
-            self.prepare_timeout.stop();
-            self.reset_quorum_counter(self.prepare_ok_from_all_replicas, .prepare_ok);
-        }
-        assert(self.request_checksum == null);
-        assert(self.prepare_message == null);
-        assert(self.prepare_attempt == 0);
-        assert(self.prepare_timeout.ticking == false);
-        for (self.prepare_ok_from_all_replicas) |received| assert(received == null);
+        // TODO
+        //if (self.prepare_message) |message| {
+        //    self.request_checksum = null;
+        //    self.message_bus.unref(message);
+        //    self.prepare_message = null;
+        //    self.prepare_timeouts = 0;
+        //    self.prepare_timeout.stop();
+        //    self.reset_quorum_messages(self.prepare_ok_from_all_replicas, .prepare_ok);
+        //}
+        //assert(self.request_checksum == null);
+        //assert(self.prepare_message == null);
+        //assert(self.prepare_timeout.ticking == false);
+        //assert(self.prepare_timeouts == 0);
+        //for (self.prepare_ok_from_all_replicas) |received| assert(received == null);
     }
 
     fn reset_quorum_start_view_change(self: *Replica) void {
-        self.reset_quorum_counter(self.start_view_change_from_other_replicas, .start_view_change);
+        self.reset_quorum_messages(&self.start_view_change_from_other_replicas, .start_view_change);
         self.start_view_change_quorum = false;
     }
 
@@ -2638,16 +2738,17 @@ pub const Replica = struct {
             // TODO We could surprise the new leader with this, if it is preparing a different op.
             self.send_header_to_replica(self.leader_index(self.view), .{
                 .command = .prepare_ok,
+                .parent = header.parent,
                 .client = header.client,
                 .context = header.checksum,
+                .request = header.request,
                 .cluster = self.cluster,
                 .replica = self.replica,
+                .epoch = header.epoch,
                 .view = header.view,
                 .op = header.op,
                 .commit = header.commit,
                 .offset = header.offset,
-                .epoch = header.epoch,
-                .request = header.request,
                 .operation = header.operation,
             });
         } else {
@@ -2692,7 +2793,7 @@ pub const Replica = struct {
         assert(self.start_view_change_quorum);
         assert(!self.do_view_change_quorum);
         const count_start_view_change = self.count_quorum(
-            self.start_view_change_from_other_replicas,
+            &self.start_view_change_from_other_replicas,
             .start_view_change,
             0,
         );
