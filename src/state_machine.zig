@@ -90,25 +90,30 @@ pub const StateMachine = struct {
         };
     }
 
-    pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) void {
+    pub fn prepare(self: *StateMachine, realtime: i64, operation: Operation, input: []u8) void {
         switch (operation) {
             .init => unreachable,
             .register => {},
-            .create_accounts => self.prepare_timestamps(.create_accounts, input),
-            .create_transfers => self.prepare_timestamps(.create_transfers, input),
-            .commit_transfers => self.prepare_timestamps(.commit_transfers, input),
+            .create_accounts => self.prepare_timestamps(realtime, .create_accounts, input),
+            .create_transfers => self.prepare_timestamps(realtime, .create_transfers, input),
+            .commit_transfers => self.prepare_timestamps(realtime, .commit_transfers, input),
             .lookup_accounts => {},
             else => unreachable,
         }
     }
 
-    fn prepare_timestamps(self: *StateMachine, comptime operation: Operation, input: []u8) void {
+    fn prepare_timestamps(
+        self: *StateMachine,
+        realtime: i64,
+        comptime operation: Operation,
+        input: []u8,
+    ) void {
         // Guard against the wall clock going backwards by taking the max with timestamps issued:
         self.prepare_timestamp = std.math.max(
             // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
             // may be our first prepare as a recently elected leader:
             std.math.max(self.prepare_timestamp, self.commit_timestamp) + 1,
-            @intCast(u64, std.time.nanoTimestamp()),
+            @intCast(u64, realtime),
         );
         assert(self.prepare_timestamp > self.commit_timestamp);
         var sum_reserved_timestamps: usize = 0;

@@ -118,7 +118,7 @@ test "push/peek/pop/full/empty" {
 
 fn test_iterator(comptime T: type, ring: *T, values: []const u32) void {
     const ring_index = ring.index;
-    
+
     var loops: usize = 0;
     while (loops < 2) : (loops += 1) {
         var iterator = ring.iterator();
