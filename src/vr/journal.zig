@@ -6,8 +6,7 @@ const log = std.log.scoped(.vr);
 
 const config = @import("../config.zig");
 
-const MessageBus = @import("../message_bus.zig").MessageBusReplica;
-const Message = @import("../message_bus.zig").Message;
+const Message = @import("../message_pool.zig").MessagePool.Message;
 
 const vr = @import("../vr.zig");
 const Header = vr.Header;
