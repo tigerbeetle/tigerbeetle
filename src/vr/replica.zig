@@ -5,8 +5,7 @@ const log = std.log.scoped(.vr);
 
 const config = @import("../config.zig");
 
-const MessageBus = @import("../message_bus.zig").MessageBusReplica;
-const Message = @import("../message_bus.zig").Message;
+const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 const vr = @import("../vr.zig");
@@ -61,7 +60,12 @@ const Prepare = struct {
 const QuorumMessages = [config.replicas_max]?*Message;
 const QuorumMessagesReset = [_]?*Message{null} ** config.replicas_max;
 
-pub fn Replica(comptime StateMachine: type, comptime Storage: type, comptime Time: type) type {
+pub fn Replica(
+    comptime StateMachine: type,
+    comptime MessageBus: type,
+    comptime Storage: type,
+    comptime Time: type,
+) type {
     return struct {
         const Self = @This();
 

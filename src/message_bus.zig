@@ -12,8 +12,7 @@ const Header = vr.Header;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
-
-pub const Message = MessagePool.Message;
+const Message = MessagePool.Message;
 
 const SendQueue = RingBuffer(*Message, config.connection_send_queue_max);
 
