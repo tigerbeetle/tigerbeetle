@@ -432,9 +432,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
                 while (copy.pop()) |message| {
                     defer bus.unref(message);
-                    // TODO Rewrite ConcurrentRanges to not use async:
-                    // This nosuspend is only safe because we do not do any async disk IO yet.
-                    nosuspend await async bus.process.replica.on_message(message);
+                    bus.process.replica.on_message(message);
                 }
             }
             unreachable;
@@ -857,9 +855,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
                 switch (process_type) {
                     .replica => {
-                        // TODO Rewrite ConcurrentRanges to not use async:
-                        // This nosuspend is only safe because we do not do any async disk IO yet.
-                        nosuspend await async bus.process.replica.on_message(message);
+                        bus.process.replica.on_message(message);
                         // Flush any messages queued by `process.on_message()` above immediately:
                         // This optimization is critical for throughput, otherwise messages from a
                         // process to itconnection would be delayed until the next `tick()`.
