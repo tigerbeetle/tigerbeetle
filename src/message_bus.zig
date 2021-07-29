@@ -9,14 +9,6 @@ const log = std.log.scoped(.message_bus);
 const vr = @import("vr.zig");
 const Header = vr.Header;
 
-// TODO: the message bus should not be dependant on the Journal or Replica types
-const StateMachine = @import("state_machine.zig").StateMachine;
-const Storage = @import("storage.zig").Storage;
-const Time = @import("time.zig").Time;
-const Replica = vr.Replica(StateMachine, Storage, Time);
-const Journal = vr.Journal(Replica, Storage);
-
-const Client = @import("client.zig").Client;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
@@ -40,10 +32,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
         cluster: u32,
         configuration: []std.net.Address,
 
-        /// The Replica or Client process that will handle messages received by this message bus.
         process: switch (process_type) {
             .replica => struct {
-                replica: *Replica,
+                replica: u8,
                 /// Used to store messages sent by a process to itself for delivery in flush().
                 send_queue: SendQueue = .{},
                 /// The file descriptor for the process on which to accept connections.
@@ -58,10 +49,13 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 /// is established.
                 clients: std.AutoHashMapUnmanaged(u128, *Connection) = .{},
             },
-            .client => struct {
-                client: *Client,
-            },
+            .client => void,
         },
+
+        /// The callback to be called when a message is received. Use set_on_message() to set
+        /// with type safety for the context pointer.
+        on_message_callback: ?fn (context: ?*c_void, message: *Message) void = null,
+        on_message_context: ?*c_void = null,
 
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
@@ -117,10 +111,10 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 .configuration = configuration,
                 .process = switch (process_type) {
                     .replica => .{
-                        .replica = undefined,
+                        .replica = process,
                         .accept_fd = try init_tcp(configuration[process]),
                     },
-                    .client => .{ .client = undefined },
+                    .client => {},
                 },
                 .connections = connections,
                 .replicas = replicas,
@@ -134,6 +128,23 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             }
 
             return bus;
+        }
+
+        pub fn set_on_message(
+            bus: *Self,
+            comptime Context: type,
+            context: Context,
+            comptime on_message: fn (context: Context, message: *Message) void,
+        ) void {
+            assert(bus.on_message_callback == null);
+            assert(bus.on_message_context == null);
+
+            bus.on_message_callback = struct {
+                fn wrapper(_context: ?*c_void, message: *Message) void {
+                    on_message(@intToPtr(Context, @ptrToInt(_context)), message);
+                }
+            }.wrapper;
+            bus.on_message_context = context;
         }
 
         /// TODO This is required by the Client.
@@ -201,7 +212,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     // Each replica is responsible for connecting to replicas that come
                     // after it in the configuration. This ensures that replicas never try
                     // to connect to each other at the same time.
-                    var replica: u8 = bus.process.replica.replica + 1;
+                    var replica: u8 = bus.process.replica + 1;
                     while (replica < bus.replicas.len) : (replica += 1) {
                         bus.maybe_connect_to_replica(replica);
                     }
@@ -328,7 +339,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
         /// Returns true if the target replica is connected and has space in its send queue.
         pub fn can_send_to_replica(bus: *Self, replica: u8) bool {
-            if (process_type == .replica and replica == bus.process.replica.replica) {
+            if (process_type == .replica and replica == bus.process.replica) {
                 return !bus.process.send_queue.full();
             } else {
                 const connection = bus.replicas[replica] orelse return false;
@@ -362,7 +373,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
         pub fn send_message_to_replica(bus: *Self, replica: u8, message: *Message) void {
             // Messages sent by a process to itself are delivered directly in flush():
-            if (process_type == .replica and replica == bus.process.replica.replica) {
+            if (process_type == .replica and replica == bus.process.replica) {
                 bus.process.send_queue.push(message.ref()) catch |err| switch (err) {
                     error.NoSpaceLeft => {
                         bus.unref(message);
@@ -432,7 +443,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
                 while (copy.pop()) |message| {
                     defer bus.unref(message);
-                    bus.process.replica.on_message(message);
+                    bus.on_message_callback.?(bus.on_message_context, message);
                 }
             }
             unreachable;
@@ -526,7 +537,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             /// The slot in the Message.replicas slices is immediately reserved.
             /// Failure is silent and returns the connection to an unused state.
             pub fn connect_to_replica(connection: *Connection, bus: *Self, replica: u8) void {
-                if (process_type == .replica) assert(replica != bus.process.replica.replica);
+                if (process_type == .replica) assert(replica != bus.process.replica);
 
                 assert(connection.peer == .none);
                 assert(connection.state == .free);
@@ -845,7 +856,12 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 }
 
                 if (message.header.command == .request or message.header.command == .prepare) {
-                    const sector_ceil = Journal.sector_ceil(message.header.size);
+                    // TODO: This is Journal.sector_ceil(), but we can't depend on Journal here as
+                    // that would cause a circular dependency. Instead, we should move this to some
+                    // shared util.zig or similar.
+                    const sectors = std.math.divCeil(u64, message.header.size, config.sector_size) catch unreachable;
+                    const sector_ceil = sectors * config.sector_size;
+
                     if (message.header.size != sector_ceil) {
                         assert(message.header.size < sector_ceil);
                         assert(message.buffer.len == config.message_size_max + config.sector_size);
@@ -853,16 +869,11 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     }
                 }
 
-                switch (process_type) {
-                    .replica => {
-                        bus.process.replica.on_message(message);
-                        // Flush any messages queued by `process.on_message()` above immediately:
-                        // This optimization is critical for throughput, otherwise messages from a
-                        // process to itconnection would be delayed until the next `tick()`.
-                        bus.flush_send_queue();
-                    },
-                    .client => bus.process.client.on_message(message),
-                }
+                bus.on_message_callback.?(bus.on_message_context, message);
+                // Flush any messages queued by the `on_message_callback` above immediately:
+                // This optimization is critical for throughput, otherwise messages from a
+                // process to itself would be delayed until the next `tick()`.
+                if (process_type == .replica) bus.flush_send_queue();
             }
 
             fn maybe_set_peer(connection: *Connection, bus: *Self, header: *const Header) void {

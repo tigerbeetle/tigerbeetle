@@ -98,8 +98,7 @@ fn start(
         &message_bus,
         &state_machine,
     );
-    // TODO: Get rid of this wart by moving MessageBus inside Replica or otherwise.
-    message_bus.process.replica = &replica;
+    message_bus.set_on_message(*Replica, &replica, Replica.on_message);
 
     log.info("cluster={x} replica={}: listening on {}", .{
         cluster,
