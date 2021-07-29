@@ -168,7 +168,7 @@ pub fn Clock(comptime Time: type) type {
             );
             const clock_offset_corrected = clock_offset + asymmetric_delay;
 
-            log.debug("learn: replica={} m0={} t1={} m2={} t2={} one_way_delay={} " ++
+            log.info("learn: replica={} m0={} t1={} m2={} t2={} one_way_delay={} " ++
                 "asymmetric_delay={} clock_offset={}", .{
                 replica,
                 m0,
@@ -326,7 +326,8 @@ pub fn Clock(comptime Time: type) type {
         fn after_synchronization(self: *Self) void {
             const new_interval = self.epoch.synchronized.?;
 
-            log.info("synchronized: truechimers={}/{} clock_offset={}..{} accuracy={}", .{
+            log.info("replica={} synchronized: truechimers={}/{} clock_offset={}..{} accuracy={}", .{
+                self.replica,
                 new_interval.sources_true,
                 self.epoch.sources.len,
                 fmtDurationSigned(new_interval.lower_bound),
@@ -340,23 +341,29 @@ pub fn Clock(comptime Time: type) type {
             const upper = self.epoch.realtime + elapsed + new_interval.upper_bound;
             const cluster = std.math.clamp(system, lower, upper);
 
-            if (system == cluster) {
-                log.info("system time is within cluster time", .{});
-            } else if (system < lower) {
+            if (system == cluster) {} else if (system < lower) {
                 const delta = lower - system;
                 if (delta < std.time.ns_per_ms) {
-                    log.info("system time is {} behind", .{fmtDurationSigned(delta)});
+                    log.info("replica={} system time is {} behind", .{
+                        self.replica,
+                        fmtDurationSigned(delta),
+                    });
                 } else {
-                    log.err("system time is {} behind, clamping system time to cluster time", .{
+                    log.err("replica={} system time is {} behind, clamping system time to cluster time", .{
+                        self.replica,
                         fmtDurationSigned(delta),
                     });
                 }
             } else {
                 const delta = system - upper;
                 if (delta < std.time.ns_per_ms) {
-                    log.info("system time is {} ahead", .{fmtDurationSigned(delta)});
+                    log.info("replica={} system time is {} ahead", .{
+                        self.replica,
+                        fmtDurationSigned(delta),
+                    });
                 } else {
-                    log.err("system time is {} ahead, clamping system time to cluster time", .{
+                    log.err("replica={} system time is {} ahead, clamping system time to cluster time", .{
+                        self.replica,
                         fmtDurationSigned(delta),
                     });
                 }
@@ -415,4 +422,311 @@ fn formatDurationSigned(
     }
 }
 
-// TODO Use tracing analysis to test a simulated trace, comparing against known values for accuracy.
+const testing = std.testing;
+const OffsetType = @import("../time.zig").OffsetType;
+const DeterministicTime = @import("../time.zig").DeterministicTime;
+const DeterministicClock = Clock(DeterministicTime);
+
+const ClockUnitTestContainer = struct {
+    const Self = @This();
+    clock: DeterministicClock,
+    rtt: u64 = 300 * std.time.ns_per_ms,
+    owd: u64 = 150 * std.time.ns_per_ms,
+    learn_interval: u64 = 5,
+
+    pub fn init(
+        allocator: *std.mem.Allocator,
+        offset_type: OffsetType,
+        offset_coefficient_A: i64,
+        offset_coefficient_B: u64,
+    ) !Self {
+        const time: DeterministicTime = .{
+            .resolution = std.time.ns_per_s / 2,
+            .offset_type = offset_type,
+            .offset_coefficient_A = offset_coefficient_A,
+            .offset_coefficient_B = offset_coefficient_B,
+        };
+        const self: Self = .{
+            .clock = try DeterministicClock.init(allocator, 3, 0, time),
+        };
+        return self;
+    }
+
+    pub fn run_till_tick(self: *Self, tick: u64) void {
+        while (self.clock.time.ticks < tick) {
+            self.clock.time.tick();
+
+            if (@mod(self.clock.time.ticks, self.learn_interval) == 0) {
+                const on_pong_time = self.clock.monotonic();
+                const m0 = on_pong_time - self.rtt;
+                const t1 = @intCast(i64, on_pong_time - self.owd);
+
+                self.clock.learn(1, m0, t1, on_pong_time);
+                self.clock.learn(2, m0, t1, on_pong_time);
+            }
+
+            self.clock.synchronize();
+        }
+    }
+
+    const AssertionPoint = struct {
+        tick: u64,
+        expected_offset: i64,
+    };
+    pub fn ticks_to_perform_assertions(self: *Self) [3]AssertionPoint {
+        var ret: [3]AssertionPoint = undefined;
+        switch (self.clock.time.offset_type) {
+            .linear => {
+                // For the first (OWD/drift per tick) ticks, the offset < OWD. This means that the
+                // Marzullo interval is [0,0] (the offset and OWD are 0 for a replica w.r.t. itself).
+                // Therefore the offset of `clock.realtime_synchronised` will be the analytically prescribed
+                // offset at the start of the window.
+                // Beyond this, the offset > OWD and the Marzullo interval will be from replica 1 and
+                // replica 2. The `clock.realtime_synchronized` will be clamped to the lower bound.
+                // Therefore the `clock.realtime_synchronized` will be offset by the OWD.
+                var threshold = self.owd / @intCast(u64, self.clock.time.offset_coefficient_A);
+                ret[0] = .{
+                    .tick = threshold,
+                    .expected_offset = self.clock.time.offset(threshold - self.learn_interval),
+                };
+                ret[1] = .{
+                    .tick = threshold + 100,
+                    .expected_offset = @intCast(i64, self.owd),
+                };
+                ret[2] = .{
+                    .tick = threshold + 200,
+                    .expected_offset = @intCast(i64, self.owd),
+                };
+            },
+            .periodic => {
+                ret[0] = .{
+                    .tick = self.clock.time.offset_coefficient_B / 4,
+                    .expected_offset = @intCast(i64, self.owd),
+                };
+                ret[1] = .{
+                    .tick = self.clock.time.offset_coefficient_B / 2,
+                    .expected_offset = 0,
+                };
+                ret[2] = .{
+                    .tick = self.clock.time.offset_coefficient_B * 3 / 4,
+                    .expected_offset = -@intCast(i64, self.owd),
+                };
+            },
+            .step => {
+                ret[0] = .{
+                    .tick = self.clock.time.offset_coefficient_B - 10,
+                    .expected_offset = 0,
+                };
+                ret[1] = .{
+                    .tick = self.clock.time.offset_coefficient_B + 10,
+                    .expected_offset = -@intCast(i64, self.owd),
+                };
+                ret[2] = .{
+                    .tick = self.clock.time.offset_coefficient_B + 10,
+                    .expected_offset = -@intCast(i64, self.owd),
+                };
+            },
+        }
+
+        return ret;
+    }
+};
+
+test "ideal clocks get clamped to cluster time" {
+    std.testing.log_level = .crit;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = &arena.allocator;
+
+    var ideal_constant_drift_clock = try ClockUnitTestContainer.init(
+        allocator,
+        OffsetType.linear,
+        std.time.ns_per_ms, // loses 1ms per tick
+        0,
+    );
+    var linear_clock_assertion_points = ideal_constant_drift_clock.ticks_to_perform_assertions();
+    for (linear_clock_assertion_points) |point| {
+        ideal_constant_drift_clock.run_till_tick(point.tick);
+        try testing.expectEqual(
+            point.expected_offset,
+            @intCast(i64, ideal_constant_drift_clock.clock.monotonic()) -
+                ideal_constant_drift_clock.clock.realtime_synchronized().?,
+        );
+    }
+
+    var ideal_periodic_drift_clock = try ClockUnitTestContainer.init(
+        allocator,
+        OffsetType.periodic,
+        std.time.ns_per_s, // loses up to 1s
+        200, // period of 200 ticks
+    );
+    var ideal_periodic_drift_clock_assertion_points =
+        ideal_periodic_drift_clock.ticks_to_perform_assertions();
+    for (ideal_periodic_drift_clock_assertion_points) |point| {
+        ideal_periodic_drift_clock.run_till_tick(point.tick);
+        try testing.expectEqual(
+            point.expected_offset,
+            @intCast(i64, ideal_periodic_drift_clock.clock.monotonic()) -
+                ideal_periodic_drift_clock.clock.realtime_synchronized().?,
+        );
+    }
+
+    var ideal_jumping_clock = try ClockUnitTestContainer.init(
+        allocator,
+        OffsetType.step,
+        -5 * std.time.ns_per_day, // jumps 5 days ahead.
+        49, // after 49 ticks
+    );
+    var ideal_jumping_clock_assertion_points = ideal_jumping_clock.ticks_to_perform_assertions();
+    for (ideal_jumping_clock_assertion_points) |point| {
+        ideal_jumping_clock.run_till_tick(point.tick);
+        try testing.expectEqual(
+            point.expected_offset,
+            @intCast(i64, ideal_jumping_clock.clock.monotonic()) -
+                ideal_jumping_clock.clock.realtime_synchronized().?,
+        );
+    }
+}
+
+const MockNetworkOptions = @import("../mock_network.zig").MockNetworkOptions;
+const MockNetwork = @import("../mock_network.zig").MockNetwork;
+const ClockSimulator = struct {
+    const Packet = struct {
+        m0: u64,
+        t1: ?i64,
+        clock_simulator: *ClockSimulator,
+    };
+
+    const Options = struct {
+        ping_timeout: u32,
+        clock_count: u8,
+        network_options: MockNetworkOptions,
+    };
+
+    allocator: *std.mem.Allocator,
+    options: Options,
+    ticks: u64 = 0,
+    network: MockNetwork(Packet),
+    clocks: []DeterministicClock,
+
+    pub fn init(allocator: *std.mem.Allocator, options: Options) !ClockSimulator {
+        var self = ClockSimulator{
+            .allocator = allocator,
+            .options = options,
+            .network = try MockNetwork(Packet).init(allocator, options.network_options),
+            .clocks = try allocator.alloc(DeterministicClock, options.clock_count),
+        };
+
+        for (self.clocks) |*clock, index| {
+            clock.* = try self.create_clock(@intCast(u8, index));
+        }
+
+        return self;
+    }
+
+    fn create_clock(self: *ClockSimulator, replica: u8) !DeterministicClock {
+        const time: DeterministicTime = .{
+            .resolution = std.time.ns_per_s / 2, // delta_t = 0.5s
+            .offset_type = OffsetType.periodic,
+            .offset_coefficient_A = std.time.ns_per_s, // loses up to 1s.
+            .offset_coefficient_B = 200, // cycles every 200 ticks
+        };
+
+        return try DeterministicClock.init(self.allocator, self.options.clock_count, replica, time);
+    }
+
+    pub fn tick(self: *ClockSimulator) void {
+        self.ticks += 1;
+        self.network.tick();
+        for (self.clocks) |*clock| {
+            clock.tick();
+        }
+
+        for (self.clocks) |*clock| {
+            if (clock.time.ticks % self.options.ping_timeout == 0) {
+                const m0 = clock.monotonic();
+                for (self.clocks) |_, target| {
+                    if (target != clock.replica) {
+                        self.network.submit_packet(
+                            .{
+                                .m0 = m0,
+                                .t1 = null,
+                                .clock_simulator = self,
+                            },
+                            ClockSimulator.handle_packet,
+                            @intCast(u8, target),
+                            clock.replica,
+                            .forward,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_packet(packet: Packet, to: u8, from: u8) void {
+        const self = packet.clock_simulator;
+        const target = &self.clocks[to];
+
+        if (packet.t1) |t1| {
+            target.learn(
+                from,
+                packet.m0,
+                t1,
+                target.monotonic(),
+            );
+        } else {
+            self.network.submit_packet(
+                .{
+                    .m0 = packet.m0,
+                    .t1 = target.realtime(),
+                    .clock_simulator = self,
+                },
+                ClockSimulator.handle_packet,
+                from, // send the packet back to where it came from.
+                to,
+                .reverse,
+            );
+        }
+    }
+};
+
+test "fuzz test" {
+    std.testing.log_level = .emerg; // silence all clock logs
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_allocator.deinit();
+    const allocator = &arena_allocator.allocator;
+    const ticks_max: u64 = 1_000_000;
+    const clock_count: u8 = 3;
+    const SystemTime = @import("../time.zig").Time;
+    var system_time = SystemTime{};
+    var prng_seed = @intCast(u64, system_time.realtime());
+
+    var simulator = try ClockSimulator.init(allocator, .{
+        .network_options = .{
+            .node_count = clock_count,
+            .prng_seed = prng_seed,
+            .forward_delay_mean = 50,
+            .min_forward_delay = 5,
+            .reverse_delay_mean = 25,
+            .min_reverse_delay = 10,
+            .packet_loss_probability = 10,
+            .path_maximum_capacity = 20,
+            .path_clog_duration_mean = 200,
+            .path_clog_probability = 2,
+            .packet_replay_probability = 2,
+        },
+        .clock_count = clock_count,
+        .ping_timeout = 20,
+    });
+
+    while (simulator.ticks < ticks_max) {
+        simulator.tick();
+    }
+
+    std.debug.print("prng seed={}\n", .{prng_seed});
+    std.debug.print("Packets dropped due to congestion={}\n", .{simulator.network.stats[0]});
+    std.debug.print("Packets dropped={}\n", .{simulator.network.stats[1]});
+    std.debug.print("Packets replayed on reverse path={}\n", .{simulator.network.stats[2]});
+    std.debug.print("Packets replayed on forward path={}\n", .{simulator.network.stats[3]});
+}
