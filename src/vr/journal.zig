@@ -49,7 +49,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(journal.writes.items.len == journal.headers_iops.len);
                 const i = @divExact(@ptrToInt(write) - @ptrToInt(&journal.writes.items), @sizeOf(Self.Write));
                 // TODO: the compiler should probably be smart enough to avoid needing this align cast
-                // as the type of Self.headers_iops ensures that each buffer is properly aligned.
+                // as the type of `headers_iops` ensures that each buffer is properly aligned.
                 return @alignCast(config.sector_size, &journal.headers_iops[i]);
             }
 
@@ -953,7 +953,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             //
             // We don't currently allow Storage implementations that are sometimes synchronous and
             // sometimes asynchronous as we don't have a use case for such a Storage implementation
-            // and doing so would require a significant complexity increase in the Self code.
+            // and doing so would require a significant complexity increase.
             switch (Storage.synchronicity) {
                 .always_synchronous => assert(!write.range.locked),
                 .always_asynchronous => assert(write.range.locked),

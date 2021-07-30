@@ -94,7 +94,7 @@ pub fn Replica(
 
         /// An abstraction to send messages from the replica to itself or another replica or client.
         /// The recipient replica or client may be a local in-memory pointer or network-addressable.
-        /// The message bus will also deliver messages to this replica by calling Self.on_message().
+        /// The message bus will also deliver messages to this replica by calling `on_message()`.
         message_bus: *MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
