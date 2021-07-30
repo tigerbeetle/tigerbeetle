@@ -633,18 +633,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            // There should be no concurrency between setting an entry as dirty and deciding to write:
             assert(self.has_dirty(message.header));
-
-            const sectors = message.buffer[0..Self.sector_ceil(message.header.size)];
-            assert(message.header.offset + sectors.len <= self.size_circular_buffer);
-
-            if (std.builtin.mode == .Debug) {
-                // Assert that any sector padding has already been zeroed:
-                var sum_of_sector_padding_bytes: u32 = 0;
-                for (sectors[message.header.size..]) |byte| sum_of_sector_padding_bytes += byte;
-                assert(sum_of_sector_padding_bytes == 0);
-            }
 
             const write = self.writes.acquire() orelse {
                 self.write_prepare_debug(message.header, "no iop available");
@@ -662,10 +651,21 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .range = undefined,
             };
 
+            // Slice the message to the nearest sector, we don't want to write the whole buffer:
+            const sectors = message.buffer[0..Self.sector_ceil(message.header.size)];
+            assert(message.header.offset + sectors.len <= self.size_circular_buffer);
+
+            if (std.builtin.mode == .Debug) {
+                // Assert that any sector padding has already been zeroed:
+                var sum_of_sector_padding_bytes: u32 = 0;
+                for (sectors[message.header.size..]) |byte| sum_of_sector_padding_bytes += byte;
+                assert(sum_of_sector_padding_bytes == 0);
+            }
+
             self.write_sectors(
                 write_prepare_on_write_message,
                 write,
-                message.buffer,
+                sectors,
                 self.offset_in_circular_buffer(message.header.offset),
             );
         }
