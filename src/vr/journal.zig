@@ -939,6 +939,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 }
             }
 
+            log.debug("{}: journal: write_sectors: offset={} len={} locked", .{
+                self.replica,
+                write.range.offset,
+                write.range.buffer.len,
+            });
+
             write.range.locked = true;
             self.storage.write_sectors(
                 write_sectors_on_write,
@@ -967,6 +973,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             assert(write.range.locked);
             write.range.locked = false;
+
+            log.debug("{}: journal: write_sectors: offset={} len={} unlocked", .{
+                self.replica,
+                write.range.offset,
+                write.range.buffer.len,
+            });
 
             // Drain the list of ranges that were waiting on this range to complete.
             while (range.next) |waiting| {
