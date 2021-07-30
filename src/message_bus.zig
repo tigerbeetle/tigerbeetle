@@ -72,7 +72,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
         /// Seeded with the process' replica index or client ID.
         prng: std.rand.DefaultPrng,
 
-        /// Initialize the Self for the given cluster, configuration and replica/client process.
+        /// Initialize the MessageBus for the given cluster, configuration and replica/client process.
         pub fn init(
             allocator: *mem.Allocator,
             cluster: u32,
