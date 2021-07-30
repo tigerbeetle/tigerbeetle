@@ -368,7 +368,11 @@ pub const Storage = struct {
         // TODO Check that the file is actually a file.
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
-        try os.flock(fd, os.LOCK_EX);
+        // LOCK_NB means that we want to fail the lock without waiting if another process has it.
+        os.flock(fd, os.LOCK_EX | os.LOCK_NB) catch |err| switch (err) {
+            error.WouldBlock => @panic("another process holds the data file lock"),
+            else => return err,
+        };
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
