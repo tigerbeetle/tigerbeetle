@@ -4,7 +4,8 @@ interface Binding {
   request: (context: Context, operation: Operation, batch: Event[], result: ResultCallback) => void
   raw_request: (context: Context, operation: Operation, raw_batch: Buffer, result: ResultCallback) => void
   tick: (context: Context) => void,
-  deinit: (context: Context) => void
+  deinit: (context: Context) => void,
+  tick_ms: number
 }
 
 interface BindingInitArgs {
@@ -337,7 +338,7 @@ export function createClient (args: InitArgs): Client {
 
   _interval = setInterval(() => {
     binding.tick(context)
-  }, 5)
+  }, binding.tick_ms)
 
   return _client
 }

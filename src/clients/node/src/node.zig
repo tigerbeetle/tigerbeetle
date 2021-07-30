@@ -34,6 +34,14 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     translate.register_function(env, exports, "raw_request", raw_request) catch return null;
     translate.register_function(env, exports, "tick", tick) catch return null;
 
+    translate.u32_into_object(
+        env,
+        exports,
+        "tick_ms",
+        config.tick_ms,
+        "failed to add tick_ms to exports",
+    ) catch return null;
+
     const allocator = std.heap.c_allocator;
     var global = Globals.init(allocator, env) catch {
         std.log.emerg("Failed to initialise environment.\n", .{});
