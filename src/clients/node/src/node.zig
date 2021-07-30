@@ -15,15 +15,14 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 const CommitTransfersResult = tb.CommitTransfersResult;
 
-const Header = @import("tigerbeetle/src/vr.zig").Header;
-const Operation = @import("tigerbeetle/src/state_machine.zig").Operation;
+const Operation = @import("tigerbeetle/src/state_machine.zig").StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
-const Client = @import("tigerbeetle/src/client.zig").Client;
-const ClientError = @import("tigerbeetle/src/client.zig").ClientError;
 const IO = @import("tigerbeetle/src/io.zig").IO;
 const config = @import("tigerbeetle/src/config.zig");
 
 const vr = @import("tigerbeetle/src/vr.zig");
+const Header = vr.Header;
+const Client = vr.Client(MessageBus);
 
 pub const log_level: std.log.Level = .info;
 
@@ -133,7 +132,7 @@ const Context = struct {
         context.message_bus = try MessageBus.init(
             allocator,
             cluster,
-            context.addresses[0..configuration.len],
+            &context.addresses,
             std.crypto.random.int(u128),
             context.io,
         );
@@ -146,7 +145,7 @@ const Context = struct {
             &context.message_bus,
         );
         errdefer context.client.deinit();
-        context.message_bus.process = .{ .client = &context.client };
+        context.message_bus.set_on_message(*Client, &context.client, Client.on_message);
 
         const ret = try translate.create_external(env, context);
 
@@ -441,7 +440,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     return context;
 }
 
-/// This function decodes and validates an array of Node objects, one-by-one, directly into an 
+/// This function decodes and validates an array of Node objects, one-by-one, directly into an
 /// available message before requesting the client to send it.
 fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 4;
@@ -494,7 +493,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
     return null;
 }
 
-/// The batch has already been encoded into a byte slice. This means that we only have to do one 
+/// The batch has already been encoded into a byte slice. This means that we only have to do one
 /// copy directly into an available message. No validation of the encoded data is performed except
 /// that it will fit into the message buffer.
 fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
@@ -548,7 +547,7 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     return null;
 }
 
-fn create_client_error(env: c.napi_env, client_error: ClientError) !c.napi_value {
+fn create_client_error(env: c.napi_env, client_error: Client.Error) !c.napi_value {
     return switch (client_error) {
         error.TooManyOutstandingRequests => try translate.create_error(
             env,
@@ -557,7 +556,7 @@ fn create_client_error(env: c.napi_env, client_error: ClientError) !c.napi_value
     };
 }
 
-fn on_result(user_data: u128, operation: Operation, results: ClientError![]const u8) void {
+fn on_result(user_data: u128, operation: Operation, results: Client.Error![]const u8) void {
     // A reference to the user's JS callback was made in `request` or `raw_request`. This MUST be
     // cleaned up regardless of the result of this function.
     const env = @bitCast(translate.UserData, user_data).env;
@@ -582,7 +581,7 @@ fn on_result(user_data: u128, operation: Operation, results: ClientError![]const
 
     if (results) |value| {
         const napi_results = switch (operation) {
-            .reserved, .init => {
+            .reserved, .init, .register => {
                 translate.throw(env, "Reserved operation.") catch return;
             },
             .create_accounts => encode_napi_results_array(
