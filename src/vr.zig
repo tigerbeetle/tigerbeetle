@@ -10,6 +10,7 @@ const config = @import("config.zig");
 pub const Version: u8 = 0;
 
 pub const Replica = @import("vr/replica.zig").Replica;
+pub const Client = @import("vr/client.zig").Client;
 pub const Clock = @import("vr/clock.zig").Clock;
 pub const Journal = @import("vr/journal.zig").Journal;
 

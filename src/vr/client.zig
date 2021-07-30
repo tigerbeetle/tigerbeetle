@@ -2,16 +2,16 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("config.zig");
-const vr = @import("vr.zig");
+const config = @import("../config.zig");
+const vr = @import("../vr.zig");
 const Header = vr.Header;
 
-const MessageBus = @import("message_bus.zig").MessageBusClient;
-const Message = @import("message_bus.zig").Message;
-const StateMachine = @import("state_machine.zig").StateMachine;
-const RingBuffer = @import("ring_buffer.zig").RingBuffer;
+const MessageBus = @import("../message_bus.zig").MessageBusClient;
+const Message = @import("../message_pool.zig").MessagePool.Message;
+const StateMachine = @import("../state_machine.zig").StateMachine;
+const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
-const tb = @import("tigerbeetle.zig");
+const tb = @import("../tigerbeetle.zig");
 const Account = tb.Account;
 const Transfer = tb.Transfer;
 const Commit = tb.Commit;
@@ -21,16 +21,16 @@ const CommitTransfersResult = tb.CommitTransfersResult;
 
 const log = std.log;
 
-pub const ClientError = error{
-    TooManyOutstandingRequests,
-};
-
 pub const Client = struct {
+    pub const Error = error{
+        TooManyOutstandingRequests,
+    };
+
     const Request = struct {
         const Callback = fn (
             user_data: u128,
             operation: StateMachine.Operation,
-            results: ClientError![]const u8,
+            results: Client.Error![]const u8,
         ) void;
         user_data: u128,
         callback: Callback,
