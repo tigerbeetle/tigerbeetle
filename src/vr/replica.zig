@@ -515,7 +515,7 @@ pub fn Replica(
             assert(self.op == message.header.op);
         }
 
-        /// Selftion is simple, with a single code path for the leader and followers.
+        /// Replication is simple, with a single code path for the leader and followers.
         ///
         /// The leader starts by sending a prepare message to itself.
         ///
@@ -2618,8 +2618,8 @@ pub fn Replica(
             }
         }
 
-        /// Selftes to the next replica in the configuration (until we get back to the leader):
-        /// Selftion starts and ends with the leader, we never forward back to the leader.
+        /// Replicates to the next replica in the configuration (until we get back to the leader):
+        /// Replication starts and ends with the leader, we never forward back to the leader.
         /// Does not flood the network with prepares that have already committed.
         /// TODO Use recent heartbeat data for next replica to leapfrog if faulty.
         fn replicate(self: *Self, message: *Message) void {
