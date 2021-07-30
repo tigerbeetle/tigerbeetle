@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.storage);
 
 const IO = @import("io.zig").IO;
+const is_darwin = std.Target.current.isDarwin();
 
 const config = @import("config.zig");
 const vr = @import("vr.zig");
@@ -445,13 +446,19 @@ pub const Storage = struct {
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
     /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
     fn fs_supports_direct_io(dir_fd: std.os.fd_t) !bool {
-        if (!@hasDecl(std.os, "O_DIRECT")) return false;
+        if (!@hasDecl(std.os, "O_DIRECT") and !is_darwin) return false;
 
         const path = "fs_supports_direct_io";
         const dir = std.fs.Dir{ .fd = dir_fd };
         const fd = try os.openatZ(dir_fd, path, os.O_CLOEXEC | os.O_CREAT | os.O_TRUNC, 0o666);
         defer os.close(fd);
         defer dir.deleteFile(path) catch {};
+
+        // F_NOCACHE on darwin is the most similar option to O_DIRECT on linux.
+        if (is_darwin) {
+            _ = os.fcntl(fd, os.F_NOCACHE, 1) catch return false;
+            return true;
+        }
 
         while (true) {
             const res = os.system.openat(dir_fd, path, os.O_CLOEXEC | os.O_RDONLY | os.O_DIRECT, 0);
