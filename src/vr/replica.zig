@@ -51,14 +51,14 @@ const Prepare = struct {
     message: *Message,
 
     /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas.
-    ok_from_all_replicas: QuorumMessages = QuorumMessagesReset,
+    ok_from_all_replicas: QuorumMessages = QuorumMessagesNull,
 
     /// Whether a quorum of prepare_ok messages has been received for this prepare.
     ok_quorum_received: bool = false,
 };
 
 const QuorumMessages = [config.replicas_max]?*Message;
-const QuorumMessagesReset = [_]?*Message{null} ** config.replicas_max;
+const QuorumMessagesNull = [_]?*Message{null} ** config.replicas_max;
 
 pub fn Replica(
     comptime StateMachine: type,
@@ -128,21 +128,21 @@ pub fn Replica(
 
         committing: bool = false,
 
-        /// The leader's pipeline of inflight prepares waiting to commit (in First In, First Out order).
+        /// The leader's pipeline of inflight prepares waiting to commit in FIFO order.
         /// This allows us to pipeline without the complexity of out-of-order commits.
-        preparing: RingBuffer(Prepare, config.pipelining_max) = .{},
+        pipeline: RingBuffer(Prepare, config.pipelining_max) = .{},
 
         /// The number of retry attempts to resend the first prepare in the pipelining queue.
         prepare_timeouts: u64 = 0,
 
         /// Unique start_view_change messages for the same view from OTHER replicas (excluding ourself).
-        start_view_change_from_other_replicas: QuorumMessages = QuorumMessagesReset,
+        start_view_change_from_other_replicas: QuorumMessages = QuorumMessagesNull,
 
         /// Unique do_view_change messages for the same view from ALL replicas (including ourself).
-        do_view_change_from_all_replicas: QuorumMessages = QuorumMessagesReset,
+        do_view_change_from_all_replicas: QuorumMessages = QuorumMessagesNull,
 
         /// Unique nack_prepare messages for the same view from OTHER replicas (excluding ourself).
-        nack_prepare_from_other_replicas: QuorumMessages = QuorumMessagesReset,
+        nack_prepare_from_other_replicas: QuorumMessages = QuorumMessagesNull,
 
         /// Whether a replica has received a quorum of start_view_change messages for the view change:
         start_view_change_quorum: bool = false,
@@ -323,24 +323,6 @@ pub fn Replica(
             self.client_table.deinit();
         }
 
-        /// Returns whether the replica is a follower for the current view.
-        /// This may be used only when the replica status is normal.
-        pub fn follower(self: *Self) bool {
-            return !self.leader();
-        }
-
-        /// Returns whether the replica is the leader for the current view.
-        /// This may be used only when the replica status is normal.
-        pub fn leader(self: *Self) bool {
-            assert(self.status == .normal);
-            return self.leader_index(self.view) == self.replica;
-        }
-
-        /// Returns the index into the configuration of the leader for a given view.
-        pub fn leader_index(self: *Self, view: u32) u8 {
-            return @intCast(u8, @mod(view, self.replica_count));
-        }
-
         /// Time is measured in logical ticks that are incremented on every call to tick().
         /// This eliminates a dependency on the system time and enables deterministic testing.
         pub fn tick(self: *Self) void {
@@ -464,7 +446,7 @@ pub fn Replica(
             assert(self.status == .normal);
             assert(self.leader());
             assert(self.commit_min == self.commit_max);
-            assert(self.commit_max + self.preparing.count == self.op);
+            assert(self.commit_max + self.pipeline.count == self.op);
 
             assert(message.header.command == .request);
             assert(message.header.view <= self.view); // The client's view may be behind ours.
@@ -497,14 +479,16 @@ pub fn Replica(
 
             log.debug("{}: on_request: prepare {}", .{ self.replica, message.header.checksum });
 
-            self.preparing.push(.{ .message = message.ref() }) catch unreachable;
-            assert(self.preparing.count >= 1);
+            self.pipeline.push(.{ .message = message.ref() }) catch unreachable;
+            assert(self.pipeline.count >= 1);
 
-            // Do not restart the prepare timeout if it is already ticking for a prior inflight prepare:
-            if (self.preparing.count == 1) {
+            if (self.pipeline.count == 1) {
+                // This is the only prepare in the pipeline, start the timeout:
                 assert(!self.prepare_timeout.ticking);
+                assert(self.prepare_timeouts == 0);
                 self.prepare_timeout.start();
             } else {
+                // Do not restart the prepare timeout as it is already ticking for another prepare.
                 assert(self.prepare_timeout.ticking);
             }
 
@@ -608,11 +592,11 @@ pub fn Replica(
             assert(message.header.view == self.view);
             assert(self.leader());
 
-            const prepare = self.preparing_for_prepare_ok(message) orelse return;
+            const prepare = self.pipeline_prepare_for_prepare_ok(message) orelse return;
 
             assert(prepare.message.header.checksum == message.header.context);
             assert(prepare.message.header.op >= self.commit_max + 1);
-            assert(prepare.message.header.op <= self.commit_max + self.preparing.count);
+            assert(prepare.message.header.op <= self.commit_max + self.pipeline.count);
             assert(prepare.message.header.op <= self.op);
 
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
@@ -630,39 +614,7 @@ pub fn Replica(
             log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
             // TODO Improve logging.
 
-            self.commit_from_preparing_pipeline_if_possible();
-        }
-
-        fn commit_from_preparing_pipeline_if_possible(self: *Self) void {
-            assert(self.status == .normal);
-            assert(self.leader());
-
-            // TODO What about self.committing?
-
-            assert(self.preparing.count > 0);
-            while (self.preparing.peek_ptr()) |prepare| {
-                assert(self.commit_min == self.commit_max);
-                assert(self.commit_max + self.preparing.count == self.op);
-                assert(prepare.message.header.op == self.commit_max + 1);
-
-                if (!prepare.ok_quorum_received) return; // TODO log.debug
-
-                self.commit_op(prepare.message);
-
-                assert(self.commit_min == self.commit_max);
-                assert(self.commit_max == prepare.message.header.op);
-
-                // We must copy the message checksum before we pop (and invalidate the prepare pointer):
-                const checksum = prepare.message.header.checksum;
-                const popped = self.preparing.pop().?;
-                assert(popped.message.header.checksum == checksum);
-                self.message_bus.unref(popped.message);
-
-                // TODO Free ok messages.
-            }
-
-            assert(self.prepare_timeout.ticking);
-            if (self.preparing.count == 0) self.prepare_timeout.stop();
+            self.commit_pipeline();
         }
 
         fn on_commit(self: *Self, message: *const Message) void {
@@ -1195,10 +1147,8 @@ pub fn Replica(
             assert(self.status == .normal);
             assert(self.leader());
 
-            var prepare = self.preparing.peek_ptr().?;
+            const prepare = self.pipeline.peek_ptr().?;
             assert(prepare.message.header.command == .prepare);
-            assert(prepare.message.header.op == self.commit_max + 1);
-            assert(prepare.message.header.view == self.view);
 
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [config.replicas_max]u8 = undefined;
@@ -1219,13 +1169,15 @@ pub fn Replica(
             assert(waiting_len <= self.replica_count);
             for (waiting[0..waiting_len]) |replica| {
                 assert(replica < self.replica_count);
-                log.debug("{}: on_prepare_timeout: waiting for replica {}", .{ self.replica, replica });
+                log.debug("{}: on_prepare_timeout: waiting for replica {}", .{
+                    self.replica,
+                    replica,
+                });
             }
 
-            // Cycle through the list for each attempt to reach live replicas and get around partitions:
-            // If only the first replica in the list was chosen... liveness would suffer if it was down!
+            // Cycle through the list to reach live replicas and get around partitions:
             assert(self.prepare_timeouts > 0);
-            var replica = waiting[@mod(self.prepare_timeouts, waiting_len)];
+            const replica = waiting[@mod(self.prepare_timeouts, waiting_len)];
             assert(replica != self.replica);
 
             log.debug("{}: on_prepare_timeout: replicating to replica {}", .{ self.replica, replica });
@@ -1527,7 +1479,7 @@ pub fn Replica(
             reply.header.* = .{
                 .command = .reply,
                 .operation = prepare.header.operation,
-                .parent = prepare.header.context, // The prepare's context carries `request.checksum`.
+                .parent = prepare.header.context, // The prepare's context has `request.checksum`.
                 .client = prepare.header.client,
                 .request = prepare.header.request,
                 .cluster = prepare.header.cluster,
@@ -1552,6 +1504,49 @@ pub fn Replica(
             if (self.leader_index(self.view) == self.replica) {
                 log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
                 self.message_bus.send_message_to_client(reply.header.client, reply);
+            }
+        }
+
+        /// Commits, frees and pops as many prepares at the head of the pipeline as have quorum.
+        /// Can be called only when the pipeline has at least one prepare.
+        /// Stops the prepare timeout and resets the timeouts counter if the pipeline becomes empty.
+        fn commit_pipeline(self: *Self) void {
+            assert(self.status == .normal);
+            assert(self.leader());
+            assert(self.pipeline.count > 0);
+
+            while (self.pipeline.peek_ptr()) |prepare| {
+                assert(self.pipeline.count > 0);
+                assert(self.commit_min == self.commit_max);
+                assert(self.commit_max + self.pipeline.count == self.op);
+                assert(self.commit_max + 1 == prepare.message.header.op);
+
+                if (!prepare.ok_quorum_received) {
+                    log.debug("{}: commit_pipeline: waiting for quorum", .{self.replica});
+                    return;
+                }
+
+                const count = self.count_quorum(
+                    &prepare.ok_from_all_replicas,
+                    .prepare_ok,
+                    prepare.message.header.checksum,
+                );
+                assert(count >= self.f + 1);
+
+                self.commit_op(prepare.message);
+
+                assert(self.commit_min == self.commit_max);
+                assert(self.commit_max == prepare.message.header.op);
+
+                self.unref_prepare_message_and_quorum_messages(prepare);
+                assert(self.pipeline.pop() != null);
+            }
+
+            assert(self.prepare_timeout.ticking);
+
+            if (self.pipeline.count == 0) {
+                self.prepare_timeout.stop();
+                self.prepare_timeouts = 0;
             }
         }
 
@@ -1703,6 +1698,12 @@ pub fn Replica(
             message.header.set_checksum();
 
             return message.ref();
+        }
+
+        /// Returns whether the replica is a follower for the current view.
+        /// This may be used only when the replica status is normal.
+        fn follower(self: *Self) bool {
+            return !self.leader();
         }
 
         fn ignore_prepare_ok(self: *Self, message: *const Message) bool {
@@ -1968,7 +1969,7 @@ pub fn Replica(
             assert(message.header.client > 0);
             assert(message.header.view <= self.view); // See ignore_request_message_follower().
 
-            if (self.preparing_for_client(message.header.client)) |prepare| {
+            if (self.pipeline_prepare_for_client(message.header.client)) |prepare| {
                 assert(prepare.message.header.command == .prepare);
                 assert(prepare.message.header.client == message.header.client);
                 assert(prepare.message.header.op > self.commit_max);
@@ -1977,12 +1978,12 @@ pub fn Replica(
                     log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
                     return true;
                 } else {
-                    log.alert("{}: on_request: ignoring (client attempted to fork)", .{self.replica});
+                    log.alert("{}: on_request: ignoring (client forked)", .{self.replica});
                     return true;
                 }
             }
 
-            if (self.preparing.full()) {
+            if (self.pipeline.full()) {
                 log.debug("{}: on_request: ignoring (pipeline full)", .{self.replica});
                 return true;
             }
@@ -2053,6 +2054,18 @@ pub fn Replica(
             return false;
         }
 
+        /// Returns whether the replica is the leader for the current view.
+        /// This may be used only when the replica status is normal.
+        fn leader(self: *Self) bool {
+            assert(self.status == .normal);
+            return self.leader_index(self.view) == self.replica;
+        }
+
+        /// Returns the index into the configuration of the leader for a given view.
+        fn leader_index(self: *Self, view: u32) u8 {
+            return @intCast(u8, @mod(view, self.replica_count));
+        }
+
         /// Advances `op` to where we need to be before `header` can be processed as a prepare:
         fn jump_to_newer_op_in_normal_status(self: *Self, header: *const Header) void {
             assert(self.status == .normal);
@@ -2101,13 +2114,14 @@ pub fn Replica(
             }
         }
 
-        fn preparing_for_client(self: *Self, client: u128) ?*Prepare {
+        /// Searches the pipeline for a prepare for a given client.
+        fn pipeline_prepare_for_client(self: *Self, client: u128) ?*Prepare {
             assert(self.status == .normal);
             assert(self.leader());
 
             var op = self.commit_max + 1;
             var parent = self.journal.entry_for_op_exact(self.commit_max).?.checksum;
-            var iterator = self.preparing.iterator();
+            var iterator = self.pipeline.iterator();
             while (iterator.next_ptr()) |prepare| {
                 assert(prepare.message.header.command == .prepare);
                 assert(prepare.message.header.op == op);
@@ -2117,28 +2131,36 @@ pub fn Replica(
                 op += 1;
             }
 
-            assert(self.preparing.count <= config.pipelining_max);
-            assert(self.preparing.count + self.commit_max == op - 1);
-            assert(self.preparing.count + self.commit_max == self.op);
+            assert(self.pipeline.count <= config.pipelining_max);
+            assert(self.pipeline.count + self.commit_max == op - 1);
+            assert(self.pipeline.count + self.commit_max == self.op);
             assert(self.commit_min == self.commit_max);
 
             return null;
         }
 
-        fn preparing_for_prepare_ok(self: *Self, ok: *const Message) ?*Prepare {
+        /// Searches the pipeline for a prepare for a given client and checksum.
+        /// Passing the prepare_ok message prevents these u128s from being accidentally swapped.
+        /// Asserts that the returned prepare, if any, exactly matches the prepare_ok.
+        fn pipeline_prepare_for_prepare_ok(self: *Self, ok: *const Message) ?*Prepare {
             assert(ok.header.command == .prepare_ok);
 
             assert(self.status == .normal);
             assert(self.leader());
 
-            const prepare = self.preparing_for_client(ok.header.client) orelse {
-                log.debug("{}: preparing_for_prepare_ok: not preparing", .{self.replica});
+            const prepare = self.pipeline_prepare_for_client(ok.header.client) orelse {
+                log.debug("{}: pipeline_prepare_for_prepare_ok: not preparing", .{self.replica});
                 return null;
             };
 
             if (ok.header.context != prepare.message.header.checksum) {
-                // This can be normal, for example, if an older prepare_ok for the client is replayed.
-                log.debug("{}: preparing_for_prepare_ok: different prepare checksum", .{self.replica});
+                // This can be normal, for example, if an old prepare_ok is replayed, but we do
+                // expect that the viewstamp should at least be different for a checksum mismatch.
+                assert(ok.header.view != prepare.message.header.view or
+                    ok.header.op != prepare.message.header.op);
+                log.debug("{}: pipeline_prepare_for_prepare_ok: preparing a different client op", .{
+                    self.replica,
+                });
                 return null;
             }
 
@@ -2643,6 +2665,21 @@ pub fn Replica(
             self.send_message_to_replica(next, message);
         }
 
+        /// Empties the prepare pipeline, unreffing all prepare and prepare_ok messages.
+        /// Stops the prepare timeout and resets the timeouts counter.
+        fn reset_pipeline(self: *Self) void {
+            while (self.pipeline.pop()) |prepare| {
+                self.unref_prepare_message_and_quorum_messages(&prepare);
+            }
+
+            self.prepare_timeout.stop();
+            self.prepare_timeouts = 0;
+
+            assert(self.pipeline.count == 0);
+            assert(self.prepare_timeout.ticking == false);
+            assert(self.prepare_timeouts == 0);
+        }
+
         fn reset_quorum_messages(self: *Self, messages: *QuorumMessages, command: Command) void {
             assert(messages.len == config.replicas_max);
             var count: usize = 0;
@@ -2669,23 +2706,6 @@ pub fn Replica(
         fn reset_quorum_nack_prepare(self: *Self) void {
             self.reset_quorum_messages(&self.nack_prepare_from_other_replicas, .nack_prepare);
             self.nack_prepare_op = null;
-        }
-
-        fn reset_quorum_prepare(self: *Self) void {
-            // TODO
-            //if (self.prepare_message) |message| {
-            //    self.request_checksum = null;
-            //    self.message_bus.unref(message);
-            //    self.prepare_message = null;
-            //    self.prepare_timeouts = 0;
-            //    self.prepare_timeout.stop();
-            //    self.reset_quorum_messages(self.prepare_ok_from_all_replicas, .prepare_ok);
-            //}
-            //assert(self.request_checksum == null);
-            //assert(self.prepare_message == null);
-            //assert(self.prepare_timeout.ticking == false);
-            //assert(self.prepare_timeouts == 0);
-            //for (self.prepare_ok_from_all_replicas) |received| assert(received == null);
         }
 
         fn reset_quorum_start_view_change(self: *Self) void {
@@ -2739,7 +2759,7 @@ pub fn Replica(
 
                 // We therefore only send to the leader of the current view, never to the leader of the
                 // prepare header's view:
-                // TODO We could surprise the new leader with this, if it is preparing a different op.
+                // TODO We could surprise the new leader with this if it's preparing a different op.
                 self.send_header_to_replica(self.leader_index(self.view), .{
                     .command = .prepare_ok,
                     .parent = header.parent,
@@ -3014,7 +3034,7 @@ pub fn Replica(
 
         fn transition_to_normal_status(self: *Self, new_view: u32) void {
             log.debug("{}: transition_to_normal_status: view={}", .{ self.replica, new_view });
-            // In the VRR paper it's possible to transition from .normal to .normal for the same view.
+            // In the VRR paper it's possible to transition from normal to normal for the same view.
             // For example, this could happen after a state transfer triggered by an op jump.
             assert(new_view >= self.view);
             self.view = new_view;
@@ -3029,6 +3049,8 @@ pub fn Replica(
                 self.view_change_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
+
+                // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
             } else {
                 log.debug("{}: transition_to_normal_status: follower", .{self.replica});
 
@@ -3038,9 +3060,10 @@ pub fn Replica(
                 self.view_change_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
+
+                self.reset_pipeline();
             }
 
-            self.reset_quorum_prepare();
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
@@ -3073,7 +3096,7 @@ pub fn Replica(
             // successive view changes can fail, e.g. after a view change timeout.
             // We must therefore reset our counters here to avoid counting messages from an older view,
             // which would violate the quorum intersection property essential for correctness.
-            self.reset_quorum_prepare();
+            self.reset_pipeline();
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
@@ -3083,6 +3106,19 @@ pub fn Replica(
             assert(self.nack_prepare_op == null);
 
             self.send_start_view_change();
+        }
+
+        fn unref_prepare_message_and_quorum_messages(
+            self: *Self,
+            prepare: *const Prepare,
+        ) void {
+            self.message_bus.unref(prepare.message);
+            for (prepare.ok_from_all_replicas) |received, replica| {
+                if (received) |prepare_ok| {
+                    assert(replica < self.replica_count);
+                    self.message_bus.unref(prepare_ok);
+                }
+            }
         }
 
         fn update_client_table_entry(self: *Self, reply: *Message) void {
