@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const config = @import("./config.zig");
+const is_darwin = std.Target.current.isDarwin();
 
 pub const Time = struct {
     const Self = @This();
@@ -20,7 +20,7 @@ pub const Time = struct {
             // Uses mach_continuous_time() instead of mach_absolute_time() as it counts while suspended.
             // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
             // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
-            if (comptime std.Target.current.isDarwin()) {
+            if (is_darwin) {
                 const darwin = struct {
                     const mach_timebase_info_t = std.os.darwin.mach_timebase_info_data;
                     extern "c" fn mach_timebase_info(info: *mach_timebase_info_t) std.os.darwin.kern_return_t;
@@ -52,7 +52,7 @@ pub const Time = struct {
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
     /// This clock is affected by discontinuous jumps in the system time.
     pub fn realtime(self: *Self) i64 {
-        if (comptime std.Target.current.isDarwin()) {
+        if (is_darwin) {
             var tv: std.os.timeval = undefined;
             std.os.gettimeofday(&tv, null);
             return (@intCast(i64, tv.tv_sec) * std.time.ns_per_s) + (@intCast(i64, tv.tv_usec) * std.time.ns_per_us);
