@@ -52,12 +52,9 @@ pub const Time = struct {
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
     /// This clock is affected by discontinuous jumps in the system time.
     pub fn realtime(self: *Self) i64 {
-        if (is_darwin) {
-            var tv: std.os.timeval = undefined;
-            std.os.gettimeofday(&tv, null);
-            return (@intCast(i64, tv.tv_sec) * std.time.ns_per_s) + (@intCast(i64, tv.tv_usec) * std.time.ns_per_us);
-        }
-
+        // macos has supported clock_gettime() since 10.12:
+        // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
+        
         var ts: std.os.timespec = undefined;
         std.os.clock_gettime(std.os.CLOCK_REALTIME, &ts) catch unreachable;
         return @as(i64, ts.tv_sec) * std.time.ns_per_s + ts.tv_nsec;
