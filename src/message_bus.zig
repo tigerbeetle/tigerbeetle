@@ -533,8 +533,8 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 var attempts = &bus.replicas_connect_attempts[replica];
                 const ms = vr.exponential_backoff_with_jitter(
                     &bus.prng,
-                    config.connection_delay_ms_min,
-                    config.connection_delay_ms_max,
+                    config.connection_delay_min_ms,
+                    config.connection_delay_max_ms,
                     attempts.*,
                 );
                 attempts.* += 1;
