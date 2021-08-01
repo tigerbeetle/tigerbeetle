@@ -95,10 +95,9 @@ pub const message_bus_headers_max = connections_max * connection_send_queue_max;
 pub const pipelining_max = 32;
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
-/// Exponential backoff and full jitter are applied within this range.
-/// For more, see: https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
-pub const connection_delay_min = 50;
-pub const connection_delay_max = 1000;
+/// Exponential backoff and jitter are applied within this range.
+pub const connection_delay_ms_min = 50;
+pub const connection_delay_ms_max = 1000;
 
 /// The maximum number of outgoing messages that may be queued on a connection.
 pub const connection_send_queue_max = 3;

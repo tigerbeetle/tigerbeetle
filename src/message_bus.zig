@@ -66,9 +66,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
         replicas: []?*Connection,
         /// The number of outgoing `connect()` attempts for a given replica:
         /// Reset to zero after a successful `on_connect()`.
-        replicas_connect_attempts: []u4,
+        replicas_connect_attempts: []u64,
 
-        /// Used to apply full jitter when calculating exponential backoff:
+        /// Used to apply jitter when calculating exponential backoff:
         /// Seeded with the process' replica index or client ID.
         prng: std.rand.DefaultPrng,
 
@@ -94,9 +94,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             errdefer allocator.free(replicas);
             mem.set(?*Connection, replicas, null);
 
-            const replicas_connect_attempts = try allocator.alloc(u4, configuration.len);
+            const replicas_connect_attempts = try allocator.alloc(u64, configuration.len);
             errdefer allocator.free(replicas_connect_attempts);
-            mem.set(u4, replicas_connect_attempts, 0);
+            mem.set(u64, replicas_connect_attempts, 0);
 
             const prng_seed = switch (process_type) {
                 .replica => process,
@@ -448,29 +448,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             unreachable;
         }
 
-        /// Calculates exponential backoff with full jitter according to the formula:
-        /// `sleep = random_between(0, min(cap, base * 2 ** attempt))`
-        ///
-        /// `attempt` is zero-based.
-        /// `attempt` is tracked as a u4 to flush out any overflow bugs sooner rather than later.
-        pub fn exponential_backoff_with_full_jitter_in_ms(bus: *Self, attempt: u4) u63 {
-            assert(config.connection_delay_min < config.connection_delay_max);
-            // Calculate the capped exponential backoff component: `min(cap, base * 2 ** attempt)`
-            const base: u63 = config.connection_delay_min;
-            const cap: u63 = config.connection_delay_max - config.connection_delay_min;
-            const exponential_backoff = std.math.min(
-                cap,
-                // A "1" shifted left gives any power of two:
-                // 1<<0 = 1, 1<<1 = 2, 1<<2 = 4, 1<<3 = 8:
-                base * std.math.shl(u63, 1, attempt),
-            );
-            const jitter = bus.prng.random.uintAtMostBiased(u63, exponential_backoff);
-            const ms = base + jitter;
-            assert(ms >= config.connection_delay_min);
-            assert(ms <= config.connection_delay_max);
-            return ms;
-        }
-
         /// Used to send/receive messages to/from a client or fellow replica.
         const Connection = struct {
             /// The peer is determined by inspecting the first message header
@@ -554,10 +531,13 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 bus.replicas[replica] = connection;
 
                 var attempts = &bus.replicas_connect_attempts[replica];
-                const ms = bus.exponential_backoff_with_full_jitter_in_ms(attempts.*);
-                // Saturate the counter at its maximum value if the addition wraps:
-                attempts.* +%= 1;
-                if (attempts.* == 0) attempts.* -%= 1;
+                const ms = vr.exponential_backoff_with_jitter(
+                    &bus.prng,
+                    config.connection_delay_ms_min,
+                    config.connection_delay_ms_max,
+                    attempts.*,
+                );
+                attempts.* += 1;
 
                 log.debug("connecting to replica {} in {}ms...", .{ connection.peer.replica, ms });
 
@@ -570,7 +550,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     on_connect_with_exponential_backoff,
                     // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                     &connection.recv_completion,
-                    ms * std.time.ns_per_ms,
+                    @intCast(u63, ms * std.time.ns_per_ms),
                 );
             }
 
