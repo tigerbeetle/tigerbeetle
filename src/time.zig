@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const is_darwin = std.Target.current.isDarwin();
 const config = @import("./config.zig");
+const is_darwin = std.Target.current.isDarwin();
 
 pub const Time = struct {
     const Self = @This();
