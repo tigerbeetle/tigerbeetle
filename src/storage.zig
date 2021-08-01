@@ -3,6 +3,7 @@ const os = std.os;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.storage);
+const is_darwin = std.Target.current.isDarwin();
 
 const IO = @import("io.zig").IO;
 const is_darwin = std.Target.current.isDarwin();
@@ -336,10 +337,11 @@ pub const Storage = struct {
         // TODO Document this and investigate whether this is in fact correct to set here.
         if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O_LARGEFILE;
 
+        var direct_io_supported = false;
         if (config.direct_io) {
-            const direct_io_supported = try Storage.fs_supports_direct_io(dir_fd);
+            direct_io_supported = try Storage.fs_supports_direct_io(dir_fd);
             if (direct_io_supported) {
-                flags |= os.O_DIRECT;
+                if (!is_darwin) flags |= os.O_DIRECT;
             } else if (config.deployment_environment == .development) {
                 log.warn("file system does not support Direct I/O", .{});
             } else {
@@ -368,6 +370,15 @@ pub const Storage = struct {
         errdefer os.close(fd);
 
         // TODO Check that the file is actually a file.
+
+        // On darwin, use F_NOCACHE to disable the OS page cache for direct_io as O_DIRECT doesn't exit.
+        // If statements are separated out as mixing comptime and runtime values coerces the check to 
+        // runtime and linux doesn't define F_NOCACHE.
+        if (is_darwin) {
+            if (direct_io_supported) {
+                _ = try os.fcntl(fd, os.F_NOCACHE, 1);
+            }
+        }
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
@@ -422,6 +433,58 @@ pub const Storage = struct {
     }
 
     fn fallocate(fd: i32, mode: i32, offset: i64, length: i64) !void {
+        // https://stackoverflow.com/a/11497568
+        // http://hg.mozilla.org/mozilla-central/file/3d846420a907/xpcom/glue/FileUtils.cpp#l61
+        if (is_darwin) {
+            const F_ALLOCATECONTIG = 0x2; // allocate contiguous space
+            const F_ALLOCATEALL = 0x4; // allocate all or nothing
+            const F_PEOFPOSMODE = 3; // use relative offset from the seek pos mode
+            const F_VOLPOSMODE = 4; // use the specified volume offset
+            const fstore_t = extern struct {
+                fst_flags: c_uint,
+                fst_posmode: c_int,
+                fst_offset: os.off_t,
+                fst_length: os.off_t,
+                fst_bytesalloc: os.off_t,
+            };
+
+            var store = fstore_t{
+                .fst_flags = F_ALLOCATECONTIG | F_ALLOCATEALL,
+                .fst_posmode = if (mode == 0) F_VOLPOSMODE else F_PEOFPOSMODE,
+                .fst_offset = if (mode == 0) offset else 0,
+                .fst_length = length,
+                .fst_bytesalloc = 0,
+            };
+
+            // try to pre-allocate contiguous space and fall back to default non-continugous
+            var res = os.system.fcntl(fd, os.F_PREALLOCATE, @ptrToInt(&store));
+            if (os.errno(res) != 0) {
+                store.fst_flags = F_ALLOCATEALL;
+                res = os.system.fcntl(fd, os.F_PREALLOCATE, @ptrToInt(&store));
+            }
+
+            switch (os.errno(res)) {
+                0 => {},
+                os.EACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
+                os.EBADF => return error.FileDescriptorInvalid,
+                os.EDEADLK => unreachable, // F_SETLKW
+                os.EINTR => unreachable, // F_SETLKW
+                os.EINVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
+                os.EMFILE => unreachable, // F_DUPFD or F_DUPED
+                os.ENOLCK => unreachable, // F_SETLK or F_SETLKW
+                os.EOVERFLOW => return error.FileTooBig,
+                os.ESRCH => unreachable, // F_SETOWN
+                os.EOPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
+                else => |errno| return os.unexpectedErrno(errno),
+            }
+
+            // now actually perform the allocation
+            return os.ftruncate(fd, @intCast(u64, length)) catch |err| switch (err) {
+                error.AccessDenied => error.PermissionDenied,
+                else => |e| e,
+            };
+        }
+
         while (true) {
             const rc = os.linux.fallocate(fd, mode, offset, length);
             switch (os.linux.getErrno(rc)) {
