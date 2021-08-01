@@ -413,6 +413,55 @@ pub const Timeout = struct {
     }
 };
 
+/// Calculates exponential backoff with jitter to prevent cascading failure due to thundering herds.
+pub fn exponential_backoff_with_jitter(
+    prng: *std.rand.DefaultPrng,
+    min: u64,
+    max: u64,
+    attempt: u64,
+) u64 {
+    const range = max - min;
+    assert(range > 0);
+
+    // Do not use `@truncate(u6, attempt)` since that only discards the high bits:
+    // We want a saturating exponent here instead.
+    const exponent = @intCast(u6, std.math.min(std.math.maxInt(u6), attempt));
+
+    // A "1" shifted left gives any power of two:
+    // 1<<0 = 1, 1<<1 = 2, 1<<2 = 4, 1<<3 = 8
+    const power = std.math.shlExact(u128, 1, exponent) catch unreachable; // Do not truncate.
+
+    // Calculate the capped exponential backoff component, `min(range, min * 2 ^ attempt)`:
+    const backoff = std.math.min(range, std.math.max(1, min) * power);
+    const jitter = prng.random.uintAtMostBiased(u64, backoff);
+
+    const result = @intCast(u64, min + jitter);
+    assert(result >= min);
+    assert(result <= max);
+    return result;
+}
+
+test "exponential_backoff_with_jitter" {
+    const testing = std.testing;
+
+    const attempts = 1000;
+    var prng = std.rand.DefaultPrng.init(0);
+    const max: u64 = std.math.maxInt(u64);
+    const min = max - attempts;
+    var attempt = max - attempts;
+    while (attempt < max) : (attempt += 1) {
+        const ebwj = exponential_backoff_with_jitter(&prng, min, max, attempt);
+        testing.expect(ebwj >= min);
+        testing.expect(ebwj <= max);
+    }
+
+    // Check that `backoff` is calculated correctly when min is 0 by taking `std.math.max(1, min)`.
+    // Otherwise, the final result will always be 0. This was an actual bug we encountered.
+    // If the PRNG ever changes, then there is a small chance that we may collide for 0,
+    // but this is outweighed by the probability that we refactor and fail to take the max.
+    testing.expect(exponential_backoff_with_jitter(&prng, 0, max, 0) > 0);
+}
+
 /// Returns An array containing the remote or local addresses of each of the 2f + 1 replicas:
 /// Unlike the VRR paper, we do not sort the array but leave the order explicitly to the user.
 /// There are several advantages to this:
