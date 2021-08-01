@@ -12,6 +12,8 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 
 const log = std.log;
 
+const at_least_one_second_in_ticks = std.math.max(1, @divFloor(std.time.ms_per_s, config.tick_ms));
+
 pub fn Client(comptime MessageBus: type) type {
     return struct {
         const Self = @This();
@@ -56,9 +58,9 @@ pub fn Client(comptime MessageBus: type) type {
         ) !Self {
             assert(replica_count > 0);
 
-            // We require the client ID to be non-zero for client requests.
-            // The probability of this actually being zero is unlikely (more likely a CSPRNG bug):
             var id = std.crypto.random.int(u128);
+            // We require the client ID to be non-zero for client requests:
+            // The probability of a CSPRNG returning zero is very unlikely (more likely a bug).
             assert(id > 0);
 
             var self = Self{
@@ -67,17 +69,16 @@ pub fn Client(comptime MessageBus: type) type {
                 .cluster = cluster,
                 .replica_count = replica_count,
                 .message_bus = message_bus,
-                // TODO These timeouts need to be a function of the RTT to be congestion-sensitive:
-                // TODO We also need to express the starting value in terms of the tick unit.
+                // Start with a conservative timeout while we are still working out the RTT:
                 .request_timeout = .{
                     .name = "request_timeout",
                     .replica = std.math.maxInt(u8),
-                    .after = 10,
+                    .after = at_least_one_second_in_ticks,
                 },
                 .ping_timeout = .{
                     .name = "ping_timeout",
                     .replica = std.math.maxInt(u8),
-                    .after = 10,
+                    .after = at_least_one_second_in_ticks,
                 },
             };
 
@@ -116,7 +117,8 @@ pub fn Client(comptime MessageBus: type) type {
             // This anticipates the next view change, without the cost of broadcast against the cluster.
         }
 
-        /// A client is allowed at most one inflight request at a time, concurrent requests are queued.
+        /// A client is allowed at most one inflight request at a time at the protocol layer.
+        /// We therefore queue any further concurrent requests by the application layer.
         pub fn request(
             self: *Self,
             user_data: u128,
