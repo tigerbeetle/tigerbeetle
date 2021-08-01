@@ -1,10 +1,13 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const os = std.os;
-const linux = os.linux;
-const IO_Uring = linux.IO_Uring;
-const io_uring_cqe = linux.io_uring_cqe;
-const io_uring_sqe = linux.io_uring_sqe;
+
+const is_darwin = std.Target.current.isDarwin();
+const io_uring = if (is_darwin) @import("io_uring_darwin.zig") else os.linux;
+
+const IO_Uring = io_uring.IO_Uring;
+const io_uring_cqe = io_uring.io_uring_cqe;
+const io_uring_sqe = io_uring.io_uring_sqe;
 
 const FIFO = @import("fifo.zig").FIFO;
 
@@ -53,16 +56,8 @@ pub const IO = struct {
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the __kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
-        // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
-        // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
-        var current_ts: os.timespec = undefined;
-        os.clock_gettime(os.CLOCK_MONOTONIC, &current_ts) catch unreachable;
         // The absolute CLOCK_MONOTONIC time after which we may return from this function:
-        const timeout_ts: os.__kernel_timespec = .{
-            .tv_sec = current_ts.tv_sec,
-            .tv_nsec = current_ts.tv_nsec + nanoseconds,
-        };
+        const timeout_ts = self.ring_absolute_timeout(nanoseconds);
         var timeouts: usize = 0;
         var etime = false;
         while (!etime) {
@@ -72,7 +67,7 @@ pub const IO = struct {
                 break :blk self.ring.get_sqe() catch unreachable;
             };
             // Submit an absolute timeout that will be canceled if any other SQE completes first:
-            linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.IORING_TIMEOUT_ABS);
+            io_uring.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, io_uring.IORING_TIMEOUT_ABS);
             timeout_sqe.user_data = 0;
             timeouts += 1;
             // The amount of time this call will block is bounded by the timeout we just submitted:
@@ -82,6 +77,30 @@ pub const IO = struct {
         // The busy loop here is required to avoid a potential deadlock, as the kernel determines
         // when the timeouts are pushed to the completion queue, not us.
         while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
+    }
+
+    fn ring_absolute_timeout(self: *IO, nanoseconds: u63) io_uring.__kernel_timespec {
+        // We must use the same clock source used by io_uring since we specify the
+        // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
+        // dramatically different.
+        var now = blk: {
+            if (is_darwin) {
+                break :blk self.ring.now();
+            }
+
+            // The io_uring clock source is CLOCK_MONOTONIC.
+            // Any kernel that supports io_uring will also support CLOCK_MONOTONIC.
+            var ts: os.timespec = undefined;
+            os.clock_gettime(os.CLOCK_MONOTONIC, &ts) catch unreachable;
+            break :blk @intCast(u64, ts.tv_sec) * std.time.ns_per_s + @intCast(u64, ts.tv_nsec);
+        };
+
+        // Add nanoseconds as a u64 to account for tv_nsec overflow in final timespec conversion
+        now += nanoseconds;
+        return io_uring.__kernel_timespec{
+            .tv_sec = @intCast(i64, now / std.time.ns_per_s),
+            .tv_nsec = @intCast(i64, now % std.time.ns_per_s),
+        };
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
@@ -181,7 +200,7 @@ pub const IO = struct {
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
                 .accept => |*op| {
-                    linux.io_uring_prep_accept(
+                    io_uring.io_uring_prep_accept(
                         sqe,
                         op.socket,
                         &op.address,
@@ -190,10 +209,10 @@ pub const IO = struct {
                     );
                 },
                 .close => |op| {
-                    linux.io_uring_prep_close(sqe, op.fd);
+                    io_uring.io_uring_prep_close(sqe, op.fd);
                 },
                 .connect => |*op| {
-                    linux.io_uring_prep_connect(
+                    io_uring.io_uring_prep_connect(
                         sqe,
                         op.socket,
                         &op.address.any,
@@ -201,13 +220,13 @@ pub const IO = struct {
                     );
                 },
                 .fsync => |op| {
-                    linux.io_uring_prep_fsync(sqe, op.fd, op.flags);
+                    io_uring.io_uring_prep_fsync(sqe, op.fd, op.flags);
                 },
                 .openat => |op| {
-                    linux.io_uring_prep_openat(sqe, op.fd, op.path, op.flags, op.mode);
+                    io_uring.io_uring_prep_openat(sqe, op.fd, op.path, op.flags, op.mode);
                 },
                 .read => |op| {
-                    linux.io_uring_prep_read(
+                    io_uring.io_uring_prep_read(
                         sqe,
                         op.fd,
                         op.buffer[0..buffer_limit(op.buffer.len)],
@@ -215,16 +234,16 @@ pub const IO = struct {
                     );
                 },
                 .recv => |op| {
-                    linux.io_uring_prep_recv(sqe, op.socket, op.buffer, op.flags);
+                    io_uring.io_uring_prep_recv(sqe, op.socket, op.buffer, op.flags);
                 },
                 .send => |op| {
-                    linux.io_uring_prep_send(sqe, op.socket, op.buffer, op.flags);
+                    io_uring.io_uring_prep_send(sqe, op.socket, op.buffer, op.flags);
                 },
                 .timeout => |*op| {
-                    linux.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
+                    io_uring.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
                 },
                 .write => |op| {
-                    linux.io_uring_prep_write(
+                    io_uring.io_uring_prep_write(
                         sqe,
                         op.fd,
                         op.buffer[0..buffer_limit(op.buffer.len)],
@@ -1099,7 +1118,7 @@ test "openat/close" {
                 &self,
                 openat_callback,
                 &completion,
-                linux.AT_FDCWD,
+                os.AT_FDCWD,
                 path,
                 os.O_CLOEXEC | os.O_RDWR | os.O_CREAT,
                 0o666,
