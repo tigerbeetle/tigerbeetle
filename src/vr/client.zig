@@ -58,10 +58,13 @@ pub fn Client(comptime MessageBus: type) type {
         ) !Self {
             assert(replica_count > 0);
 
-            var id = std.crypto.random.int(u128);
+            const id = std.crypto.random.int(u128);
             // We require the client ID to be non-zero for client requests:
             // The probability of a CSPRNG returning zero is very unlikely (more likely a bug).
             assert(id > 0);
+
+            // Add jitter to prevent a thundering herd if all clients are restarted simultaneously.
+            const jitter = id % at_least_one_second_in_ticks;
 
             var self = Self{
                 .allocator = allocator,
@@ -73,14 +76,20 @@ pub fn Client(comptime MessageBus: type) type {
                 .request_timeout = .{
                     .name = "request_timeout",
                     .replica = std.math.maxInt(u8),
-                    .after = at_least_one_second_in_ticks,
+                    .after = at_least_one_second_in_ticks + jitter,
                 },
                 .ping_timeout = .{
                     .name = "ping_timeout",
                     .replica = std.math.maxInt(u8),
-                    .after = at_least_one_second_in_ticks,
+                    .after = at_least_one_second_in_ticks + jitter,
                 },
             };
+
+            assert(self.request_timeout.after >= at_least_one_second_in_ticks);
+            assert(self.request_timeout.after <= at_least_one_second_in_ticks * 2);
+
+            assert(self.ping_timeout.after >= at_least_one_second_in_ticks);
+            assert(self.ping_timeout.after <= at_least_one_second_in_ticks * 2);
 
             self.ping_timeout.start();
 
