@@ -39,11 +39,10 @@ pub fn Client(comptime MessageBus: type) type {
         message_bus: *MessageBus,
 
         // TODO Track the latest view number received in .pong and .reply messages.
-        // TODO Ask the cluster for our last request number.
         request_number_min: u32 = 0,
         request_number_max: u32 = 0,
 
-        /// Leave one Message free to receive with
+        /// Leave one Message free to receive with:
         request_queue: RingBuffer(Request, config.message_bus_messages_max - 1) = .{},
         request_timeout: vr.Timeout,
 
@@ -68,6 +67,8 @@ pub fn Client(comptime MessageBus: type) type {
                 .cluster = cluster,
                 .replica_count = replica_count,
                 .message_bus = message_bus,
+                // TODO These timeouts need to be a function of the RTT to be congestion-sensitive:
+                // TODO We also need to express the starting value in terms of the tick unit.
                 .request_timeout = .{
                     .name = "request_timeout",
                     .replica = std.math.maxInt(u8),
@@ -257,6 +258,10 @@ pub fn Client(comptime MessageBus: type) type {
                 .pong => {
                     // TODO: when we implement proper request number usage, we will
                     // need to get the request number from a pong message on startup.
+
+                    // Set our ticks value when we ping the leader.
+                    // Compare our ticks value with this value when we receive the pong back.
+                    // Then adjust on_request_timeout to be twice this value.
                 },
                 else => {
                     log.warn(
@@ -276,6 +281,7 @@ pub fn Client(comptime MessageBus: type) type {
                 .client = self.id,
             };
 
+            // TODO If we haven't received a pong from a replica since our last ping, then back off.
             self.send_header_to_replicas(ping);
         }
 
