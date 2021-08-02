@@ -4,9 +4,6 @@ usingnamespace @import("tigerbeetle.zig");
 usingnamespace @import("demo.zig");
 
 pub fn main() !void {
-    const fd = try connect(config.port);
-    defer std.os.close(fd);
-
     var accounts = [_]Account{
         Account{
             .id = 1,
@@ -34,5 +31,5 @@ pub fn main() !void {
         },
     };
 
-    try send(fd, .create_accounts, accounts, CreateAccountsResult);
+    try Demo.request(.create_accounts, accounts, CreateAccountsResult);
 }
