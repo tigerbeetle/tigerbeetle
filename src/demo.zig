@@ -9,7 +9,7 @@ const StateMachine = @import("state_machine.zig").StateMachine;
 
 const vr = @import("vr.zig");
 const Header = vr.Header;
-const Client = vr.Client(MessageBus);
+const Client = vr.Client(StateMachine, MessageBus);
 
 pub const Demo = struct {
     pub fn request(
