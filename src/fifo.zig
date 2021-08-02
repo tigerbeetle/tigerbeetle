@@ -22,6 +22,20 @@ pub fn FIFO(comptime T: type) type {
             }
         }
 
+        pub fn push_all(self: *Self, fifo: Self) void {
+            const fifo_out = fifo.out orelse {
+                assert(fifo.in == null);
+                return;
+            };
+            if (self.in) |in| {
+                in.next = fifo_out;
+                self.in = fifo.in;
+            } else {
+                assert(self.out == null);
+                self.* = fifo;
+            }
+        }
+
         pub fn pop(self: *Self) ?*T {
             const ret = self.out orelse return null;
             self.out = ret.next;
@@ -91,5 +105,19 @@ test "push/pop/peek/remove" {
     fifo.remove(&three);
     testing.expectEqual(@as(?*Foo, &one), fifo.pop());
     testing.expectEqual(@as(?*Foo, &two), fifo.pop());
+    testing.expectEqual(@as(?*Foo, null), fifo.pop());
+
+    var fifo_one_two: FIFO(Foo) = .{};
+    fifo_one_two.push(&one);
+    fifo_one_two.push(&two);
+    fifo.push_all(fifo_one_two);
+
+    var fifo_three: FIFO(Foo) = .{};
+    fifo_three.push(&three);
+    fifo.push_all(fifo_three);
+    
+    testing.expectEqual(@as(?*Foo, &one), fifo.pop());
+    testing.expectEqual(@as(?*Foo, &two), fifo.pop());
+    testing.expectEqual(@as(?*Foo, &three), fifo.pop());
     testing.expectEqual(@as(?*Foo, null), fifo.pop());
 }
