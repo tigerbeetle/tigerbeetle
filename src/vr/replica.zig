@@ -402,21 +402,11 @@ pub fn Replica(
             if (message.header.client > 0) {
                 assert(message.header.replica == 0);
 
-                // 4.5 Client Recovery
-                // If a client crashes and recovers it must start up with a request number larger than
-                // what it had before it failed. It fetches its latest number from the replicas and adds
-                // 2 to this value to be sure the new request number is big enough. Adding 2 ensures
-                // that its next request will have a unique number even in the odd case where the latest
-                // request it sent before it failed is still in transit (since that request will have as
-                // its request number the number the client learns plus 1).
-                //
-                // TODO Lookup latest request number from client table:
-                pong.request = 0;
                 self.message_bus.send_header_to_client(message.header.client, pong);
             } else if (message.header.replica == self.replica) {
                 log.warn("{}: on_ping: ignoring (self)", .{self.replica});
             } else {
-                // Copy the ping's monotonic timestamp across to our pong and add our wall clock sample:
+                // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
                 pong.op = message.header.op;
                 pong.offset = @bitCast(u64, self.clock.realtime());
                 self.message_bus.send_header_to_replica(message.header.replica, pong);
