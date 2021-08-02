@@ -45,7 +45,7 @@ pub const IO = struct {
         // At the same time, we do not flush any ready CQEs since SQEs may complete synchronously.
         // We guard against an io_uring_enter() syscall if we know we do not have any queued SQEs.
         // We cannot use `self.ring.sq_ready()` here since this counts flushed and unflushed SQEs.
-        const queued = self.ring.sq.sqe_tail -% self.ring.sq.sqe_head;
+        const queued = self.ring.sq_ready();
         if (queued > 0) {
             try self.flush_submissions(0, &timeouts, &etime);
             assert(etime == false);
@@ -80,22 +80,18 @@ pub const IO = struct {
     }
 
     fn ring_absolute_timeout(self: *IO, nanoseconds: u63) io_uring.__kernel_timespec {
-        // We must use the same clock source used by io_uring since we specify the
+        // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
-        // dramatically different.
-        var now = blk: {
-            if (is_darwin) {
-                break :blk self.ring.now();
-            }
-
-            // The io_uring clock source is CLOCK_MONOTONIC.
-            // Any kernel that supports io_uring will also support CLOCK_MONOTONIC.
-            var ts: os.timespec = undefined;
+        // dramatically different. Any kernel that supports io_uring will also support CLOCK_MONOTONIC.
+        var ts: os.timespec = undefined;
+        if (is_darwin) {
+            ts = self.ring.clock_gettime();
+        } else {
             os.clock_gettime(os.CLOCK_MONOTONIC, &ts) catch unreachable;
-            break :blk @intCast(u64, ts.tv_sec) * std.time.ns_per_s + @intCast(u64, ts.tv_nsec);
-        };
+        }
 
         // Add nanoseconds as a u64 to account for tv_nsec overflow in final timespec conversion
+        const now = @intCast(u64, ts.tv_sec) * std.time.ns_per_s + @intCast(u64, ts.tv_nsec);
         now += nanoseconds;
         return io_uring.__kernel_timespec{
             .tv_sec = @intCast(i64, now / std.time.ns_per_s),
@@ -513,7 +509,7 @@ pub const IO = struct {
             flags: u32,
         },
         timeout: struct {
-            timespec: os.__kernel_timespec,
+            timespec: io_uring.__kernel_timespec,
         },
         write: struct {
             fd: os.fd_t,
