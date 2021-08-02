@@ -4,18 +4,22 @@ const config = @import("config.zig");
 
 const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
-const Client = @import("client.zig").Client;
-const ClientError = @import("client.zig").ClientError;
+
 const MessageBus = @import("message_bus.zig").MessageBusClient;
-const TigerBeetle = @import("tigerbeetle.zig");
-const Transfer = TigerBeetle.Transfer;
-const Commit = TigerBeetle.Commit;
-const Account = TigerBeetle.Account;
-const CreateAccountsResult = TigerBeetle.CreateAccountsResult;
-const CreateTransfersResult = TigerBeetle.CreateTransfersResult;
-const Operation = @import("state_machine.zig").StateMachine.Operation;
-const Header = @import("vr.zig").Header;
+const StateMachine = @import("state_machine.zig").StateMachine;
+const Operation = StateMachine.Operation;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
+
+const vr = @import("vr.zig");
+const Header = vr.Header;
+const Client = vr.Client(StateMachine, MessageBus);
+
+const tb = @import("tigerbeetle.zig");
+const Transfer = tb.Transfer;
+const Commit = tb.Commit;
+const Account = tb.Account;
+const CreateAccountsResult = tb.CreateAccountsResult;
+const CreateTransfersResult = tb.CreateTransfersResult;
 
 const MAX_TRANSFERS: u32 = 1_000_000;
 const BATCH_SIZE: u32 = 10_000;
@@ -78,7 +82,7 @@ pub fn main() !void {
         &message_bus,
     );
     defer client.deinit();
-    message_bus.process = .{ .client = &client };
+    message_bus.set_on_message(*Client, &client, Client.on_message);
 
     // Pre-allocate a million transfers:
     var transfers = try arena.allocator.alloc(Transfer, MAX_TRANSFERS);
@@ -244,7 +248,7 @@ const TimedQueue = struct {
         }
     }
 
-    pub fn lap(user_data: u128, operation: Operation, results: ClientError![]const u8) void {
+    pub fn lap(user_data: u128, operation: Operation, results: Client.Error![]const u8) void {
         const now = std.time.milliTimestamp();
         const value = results catch |err| {
             log.emerg("Client returned error={o}", .{@errorName(err)});
