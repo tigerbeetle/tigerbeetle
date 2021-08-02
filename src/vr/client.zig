@@ -63,7 +63,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             assert(id > 0);
 
             // Add jitter to prevent a thundering herd if all clients are restarted simultaneously.
-            const jitter = id % at_least_one_second_in_ticks;
+            const jitter = @truncate(u64, id) % at_least_one_second_in_ticks;
 
             var self = Self{
                 .allocator = allocator,
