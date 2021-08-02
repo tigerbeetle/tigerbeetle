@@ -6,7 +6,6 @@ const config = @import("../config.zig");
 const vr = @import("../vr.zig");
 const Header = vr.Header;
 
-const StateMachine = @import("../state_machine.zig").StateMachine;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 
@@ -14,7 +13,7 @@ const log = std.log;
 
 const at_least_one_second_in_ticks = std.math.max(1, @divFloor(std.time.ms_per_s, config.tick_ms));
 
-pub fn Client(comptime MessageBus: type) type {
+pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
     return struct {
         const Self = @This();
 
