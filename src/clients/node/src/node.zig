@@ -149,6 +149,7 @@ const Context = struct {
 
         context.client = try Client.init(
             allocator,
+            std.crypto.random.int(u128),
             cluster,
             @intCast(u8, addresses.len),
             &context.message_bus,
