@@ -11,7 +11,9 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 
 const log = std.log;
 
-const at_least_one_second_in_ticks = std.math.max(1, @divFloor(std.time.ms_per_s, config.tick_ms));
+// We initialize the client to use conservative timeouts until we can estimate the round-trip time:
+const timeout_min = std.math.max(1, @divFloor(std.time.ms_per_s, config.tick_ms));
+const timeout_max = timeout_min * 2;
 
 pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
     return struct {
@@ -29,66 +31,105 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             ) void;
             user_data: u128,
             callback: Callback,
-            operation: StateMachine.Operation,
             message: *Message,
         };
 
         allocator: *mem.Allocator,
-        id: u128,
-        cluster: u32,
-        replica_count: u8,
         message_bus: *MessageBus,
 
-        // TODO Track the latest view number received in .pong and .reply messages.
-        request_number_min: u32 = 0,
-        request_number_max: u32 = 0,
+        /// A universally unique identifier for the client (must not be zero).
+        /// Used for routing replies back to the client via any network path (multi-path routing).
+        /// The client ID must be ephemeral and random per process, and never persisted, so that
+        /// lingering or zombie deployment processes cannot break correctness and/or liveness.
+        /// A cryptographic random number generator must be used to ensure these properties.
+        id: u128,
 
-        /// Leave one Message free to receive with:
+        /// The identifier for the cluster that this client intends to communicate with.
+        cluster: u32,
+
+        /// The number of replicas in the cluster.
+        replica_count: u8,
+
+        /// The total number of ticks elapsed since the client was initialized.
+        ticks: u64 = 0,
+
+        /// We hash-chain request/reply checksums to verify linearizability within a client session:
+        /// * so that the parent of the next request is the checksum of the latest reply, and
+        /// * so that the parent of the next reply is the checksum of the latest request.
+        parent: u128 = 0,
+
+        /// The session number for the client, zero when registering a session, non-zero thereafter.
+        session: u64 = 0,
+
+        /// The request number of the next request.
+        request_number: u32 = 0,
+
+        /// The highest view number seen by the client in messages exchanged with the cluster.
+        /// Used to locate the current leader, and provide more information to a partitioned leader.
+        view: u32 = 0,
+
+        /// A client is allowed at most one inflight request at a time at the protocol layer.
+        /// We therefore queue any further concurrent requests made by the application layer.
+        /// We must leave one message free to receive with.
         request_queue: RingBuffer(Request, config.message_bus_messages_max - 1) = .{},
+
+        /// The value of `ticks` when the inflight request was first sent.
+        /// Used to measure the request/reply round-trip time in ticks for optimal timeouts.
+        /// We do not reset this when resending because we do not know which message made it
+        /// through, and because we would rather err on the side of overestimating the RTT.
+        request_ticks: u64 = 0,
+
+        /// The number of ticks without a reply before the client resends the inflight request.
         request_timeout: vr.Timeout,
 
+        /// The number of timeouts experienced by the inflight request since it was first sent.
+        /// Used for calculating exponential backoff with jitter.
+        request_timeouts: u64 = 0,
+
+        /// The number of ticks before the client broadcasts a ping to the cluster.
+        /// Used for end-to-end keepalive, and to discover a new leader between requests.
         ping_timeout: vr.Timeout,
+
+        /// Used to calculate exponential backoff with random jitter.
+        /// Seeded with the client's ID.
+        prng: std.rand.DefaultPrng,
 
         pub fn init(
             allocator: *mem.Allocator,
+            id: u128,
             cluster: u32,
             replica_count: u8,
             message_bus: *MessageBus,
         ) !Self {
+            assert(id > 0);
             assert(replica_count > 0);
 
-            const id = std.crypto.random.int(u128);
-            // We require the client ID to be non-zero for client requests:
-            // The probability of a CSPRNG returning zero is very unlikely (more likely a bug).
-            assert(id > 0);
-
-            // Add jitter to prevent a thundering herd if all clients are restarted simultaneously.
-            const jitter = @truncate(u64, id) % at_least_one_second_in_ticks;
+            var prng = std.rand.DefaultPrng.init(@truncate(u64, id));
 
             var self = Self{
                 .allocator = allocator,
+                .message_bus = message_bus,
                 .id = id,
                 .cluster = cluster,
                 .replica_count = replica_count,
-                .message_bus = message_bus,
-                // Start with a conservative timeout while we are still working out the RTT:
                 .request_timeout = .{
                     .name = "request_timeout",
                     .replica = std.math.maxInt(u8),
-                    .after = at_least_one_second_in_ticks + jitter,
+                    .after = vr.exponential_backoff_with_jitter(&prng, timeout_min, timeout_max, 0),
                 },
                 .ping_timeout = .{
                     .name = "ping_timeout",
                     .replica = std.math.maxInt(u8),
-                    .after = at_least_one_second_in_ticks + jitter,
+                    .after = vr.exponential_backoff_with_jitter(&prng, timeout_min, timeout_max, 0),
                 },
+                .prng = prng,
             };
 
-            assert(self.request_timeout.after >= at_least_one_second_in_ticks);
-            assert(self.request_timeout.after <= at_least_one_second_in_ticks * 2);
+            assert(self.request_timeout.after >= timeout_min);
+            assert(self.request_timeout.after <= timeout_max);
 
-            assert(self.ping_timeout.after >= at_least_one_second_in_ticks);
-            assert(self.ping_timeout.after <= at_least_one_second_in_ticks * 2);
+            assert(self.ping_timeout.after >= timeout_min);
+            assert(self.ping_timeout.after <= timeout_max);
 
             self.ping_timeout.start();
 
@@ -97,157 +138,6 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
         pub fn deinit(self: *Self) void {}
 
-        pub fn tick(self: *Self) void {
-            self.message_bus.tick();
-
-            self.request_timeout.tick();
-            if (self.request_timeout.fired()) self.on_request_timeout();
-
-            self.ping_timeout.tick();
-            if (self.ping_timeout.fired()) self.on_ping_timeout();
-
-            // TODO Resend the request to the leader when the request_timeout fires.
-            // This covers for dropped packets, when the leader is still the leader.
-
-            // TODO Resend the request to the next replica and so on each time the reply_timeout fires.
-            // This anticipates the next view change, without the cost of broadcast against the cluster.
-
-            // TODO Tick ping_timeout and send ping if necessary to all replicas.
-            // We need to keep doing this until we discover our latest request_number.
-            // Thereafter, we can extend our ping_timeout considerably.
-            // The cluster can use this ping information to do LRU eviction from the client table when
-            // it is overflowed by the number of unique client IDs.
-
-            // TODO Resend the request to the leader when the request_timeout fires.
-            // This covers for dropped packets, when the leader is still the leader.
-
-            // TODO Resend the request to the next replica and so on each time the reply_timeout fires.
-            // This anticipates the next view change, without the cost of broadcast against the cluster.
-        }
-
-        /// A client is allowed at most one inflight request at a time at the protocol layer.
-        /// We therefore queue any further concurrent requests by the application layer.
-        pub fn request(
-            self: *Self,
-            user_data: u128,
-            callback: Request.Callback,
-            operation: StateMachine.Operation,
-            message: *Message,
-            body_size: usize,
-        ) void {
-            const message_size = @intCast(u32, @sizeOf(Header) + body_size);
-            assert(message_size <= config.message_size_max);
-
-            self.request_number_max += 1;
-            log.debug("{} request: setting request={}", .{ self.id, self.request_number_max });
-            message.header.* = .{
-                .client = self.id,
-                .cluster = self.cluster,
-                .request = self.request_number_max,
-                .command = .request,
-                .operation = vr.Operation.from(StateMachine, operation),
-                .size = message_size,
-            };
-            const body = message.buffer[@sizeOf(Header)..][0..body_size];
-            message.header.set_checksum_body(body);
-            message.header.set_checksum();
-
-            const was_empty = self.request_queue.empty();
-            self.request_queue.push(.{
-                .user_data = user_data,
-                .callback = callback,
-                .operation = operation,
-                .message = message.ref(),
-            }) catch |err| switch (err) {
-                error.NoSpaceLeft => {
-                    callback(
-                        user_data,
-                        operation,
-                        error.TooManyOutstandingRequests,
-                    );
-                    return;
-                },
-                else => unreachable,
-            };
-
-            // If the queue was empty, there is no currently inflight message, so send this one.
-            if (was_empty) self.send_request(message);
-        }
-
-        /// Helper function to get an available message from the message bus.
-        pub fn get_message(self: *Self) ?*Message {
-            return self.message_bus.get_message();
-        }
-
-        /// Helper function to get the message bus to unref the message.
-        pub fn unref(self: *Self, message: *Message) void {
-            self.message_bus.unref(message);
-        }
-
-        fn on_request_timeout(self: *Self) void {
-            const current_request = self.request_queue.peek_ptr() orelse return;
-
-            log.debug("Retrying timed out request {o}.", .{current_request.message.header});
-            self.request_timeout.stop();
-            self.retry_request(current_request.message);
-        }
-
-        fn send(self: *Self, message: *Message, isRetry: bool) void {
-            if (!isRetry) self.request_number_min += 1;
-            log.debug("{} send: request_number_min={}", .{ self.id, self.request_number_min });
-            assert(message.header.valid_checksum());
-            assert(message.header.request == self.request_number_min);
-            assert(message.header.client == self.id);
-            assert(message.header.cluster == self.cluster);
-            assert(!self.request_timeout.ticking);
-
-            self.send_message_to_replicas(message);
-            self.request_timeout.start();
-        }
-
-        fn send_request(self: *Self, message: *Message) void {
-            self.send(message, false);
-        }
-
-        fn retry_request(self: *Self, message: *Message) void {
-            self.send(message, true);
-        }
-
-        fn on_reply(self: *Self, reply: *Message) void {
-            assert(reply.header.valid_checksum());
-            assert(reply.header.valid_checksum_body(reply.body()));
-
-            if (reply.header.client != self.id or reply.header.cluster != self.cluster) {
-                log.debug("{} on_reply: Dropping unsolicited message.", .{self.id});
-                return;
-            }
-
-            const queued_request = self.request_queue.peek_ptr().?;
-
-            if (reply.header.request < queued_request.message.header.request) {
-                log.debug(
-                    "{} on_reply: Dropping duplicate message. request={}",
-                    .{ self.id, reply.header.request },
-                );
-                return;
-            }
-            assert(reply.header.request == queued_request.message.header.request);
-            assert(reply.header.operation.cast(StateMachine) == queued_request.operation);
-
-            self.request_timeout.stop();
-            queued_request.callback(
-                queued_request.user_data,
-                queued_request.operation,
-                reply.body(),
-            );
-            _ = self.request_queue.pop().?;
-            self.message_bus.unref(queued_request.message);
-
-            if (self.request_queue.peek_ptr()) |next_request| {
-                self.send_request(next_request.message);
-            }
-        }
-
         pub fn on_message(self: *Self, message: *Message) void {
             log.debug("{}: on_message: {}", .{ self.id, message.header });
             if (message.header.invalid()) |reason| {
@@ -255,30 +145,185 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 return;
             }
             if (message.header.cluster != self.cluster) {
-                log.warn("{}: on_message: wrong cluster (message.header.cluster={} instead of {})", .{
+                log.warn("{}: on_message: wrong cluster (cluster should be {}, not {})", .{
                     self.id,
-                    message.header.cluster,
                     self.cluster,
+                    message.header.cluster,
                 });
                 return;
             }
             switch (message.header.command) {
+                .pong => self.on_pong(message),
                 .reply => self.on_reply(message),
-                .ping => self.on_ping(message),
-                .pong => {
-                    // TODO: when we implement proper request number usage, we will
-                    // need to get the request number from a pong message on startup.
-
-                    // Set our ticks value when we ping the leader.
-                    // Compare our ticks value with this value when we receive the pong back.
-                    // Then adjust on_request_timeout to be twice this value.
-                },
                 else => {
+                    // This could be because of a misdirected packet.
                     log.warn(
                         "{}: on_message: unexpected command {}",
                         .{ self.id, message.header.command },
                     );
                 },
+            }
+        }
+
+        pub fn tick(self: *Self) void {
+            self.ticks += 1;
+
+            self.message_bus.tick();
+
+            self.ping_timeout.tick();
+            self.request_timeout.tick();
+
+            if (self.ping_timeout.fired()) self.on_ping_timeout();
+            if (self.request_timeout.fired()) self.on_request_timeout();
+        }
+
+        pub fn request(
+            self: *Self,
+            user_data: u128,
+            callback: Request.Callback,
+            operation: StateMachine.Operation,
+            message: *Message,
+            message_body_size: usize,
+        ) void {
+            self.register();
+
+            // We will set parent, context, view and checksums only when sending for the first time:
+            message.header.* = .{
+                .client = self.id,
+                .request = self.request_number,
+                .cluster = self.cluster,
+                .command = .request,
+                .operation = vr.Operation.from(StateMachine, operation),
+                .size = @intCast(u32, @sizeOf(Header) + message_body_size),
+            };
+
+            self.request_number += 1;
+
+            log.debug("{}: request: user_data={} request={} size={} {s}", .{
+                self.id,
+                user_data,
+                message.header.request,
+                message.header.size,
+                @tagName(operation),
+            });
+
+            const was_empty = self.request_queue.empty();
+
+            self.request_queue.push(.{
+                .user_data = user_data,
+                .callback = callback,
+                .message = message.ref(),
+            }) catch |err| switch (err) {
+                error.NoSpaceLeft => {
+                    callback(user_data, operation, error.TooManyOutstandingRequests);
+                    return;
+                },
+            };
+
+            // If the queue was empty, then there is no request inflight and we must send this one:
+            if (was_empty) self.send_request_for_the_first_time(message);
+        }
+
+        /// Acquires a message from the message bus if one is available.
+        pub fn get_message(self: *Self) ?*Message {
+            return self.message_bus.get_message();
+        }
+
+        /// Releases a message back to the message bus.
+        pub fn unref(self: *Self, message: *Message) void {
+            self.message_bus.unref(message);
+        }
+
+        fn on_pong(self: *Self, pong: *const Message) void {
+            assert(pong.header.command == .pong);
+
+            if (pong.header.client != 0) {
+                log.debug("{}: on_pong: ignoring (client != 0)", .{self.id});
+                return;
+            }
+
+            if (pong.header.view > self.view) {
+                log.debug("{}: on_pong: newer view={}..{}", .{
+                    self.id,
+                    self.view,
+                    pong.header.view,
+                });
+                self.view = pong.header.view;
+            }
+        }
+
+        fn on_reply(self: *Self, reply: *Message) void {
+            assert(reply.header.valid_checksum());
+            assert(reply.header.valid_checksum_body(reply.body()));
+            assert(reply.header.command == .reply);
+            assert(reply.header.cluster == self.cluster);
+            assert(reply.header.op == reply.header.commit);
+            // TODO Add more assertions on the reply.
+
+            if (reply.header.client != self.id) {
+                log.debug("{}: on_reply: ignoring (wrong client={})", .{
+                    self.id,
+                    reply.header.client,
+                });
+                return;
+            }
+
+            const inflight = self.request_queue.peek_ptr() orelse {
+                log.debug("{}: on_reply: ignoring (no inflight request)", .{self.id});
+                return;
+            };
+
+            if (reply.header.request < inflight.message.header.request) {
+                log.debug("{}: on_reply: ignoring (request {} < {})", .{
+                    self.id,
+                    reply.header.request,
+                    inflight.message.header.request,
+                });
+                return;
+            }
+
+            // TODO Log receipt of reply.
+            // TODO Calculate elapsed tick time to set a more optimal timeout for the next request.
+            // TODO Add emerg logs for bad request or parent.
+
+            assert(reply.header.request == inflight.message.header.request);
+            assert(reply.header.operation == inflight.message.header.operation);
+            assert(reply.header.parent == self.parent);
+
+            // The checksum of this reply becomes the parent of our next request:
+            self.parent = reply.header.checksum;
+
+            if (reply.header.view > self.view) {
+                log.debug("{}: on_reply: newer view={}..{}", .{
+                    self.id,
+                    self.view,
+                    reply.header.view,
+                });
+                self.view = reply.header.view;
+            }
+
+            self.request_ticks = 0;
+            assert(self.request_timeout.ticking);
+            self.request_timeout.stop();
+            self.request_timeouts = 0;
+
+            if (inflight.message.header.operation == .register) {
+                assert(self.session == 0);
+                assert(reply.header.commit > 0);
+                self.session = reply.header.commit; // The commit number becomes the session number.
+            } else {
+                inflight.callback(
+                    inflight.user_data,
+                    inflight.message.header.operation.cast(StateMachine),
+                    reply.body(),
+                );
+            }
+
+            _ = self.request_queue.pop().?;
+            self.message_bus.unref(inflight.message);
+
+            if (self.request_queue.peek_ptr()) |next_request| {
+                self.send_request_for_the_first_time(next_request.message);
             }
         }
 
@@ -293,38 +338,140 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
             // TODO If we haven't received a pong from a replica since our last ping, then back off.
             self.send_header_to_replicas(ping);
+
+            self.register();
         }
 
-        fn on_ping(self: Self, ping: *const Message) void {
-            const pong: Header = .{
-                .command = .pong,
-                .cluster = self.cluster,
+        fn on_request_timeout(self: *Self) void {
+            self.request_timeout.reset();
+            self.request_timeouts += 1;
+
+            const message = self.request_queue.peek_ptr().?.message;
+            assert(message.header.command == .request);
+            assert(message.header.request < self.request_number);
+            assert(message.header.checksum == self.parent);
+            assert(message.header.context == self.session);
+
+            log.debug("{}: on_request_timeout: resending request={} checksum={}", .{
+                self.id,
+                message.header.request,
+                message.header.checksum,
+            });
+
+            // We assume the leader is down and round-robin through the cluster:
+            const replica = @intCast(u8, (self.view + self.request_timeouts) % self.replica_count);
+            self.send_message_to_replica(replica, message);
+        }
+
+        /// Registers a session with the cluster for the client, if this has not yet been done.
+        fn register(self: *Self) void {
+            if (self.request_number > 0) return;
+
+            var message = self.message_bus.get_message() orelse
+                @panic("register: no message available to register a session with the cluster");
+
+            // We will set parent, context, view and checksums only when sending for the first time:
+            message.header.* = .{
                 .client = self.id,
+                .request = self.request_number,
+                .cluster = self.cluster,
+                .command = .request,
+                .operation = .register,
             };
-            self.message_bus.send_header_to_replica(ping.header.replica, pong);
+
+            self.request_number += 1;
+
+            log.debug("{}: register: registering a session with the cluster", .{self.id});
+
+            assert(self.request_queue.empty());
+
+            self.request_queue.push(.{
+                .user_data = undefined,
+                .callback = undefined,
+                .message = message.ref(),
+            }) catch |err| switch (err) {
+                error.NoSpaceLeft => unreachable, // This is the first request.
+            };
+
+            self.send_request_for_the_first_time(message);
         }
 
-        fn send_message_to_leader(self: *Self, message: *Message) void {
-            // TODO For this to work, we need to send pings to the cluster every N ticks.
-            // Otherwise, the latest leader will have our connection.peer set to .unknown.
+        fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
+            assert(header.client == self.id);
+            assert(header.cluster == self.cluster);
 
-            // TODO Use the latest view number modulo the configuration length to find the leader.
-            // For now, replica 0 will forward onto the latest leader.
-            self.message_bus.send_message_to_replica(0, message);
-        }
+            log.debug("{}: sending {s} to replica {}: {}", .{
+                self.id,
+                @tagName(header.command),
+                replica,
+                header,
+            });
 
-        fn send_message_to_replicas(self: *Self, message: *Message) void {
-            var replica: u8 = 0;
-            while (replica < self.replica_count) : (replica += 1) {
-                self.message_bus.send_message_to_replica(replica, message);
-            }
+            self.message_bus.send_header_to_replica(replica, header);
         }
 
         fn send_header_to_replicas(self: *Self, header: Header) void {
             var replica: u8 = 0;
             while (replica < self.replica_count) : (replica += 1) {
-                self.message_bus.send_header_to_replica(replica, header);
+                self.send_header_to_replica(replica, header);
             }
+        }
+
+        fn send_message_to_replica(self: *Self, replica: u8, message: *Message) void {
+            log.debug("{}: sending {s} to replica {}: {}", .{
+                self.id,
+                @tagName(message.header.command),
+                replica,
+                message.header,
+            });
+
+            assert(replica < self.replica_count);
+            assert(message.header.valid_checksum());
+            assert(message.header.client == self.id);
+            assert(message.header.cluster == self.cluster);
+
+            self.message_bus.send_message_to_replica(replica, message);
+        }
+
+        fn send_request_for_the_first_time(self: *Self, message: *Message) void {
+            assert(message.header.command == .request);
+            assert(message.header.parent == 0);
+            assert(message.header.context == 0);
+            assert(message.header.request < self.request_number);
+            assert(message.header.view == 0);
+            assert(message.header.size <= config.message_size_max);
+
+            // We set the message checksums only when sending the request for the first time,
+            // which is when we have the checksum of the latest reply available to set as `parent`,
+            // and similarly also the session number if requests were queued while registering:
+            message.header.parent = self.parent;
+            message.header.context = self.session;
+            // We also try to include our highest view number, so we wait until the request is ready
+            // to be sent for the first time. However, beyond that, it is not necessary to update
+            // the view number again, for example if it should change between now and resending.
+            message.header.view = self.view;
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
+
+            // The checksum of this request becomes the parent of our next reply:
+            self.parent = message.header.checksum;
+
+            log.debug("{}: send_request_for_the_first_time: request={} checksum={}", .{
+                self.id,
+                message.header.request,
+                message.header.checksum,
+            });
+
+            assert(!self.request_timeout.ticking);
+            assert(self.request_timeouts == 0);
+            assert(self.request_ticks == 0);
+
+            self.request_timeout.start();
+            self.request_ticks = self.ticks;
+
+            // If our view number is out of date, then the old leader will forward our request.
+            // If the leader is offline, then our request timeout will fire and we will round-robin.
+            self.send_message_to_replica(@intCast(u8, self.view % self.replica_count), message);
         }
     };
 }
