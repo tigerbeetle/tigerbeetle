@@ -27,8 +27,15 @@ trap onerror EXIT
 
 for I in 0
 do
+    echo "Initializing replica $I..."
+    rm "./cluster_0000000001_replica_00${I}.tigerbeetle"
+    ./tigerbeetle init --directory=. --cluster=1 --replica=$I > benchmark.log 2>&1
+done
+
+for I in 0
+do
     echo "Starting replica $I..."
-    ./tigerbeetle --cluster=1 --addresses=3001 --replica=$I > benchmark.log 2>&1 &
+    ./tigerbeetle start --directory=. --cluster=1 --addresses=3001 --replica=$I > benchmark.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:
