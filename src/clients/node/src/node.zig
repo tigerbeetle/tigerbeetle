@@ -15,14 +15,15 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 const CommitTransfersResult = tb.CommitTransfersResult;
 
-const Operation = @import("tigerbeetle/src/state_machine.zig").StateMachine.Operation;
+const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachine;
+const Operation = StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
 const IO = @import("tigerbeetle/src/io.zig").IO;
 const config = @import("tigerbeetle/src/config.zig");
 
 const vr = @import("tigerbeetle/src/vr.zig");
 const Header = vr.Header;
-const Client = vr.Client(MessageBus);
+const Client = vr.Client(StateMachine, MessageBus);
 
 pub const log_level: std.log.Level = .info;
 
