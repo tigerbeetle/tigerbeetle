@@ -3,8 +3,11 @@ const os = std.os;
 const linux = os.linux;
 
 const FIFO = @import("fifo.zig").FIFO;
-const IO = @import("io.zig").IO;
+
+const io = @import("io.zig");
+const IO = io.IO;
 const Completion = IO.Completion;
+const buffer_limit = io.buffer_limit;
 
 pub const Driver = struct {
     ring: linux.IO_Uring,
@@ -39,7 +42,7 @@ pub const Driver = struct {
     pub fn poll(self: *Driver) FIFO(Completion) {
         var completions: FIFO(Completion) = .{};
         while (true) {
-            var cqes: [256]io_uring_cqe = undefined;
+            var cqes: [256]linux.io_uring_cqe = undefined;
             const num_cqes = self.ring.copy_cqes(&cqes, 0) catch unreachable;
             if (num_cqes == 0) break;
             for (cqes[0..num_cqes]) |cqe| {
@@ -56,17 +59,19 @@ pub const Driver = struct {
         flush_submissions: bool,
         wait_for_completions: bool,
     ) IO.EnterError!void {
-        return self.ring.enter(
+        _ = self.ring.enter(
             if (flush_submissions) self.ring.flush_sq() else 0, 
             if (wait_for_completions) 1 else 0, 
             if (wait_for_completions) linux.IORING_ENTER_GETEVENTS else 0,
-        ) catch |err| switch (err) {
-            error.FileDescriptorInvalid, error.SubmissionQueueEntryInvalid => error.InvalidSubmission,
-            error.CompletionQueueOvercommitted, error.SystemResources => error.WaitForCompletions,
-            error.FileDescriptorInBadState, error.RingShuttingDown => error.InternalError,
-            error.OpcodeNotSupported => error.OperationNotSupported,
-            error.UnexpectedError => error.UnexpectedError,
-            error.SignalInterrupt => error.Retry,
+        ) catch |err| {
+            return switch (err) {
+                error.BufferInvalid, error.FileDescriptorInvalid, error.SubmissionQueueEntryInvalid => error.InvalidSubmission,
+                error.CompletionQueueOvercommitted, error.SystemResources => error.WaitForCompletions,
+                error.FileDescriptorInBadState, error.RingShuttingDown => error.InternalError,
+                error.OpcodeNotSupported => error.OperationNotSupported,
+                error.SignalInterrupt => error.Retry,
+                error.Unexpected => error.Unexpected,
+            };
         };
     }
 
@@ -107,7 +112,7 @@ pub const Driver = struct {
                 sqe,
                 op.socket,
                 &op.address.any,
-                &op.address.getOsSockLen(),
+                op.address.getOsSockLen(),
             ),
             .send => |op| linux.io_uring_prep_send(
                 sqe,
