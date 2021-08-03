@@ -12,7 +12,7 @@ pub const Driver = const DarwinDriver = struct {
     time: Time = .{},
     num_submitted: u32 = 0,
     max_submitted: u32 = 0,
-    timeouts: FIFO(Completion) = .{},
+    timeouts: FIFO(Completion) = .{}, // TODO: binary tree to avoid O(n) remove in next_expire()?
     submitted: FIFO(Completion) = .{},
     completed: FIFO(Completion) = .{},
 
@@ -254,19 +254,34 @@ pub const Driver = const DarwinDriver = struct {
             else => unreachable, // operation is not evented
         };
 
+        // Complete the completion if it doesn't need to wait for an event.
         if (completion.result != -os.EAGAIN) {
             self.completed.push(completion);
             return;
         }
         
+        // Fill the os.Kevent with a change event describing a filter
+        // to wait for the socket in the operation to become either readable or writable.
+        // The filter is created as ONESHOT so that it is only triggered/generated once.
         event.* = .{
-            .ident = fd,
-            .filter = filter,
+            .ident = switch (completion.op) {
+                .accept => |op| op.socket,
+                .connect => |op| op.socket,
+                .recv => |op| op.socket,
+                .send => |op| op.socket,
+                else => unreachable, // operation is not evented
+            },
+            .filter = switch (completion.op) {
+                .accept, .recv => os.EVFILT_READ,
+                .connect, .send => os.EVFILT_WRITE,
+                else => unreachable, // operation is not evented
+            },
             .flags = os.EV_CLEAR | os.EV_ADD | os.EV_ENABLE | os.EV_ONESHOT,
             .fflags = 0,
             .data = 0,
             .udata = @ptrToInt(completion),
         };
+
         return error.Evented;
     }
 };
