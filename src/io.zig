@@ -18,7 +18,7 @@ pub const IO = struct {
     completed: FIFO(Completion) = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
-        return IO{ .driver = Driver.init(entries) };    
+        return IO{ .driver = try Driver.init(entries) };    
     }
 
     pub fn deinit(self: *IO) void {
@@ -71,7 +71,7 @@ pub const IO = struct {
                 _ = result catch @panic("run_for_ns timeout failed");
                 timed_out_ptr.* = true;
             }
-        };
+        }.callback;
         
         // Submit the timeout completion...
         const timed_out_ptr = &timed_out;
@@ -104,9 +104,9 @@ pub const IO = struct {
         self.poll_completions();
 
         // Having just flushed pending submissions,
-        // try to fill up the ring's submission queue with unqueued submissions.
+        // try to fill up the driver's submission queue with unqueued submissions.
         while (self.unqueued.peek()) |completion| {
-            if (self.ring.submit(completion)) |_| {
+            if (self.driver.submit(completion)) |_| {
                 self.unqueued.remove(completion);
             } else |_| {
                 break;
@@ -119,7 +119,7 @@ pub const IO = struct {
         self.completed = .{};
         while (completed.pop()) |completion| completion.callback(completion);
 
-        // Flush any submissions made from either the unqueued ring.submit()'s
+        // Flush any submissions made from either the unqueued driver.submit()'s
         // or completion callback self.enqueue()S as an optimization to avoid 
         // the submissions waiting in the queue for the next tick.
         try self.flush_submissions(false);
@@ -128,7 +128,7 @@ pub const IO = struct {
     fn poll_completions(self: *IO) void {
         // Reap all the completions available at this point in time
         while (true) {
-            var completions = self.ring.poll();
+            var completions = self.driver.poll();
             if (completions.peek() == null) break;
             self.completed.push_all(completions);
         }
@@ -138,8 +138,8 @@ pub const IO = struct {
         while (true) {
             // Don't enter() (syscall) if there's no submissions 
             // and if there's no completions to wait for.
-            if (!self.ring.has_submissions()) {
-                if (!wait_for_completions or self.ring.has_completions()) {
+            if (!self.driver.has_submissions()) {
+                if (!wait_for_completions or self.driver.has_completions()) {
                     return;
                 }
             }
@@ -147,20 +147,20 @@ pub const IO = struct {
             // Flush any submissions while also potentially waiting for completions
             // when necessary using the same enter() (syscall).
             while (true) {
-                return self.ring.enter(true, wait_for_completions) catch |err| switch (err) {
+                return self.driver.enter(true, wait_for_completions) catch |err| switch (err) {
                     error.Retry => continue,
                     error.WaitForCompletions => break,
                     else => |e| return e,
                 };
             }
 
-            // Either the ring is under memory pressure or it's completion queue is overflowing.
+            // Either the driver is under memory pressure or it's completion queue is overflowing.
             // Regardless, wait for some completions to occur to either:
             // - make room in the completion queue and avoid overflow
             // - release some memory by consuming some completions
             // then break to try and do the submissions again. 
             while (true) {
-                self.ring.enter(false, true) catch |err| switch (err) {
+                self.driver.enter(false, true) catch |err| switch (err) {
                     error.Retry => continue,
                     else => |e| return e,
                 };
@@ -176,14 +176,14 @@ pub const IO = struct {
         io: *IO,
         context: ?*c_void,
         callback: fn(*Completion) void,
-        result: i32 = undefined,
+        result: isize = undefined,
         op: Operation,
     };
     
     /// Defines an IO operation taken by the Driver
     const Operation = union(enum) {
         close: os.fd_t,
-        timeout: {
+        timeout: struct {
             expires: u64,
             ts: if (@hasDecl(os, "__kernel_timespec")) os.__kernel_timespec else os.timespec,
         },
@@ -221,7 +221,7 @@ pub const IO = struct {
     };
 
     fn enqueue(self: *IO, completion: *Completion) void {
-        self.ring.submit(completion) catch {
+        self.driver.submit(completion) catch {
             completion.next = null;
             self.unqueued.push(completion);
         };
@@ -231,7 +231,7 @@ pub const IO = struct {
         self: *IO, 
         completion: *Completion, 
         context: ?*c_void,
-        op: Operation, 
+        operation: Operation, 
         comptime CallbackHandler: type,
     ) void {
         completion.* = .{
@@ -304,7 +304,7 @@ pub const IO = struct {
             context,
             .{
                 .timeout = .{
-                    .expires = self.ring.timestamp() + nanoseconds,
+                    .expires = self.driver.timestamp() + nanoseconds,
                     .ts = undefined,
                 },
             },
@@ -441,29 +441,22 @@ pub const IO = struct {
                                 completion.io.enqueue(completion);
                                 return;
                             },
-                            os.EACCES => error.AccessDenied,
-                            os.EBADF => error.FileDescriptorInvalid,
-                            os.EBUSY => error.DeviceBusy,
-                            os.EEXIST => error.PathAlreadyExists,
+                            os.EAGAIN => error.WouldBlock,
+                            os.EBADF => error.NotOpenForWriting,
+                            os.EDESTADDRREQ => error.NotConnected,
+                            os.EDQUOT => error.DiskQuota,
                             os.EFAULT => unreachable,
                             os.EFBIG => error.FileTooBig,
-                            os.EINVAL => error.ArgumentsInvalid,
-                            os.EISDIR => error.IsDir,
-                            os.ELOOP => error.SymLinkLoop,
-                            os.EMFILE => error.ProcessFdQuotaExceeded,
-                            os.ENAMETOOLONG => error.NameTooLong,
-                            os.ENFILE => error.SystemFdQuotaExceeded,
-                            os.ENODEV => error.NoDevice,
-                            os.ENOENT => error.FileNotFound,
-                            os.ENOMEM => error.SystemResources,
+                            os.EINVAL => error.Alignment,
+                            os.EIO => error.InputOutput,
                             os.ENOSPC => error.NoSpaceLeft,
-                            os.ENOTDIR => error.NotDir,
-                            os.EOPNOTSUPP => error.FileLocksNotSupported,
-                            os.EOVERFLOW => error.FileTooBig,
+                            os.ENXIO => error.Unseekable,
+                            os.EOVERFLOW => error.Unseekable,
                             os.EPERM => error.AccessDenied,
-                            os.EWOULDBLOCK => error.WouldBlock,
+                            os.EPIPE => error.BrokenPipe,
+                            os.ESPIPE => error.Unseekable,
                             else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                        } else @intCast(os.fd_t, completion.result),
+                        } else @intCast(usize, completion.result),
                     );
                 }
             },
@@ -595,6 +588,7 @@ pub const IO = struct {
         OpenAlreadyInProgress,
         FileDescriptorInvalid,
         ConnectionRefused,
+        ConnectionResetByPeer,
         AlreadyConnected,
         NetworkUnreachable,
         FileNotFound,
@@ -737,6 +731,7 @@ pub const IO = struct {
         WouldBlock,
         FileDescriptorInvalid,
         ConnectionRefused,
+        ConnectionResetByPeer,
         SystemResources,
         SocketNotConnected,
         FileDescriptorNotASocket,
@@ -751,7 +746,7 @@ pub const IO = struct {
             completion: *Completion,
             result: RecvError!usize,
         ) void,
-        completion: *Completion,
+        _completion: *Completion,
         socket: os.socket_t,
         buffer: []u8,
     ) void {

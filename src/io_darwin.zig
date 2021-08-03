@@ -4,10 +4,13 @@ const linux = os.linux;
 
 const Time = @import("time.zig").Time;
 const FIFO = @import("fifo.zig").FIFO;
-const IO = @import("io.zig").IO;
-const Completion = IO.Completion;
 
-pub const Driver = const DarwinDriver = struct {
+const io = @import("io.zig");
+const IO = io.IO;
+const Completion = IO.Completion;
+const buffer_limit = io.buffer_limit;
+
+pub const Driver = struct {
     kq: os.fd_t,
     time: Time = .{},
     num_submitted: u32 = 0,
@@ -63,7 +66,7 @@ pub const Driver = const DarwinDriver = struct {
         // in the event that their kevent's fail to get registered. 
         var num_evented: u32 = 0;
         var evented: FIFO(Completion) = .{};
-        defer if (num_events > 0) {
+        defer if (num_evented > 0) {
             self.num_submitted += num_evented;
             evented.push_all(self.submitted);
             self.submitted = evented;
@@ -91,9 +94,16 @@ pub const Driver = const DarwinDriver = struct {
         var timeout_ts = std.mem.zeroes(os.timespec);
         var timeout_ptr: ?*const os.timespec = &timeout_ts;
         if (wait_for_completions) blk: {
+            // No timers when waiting means that the timeout should be null to wait forever.
+            if (self.timeouts.peek() == null) {
+                timeout_ptr = null;
+                break :blk;
+            }
+
             // Check for timers if this call to enter() is allowed to wait.
-            // No timers while also waiting means that the timeout should be null to wait forever.
-            const next_exp = self.next_expire() orelse {
+            // Wait forever if all the timeouts expire by nulling out the timespec
+            const now = self.timestamp();
+            const next_exp = self.next_expire(now) orelse {
                 timeout_ptr = null;
                 break :blk;
             };
@@ -107,9 +117,9 @@ pub const Driver = const DarwinDriver = struct {
 
         const rc = os.system.kevent(
             self.kq,
-            events[0..].ptr,
+            &events,
             @intCast(c_int, change_events),
-            events[0..].ptr,
+            &events,
             @intCast(c_int, events.len),
             timeout_ptr,
         );
@@ -124,7 +134,7 @@ pub const Driver = const DarwinDriver = struct {
             os.ENOENT => unreachable, // only for event modification and deletion
             os.ENOMEM => return error.WaitForCompletions, // no memory for the change_events
             os.ESRCH => unreachable, // only for process attaching,
-            else => |err| os.unexpectedErrno(err),
+            else => |err| return os.unexpectedErrno(err),
         };
 
         // Change events were successfully submitted
@@ -132,14 +142,11 @@ pub const Driver = const DarwinDriver = struct {
         evented = .{};
         num_evented = 0;
 
-        // Get the current time if necessary
-        var now: u64 = undefined;
-        if (num_events > 0 or self.timeouts.peek() != null) {
-            now = self.timestamp();
-        }
-
         // Check for expired timers after successfully polling in case there are any.    
-        _ = self.next_expire(now);
+        if (self.timeouts.peek() != null) {
+            const now = self.timestamp();
+            _ = self.next_expire(now);
+        }
 
         // Retry any completions ready from the events.
         // Those which are still not ready are added back to the submission list via evented.
@@ -156,8 +163,8 @@ pub const Driver = const DarwinDriver = struct {
     /// Iterate the timers and either invalidate them or decide the 
     /// smallest amount of time to wait on kevent() to expire one. 
     fn next_expire(self: *Driver, now: u64) ?u64 {
-        var next_expire: ?u64 = null;
-        var timed = self.timeout.peek();
+        var next: ?u64 = null;
+        var timed = self.timeouts.peek();
         while (timed) |completion| {
             timed = completion.next;
 
@@ -165,18 +172,18 @@ pub const Driver = const DarwinDriver = struct {
             if (now > expires) {
                 completion.result = -os.ETIME;
                 self.timeouts.remove(completion);
-                self.completions.push(completion);
+                self.completed.push(completion);
                 continue;
             }
 
-            const current_expire = next_expire orelse std.math.maxInt(u64);
-            next_expire = std.math.min(current_expire, expires);
+            const current_expire = next orelse std.math.maxInt(u64);
+            next = std.math.min(current_expire, expires);
         }
-        return next_expire;
+        return next;
     }
 
     /// Perform a system call, returning the result in a similar format to linux.io_uring_cqe.result
-    fn syscall(self: *Driver, comptime func: anytype, args: anytype) i32 {
+    fn syscall(self: *Driver, comptime func: anytype, args: anytype) isize {
         const rc = @call(.{}, func, args);
         return switch (os.errno(rc)) {
             0 => rc,
@@ -205,7 +212,7 @@ pub const Driver = const DarwinDriver = struct {
                 completion.result = self.syscall(os.system.pread, .{
                     op.fd, 
                     op.buffer.ptr,
-                    buffer_limit(os.buffer.len),
+                    buffer_limit(op.buffer.len),
                     @bitCast(i64, op.offset),
                 });
                 self.completed.push(completion);
@@ -214,12 +221,18 @@ pub const Driver = const DarwinDriver = struct {
                 completion.result = self.syscall(os.system.pwrite, .{
                     op.fd, 
                     op.buffer.ptr,
-                    buffer_limit(os.buffer.len),
+                    buffer_limit(op.buffer.len),
                     @bitCast(i64, op.offset),
                 });
             },
             .fsync => |op| {
-                completion.result = P.syscall(os.system.fsync, .{op.fd, op.flags});
+                // Try to use F_FULLFSYNC over fsync() when possible
+                //
+                // https://github.com/untitaker/python-atomicwrites/issues/6
+                // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fcntl.2.html
+                // https://github.com/rust-lang/rust/blob/1195bea5a7b73e079fa14b37ac7e375fc77d368a/library/std/src/sys/unix/fs.rs#L787
+                completion.result = self.syscall(os.system.fcntl, .{op.fd, os.F_FULLFSYNC, @as(usize, 0)});
+                if (completion.result < 0) completion.result = self.syscall(os.system.fsync, .{op.fd});
                 self.completed.push(completion);
             },
             .accept, .connect, .recv, .send => {
@@ -245,17 +258,38 @@ pub const Driver = const DarwinDriver = struct {
                 op.socket, 
                 op.buffer.ptr,
                 op.buffer.len,
+                0,
             }),
             .send => |op| self.syscall(os.system.send, .{
                 op.socket, 
                 op.buffer.ptr,
                 op.buffer.len,
+                0,
             }),
             else => unreachable, // operation is not evented
         };
 
         // Complete the completion if it doesn't need to wait for an event.
         if (completion.result != -os.EAGAIN) {
+            // On a valid accept call, make the socket non-blocking
+            if (completion.result >= 0 and completion.op == .accept) {
+                const fd = @intCast(os.fd_t, completion.result);
+
+                // Store any errors that occur in the non-blocking process in completion.result
+                completion.result = self.syscall(os.system.fcntl, .{fd, os.F_GETFL, @as(usize, 0)});
+                if (completion.result >= 0) {
+                    const new = @intCast(usize, completion.result) | os.O_NONBLOCK;
+                    completion.result = self.syscall(os.system.fcntl, .{fd, os.F_SETFL, new});
+                }
+
+                // Make sure to restore the fd result or destroy it in case of error
+                if (completion.result >= 0) {
+                    completion.result = fd;
+                } else {
+                    os.close(fd);
+                }
+            }
+
             self.completed.push(completion);
             return;
         }
@@ -264,13 +298,13 @@ pub const Driver = const DarwinDriver = struct {
         // to wait for the socket in the operation to become either readable or writable.
         // The filter is created as ONESHOT so that it is only triggered/generated once.
         event.* = .{
-            .ident = switch (completion.op) {
+            .ident = @intCast(usize, switch (completion.op) {
                 .accept => |op| op.socket,
                 .connect => |op| op.socket,
                 .recv => |op| op.socket,
                 .send => |op| op.socket,
                 else => unreachable, // operation is not evented
-            },
+            }),
             .filter = switch (completion.op) {
                 .accept, .recv => os.EVFILT_READ,
                 .connect, .send => os.EVFILT_WRITE,
