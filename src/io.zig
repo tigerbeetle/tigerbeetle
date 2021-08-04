@@ -139,9 +139,8 @@ pub const IO = struct {
             // Don't enter() (syscall) if there's no submissions 
             // and if there's no completions to wait for.
             if (!self.driver.has_submissions()) {
-                if (!wait_for_completions or self.driver.has_completions()) {
-                    return;
-                }
+                if (!wait_for_completions) return;
+                if (self.completed.peek() != null or self.driver.has_completions()) return;
             }
 
             // Flush any submissions while also potentially waiting for completions
