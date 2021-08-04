@@ -724,9 +724,34 @@ test "fuzz test" {
         simulator.tick();
     }
 
-    std.debug.print("prng seed={}\n", .{prng_seed});
-    std.debug.print("Packets dropped due to congestion={}\n", .{simulator.network.stats[0]});
-    std.debug.print("Packets dropped={}\n", .{simulator.network.stats[1]});
-    std.debug.print("Packets replayed on reverse path={}\n", .{simulator.network.stats[2]});
-    std.debug.print("Packets replayed on forward path={}\n", .{simulator.network.stats[3]});
+    var test_delta_time: u64 = std.time.ns_per_s / 2;
+    var sync_errors: [clock_count]?i64 = undefined;
+    var test_time: u64 = ticks_max * test_delta_time;
+    var minimum_sync_error: ?u64 = null;
+    var index: u8 = 0;
+
+    std.debug.print("prng seed={} max ticks={}\n", .{ prng_seed, ticks_max });
+
+    while (index < clock_count) : (index += 1) {
+        const clock = &simulator.clocks[index];
+        if (clock.realtime_synchronized()) |synced_time| {
+            var err: i64 = @intCast(i64, test_time) - synced_time;
+            var absolute_error: u64 = if (err < 0) @intCast(u64, -err) else @intCast(u64, err);
+            minimum_sync_error = if (minimum_sync_error == null or
+                minimum_sync_error.? > absolute_error) absolute_error else minimum_sync_error;
+
+            std.debug.print("clock={} is {} behind\n", .{ index, fmtDurationSigned(err) });
+        } else {
+            std.debug.print("clock={} failed to synchronize.\n", .{index});
+        }
+    }
+
+    if (minimum_sync_error) |err| {
+        std.debug.print(
+            "minimum absolute synchronization error={}\n",
+            .{fmtDurationSigned(@intCast(i64, err))},
+        );
+    } else {
+        std.debug.print("All clocks failed to synchronize.\n", .{});
+    }
 }
