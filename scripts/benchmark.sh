@@ -28,7 +28,10 @@ trap onerror EXIT
 for I in 0
 do
     echo "Initializing replica $I..."
-    rm "./cluster_0000000001_replica_00${I}.tigerbeetle"
+    FILE="./cluster_0000000001_replica_00${I}.tigerbeetle"
+    if [ -f $FILE ]; then
+        rm $FILE
+    fi
     ./tigerbeetle init --directory=. --cluster=1 --replica=$I > benchmark.log 2>&1
 done
 
