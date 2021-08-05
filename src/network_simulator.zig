@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.mock_network);
 
-pub const MockNetworkOptions = struct {
+pub const NetworkSimulatorOptions = struct {
     /// Mean for the exponential distribution used to calculate forward delay.
     forward_delay_mean: u64,
 
@@ -33,7 +33,7 @@ pub const PacketStatistics = enum(u8) {
     forward_replay,
     reverse_replay,
 };
-pub fn MockNetwork(comptime Packet: type) type {
+pub fn NetworkSimulator(comptime Packet: type) type {
     return struct {
         const Self = @This();
         const Direction = enum(u8) {
@@ -58,12 +58,12 @@ pub fn MockNetwork(comptime Packet: type) type {
         /// We can arbitrary clog a path until a tick.
         path_clogged_till: []u64,
         ticks: u64 = 0,
-        options: MockNetworkOptions,
+        options: NetworkSimulatorOptions,
         prng: std.rand.DefaultPrng,
         stats: [@typeInfo(PacketStatistics).Enum.fields.len]u32 = [_]u32{0} **
             @typeInfo(PacketStatistics).Enum.fields.len,
 
-        pub fn init(allocator: *std.mem.Allocator, options: MockNetworkOptions) !Self {
+        pub fn init(allocator: *std.mem.Allocator, options: NetworkSimulatorOptions) !Self {
             var self = Self{
                 .paths = try allocator.alloc(
                     std.PriorityQueue(Data),
