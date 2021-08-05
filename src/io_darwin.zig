@@ -1,321 +1,690 @@
 const std = @import("std");
 const os = std.os;
-const linux = os.linux;
 
-const Time = @import("time.zig").Time;
 const FIFO = @import("fifo.zig").FIFO;
+const Time = @import("time.zig").Time;
+const buffer_limit = @import("io.zig").buffer_limit;
 
-const io = @import("io.zig");
-const IO = io.IO;
-const Completion = IO.Completion;
-const buffer_limit = io.buffer_limit;
-
-pub const Driver = struct {
+pub const IO = struct {
     kq: os.fd_t,
     time: Time = .{},
-    num_submitted: u32 = 0,
-    max_submitted: u32 = 0,
-    timeouts: FIFO(Completion) = .{}, // TODO: binary tree to avoid O(n) remove in next_expire()?
-    submitted: FIFO(Completion) = .{},
+    timeouts: FIFO(Completion) = .{},
     completed: FIFO(Completion) = .{},
+    io_pending: FIFO(Completion) = .{},
 
-    pub fn init(entries: u12) !Driver {
-        const num_entries = std.math.max(1, std.math.ceilPowerOfTwoPromote(u12, entries));
-        return Driver{
-            .kq = try os.kqueue(),
-            .max_submitted = num_entries,
-        };
+    pub fn init(entries: u12, flags: u32) !IO {
+        return IO{ .kq = try os.kqueue() };
     }
 
-    pub fn deinit(self: *Driver) void {
+    pub fn deinit(self: *IO) void {
         os.close(self.kq);
     }
 
-    pub fn timestamp(self: *Driver) u64 {
-        return self.time.monotonic();
+    /// Pass all queued submissions to the kernel and peek for completions.
+    pub fn tick(self: *IO) !void {
+        return self.flush(false);
     }
 
-    pub fn has_submissions(self: *Driver) bool {
-        return self.submitted.peek() != null;
+    /// Pass all queued submissions to the kernel and run for `nanoseconds`.
+    /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
+    /// in the __kernel_timespec struct.
+    pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
+        var running = true;
+        var completion: Completion = undefined;
+        const timeout_callback = struct {
+            fn callback(running_ptr: *bool, _completion: *Completion, result: TimeoutError!void) void {
+                running_ptr.* = false;
+            }
+        }.callback;
+
+        const running_ptr = &running;
+        self.timeout(
+            *bool,
+            running_ptr,
+            timeout_callback,
+            &completion,
+            nanoseconds,
+        );
+
+        while (running_ptr.*) {
+            try self.flush(true);
+        }
     }
 
-    pub fn submit(self: *Driver, completion: *Completion) IO.SubmitError!void {
-        if (self.num_submitted == self.max_submitted) return error.SubmissionQueueFull;
-        self.submitted.push(completion);
-        self.num_submitted += 1;
-    }
+    fn flush(self: *IO, wait_for_completions: bool) !void {
+        try self.flush_submissions();
+        try self.flush_completions();
 
-    pub fn has_completions(self: *Driver) bool {
-        return self.completed.peek() != null;
-    }
-
-    pub fn poll(self: *Driver) FIFO(Completion) {
-        const completed = self.completed;
+        var completed = self.completed;
         self.completed = .{};
-        return completed;
+        while (completed.pop()) |completion| {
+            (completion.callback)(completion);
+        }
     }
 
-    pub fn enter(
-        self: *Driver,
-        flush_submissions: bool,
-        wait_for_completions: bool,
-    ) IO.EnterError!void {
-        var events: [256]os.Kevent = undefined;
-
-        // A list of submissions waiting on a kevent that are pushed back to the submitted list
-        // in the event that their kevent's fail to get registered. 
-        var num_evented: u32 = 0;
-        var evented: FIFO(Completion) = .{};
-        defer if (num_evented > 0) {
-            self.num_submitted += num_evented;
-            evented.push_all(self.submitted);
-            self.submitted = evented;
-        };
-        
-        // Try to flush the submission list, filling up the events array 
-        // with change_events for completions that need to wait on the kqueue. 
-        var change_events: u32 = 0;
-        if (flush_submissions and self.num_submitted > 0) {
-            const now = self.timestamp();
-            while (change_events < events.len) {
-                const completion = self.submitted.pop() orelse break;
-                self.num_submitted -= 1;
-                self.process(completion, &events[change_events], now) catch {
-                    change_events += 1;
-                    num_evented += 1;
-                    evented.push(completion);
+    fn flush_submissions(self: *IO) !void {
+        while (self.io_pending.peek()) |_| {
+            self.enter(true, false) catch |err| switch (err) {
+                error.SystemResources => {
+                    try self.flush_completions();
                     continue;
+                },
+                else => |e| return e,
+            };
+        }
+    }
+
+    fn flush_completions(self: *IO) !void {
+        while (self.completed.peek() == null) {
+            try self.enter(false, true);
+        }
+    }
+
+    fn enter(self: *IO, flush_io: bool, wait_event: bool) !void {
+        var change_events: u32 = 0;
+        var io_top = self.io_pending.out;
+        var events: [256]os.Kevent = undefined;
+        
+        if (flush_io) {
+            while (io_top) |completion| {
+                if (change_events == events.len) break;
+                io_top = completion.next;
+
+                const event_info = switch (completion.operation) {
+                    .accept => |op| [2]c_int{ op.socket, os.EVFILT_READ },
+                    .connect => |op| [2]c_int{ op.socket, os.EVFILT_WRITE },
+                    .send => |op| [2]c_int{ op.socket, os.EVFILT_WRITE },
+                    .recv => |op| [2]c_int{ op.socket, os.EVFILT_READ },
+                    else => unreachable,
+                };
+
+                defer change_events += 1;
+                events[change_events] = .{
+                    .ident = @intCast(u32, event_info[0]),
+                    .filter = @intCast(i16, event_info[1]),
+                    .flags = os.EV_ADD | os.EV_ENABLE | os.EV_ONESHOT,
+                    .fflags = 0,
+                    .data = 0,
+                    .udata = @ptrToInt(completion),
                 };
             }
         }
 
-        // Get the kevent() timeout structure pointer.
-        // For polling (!wait_for_completions) it points to a zeroed out os.timespec.
-        var timeout_ts = std.mem.zeroes(os.timespec);
-        var timeout_ptr: ?*const os.timespec = &timeout_ts;
-        if (wait_for_completions) blk: {
-            // No timers when waiting means that the timeout should be null to wait forever.
-            if (self.timeouts.peek() == null) {
-                timeout_ptr = null;
-                break :blk;
-            }
+        var ts = std.mem.zeroes(os.timespec);
+        var timeout_ptr: ?*const os.timespec = &ts;
 
-            // Check for timers if this call to enter() is allowed to wait.
-            // Wait forever if all the timeouts expire by nulling out the timespec
-            const now = self.timestamp();
-            const next_exp = self.next_expire(now) orelse {
-                timeout_ptr = null;
-                break :blk;
-            };
+        if (self.timeouts.peek()) |next_timeout| {
+            var min_expire: ?u64 = null;
+            const now = self.time.monotonic();
 
-            // The timoeut already points to the os.timespec
-            // Fill the timespec with relative wait time for the next timeout completion to expire.
-            const wait_ns = next_exp - now;
-            timeout_ts.tv_sec = @intCast(@TypeOf(timeout_ts.tv_sec), wait_ns / std.time.ns_per_s);
-            timeout_ts.tv_nsec = @intCast(@TypeOf(timeout_ts.tv_nsec), wait_ns % std.time.ns_per_s);
-        }
+            var next: ?*Completion = next_timeout;
+            while (true) {
+                const completion = next orelse break;
+                next = completion.next;
 
-        const rc = os.system.kevent(
-            self.kq,
-            &events,
-            @intCast(c_int, change_events),
-            &events,
-            @intCast(c_int, events.len),
-            timeout_ptr,
-        );
-
-        const num_events = switch (os.errno(rc)) {
-            0 => @intCast(usize, rc),
-            os.EACCES => return error.InternalError, // access denied?
-            os.EFAULT => unreachable, // the events memory should always be valid
-            os.EBADF => return error.InternalError, // invalid kq file descriptor
-            os.EINTR => return error.Retry, // signal interrupted the call
-            os.EINVAL => unreachable, // time limit or event.filter is invalid
-            os.ENOENT => unreachable, // only for event modification and deletion
-            os.ENOMEM => return error.WaitForCompletions, // no memory for the change_events
-            os.ESRCH => unreachable, // only for process attaching,
-            else => |err| return os.unexpectedErrno(err),
-        };
-
-        // Change events were successfully submitted
-        // So we don't need to rollback any completions that tried to wait on events.
-        evented = .{};
-        num_evented = 0;
-
-        // Check for expired timers after successfully polling in case there are any.    
-        if (self.timeouts.peek() != null) {
-            const now = self.timestamp();
-            _ = self.next_expire(now);
-        }
-
-        // Retry any completions ready from the events.
-        // Those which are still not ready are added back to the submission list via evented.
-        for (events[0..num_events]) |*event| {
-            const completion = @intToPtr(*Completion, @intCast(usize, event.udata));
-            self.processEvented(completion, event) catch {
-                num_evented += 1;
-                evented.push(completion);
-                continue;
-            };
-        }
-    }
-
-    /// Iterate the timers and either invalidate them or decide the 
-    /// smallest amount of time to wait on kevent() to expire one. 
-    fn next_expire(self: *Driver, now: u64) ?u64 {
-        var next: ?u64 = null;
-        var timed = self.timeouts.peek();
-        while (timed) |completion| {
-            timed = completion.next;
-
-            const expires = completion.op.timeout.expires;
-            if (now > expires) {
-                completion.result = -os.ETIME;
-                self.timeouts.remove(completion);
-                self.completed.push(completion);
-                continue;
-            }
-
-            const current_expire = next orelse std.math.maxInt(u64);
-            next = std.math.min(current_expire, expires);
-        }
-        return next;
-    }
-
-    /// Perform a system call, returning the result in a similar format to linux.io_uring_cqe.result
-    fn syscall(self: *Driver, comptime func: anytype, args: anytype) isize {
-        const rc = @call(.{}, func, args);
-        return switch (os.errno(rc)) {
-            0 => rc,
-            else => |e| -e,
-        };
-    }
-
-    /// Tries to perform the completion operation using the `now` timestamp.
-    /// If the operation must wait on an event, it returns `error.Evented` and writes the event to `event`.
-    /// Otherwise the completion's result is set and it is pushed to the `completed` list.
-    fn process(self: *Driver, completion: *Completion, event: *os.Kevent, now: u64) error{Evented}!void {
-        switch (completion.op) {
-            .close => |fd| {
-                completion.result = self.syscall(os.system.close, .{fd});
-                self.completed.push(completion);
-            },
-            .timeout => |op| {
-                if (now >= op.expires) {
-                    completion.result = -os.ETIME;
+                const expires = completion.operation.timeout.expires;
+                if (now >= expires) {
+                    self.timeouts.remove(completion);
                     self.completed.push(completion);
                 } else {
-                    self.timeouts.push(completion);
-                }
-            },
-            .read => |op| {
-                completion.result = self.syscall(os.system.pread, .{
-                    op.fd, 
-                    op.buffer.ptr,
-                    buffer_limit(op.buffer.len),
-                    @bitCast(i64, op.offset),
-                });
-                self.completed.push(completion);
-            },
-            .write => |op| {
-                completion.result = self.syscall(os.system.pwrite, .{
-                    op.fd, 
-                    op.buffer.ptr,
-                    buffer_limit(op.buffer.len),
-                    @bitCast(i64, op.offset),
-                });
-            },
-            .fsync => |op| {
-                // Try to use F_FULLFSYNC over fsync() when possible
-                //
-                // https://github.com/untitaker/python-atomicwrites/issues/6
-                // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fcntl.2.html
-                // https://github.com/rust-lang/rust/blob/1195bea5a7b73e079fa14b37ac7e375fc77d368a/library/std/src/sys/unix/fs.rs#L787
-                completion.result = self.syscall(os.system.fcntl, .{op.fd, os.F_FULLFSYNC, @as(usize, 0)});
-                if (completion.result < 0) completion.result = self.syscall(os.system.fsync, .{op.fd});
-                self.completed.push(completion);
-            },
-            .accept, .connect, .recv, .send => {
-                return self.processEvented(completion, event);
-            },
-        }
-    }
-
-    /// Similar to `process()` but is only used for completions with operations that could be evented.
-    fn processEvented(self: *Driver, completion: *Completion, event: *os.Kevent) error{Evented}!void {
-        completion.result = switch (completion.op) {
-            .accept => |*op| self.syscall(os.system.accept, .{
-                op.socket, 
-                &op.address,
-                &op.address_size,
-            }),
-            .connect => |*op| self.syscall(os.system.accept, .{
-                op.socket, 
-                &op.address.any,
-                &op.address.getOsSockLen(),
-            }),
-            .recv => |op| self.syscall(os.system.recv, .{
-                op.socket, 
-                op.buffer.ptr,
-                op.buffer.len,
-                0,
-            }),
-            .send => |op| self.syscall(os.system.send, .{
-                op.socket, 
-                op.buffer.ptr,
-                op.buffer.len,
-                0,
-            }),
-            else => unreachable, // operation is not evented
-        };
-
-        // Complete the completion if it doesn't need to wait for an event.
-        if (completion.result != -os.EAGAIN) {
-            // On a valid accept call, make the socket non-blocking
-            if (completion.result >= 0 and completion.op == .accept) {
-                const fd = @intCast(os.fd_t, completion.result);
-
-                // Store any errors that occur in the non-blocking process in completion.result
-                completion.result = self.syscall(os.system.fcntl, .{fd, os.F_GETFL, @as(usize, 0)});
-                if (completion.result >= 0) {
-                    const new = @intCast(usize, completion.result) | os.O_NONBLOCK;
-                    completion.result = self.syscall(os.system.fcntl, .{fd, os.F_SETFL, new});
-                }
-
-                // Make sure to restore the fd result or destroy it in case of error
-                if (completion.result >= 0) {
-                    completion.result = fd;
-                } else {
-                    os.close(fd);
+                    const current_expire = min_expire orelse std.math.maxInt(u64);
+                    min_expire = std.math.min(expires, current_expire);
                 }
             }
 
-            self.completed.push(completion);
-            return;
+            if (min_expire) |expires| {
+                const timeout_ns = expires - now;
+                ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
+                ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
+            }
         }
+
+        if (change_events == 0) blk: {
+            if (self.timeouts.peek() != null) break :blk;
+            if (!wait_event) return;
+            timeout_ptr = null;
+        }
+
+        const new_events = try os.kevent(
+            self.kq, 
+            events[0..change_events],
+            events[0..events.len],
+            timeout_ptr,
+        );
         
-        // Fill the os.Kevent with a change event describing a filter
-        // to wait for the socket in the operation to become either readable or writable.
-        // The filter is created as ONESHOT so that it is only triggered/generated once.
-        event.* = .{
-            .ident = @intCast(usize, switch (completion.op) {
-                .accept => |op| op.socket,
-                .connect => |op| op.socket,
-                .recv => |op| op.socket,
-                .send => |op| op.socket,
-                else => unreachable, // operation is not evented
-            }),
-            .filter = switch (completion.op) {
-                .accept, .recv => os.EVFILT_READ,
-                .connect, .send => os.EVFILT_WRITE,
-                else => unreachable, // operation is not evented
-            },
-            .flags = os.EV_CLEAR | os.EV_ADD | os.EV_ENABLE | os.EV_ONESHOT,
-            .fflags = 0,
-            .data = 0,
-            .udata = @ptrToInt(completion),
+        self.io_pending.out = io_top;
+        for (events[0..new_events]) |event| {
+            const completion = @intToPtr(*Completion, event.udata);
+            self.completed.push(completion);
+        }
+    }
+
+    /// This struct holds the data needed for a single IO operation
+    pub const Completion = struct {
+        next: ?*Completion,
+        context: ?*c_void,
+        callback: fn(*Completion) void,
+        operation: Operation,
+    };
+
+    const Operation = union(enum) {
+        accept: struct {
+            socket: os.socket_t,
+            flags: u32,
+        },
+        close: struct {
+            fd: os.fd_t,
+        },
+        connect: struct {
+            socket: os.socket_t,
+            address: std.net.Address,
+        },
+        fsync: struct {
+            fd: os.fd_t,
+            flags: u32,
+        },
+        openat: struct {
+            fd: os.fd_t,
+            path: [*:0]const u8,
+            flags: u32,
+            mode: os.mode_t,
+        },
+        read: struct {
+            fd: os.fd_t,
+            buffer: []u8,
+            offset: u64,
+        },
+        recv: struct {
+            socket: os.socket_t,
+            buffer: []u8,
+            flags: u32,
+        },
+        send: struct {
+            socket: os.socket_t,
+            buffer: []const u8,
+            flags: u32,
+        },
+        timeout: struct {
+            expires: u64,
+        },
+        write: struct {
+            fd: os.fd_t,
+            buffer: []const u8,
+            offset: u64,
+        },
+    };
+
+    fn submit(
+        self: *IO, 
+        context: ?*c_void,
+        completion: *Completion,
+        operation: Operation,
+        comptime CallbackImpl: type,
+    ) void {
+        completion.* = .{
+            .next = null,
+            .context = context,
+            .callback = CallbackImpl.onCompletion,
+            .operation = operation,
         };
 
-        return error.Evented;
+        switch (operation) {
+            .accept, .connect, .recv, .send => self.io_pending.push(completion),
+            .timeout => self.timeouts.push(completion),
+            else => self.completed.push(completion),
+        }
+    }
+
+    pub const AcceptError = os.AcceptError;
+
+    pub fn accept(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: AcceptError!os.socket_t,
+        ) void,
+        completion: *Completion,
+        socket: os.socket_t,
+        flags: u32,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .accept = .{
+                    .socket = socket,
+                    .flags = flags,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.accept;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        os.accept(op.socket, null, null, op.flags),
+                    );
+                }
+            },
+        );
+    }
+
+    pub const CloseError = error{
+        FileDescriptorInvalid,
+        DiskQuota,
+        InputOutput,
+        NoSpaceLeft,
+    } || os.UnexpectedError;
+
+    pub fn close(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: CloseError!void,
+        ) void,
+        completion: *Completion,
+        fd: os.fd_t,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .close = .{
+                    .fd = fd,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.close;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        switch (os.errno(os.system.close(op.fd))) {
+                            0 => {},
+                            os.EBADF => error.FileDescriptorInvalid,
+                            os.EINTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
+                            os.EIO => error.InputOutput,
+                            else => |errno| os.unexpectedErrno(errno),
+                        },
+                    );
+                }
+            },
+        );
+    }
+
+    pub const ConnectError = os.ConnectError;
+
+    pub fn connect(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: ConnectError!void,
+        ) void,
+        completion: *Completion,
+        socket: os.socket_t,
+        address: std.net.Address,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .connect = .{
+                    .socket = socket,
+                    .address = address,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.connect;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        os.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
+                    );
+                }
+            },
+        );
+    }
+
+    pub const FsyncError = error{
+        FileDescriptorInvalid,
+        DiskQuota,
+        ArgumentsInvalid,
+        InputOutput,
+        NoSpaceLeft,
+        ReadOnlyFileSystem,
+    } || os.UnexpectedError;
+
+    pub fn fsync(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: FsyncError!void,
+        ) void,
+        completion: *Completion,
+        fd: os.fd_t,
+        flags: u32,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .fsync = .{
+                    .fd = fd,
+                    .flags = flags,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.fsync;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        blk: {
+                            _ = os.fcntl(op.fd, os.F_FULLFSYNC, 1) catch break :blk os.fsync(op.fd);
+                            break :blk {};
+                        },
+                    );
+                }
+            },
+        );
+    }
+
+    pub const OpenatError = error{
+        AccessDenied,
+        FileDescriptorInvalid,
+        DeviceBusy,
+        PathAlreadyExists,
+        FileTooBig,
+        ArgumentsInvalid,
+        IsDir,
+        SymLinkLoop,
+        ProcessFdQuotaExceeded,
+        NameTooLong,
+        SystemFdQuotaExceeded,
+        NoDevice,
+        FileNotFound,
+        SystemResources,
+        NoSpaceLeft,
+        NotDir,
+        FileLocksNotSupported,
+        WouldBlock,
+    } || os.UnexpectedError;
+
+    pub fn openat(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: OpenatError!os.fd_t,
+        ) void,
+        completion: *Completion,
+        fd: os.fd_t,
+        path: [*:0]const u8,
+        flags: u32,
+        mode: os.mode_t,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .openat = .{
+                    .fd = fd,
+                    .path = path,
+                    .mode = mode,
+                    .flags = flags,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.openat;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        os.openatZ(op.fd, op.path, op.flags, op.mode),
+                    );
+                }
+            },
+        );
+    }
+
+    pub const ReadError = error{
+        WouldBlock,
+        NotOpenForReading,
+        ConnectionResetByPeer,
+        Alignment,
+        InputOutput,
+        IsDir,
+        SystemResources,
+        Unseekable,
+    } || os.UnexpectedError;
+
+    pub fn read(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: ReadError!usize,
+        ) void,
+        completion: *Completion,
+        fd: os.fd_t,
+        buffer: []u8,
+        offset: u64,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .read = .{
+                    .fd = fd,
+                    .buffer = buffer,
+                    .offset = offset,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.read;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        blk: {
+                            while (true) {
+                                const rc = os.system.pread(
+                                    op.fd, 
+                                    op.buffer.ptr, 
+                                    buffer_limit(op.buffer.len),
+                                    @bitCast(isize, op.offset),
+                                );
+                                break :blk switch (os.errno(rc)) {
+                                    0 => @intCast(usize, rc),
+                                    os.EINTR => continue,
+                                    os.EAGAIN => error.WouldBlock,
+                                    os.EBADF => error.NotOpenForReading,
+                                    os.ECONNRESET => error.ConnectionResetByPeer,
+                                    os.EFAULT => unreachable,
+                                    os.EINVAL => error.Alignment,
+                                    os.EIO => error.InputOutput,
+                                    os.EISDIR => error.IsDir,
+                                    os.ENOBUFS => error.SystemResources,
+                                    os.ENOMEM => error.SystemResources,
+                                    os.ENXIO => error.Unseekable,
+                                    os.EOVERFLOW => error.Unseekable,
+                                    os.ESPIPE => error.Unseekable,
+                                    else => |err| os.unexpectedErrno(err),
+                                };
+                            }
+                        }
+                    );
+                }
+            },
+        );
+    }
+
+    pub const RecvError = os.RecvFromError;
+
+    pub fn recv(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: RecvError!usize,
+        ) void,
+        completion: *Completion,
+        socket: os.socket_t,
+        buffer: []u8,
+        flags: u32,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .recv = .{
+                    .socket = socket,
+                    .buffer = buffer,
+                    .flags = flags,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.recv;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        os.recv(op.socket, op.buffer, op.flags),
+                    );
+                }
+            },
+        );
+    }
+
+    pub const SendError = os.SendError;
+
+    pub fn send(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: SendError!usize,
+        ) void,
+        completion: *Completion,
+        socket: os.socket_t,
+        buffer: []const u8,
+        flags: u32,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .send = .{
+                    .socket = socket,
+                    .buffer = buffer,
+                    .flags = flags,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.send;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        os.send(op.socket, op.buffer, op.flags),
+                    );
+                }
+            },
+        );
+    }
+
+    pub const TimeoutError = error{Canceled} || os.UnexpectedError;
+
+    pub fn timeout(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: TimeoutError!void,
+        ) void,
+        completion: *Completion,
+        nanoseconds: u63,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .timeout = .{
+                    .expires = self.time.monotonic() + nanoseconds,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.timeout;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        {},
+                    );
+                }
+            },
+        );
+    }
+
+    pub const WriteError = os.PWriteError;
+
+    pub fn write(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: WriteError!usize,
+        ) void,
+        completion: *Completion,
+        fd: os.fd_t,
+        buffer: []const u8,
+        offset: u64,
+    ) void {
+        self.submit(
+            context,
+            completion, 
+            .{
+                .write = .{
+                    .fd = fd,
+                    .buffer = buffer,
+                    .offset = offset,
+                },
+            },
+            struct {
+                fn onCompletion(_completion: *Completion) void {
+                    const op = _completion.operation.write;
+                    return callback(
+                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        _completion,
+                        os.pwrite(op.fd, op.buffer, op.offset),
+                    );
+                }
+            },
+        );
     }
 };
