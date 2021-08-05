@@ -41,7 +41,7 @@ pub const Time = struct {
     pub fn tick(self: *Self) void {}
 };
 
-pub const OffsetType = enum { linear, periodic, step };
+pub const OffsetType = enum { linear, periodic, step, non_ideal };
 pub const DeterministicTime = struct {
     const Self = @This();
 
@@ -56,9 +56,14 @@ pub const DeterministicTime = struct {
     /// terms of ticks.
     /// Step function represents a discontinuous jump in the wall-clock time. B is the period in
     /// which the jumps occur. A is the amplitude of the step.
-    /// Combination
+    /// Non-ideal is similar to periodic except the phase is adjusted using a random number taken
+    /// from a normal distribution with mean=0, stddev=10. Finally, a random offset (up to 
+    /// offset_coefficientC) is added to the result.
     offset_coefficient_A: i64,
-    offset_coefficient_B: u64,
+    offset_coefficient_B: i64,
+    offset_coefficient_C: u32 = 0,
+
+    prng: std.rand.DefaultPrng = std.rand.DefaultPrng.init(0),
 
     /// The number of ticks elapsed since initialization.
     ticks: u64 = 0,
@@ -78,7 +83,10 @@ pub const DeterministicTime = struct {
         switch (self.offset_type) {
             .linear => {
                 const drift_per_tick = self.offset_coefficient_A;
-                return @intCast(i64, ticks) * drift_per_tick + @intCast(i64, self.offset_coefficient_B);
+                return @intCast(i64, ticks) * drift_per_tick + @intCast(
+                    i64,
+                    self.offset_coefficient_B,
+                );
             },
             .periodic => {
                 const unscaled = std.math.sin(@intToFloat(f64, ticks) * 2 * std.math.pi /
@@ -88,6 +96,18 @@ pub const DeterministicTime = struct {
             },
             .step => {
                 return if (ticks > self.offset_coefficient_B) self.offset_coefficient_A else 0;
+            },
+            .non_ideal => {
+                const phase: f64 = @intToFloat(f64, ticks) * 2 * std.math.pi /
+                    (@intToFloat(f64, self.offset_coefficient_B) + self.prng.random.floatNorm(f64) * 10);
+                const unscaled = std.math.sin(phase);
+                const scaled = @intToFloat(f64, self.offset_coefficient_A) * unscaled;
+                return @floatToInt(i64, std.math.floor(scaled)) +
+                    self.prng.random.intRangeAtMost(
+                    i64,
+                    -@intCast(i64, self.offset_coefficient_C),
+                    self.offset_coefficient_C,
+                );
             },
         }
     }

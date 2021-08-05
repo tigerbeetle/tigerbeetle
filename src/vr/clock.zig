@@ -438,7 +438,7 @@ const ClockUnitTestContainer = struct {
         allocator: *std.mem.Allocator,
         offset_type: OffsetType,
         offset_coefficient_A: i64,
-        offset_coefficient_B: u64,
+        offset_coefficient_B: i64,
     ) !Self {
         const time: DeterministicTime = .{
             .resolution = std.time.ns_per_s / 2,
@@ -500,32 +500,33 @@ const ClockUnitTestContainer = struct {
             },
             .periodic => {
                 ret[0] = .{
-                    .tick = self.clock.time.offset_coefficient_B / 4,
+                    .tick = @intCast(u64, @divTrunc(self.clock.time.offset_coefficient_B, 4)),
                     .expected_offset = @intCast(i64, self.owd),
                 };
                 ret[1] = .{
-                    .tick = self.clock.time.offset_coefficient_B / 2,
+                    .tick = @intCast(u64, @divTrunc(self.clock.time.offset_coefficient_B, 2)),
                     .expected_offset = 0,
                 };
                 ret[2] = .{
-                    .tick = self.clock.time.offset_coefficient_B * 3 / 4,
+                    .tick = @intCast(u64, @divTrunc(self.clock.time.offset_coefficient_B * 3, 4)),
                     .expected_offset = -@intCast(i64, self.owd),
                 };
             },
             .step => {
                 ret[0] = .{
-                    .tick = self.clock.time.offset_coefficient_B - 10,
+                    .tick = @intCast(u64, self.clock.time.offset_coefficient_B - 10),
                     .expected_offset = 0,
                 };
                 ret[1] = .{
-                    .tick = self.clock.time.offset_coefficient_B + 10,
+                    .tick = @intCast(u64, self.clock.time.offset_coefficient_B + 10),
                     .expected_offset = -@intCast(i64, self.owd),
                 };
                 ret[2] = .{
-                    .tick = self.clock.time.offset_coefficient_B + 10,
+                    .tick = @intCast(u64, self.clock.time.offset_coefficient_B + 10),
                     .expected_offset = -@intCast(i64, self.owd),
                 };
             },
+            .non_ideal => unreachable, // use ideal clocks for the unit tests
         }
 
         return ret;
@@ -588,8 +589,8 @@ test "ideal clocks get clamped to cluster time" {
     }
 }
 
-const MockNetworkOptions = @import("../mock_network.zig").MockNetworkOptions;
-const MockNetwork = @import("../mock_network.zig").MockNetwork;
+const NetworkSimulatorOptions = @import("../network_simulator.zig").NetworkSimulatorOptions;
+const NetworkSimulator = @import("../network_simulator.zig").NetworkSimulator;
 const ClockSimulator = struct {
     const Packet = struct {
         m0: u64,
@@ -600,21 +601,23 @@ const ClockSimulator = struct {
     const Options = struct {
         ping_timeout: u32,
         clock_count: u8,
-        network_options: MockNetworkOptions,
+        network_options: NetworkSimulatorOptions,
     };
 
     allocator: *std.mem.Allocator,
     options: Options,
     ticks: u64 = 0,
-    network: MockNetwork(Packet),
+    network: NetworkSimulator(Packet),
     clocks: []DeterministicClock,
+    prng: std.rand.DefaultPrng,
 
     pub fn init(allocator: *std.mem.Allocator, options: Options) !ClockSimulator {
         var self = ClockSimulator{
             .allocator = allocator,
             .options = options,
-            .network = try MockNetwork(Packet).init(allocator, options.network_options),
+            .network = try NetworkSimulator(Packet).init(allocator, options.network_options),
             .clocks = try allocator.alloc(DeterministicClock, options.clock_count),
+            .prng = std.rand.DefaultPrng.init(options.network_options.prng_seed),
         };
 
         for (self.clocks) |*clock, index| {
@@ -625,11 +628,15 @@ const ClockSimulator = struct {
     }
 
     fn create_clock(self: *ClockSimulator, replica: u8) !DeterministicClock {
+        const amplitude = self.prng.random.intRangeAtMost(i64, -10, 10) * std.time.ns_per_s;
+        const phase = self.prng.random.intRangeAtMost(i64, 100, 1000) +
+            @floatToInt(i64, self.prng.random.floatNorm(f64) * 50);
         const time: DeterministicTime = .{
             .resolution = std.time.ns_per_s / 2, // delta_t = 0.5s
-            .offset_type = OffsetType.periodic,
-            .offset_coefficient_A = std.time.ns_per_s, // loses up to 1s.
-            .offset_coefficient_B = 200, // cycles every 200 ticks
+            .offset_type = OffsetType.non_ideal,
+            .offset_coefficient_A = amplitude,
+            .offset_coefficient_B = phase,
+            .offset_coefficient_C = 10,
         };
 
         return try DeterministicClock.init(self.allocator, self.options.clock_count, replica, time);
@@ -698,10 +705,14 @@ test "fuzz test" {
     const allocator = &arena_allocator.allocator;
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
+    const test_delta_time: u64 = std.time.ns_per_s / 2;
     const SystemTime = @import("../time.zig").Time;
     var system_time = SystemTime{};
     var prng_seed = @intCast(u64, system_time.realtime());
-
+    var min_sync_error: u64 = 1_000_000_000;
+    var max_sync_error: u64 = 0;
+    var max_clock_offset: u64 = 0;
+    var min_clock_offset: u64 = 1_000_000_000;
     var simulator = try ClockSimulator.init(allocator, .{
         .network_options = .{
             .node_count = clock_count,
@@ -720,38 +731,47 @@ test "fuzz test" {
         .ping_timeout = 20,
     });
 
+    var clock_ticks_without_synchronization = [_]u32{0} ** clock_count;
     while (simulator.ticks < ticks_max) {
         simulator.tick();
-    }
 
-    var test_delta_time: u64 = std.time.ns_per_s / 2;
-    var sync_errors: [clock_count]?i64 = undefined;
-    var test_time: u64 = ticks_max * test_delta_time;
-    var minimum_sync_error: ?u64 = null;
-    var index: u8 = 0;
+        const test_time: u64 = simulator.ticks * test_delta_time;
+        for (simulator.clocks) |*clock, index| {
+            var offset = clock.time.offset(simulator.ticks);
+            var abs_offset = if (offset >= 0) @intCast(u64, offset) else @intCast(u64, -offset);
+            max_clock_offset = if (abs_offset > max_clock_offset) abs_offset else max_clock_offset;
+            min_clock_offset = if (abs_offset < min_clock_offset) abs_offset else min_clock_offset;
 
-    std.debug.print("prng seed={} max ticks={}\n", .{ prng_seed, ticks_max });
+            var synced_time = clock.realtime_synchronized() orelse {
+                clock_ticks_without_synchronization[index] += 1;
+                continue;
+            };
 
-    while (index < clock_count) : (index += 1) {
-        const clock = &simulator.clocks[index];
-        if (clock.realtime_synchronized()) |synced_time| {
-            var err: i64 = @intCast(i64, test_time) - synced_time;
-            var absolute_error: u64 = if (err < 0) @intCast(u64, -err) else @intCast(u64, err);
-            minimum_sync_error = if (minimum_sync_error == null or
-                minimum_sync_error.? > absolute_error) absolute_error else minimum_sync_error;
-
-            std.debug.print("clock={} is {} behind\n", .{ index, fmtDurationSigned(err) });
-        } else {
-            std.debug.print("clock={} failed to synchronize.\n", .{index});
+            for (simulator.clocks) |*other_clock, other_clock_index| {
+                if (index == other_clock_index) continue;
+                var other_clock_sync_time = other_clock.realtime_synchronized() orelse {
+                    continue;
+                };
+                var err: i64 = synced_time - other_clock_sync_time;
+                var abs_err: u64 = if (err >= 0) @intCast(u64, err) else @intCast(u64, -err);
+                max_sync_error = if (abs_err > max_sync_error) abs_err else max_sync_error;
+                min_sync_error = if (abs_err < min_sync_error) abs_err else min_sync_error;
+            }
         }
     }
 
-    if (minimum_sync_error) |err| {
-        std.debug.print(
-            "minimum absolute synchronization error={}\n",
-            .{fmtDurationSigned(@intCast(i64, err))},
-        );
-    } else {
-        std.debug.print("All clocks failed to synchronize.\n", .{});
-    }
+    std.debug.print("prng seed={}, max ticks={}, clock count={}\n", .{
+        prng_seed,
+        ticks_max,
+        clock_count,
+    });
+    std.debug.print("absolute clock offsets with respect to test time:\n", .{});
+    std.debug.print("maximum={}\n", .{fmtDurationSigned(@intCast(i64, max_clock_offset))});
+    std.debug.print("minimum={}\n", .{fmtDurationSigned(@intCast(i64, min_clock_offset))});
+    std.debug.print("\nabsolute synchronization errors between clocks:\n", .{});
+    std.debug.print("maximum={}\n", .{fmtDurationSigned(@intCast(i64, max_sync_error))});
+    std.debug.print("minimum={}\n", .{fmtDurationSigned(@intCast(i64, min_sync_error))});
+    std.debug.print("clock ticks without synchronization={d}\n", .{
+        clock_ticks_without_synchronization,
+    });
 }
