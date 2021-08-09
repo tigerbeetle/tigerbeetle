@@ -663,7 +663,6 @@ const ClockSimulator = struct {
                             ClockSimulator.handle_packet,
                             @intCast(u8, target),
                             clock.replica,
-                            .forward,
                         );
                     }
                 }
@@ -692,7 +691,6 @@ const ClockSimulator = struct {
                 ClockSimulator.handle_packet,
                 from, // send the packet back to where it came from.
                 to,
-                .reverse,
             );
         }
     }
@@ -717,10 +715,8 @@ test "fuzz test" {
         .network_options = .{
             .node_count = clock_count,
             .prng_seed = prng_seed,
-            .forward_delay_mean = 50,
-            .min_forward_delay = 5,
-            .reverse_delay_mean = 25,
-            .min_reverse_delay = 10,
+            .one_way_delay_mean = 25,
+            .one_way_delay_min = 10,
             .packet_loss_probability = 10,
             .path_maximum_capacity = 20,
             .path_clog_duration_mean = 200,
