@@ -369,11 +369,27 @@ pub const Header = packed struct {
 
 pub const Timeout = struct {
     name: []const u8,
-    /// TODO: get rid of this field as this is used by Client as well
     replica: u8,
     after: u64,
+    attempts: u8 = 0,
+    rtt: u64 = config.rtt_ticks,
+    rtt_multiple: u8 = config.rtt_multiple,
     ticks: u64 = 0,
     ticking: bool = false,
+
+    /// Increments the attempts counter and resets the timeout with exponential backoff and jitter.
+    /// Allows the attempts counter to wrap from time to time.
+    /// The overflow period is kept short to surface any related bugs sooner rather than later.
+    /// We do not saturate the counter as this would cause round-robin retries to get stuck.
+    pub fn backoff(self: *Timeout, prng: *std.rand.DefaultPrng) void {
+        assert(self.ticking);
+
+        self.ticks = 0;
+        self.attempts +%= 1;
+
+        log.debug("{}: {s} backing off", .{ self.replica, self.name });
+        self.set_after_for_rtt_and_attempts(prng);
+    }
 
     /// It's important to check that when fired() is acted on that the timeout is stopped/started,
     /// otherwise further ticks around the event loop may trigger a thundering herd of messages.
@@ -391,18 +407,69 @@ pub const Timeout = struct {
     }
 
     pub fn reset(self: *Timeout) void {
-        assert(self.ticking);
+        self.attempts = 0;
         self.ticks = 0;
+        assert(self.ticking);
+        // TODO Use self.prng to adjust for rtt and attempts.
         log.debug("{}: {s} reset", .{ self.replica, self.name });
     }
 
+    /// Sets the value of `after` as a function of `rtt` and `attempts`.
+    /// Adds exponential backoff and jitter.
+    /// May be called only after a timeout has been stopped or reset, to prevent backward jumps.
+    pub fn set_after_for_rtt_and_attempts(self: *Timeout, prng: *std.rand.DefaultPrng) void {
+        // If `after` is reduced by this function to less than `ticks`, then `fired()` will panic:
+        assert(self.ticks == 0);
+        assert(self.rtt > 0);
+
+        const after = (self.rtt * self.rtt_multiple) + exponential_backoff_with_jitter(
+            prng,
+            config.backoff_min_ticks,
+            config.backoff_max_ticks,
+            self.attempts,
+        );
+
+        // TODO Clamp `after` to min/max tick bounds for timeout.
+
+        log.debug("{}: {s} after={}..{} (rtt={} min={} max={} attempts={})", .{
+            self.replica,
+            self.name,
+            self.after,
+            after,
+            self.rtt,
+            config.backoff_min_ticks,
+            config.backoff_max_ticks,
+            self.attempts,
+        });
+
+        self.after = after;
+        assert(self.after > 0);
+    }
+
+    pub fn set_rtt(self: *Timeout, rtt_ticks: u64) void {
+        assert(self.rtt > 0);
+        assert(rtt_ticks > 0);
+
+        log.debug("{}: {s} rtt={}..{}", .{
+            self.replica,
+            self.name,
+            self.rtt,
+            rtt_ticks,
+        });
+
+        self.rtt = rtt_ticks;
+    }
+
     pub fn start(self: *Timeout) void {
+        self.attempts = 0;
         self.ticks = 0;
         self.ticking = true;
+        // TODO Use self.prng to adjust for rtt and attempts.
         log.debug("{}: {s} started", .{ self.replica, self.name });
     }
 
     pub fn stop(self: *Timeout) void {
+        self.attempts = 0;
         self.ticks = 0;
         self.ticking = false;
         log.debug("{}: {s} stopped", .{ self.replica, self.name });
