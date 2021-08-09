@@ -132,9 +132,6 @@ pub fn Replica(
         /// This allows us to pipeline without the complexity of out-of-order commits.
         pipeline: RingBuffer(Prepare, config.pipelining_max) = .{},
 
-        /// The number of retry attempts to resend the first prepare in the pipelining queue.
-        prepare_timeouts: u64 = 0,
-
         /// Unique start_view_change messages for the same view from OTHER replicas (excluding ourself).
         start_view_change_from_other_replicas: QuorumMessages = QuorumMessagesNull,
 
@@ -154,13 +151,12 @@ pub fn Replica(
         /// Whether the leader is expecting to receive a nack_prepare and for which op:
         nack_prepare_op: ?u64 = null,
 
-        /// The number of ticks before a leader or follower broadcasts a ping to the other replicas:
+        /// The number of ticks before a leader or follower broadcasts a ping to other replicas.
         /// TODO Explain why we need this (MessageBus handshaking, leapfrogging faulty replicas,
         /// deciding whether starting a view change would be detrimental under some network partitions).
         ping_timeout: Timeout,
 
-        /// The number of ticks without enough prepare_ok's before the leader resends a prepare:
-        /// TODO Adjust this dynamically to match sliding window EWMA of recent network latencies.
+        /// The number of ticks without enough prepare_ok's before the leader resends a prepare.
         prepare_timeout: Timeout,
 
         /// The number of ticks before the leader sends a commit heartbeat:
@@ -168,9 +164,9 @@ pub fn Replica(
         /// This improves liveness when prepare messages cannot be replicated fully due to partitions.
         commit_timeout: Timeout,
 
-        /// The number of ticks without hearing from the leader before a follower starts a view change:
+        /// The number of ticks without hearing from the leader before starting a view change.
         /// This transitions from .normal status to .view_change status.
-        normal_timeout: Timeout,
+        election_timeout: Timeout,
 
         /// The number of ticks before a view change is timed out:
         /// This transitions from `view_change` status to `view_change` status but for a newer view.
@@ -185,6 +181,10 @@ pub fn Replica(
         /// Used to provide deterministic entropy to `choose_any_other_replica()`.
         /// Incremented whenever `choose_any_other_replica()` is called.
         choose_any_other_replica_ticks: u64 = 0,
+
+        /// Used to calculate exponential backoff with random jitter.
+        /// Seeded with the replica's index number.
+        prng: std.rand.DefaultPrng,
 
         pub fn init(
             allocator: *Allocator,
@@ -271,8 +271,8 @@ pub fn Replica(
                     .replica = replica,
                     .after = 100,
                 },
-                .normal_timeout = Timeout{
-                    .name = "normal_timeout",
+                .election_timeout = Timeout{
+                    .name = "election_timeout",
                     .replica = replica,
                     .after = 500,
                 },
@@ -291,6 +291,7 @@ pub fn Replica(
                     .replica = replica,
                     .after = 50,
                 },
+                .prng = std.rand.DefaultPrng.init(replica),
             };
 
             // To reduce the probability of clustering, for efficient linear probing, the hash map will
@@ -312,7 +313,7 @@ pub fn Replica(
             } else {
                 log.debug("{}: init: follower", .{self.replica});
                 self.ping_timeout.start();
-                self.normal_timeout.start();
+                self.election_timeout.start();
                 self.repair_timeout.start();
             }
 
@@ -331,7 +332,7 @@ pub fn Replica(
             self.ping_timeout.tick();
             self.prepare_timeout.tick();
             self.commit_timeout.tick();
-            self.normal_timeout.tick();
+            self.election_timeout.tick();
             self.view_change_timeout.tick();
             self.view_change_message_timeout.tick();
             self.repair_timeout.tick();
@@ -339,7 +340,7 @@ pub fn Replica(
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.prepare_timeout.fired()) self.on_prepare_timeout();
             if (self.commit_timeout.fired()) self.on_commit_timeout();
-            if (self.normal_timeout.fired()) self.on_normal_timeout();
+            if (self.election_timeout.fired()) self.on_election_timeout();
             if (self.view_change_timeout.fired()) self.on_view_change_timeout();
             if (self.view_change_message_timeout.fired()) self.on_view_change_message_timeout();
             if (self.repair_timeout.fired()) self.on_repair_timeout();
@@ -475,7 +476,6 @@ pub fn Replica(
             if (self.pipeline.count == 1) {
                 // This is the only prepare in the pipeline, start the timeout:
                 assert(!self.prepare_timeout.ticking);
-                assert(self.prepare_timeouts == 0);
                 self.prepare_timeout.start();
             } else {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
@@ -534,7 +534,7 @@ pub fn Replica(
             assert(message.header.op > self.op);
             assert(message.header.op > self.commit_min);
 
-            if (self.follower()) self.normal_timeout.reset();
+            if (self.follower()) self.election_timeout.reset();
 
             if (message.header.op > self.op + 1) {
                 log.debug("{}: on_prepare: newer op", .{self.replica});
@@ -639,7 +639,7 @@ pub fn Replica(
                 }
             }
 
-            self.normal_timeout.reset();
+            self.election_timeout.reset();
 
             self.commit_ops(message.header.commit);
         }
@@ -1129,11 +1129,7 @@ pub fn Replica(
         }
 
         fn on_prepare_timeout(self: *Self) void {
-            // TODO Exponential backoff.
-            // TODO Prevent flooding the network due to multiple concurrent rounds of replication.
-            self.prepare_timeout.reset();
-            self.prepare_timeouts += 1;
-
+            // We will decide below whether to reset or backoff the timeout.
             assert(self.status == .normal);
             assert(self.leader());
 
@@ -1151,10 +1147,14 @@ pub fn Replica(
             }
 
             if (waiting_len == 0) {
+                self.prepare_timeout.reset();
+
                 log.debug("{}: on_prepare_timeout: waiting for journal", .{self.replica});
                 assert(prepare.ok_from_all_replicas[self.replica] == null);
                 return;
             }
+
+            self.prepare_timeout.backoff(&self.prng);
 
             assert(waiting_len <= self.replica_count);
             for (waiting[0..waiting_len]) |replica| {
@@ -1166,8 +1166,8 @@ pub fn Replica(
             }
 
             // Cycle through the list to reach live replicas and get around partitions:
-            assert(self.prepare_timeouts > 0);
-            const replica = waiting[@mod(self.prepare_timeouts, waiting_len)];
+            assert(self.prepare_timeout.attempts > 0);
+            const replica = waiting[self.prepare_timeout.attempts % waiting_len];
             assert(replica != self.replica);
 
             log.debug("{}: on_prepare_timeout: replicating to replica {}", .{ self.replica, replica });
@@ -1194,7 +1194,7 @@ pub fn Replica(
             });
         }
 
-        fn on_normal_timeout(self: *Self) void {
+        fn on_election_timeout(self: *Self) void {
             assert(self.status == .normal);
             assert(self.follower());
             self.transition_to_view_change_status(self.view + 1);
@@ -1534,10 +1534,7 @@ pub fn Replica(
 
             assert(self.prepare_timeout.ticking);
 
-            if (self.pipeline.count == 0) {
-                self.prepare_timeout.stop();
-                self.prepare_timeouts = 0;
-            }
+            if (self.pipeline.count == 0) self.prepare_timeout.stop();
         }
 
         fn count_quorum(
@@ -2663,11 +2660,9 @@ pub fn Replica(
             }
 
             self.prepare_timeout.stop();
-            self.prepare_timeouts = 0;
 
             assert(self.pipeline.count == 0);
             assert(self.prepare_timeout.ticking == false);
-            assert(self.prepare_timeouts == 0);
         }
 
         fn reset_quorum_messages(self: *Self, messages: *QuorumMessages, command: Command) void {
@@ -3035,7 +3030,7 @@ pub fn Replica(
 
                 self.ping_timeout.start();
                 self.commit_timeout.start();
-                self.normal_timeout.stop();
+                self.election_timeout.stop();
                 self.view_change_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
@@ -3046,7 +3041,7 @@ pub fn Replica(
 
                 self.ping_timeout.start();
                 self.commit_timeout.stop();
-                self.normal_timeout.start();
+                self.election_timeout.start();
                 self.view_change_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
@@ -3076,7 +3071,7 @@ pub fn Replica(
 
             self.ping_timeout.stop();
             self.commit_timeout.stop();
-            self.normal_timeout.stop();
+            self.election_timeout.stop();
             self.view_change_timeout.start();
             self.view_change_message_timeout.start();
             self.repair_timeout.stop();
@@ -3120,7 +3115,6 @@ pub fn Replica(
             assert(reply.header.commit > 0);
             assert(reply.header.request > 0);
 
-            // If no entry exists, then the session must have been evicted while being prepared.
             if (self.client_table.getPtr(reply.header.client)) |entry| {
                 assert(entry.reply.header.command == .reply);
                 assert(entry.reply.header.context == 0);
@@ -3132,8 +3126,8 @@ pub fn Replica(
                 assert(entry.reply.header.op < reply.header.op);
                 assert(entry.reply.header.commit < reply.header.commit);
 
-                // TODO Use this reply's prepare to cross-check against the entry's prepare, if we still
-                // have access to the prepare in the journal (it may have been snapshotted).
+                // TODO Use this reply's prepare to cross-check against the entry's prepare, if we
+                // still have access to the prepare in the journal (it may have been snapshotted).
 
                 log.debug("{}: update_client_table_entry: client={} session={} request={}", .{
                     self.replica,
@@ -3145,7 +3139,8 @@ pub fn Replica(
                 self.message_bus.unref(entry.reply);
                 entry.reply = reply.ref();
             } else {
-                // TODO Send eviction message to client (if we are the leader).
+                // If no entry exists, then the session must have been evicted while being prepared.
+                // We can still send the reply, the next request will receive an eviction message.
             }
         }
 

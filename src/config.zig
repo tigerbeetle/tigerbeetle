@@ -178,6 +178,28 @@ pub const io_depth_write = 8;
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = 10;
 
+/// The conservative round-trip time at startup when there is no network knowledge.
+/// Adjusted dynamically thereafter for RTT-sensitive timeouts according to network congestion.
+/// This should be set higher rather than lower to avoid flooding the network at startup.
+pub const rtt_ticks = 300 / tick_ms;
+
+/// The multiple of round-trip time for RTT-sensitive timeouts.
+pub const rtt_multiple = 2;
+
+/// The min/max bounds of exponential backoff (and jitter) to add to RTT-sensitive timeouts.
+pub const backoff_min_ticks = 100 / tick_ms;
+pub const backoff_max_ticks = 10000 / tick_ms;
+
+/// TODO
+pub const election_timeout_rtt_multiple = rtt_multiple * 10;
+pub const election_timeout_min_ticks = 100 / tick_ms;
+pub const election_timeout_max_ticks = 30000 / tick_ms;
+
+/// TODO
+pub const view_change_timeout_rtt_multiple = rtt_multiple * 10;
+pub const view_change_timeout_min_ticks = 500 / tick_ms;
+pub const view_change_timeout_max_ticks = 10000 / tick_ms;
+
 /// The maximum skew between two clocks to allow when considering them to be in agreement.
 /// The principle is that no two clocks tick exactly alike but some clocks more or less agree.
 /// The maximum skew across the cluster as a whole is this value times the total number of clocks.
