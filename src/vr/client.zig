@@ -99,12 +99,12 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 .replica_count = replica_count,
                 .request_timeout = .{
                     .name = "request_timeout",
-                    .replica = std.math.maxInt(u8),
+                    .id = id,
                     .after = config.rtt_ticks * config.rtt_multiple,
                 },
                 .ping_timeout = .{
                     .name = "ping_timeout",
-                    .replica = std.math.maxInt(u8),
+                    .id = id,
                     .after = 30000 / config.tick_ms,
                 },
                 .prng = std.rand.DefaultPrng.init(@truncate(u64, id)),
