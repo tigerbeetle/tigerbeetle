@@ -1,15 +1,14 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const math = std.math;
+
 const log = std.log.scoped(.mock_network);
 
 pub const NetworkSimulatorOptions = struct {
     /// Mean for the exponential distribution used to calculate forward delay.
-    forward_delay_mean: u64,
+    one_way_delay_mean: u64,
+    one_way_delay_min: u64,
 
-    /// Mean for the exponential distribution used to calculate reverse delay.
-    reverse_delay_mean: u64,
-    min_forward_delay: u64,
-    min_reverse_delay: u64,
     packet_loss_probability: u8,
     packet_replay_probability: u8,
     prng_seed: u64,
@@ -30,16 +29,12 @@ pub const NetworkSimulatorOptions = struct {
 pub const PacketStatistics = enum(u8) {
     dropped_due_to_congestion,
     dropped,
-    forward_replay,
-    reverse_replay,
+    replay,
 };
 pub fn NetworkSimulator(comptime Packet: type) type {
     return struct {
         const Self = @This();
-        const Direction = enum(u8) {
-            forward,
-            reverse,
-        };
+
         const Data = struct {
             expiry: u64,
             callback: fn (
@@ -48,7 +43,6 @@ pub fn NetworkSimulator(comptime Packet: type) type {
                 from: u8,
             ) void,
             packet: Packet,
-            direction: Direction,
         };
 
         /// A send and receive path between each node in the network. We use the `path` function to
@@ -89,8 +83,8 @@ pub fn NetworkSimulator(comptime Packet: type) type {
             return self;
         }
 
-        fn order_packets(a: Data, b: Data) std.math.Order {
-            return std.math.order(a.expiry, b.expiry);
+        fn order_packets(a: Data, b: Data) math.Order {
+            return math.order(a.expiry, b.expiry);
         }
 
         fn should_drop(self: *Self) bool {
@@ -128,21 +122,11 @@ pub fn NetworkSimulator(comptime Packet: type) type {
 
         /// We assume the one way delay will follow an exponential distrbution with there being a
         /// minimum delay.
-        fn one_way_delay(self: *Self, direction: Direction) u64 {
-            switch (direction) {
-                .forward => {
-                    var delay = self.options.forward_delay_mean *
-                        @floatToInt(u64, self.prng.random.floatExp(f64));
-
-                    return if (self.options.min_forward_delay < delay) delay else self.options.min_forward_delay;
-                },
-                .reverse => {
-                    var delay = self.options.reverse_delay_mean *
-                        @floatToInt(u64, self.prng.random.floatExp(f64));
-
-                    return if (self.options.min_reverse_delay < delay) delay else self.options.min_reverse_delay;
-                },
-            }
+        fn one_way_delay(self: *Self) u64 {
+            return math.min(
+                self.options.one_way_delay_min,
+                self.options.one_way_delay_mean * @floatToInt(u64, self.prng.random.floatExp(f64)),
+            );
         }
 
         pub fn tick(self: *Self) void {
@@ -171,14 +155,10 @@ pub fn NetworkSimulator(comptime Packet: type) type {
                                 data.callback,
                                 to,
                                 from,
-                                data.direction,
                             );
 
                             log.debug("replayed packet from={} to={}", .{ from, to });
-                            switch (data.direction) {
-                                .forward => self.stats[@enumToInt(PacketStatistics.forward_replay)] += 1,
-                                .reverse => self.stats[@enumToInt(PacketStatistics.reverse_replay)] += 1,
-                            }
+                            self.stats[@enumToInt(PacketStatistics.replay)] += 1;
                         }
 
                         data.callback(data.packet, to, from);
@@ -200,7 +180,6 @@ pub fn NetworkSimulator(comptime Packet: type) type {
             callback: fn (packet: Packet, to: u8, from: u8) void,
             to: u8,
             from: u8,
-            direction: Direction,
         ) void {
             const queue = self.path(from, to);
             // We simulate network congestion by dropping a random packet in the queue if
@@ -219,10 +198,9 @@ pub fn NetworkSimulator(comptime Packet: type) type {
             }
 
             queue.add(.{
-                .expiry = self.ticks + self.one_way_delay(direction),
+                .expiry = self.ticks + self.one_way_delay(),
                 .packet = packet,
                 .callback = callback,
-                .direction = direction,
             }) catch unreachable;
         }
     };
