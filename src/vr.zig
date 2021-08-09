@@ -369,7 +369,7 @@ pub const Header = packed struct {
 
 pub const Timeout = struct {
     name: []const u8,
-    replica: u8,
+    id: u128,
     after: u64,
     attempts: u8 = 0,
     rtt: u64 = config.rtt_ticks,
@@ -387,7 +387,7 @@ pub const Timeout = struct {
         self.ticks = 0;
         self.attempts +%= 1;
 
-        log.debug("{}: {s} backing off", .{ self.replica, self.name });
+        log.debug("{}: {s} backing off", .{ self.id, self.name });
         self.set_after_for_rtt_and_attempts(prng);
     }
 
@@ -395,9 +395,9 @@ pub const Timeout = struct {
     /// otherwise further ticks around the event loop may trigger a thundering herd of messages.
     pub fn fired(self: *Timeout) bool {
         if (self.ticking and self.ticks >= self.after) {
-            log.debug("{}: {s} fired", .{ self.replica, self.name });
+            log.debug("{}: {s} fired", .{ self.id, self.name });
             if (self.ticks > self.after) {
-                log.emerg("{}: {s} is firing every tick", .{ self.replica, self.name });
+                log.emerg("{}: {s} is firing every tick", .{ self.id, self.name });
                 @panic("timeout was not reset correctly");
             }
             return true;
@@ -411,7 +411,7 @@ pub const Timeout = struct {
         self.ticks = 0;
         assert(self.ticking);
         // TODO Use self.prng to adjust for rtt and attempts.
-        log.debug("{}: {s} reset", .{ self.replica, self.name });
+        log.debug("{}: {s} reset", .{ self.id, self.name });
     }
 
     /// Sets the value of `after` as a function of `rtt` and `attempts`.
@@ -432,7 +432,7 @@ pub const Timeout = struct {
         // TODO Clamp `after` to min/max tick bounds for timeout.
 
         log.debug("{}: {s} after={}..{} (rtt={} min={} max={} attempts={})", .{
-            self.replica,
+            self.id,
             self.name,
             self.after,
             after,
@@ -451,7 +451,7 @@ pub const Timeout = struct {
         assert(rtt_ticks > 0);
 
         log.debug("{}: {s} rtt={}..{}", .{
-            self.replica,
+            self.id,
             self.name,
             self.rtt,
             rtt_ticks,
@@ -465,14 +465,14 @@ pub const Timeout = struct {
         self.ticks = 0;
         self.ticking = true;
         // TODO Use self.prng to adjust for rtt and attempts.
-        log.debug("{}: {s} started", .{ self.replica, self.name });
+        log.debug("{}: {s} started", .{ self.id, self.name });
     }
 
     pub fn stop(self: *Timeout) void {
         self.attempts = 0;
         self.ticks = 0;
         self.ticking = false;
-        log.debug("{}: {s} stopped", .{ self.replica, self.name });
+        log.debug("{}: {s} stopped", .{ self.id, self.name });
     }
 
     pub fn tick(self: *Timeout) void {
