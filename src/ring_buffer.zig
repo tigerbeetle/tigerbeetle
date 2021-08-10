@@ -82,41 +82,41 @@ const testing = std.testing;
 test "push/peek/pop/full/empty" {
     var fifo = RingBuffer(u32, 3){};
 
-    testing.expect(!fifo.full());
-    testing.expect(fifo.empty());
+    try testing.expect(!fifo.full());
+    try testing.expect(fifo.empty());
 
     try fifo.push(1);
-    testing.expectEqual(@as(?u32, 1), fifo.peek());
+    try testing.expectEqual(@as(?u32, 1), fifo.peek());
 
-    testing.expect(!fifo.full());
-    testing.expect(!fifo.empty());
+    try testing.expect(!fifo.full());
+    try testing.expect(!fifo.empty());
 
     try fifo.push(2);
-    testing.expectEqual(@as(?u32, 1), fifo.peek());
+    try testing.expectEqual(@as(?u32, 1), fifo.peek());
 
     try fifo.push(3);
-    testing.expectError(error.NoSpaceLeft, fifo.push(4));
+    try testing.expectError(error.NoSpaceLeft, fifo.push(4));
 
-    testing.expect(fifo.full());
-    testing.expect(!fifo.empty());
+    try testing.expect(fifo.full());
+    try testing.expect(!fifo.empty());
 
-    testing.expectEqual(@as(?u32, 1), fifo.peek());
-    testing.expectEqual(@as(?u32, 1), fifo.pop());
+    try testing.expectEqual(@as(?u32, 1), fifo.peek());
+    try testing.expectEqual(@as(?u32, 1), fifo.pop());
 
-    testing.expect(!fifo.full());
-    testing.expect(!fifo.empty());
+    try testing.expect(!fifo.full());
+    try testing.expect(!fifo.empty());
 
     fifo.peek_ptr().?.* += 1000;
 
-    testing.expectEqual(@as(?u32, 1002), fifo.pop());
-    testing.expectEqual(@as(?u32, 3), fifo.pop());
-    testing.expectEqual(@as(?u32, null), fifo.pop());
+    try testing.expectEqual(@as(?u32, 1002), fifo.pop());
+    try testing.expectEqual(@as(?u32, 3), fifo.pop());
+    try testing.expectEqual(@as(?u32, null), fifo.pop());
 
-    testing.expect(!fifo.full());
-    testing.expect(fifo.empty());
+    try testing.expect(!fifo.full());
+    try testing.expect(fifo.empty());
 }
 
-fn test_iterator(comptime T: type, ring: *T, values: []const u32) void {
+fn test_iterator(comptime T: type, ring: *T, values: []const u32) !void {
     const ring_index = ring.index;
 
     var loops: usize = 0;
@@ -124,47 +124,47 @@ fn test_iterator(comptime T: type, ring: *T, values: []const u32) void {
         var iterator = ring.iterator();
         var index: usize = 0;
         while (iterator.next()) |item| {
-            testing.expectEqual(values[index], item);
+            try testing.expectEqual(values[index], item);
             index += 1;
         }
-        testing.expectEqual(values.len, index);
+        try testing.expectEqual(values.len, index);
     }
 
-    testing.expectEqual(ring_index, ring.index);
+    try testing.expectEqual(ring_index, ring.index);
 }
 
 test "iterator" {
     const Ring = RingBuffer(u32, 2);
 
     var ring = Ring{};
-    test_iterator(Ring, &ring, &[_]u32{});
+    try test_iterator(Ring, &ring, &[_]u32{});
 
     try ring.push(0);
-    test_iterator(Ring, &ring, &[_]u32{0});
+    try test_iterator(Ring, &ring, &[_]u32{0});
 
     try ring.push(1);
-    test_iterator(Ring, &ring, &[_]u32{ 0, 1 });
+    try test_iterator(Ring, &ring, &[_]u32{ 0, 1 });
 
-    testing.expectEqual(@as(?u32, 0), ring.pop());
-    test_iterator(Ring, &ring, &[_]u32{1});
+    try testing.expectEqual(@as(?u32, 0), ring.pop());
+    try test_iterator(Ring, &ring, &[_]u32{1});
 
     try ring.push(2);
-    test_iterator(Ring, &ring, &[_]u32{ 1, 2 });
+    try test_iterator(Ring, &ring, &[_]u32{ 1, 2 });
 
     var iterator = ring.iterator();
     while (iterator.next_ptr()) |item_ptr| {
         item_ptr.* += 1000;
     }
 
-    testing.expectEqual(@as(?u32, 1001), ring.pop());
-    test_iterator(Ring, &ring, &[_]u32{1002});
+    try testing.expectEqual(@as(?u32, 1001), ring.pop());
+    try test_iterator(Ring, &ring, &[_]u32{1002});
 
     try ring.push(3);
-    test_iterator(Ring, &ring, &[_]u32{ 1002, 3 });
+    try test_iterator(Ring, &ring, &[_]u32{ 1002, 3 });
 
-    testing.expectEqual(@as(?u32, 1002), ring.pop());
-    test_iterator(Ring, &ring, &[_]u32{3});
+    try testing.expectEqual(@as(?u32, 1002), ring.pop());
+    try test_iterator(Ring, &ring, &[_]u32{3});
 
-    testing.expectEqual(@as(?u32, 3), ring.pop());
-    test_iterator(Ring, &ring, &[_]u32{});
+    try testing.expectEqual(@as(?u32, 3), ring.pop());
+    try test_iterator(Ring, &ring, &[_]u32{});
 }

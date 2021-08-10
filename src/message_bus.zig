@@ -792,12 +792,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 }
 
                 if (message.header.command == .request or message.header.command == .prepare) {
-                    // TODO: This is Journal.sector_ceil(), but we can't depend on Journal here as
-                    // that would cause a circular dependency. Instead, we should move this to some
-                    // shared util.zig or similar.
-                    const sectors = std.math.divCeil(u64, message.header.size, config.sector_size) catch unreachable;
-                    const sector_ceil = sectors * config.sector_size;
-
+                    const sector_ceil = vr.sector_ceil(message.header.size);
                     if (message.header.size != sector_ceil) {
                         assert(message.header.size < sector_ceil);
                         assert(message.buffer.len == config.message_size_max + config.sector_size);
