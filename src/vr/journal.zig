@@ -262,7 +262,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         pub fn next_offset(self: *Self, header: *const Header) u64 {
             // TODO Snapshots
             assert(header.command == .prepare);
-            return header.offset + Self.sector_ceil(header.size);
+            return header.offset + vr.sector_ceil(header.size);
         }
 
         pub fn has(self: *Self, header: *const Header) bool {
@@ -465,7 +465,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            const physical_size = Self.sector_ceil(exact.size);
+            const physical_size = vr.sector_ceil(exact.size);
             assert(physical_size >= exact.size);
 
             const message = replica.message_bus.get_message() orelse {
@@ -652,7 +652,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
 
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
-            const sectors = message.buffer[0..Self.sector_ceil(message.header.size)];
+            const sectors = message.buffer[0..vr.sector_ceil(message.header.size)];
             assert(message.header.offset + sectors.len <= self.size_circular_buffer);
 
             if (std.builtin.mode == .Debug) {
@@ -832,7 +832,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn write_prepare_header_offset(message: *Message) u64 {
             comptime assert(config.sector_size % @sizeOf(Header) == 0);
-            return Self.sector_floor(message.header.op * @sizeOf(Header));
+            return vr.sector_floor(message.header.op * @sizeOf(Header));
         }
 
         fn write_headers_increment_version(self: *Self) u1 {
@@ -996,16 +996,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             range.* = undefined;
             callback(write);
         }
-
-        pub fn sector_floor(offset: u64) u64 {
-            const sectors = math.divFloor(u64, offset, config.sector_size) catch unreachable;
-            return sectors * config.sector_size;
-        }
-
-        pub fn sector_ceil(offset: u64) u64 {
-            const sectors = math.divCeil(u64, offset, config.sector_size) catch unreachable;
-            return sectors * config.sector_size;
-        }
     };
 }
 
@@ -1088,7 +1078,7 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
 
         /// Returns true if there is at least one IOP in use
         pub fn executing(self: *const Self) math.Log2IntCeil(Map) {
-            return math.maxInt(math.Log2IntCeil(Map)) - @popCount(Map, self.free);
+            return @popCount(Map, math.maxInt(Map)) - @popCount(Map, self.free);
         }
 
         pub const Iterator = struct {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const math = std.math;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.vr);
@@ -518,15 +519,15 @@ test "exponential_backoff_with_jitter" {
     var attempt = max - attempts;
     while (attempt < max) : (attempt += 1) {
         const ebwj = exponential_backoff_with_jitter(&prng, min, max, attempt);
-        testing.expect(ebwj >= min);
-        testing.expect(ebwj <= max);
+        try testing.expect(ebwj >= min);
+        try testing.expect(ebwj <= max);
     }
 
     // Check that `backoff` is calculated correctly when min is 0 by taking `std.math.max(1, min)`.
     // Otherwise, the final result will always be 0. This was an actual bug we encountered.
     // If the PRNG ever changes, then there is a small chance that we may collide for 0,
     // but this is outweighed by the probability that we refactor and fail to take the max.
-    testing.expect(exponential_backoff_with_jitter(&prng, 0, max, 0) > 0);
+    try testing.expect(exponential_backoff_with_jitter(&prng, 0, max, 0) > 0);
 }
 
 /// Returns An array containing the remote or local addresses of each of the 2f + 1 replicas:
@@ -582,4 +583,14 @@ pub fn parse_addresses(allocator: *std.mem.Allocator, raw: []const u8) ![]std.ne
         }
     }
     return addresses[0..index];
+}
+
+pub fn sector_floor(offset: u64) u64 {
+    const sectors = math.divFloor(u64, offset, config.sector_size) catch unreachable;
+    return sectors * config.sector_size;
+}
+
+pub fn sector_ceil(offset: u64) u64 {
+    const sectors = math.divCeil(u64, offset, config.sector_size) catch unreachable;
+    return sectors * config.sector_size;
 }

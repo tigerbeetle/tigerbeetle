@@ -423,8 +423,8 @@ fn formatDurationSigned(
 }
 
 const testing = std.testing;
-const OffsetType = @import("../time.zig").OffsetType;
-const DeterministicTime = @import("../time.zig").DeterministicTime;
+const OffsetType = @import("../test/time.zig").OffsetType;
+const DeterministicTime = @import("../test/time.zig").Time;
 const DeterministicClock = Clock(DeterministicTime);
 
 const ClockUnitTestContainer = struct {
@@ -589,25 +589,29 @@ test "ideal clocks get clamped to cluster time" {
     }
 }
 
-const NetworkSimulatorOptions = @import("../network_simulator.zig").NetworkSimulatorOptions;
-const NetworkSimulator = @import("../network_simulator.zig").NetworkSimulator;
+const PacketSimulatorOptions = @import("../test/packet_simulator.zig").PacketSimulatorOptions;
+const PacketSimulator = @import("../test/packet_simulator.zig").PacketSimulator;
+const Path = @import("../test/packet_simulator.zig").Path;
 const ClockSimulator = struct {
     const Packet = struct {
         m0: u64,
         t1: ?i64,
         clock_simulator: *ClockSimulator,
+
+        /// PacketSimulator requires this function, but we don't actually have anything to deinit.
+        pub fn deinit(packet: *Packet, path: Path) void {}
     };
 
     const Options = struct {
         ping_timeout: u32,
         clock_count: u8,
-        network_options: NetworkSimulatorOptions,
+        network_options: PacketSimulatorOptions,
     };
 
     allocator: *std.mem.Allocator,
     options: Options,
     ticks: u64 = 0,
-    network: NetworkSimulator(Packet),
+    network: PacketSimulator(Packet),
     clocks: []DeterministicClock,
     prng: std.rand.DefaultPrng,
 
@@ -615,7 +619,7 @@ const ClockSimulator = struct {
         var self = ClockSimulator{
             .allocator = allocator,
             .options = options,
-            .network = try NetworkSimulator(Packet).init(allocator, options.network_options),
+            .network = try PacketSimulator(Packet).init(allocator, options.network_options),
             .clocks = try allocator.alloc(DeterministicClock, options.clock_count),
             .prng = std.rand.DefaultPrng.init(options.network_options.prng_seed),
         };
@@ -661,8 +665,10 @@ const ClockSimulator = struct {
                                 .clock_simulator = self,
                             },
                             ClockSimulator.handle_packet,
-                            @intCast(u8, target),
-                            clock.replica,
+                            .{
+                                .source = clock.replica,
+                                .target = @intCast(u8, target),
+                            },
                         );
                     }
                 }
@@ -670,13 +676,13 @@ const ClockSimulator = struct {
         }
     }
 
-    fn handle_packet(packet: Packet, to: u8, from: u8) void {
+    fn handle_packet(packet: Packet, path: Path) void {
         const self = packet.clock_simulator;
-        const target = &self.clocks[to];
+        const target = &self.clocks[path.target];
 
         if (packet.t1) |t1| {
             target.learn(
-                from,
+                path.source,
                 packet.m0,
                 t1,
                 target.monotonic(),
@@ -689,8 +695,11 @@ const ClockSimulator = struct {
                     .clock_simulator = self,
                 },
                 ClockSimulator.handle_packet,
-                from, // send the packet back to where it came from.
-                to,
+                .{
+                    // send the packet back to where it came from.
+                    .source = path.target,
+                    .target = path.source,
+                },
             );
         }
     }

@@ -2941,6 +2941,7 @@ pub fn Replica(
                     assert(self.status == .view_change);
                     assert(self.start_view_change_quorum);
                     assert(!self.do_view_change_quorum);
+                    assert(message.header.replica == self.replica);
                     assert(message.header.view == self.view);
                 },
                 .start_view => switch (self.status) {
@@ -2948,11 +2949,13 @@ pub fn Replica(
                         // A follower may ask the leader to resend the start_view message.
                         assert(!self.start_view_change_quorum);
                         assert(!self.do_view_change_quorum);
+                        assert(message.header.replica == self.replica);
                         assert(message.header.view == self.view);
                     },
                     .view_change => {
                         assert(self.start_view_change_quorum);
                         assert(self.do_view_change_quorum);
+                        assert(message.header.replica == self.replica);
                         assert(message.header.view == self.view);
                     },
                     else => unreachable,
