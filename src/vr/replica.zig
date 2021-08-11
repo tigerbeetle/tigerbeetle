@@ -92,10 +92,14 @@ pub fn Replica(
         /// The persistent log of hash-chained journal entries:
         journal: Journal,
 
-        /// An abstraction to send messages from the replica to itself or another replica or client.
-        /// The recipient replica or client may be a local in-memory pointer or network-addressable.
+        /// An abstraction to send messages from the replica to another replica or client.
         /// The message bus will also deliver messages to this replica by calling `on_message()`.
         message_bus: *MessageBus,
+
+        /// In some cases, a replica may send a message to itself. We do not submit such messages
+        /// to the message bus but rather queue them here for guaranteed immediate delivery, which
+        /// we require and assert in the protocol implementation.
+        queued_loopback_message: ?*Message = null,
 
         /// For executing service up-calls after an operation has been committed:
         state_machine: *StateMachine,
@@ -344,10 +348,39 @@ pub fn Replica(
             if (self.view_change_timeout.fired()) self.on_view_change_timeout();
             if (self.view_change_message_timeout.fired()) self.on_view_change_message_timeout();
             if (self.repair_timeout.fired()) self.on_repair_timeout();
+
+            // None of the on_timeout functions above should ever send a
+            // message from this replica to itself.
+            assert(self.queued_loopback_message == null);
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
         pub fn on_message(self: *Self, message: *Message) void {
+            assert(self.queued_loopback_message == null);
+
+            self.on_message_internal(message);
+
+            // There are currently 3 cases in which a replica will send a message to itself:
+            // 1. In on_request, the leader sends a prepare to itself, and
+            //    subsequent prepare timeout retries will never resend to self.
+            // 2. In on_prepare, after writing to storage, the leader sends a
+            //    prepare_ok back to itself.
+            // 3. In on_start_view_change, after receiving a quorum of start_view_change
+            //    messages, the new leader sends a do_view_change to itself.
+            var safety_counter: usize = 0;
+            while (self.queued_loopback_message) |loopback_message| : (safety_counter += 1) {
+                defer self.message_bus.unref(loopback_message);
+
+                // If the storage write is synchronous two loopback messages will be sent
+                // on_request -> prepare -> on_prepare -> prepare_ok
+                assert(safety_counter < 2);
+
+                self.queued_loopback_message = null;
+                self.on_message_internal(loopback_message);
+            }
+        }
+
+        fn on_message_internal(self: *Self, message: *Message) void {
             log.debug("{}: on_message: view={} status={s} {}", .{
                 self.replica,
                 self.view,
@@ -2846,7 +2879,24 @@ pub fn Replica(
             assert(header.replica == self.replica);
             assert(header.view == self.view);
 
-            self.message_bus.send_header_to_replica(replica, header);
+            if (replica == self.replica) {
+                // Messages the replica sends to itself are not sent through
+                // the message bus but rather directly delivered after
+                // whatever is currently being processed has been completed.
+                // TODO: avoid code duplication with MessageBus.send_header_to_replica()
+                assert(self.queued_loopback_message == null);
+                const message = self.message_bus.pool.get_header_only_message() orelse {
+                    log.debug("no header only message available, " ++
+                        "dropping message to replica {}", .{replica});
+                    return;
+                };
+                message.header.* = header;
+                message.header.set_checksum_body(message.body());
+                message.header.set_checksum();
+                self.queued_loopback_message = message;
+            } else {
+                self.message_bus.send_header_to_replica(replica, header);
+            }
         }
 
         fn send_eviction_message_to_client(self: *Self, client: u128) void {
@@ -2912,7 +2962,16 @@ pub fn Replica(
                 else => unreachable,
             }
             assert(message.header.cluster == self.cluster);
-            self.message_bus.send_message_to_replica(replica, message);
+
+            if (replica == self.replica) {
+                // Messages the replica sends to itself are not sent through
+                // the message bus but rather directly delivered after
+                // whatever is currently being processed has been completed.
+                assert(self.queued_loopback_message == null);
+                self.queued_loopback_message = message.ref();
+            } else {
+                self.message_bus.send_message_to_replica(replica, message);
+            }
         }
 
         fn set_latest_header(self: *Self, headers: []Header, latest: *Header) void {
