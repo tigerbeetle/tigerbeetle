@@ -53,7 +53,7 @@ pub const IO = struct {
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
         try self.flush_submissions();
-        try self.flush_completions();
+        try self.flush_completions(wait_for_completions);
 
         var completed = self.completed;
         self.completed = .{};
@@ -66,7 +66,7 @@ pub const IO = struct {
         while (self.io_pending.peek()) |_| {
             self.enter(true, false) catch |err| switch (err) {
                 error.SystemResources => {
-                    try self.flush_completions();
+                    try self.flush_completions(true);
                     continue;
                 },
                 else => |e| return e,
@@ -74,9 +74,9 @@ pub const IO = struct {
         }
     }
 
-    fn flush_completions(self: *IO) !void {
+    fn flush_completions(self: *IO, wait_for_completions: bool) !void {
         while (self.completed.peek() == null) {
-            try self.enter(false, true);
+            try self.enter(false, wait_for_completions);
         }
     }
 
@@ -263,7 +263,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.accept;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         os.accept(op.socket, null, null, op.flags),
                     );
@@ -303,7 +303,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.close;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         switch (os.errno(os.system.close(op.fd))) {
                             0 => {},
@@ -346,7 +346,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.connect;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         os.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
                     );
@@ -390,7 +390,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.fsync;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         blk: {
                             _ = os.fcntl(op.fd, os.F_FULLFSYNC, 1) catch break :blk os.fsync(op.fd);
@@ -453,7 +453,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.openat;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         os.openatZ(op.fd, op.path, op.flags, op.mode),
                     );
@@ -501,7 +501,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.read;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         blk: {
                             while (true) {
@@ -566,7 +566,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.recv;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         os.recv(op.socket, op.buffer, op.flags),
                     );
@@ -605,7 +605,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.send;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         os.send(op.socket, op.buffer, op.flags),
                     );
@@ -640,7 +640,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.timeout;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         {},
                     );
@@ -679,7 +679,7 @@ pub const IO = struct {
                 fn onCompletion(_completion: *Completion) void {
                     const op = _completion.operation.write;
                     return callback(
-                        @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                        @intToPtr(Context, @ptrToInt(_completion.context)),
                         _completion,
                         os.pwrite(op.fd, op.buffer, op.offset),
                     );
