@@ -434,6 +434,7 @@ pub const Storage = struct {
 
     fn fallocate(fd: i32, mode: i32, offset: i64, length: i64) !void {
         // https://stackoverflow.com/a/11497568
+        // https://api.kde.org/frameworks/kcoreaddons/html/posix__fallocate__mac_8h_source.html
         // http://hg.mozilla.org/mozilla-central/file/3d846420a907/xpcom/glue/FileUtils.cpp#l61
         if (is_darwin) {
             const F_ALLOCATECONTIG = 0x2; // allocate contiguous space
@@ -450,9 +451,9 @@ pub const Storage = struct {
 
             var store = fstore_t{
                 .fst_flags = F_ALLOCATECONTIG | F_ALLOCATEALL,
-                .fst_posmode = if (mode == 0) F_VOLPOSMODE else F_PEOFPOSMODE,
-                .fst_offset = if (mode == 0) offset else 0,
-                .fst_length = length,
+                .fst_posmode = F_PEOFPOSMODE,
+                .fst_offset = 0,
+                .fst_length = offset + length,
                 .fst_bytesalloc = 0,
             };
 
