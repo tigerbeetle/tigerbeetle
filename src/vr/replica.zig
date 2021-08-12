@@ -1410,7 +1410,10 @@ pub fn Replica(
                 self.commit_max = commit;
             }
 
-            if (!self.valid_hash_chain("commit_ops")) return;
+            if (!self.valid_hash_chain("commit_ops")) {
+                self.committing = false;
+                return;
+            }
             assert(!self.view_jump_barrier);
             assert(self.op >= self.commit_max);
 
