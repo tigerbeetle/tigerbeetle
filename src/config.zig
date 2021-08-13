@@ -72,6 +72,9 @@ pub const journal_headers_max = switch (deployment_environment) {
     else => 16384,
 };
 
+/// The page sized used for snapshots written to disk
+pub const snapshot_page_size = 4 * 1024 * 1024; // 4 MiB
+
 /// The maximum number of connections that can be held open by the server at any time:
 pub const connections_max = replicas_max + clients_max;
 

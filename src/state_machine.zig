@@ -443,6 +443,56 @@ pub const StateMachine = struct {
         }
         self.commits.rollback(c.id);
     }
+
+    pub const Snapshot = struct {
+        pub const Page = struct {
+            bytes: *align(config.sector_size) const [config.snapshot_page_size]u8,
+            user_data: u64,
+        };
+
+        self: *StateMachine,
+
+        accounts: Accounts.Snapshot,
+        transfers: Transfers.Snapshot,
+        commits: Commits.Snapshot,
+
+        state: enum {
+            accounts,
+            transfers,
+            commits,
+            done,
+        } = .accounts,
+
+        pub fn next_page(snapshot: *Snapshot) ?Page {
+            assert(snapshot.state != .done);
+            while (true) {
+                switch (snapshot.state) {
+                    .accounts => return snapshot.accounts.next_page() orelse {
+                        snapshot.state = .transfers;
+                        continue;
+                    },
+                    .transfers => return snapshot.transfers.next_page() orelse {
+                        snapshot.state = .commits;
+                        continue;
+                    },
+                    .commits => return snapshot.commits.next_page() orelse {
+                        snapshot.state = .done;
+                        continue;
+                    },
+                    .done => return null,
+                }
+            }
+        }
+    };
+
+    pub fn snapshot(self: *StateMachine) Snapshot {
+        return .{
+            .self = self,
+            .accounts = self.accounts.snapshot(),
+            .transfers = self.transfers.snapshot(),
+            .commits = self.commits.snapshot(),
+        };
+    }
 };
 
 // TODO Optimize this by precomputing hashes outside and before committing to the state machine.

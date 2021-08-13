@@ -3,19 +3,31 @@ const assert = std.debug.assert;
 const builtin = @import("builtin");
 const mem = std.mem;
 
+const config = @import("../config.zig");
+
+comptime {
+    assert(config.snapshot_page_size % config.sector_size == 0);
+    assert(config.snapshot_page_size > 0);
+}
+
+const SnapshotPage = [config.snapshot_page_size]u8;
+
 pub const ObjectStoreKind = enum {
     append_only,
     copy_on_write,
 };
 
 pub fn ObjectStore(comptime T: type, comptime kind: ObjectStoreKind) type {
+    assert(config.snapshot_page_size % @sizeOf(T) == 0);
+    assert(@sizeOf(T) > 0);
+
     return struct {
         const Self = @This();
 
         const Indexes = std.AutoHashMapUnmanaged(u128, u64);
         const IndexesDirty = std.bit_set.DynamicBitSetUnmanaged;
 
-        objects: []T,
+        objects: []align(config.sector_size) T,
         indexes: Indexes,
 
         /// Length of 0 indicates that we are not currently writing a snapshot.
@@ -24,8 +36,15 @@ pub fn ObjectStore(comptime T: type, comptime kind: ObjectStoreKind) type {
 
         capacity: u64,
 
+        snapshot_page: *align(config.sector_size) SnapshotPage,
+
         pub fn init(allocator: *mem.Allocator, capacity: u64) !Self {
-            const objects_max_capacity = try allocator.alloc(T, capacity);
+            const objects_max_capacity = try allocator.allocAdvanced(
+                T,
+                config.sector_size,
+                capacity,
+                .exact,
+            );
             errdefer allocator.free(objects_max_capacity);
             var objects = objects_max_capacity;
             objects.len = 0;
@@ -35,6 +54,14 @@ pub fn ObjectStore(comptime T: type, comptime kind: ObjectStoreKind) type {
             try indexes.ensureCapacity(allocator, @intCast(u32, capacity));
             errdefer indexes.deinit(allocator);
 
+            const snapshot_page = (try allocator.allocAdvanced(
+                u8,
+                config.sector_size,
+                config.snapshot_page_size,
+                .exact,
+            ))[0..config.snapshot_page_size];
+            errdefer allocator.free(snapshot_page);
+
             if (kind == .append_only) {
                 return Self{
                     .objects = objects,
@@ -42,6 +69,7 @@ pub fn ObjectStore(comptime T: type, comptime kind: ObjectStoreKind) type {
                     .indexes = indexes,
                     .indexes_dirty = {},
                     .capacity = capacity,
+                    .snapshot_page = snapshot_page,
                 };
             } else {
                 const objects_dirty_max_capacity = try allocator.alloc(T, capacity);
@@ -58,6 +86,7 @@ pub fn ObjectStore(comptime T: type, comptime kind: ObjectStoreKind) type {
                     .objects_dirty = objects_dirty,
                     .indexes_dirty = indexes_dirty,
                     .capacity = capacity,
+                    .snapshot_page = snapshot_page,
                 };
             }
         }
@@ -168,7 +197,55 @@ pub fn ObjectStore(comptime T: type, comptime kind: ObjectStoreKind) type {
             }
         }
 
-        pub fn acquire(self: *Self) void {
+        // TODO: update this to return user_data including page number and a static type ID
+        // from next_page() alongside the page.
+        pub const Snapshot = struct {
+            const objects_per_page = @divExact(config.snapshot_page_size, @sizeOf(T));
+
+            self: *Self,
+            index: u64 = 0,
+            /// The value self.objects.len had when the snapshot was started.
+            len: u64,
+            released: bool = false,
+
+            /// Return the snapshot pages in order.
+            /// Once next_page() returns null once, it may not be called again.
+            pub fn next_page(snapshot: *Snapshot) ?*align(config.sector_size) const SnapshotPage {
+                const self = snapshot.self;
+
+                if (snapshot.index == snapshot.len) {
+                    assert(!snapshot.released);
+                    snapshot.released = true;
+                    if (kind == .copy_on_write) self.release();
+                    return null;
+                }
+                assert(snapshot.index < snapshot.len);
+
+                if (snapshot.index + objects_per_page > snapshot.len) {
+                    assert(snapshot.len > snapshot.index);
+
+                    mem.set(u8, self.snapshot_page, 0);
+                    const objects = self.objects[snapshot.index..snapshot.len];
+                    mem.copy(T, mem.bytesAsSlice(T, self.snapshot_page), objects);
+
+                    snapshot.index += objects.len;
+                    return self.snapshot_page;
+                }
+
+                defer snapshot.index += objects_per_page;
+                return mem.sliceAsBytes(self.objects[snapshot.index..][0..objects_per_page]);
+            }
+        };
+
+        pub fn snapshot(self: *Self) Snapshot {
+            if (kind == .copy_on_write) self.acquire();
+            return .{
+                .self = self,
+                .len = self.objects.len,
+            };
+        }
+
+        fn acquire(self: *Self) void {
             comptime assert(kind == .copy_on_write);
 
             // assert that this object store is not currently acquired.
@@ -178,7 +255,7 @@ pub fn ObjectStore(comptime T: type, comptime kind: ObjectStoreKind) type {
             self.objects_dirty.len = self.objects.len;
         }
 
-        pub fn release(self: *Self) void {
+        fn release(self: *Self) void {
             comptime assert(kind == .copy_on_write);
 
             // assert that this object store is currently acquired.
