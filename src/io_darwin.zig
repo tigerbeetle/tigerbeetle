@@ -1,5 +1,6 @@
 const std = @import("std");
 const os = std.os;
+const assert = std.debug.assert;
 
 const FIFO = @import("fifo.zig").FIFO;
 const Time = @import("time.zig").Time;
@@ -29,141 +30,122 @@ pub const IO = struct {
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the __kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        var running = true;
+        var timed_out = false;
         var completion: Completion = undefined;
-        const timeout_callback = struct {
-            fn callback(running_ptr: *bool, _completion: *Completion, result: TimeoutError!void) void {
-                running_ptr.* = false;
+        const on_timeout = struct {
+            fn callback(timed_out_ptr: *bool, _completion: *Completion, _result: TimeoutError!void) void {
+                timed_out_ptr.* = true;
             }
         }.callback;
 
-        const running_ptr = &running;
+        // Submit a timeout which sets the timed_out ptr value to true to terminate the loop 
+        const timed_out_ptr = &timed_out;
         self.timeout(
             *bool,
-            running_ptr,
-            timeout_callback,
+            timed_out_ptr,
+            on_timeout,
             &completion,
             nanoseconds,
         );
 
-        while (running_ptr.*) {
+        std.debug.warn("run_for_ns(begin)\n", .{});
+        defer std.debug.warn("run_for_ns(end)\n", .{});
+
+        while (!(timed_out_ptr.*)) {
             try self.flush(true);
         }
     }
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
-        try self.flush_submissions();
-        try self.flush_completions(wait_for_completions);
+        var io_pending = self.io_pending.out;
+        var events: [256]os.Kevent = undefined;
+
+        const next_timeout = self.flush_timeouts();
+        const change_events = self.flush_io(&events, &io_pending);
+
+        if (change_events > 0 or self.completed.peek() == null) {
+            var ts = std.mem.zeroes(os.timespec);
+            if (change_events == 0 and self.completed.peek() == null) {
+                const timeout_ns = next_timeout orelse @panic("kevent() attempt to block without a timeout");
+                ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
+                ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
+            }
+
+            const new_events = try os.kevent(
+                self.kq, 
+                events[0..change_events],
+                events[0..events.len],
+                &ts,
+            );
+
+            self.io_pending.out = io_pending;
+            for (events[0..new_events]) |event| {
+                const completion = @intToPtr(*Completion, event.udata);
+                self.completed.push(completion);
+            }
+        }
 
         var completed = self.completed;
         self.completed = .{};
         while (completed.pop()) |completion| {
-            (completion.callback)(completion);
+            (completion.callback)(self, completion);
         }
     }
 
-    fn flush_submissions(self: *IO) !void {
-        while (self.io_pending.peek()) |_| {
-            self.enter(true, false) catch |err| switch (err) {
-                error.SystemResources => {
-                    try self.flush_completions(true);
-                    continue;
-                },
-                else => |e| return e,
+    fn flush_io(self: *IO, events: []os.Kevent, io_pending_top: *?*Completion) usize {
+        for (events) |*event, flushed| {
+            const completion = io_pending_top.* orelse return flushed;
+            io_pending_top.* = completion.next;
+
+            const event_info = switch (completion.operation) {
+                .accept => |op| [2]c_int{ op.socket, os.EVFILT_READ },
+                .connect => |op| [2]c_int{ op.socket, os.EVFILT_WRITE },
+                .read => |op| [2]c_int{ op.fd, os.EVFILT_READ },
+                .write => |op| [2]c_int{ op.fd, os.EVFILT_WRITE },
+                .recv => |op| [2]c_int{ op.socket, os.EVFILT_READ },
+                .send => |op| [2]c_int{ op.socket, os.EVFILT_WRITE },
+                else => @panic("invalid completion operation queued for io"),
+            };
+
+            event.* = .{
+                .ident = @intCast(u32, event_info[0]),
+                .filter = @intCast(i16, event_info[1]),
+                .flags = os.EV_ADD | os.EV_ENABLE | os.EV_ONESHOT,
+                .fflags = 0,
+                .data = 0,
+                .udata = @ptrToInt(completion),
             };
         }
+        return events.len;
     }
+    
+    fn flush_timeouts(self: *IO) ?u64 {
+        var min_timeout: ?u64 = null;
+        var timeouts: ?*Completion = self.timeouts.peek();
+        while (timeouts) |completion| {
+            timeouts = completion.next;
 
-    fn flush_completions(self: *IO, wait_for_completions: bool) !void {
-        while (self.completed.peek() == null) {
-            try self.enter(false, wait_for_completions);
-        }
-    }
-
-    fn enter(self: *IO, flush_io: bool, wait_event: bool) !void {
-        var change_events: u32 = 0;
-        var io_top = self.io_pending.out;
-        var events: [256]os.Kevent = undefined;
-        
-        if (flush_io) {
-            while (io_top) |completion| {
-                if (change_events == events.len) break;
-                io_top = completion.next;
-
-                const event_info = switch (completion.operation) {
-                    .accept => |op| [2]c_int{ op.socket, os.EVFILT_READ },
-                    .connect => |op| [2]c_int{ op.socket, os.EVFILT_WRITE },
-                    .send => |op| [2]c_int{ op.socket, os.EVFILT_WRITE },
-                    .recv => |op| [2]c_int{ op.socket, os.EVFILT_READ },
-                    else => unreachable,
-                };
-
-                defer change_events += 1;
-                events[change_events] = .{
-                    .ident = @intCast(u32, event_info[0]),
-                    .filter = @intCast(i16, event_info[1]),
-                    .flags = os.EV_ADD | os.EV_ENABLE | os.EV_ONESHOT,
-                    .fflags = 0,
-                    .data = 0,
-                    .udata = @ptrToInt(completion),
-                };
-            }
-        }
-
-        var ts = std.mem.zeroes(os.timespec);
-        var timeout_ptr: ?*const os.timespec = &ts;
-
-        if (self.timeouts.peek()) |next_timeout| {
-            var min_expire: ?u64 = null;
             const now = self.time.monotonic();
-
-            var next: ?*Completion = next_timeout;
-            while (true) {
-                const completion = next orelse break;
-                next = completion.next;
-
-                const expires = completion.operation.timeout.expires;
-                if (now >= expires) {
-                    self.timeouts.remove(completion);
-                    self.completed.push(completion);
-                } else {
-                    const current_expire = min_expire orelse std.math.maxInt(u64);
-                    min_expire = std.math.min(expires, current_expire);
-                }
+            const expires = completion.operation.timeout.expires;
+            
+            if (now >= expires) {
+                self.timeouts.remove(completion);
+                self.completed.push(completion);
+                continue;
             }
 
-            if (min_expire) |expires| {
-                const timeout_ns = expires - now;
-                ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
-                ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
-            }
+            const timeout_ns = expires - now;
+            const current_ns = min_timeout orelse std.math.maxInt(u64);
+            min_timeout = std.math.min(current_ns, timeout_ns);
         }
-
-        if (change_events == 0) blk: {
-            if (self.timeouts.peek() != null) break :blk;
-            if (!wait_event) return;
-            timeout_ptr = null;
-        }
-
-        const new_events = try os.kevent(
-            self.kq, 
-            events[0..change_events],
-            events[0..events.len],
-            timeout_ptr,
-        );
-        
-        self.io_pending.out = io_top;
-        for (events[0..new_events]) |event| {
-            const completion = @intToPtr(*Completion, event.udata);
-            self.completed.push(completion);
-        }
+        return min_timeout;
     }
 
     /// This struct holds the data needed for a single IO operation
     pub const Completion = struct {
         next: ?*Completion,
         context: ?*c_void,
-        callback: fn(*Completion) void,
+        callback: fn(*IO, *Completion) void,
         operation: Operation,
     };
 
@@ -215,21 +197,53 @@ pub const IO = struct {
     };
 
     fn submit(
-        self: *IO, 
-        context: ?*c_void,
+        self: *IO,
+        context: anytype,
+        comptime callback: anytype,
         completion: *Completion,
-        operation: Operation,
-        comptime CallbackImpl: type,
+        comptime operation_tag: std.meta.Tag(Operation),
+        operation_data: anytype,
+        comptime OperationImpl: type,
     ) void {
+        const Context = @TypeOf(context);
+        const onCompleteFn = struct {
+            fn onComplete(io: *IO, _completion: *Completion) void {
+                // Perform the actual operaton
+                const op_data = @field(_completion.operation, @tagName(operation_tag));
+                const result = OperationImpl.doOperation(op_data);
+
+                // Requeue onto io_pending if error.WouldBlock
+                switch (operation_tag) {
+                    .accept, .connect, .read, .write, .send, .recv => {
+                        _ = result catch |err| switch (err) {
+                            error.WouldBlock => {
+                                _completion.next = null;
+                                io.io_pending.push(_completion);
+                                return;
+                            },
+                            else => {},
+                        };
+                    },
+                    else => {}
+                }
+
+                // Complete the Completion
+                return callback(
+                    @intToPtr(Context, @ptrToInt(_completion.context)),
+                    _completion,
+                    result,
+                );
+            }
+        }.onComplete;
+
         completion.* = .{
             .next = null,
             .context = context,
-            .callback = CallbackImpl.onCompletion,
-            .operation = operation,
+            .callback = onCompleteFn,
+            .operation = @unionInit(Operation, @tagName(operation_tag), operation_data),
         };
 
-        switch (operation) {
-            .accept, .connect, .recv, .send => self.io_pending.push(completion),
+        switch (operation_tag) {
             .timeout => self.timeouts.push(completion),
             else => self.completed.push(completion),
         }
@@ -252,21 +266,16 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .accept,
             .{
-                .accept = .{
-                    .socket = socket,
-                    .flags = flags,
-                },
+                .socket = socket,
+                .flags = flags,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.accept;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        os.accept(op.socket, null, null, op.flags),
-                    );
+                fn doOperation(op: anytype) AcceptError!os.socket_t {
+                    return os.accept(op.socket, null, null, op.flags);
                 }
             },
         );
@@ -293,26 +302,21 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .close,
             .{
-                .close = .{
-                    .fd = fd,
-                },
+                .fd = fd,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.close;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        switch (os.errno(os.system.close(op.fd))) {
-                            0 => {},
-                            os.EBADF => error.FileDescriptorInvalid,
-                            os.EINTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
-                            os.EIO => error.InputOutput,
-                            else => |errno| os.unexpectedErrno(errno),
-                        },
-                    );
+                fn doOperation(op: anytype) CloseError!void {
+                    return switch (os.errno(os.system.close(op.fd))) {
+                        0 => {},
+                        os.EBADF => error.FileDescriptorInvalid,
+                        os.EINTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
+                        os.EIO => error.InputOutput,
+                        else => |errno| os.unexpectedErrno(errno),
+                    };
                 }
             },
         );
@@ -335,21 +339,16 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .connect, 
             .{
-                .connect = .{
-                    .socket = socket,
-                    .address = address,
-                },
+                .socket = socket,
+                .address = address,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.connect;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        os.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
-                    );
+                fn doOperation(op: anytype) ConnectError!void {
+                    return os.connect(op.socket, &op.address.any, op.address.getOsSockLen());
                 }
             },
         );
@@ -379,24 +378,16 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .fsync,
             .{
-                .fsync = .{
-                    .fd = fd,
-                    .flags = flags,
-                },
+                .fd = fd,
+                .flags = flags,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.fsync;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        blk: {
-                            _ = os.fcntl(op.fd, os.F_FULLFSYNC, 1) catch break :blk os.fsync(op.fd);
-                            break :blk {};
-                        },
-                    );
+                fn doOperation(op: anytype) FsyncError!void {
+                    _ = os.fcntl(op.fd, os.F_FULLFSYNC, 1) catch return os.fsync(op.fd);
                 }
             },
         );
@@ -440,23 +431,18 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .openat,
             .{
-                .openat = .{
-                    .fd = fd,
-                    .path = path,
-                    .mode = mode,
-                    .flags = flags,
-                },
+                .fd = fd,
+                .path = path,
+                .mode = mode,
+                .flags = flags,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.openat;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        os.openatZ(op.fd, op.path, op.flags, op.mode),
-                    );
+                fn doOperation(op: anytype) OpenatError!os.fd_t {
+                    return os.openatZ(op.fd, op.path, op.flags, op.mode);
                 }
             },
         );
@@ -489,48 +475,41 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .read,
             .{
-                .read = .{
-                    .fd = fd,
-                    .buffer = buffer,
-                    .offset = offset,
-                },
+                .fd = fd,
+                .buffer = buffer,
+                .offset = offset,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.read;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        blk: {
-                            while (true) {
-                                const rc = os.system.pread(
-                                    op.fd, 
-                                    op.buffer.ptr, 
-                                    buffer_limit(op.buffer.len),
-                                    @bitCast(isize, op.offset),
-                                );
-                                break :blk switch (os.errno(rc)) {
-                                    0 => @intCast(usize, rc),
-                                    os.EINTR => continue,
-                                    os.EAGAIN => error.WouldBlock,
-                                    os.EBADF => error.NotOpenForReading,
-                                    os.ECONNRESET => error.ConnectionResetByPeer,
-                                    os.EFAULT => unreachable,
-                                    os.EINVAL => error.Alignment,
-                                    os.EIO => error.InputOutput,
-                                    os.EISDIR => error.IsDir,
-                                    os.ENOBUFS => error.SystemResources,
-                                    os.ENOMEM => error.SystemResources,
-                                    os.ENXIO => error.Unseekable,
-                                    os.EOVERFLOW => error.Unseekable,
-                                    os.ESPIPE => error.Unseekable,
-                                    else => |err| os.unexpectedErrno(err),
-                                };
-                            }
-                        }
-                    );
+                fn doOperation(op: anytype) ReadError!usize {
+                    while (true) {
+                        const rc = os.system.pread(
+                            op.fd, 
+                            op.buffer.ptr, 
+                            buffer_limit(op.buffer.len),
+                            @bitCast(isize, op.offset),
+                        );
+                        return switch (os.errno(rc)) {
+                            0 => @intCast(usize, rc),
+                            os.EINTR => continue,
+                            os.EAGAIN => error.WouldBlock,
+                            os.EBADF => error.NotOpenForReading,
+                            os.ECONNRESET => error.ConnectionResetByPeer,
+                            os.EFAULT => unreachable,
+                            os.EINVAL => error.Alignment,
+                            os.EIO => error.InputOutput,
+                            os.EISDIR => error.IsDir,
+                            os.ENOBUFS => error.SystemResources,
+                            os.ENOMEM => error.SystemResources,
+                            os.ENXIO => error.Unseekable,
+                            os.EOVERFLOW => error.Unseekable,
+                            os.ESPIPE => error.Unseekable,
+                            else => |err| os.unexpectedErrno(err),
+                        };
+                    }
                 }
             },
         );
@@ -554,22 +533,17 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .recv,
             .{
-                .recv = .{
-                    .socket = socket,
-                    .buffer = buffer,
-                    .flags = flags,
-                },
+                .socket = socket,
+                .buffer = buffer,
+                .flags = flags,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.recv;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        os.recv(op.socket, op.buffer, op.flags),
-                    );
+                fn doOperation(op: anytype) RecvError!usize {
+                    return os.recv(op.socket, op.buffer, op.flags);
                 }
             },
         );
@@ -593,22 +567,17 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .send,
             .{
-                .send = .{
-                    .socket = socket,
-                    .buffer = buffer,
-                    .flags = flags,
-                },
+                .socket = socket,
+                .buffer = buffer,
+                .flags = flags,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.send;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        os.send(op.socket, op.buffer, op.flags),
-                    );
+                fn doOperation(op: anytype) SendError!usize {
+                    return os.send(op.socket, op.buffer, op.flags);
                 }
             },
         );
@@ -630,20 +599,15 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .timeout,
             .{
-                .timeout = .{
-                    .expires = self.time.monotonic() + nanoseconds,
-                },
+                .expires = self.time.monotonic() + nanoseconds,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.timeout;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        {},
-                    );
+                fn doOperation(_: anytype) TimeoutError!void {
+                    return; // timeouts don't have errors for now
                 }
             },
         );
@@ -667,22 +631,17 @@ pub const IO = struct {
     ) void {
         self.submit(
             context,
-            completion, 
+            callback,
+            completion,
+            .write,
             .{
-                .write = .{
-                    .fd = fd,
-                    .buffer = buffer,
-                    .offset = offset,
-                },
+                .fd = fd,
+                .buffer = buffer,
+                .offset = offset,
             },
             struct {
-                fn onCompletion(_completion: *Completion) void {
-                    const op = _completion.operation.write;
-                    return callback(
-                        @intToPtr(Context, @ptrToInt(_completion.context)),
-                        _completion,
-                        os.pwrite(op.fd, op.buffer, op.offset),
-                    );
+                fn doOperation(op: anytype) WriteError!usize {
+                    return os.pwrite(op.fd, op.buffer, op.offset);
                 }
             },
         );
