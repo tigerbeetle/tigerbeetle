@@ -6,14 +6,15 @@ const log = std.log.scoped(.vr);
 
 const config = @import("config.zig");
 
+pub const ObjectStoreKind = @import("vr/object_store.zig").ObjectStoreKind;
+pub const ObjectStore = @import("vr/object_store.zig").ObjectStore;
+
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
 pub const Version: u8 = 0;
 
 pub const Replica = @import("vr/replica.zig").Replica;
 pub const Client = @import("vr/client.zig").Client;
-pub const Clock = @import("vr/clock.zig").Clock;
-pub const Journal = @import("vr/journal.zig").Journal;
 
 /// Viewstamped Replication protocol commands:
 pub const Command = packed enum(u8) {

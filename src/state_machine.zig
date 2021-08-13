@@ -4,9 +4,12 @@ const log = std.log.scoped(.state_machine);
 
 usingnamespace @import("tigerbeetle.zig");
 
-const HashMapAccounts = std.AutoHashMap(u128, Account);
-const HashMapTransfers = std.AutoHashMap(u128, Transfer);
-const HashMapCommits = std.AutoHashMap(u128, Commit);
+const vr = @import("vr.zig");
+const ObjectStore = vr.ObjectStore;
+
+const Accounts = ObjectStore(Account, .copy_on_write);
+const Transfers = ObjectStore(Transfer, .append_only);
+const Commits = ObjectStore(Commit, .append_only);
 
 pub const StateMachine = struct {
     pub const Operation = enum(u8) {
@@ -29,9 +32,9 @@ pub const StateMachine = struct {
     allocator: *std.mem.Allocator,
     prepare_timestamp: u64,
     commit_timestamp: u64,
-    accounts: HashMapAccounts,
-    transfers: HashMapTransfers,
-    commits: HashMapCommits,
+    accounts: Accounts,
+    transfers: Transfers,
+    commits: Commits,
 
     pub fn init(
         allocator: *std.mem.Allocator,
@@ -39,17 +42,14 @@ pub const StateMachine = struct {
         transfers_max: usize,
         commits_max: usize,
     ) !StateMachine {
-        var accounts = HashMapAccounts.init(allocator);
-        errdefer accounts.deinit();
-        try accounts.ensureCapacity(@intCast(u32, accounts_max));
+        var accounts = try Accounts.init(allocator, accounts_max);
+        errdefer accounts.deinit(allocator);
 
-        var transfers = HashMapTransfers.init(allocator);
-        errdefer transfers.deinit();
-        try transfers.ensureCapacity(@intCast(u32, transfers_max));
+        var transfers = try Transfers.init(allocator, transfers_max);
+        errdefer transfers.deinit(allocator);
 
-        var commits = HashMapCommits.init(allocator);
-        errdefer commits.deinit();
-        try commits.ensureCapacity(@intCast(u32, commits_max));
+        var commits = try Commits.init(allocator, commits_max);
+        errdefer commits.deinit(allocator);
 
         // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
         // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
@@ -65,9 +65,9 @@ pub const StateMachine = struct {
     }
 
     pub fn deinit(self: *StateMachine) void {
-        self.accounts.deinit();
-        self.transfers.deinit();
-        self.commits.deinit();
+        self.accounts.deinit(self.allocator);
+        self.transfers.deinit(self.allocator);
+        self.commits.deinit(self.allocator);
     }
 
     pub fn Event(comptime operation: Operation) type {
@@ -258,7 +258,7 @@ pub const StateMachine = struct {
         var results = std.mem.bytesAsSlice(Account, output[0..output_len]);
         var results_count: usize = 0;
         for (batch) |id, index| {
-            if (self.get_account(id)) |result| {
+            if (self.accounts.get_const(id)) |result| {
                 results[results_count] = result.*;
                 results_count += 1;
             }
@@ -276,28 +276,28 @@ pub const StateMachine = struct {
         if (a.debits_exceed_credits(0)) return .exceeds_credits;
         if (a.credits_exceed_debits(0)) return .exceeds_debits;
 
-        var insert = self.accounts.getOrPutAssumeCapacity(a.id);
-        if (insert.found_existing) {
-            const exists = insert.value_ptr.*;
-            if (exists.unit != a.unit) return .exists_with_different_unit;
-            if (exists.code != a.code) return .exists_with_different_code;
-            if (@bitCast(u32, exists.flags) != @bitCast(u32, a.flags)) {
+        const account = self.accounts.get_or_append(a.id);
+        if (account.exists) {
+            const existing = account.object;
+            if (existing.unit != a.unit) return .exists_with_different_unit;
+            if (existing.code != a.code) return .exists_with_different_code;
+            if (@bitCast(u32, existing.flags) != @bitCast(u32, a.flags)) {
                 return .exists_with_different_flags;
             }
-            if (exists.user_data != a.user_data) return .exists_with_different_user_data;
-            if (!equal_48_bytes(exists.reserved, a.reserved)) {
+            if (existing.user_data != a.user_data) return .exists_with_different_user_data;
+            if (!equal_48_bytes(existing.reserved, a.reserved)) {
                 return .exists_with_different_reserved_field;
             }
             return .exists;
         } else {
-            insert.value_ptr.* = a;
+            account.object.* = a;
             self.commit_timestamp = a.timestamp;
             return .ok;
         }
     }
 
     fn create_account_rollback(self: *StateMachine, a: Account) void {
-        assert(self.accounts.remove(a.id));
+        self.accounts.rollback(a.id);
     }
 
     fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
@@ -321,8 +321,8 @@ pub const StateMachine = struct {
         // 2. standing for debit record and credit record, or
         // 3. relating to debtor and creditor.
         // We use them to distinguish between `cr` (credit account), and `c` (commit).
-        var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
-        var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
+        const dr = self.accounts.get(t.debit_account_id) orelse return .debit_account_not_found;
+        const cr = self.accounts.get(t.credit_account_id) orelse return .credit_account_not_found;
         assert(t.timestamp > dr.timestamp);
         assert(t.timestamp > cr.timestamp);
 
@@ -333,27 +333,27 @@ pub const StateMachine = struct {
         if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
         if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
 
-        var insert = self.transfers.getOrPutAssumeCapacity(t.id);
-        if (insert.found_existing) {
-            const exists = insert.value_ptr.*;
-            if (exists.debit_account_id != t.debit_account_id) {
+        const transfer = self.transfers.get_or_append(t.id);
+        if (transfer.exists) {
+            const existing = transfer.object;
+            if (existing.debit_account_id != t.debit_account_id) {
                 return .exists_with_different_debit_account_id;
             }
-            if (exists.credit_account_id != t.credit_account_id) {
+            if (existing.credit_account_id != t.credit_account_id) {
                 return .exists_with_different_credit_account_id;
             }
-            if (exists.amount != t.amount) return .exists_with_different_amount;
-            if (@bitCast(u32, exists.flags) != @bitCast(u32, t.flags)) {
+            if (existing.amount != t.amount) return .exists_with_different_amount;
+            if (@bitCast(u32, existing.flags) != @bitCast(u32, t.flags)) {
                 return .exists_with_different_flags;
             }
-            if (exists.user_data != t.user_data) return .exists_with_different_user_data;
-            if (!equal_32_bytes(exists.reserved, t.reserved)) {
+            if (existing.user_data != t.user_data) return .exists_with_different_user_data;
+            if (!equal_32_bytes(existing.reserved, t.reserved)) {
                 return .exists_with_different_reserved_field;
             }
-            if (exists.timeout != t.timeout) return .exists_with_different_timeout;
+            if (existing.timeout != t.timeout) return .exists_with_different_timeout;
             return .exists;
         } else {
-            insert.value_ptr.* = t;
+            transfer.object.* = t;
             if (t.flags.two_phase_commit) {
                 dr.debits_reserved += t.amount;
                 cr.credits_reserved += t.amount;
@@ -367,8 +367,8 @@ pub const StateMachine = struct {
     }
 
     fn create_transfer_rollback(self: *StateMachine, t: Transfer) void {
-        var dr = self.get_account(t.debit_account_id).?;
-        var cr = self.get_account(t.credit_account_id).?;
+        const dr = self.accounts.get(t.debit_account_id).?;
+        const cr = self.accounts.get(t.credit_account_id).?;
         if (t.flags.two_phase_commit) {
             dr.debits_reserved -= t.amount;
             cr.credits_reserved -= t.amount;
@@ -376,7 +376,7 @@ pub const StateMachine = struct {
             dr.debits_accepted -= t.amount;
             cr.credits_accepted -= t.amount;
         }
-        assert(self.transfers.remove(t.id));
+        self.transfers.rollback(t.id);
     }
 
     fn commit_transfer(self: *StateMachine, c: Commit) CommitTransferResult {
@@ -385,14 +385,14 @@ pub const StateMachine = struct {
         if (!c.flags.preimage and !zeroed_32_bytes(c.reserved)) return .reserved_field;
         if (c.flags.padding != 0) return .reserved_flag_padding;
 
-        var t = self.get_transfer(c.id) orelse return .transfer_not_found;
+        const t = self.transfers.get_const(c.id) orelse return .transfer_not_found;
         assert(c.timestamp > t.timestamp);
 
         if (!t.flags.two_phase_commit) return .transfer_not_two_phase_commit;
 
-        if (self.get_commit(c.id)) |exists| {
-            if (!exists.flags.reject and c.flags.reject) return .already_committed_but_accepted;
-            if (exists.flags.reject and !c.flags.reject) return .already_committed_but_rejected;
+        if (self.commits.get_const(c.id)) |existing| {
+            if (!existing.flags.reject and c.flags.reject) return .already_committed_but_accepted;
+            if (existing.flags.reject and !c.flags.reject) return .already_committed_but_rejected;
             return .already_committed;
         }
 
@@ -405,8 +405,8 @@ pub const StateMachine = struct {
             return .preimage_requires_condition;
         }
 
-        var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
-        var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
+        const dr = self.accounts.get(t.debit_account_id) orelse return .debit_account_not_found;
+        const cr = self.accounts.get(t.credit_account_id) orelse return .credit_account_not_found;
         assert(t.timestamp > dr.timestamp);
         assert(t.timestamp > cr.timestamp);
 
@@ -419,53 +419,29 @@ pub const StateMachine = struct {
         assert(!cr.credits_exceed_debits(0));
 
         // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-        var insert = self.commits.getOrPutAssumeCapacity(c.id);
-        if (insert.found_existing) {
-            unreachable;
-        } else {
-            insert.value_ptr.* = c;
-            dr.debits_reserved -= t.amount;
-            cr.credits_reserved -= t.amount;
-            if (!c.flags.reject) {
-                dr.debits_accepted += t.amount;
-                cr.credits_accepted += t.amount;
-            }
-            self.commit_timestamp = c.timestamp;
-            return .ok;
+        const object = self.commits.append(c.id);
+        object.* = c;
+        dr.debits_reserved -= t.amount;
+        cr.credits_reserved -= t.amount;
+        if (!c.flags.reject) {
+            dr.debits_accepted += t.amount;
+            cr.credits_accepted += t.amount;
         }
+        self.commit_timestamp = c.timestamp;
+        return .ok;
     }
 
     fn commit_transfer_rollback(self: *StateMachine, c: Commit) void {
-        var t = self.get_transfer(c.id).?;
-        var dr = self.get_account(t.debit_account_id).?;
-        var cr = self.get_account(t.credit_account_id).?;
+        const t = self.transfers.get_const(c.id).?;
+        const dr = self.accounts.get(t.debit_account_id).?;
+        const cr = self.accounts.get(t.credit_account_id).?;
         dr.debits_reserved += t.amount;
         cr.credits_reserved += t.amount;
         if (!c.flags.reject) {
             dr.debits_accepted -= t.amount;
             cr.credits_accepted -= t.amount;
         }
-        assert(self.commits.remove(c.id));
-    }
-
-    /// This is our core private method for changing balances.
-    /// Returns a live pointer to an Account in the accounts hash map.
-    /// This is intended to lookup an Account and modify balances directly by reference.
-    /// This pointer is invalidated if the hash map is resized by another insert, e.g. if we get a
-    /// pointer, insert another account without capacity, and then modify this pointer... BOOM!
-    /// This is a sharp tool but replaces a lookup, copy and update with a single lookup.
-    fn get_account(self: *StateMachine, id: u128) ?*Account {
-        return self.accounts.getPtr(id);
-    }
-
-    /// See the comment for get_account().
-    fn get_transfer(self: *StateMachine, id: u128) ?*Transfer {
-        return self.transfers.getPtr(id);
-    }
-
-    /// See the comment for get_account().
-    fn get_commit(self: *StateMachine, id: u128) ?*Commit {
-        return self.commits.getPtr(id);
+        self.commits.rollback(c.id);
     }
 };
 
@@ -560,7 +536,7 @@ test "linked accounts" {
     const input = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    state_machine.prepare(.create_accounts, input);
+    state_machine.prepare(0, .create_accounts, input);
     const size = state_machine.commit(.create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
@@ -581,12 +557,12 @@ test "linked accounts" {
         results,
     );
 
-    try testing.expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
-    try testing.expectEqual(accounts[5], state_machine.get_account(accounts[5].id).?.*);
-    try testing.expectEqual(accounts[8], state_machine.get_account(accounts[8].id).?.*);
-    try testing.expectEqual(accounts[11], state_machine.get_account(accounts[11].id).?.*);
-    try testing.expectEqual(accounts[12], state_machine.get_account(accounts[12].id).?.*);
-    try testing.expectEqual(@as(u32, 5), state_machine.accounts.count());
+    try testing.expectEqual(accounts[0], state_machine.accounts.get_const(accounts[0].id).?.*);
+    try testing.expectEqual(accounts[5], state_machine.accounts.get_const(accounts[5].id).?.*);
+    try testing.expectEqual(accounts[8], state_machine.accounts.get_const(accounts[8].id).?.*);
+    try testing.expectEqual(accounts[11], state_machine.accounts.get_const(accounts[11].id).?.*);
+    try testing.expectEqual(accounts[12], state_machine.accounts.get_const(accounts[12].id).?.*);
+    try testing.expectEqual(@as(u64, 5), state_machine.accounts.count());
 
     // TODO How can we test that events were in fact rolled back in LIFO order?
     // All our rollback handlers appear to be commutative.
