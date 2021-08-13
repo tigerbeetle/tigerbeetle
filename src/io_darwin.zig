@@ -48,16 +48,13 @@ pub const IO = struct {
             nanoseconds,
         );
 
-        std.debug.warn("run_for_ns(begin)\n", .{});
-        defer std.debug.warn("run_for_ns(end)\n", .{});
-
         while (!(timed_out_ptr.*)) {
             try self.flush(true);
         }
     }
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
-        var io_pending = self.io_pending.out;
+        var io_pending = self.io_pending.peek();
         var events: [256]os.Kevent = undefined;
 
         const next_timeout = self.flush_timeouts();
@@ -79,6 +76,10 @@ pub const IO = struct {
             );
 
             self.io_pending.out = io_pending;
+            if (io_pending == null) {
+                self.io_pending.in = null;
+            }
+
             for (events[0..new_events]) |event| {
                 const completion = @intToPtr(*Completion, event.udata);
                 self.completed.push(completion);
@@ -88,6 +89,7 @@ pub const IO = struct {
         var completed = self.completed;
         self.completed = .{};
         while (completed.pop()) |completion| {
+            std.log.debug("io_complete: {*} {}", .{completion, completion.operation});
             (completion.callback)(self, completion);
         }
     }
@@ -219,6 +221,7 @@ pub const IO = struct {
                             error.WouldBlock => {
                                 _completion.next = null;
                                 io.io_pending.push(_completion);
+                                std.log.debug("io_evented: {*} {}", .{_completion, _completion.operation});
                                 return;
                             },
                             else => {},
@@ -243,6 +246,7 @@ pub const IO = struct {
             .operation = @unionInit(Operation, @tagName(operation_tag), operation_data),
         };
 
+        std.log.debug("io_submit: {*} {}", .{completion, completion.operation});
         switch (operation_tag) {
             .timeout => self.timeouts.push(completion),
             else => self.completed.push(completion),
