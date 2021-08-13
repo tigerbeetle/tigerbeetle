@@ -45,6 +45,7 @@ pub fn FIFO(comptime T: type) type {
             var it = self.out;
             while (it) |elem| : (it = elem.next) {
                 if (to_remove == elem.next) {
+                    if (to_remove == self.in) self.in = elem;
                     elem.next = to_remove.next;
                     to_remove.next = null;
                     break;
