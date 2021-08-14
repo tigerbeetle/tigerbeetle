@@ -72,38 +72,6 @@ pub const MessageBus = struct {
         bus.pool.unref(message);
     }
 
-    pub fn can_send_to_replica(bus: *MessageBus, replica: u8) bool {
-        // TODO: This isn't safety-critical and is only used as an optimization
-        // in the VR protocol implementation. Therefore it's fine to always
-        // return true for now, but we should ideally have more correct logic
-        // in the future to make the testing as realistic as possible.
-        return true;
-    }
-
-    pub fn send_header_to_replica(bus: *MessageBus, replica: u8, header: Header) void {
-        assert(header.size == @sizeOf(Header));
-
-        if (!bus.can_send_to_replica(replica)) {
-            log.debug("cannot send to replica {}, dropping", .{replica});
-            return;
-        }
-
-        const message = bus.pool.get_header_only_message() orelse {
-            log.debug("no header only message available, " ++
-                "dropping message to replica {}", .{replica});
-            return;
-        };
-        defer bus.unref(message);
-        message.header.* = header;
-
-        const body = message.buffer[@sizeOf(Header)..message.header.size];
-        // The order matters here because checksum depends on checksum_body:
-        message.header.set_checksum_body(body);
-        message.header.set_checksum();
-
-        bus.send_message_to_replica(replica, message);
-    }
-
     pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
         // Messages sent by a process to itself should never be passed to the message bus
         if (bus.process == .replica) assert(replica != bus.process.replica);
@@ -112,25 +80,6 @@ pub const MessageBus = struct {
             .source = bus.process,
             .target = .{ .replica = replica },
         });
-    }
-
-    pub fn send_header_to_client(bus: *MessageBus, client_id: u128, header: Header) void {
-        assert(header.size == @sizeOf(Header));
-
-        const message = bus.pool.get_header_only_message() orelse {
-            log.debug("no header only message available, " ++
-                "dropping message to client {}", .{client_id});
-            return;
-        };
-        defer bus.unref(message);
-        message.header.* = header;
-
-        const body = message.buffer[@sizeOf(Header)..message.header.size];
-        // The order matters here because checksum depends on checksum_body:
-        message.header.set_checksum_body(body);
-        message.header.set_checksum();
-
-        bus.send_message_to_client(client_id, message);
     }
 
     /// Try to send the message to the client with the given id.

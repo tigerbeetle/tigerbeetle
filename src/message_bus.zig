@@ -34,8 +34,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
         process: switch (process_type) {
             .replica => struct {
                 replica: u8,
-                /// Used to store messages sent by a process to itself for delivery in flush().
-                send_queue: SendQueue = .{},
                 /// The file descriptor for the process on which to accept connections.
                 accept_fd: os.socket_t,
                 accept_completion: IO.Completion = undefined,
@@ -218,11 +216,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
                     // Only replicas accept connections from other replicas and clients:
                     bus.maybe_accept();
-
-                    // Even though we call this after delivering all messages received over
-                    // a socket, it is necessary to call here as well in case a replica sends
-                    // a message to itself in Replica.tick().
-                    bus.flush_send_queue();
                 },
                 .client => {
                     // The client connects to all replicas.
@@ -336,76 +329,16 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             bus.pool.unref(message);
         }
 
-        /// Returns true if the target replica is connected and has space in its send queue.
-        pub fn can_send_to_replica(bus: *Self, replica: u8) bool {
-            if (process_type == .replica and replica == bus.process.replica) {
-                return !bus.process.send_queue.full();
-            } else {
-                const connection = bus.replicas[replica] orelse return false;
-                return connection.state == .connected and !connection.send_queue.full();
-            }
-        }
-
-        pub fn send_header_to_replica(bus: *Self, replica: u8, header: Header) void {
-            assert(header.size == @sizeOf(Header));
-
-            if (!bus.can_send_to_replica(replica)) {
-                log.debug("cannot send to replica {}, dropping", .{replica});
-                return;
-            }
-
-            const message = bus.pool.get_header_only_message() orelse {
-                log.debug("no header only message available, " ++
-                    "dropping message to replica {}", .{replica});
-                return;
-            };
-            defer bus.unref(message);
-            message.header.* = header;
-
-            const body = message.buffer[@sizeOf(Header)..message.header.size];
-            // The order matters here because checksum depends on checksum_body:
-            message.header.set_checksum_body(body);
-            message.header.set_checksum();
-
-            bus.send_message_to_replica(replica, message);
-        }
-
         pub fn send_message_to_replica(bus: *Self, replica: u8, message: *Message) void {
-            // Messages sent by a process to itself are delivered directly in flush():
-            if (process_type == .replica and replica == bus.process.replica) {
-                bus.process.send_queue.push(message.ref()) catch |err| switch (err) {
-                    error.NoSpaceLeft => {
-                        bus.unref(message);
-                        log.notice("process' message queue full, dropping message", .{});
-                    },
-                };
-            } else if (bus.replicas[replica]) |connection| {
+            // Messages sent by a replica to itself should never be passed to the message bus.
+            if (process_type == .replica) assert(replica != bus.process.replica);
+
+            if (bus.replicas[replica]) |connection| {
                 connection.send_message(bus, message);
             } else {
                 log.debug("no active connection to replica {}, " ++
                     "dropping message with header {}", .{ replica, message.header });
             }
-        }
-
-        pub fn send_header_to_client(bus: *Self, client_id: u128, header: Header) void {
-            assert(header.size == @sizeOf(Header));
-
-            // TODO Do not allocate a message if we know we cannot send to the client.
-
-            const message = bus.pool.get_header_only_message() orelse {
-                log.debug("no header only message available, " ++
-                    "dropping message to client {}", .{client_id});
-                return;
-            };
-            defer bus.unref(message);
-            message.header.* = header;
-
-            const body = message.buffer[@sizeOf(Header)..message.header.size];
-            // The order matters here because checksum depends on checksum_body:
-            message.header.set_checksum_body(body);
-            message.header.set_checksum();
-
-            bus.send_message_to_client(client_id, message);
         }
 
         /// Try to send the message to the client with the given id.
@@ -418,34 +351,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             } else {
                 log.debug("no connection to client {x}", .{client_id});
             }
-        }
-
-        /// Deliver messages the replica has sent to itself.
-        pub fn flush_send_queue(bus: *Self) void {
-            comptime assert(process_type == .replica);
-
-            // There are currently 3 cases in which a replica will send a message to itself:
-            // 1. In on_request, the leader sends a prepare to itself, and
-            //    subsequent prepare timeout retries will never resend to self.
-            // 2. In on_prepare, after writing to storage, the leader sends a
-            //    prepare_ok back to itself.
-            // 3. In on_start_view_change, after receiving a quorum of start_view_change
-            //    messages, the new leader sends a do_view_change to itself.
-            // Therefore we should never enter an infinite loop here. To catch the case in which we
-            // do so that we can learn from it, assert that we never iterate more than 100 times.
-            var i: usize = 0;
-            while (i < 100) : (i += 1) {
-                if (bus.process.send_queue.empty()) return;
-
-                var copy = bus.process.send_queue;
-                bus.process.send_queue = .{};
-
-                while (copy.pop()) |message| {
-                    defer bus.unref(message);
-                    bus.on_message_callback.?(bus.on_message_context, message);
-                }
-            }
-            unreachable;
         }
 
         /// Used to send/receive messages to/from a client or fellow replica.
@@ -844,10 +749,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 }
 
                 bus.on_message_callback.?(bus.on_message_context, message);
-                // Flush any messages queued by the `on_message_callback` above immediately:
-                // This optimization is critical for throughput, otherwise messages from a
-                // process to itself would be delayed until the next `tick()`.
-                if (process_type == .replica) bus.flush_send_queue();
             }
 
             fn maybe_set_peer(connection: *Connection, bus: *Self, header: *const Header) void {
