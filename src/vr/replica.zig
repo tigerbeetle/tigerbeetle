@@ -92,8 +92,7 @@ pub fn Replica(
         /// The persistent log of hash-chained journal entries:
         journal: Journal,
 
-        /// An abstraction to send messages from the replica to itself or another replica or client.
-        /// The recipient replica or client may be a local in-memory pointer or network-addressable.
+        /// An abstraction to send messages from the replica to another replica or client.
         /// The message bus will also deliver messages to this replica by calling `on_message()`.
         message_bus: *MessageBus,
 
@@ -131,6 +130,11 @@ pub fn Replica(
         /// The leader's pipeline of inflight prepares waiting to commit in FIFO order.
         /// This allows us to pipeline without the complexity of out-of-order commits.
         pipeline: RingBuffer(Prepare, config.pipelining_max) = .{},
+
+        /// In some cases, a replica may send a message to itself. We do not submit these messages
+        /// to the message bus but rather queue them here for guaranteed immediate delivery, which
+        /// we require and assert in our protocol implementation.
+        loopback_queue: ?*Message = null,
 
         /// Unique start_view_change messages for the same view from OTHER replicas (excluding ourself).
         start_view_change_from_other_replicas: QuorumMessages = QuorumMessagesNull,
@@ -327,6 +331,12 @@ pub fn Replica(
         /// Time is measured in logical ticks that are incremented on every call to tick().
         /// This eliminates a dependency on the system time and enables deterministic testing.
         pub fn tick(self: *Self) void {
+            // Ensure that all asynchronous IO callbacks flushed the loopback queue as needed.
+            // If an IO callback queues a loopback message without flushing the queue then this will
+            // delay the delivery of messages (e.g. a prepare_ok from the leader to itself) and
+            // decrease throughput significantly.
+            assert(self.loopback_queue == null);
+
             self.clock.tick();
 
             self.ping_timeout.tick();
@@ -344,28 +354,36 @@ pub fn Replica(
             if (self.view_change_timeout.fired()) self.on_view_change_timeout();
             if (self.view_change_message_timeout.fired()) self.on_view_change_message_timeout();
             if (self.repair_timeout.fired()) self.on_repair_timeout();
+
+            // None of the on_timeout() functions above should send a message to this replica.
+            assert(self.loopback_queue == null);
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
         pub fn on_message(self: *Self, message: *Message) void {
+            assert(self.loopback_queue == null);
+
             log.debug("{}: on_message: view={} status={s} {}", .{
                 self.replica,
                 self.view,
                 @tagName(self.status),
                 message.header,
             });
+
             if (message.header.invalid()) |reason| {
                 log.debug("{}: on_message: invalid ({s})", .{ self.replica, reason });
                 return;
             }
+
             if (message.header.cluster != self.cluster) {
-                log.warn("{}: on_message: wrong cluster (message.header.cluster={} instead of {})", .{
+                log.warn("{}: on_message: wrong cluster (cluster must be {} not {})", .{
                     self.replica,
-                    message.header.cluster,
                     self.cluster,
+                    message.header.cluster,
                 });
                 return;
             }
+
             assert(message.header.replica < self.replica_count);
             switch (message.header.command) {
                 .ping => self.on_ping(message),
@@ -384,6 +402,17 @@ pub fn Replica(
                 .nack_prepare => self.on_nack_prepare(message),
                 else => unreachable,
             }
+
+            if (self.loopback_queue) |loopback_message| {
+                log.emerg("{}: on_message: on_{s}() queued a {s} loopback message with no flush", .{
+                    self.replica,
+                    @tagName(message.header.command),
+                    @tagName(loopback_message.header.command),
+                });
+            }
+
+            // Any message handlers that loopback must take responsibility for the flush.
+            assert(self.loopback_queue == null);
         }
 
         fn on_ping(self: *Self, message: *const Message) void {
@@ -403,14 +432,14 @@ pub fn Replica(
             if (message.header.client > 0) {
                 assert(message.header.replica == 0);
 
-                self.message_bus.send_header_to_client(message.header.client, pong);
+                self.send_header_to_client(message.header.client, pong);
             } else if (message.header.replica == self.replica) {
                 log.warn("{}: on_ping: ignoring (self)", .{self.replica});
             } else {
                 // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
                 pong.op = message.header.op;
                 pong.offset = @bitCast(u64, self.clock.realtime());
-                self.message_bus.send_header_to_replica(message.header.replica, pong);
+                self.send_header_to_replica(message.header.replica, pong);
             }
         }
 
@@ -745,6 +774,7 @@ pub fn Replica(
             // latest view in which its status was normal, n is the op number, and k is the commit
             // number.
             self.send_do_view_change();
+            defer self.flush_loopback_queue();
         }
 
         /// When the new primary receives f + 1 do_view_change messages from different replicas
@@ -965,6 +995,8 @@ pub fn Replica(
 
         fn on_request_prepare_read(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
             const message = prepare orelse return;
+
+            assert(destination_replica.? != self.replica);
             self.send_message_to_replica(destination_replica.?, message);
         }
 
@@ -1341,7 +1373,6 @@ pub fn Replica(
                     self.replica_count,
                 );
                 if (replica == self.replica) continue;
-                // TODO if (!MessageBus.can_send_to_replica(replica)) continue;
                 return @intCast(u8, replica);
             }
             return null;
@@ -1690,10 +1721,50 @@ pub fn Replica(
             return message.ref();
         }
 
+        /// The caller owns the returned message, if any, which has exactly 1 reference.
+        fn create_message_from_header(self: *Self, header: Header) ?*Message {
+            assert(header.replica == self.replica);
+            assert(header.view == self.view);
+            assert(header.size == @sizeOf(Header));
+
+            const message = self.message_bus.pool.get_header_only_message() orelse return null;
+            defer self.message_bus.unref(message);
+
+            message.header.* = header;
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
+
+            return message.ref();
+        }
+
         /// Returns whether the replica is a follower for the current view.
         /// This may be used only when the replica status is normal.
         fn follower(self: *Self) bool {
             return !self.leader();
+        }
+
+        fn flush_loopback_queue(self: *Self) void {
+            // There are three cases where a replica will send a message to itself:
+            // However, of these three cases, only two cases will call send_message_to_replica().
+            //
+            // 1. In on_request(), the leader sends a synchronous prepare to itself, but this is
+            //    done by calling on_prepare() directly, and subsequent prepare timeout retries will
+            //    never resend to self.
+            // 2. In on_prepare(), after writing to storage, the leader sends a (typically)
+            //    asynchronous prepare_ok to itself.
+            // 3. In on_start_view_change(), after receiving a quorum of start_view_change
+            //    messages, the new leader sends a synchronous do_view_change to itself.
+            if (self.loopback_queue) |message| {
+                defer self.message_bus.unref(message);
+
+                self.loopback_queue = null;
+                assert(message.header.replica == self.replica);
+                self.on_message(message);
+                // We do not call flush_loopback_queue() within on_message() to avoid recursion.
+            }
+            // We expect that delivering a prepare_ok or do_view_change message to ourselves will
+            // not result in any further messages being added synchronously to the loopback queue.
+            assert(self.loopback_queue == null);
         }
 
         fn ignore_prepare_ok(self: *Self, message: *const Message) bool {
@@ -2829,27 +2900,47 @@ pub fn Replica(
             self.send_message_to_replica(self.leader_index(self.view), message);
         }
 
+        fn send_header_to_client(self: *Self, client: u128, header: Header) void {
+            const message = self.create_message_from_header(header) orelse {
+                log.alert("{}: no header-only message available, dropping message to client {}", .{
+                    self.replica,
+                    client,
+                });
+                return;
+            };
+            defer self.message_bus.unref(message);
+
+            self.message_bus.send_message_to_client(client, message);
+        }
+
         fn send_header_to_other_replicas(self: *Self, header: Header) void {
+            const message = self.create_message_from_header(header) orelse {
+                log.alert("{}: no header-only message available, dropping message to replicas", .{
+                    self.replica,
+                });
+                return;
+            };
+            defer self.message_bus.unref(message);
+
             var replica: u8 = 0;
             while (replica < self.replica_count) : (replica += 1) {
                 if (replica != self.replica) {
-                    self.send_header_to_replica(replica, header);
+                    self.send_message_to_replica(replica, message);
                 }
             }
         }
 
-        // TODO Work out the maximum number of messages a replica may output per tick() or on_message().
         fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
-            log.debug("{}: sending {s} to replica {}: {}", .{
-                self.replica,
-                @tagName(header.command),
-                replica,
-                header,
-            });
-            assert(header.replica == self.replica);
-            assert(header.view == self.view);
+            const message = self.create_message_from_header(header) orelse {
+                log.alert("{}: no header-only message available, dropping message to replica {}", .{
+                    self.replica,
+                    replica,
+                });
+                return;
+            };
+            defer self.message_bus.unref(message);
 
-            self.message_bus.send_header_to_replica(replica, header);
+            self.send_message_to_replica(replica, message);
         }
 
         fn send_eviction_message_to_client(self: *Self, client: u128) void {
@@ -2873,9 +2964,10 @@ pub fn Replica(
                 replica,
                 message.header,
             });
+
             switch (message.header.command) {
                 .request => {
-                    // We do not assert message.header.replica as we would for send_header_to_replica()
+                    // We do not assert message.header.replica as we do for send_header_to_replica()
                     // because we may forward .request or .prepare messages.
                     assert(self.status == .normal);
                     assert(message.header.view <= self.view);
@@ -2886,6 +2978,10 @@ pub fn Replica(
                         .view_change => assert(message.header.view < self.view),
                         else => unreachable,
                     }
+                },
+                .prepare_ok => {
+                    assert(self.status == .normal);
+                    assert(message.header.view <= self.view);
                 },
                 .do_view_change => {
                     assert(self.status == .view_change);
@@ -2915,10 +3011,21 @@ pub fn Replica(
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                 },
-                else => unreachable,
+                else => {
+                    log.notice("{}: send_message_to_replica: TODO {s}", .{
+                        self.replica,
+                        @tagName(message.header.command),
+                    });
+                },
             }
             assert(message.header.cluster == self.cluster);
-            self.message_bus.send_message_to_replica(replica, message);
+
+            if (replica == self.replica) {
+                assert(self.loopback_queue == null);
+                self.loopback_queue = message.ref();
+            } else {
+                self.message_bus.send_message_to_replica(replica, message);
+            }
         }
 
         fn set_latest_header(self: *Self, headers: []Header, latest: *Header) void {
@@ -3331,6 +3438,7 @@ pub fn Replica(
             const message = wrote orelse return;
 
             self.send_prepare_ok(message.header);
+            defer self.flush_loopback_queue();
 
             switch (trigger) {
                 .append => {},

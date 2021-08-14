@@ -353,6 +353,22 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             );
         }
 
+        /// The caller owns the returned message, if any, which has exactly 1 reference.
+        fn create_message_from_header(self: *Self, header: Header) ?*Message {
+            assert(header.client == self.id);
+            assert(header.cluster == self.cluster);
+            assert(header.size == @sizeOf(Header));
+
+            const message = self.message_bus.pool.get_header_only_message() orelse return null;
+            defer self.message_bus.unref(message);
+
+            message.header.* = header;
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
+
+            return message.ref();
+        }
+
         /// Registers a session with the cluster for the client, if this has not yet been done.
         fn register(self: *Self) void {
             if (self.request_number > 0) return;
@@ -388,23 +404,30 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
-            assert(header.client == self.id);
-            assert(header.cluster == self.cluster);
+            const message = self.create_message_from_header(header) orelse {
+                log.alert("{}: no header-only message available, dropping message to replica {}", .{
+                    self.id,
+                    replica,
+                });
+                return;
+            };
+            defer self.message_bus.unref(message);
 
-            log.debug("{}: sending {s} to replica {}: {}", .{
-                self.id,
-                @tagName(header.command),
-                replica,
-                header,
-            });
-
-            self.message_bus.send_header_to_replica(replica, header);
+            self.send_message_to_replica(replica, message);
         }
 
         fn send_header_to_replicas(self: *Self, header: Header) void {
+            const message = self.create_message_from_header(header) orelse {
+                log.alert("{}: no header-only message available, dropping message to replicas", .{
+                    self.id,
+                });
+                return;
+            };
+            defer self.message_bus.unref(message);
+
             var replica: u8 = 0;
             while (replica < self.replica_count) : (replica += 1) {
-                self.send_header_to_replica(replica, header);
+                self.send_message_to_replica(replica, message);
             }
         }
 
