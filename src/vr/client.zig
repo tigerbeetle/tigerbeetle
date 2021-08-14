@@ -265,11 +265,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 return;
             }
 
-            // We want to pop() and free the slot in the request queue before calling the callback.
-            // We also want to check that what we popped is the same as what we peeked above,
-            // which we do when asserting the reply against the inflight message below.
             const inflight = self.request_queue.pop().?;
-            defer self.message_bus.unref(inflight.message);
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
                 self.id,
@@ -305,7 +301,15 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 assert(self.session == 0);
                 assert(reply.header.commit > 0);
                 self.session = reply.header.commit; // The commit number becomes the session number.
-            } else {
+            }
+
+            // We must process the next request before releasing control back to the callback.
+            // Otherwise, requests may run through send_request_for_the_first_time() more than once.
+            if (self.request_queue.peek_ptr()) |next_request| {
+                self.send_request_for_the_first_time(next_request.message);
+            }
+
+            if (inflight.message.header.operation != .register) {
                 inflight.callback(
                     inflight.user_data,
                     inflight.message.header.operation.cast(StateMachine),
@@ -313,9 +317,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 );
             }
 
-            if (self.request_queue.peek_ptr()) |next_request| {
-                self.send_request_for_the_first_time(next_request.message);
-            }
+            self.message_bus.unref(inflight.message);
         }
 
         fn on_ping_timeout(self: *Self) void {
@@ -448,6 +450,8 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         fn send_request_for_the_first_time(self: *Self, message: *Message) void {
+            assert(self.request_queue.peek_ptr().?.message == message);
+
             assert(message.header.command == .request);
             assert(message.header.parent == 0);
             assert(message.header.context == 0);
