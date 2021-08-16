@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
-const log = std.log.scoped(.vr);
 
 const config = @import("../config.zig");
 
@@ -13,6 +12,8 @@ const Header = vr.Header;
 const Timeout = vr.Timeout;
 const Command = vr.Command;
 const Version = vr.Version;
+
+const log = std.log.scoped(.replica);
 
 pub const Status = enum {
     normal,
@@ -371,7 +372,7 @@ pub fn Replica(
             });
 
             if (message.header.invalid()) |reason| {
-                log.debug("{}: on_message: invalid ({s})", .{ self.replica, reason });
+                log.alert("{}: on_message: invalid ({s})", .{ self.replica, reason });
                 return;
             }
 
@@ -1491,6 +1492,7 @@ pub fn Replica(
             });
 
             const reply_body_size = @intCast(u32, self.state_machine.commit(
+                prepare.header.client,
                 prepare.header.operation.cast(StateMachine),
                 prepare.buffer[@sizeOf(Header)..prepare.header.size],
                 reply.buffer[@sizeOf(Header)..],
@@ -1694,8 +1696,6 @@ pub fn Replica(
             // We may also send a start_view message in normal status to resolve a follower's view jump:
             assert(self.status == .normal or self.status == .view_change);
 
-            const size_max = @sizeOf(Header) * 8;
-
             const message = self.message_bus.get_message() orelse return null;
             defer self.message_bus.unref(message);
 
@@ -1708,14 +1708,19 @@ pub fn Replica(
                 .commit = self.commit_max,
             };
 
+            const size_max = @sizeOf(Header) * std.math.min(
+                std.math.max(@divFloor(message.buffer.len, @sizeOf(Header)), 2),
+                8,
+            );
+            assert(size_max > @sizeOf(Header));
+
             var dest = std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..size_max]);
             const count = self.journal.copy_latest_headers_between(0, self.op, dest);
             assert(count > 0);
 
             message.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
-            const body = message.buffer[@sizeOf(Header)..message.header.size];
 
-            message.header.set_checksum_body(body);
+            message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
             return message.ref();
@@ -2965,14 +2970,22 @@ pub fn Replica(
                 message.header,
             });
 
+            if (message.header.invalid()) |reason| {
+                log.emerg("{}: send_message_to_replica: invalid ({s})", .{ self.replica, reason });
+                @panic("send_message_to_replica: invalid message");
+            }
+
+            assert(message.header.cluster == self.cluster);
+
+            // TODO According to message.header.command, assert on the destination replica.
             switch (message.header.command) {
                 .request => {
-                    // We do not assert message.header.replica as we do for send_header_to_replica()
-                    // because we may forward .request or .prepare messages.
+                    // Do not assert message.header.replica because we forward .request messages.
                     assert(self.status == .normal);
                     assert(message.header.view <= self.view);
                 },
                 .prepare => {
+                    // Do not assert message.header.replica because we forward .prepare messages.
                     switch (self.status) {
                         .normal => assert(message.header.view <= self.view),
                         .view_change => assert(message.header.view < self.view),
@@ -2982,32 +2995,52 @@ pub fn Replica(
                 .prepare_ok => {
                     assert(self.status == .normal);
                     assert(message.header.view <= self.view);
+                    assert(message.header.replica == self.replica);
+                },
+                .start_view_change => {
+                    assert(self.status == .view_change);
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
                 },
                 .do_view_change => {
                     assert(self.status == .view_change);
                     assert(self.start_view_change_quorum);
                     assert(!self.do_view_change_quorum);
-                    assert(message.header.replica == self.replica);
                     assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
                 },
                 .start_view => switch (self.status) {
                     .normal => {
                         // A follower may ask the leader to resend the start_view message.
                         assert(!self.start_view_change_quorum);
                         assert(!self.do_view_change_quorum);
-                        assert(message.header.replica == self.replica);
                         assert(message.header.view == self.view);
+                        assert(message.header.replica == self.replica);
                     },
                     .view_change => {
                         assert(self.start_view_change_quorum);
                         assert(self.do_view_change_quorum);
-                        assert(message.header.replica == self.replica);
                         assert(message.header.view == self.view);
+                        assert(message.header.replica == self.replica);
                     },
                     else => unreachable,
                 },
                 .headers => {
                     assert(self.status == .normal or self.status == .view_change);
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
+                },
+                .ping, .pong => {
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
+                },
+                .commit => {
+                    assert(self.status == .normal);
+                    assert(self.leader());
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
+                },
+                .request_prepare => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                 },
@@ -3018,7 +3051,6 @@ pub fn Replica(
                     });
                 },
             }
-            assert(message.header.cluster == self.cluster);
 
             if (replica == self.replica) {
                 assert(self.loopback_queue == null);

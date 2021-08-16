@@ -16,6 +16,8 @@ const PacketSimulator = @import("packet_simulator.zig").PacketSimulator;
 const PacketSimulatorOptions = @import("packet_simulator.zig").PacketSimulatorOptions;
 const PacketSimulatorPath = @import("packet_simulator.zig").Path;
 
+const log = std.log.scoped(.network);
+
 pub const NetworkOptions = struct {
     after_on_message: ?fn (network: *Network, message: *Message, path: Network.Path) void,
 
@@ -27,7 +29,7 @@ pub const Network = struct {
         network: *Network,
         message: *Message,
 
-        pub fn deinit(packet: *Packet, path: PacketSimulatorPath) void {
+        pub fn deinit(packet: *const Packet, path: PacketSimulatorPath) void {
             const source_bus = &packet.network.busses.items[path.source];
             source_bus.unref(packet.message);
         }
@@ -134,7 +136,10 @@ pub const Network = struct {
         const source_bus = &network.busses.items[path.source];
         const target_bus = &network.busses.items[path.target];
 
-        const message = target_bus.get_message() orelse return;
+        const message = target_bus.get_message() orelse {
+            log.notice("deliver_message: target message bus has no free messages, dropping", .{});
+            return;
+        };
         defer target_bus.unref(message);
 
         std.mem.copy(u8, message.buffer, packet.message.buffer);

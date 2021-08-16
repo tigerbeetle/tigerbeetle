@@ -269,10 +269,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // TODO Snapshots
             const existing = &self.headers[header.op];
             if (existing.command == .reserved) {
-                assert(existing.checksum == 0);
-                assert(existing.checksum_body == 0);
-                assert(existing.offset == 0);
-                assert(existing.size == 0);
                 return false;
             } else {
                 if (existing.checksum == header.checksum) {
@@ -313,7 +309,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             var copied: usize = 0;
             std.mem.set(Header, dest, Header.reserved());
 
-            // We start at op_max + 1 but front-load the decrement to avoid overflow when op_min == 0:
+            // Start at op_max + 1 and do the decrement upfront to avoid overflow when op_min == 0:
             var op = op_max + 1;
             while (op > op_min) {
                 op -= 1;
@@ -322,8 +318,17 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     dest[copied] = header.*;
                     assert(dest[copied].invalid() == null);
                     copied += 1;
+                    if (copied == dest.len) break;
                 }
             }
+
+            log.debug("copy_latest_headers_between: op_min={} op_max={} dest.len={} copied={}", .{
+                op_min,
+                op_max,
+                dest.len,
+                copied,
+            });
+
             return copied;
         }
 

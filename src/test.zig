@@ -18,6 +18,7 @@ const log = std.log.scoped(.fuzz);
 
 test "VR" {
     std.testing.log_level = .notice;
+
     // TODO: use std.testing.allocator when all leaks are fixed.
     const allocator = std.heap.page_allocator;
     var prng = std.rand.DefaultPrng.init(0xABEE11E);
@@ -74,12 +75,13 @@ fn maybe_send_random_request(cluster: *Cluster, random: *std.rand.Random) void {
     const client = &cluster.clients[client_index];
     const checker_request_queue = &cluster.state_checker.client_requests[client_index];
 
-    assert(client.request_queue.buffer.len == checker_request_queue.buffer.len);
+    // Ensure that we don't shortchange testing of the full client request queue length:
+    assert(client.request_queue.buffer.len <= checker_request_queue.buffer.len);
     if (client.request_queue.full()) return;
     if (checker_request_queue.full()) return;
 
     const message = client.get_message() orelse {
-        log.debug("no message available to send request, dropping request.", .{});
+        log.notice("no message available to send request, dropping", .{});
         return;
     };
     defer client.unref(message);
@@ -92,16 +94,16 @@ fn maybe_send_random_request(cluster: *Cluster, random: *std.rand.Random) void {
         else => unreachable,
     };
 
-    const body_target = message.buffer[@sizeOf(Header)..][0..body_size];
+    const body = message.buffer[@sizeOf(Header)..][0..body_size];
     if (chance(random, 10)) {
-        std.mem.set(u8, body_target, 0);
+        std.mem.set(u8, body, 0);
     } else {
-        random.bytes(body_target);
+        random.bytes(body);
     }
 
-    log.debug("no message available to send request, dropping request.", .{});
-
-    checker_request_queue.push(message.ref()) catch unreachable;
+    // While hashing the client ID with the request body prevents input collisions across clients,
+    // it's still possible for the same client to generate the same body, and therefore input hash.
+    checker_request_queue.push(StateMachine.hash(client.id, body)) catch unreachable;
 
     client.request(0, client_callback, .hash, message, body_size);
 }

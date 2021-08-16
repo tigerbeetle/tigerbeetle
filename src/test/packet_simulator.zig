@@ -196,18 +196,10 @@ pub fn PacketSimulator(comptime Packet: type) type {
             path: Path,
         ) void {
             const queue = self.path_queue(path);
-            // We simulate network congestion by dropping a random packet in the queue if
-            // its capacity is exceeded.
             var queue_length = queue.count();
             if (queue_length + 1 > queue.capacity()) {
-                var index_to_drop = self.prng.random.uintLessThanBiased(u64, queue_length);
-                _ = queue.removeIndex(index_to_drop);
-                self.stats[@enumToInt(PacketStatistics.dropped_due_to_congestion)] += 1;
-
-                log.debug(
-                    "{} reached capacity. Dropped packet at index={}.",
-                    .{ path, index_to_drop },
-                );
+                log.debug("submit_packet: {} reached capacity, dropping packet", .{path});
+                Packet.deinit(&packet, path);
                 return;
             }
 
