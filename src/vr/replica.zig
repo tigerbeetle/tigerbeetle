@@ -602,7 +602,7 @@ pub fn Replica(
             if (self.follower()) {
                 // A prepare may already be committed if requested by repair() so take the max:
                 self.commit_ops(std.math.max(message.header.commit, self.commit_max));
-                assert(self.commit >= message.header.commit);
+                assert(self.commit_max >= message.header.commit);
             }
         }
 

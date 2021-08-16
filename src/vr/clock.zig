@@ -621,7 +621,7 @@ const ClockSimulator = struct {
             .options = options,
             .network = try PacketSimulator(Packet).init(allocator, options.network_options),
             .clocks = try allocator.alloc(DeterministicClock, options.clock_count),
-            .prng = std.rand.DefaultPrng.init(options.network_options.prng_seed),
+            .prng = std.rand.DefaultPrng.init(options.network_options.seed),
         };
 
         for (self.clocks) |*clock, index| {
