@@ -131,6 +131,7 @@ pub const StateMachine = struct {
 
     pub fn commit(
         self: *StateMachine,
+        client: u128,
         operation: Operation,
         input: []const u8,
         output: []u8,

@@ -31,6 +31,7 @@ pub const StateMachine = struct {
 
     pub fn commit(
         state_machine: *StateMachine,
+        client: u128,
         operation: Operation,
         input: []const u8,
         output: []u8,
@@ -43,8 +44,10 @@ pub const StateMachine = struct {
             // buffer, get tricky and use a random but deterministic slice
             // of it, filling the rest with 0s.
             .hash => {
-                // Fold the input into our current state, creating a hash chain
-                const new_state = hash(state_machine.state, input);
+                // Fold the input into our current state, creating a hash chain.
+                // Hash the input with the client ID since small inputs may collide across clients.
+                const client_input = hash(client, input);
+                const new_state = hash(state_machine.state, std.mem.asBytes(&client_input));
 
                 log.debug("state={} input={} input.len={} new state={}", .{
                     state_machine.state,

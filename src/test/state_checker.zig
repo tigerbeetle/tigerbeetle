@@ -15,8 +15,7 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 const log = std.log.scoped(.state_checker);
 
-const RequestQueue = RingBuffer(*Message, config.message_bus_messages_max - 1);
-
+const RequestQueue = RingBuffer(u128, config.message_bus_messages_max - 1);
 const Transitioned = std.bit_set.IntegerBitSet(config.replicas_max);
 const StateTransitions = std.AutoHashMap(u128, Transitioned);
 
@@ -100,12 +99,15 @@ pub const StateChecker = struct {
             return;
         }
 
+        // As soon as we use an inflight client request to arrive at a valid state we want to pop().
+        // Otherwise, if we used the client.request_queue directly, we would allow multiple uses.
+
         // The replica has transitioned to a state b that is not yet in the history.
         // Check if this is a vaild next state based on the currently inflight messages
         // from clients.
         for (state_checker.client_requests) |*queue| {
-            if (queue.peek()) |request| {
-                if (b == StateMachine.hash(state_checker.state, request.body())) {
+            if (queue.peek_ptr()) |input| {
+                if (b == StateMachine.hash(state_checker.state, std.mem.asBytes(input))) {
                     state_checker.state = b;
                     state_checker.transitions += 1;
                     log.notice(
@@ -116,9 +118,12 @@ pub const StateChecker = struct {
                     var transitioned = Transitioned.initEmpty();
                     transitioned.set(replica);
 
-                    state_checker.history.putNoClobber(b, transitioned) catch @panic("OOM in test code");
+                    state_checker.history.putNoClobber(b, transitioned) catch @panic("Test OOM");
 
-                    cluster.network.get_message_bus(.{ .client = request.header.client }).unref(request);
+                    // TODO We must hook into all places in Replica where state may change.
+                    // Otherwise, if state changes successively, e.g. because of an asynchronous
+                    // I/O callback, then we may miss a transition and our client_requests queue
+                    // will get out of sync, resulting in a spurious "invalid state" panic.
                     _ = queue.pop();
                     return;
                 }

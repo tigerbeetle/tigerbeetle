@@ -9,7 +9,7 @@ const Header = vr.Header;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 
-const log = std.log;
+const log = std.log.scoped(.client);
 
 pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
     return struct {
@@ -266,6 +266,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             }
 
             const inflight = self.request_queue.pop().?;
+            defer self.message_bus.unref(inflight.message);
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
                 self.id,
@@ -316,8 +317,6 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                     reply.body(),
                 );
             }
-
-            self.message_bus.unref(inflight.message);
         }
 
         fn on_ping_timeout(self: *Self) void {
@@ -377,6 +376,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
             var message = self.message_bus.get_message() orelse
                 @panic("register: no message available to register a session with the cluster");
+            defer self.message_bus.unref(message);
 
             // We will set parent, context, view and checksums only when sending for the first time:
             message.header.* = .{

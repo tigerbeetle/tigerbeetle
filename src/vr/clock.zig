@@ -168,7 +168,7 @@ pub fn Clock(comptime Time: type) type {
             );
             const clock_offset_corrected = clock_offset + asymmetric_delay;
 
-            log.info("learn: replica={} m0={} t1={} m2={} t2={} one_way_delay={} " ++
+            log.debug("learn: replica={} m0={} t1={} m2={} t2={} one_way_delay={} " ++
                 "asymmetric_delay={} clock_offset={}", .{
                 replica,
                 m0,
@@ -599,7 +599,7 @@ const ClockSimulator = struct {
         clock_simulator: *ClockSimulator,
 
         /// PacketSimulator requires this function, but we don't actually have anything to deinit.
-        pub fn deinit(packet: *Packet, path: Path) void {}
+        pub fn deinit(packet: *const Packet, path: Path) void {}
     };
 
     const Options = struct {
