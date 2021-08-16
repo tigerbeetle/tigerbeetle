@@ -715,7 +715,7 @@ test "fuzz test" {
     const test_delta_time: u64 = std.time.ns_per_s / 2;
     const SystemTime = @import("../time.zig").Time;
     var system_time = SystemTime{};
-    var prng_seed = @intCast(u64, system_time.realtime());
+    var seed = @intCast(u64, system_time.realtime());
     var min_sync_error: u64 = 1_000_000_000;
     var max_sync_error: u64 = 0;
     var max_clock_offset: u64 = 0;
@@ -723,7 +723,7 @@ test "fuzz test" {
     var simulator = try ClockSimulator.init(allocator, .{
         .network_options = .{
             .node_count = clock_count,
-            .prng_seed = prng_seed,
+            .seed = seed,
             .one_way_delay_mean = 25,
             .one_way_delay_min = 10,
             .packet_loss_probability = 10,
@@ -765,8 +765,8 @@ test "fuzz test" {
         }
     }
 
-    std.debug.print("prng seed={}, max ticks={}, clock count={}\n", .{
-        prng_seed,
+    std.debug.print("seed={}, max ticks={}, clock count={}\n", .{
+        seed,
         ticks_max,
         clock_count,
     });
