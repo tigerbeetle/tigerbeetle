@@ -602,6 +602,7 @@ pub fn Replica(
             if (self.follower()) {
                 // A prepare may already be committed if requested by repair() so take the max:
                 self.commit_ops(std.math.max(message.header.commit, self.commit_max));
+                assert(self.commit >= message.header.commit);
             }
         }
 
@@ -1392,14 +1393,8 @@ pub fn Replica(
             // We have already committed this far:
             if (commit <= self.commit_min) return;
 
-            // Guard against multiple concurrent invocations of commit_ops():
-            if (self.committing) {
-                log.debug("{}: commit_ops: already committing...", .{self.replica});
-                return;
-            }
-
-            self.committing = true;
-
+            // We must update `commit_max` even if we are already committing, otherwise we will lose
+            // information that we should know, and `set_latest_op_and_k()` will catch us out:
             if (commit > self.commit_max) {
                 log.debug("{}: commit_ops: advancing commit_max={}..{}", .{
                     self.replica,
@@ -1409,12 +1404,19 @@ pub fn Replica(
                 self.commit_max = commit;
             }
 
-            if (!self.valid_hash_chain("commit_ops")) {
-                self.committing = false;
+            // Guard against multiple concurrent invocations of commit_ops():
+            if (self.committing) {
+                log.debug("{}: commit_ops: already committing...", .{self.replica});
                 return;
             }
+
+            if (!self.valid_hash_chain("commit_ops")) return;
+
             assert(!self.view_jump_barrier);
             assert(self.op >= self.commit_max);
+
+            assert(!self.committing);
+            self.committing = true;
 
             self.commit_ops_read();
         }
@@ -1432,38 +1434,31 @@ pub fn Replica(
                 const checksum = self.journal.entry_for_op_exact(op).?.checksum;
                 self.journal.read_prepare(commit_ops_commit, op, checksum, null);
             } else {
-                self.commit_ops_finish();
+                self.committing = false;
+                // This is an optimization to expedite the view change before the `repair_timeout`:
+                if (self.status == .view_change and self.repairs_allowed()) self.repair();
             }
         }
 
         fn commit_ops_commit(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
             assert(self.committing);
-
-            const message = prepare orelse return;
             assert(destination_replica == null);
 
-            // Things change quickly when we're reading from disk:
-            if (self.status != .normal and self.status != .view_change) {
-                self.commit_ops_finish();
+            // The prepare could not be read, or things changed while we were reading from disk:
+            if (prepare == null or (self.status != .normal and self.status != .view_change)) {
+                self.committing = false;
                 return;
             }
 
             // Guard against any re-entrancy concurrent to reading this prepare from disk:
-            assert(message.header.op == self.commit_min + 1);
+            assert(prepare.?.header.op == self.commit_min + 1);
 
             const commit_min = self.commit_min;
-            self.commit_op(message);
+            self.commit_op(prepare.?);
             assert(self.commit_min == commit_min + 1);
             assert(self.commit_min <= self.op);
 
             self.commit_ops_read();
-        }
-
-        fn commit_ops_finish(self: *Self) void {
-            assert(self.committing);
-            self.committing = false;
-            // This is an optimization to expedite the view change without waiting for `repair_timeout`:
-            if (self.status == .view_change and self.repairs_allowed()) self.repair();
         }
 
         fn commit_op(self: *Self, prepare: *const Message) void {
