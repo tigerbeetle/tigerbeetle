@@ -11,7 +11,7 @@ pub const PacketSimulatorOptions = struct {
 
     packet_loss_probability: u8,
     packet_replay_probability: u8,
-    prng_seed: u64,
+    seed: u64,
     node_count: u8,
 
     /// The maximum number of in-flight packets a path can have before packets are randomly dropped.
@@ -69,7 +69,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
                     options.node_count * options.node_count,
                 ),
                 .options = options,
-                .prng = std.rand.DefaultPrng.init(options.prng_seed),
+                .prng = std.rand.DefaultPrng.init(options.seed),
             };
 
             for (self.paths) |*queue| {

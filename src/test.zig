@@ -33,7 +33,7 @@ test "VR" {
             .after_on_message = StateChecker.after_on_message,
             .packet_simulator_options = .{
                 .node_count = 4,
-                .prng_seed = prng.random.int(u64),
+                .seed = prng.random.int(u64),
                 .one_way_delay_mean = 25,
                 .one_way_delay_min = 10,
                 .packet_loss_probability = 10,
