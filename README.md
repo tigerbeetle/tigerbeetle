@@ -44,7 +44,7 @@ TigerBeetle's Zig implementation of io_uring was [submitted](https://github.com/
 
 ## BetaBeetle (under active development)
 
-The [beta version](https://github.com/coilhq/tigerbeetle/tree/beta) of **TigerBeetle is now under active development** and [our design document](./docs/DESIGN.md) details our design decisions regarding performance and safety, and where we want to go regarding accounting features.
+The [beta version](https://github.com/coilhq/tigerbeetle/tree/beta2) of **TigerBeetle is now under active development** and [our design document](./docs/DESIGN.md) details our design decisions regarding performance and safety, and where we want to go regarding accounting features.
 
 ## QuickStart
 
