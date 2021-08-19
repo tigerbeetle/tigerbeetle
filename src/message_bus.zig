@@ -2,7 +2,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 const os = std.os;
+
 const is_darwin = std.Target.current.isDarwin();
+const sock_flags = os.SOCK_CLOEXEC | (if (is_darwin) os.SOCK_NONBLOCK else 0);
 
 const config = @import("config.zig");
 const log = std.log.scoped(.message_bus);
@@ -151,7 +153,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
         fn init_tcp(address: std.net.Address) !os.socket_t {
             const fd = try os.socket(
                 address.any.family,
-                os.SOCK_STREAM | os.SOCK_CLOEXEC | (if (is_darwin) os.SOCK_NONBLOCK else 0),
+                os.SOCK_STREAM | sock_flags,
                 os.IPPROTO_TCP,
             );
             errdefer os.close(fd);
@@ -321,7 +323,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 on_accept,
                 &bus.process.accept_completion,
                 bus.process.accept_fd,
-                os.SOCK_CLOEXEC | (if (is_darwin) os.SOCK_NONBLOCK else 0)
+                sock_flags,
             );
         }
 
@@ -448,7 +450,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 // The first replica's network address family determines the
                 // family for all other replicas:
                 const family = bus.configuration[0].any.family;
-                connection.fd = os.socket(family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0) catch return;
+                connection.fd = os.socket(family, os.SOCK_STREAM | sock_flags, 0) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;
