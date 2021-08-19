@@ -6,6 +6,11 @@ const FIFO = @import("fifo.zig").FIFO;
 const Time = @import("time.zig").Time;
 const buffer_limit = @import("io.zig").buffer_limit;
 
+fn log(comptime fmt: []const u8, args: anytype) void {
+    if (@hasDecl(@import("root"), "is_main")) return;
+    std.log.debug(fmt, args);
+}
+
 pub const IO = struct {
     kq: os.fd_t,
     time: Time = .{},
@@ -89,7 +94,7 @@ pub const IO = struct {
         var completed = self.completed;
         self.completed = .{};
         while (completed.pop()) |completion| {
-            std.log.debug("io_complete: {*} {}", .{completion, completion.operation});
+            log("io_complete: {*} {}", .{completion, completion.operation});
             (completion.callback)(self, completion);
         }
     }
@@ -175,17 +180,20 @@ pub const IO = struct {
         },
         read: struct {
             fd: os.fd_t,
-            buffer: []u8,
+            buf: [*]u8,
+            len: u32,
             offset: u64,
         },
         recv: struct {
             socket: os.socket_t,
-            buffer: []u8,
+            buf: [*]u8,
+            len: u32,
             flags: u32,
         },
         send: struct {
             socket: os.socket_t,
-            buffer: []const u8,
+            buf: [*]const u8,
+            len: u32,
             flags: u32,
         },
         timeout: struct {
@@ -193,7 +201,8 @@ pub const IO = struct {
         },
         write: struct {
             fd: os.fd_t,
-            buffer: []const u8,
+            buf: [*]const u8,
+            len: u32,
             offset: u64,
         },
     };
@@ -221,7 +230,7 @@ pub const IO = struct {
                             error.WouldBlock => {
                                 _completion.next = null;
                                 io.io_pending.push(_completion);
-                                std.log.debug("io_evented: {*} {}", .{_completion, _completion.operation});
+                                log("io_evented: {*} {}", .{_completion, _completion.operation});
                                 return;
                             },
                             else => {},
@@ -246,7 +255,7 @@ pub const IO = struct {
             .operation = @unionInit(Operation, @tagName(operation_tag), operation_data),
         };
 
-        std.log.debug("io_submit: {*} {}", .{completion, completion.operation});
+        log("io_submit: {*} {}", .{completion, completion.operation});
         switch (operation_tag) {
             .timeout => self.timeouts.push(completion),
             else => self.completed.push(completion),
@@ -484,7 +493,8 @@ pub const IO = struct {
             .read,
             .{
                 .fd = fd,
-                .buffer = buffer,
+                .buf = buffer.ptr,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
                 .offset = offset,
             },
             struct {
@@ -492,8 +502,8 @@ pub const IO = struct {
                     while (true) {
                         const rc = os.system.pread(
                             op.fd, 
-                            op.buffer.ptr, 
-                            buffer_limit(op.buffer.len),
+                            op.buf,
+                            op.len,
                             @bitCast(isize, op.offset),
                         );
                         return switch (os.errno(rc)) {
@@ -542,12 +552,13 @@ pub const IO = struct {
             .recv,
             .{
                 .socket = socket,
-                .buffer = buffer,
+                .buf = buffer.ptr,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
                 .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) RecvError!usize {
-                    return os.recv(op.socket, op.buffer, op.flags);
+                    return os.recv(op.socket, op.buf[0..op.len], op.flags);
                 }
             },
         );
@@ -576,12 +587,13 @@ pub const IO = struct {
             .send,
             .{
                 .socket = socket,
-                .buffer = buffer,
+                .buf = buffer.ptr,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
                 .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) SendError!usize {
-                    return os.send(op.socket, op.buffer, op.flags);
+                    return os.send(op.socket, op.buf[0..op.len], op.flags);
                 }
             },
         );
@@ -640,12 +652,13 @@ pub const IO = struct {
             .write,
             .{
                 .fd = fd,
-                .buffer = buffer,
+                .buf = buffer.ptr,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
                 .offset = offset,
             },
             struct {
                 fn doOperation(op: anytype) WriteError!usize {
-                    return os.pwrite(op.fd, op.buffer, op.offset);
+                    return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
                 }
             },
         );

@@ -19,6 +19,8 @@ const StateMachine = @import("state_machine.zig").StateMachine;
 const vr = @import("vr.zig");
 const Replica = vr.Replica(StateMachine, MessageBus, Storage, Time);
 
+pub const is_main = true;
+
 pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const arena = &arena_allocator.allocator;
