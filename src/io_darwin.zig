@@ -7,8 +7,8 @@ const Time = @import("time.zig").Time;
 const buffer_limit = @import("io.zig").buffer_limit;
 
 fn log(comptime fmt: []const u8, args: anytype) void {
-    if (@hasDecl(@import("root"), "is_main")) return;
-    std.log.debug(fmt, args);
+    // if (@hasDecl(@import("root"), "is_main")) return;
+    // std.log.debug(fmt, args);
 }
 
 pub const IO = struct {
@@ -167,6 +167,7 @@ pub const IO = struct {
         connect: struct {
             socket: os.socket_t,
             address: std.net.Address,
+            initiated: bool,
         },
         fsync: struct {
             fd: os.fd_t,
@@ -220,7 +221,7 @@ pub const IO = struct {
         const onCompleteFn = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
                 // Perform the actual operaton
-                const op_data = @field(_completion.operation, @tagName(operation_tag));
+                const op_data = &@field(_completion.operation, @tagName(operation_tag));
                 const result = OperationImpl.doOperation(op_data);
 
                 // Requeue onto io_pending if error.WouldBlock
@@ -358,10 +359,19 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .address = address,
+                .initiated = false,
             },
             struct {
                 fn doOperation(op: anytype) ConnectError!void {
-                    return os.connect(op.socket, &op.address.any, op.address.getOsSockLen());
+                    // Don't call connect after being rescheduled by io_pending as it returns EISCONN.
+                    // Instead, check the socket error to see if has been connected successfully.
+                    const result = switch (op.initiated) {
+                        true => os.getsockoptError(op.socket),
+                        else => os.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
+                    };
+                    
+                    op.initiated = true;
+                    return result;
                 }
             },
         );
