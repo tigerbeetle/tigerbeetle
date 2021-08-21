@@ -723,6 +723,7 @@ pub fn Replica(
             if (self.journal.has_clean(message.header)) {
                 log.debug("{}: on_repair: duplicate", .{self.replica});
                 self.send_prepare_ok(message.header);
+                defer self.flush_loopback_queue();
                 return;
             }
 
