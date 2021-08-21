@@ -595,7 +595,7 @@ pub fn Replica(
             // We have the latest op from the leader and have therefore cleared the view jump barrier:
             if (self.view_jump_barrier) {
                 self.view_jump_barrier = false;
-                log.notice("{}: on_prepare: cleared view jump barrier", .{self.replica});
+                log.debug("{}: on_prepare: cleared view jump barrier", .{self.replica});
             }
 
             self.replicate(message);
@@ -806,7 +806,7 @@ pub fn Replica(
             // We may receive a `do_view_change` quorum from other replicas, which already have a
             // `start_view_change_quorum`, before we receive a `start_view_change_quorum`:
             if (!self.start_view_change_quorum) {
-                log.notice("{}: on_do_view_change: waiting for start_view_change quorum", .{
+                log.debug("{}: on_do_view_change: waiting for start_view_change quorum", .{
                     self.replica,
                 });
                 return;
@@ -901,7 +901,7 @@ pub fn Replica(
             if (self.view_jump_barrier) {
                 assert(self.status == .normal);
                 self.view_jump_barrier = false;
-                log.notice("{}: on_start_view: resolved view jump barrier", .{self.replica});
+                log.debug("{}: on_start_view: resolved view jump barrier", .{self.replica});
             } else {
                 assert(self.status == .view_change);
                 self.transition_to_normal_status(message.header.view);
@@ -1946,7 +1946,7 @@ pub fn Replica(
                     if (message.header.checksum == entry.reply.header.parent) {
                         assert(entry.reply.header.operation == message.header.operation);
 
-                        log.notice("{}: on_request: replying to duplicate request", .{self.replica});
+                        log.debug("{}: on_request: replying to duplicate request", .{self.replica});
                         self.message_bus.send_message_to_client(message.header.client, entry.reply);
                         return true;
                     } else {
@@ -2265,7 +2265,7 @@ pub fn Replica(
             if (self.view_jump_barrier) {
                 assert(self.status == .normal);
                 assert(self.follower());
-                log.notice("{}: repair: resolving view jump barrier", .{self.replica});
+                log.debug("{}: repair: resolving view jump barrier", .{self.replica});
                 self.send_header_to_replica(self.leader_index(self.view), .{
                     .command = .request_start_view,
                     .cluster = self.cluster,
@@ -2284,7 +2284,7 @@ pub fn Replica(
                 // must therefore be in normal status:
                 assert(self.status == .normal);
                 assert(self.follower());
-                log.notice("{}: repair: op={} < commit_max={}", .{
+                log.debug("{}: repair: op={} < commit_max={}", .{
                     self.replica,
                     self.op,
                     self.commit_max,
@@ -2308,7 +2308,7 @@ pub fn Replica(
             // TODO Snapshots: Ensure that self.commit_min op always exists in the journal.
             var broken = self.journal.find_latest_headers_break_between(self.commit_min, self.op);
             if (broken) |range| {
-                log.notice("{}: repair: latest break: {}", .{ self.replica, range });
+                log.debug("{}: repair: latest break: {}", .{ self.replica, range });
                 assert(range.op_min > self.commit_min);
                 assert(range.op_max < self.op);
                 // A range of `op_min=0` or `op_max=0` should be impossible as a header break:
@@ -3295,14 +3295,14 @@ pub fn Replica(
             // If we know we have uncommitted ops that may have been reordered through a view change
             // then wait until the latest of these has been resolved with the leader:
             if (self.view_jump_barrier) {
-                log.notice("{}: {s}: waiting to resolve view jump barrier", .{ self.replica, method });
+                log.debug("{}: {s}: waiting to resolve view jump barrier", .{ self.replica, method });
                 return false;
             }
 
             // If we know we could validate the hash chain even further, then wait until we can:
             // This is partial defense-in-depth in case `self.op` is ever advanced by a reordered op.
             if (self.op < self.commit_max) {
-                log.notice("{}: {s}: waiting for repair (op={} < commit={})", .{
+                log.debug("{}: {s}: waiting for repair (op={} < commit={})", .{
                     self.replica,
                     method,
                     self.op,
@@ -3313,7 +3313,7 @@ pub fn Replica(
 
             // We must validate the hash chain as far as possible, since `self.op` may disclose a fork:
             if (!self.valid_hash_chain_between(self.commit_min, self.op)) {
-                log.notice("{}: {s}: waiting for repair (hash chain)", .{ self.replica, method });
+                log.debug("{}: {s}: waiting for repair (hash chain)", .{ self.replica, method });
                 return false;
             }
 
@@ -3340,12 +3340,12 @@ pub fn Replica(
                         assert(self.ascending_viewstamps(a, b));
                         b = a;
                     } else {
-                        log.notice("{}: valid_hash_chain_between: break: A: {}", .{ self.replica, a });
-                        log.notice("{}: valid_hash_chain_between: break: B: {}", .{ self.replica, b });
+                        log.debug("{}: valid_hash_chain_between: break: A: {}", .{ self.replica, a });
+                        log.debug("{}: valid_hash_chain_between: break: B: {}", .{ self.replica, b });
                         return false;
                     }
                 } else {
-                    log.notice("{}: valid_hash_chain_between: missing op={}", .{ self.replica, op });
+                    log.debug("{}: valid_hash_chain_between: missing op={}", .{ self.replica, op });
                     return false;
                 }
             }
@@ -3416,7 +3416,7 @@ pub fn Replica(
                     //
                     // This is safe because advancing our latest op in the current view or receiving the
                     // latest op from the leader both ensure that we have the latest hash chain head.
-                    log.notice("{}: view_jump: imposing view jump barrier", .{self.replica});
+                    log.debug("{}: view_jump: imposing view jump barrier", .{self.replica});
                     self.view_jump_barrier = true;
                 } else {
                     assert(self.op == self.commit_max);
@@ -3432,7 +3432,7 @@ pub fn Replica(
                 // There is no need to impose a view jump barrier and any existing barrier is cleared.
                 // We only need to transition to view change status.
                 if (self.view_jump_barrier) {
-                    log.notice("{}: view_jump: clearing view jump barrier", .{self.replica});
+                    log.debug("{}: view_jump: clearing view jump barrier", .{self.replica});
                     self.view_jump_barrier = false;
                 }
             } else {
