@@ -11,24 +11,42 @@ const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StateMachine = @import("test/cluster.zig").StateMachine;
 
-const log = std.log.scoped(.vopr);
+/// You can switch log_level to .debug to see how everything works:
+pub const log_level: std.log.Level = .info;
 
-// TODO This is a temporary workaround while we figure out how to jump from *Replica to *Cluster:
-var global_cluster: *Cluster = undefined;
+const log_state_transitions_only = true;
 
-test "VOPR" {
-    std.testing.log_level = .debug;
+pub fn log(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (log_state_transitions_only and scope != .state_checker) return;
 
-    // TODO: use std.testing.allocator when all leaks are fixed.
+    const prefix = if (log_state_transitions_only) "" else "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
+
+    // Print the message to stdout, silently ignoring any errors
+    const held = std.debug.getStderrMutex().acquire();
+    defer held.release();
+    const stderr = std.io.getStdErr().writer();
+    nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
+}
+
+var cluster: *Cluster = undefined;
+
+pub fn main() !void {
+    // TODO Use std.testing.allocator when all deinit() leaks are fixed.
     const allocator = std.heap.page_allocator;
-    var prng = std.rand.DefaultPrng.init(3);
+
+    var prng = std.rand.DefaultPrng.init(0);
     const random = &prng.random;
 
     const replica_count = 5;
     const client_count = 2;
     const node_count = replica_count + client_count;
 
-    const cluster = try Cluster.create(allocator, &prng.random, .{
+    cluster = try Cluster.create(allocator, &prng.random, .{
         .cluster = 0,
         .replica_count = replica_count,
         .client_count = client_count,
@@ -52,7 +70,6 @@ test "VOPR" {
     cluster.state_checker = try StateChecker.init(allocator, cluster);
     defer cluster.state_checker.deinit();
 
-    global_cluster = cluster;
     for (cluster.replicas) |*replica| {
         replica.on_change_state = on_change_replica;
     }
@@ -72,12 +89,10 @@ test "VOPR" {
         if (idle) {
             if (chance(random, 10)) idle = false;
         } else {
-            if (chance(random, 50)) maybe_send_random_request(cluster, random);
+            if (chance(random, 50)) maybe_send_random_request(random);
             if (chance(random, 20)) idle = true;
         }
     }
-
-    log.notice("passed after {} ticks", .{ tick });
 }
 
 /// Returns true, `p` percent of the time, else false.
@@ -87,11 +102,11 @@ fn chance(random: *std.rand.Random, p: u8) bool {
 }
 
 fn on_change_replica(replica: *Replica) void {
-    assert(global_cluster.state_machines[replica.replica].state == replica.state_machine.state);
-    global_cluster.state_checker.check_state(replica.replica);
+    assert(cluster.state_machines[replica.replica].state == replica.state_machine.state);
+    cluster.state_checker.check_state(replica.replica);
 }
 
-fn maybe_send_random_request(cluster: *Cluster, random: *std.rand.Random) void {
+fn maybe_send_random_request(random: *std.rand.Random) void {
     const client_index = random.uintLessThan(u8, cluster.options.client_count);
 
     const client = &cluster.clients[client_index];
@@ -102,10 +117,7 @@ fn maybe_send_random_request(cluster: *Cluster, random: *std.rand.Random) void {
     if (client.request_queue.full()) return;
     if (checker_request_queue.full()) return;
 
-    const message = client.get_message() orelse {
-        log.notice("no message available to send request, dropping", .{});
-        return;
-    };
+    const message = client.get_message() orelse return;
     defer client.unref(message);
 
     const body_size_max = config.message_size_max - @sizeOf(Header);

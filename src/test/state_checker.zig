@@ -16,27 +16,27 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const log = std.log.scoped(.state_checker);
 
 const RequestQueue = RingBuffer(u128, config.message_bus_messages_max - 1);
-const Transitioned = std.bit_set.IntegerBitSet(config.replicas_max);
-const StateTransitions = std.AutoHashMap(u128, Transitioned);
+const StateTransitions = std.AutoHashMap(u128, u64);
 
 pub const StateChecker = struct {
-    /// Indexed by client index used by Cluster
+    /// Indexed by client index as used by Cluster.
     client_requests: [config.clients_max]RequestQueue =
         [_]RequestQueue{.{}} ** config.clients_max,
 
-    /// Indexed by replica index
+    /// Indexed by replica index.
     state_machine_states: [config.replicas_max]u128,
 
     history: StateTransitions,
 
-    /// The highest cannonical state reached by the cluster
+    /// The highest cannonical state reached by the cluster.
     state: u128,
+
     /// The number of times the cannonical state has been advanced.
     transitions: u64 = 0,
 
     pub fn init(allocator: *mem.Allocator, cluster: *Cluster) !StateChecker {
         const state = cluster.state_machines[0].state;
-        log.debug("initial state={}", .{state});
+        log.debug("starting state={}", .{state});
 
         var state_machine_states: [config.replicas_max]u128 = undefined;
         for (cluster.state_machines) |state_machine, i| {
@@ -64,58 +64,42 @@ pub const StateChecker = struct {
         if (b == a) return;
         state_checker.state_machine_states[replica] = b;
 
-        log.debug("replica {} changed state={x}..{x}", .{ replica, a, b });
-
-        // If some other replica has already reached this state
-        if (state_checker.history.getPtr(b)) |transitioned| {
-            log.debug("replica {} new state={} found in history", .{ replica, b });
-
-            if (transitioned.isSet(replica)) {
-                @panic("replica transitioned to the same state a second time");
-            }
-
-            transitioned.set(replica);
-
-            log.notice(
-                "replica={} state={x}..{x} transitions={}",
-                .{ replica, a, b, state_checker.transitions },
+        // If some other replica has already reached this state, then it will be in the history:
+        if (state_checker.history.getPtr(b)) |transition| {
+            // A replica may transition more than once to the same state, for example, when
+            // restarting after a crash and replaying the log. The more important invariant is that
+            // the cluster as a whole may not transition to the same state more than once, and once
+            // transitioned may not regress.
+            log.info(
+                "{d:0>4}/{d:0>4} {x:0>32} > {x:0>32} {}",
+                .{ transition.*, state_checker.transitions, a, b, replica },
             );
-
-            // Remove from history if all replicas have reached this state.
-            const transitions = transitioned.count();
-            if (transitions == cluster.options.replica_count) {
-                log.debug("all replicas have reached state={}", .{b});
-            }
-            assert(transitions <= cluster.options.replica_count);
-
             return;
         }
 
-        // As soon as we use an inflight client request to arrive at a valid state we want to pop().
-        // Otherwise, if we used the client.request_queue directly, we would allow multiple uses.
-
-        // The replica has transitioned to a state b that is not yet in the history.
-        // Check if this is a vaild next state based on the currently inflight messages
-        // from clients.
+        // The replica has transitioned to state `b` that is not yet in the history.
+        // Check if this is a vaild new state based on all currently inflight client requests.
         for (state_checker.client_requests) |*queue| {
             if (queue.peek_ptr()) |input| {
                 if (b == StateMachine.hash(state_checker.state, std.mem.asBytes(input))) {
                     state_checker.state = b;
                     state_checker.transitions += 1;
-                    log.notice(
-                        "replica={} state={x}..{x} transitions={} advanced",
-                        .{ replica, a, b, state_checker.transitions },
-                    );
 
-                    var transitioned = Transitioned.initEmpty();
-                    transitioned.set(replica);
+                    log.info("     {d:0>4} {x:0>32} > {x:0>32} {}", .{
+                        state_checker.transitions,
+                        a,
+                        b,
+                        replica,
+                    });
 
-                    state_checker.history.putNoClobber(b, transitioned) catch @panic("Test OOM");
+                    state_checker.history.putNoClobber(b, state_checker.transitions) catch {
+                        @panic("state checker unable to allocate memory for history.put()");
+                    };
 
-                    // TODO We must hook into all places in Replica where state may change.
-                    // Otherwise, if state changes successively, e.g. because of an asynchronous
-                    // I/O callback, then we may miss a transition and our client_requests queue
-                    // will get out of sync, resulting in a spurious "invalid state" panic.
+                    // As soon as we reach a valid state we must pop the inflight request.
+                    // We cannot wait until the client receives the reply because that would allow
+                    // the inflight request to be used to reach other states in the interim.
+                    // We must therefore use our own queue rather than the clients' queues.
                     _ = queue.pop();
                     return;
                 }
