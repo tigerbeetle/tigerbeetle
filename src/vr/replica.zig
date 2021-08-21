@@ -126,7 +126,11 @@ pub fn Replica(
         /// This is the commit number in terms of the VRR paper.
         commit_max: u64,
 
+        /// Whether we are reading a prepare from storage in order to commit.
         committing: bool = false,
+
+        /// Whether we are reading a prepare from storage in order to push to the pipeline.
+        repairing_pipeline: bool = false,
 
         /// The leader's pipeline of inflight prepares waiting to commit in FIFO order.
         /// This allows us to pipeline without the complexity of out-of-order commits.
@@ -2358,11 +2362,7 @@ pub fn Replica(
             if (self.commit_min < self.commit_max) return self.commit_ops(self.commit_max);
 
             if (self.status == .view_change and self.leader_index(self.view) == self.replica) {
-                // TODO Drive uncommitted ops to completion through replication to a majority:
-                if (self.commit_max < self.op) {
-                    log.debug("{}: repair: waiting for uncomitted ops to replicate", .{self.replica});
-                    return;
-                }
+                if (self.repair_pipeline_op() != null) return self.repair_pipeline();
 
                 // Start the view as the new leader:
                 self.start_view_as_the_new_leader();
@@ -2586,6 +2586,122 @@ pub fn Replica(
             return false;
         }
 
+        /// Reads prepares into the pipeline (before we start the view as the new leader).
+        fn repair_pipeline(self: *Self) void {
+            assert(self.status == .view_change);
+            assert(self.leader_index(self.view) == self.replica);
+            assert(self.commit_max < self.op);
+
+            if (self.repairing_pipeline) {
+                log.debug("{}: repair_pipeline: already repairing...", .{self.replica});
+                return;
+            }
+
+            log.debug("{}: repair_pipeline: repairing", .{self.replica});
+
+            assert(!self.repairing_pipeline);
+            self.repairing_pipeline = true;
+
+            self.repair_pipeline_read();
+        }
+
+        fn repair_pipeline_op(self: *Self) ?u64 {
+            assert(self.status == .view_change);
+            assert(self.leader_index(self.view) == self.replica);
+
+            const op = self.commit_max + 1 + self.pipeline.count;
+            return if (op <= self.op) op else null;
+        }
+
+        fn repair_pipeline_read(self: *Self) void {
+            assert(self.repairing_pipeline);
+            assert(self.status == .view_change);
+            assert(self.leader_index(self.view) == self.replica);
+
+            if (self.repair_pipeline_op()) |op| {
+                assert(self.commit_max + 1 + self.pipeline.count == op);
+                assert(op <= self.op);
+
+                const checksum = self.journal.entry_for_op_exact(op).?.checksum;
+
+                log.debug("{}: repair_pipeline_read: op={} checksum={}", .{
+                    self.replica,
+                    op,
+                    checksum,
+                });
+
+                self.journal.read_prepare(repair_pipeline_push, op, checksum, null);
+            } else {
+                log.debug("{}: repair_pipeline_read: repaired", .{self.replica});
+
+                self.repairing_pipeline = false;
+                self.repair();
+            }
+        }
+
+        fn repair_pipeline_push(
+            self: *Self,
+            prepare: ?*Message,
+            destination_replica: ?u8,
+        ) void {
+            assert(destination_replica == null);
+
+            assert(self.repairing_pipeline);
+            self.repairing_pipeline = false;
+
+            if (prepare == null) {
+                log.debug("{}: repair_pipeline_push: prepare == null", .{self.replica});
+                return;
+            }
+
+            // Our state may have advanced significantly while we were reading from disk.
+            if (self.status != .view_change) {
+                log.debug("{}: repair_pipeline_push: no longer in view change status", .{
+                    self.replica,
+                });
+                return;
+            }
+
+            if (self.leader_index(self.view) != self.replica) {
+                log.debug("{}: repair_pipeline_push: no longer leader", .{self.replica});
+                return;
+            }
+
+            // We may even be several views ahead and may now have a completely different pipeline.
+            const op = self.repair_pipeline_op() orelse {
+                log.debug("{}: repair_pipeline_push: pipeline changed", .{self.replica});
+                return;
+            };
+
+            assert(self.commit_max + 1 + self.pipeline.count == op);
+            assert(op <= self.op);
+
+            if (prepare.?.header.op != op) {
+                log.debug("{}: repair_pipeline_push: op changed", .{self.replica});
+                return;
+            }
+
+            if (prepare.?.header.checksum != self.journal.entry_for_op_exact(op).?.checksum) {
+                log.debug("{}: repair_pipeline_push: checksum changed", .{self.replica});
+                return;
+            }
+
+            assert(self.status == .view_change);
+            assert(self.leader_index(self.view) == self.replica);
+
+            log.debug("{}: repair_pipeline_push: op={} checksum={}", .{
+                self.replica,
+                prepare.?.header.op,
+                prepare.?.header.checksum,
+            });
+
+            self.pipeline.push(.{ .message = prepare.?.ref() }) catch unreachable;
+            assert(self.pipeline.count >= 1);
+
+            self.repairing_pipeline = true;
+            self.repair_pipeline_read();
+        }
+
         fn repair_prepares(self: *Self) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
@@ -2759,6 +2875,9 @@ pub fn Replica(
 
             assert(self.pipeline.count == 0);
             assert(self.prepare_timeout.ticking == false);
+
+            // Do not reset `repairing_pipeline` here as this must be reset by the read callback.
+            // Otherwise, we would be making `repair_pipeline()` reentrant.
         }
 
         fn reset_quorum_messages(self: *Self, messages: *QuorumMessages, command: Command) void {
@@ -3159,9 +3278,25 @@ pub fn Replica(
             // TODO Do one last count of our do_view_change quorum messages.
 
             assert(!self.view_jump_barrier);
-            assert(self.commit_min == self.op);
-            assert(self.commit_max == self.op);
+
+            assert(self.commit_min == self.commit_max);
+            assert(self.repair_pipeline_op() == null);
+            assert(self.commit_max + self.pipeline.count == self.op);
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
+
+            var pipeline_op = self.commit_max + 1;
+            var pipeline_parent = self.journal.entry_for_op_exact(self.commit_max).?.checksum;
+            var iterator = self.pipeline.iterator();
+            while (iterator.next_ptr()) |prepare| {
+                assert(prepare.message.header.command == .prepare);
+                assert(prepare.message.header.op == pipeline_op);
+                assert(prepare.message.header.parent == pipeline_parent);
+
+                pipeline_parent = prepare.message.header.checksum;
+                pipeline_op += 1;
+            }
+            assert(self.pipeline.count <= config.pipelining_max);
+            assert(self.pipeline.count + self.commit_max == pipeline_op - 1);
 
             assert(self.journal.dirty.len == 0);
             assert(self.journal.faulty.len == 0);
@@ -3174,6 +3309,8 @@ pub fn Replica(
             defer self.message_bus.unref(start_view);
 
             self.transition_to_normal_status(self.view);
+            // Detect if the transition to normal status above accidentally resets the pipeline:
+            assert(self.commit_max + self.pipeline.count == self.op);
 
             assert(self.status == .normal);
             assert(self.leader());
@@ -3206,6 +3343,10 @@ pub fn Replica(
                 self.repair_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
+                if (self.pipeline.count > 0) {
+                    assert(!self.prepare_timeout.ticking);
+                    self.prepare_timeout.start();
+                }
             } else {
                 log.debug("{}: transition_to_normal_status: follower", .{self.replica});
 
