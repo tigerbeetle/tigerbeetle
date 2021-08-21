@@ -1,12 +1,12 @@
 #!/bin/bash
 set -e
 
-if [ "$1" == "0.8.0" ]; then
-    ZIG_RELEASE="0.8.0"
-    echo "Installing Zig $ZIG_RELEASE release build..."
-else
+if [ "$1" == "latest" ]; then
     ZIG_RELEASE="builds"
     echo "Installing Zig latest build..."
+else
+    ZIG_RELEASE="0.8.0"
+    echo "Installing Zig $ZIG_RELEASE release build..."
 fi
 
 # Determine the architecture:
