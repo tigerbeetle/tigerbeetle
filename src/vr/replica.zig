@@ -1044,6 +1044,13 @@ pub fn Replica(
                 std.mem.bytesAsSlice(Header, response.buffer[@sizeOf(Header)..size_max]),
             );
 
+            if (count == 0) {
+                log.debug("{}: on_request_headers: dropping response, no matching headers found", .{
+                    self.replica,
+                });
+                return;
+            }
+
             response.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
             const body = response.buffer[@sizeOf(Header)..response.header.size];
 
@@ -1133,6 +1140,9 @@ pub fn Replica(
             assert(self.status == .normal or self.status == .view_change);
             assert(message.header.view == self.view);
             assert(message.header.replica != self.replica);
+
+            // We expect at least one header in the body, or otherwise no response to our request.
+            assert(message.header.size > @sizeOf(Header));
 
             var op_min: ?u64 = null;
             var op_max: ?u64 = null;
@@ -3036,6 +3046,10 @@ pub fn Replica(
                 .commit => {
                     assert(self.status == .normal);
                     assert(self.leader());
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
+                },
+                .request_headers => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                 },
