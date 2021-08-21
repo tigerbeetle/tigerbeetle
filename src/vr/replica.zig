@@ -1011,16 +1011,6 @@ pub fn Replica(
             assert(message.header.view == self.view);
             assert(message.header.replica != self.replica);
 
-            const op_min = message.header.commit;
-            const op_max = message.header.op;
-            assert(op_max >= op_min);
-
-            // We must add 1 because op_max and op_min are both inclusive:
-            const count_max = @intCast(u32, std.math.min(64, op_max - op_min + 1));
-            assert(count_max > 0);
-
-            const size_max = @sizeOf(Header) + @sizeOf(Header) * count_max;
-
             const response = self.message_bus.get_message() orelse {
                 log.debug("{}: on_request_headers: dropping response, no message available", .{
                     self.replica,
@@ -1038,6 +1028,20 @@ pub fn Replica(
                 .view = self.view,
             };
 
+            const op_min = message.header.commit;
+            const op_max = message.header.op;
+            assert(op_max >= op_min);
+
+            // We must add 1 because op_max and op_min are both inclusive:
+            const count_max = @intCast(u32, std.math.min(64, op_max - op_min + 1));
+            assert(count_max > 0);
+
+            const size_max = @sizeOf(Header) * std.math.min(
+                std.math.max(@divFloor(message.buffer.len, @sizeOf(Header)), 2),
+                1 + count_max,
+            );
+            assert(size_max > @sizeOf(Header));
+
             const count = self.journal.copy_latest_headers_between(
                 op_min,
                 op_max,
@@ -1045,16 +1049,13 @@ pub fn Replica(
             );
 
             if (count == 0) {
-                log.debug("{}: on_request_headers: dropping response, no matching headers found", .{
-                    self.replica,
-                });
+                log.debug("{}: on_request_headers: no headers found, dropping", .{self.replica});
                 return;
             }
 
             response.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
-            const body = response.buffer[@sizeOf(Header)..response.header.size];
 
-            response.header.set_checksum_body(body);
+            response.header.set_checksum_body(response.body());
             response.header.set_checksum();
 
             self.send_message_to_replica(message.header.replica, response);
@@ -1717,14 +1718,21 @@ pub fn Replica(
                 .commit = self.commit_max,
             };
 
+            const count_max = 8; // The number of prepare headers to include in the body.
+
             const size_max = @sizeOf(Header) * std.math.min(
                 std.math.max(@divFloor(message.buffer.len, @sizeOf(Header)), 2),
-                8,
+                1 + count_max,
             );
             assert(size_max > @sizeOf(Header));
 
-            var dest = std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..size_max]);
-            const count = self.journal.copy_latest_headers_between(0, self.op, dest);
+            const count = self.journal.copy_latest_headers_between(
+                0,
+                self.op,
+                std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..size_max]),
+            );
+
+            // We expect that self.op always exists.
             assert(count > 0);
 
             message.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
