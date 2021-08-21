@@ -2,14 +2,14 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const math = std.math;
-const log = std.log.scoped(.vr);
 
 const config = @import("../config.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
-
 const vr = @import("../vr.zig");
 const Header = vr.Header;
+
+const log = std.log.scoped(.journal);
 
 pub fn Journal(comptime Replica: type, comptime Storage: type) type {
     return struct {
@@ -445,7 +445,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
             if (op > replica.op) {
-                self.read_prepare_notice(op, checksum, "beyond replica.op");
+                self.read_prepare_log(op, checksum, "beyond replica.op");
                 callback(replica, null, null);
                 return;
             }
@@ -453,19 +453,19 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // Do not use this pointer beyond this function's scope, as the
             // header memory may then change:
             const exact = replica.journal.entry_for_op_exact_with_checksum(op, checksum) orelse {
-                self.read_prepare_notice(op, checksum, "no entry exactly");
+                self.read_prepare_log(op, checksum, "no entry exactly");
                 callback(replica, null, null);
                 return;
             };
 
             if (replica.journal.faulty.bit(op)) {
-                self.read_prepare_notice(op, checksum, "faulty");
+                self.read_prepare_log(op, checksum, "faulty");
                 callback(replica, null, null);
                 return;
             }
 
             if (replica.journal.dirty.bit(op)) {
-                self.read_prepare_notice(op, checksum, "dirty");
+                self.read_prepare_log(op, checksum, "dirty");
                 callback(replica, null, null);
                 return;
             }
@@ -474,7 +474,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(physical_size >= exact.size);
 
             const message = replica.message_bus.get_message() orelse {
-                self.read_prepare_notice(op, checksum, "no message available");
+                self.read_prepare_log(op, checksum, "no message available");
                 callback(replica, null, null);
                 return;
             };
@@ -488,7 +488,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             const read = self.reads.acquire() orelse {
-                self.read_prepare_notice(op, checksum, "no iop available");
+                self.read_prepare_log(op, checksum, "no iop available");
                 callback(replica, null, null);
                 return;
             };
@@ -533,26 +533,26 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             if (!read.message.header.valid_checksum()) {
-                self.read_prepare_notice(op, checksum, "corrupt header after read");
+                self.read_prepare_log(op, checksum, "corrupt header after read");
                 read.callback(replica, null, null);
                 return;
             }
 
             const body = read.message.buffer[@sizeOf(Header)..read.message.header.size];
             if (!read.message.header.valid_checksum_body(body)) {
-                self.read_prepare_notice(op, checksum, "corrupt body after read");
+                self.read_prepare_log(op, checksum, "corrupt body after read");
                 read.callback(replica, null, null);
                 return;
             }
 
             if (read.message.header.op != op) {
-                self.read_prepare_notice(op, checksum, "op changed during read");
+                self.read_prepare_log(op, checksum, "op changed during read");
                 read.callback(replica, null, null);
                 return;
             }
 
             if (read.message.header.checksum != checksum) {
-                self.read_prepare_notice(op, checksum, "checksum changed during read");
+                self.read_prepare_log(op, checksum, "checksum changed during read");
                 read.callback(replica, null, null);
                 return;
             }
@@ -560,8 +560,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             read.callback(replica, read.message, read.destination_replica);
         }
 
-        fn read_prepare_notice(self: *Self, op: u64, checksum: ?u128, notice: []const u8) void {
-            log.notice(
+        fn read_prepare_log(self: *Self, op: u64, checksum: ?u128, notice: []const u8) void {
+            log.info(
                 "{}: read_prepare: op={} checksum={}: {s}",
                 .{ self.replica, op, checksum, notice },
             );
