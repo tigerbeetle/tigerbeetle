@@ -8,14 +8,14 @@ const StateChecker = @import("state_checker.zig").StateChecker;
 const Network = @import("network.zig").Network;
 const NetworkOptions = @import("network.zig").NetworkOptions;
 
-const StateMachine = @import("state_machine.zig").StateMachine;
+pub const StateMachine = @import("state_machine.zig").StateMachine;
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;
 
 const vr = @import("../vr.zig");
-const Replica = vr.Replica(StateMachine, MessageBus, Storage, Time);
-const Client = vr.Client(StateMachine, MessageBus);
+pub const Replica = vr.Replica(StateMachine, MessageBus, Storage, Time);
+pub const Client = vr.Client(StateMachine, MessageBus);
 
 pub const ClusterOptions = struct {
     cluster: u32,

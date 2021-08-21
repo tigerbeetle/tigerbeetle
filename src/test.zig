@@ -4,35 +4,38 @@ const mem = std.mem;
 
 const config = @import("config.zig");
 
+const Client = @import("test/cluster.zig").Client;
 const Cluster = @import("test/cluster.zig").Cluster;
+const Header = @import("vr.zig").Header;
+const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
+const StateMachine = @import("test/cluster.zig").StateMachine;
 
-const StateMachine = @import("test/state_machine.zig").StateMachine;
-const MessageBus = @import("test/message_bus.zig").MessageBus;
+const log = std.log.scoped(.vopr);
 
-const vr = @import("vr.zig");
-const Header = vr.Header;
-const Client = vr.Client(StateMachine, MessageBus);
+// TODO This is a temporary workaround while we figure out how to jump from *Replica to *Cluster:
+var global_cluster: *Cluster = undefined;
 
-const log = std.log.scoped(.fuzz);
-
-test "VR" {
-    std.testing.log_level = .notice;
+test "VOPR" {
+    std.testing.log_level = .debug;
 
     // TODO: use std.testing.allocator when all leaks are fixed.
     const allocator = std.heap.page_allocator;
-    var prng = std.rand.DefaultPrng.init(0xABEE11E);
+    var prng = std.rand.DefaultPrng.init(3);
     const random = &prng.random;
 
+    const replica_count = 5;
+    const client_count = 2;
+    const node_count = replica_count + client_count;
+
     const cluster = try Cluster.create(allocator, &prng.random, .{
-        .cluster = 42,
-        .replica_count = 3,
-        .client_count = 1,
+        .cluster = 0,
+        .replica_count = replica_count,
+        .client_count = client_count,
         .seed = prng.random.int(u64),
         .network_options = .{
-            .after_on_message = StateChecker.after_on_message,
             .packet_simulator_options = .{
-                .node_count = 4,
+                .node_count = node_count,
                 .seed = prng.random.int(u64),
                 .one_way_delay_mean = 25,
                 .one_way_delay_min = 10,
@@ -49,8 +52,14 @@ test "VR" {
     cluster.state_checker = try StateChecker.init(allocator, cluster);
     defer cluster.state_checker.deinit();
 
+    global_cluster = cluster;
+    for (cluster.replicas) |*replica| {
+        replica.on_change_state = on_change_replica;
+    }
+
+    var idle = false;
     var tick: u64 = 0;
-    while (tick < 1_000_000) : (tick += 1) {
+    while (tick < 1_000_000 and cluster.state_checker.transitions < 250) : (tick += 1) {
         for (cluster.replicas) |*replica, i| {
             replica.tick();
             cluster.state_checker.check_state(@intCast(u8, i));
@@ -60,13 +69,26 @@ test "VR" {
 
         for (cluster.clients) |*client| client.tick();
 
-        if (chance(random, 5)) maybe_send_random_request(cluster, random);
+        if (idle) {
+            if (chance(random, 10)) idle = false;
+        } else {
+            if (chance(random, 50)) maybe_send_random_request(cluster, random);
+            if (chance(random, 20)) idle = true;
+        }
     }
+
+    log.notice("passed after {} ticks", .{ tick });
 }
 
+/// Returns true, `p` percent of the time, else false.
 fn chance(random: *std.rand.Random, p: u8) bool {
-    assert(p < 100);
-    return random.uintLessThan(u8, 100) < p;
+    assert(p <= 100);
+    return random.uintAtMost(u8, 100) <= p;
+}
+
+fn on_change_replica(replica: *Replica) void {
+    assert(global_cluster.state_machines[replica.replica].state == replica.state_machine.state);
+    global_cluster.state_checker.check_state(replica.replica);
 }
 
 fn maybe_send_random_request(cluster: *Cluster, random: *std.rand.Random) void {

@@ -191,6 +191,8 @@ pub fn Replica(
         /// Seeded with the replica's index number.
         prng: std.rand.DefaultPrng,
 
+        on_change_state: ?fn (replica: *Self) void = null,
+
         pub fn init(
             allocator: *Allocator,
             cluster: u32,
@@ -1496,6 +1498,8 @@ pub fn Replica(
             self.commit_min += 1;
             assert(self.commit_min == prepare.header.op);
             if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
+
+            if (self.on_change_state) |hook| hook(self);
 
             reply.header.* = .{
                 .command = .reply,
