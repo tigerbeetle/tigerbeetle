@@ -11,27 +11,12 @@ const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StateMachine = @import("test/cluster.zig").StateMachine;
 
-/// You can switch log_level to .debug to see how everything works:
-pub const log_level: std.log.Level = .info;
-
+/// Set this to `false` if you want to see how literally everything works.
+/// This will run much slower but will trace all logic across the cluster.
 const log_state_transitions_only = true;
 
-pub fn log(
-    comptime level: std.log.Level,
-    comptime scope: @TypeOf(.EnumLiteral),
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    if (log_state_transitions_only and scope != .state_checker) return;
-
-    const prefix = if (log_state_transitions_only) "" else "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
-
-    // Print the message to stdout, silently ignoring any errors
-    const held = std.debug.getStderrMutex().acquire();
-    defer held.release();
-    const stderr = std.io.getStdErr().writer();
-    nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
-}
+/// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
+pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
 
 var cluster: *Cluster = undefined;
 
@@ -148,4 +133,22 @@ fn client_callback(
     results: Client.Error![]const u8,
 ) void {
     assert(user_data == 0);
+}
+
+pub fn log(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (log_state_transitions_only and scope != .state_checker) return;
+
+    const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
+    const prefix = if (log_state_transitions_only) "" else prefix_default;
+
+    // Print the message to stdout, silently ignoring any errors
+    const held = std.debug.getStderrMutex().acquire();
+    defer held.release();
+    const stderr = std.io.getStdErr().writer();
+    nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
 }
