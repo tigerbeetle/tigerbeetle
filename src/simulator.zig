@@ -11,6 +11,8 @@ const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StateMachine = @import("test/cluster.zig").StateMachine;
 
+const logger = std.log.scoped(.state_checker);
+
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
 const log_state_transitions_only = true;
@@ -24,12 +26,16 @@ pub fn main() !void {
     // TODO Use std.testing.allocator when all deinit() leaks are fixed.
     const allocator = std.heap.page_allocator;
 
-    var prng = std.rand.DefaultPrng.init(0);
+    const seed = 0;
+
+    var prng = std.rand.DefaultPrng.init(seed);
     const random = &prng.random;
 
     const replica_count = 5;
     const client_count = 2;
     const node_count = replica_count + client_count;
+
+    logger.info("seed={} replicas={} clients={}", .{ seed, replica_count, client_count });
 
     cluster = try Cluster.create(allocator, &prng.random, .{
         .cluster = 0,
