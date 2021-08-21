@@ -55,19 +55,6 @@ pub const StateChecker = struct {
         state_checker.history.deinit();
     }
 
-    pub fn after_on_message(network: *Network, message: *Message, path: Network.Path) void {
-        const cluster = @fieldParentPtr(Cluster, "network", network);
-        const state_checker = &cluster.state_checker;
-
-        // Ignore if the message is being delivered to a client
-        if (path.target == .client) {
-            // TODO: assert that the message is no longer in client_requests
-            // Be aware of the network fault model.
-            return;
-        }
-        state_checker.check_state(path.target.replica);
-    }
-
     pub fn check_state(state_checker: *StateChecker, replica: u8) void {
         const cluster = @fieldParentPtr(Cluster, "state_checker", state_checker);
 
@@ -77,7 +64,7 @@ pub const StateChecker = struct {
         if (b == a) return;
         state_checker.state_machine_states[replica] = b;
 
-        log.debug("replica {} changed state={}..{}", .{ replica, a, b });
+        log.debug("replica {} changed state={x}..{x}", .{ replica, a, b });
 
         // If some other replica has already reached this state
         if (state_checker.history.getPtr(b)) |transitioned| {
@@ -88,6 +75,11 @@ pub const StateChecker = struct {
             }
 
             transitioned.set(replica);
+
+            log.notice(
+                "replica={} state={x}..{x} transitions={}",
+                .{ replica, a, b, state_checker.transitions },
+            );
 
             // Remove from history if all replicas have reached this state.
             const transitions = transitioned.count();
@@ -111,8 +103,8 @@ pub const StateChecker = struct {
                     state_checker.state = b;
                     state_checker.transitions += 1;
                     log.notice(
-                        "replica {} advanced state={} transitions={}",
-                        .{ replica, b, state_checker.transitions },
+                        "replica={} state={x}..{x} transitions={} advanced",
+                        .{ replica, a, b, state_checker.transitions },
                     );
 
                     var transitioned = Transitioned.initEmpty();

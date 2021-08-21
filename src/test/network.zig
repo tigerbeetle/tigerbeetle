@@ -19,8 +19,6 @@ const PacketSimulatorPath = @import("packet_simulator.zig").Path;
 const log = std.log.scoped(.network);
 
 pub const NetworkOptions = struct {
-    after_on_message: ?fn (network: *Network, message: *Message, path: Network.Path) void,
-
     packet_simulator_options: PacketSimulatorOptions,
 };
 
@@ -159,8 +157,6 @@ pub const Network = struct {
         }
 
         target_bus.on_message_callback.?(target_bus.on_message_context, message);
-
-        if (network.options.after_on_message) |hook| hook(network, message, process_path);
     }
 
     fn raw_process_to_process(raw: u128) Process {
