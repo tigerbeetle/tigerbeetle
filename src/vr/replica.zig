@@ -3141,6 +3141,7 @@ pub fn Replica(
                     assert(message.header.view <= self.view);
                     // And here is the safeguard:
                     // We must only ever send a prepare_ok to the latest leader of the active view.
+                    // We must never straddle views by sending to a leader in an older view.
                     // Otherwise, we would allow a partitioned leader to commit.
                     assert(replica == self.leader_index(self.view));
                     assert(message.header.replica == self.replica);
@@ -3156,6 +3157,7 @@ pub fn Replica(
                     assert(!self.do_view_change_quorum);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(replica == self.leader_index(self.view));
                 },
                 .start_view => switch (self.status) {
                     .normal => {
@@ -3199,6 +3201,7 @@ pub fn Replica(
                 .nack_prepare => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(replica == self.leader_index(self.view));
                 },
                 else => {
                     log.notice("{}: send_message_to_replica: TODO {s}", .{
