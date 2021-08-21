@@ -11,11 +11,17 @@ const vr = @import("vr.zig");
 const Header = vr.Header;
 const Client = vr.Client(StateMachine, MessageBus);
 
+pub const log_level: std.log.Level = .alert;
+
 pub const Demo = struct {
     pub fn request(
         operation: StateMachine.Operation,
         batch: anytype,
-        Results: anytype,
+        on_reply: fn (
+            user_data: u128,
+            operation: StateMachine.Operation,
+            results: Client.Error![]const u8,
+        ) void,
     ) !void {
         const allocator = std.heap.page_allocator;
         const client_id = std.crypto.random.int(u128);
@@ -44,7 +50,6 @@ pub const Demo = struct {
 
         const body = std.mem.asBytes(&batch);
         std.mem.copy(u8, message.buffer[@sizeOf(Header)..], body);
-        std.debug.print("ready to send request...\n", .{});
 
         client.request(
             0,
@@ -60,16 +65,44 @@ pub const Demo = struct {
         }
     }
 
-    pub fn on_reply(user_data: u128, operation: StateMachine.Operation, results: Client.Error![]const u8) void {
-        std.debug.print("received reply\n", .{});
-        //const reply_body = recv[@sizeOf(Header)..reply_header.size];
-        //assert(reply_header.valid_checksum_body(reply_body));
+    pub fn on_create_accounts(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
+        print_results(CreateAccountsResult, results);
+    }
 
-        //for (std.mem.bytesAsSlice(Results, reply_body)) |result| {
-        // TODO
-        //try result.jsonStringify(.{}, stdout);
-        //try stdout.writeAll("\n");
-        //    std.debug.print("{}\n", .{result});
-        //}
+    pub fn on_lookup_accounts(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
+        print_results(Account, results);
+    }
+
+    pub fn on_create_transfers(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
+        print_results(CreateTransfersResult, results);
+    }
+
+    pub fn on_commit_transfers(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
+        print_results(CommitTransfersResult, results);
+    }
+
+    fn print_results(comptime Results: type, results: Client.Error![]const u8) void {
+        const body = results catch unreachable;
+        const slice = std.mem.bytesAsSlice(Results, body);
+        for (slice) |result| {
+            std.debug.print("{}\n", .{result});
+        }
+        if (slice.len == 0) std.debug.print("OK\n", .{});
     }
 };
