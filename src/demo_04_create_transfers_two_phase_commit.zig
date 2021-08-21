@@ -4,10 +4,7 @@ usingnamespace @import("tigerbeetle.zig");
 usingnamespace @import("demo.zig");
 
 pub fn main() !void {
-    const fd = try connect(config.port);
-    defer std.os.close(fd);
-
-    var transfers = [_]Transfer{
+    const transfers = [_]Transfer{
         Transfer{
             .id = 1001,
             .debit_account_id = 1,
@@ -52,5 +49,5 @@ pub fn main() !void {
         },
     };
 
-    try send(fd, .create_transfers, transfers, CreateTransfersResult);
+    try Demo.request(.create_transfers, transfers, Demo.on_create_transfers);
 }
