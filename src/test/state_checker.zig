@@ -13,10 +13,10 @@ const Message = MessagePool.Message;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
-const log = std.log.scoped(.state_checker);
-
 const RequestQueue = RingBuffer(u128, config.message_bus_messages_max - 1);
 const StateTransitions = std.AutoHashMap(u128, u64);
+
+const log = std.log.scoped(.state_checker);
 
 pub const StateChecker = struct {
     /// Indexed by client index as used by Cluster.
