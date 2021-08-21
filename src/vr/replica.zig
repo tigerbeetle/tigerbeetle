@@ -3057,6 +3057,10 @@ pub fn Replica(
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                 },
+                .nack_prepare => {
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
+                },
                 else => {
                     log.notice("{}: send_message_to_replica: TODO {s}", .{
                         self.replica,
