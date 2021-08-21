@@ -1751,7 +1751,13 @@ pub fn Replica(
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_message_from_header(self: *Self, header: Header) ?*Message {
             assert(header.replica == self.replica);
-            assert(header.view == self.view);
+            if (header.command == .prepare_ok) {
+                // See send_prepare_ok() for the rationale behind this.
+                // See send_message_to_replica() for the safeguard for this.
+                assert(header.view <= self.view);
+            } else {
+                assert(header.view == self.view);
+            }
             assert(header.size == @sizeOf(Header));
 
             const message = self.message_bus.pool.get_header_only_message() orelse return null;
@@ -3131,7 +3137,12 @@ pub fn Replica(
                 },
                 .prepare_ok => {
                     assert(self.status == .normal);
+                    // See send_prepare_ok() for the rationale behind this:
                     assert(message.header.view <= self.view);
+                    // And here is the safeguard:
+                    // We must only ever send a prepare_ok to the latest leader of the active view.
+                    // Otherwise, we would allow a partitioned leader to commit.
+                    assert(replica == self.leader_index(self.view));
                     assert(message.header.replica == self.replica);
                 },
                 .start_view_change => {
