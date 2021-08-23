@@ -917,7 +917,15 @@ pub fn Replica(
             assert(message.header.view == self.view);
             assert(self.follower());
 
-            // TODO Send prepare_ok messages for uncommitted ops.
+            var op = self.commit_max + 1;
+            while (op > self.commit_max and op < self.op) : (op += 1) {
+                // We may have breaks or stale headers in our uncommitted chain here. However:
+                // * the leader will drop any prepare_ok messages that do not fit the pipeline, and
+                // * being able to send what we have will allow the pipeline to commit earlier.
+                if (self.journal.entry_for_op_exact(op)) |header| {
+                    self.send_prepare_ok(header);
+                }
+            }
 
             self.commit_ops(self.commit_max);
 
@@ -2669,7 +2677,6 @@ pub fn Replica(
                 self.journal.read_prepare(repair_pipeline_push, op, checksum, null);
             } else {
                 log.debug("{}: repair_pipeline_read: repaired", .{self.replica});
-
                 self.repairing_pipeline = false;
                 self.repair();
             }
@@ -2981,22 +2988,26 @@ pub fn Replica(
                 return;
             }
 
-            // TODO Think through a scenario of where not doing this would be wrong.
-            if (!self.valid_hash_chain("send_prepare_ok")) return;
             assert(!self.view_jump_barrier);
             assert(self.op >= self.commit_max);
 
             if (self.journal.has_clean(header)) {
-                // It is crucial that replicas stop accepting prepare messages from earlier views once
-                // they start the view change protocol. Without this constraint, the system could get
-                // into a state in which there are two active primaries: the old one, which hasn't
-                // failed but is merely slow or not well connected to the network, and the new one. If a
-                // replica sent a prepare_ok message to the old primary after sending its log to the new
-                // one, the old primary might commit an operation that the new primary doesn't learn
-                // about in the do_view_change messages.
+                log.debug("{}: send_prepare_ok: op={} checksum={}", .{
+                    self.replica,
+                    header.op,
+                    header.checksum,
+                });
 
-                // We therefore only send to the leader of the current view, never to the leader of the
-                // prepare header's view:
+                // It is crucial that replicas stop accepting prepare messages from earlier views
+                // once they start the view change protocol. Without this constraint, the system
+                // could get into a state in which there are two active primaries: the old one,
+                // which hasn't failed but is merely slow or not well connected to the network, and
+                // the new one. If a replica sent a prepare_ok message to the old primary after
+                // sending its log to the new one, the old primary might commit an operation that
+                // the new primary doesn't learn about in the do_view_change messages.
+
+                // We therefore only ever send to the leader of the current view, never to the
+                // leader of the prepare header's view:
                 self.send_header_to_replica(self.leader_index(self.view), .{
                     .command = .prepare_ok,
                     .parent = header.parent,
@@ -3015,24 +3026,6 @@ pub fn Replica(
             } else {
                 log.debug("{}: send_prepare_ok: not sending (dirty)", .{self.replica});
                 return;
-            }
-        }
-
-        fn send_prepare_oks_through(self: *Self, op: u64) void {
-            assert(self.status == .normal);
-            assert(op >= self.commit_max);
-            assert(op <= self.op);
-
-            if (!self.valid_hash_chain("send_prepare_oks_through")) return;
-            assert(!self.view_jump_barrier);
-            assert(self.op >= self.commit_max);
-
-            while (op > self.commit_max and op < self.op) : (op += 1) {
-                const header = self.journal.entry_for_op_exact(op).?;
-                assert(header.op == op);
-                assert(header.operation != .init);
-
-                self.send_prepare_ok(header);
             }
         }
 
