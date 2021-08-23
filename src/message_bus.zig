@@ -170,25 +170,29 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             }
 
             // Set tcp recv buffer size
-            if (config.tcp_rcvbuf > 0) {
+            if (config.tcp_rcvbuf > 0) rcvbuf: {
                 if (!is_darwin) {
-                    // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in the event of an EPERM):
-                    set(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, config.tcp_rcvbuf) catch |err| switch (err) {
+                    // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
+                    if (set(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, config.tcp_rcvbuf)) |_| {
+                        break :rcvbuf;
+                    } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
-                    };
+                    }
                 }
                 try set(fd, os.SOL_SOCKET, os.SO_RCVBUF, config.tcp_rcvbuf);
             }
 
             // Set tcp send buffer size
-            if (config.tcp_sndbuf > 0) {
+            if (config.tcp_sndbuf > 0) sndbuf: {
                 if (!is_darwin) {
-                    // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in the event of an EPERM):
-                    set(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, config.tcp_sndbuf) catch |err| switch (err) {
+                    // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
+                    if (set(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, config.tcp_sndbuf)) |_| {
+                        break :sndbuf;
+                    } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
-                    };
+                    }
                 }
                 try set(fd, os.SOL_SOCKET, os.SO_SNDBUF, config.tcp_sndbuf);
             }
@@ -212,10 +216,15 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
             // Set tcp no-delay
             if (config.tcp_nodelay) {
-                if (@hasDecl(os, "TCP_NODELAY")) {
-                    try set(fd, os.IPPROTO_TCP, os.TCP_NODELAY, 1);
-                } else if (is_darwin) {
-                    try set(fd, os.IPPROTO_TCP, 1, 1);
+                const TCP_NODELAY: ?u32 = if (@hasDecl(os, "TCP_NODELAY")) 
+                    @as(u32, os.TCP_NODELAY)
+                else if (is_darwin)
+                    @as(u32, 1)
+                else
+                    null;
+
+                if (TCP_NODELAY) |tcp_nodelay| {
+                    try set(fd, os.IPPROTO_TCP, tcp_nodelay, 1);
                 }
             }
 
@@ -621,6 +630,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     .shutdown => {
                         // The shutdown syscall will cause currently in progress send/recv
                         // operations to be gracefully closed while keeping the fd open.
+                        //
+                        // TODO: Investigate differences between shutdown() on Linux vs Darwin.
+                        // Especially how this interacts with our assumptions around pending I/O.
                         const rc = os.system.shutdown(connection.fd, os.SHUT_RDWR);
                         switch (os.errno(rc)) {
                             0 => {},

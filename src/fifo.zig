@@ -93,4 +93,12 @@ test "push/pop/peek/remove" {
     testing.expectEqual(@as(?*Foo, &one), fifo.pop());
     testing.expectEqual(@as(?*Foo, &two), fifo.pop());
     testing.expectEqual(@as(?*Foo, null), fifo.pop());
+
+    fifo.push(&one);
+    fifo.push(&two);
+    fifo.remove(&two);
+    fifo.push(&three);
+    testing.expectEqual(@as(?*Foo, &one), fifo.pop());
+    testing.expectEqual(@as(?*Foo, &three), fifo.pop());
+    testing.expectEqual(@as(?*Foo, null), fifo.pop());
 }

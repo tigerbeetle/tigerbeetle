@@ -370,13 +370,9 @@ pub const Storage = struct {
 
         // TODO Check that the file is actually a file.
 
-        // On darwin, use F_NOCACHE to disable the OS page cache for direct_io as O_DIRECT doesn't exit.
-        // If statements are separated out as mixing comptime and runtime values coerces the check to 
-        // runtime and linux doesn't define F_NOCACHE.
-        if (is_darwin) {
-            if (direct_io_supported) {
-                _ = try os.fcntl(fd, os.F_NOCACHE, 1);
-            }
+        // On darwin, use F_NOCACHE on direct_io to disable the page cache as O_DIRECT doesn't exit.
+        if (is_darwin and config.direct_io and direct_io_supported) {
+            _ = try os.fcntl(fd, os.F_NOCACHE, 1);
         }
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().

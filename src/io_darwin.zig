@@ -14,11 +14,15 @@ pub const IO = struct {
     io_pending: FIFO(Completion) = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
-        return IO{ .kq = try os.kqueue() };
+        const kq = try os.kqueue();
+        assert(kq > -1);
+        return IO{ .kq = kq };
     }
 
     pub fn deinit(self: *IO) void {
+        assert(self.kq > -1);
         os.close(self.kq);
+        self.kq = -1;
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
@@ -33,7 +37,11 @@ pub const IO = struct {
         var timed_out = false;
         var completion: Completion = undefined;
         const on_timeout = struct {
-            fn callback(timed_out_ptr: *bool, _completion: *Completion, _result: TimeoutError!void) void {
+            fn callback(
+                timed_out_ptr: *bool,
+                _completion: *Completion,
+                _result: TimeoutError!void,
+            ) void {
                 timed_out_ptr.* = true;
             }
         }.callback;
@@ -57,7 +65,8 @@ pub const IO = struct {
         var io_pending = self.io_pending.peek();
         var events: [256]os.Kevent = undefined;
 
-        // Check timeouts and fill events with completions in io_pending (they will be submitted through kevent).
+        // Check timeouts and fill events with completions in io_pending 
+        // (they will be submitted through kevent).
         // Timeouts are expired here and possibly pushed to the completed queue.
         const next_timeout = self.flush_timeouts();
         const change_events = self.flush_io(&events, &io_pending);
@@ -73,7 +82,7 @@ pub const IO = struct {
             // - run_for_ns() always submits a timeout
             if (change_events == 0 and self.completed.peek() == null) {
                 if (!wait_for_completions) return;
-                const timeout_ns = next_timeout orelse @panic("kevent() attempt to block without a timeout");
+                const timeout_ns = next_timeout orelse @panic("kevent() blocking forever");
                 ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
                 ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
             }
@@ -137,11 +146,12 @@ pub const IO = struct {
         while (timeouts) |completion| {
             timeouts = completion.next;
 
-            // NOTE: We could cache `now` above the loop but monotonic() should be cheap to call ideally.
+            // NOTE: We could cache `now` above the loop but monotonic() should be cheap to call.
             const now = self.time.monotonic();
             const expires = completion.operation.timeout.expires;
             
-            // NOTE: remove() could be O(1) here with a doubly-linked-list since we know the previous Completion.
+            // NOTE: remove() could be O(1) here with a doubly-linked-list 
+            // since we know the previous Completion.
             if (now >= expires) {
                 self.timeouts.remove(completion);
                 self.completed.push(completion);
@@ -149,8 +159,11 @@ pub const IO = struct {
             }
 
             const timeout_ns = expires - now;
-            const current_ns = min_timeout orelse std.math.maxInt(u64);
-            min_timeout = std.math.min(current_ns, timeout_ns);
+            if (min_timeout) |min_ns| {
+                min_timeout = std.math.min(min_ns, timeout_ns);
+            } else {
+                min_timeout = timeout_ns;
+            }
         }
         return min_timeout;
     }
@@ -368,7 +381,7 @@ pub const IO = struct {
             },
             struct {
                 fn doOperation(op: anytype) ConnectError!void {
-                    // Don't call connect after being rescheduled by io_pending as it returns EISCONN.
+                    // Don't call connect after being rescheduled by io_pending as it gives EISCONN.
                     // Instead, check the socket error to see if has been connected successfully.
                     const result = switch (op.initiated) {
                         true => os.getsockoptError(op.socket),
