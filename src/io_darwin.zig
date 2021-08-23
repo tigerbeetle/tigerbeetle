@@ -6,11 +6,6 @@ const FIFO = @import("fifo.zig").FIFO;
 const Time = @import("time.zig").Time;
 const buffer_limit = @import("io.zig").buffer_limit;
 
-fn log(comptime fmt: []const u8, args: anytype) void {
-    // if (@hasDecl(@import("root"), "is_main")) return;
-    // std.log.debug(fmt, args);
-}
-
 pub const IO = struct {
     kq: os.fd_t,
     time: Time = .{},
@@ -62,12 +57,22 @@ pub const IO = struct {
         var io_pending = self.io_pending.peek();
         var events: [256]os.Kevent = undefined;
 
+        // Check timeouts and fill events with completions in io_pending (they will be submitted through kevent).
+        // Timeouts are expired here and possibly pushed to the completed queue.
         const next_timeout = self.flush_timeouts();
         const change_events = self.flush_io(&events, &io_pending);
 
+        // Only call kevent() if we need to submit io events or if we need to wait for completions.
         if (change_events > 0 or self.completed.peek() == null) {
+            // Zero timeouts for kevent() implies a non-blocking poll
             var ts = std.mem.zeroes(os.timespec);
+
+            // We need to wait (not poll) on kevent if there's nothing to submit or complete.
+            // We should never wait indefinitely (timeout_ptr = null for kevent) given:
+            // - tick() is non-blocking (wait_for_completions = false)
+            // - run_for_ns() always submits a timeout
             if (change_events == 0 and self.completed.peek() == null) {
+                if (!wait_for_completions) return;
                 const timeout_ns = next_timeout orelse @panic("kevent() attempt to block without a timeout");
                 ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
                 ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
@@ -80,6 +85,7 @@ pub const IO = struct {
                 &ts,
             );
 
+            // Mark the io events submitted only after kevent() successfully processed them
             self.io_pending.out = io_pending;
             if (io_pending == null) {
                 self.io_pending.in = null;
@@ -94,7 +100,6 @@ pub const IO = struct {
         var completed = self.completed;
         self.completed = .{};
         while (completed.pop()) |completion| {
-            log("io_complete: {*} {}", .{completion, completion.operation});
             (completion.callback)(self, completion);
         }
     }
@@ -132,9 +137,11 @@ pub const IO = struct {
         while (timeouts) |completion| {
             timeouts = completion.next;
 
+            // NOTE: We could cache `now` above the loop but monotonic() should be cheap to call ideally.
             const now = self.time.monotonic();
             const expires = completion.operation.timeout.expires;
             
+            // NOTE: remove() could be O(1) here with a doubly-linked-list since we know the previous Completion.
             if (now >= expires) {
                 self.timeouts.remove(completion);
                 self.completed.push(completion);
@@ -231,7 +238,6 @@ pub const IO = struct {
                             error.WouldBlock => {
                                 _completion.next = null;
                                 io.io_pending.push(_completion);
-                                log("io_evented: {*} {}", .{_completion, _completion.operation});
                                 return;
                             },
                             else => {},
@@ -256,7 +262,6 @@ pub const IO = struct {
             .operation = @unionInit(Operation, @tagName(operation_tag), operation_data),
         };
 
-        log("io_submit: {*} {}", .{completion, completion.operation});
         switch (operation_tag) {
             .timeout => self.timeouts.push(completion),
             else => self.completed.push(completion),
