@@ -2212,6 +2212,7 @@ pub fn Replica(
         fn pipeline_prepare_for_client(self: *Self, client: u128) ?*Prepare {
             assert(self.status == .normal);
             assert(self.leader());
+            assert(self.commit_min == self.commit_max);
 
             var op = self.commit_max + 1;
             var parent = self.journal.entry_for_op_exact(self.commit_max).?.checksum;
@@ -2220,15 +2221,16 @@ pub fn Replica(
                 assert(prepare.message.header.command == .prepare);
                 assert(prepare.message.header.op == op);
                 assert(prepare.message.header.parent == parent);
+
                 if (prepare.message.header.client == client) return prepare;
+
                 parent = prepare.message.header.checksum;
                 op += 1;
             }
 
             assert(self.pipeline.count <= config.pipelining_max);
-            assert(self.pipeline.count + self.commit_max == op - 1);
-            assert(self.pipeline.count + self.commit_max == self.op);
-            assert(self.commit_min == self.commit_max);
+            assert(self.commit_max + self.pipeline.count == op - 1);
+            assert(self.commit_max + self.pipeline.count == self.op);
 
             return null;
         }
@@ -2612,12 +2614,16 @@ pub fn Replica(
             self.repair_pipeline_read();
         }
 
+        /// Returns the next `op` number that needs to be read into the pipeline.
         fn repair_pipeline_op(self: *Self) ?u64 {
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
 
-            const op = self.commit_max + 1 + self.pipeline.count;
-            return if (op <= self.op) op else null;
+            const op = self.commit_max + self.pipeline.count + 1;
+            if (op <= self.op) return op;
+
+            assert(self.commit_max + self.pipeline.count == self.op);
+            return null;
         }
 
         fn repair_pipeline_read(self: *Self) void {
@@ -2626,8 +2632,9 @@ pub fn Replica(
             assert(self.leader_index(self.view) == self.replica);
 
             if (self.repair_pipeline_op()) |op| {
-                assert(self.commit_max + 1 + self.pipeline.count == op);
+                assert(op > self.commit_max);
                 assert(op <= self.op);
+                assert(self.commit_max + self.pipeline.count + 1 == op);
 
                 const checksum = self.journal.entry_for_op_exact(op).?.checksum;
 
@@ -2680,8 +2687,9 @@ pub fn Replica(
                 return;
             };
 
-            assert(self.commit_max + 1 + self.pipeline.count == op);
+            assert(op > self.commit_max);
             assert(op <= self.op);
+            assert(self.commit_max + self.pipeline.count + 1 == op);
 
             if (prepare.?.header.op != op) {
                 log.debug("{}: repair_pipeline_push: op changed", .{self.replica});
@@ -3293,6 +3301,8 @@ pub fn Replica(
             // TODO Do one last count of our do_view_change quorum messages.
 
             assert(!self.view_jump_barrier);
+            assert(!self.committing);
+            assert(!self.repairing_pipeline);
 
             assert(self.commit_min == self.commit_max);
             assert(self.repair_pipeline_op() == null);
@@ -3311,7 +3321,7 @@ pub fn Replica(
                 pipeline_op += 1;
             }
             assert(self.pipeline.count <= config.pipelining_max);
-            assert(self.pipeline.count + self.commit_max == pipeline_op - 1);
+            assert(self.commit_max + self.pipeline.count == pipeline_op - 1);
 
             assert(self.journal.dirty.len == 0);
             assert(self.journal.faulty.len == 0);
