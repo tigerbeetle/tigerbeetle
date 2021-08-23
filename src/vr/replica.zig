@@ -3645,8 +3645,7 @@ pub fn Replica(
                     log.debug("{}: view_jump: imposing view jump barrier", .{self.replica});
                     self.view_jump_barrier = true;
                 } else {
-                    // TODO Should this not rather be <=?
-                    assert(self.op == self.commit_max);
+                    assert(self.op <= self.commit_max);
 
                     // Crucially, we may still need to resolve any prior view jump barrier:
                     // For example, if we jump to view 3 and then view 7 both in normal status.
