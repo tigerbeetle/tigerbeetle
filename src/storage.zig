@@ -3,7 +3,6 @@ const os = std.os;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.storage);
-const is_darwin = std.Target.current.isDarwin();
 
 const IO = @import("io.zig").IO;
 const is_darwin = std.Target.current.isDarwin();
