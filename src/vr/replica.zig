@@ -2275,10 +2275,7 @@ pub fn Replica(
             };
 
             if (ok.header.context != prepare.message.header.checksum) {
-                // This can be normal, for example, if an old prepare_ok is replayed, but we do
-                // expect that the viewstamp should at least be different for a checksum mismatch.
-                assert(ok.header.view != prepare.message.header.view or
-                    ok.header.op != prepare.message.header.op);
+                // This can be normal, for example, if an old prepare_ok is replayed.
                 log.debug("{}: pipeline_prepare_for_prepare_ok: preparing a different client op", .{
                     self.replica,
                 });
@@ -2335,9 +2332,9 @@ pub fn Replica(
             // This handles the case of an idle cluster, where a follower will not otherwise advance.
             // This is not required for correctness, but for durability.
             if (self.op < self.commit_max) {
-                // If the leader repairs during a view change, it will have already advanced `self.op`
-                // to the latest op according to the quorum of `do_view_change` messages received, so we
-                // must therefore be in normal status:
+                // If the leader repairs during a view change, it will have already advanced
+                // `self.op` to the latest op according to the quorum of `do_view_change` messages
+                // received, so we must therefore be a follower in normal status:
                 assert(self.status == .normal);
                 assert(self.follower());
                 log.debug("{}: repair: op={} < commit_max={}", .{
@@ -2350,7 +2347,7 @@ pub fn Replica(
                 self.send_header_to_replica(self.leader_index(self.view), .{
                     .command = .request_prepare,
                     // We cannot yet know the checksum of the prepare so we set the context to 0:
-                    // The context is optional when requesting from the leader but required otherwise.
+                    // Context is optional when requesting from the leader but required otherwise.
                     .context = 0,
                     .cluster = self.cluster,
                     .replica = self.replica,
@@ -2973,8 +2970,9 @@ pub fn Replica(
             }
 
             assert(self.status == .normal);
-            // After a view change followers must send prepare_oks for uncommitted ops with older views:
-            // However, we will only ever send to the leader of our current view.
+            // After a view change followers send prepare_oks for uncommitted ops with older views:
+            // However, we must only ever send to the leader of our current view to prevent a
+            // partitioned leader from committing.
             assert(header.view <= self.view);
             assert(header.op <= self.op);
 
@@ -2999,7 +2997,6 @@ pub fn Replica(
 
                 // We therefore only send to the leader of the current view, never to the leader of the
                 // prepare header's view:
-                // TODO We could surprise the new leader with this if it's preparing a different op.
                 self.send_header_to_replica(self.leader_index(self.view), .{
                     .command = .prepare_ok,
                     .parent = header.parent,
