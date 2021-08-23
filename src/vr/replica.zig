@@ -912,23 +912,13 @@ pub fn Replica(
             } else {
                 assert(self.status == .view_change);
                 self.transition_to_normal_status(message.header.view);
+                self.send_prepare_oks_after_view_change();
             }
 
             assert(!self.view_jump_barrier);
             assert(self.status == .normal);
             assert(message.header.view == self.view);
             assert(self.follower());
-
-            var op = self.commit_max + 1;
-            while (op > self.commit_max and op < self.op) : (op += 1) {
-                // We may have breaks or stale headers in our uncommitted chain here. However:
-                // * being able to send what we have will allow the pipeline to commit earlier, and
-                // * the leader will drop any prepare_ok for a prepare not in the pipeline.
-                // This is safe only because the leader can verify against the prepare checksum.
-                if (self.journal.entry_for_op_exact(op)) |header| {
-                    self.send_prepare_ok(header);
-                }
-            }
 
             self.commit_ops(self.commit_max);
 
@@ -1786,13 +1776,7 @@ pub fn Replica(
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_message_from_header(self: *Self, header: Header) ?*Message {
             assert(header.replica == self.replica);
-            if (header.command == .prepare_ok) {
-                // See send_prepare_ok() for the rationale behind this.
-                // See send_message_to_replica() for the safeguard for this.
-                assert(header.view <= self.view);
-            } else {
-                assert(header.view == self.view);
-            }
+            assert(header.view == self.view);
             assert(header.size == @sizeOf(Header));
 
             const message = self.message_bus.pool.get_header_only_message() orelse return null;
@@ -2299,7 +2283,8 @@ pub fn Replica(
             assert(prepare.message.header.request == ok.header.request);
             assert(prepare.message.header.cluster == ok.header.cluster);
             assert(prepare.message.header.epoch == ok.header.epoch);
-            assert(prepare.message.header.view == ok.header.view);
+            // A prepare may be committed in the same view or in a newer view:
+            assert(prepare.message.header.view <= ok.header.view);
             assert(prepare.message.header.op == ok.header.op);
             assert(prepare.message.header.commit == ok.header.commit);
             assert(prepare.message.header.offset == ok.header.offset);
@@ -2943,7 +2928,7 @@ pub fn Replica(
                     assert(replica < self.replica_count);
                     assert(message.header.command == command);
                     assert(message.header.replica == replica);
-                    assert(message.header.view <= self.view);
+                    assert(message.header.view == self.view);
                     self.message_bus.unref(message);
                     count += 1;
                 }
@@ -2988,9 +2973,8 @@ pub fn Replica(
             }
 
             assert(self.status == .normal);
-            // After a view change followers send prepare_oks for uncommitted ops with older views:
-            // However, we must only ever send to the leader of our current view to prevent a
-            // partitioned leader from committing.
+            // After a view change, replicas send prepare_oks for uncommitted ops with older views:
+            // However, we only send to the leader of the current view (see below where we send).
             assert(header.view <= self.view);
             assert(header.op <= self.op);
 
@@ -3028,7 +3012,7 @@ pub fn Replica(
                     .cluster = self.cluster,
                     .replica = self.replica,
                     .epoch = header.epoch,
-                    .view = header.view,
+                    .view = self.view,
                     .op = header.op,
                     .commit = header.commit,
                     .offset = header.offset,
@@ -3037,6 +3021,22 @@ pub fn Replica(
             } else {
                 log.debug("{}: send_prepare_ok: not sending (dirty)", .{self.replica});
                 return;
+            }
+        }
+
+        fn send_prepare_oks_after_view_change(self: *Self) void {
+            assert(self.status == .normal);
+
+            var op = self.commit_max + 1;
+            while (op <= self.op) : (op += 1) {
+                // We may have breaks or stale headers in our uncommitted chain here. However:
+                // * being able to send what we have will allow the pipeline to commit earlier, and
+                // * the leader will drop any prepare_ok for a prepare not in the pipeline.
+                // This is safe only because the leader can verify against the prepare checksum.
+                if (self.journal.entry_for_op_exact(op)) |header| {
+                    self.send_prepare_ok(header);
+                    defer self.flush_loopback_queue();
+                }
             }
         }
 
@@ -3171,12 +3171,10 @@ pub fn Replica(
                 },
                 .prepare_ok => {
                     assert(self.status == .normal);
-                    // See send_prepare_ok() for the rationale behind this:
-                    assert(message.header.view <= self.view);
-                    // And here is the safeguard:
-                    // We must only ever send a prepare_ok to the latest leader of the active view.
+                    assert(message.header.view == self.view);
+                    // We must only ever send a prepare_ok to the latest leader of the active view:
                     // We must never straddle views by sending to a leader in an older view.
-                    // Otherwise, we would allow a partitioned leader to commit.
+                    // Otherwise, we would be enabling a partitioned leader to commit.
                     assert(replica == self.leader_index(self.view));
                     assert(message.header.replica == self.replica);
                 },
@@ -3371,6 +3369,9 @@ pub fn Replica(
             assert(start_view.header.view == self.view);
             assert(start_view.header.op == self.op);
             assert(start_view.header.commit == self.commit_max);
+
+            // Send prepare_ok messages to ourself to contribute to the pipeline.
+            self.send_prepare_oks_after_view_change();
 
             self.send_message_to_other_replicas(start_view);
         }
