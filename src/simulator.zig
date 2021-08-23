@@ -31,11 +31,17 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = &prng.random;
 
-    const replica_count = 5;
-    const client_count = 2;
+    const replica_count = 1 + prng.random.uintLessThan(u8, config.replicas_max);
+    const client_count = 1 + prng.random.uintLessThan(u8, std.math.min(config.clients_max, 5));
     const node_count = replica_count + client_count;
 
-    logger.info("seed={} replicas={} clients={}", .{ seed, replica_count, client_count });
+    const transitions_max = config.journal_size_max / config.message_size_max;
+
+    logger.info("\n          SEED={} REPLICAS={} CLIENTS={}\n", .{
+        seed,
+        replica_count,
+        client_count,
+    });
 
     cluster = try Cluster.create(allocator, &prng.random, .{
         .cluster = 0,
@@ -67,7 +73,7 @@ pub fn main() !void {
 
     var idle = false;
     var tick: u64 = 0;
-    while (tick < 1_000_000 and cluster.state_checker.transitions < 250) : (tick += 1) {
+    while (tick < 1_000_000 and cluster.state_checker.transitions < transitions_max) : (tick += 1) {
         for (cluster.replicas) |*replica, i| {
             replica.tick();
             cluster.state_checker.check_state(@intCast(u8, i));
@@ -84,6 +90,8 @@ pub fn main() !void {
             if (chance(random, 20)) idle = true;
         }
     }
+
+    logger.info("\nPASSED", .{});
 }
 
 /// Returns true, `p` percent of the time, else false.
