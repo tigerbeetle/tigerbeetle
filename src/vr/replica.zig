@@ -1392,10 +1392,9 @@ pub fn Replica(
         }
 
         /// Choose a different replica each time if possible (excluding ourself).
-        /// The choice of replica is a deterministic function of:
-        /// 1. `choose_any_other_replica_ticks`, and
-        /// 2. whether the replica is connected and ready for sending in the MessageBus.
         fn choose_any_other_replica(self: *Self) ?u8 {
+            if (self.replica_count == 1) return null;
+
             var count: usize = 0;
             while (count < self.replica_count) : (count += 1) {
                 self.choose_any_other_replica_ticks += 1;
@@ -1406,7 +1405,7 @@ pub fn Replica(
                 if (replica == self.replica) continue;
                 return @intCast(u8, replica);
             }
-            return null;
+            unreachable;
         }
 
         /// Commit ops up to commit number `commit` (inclusive).
