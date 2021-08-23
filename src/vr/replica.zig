@@ -920,8 +920,9 @@ pub fn Replica(
             var op = self.commit_max + 1;
             while (op > self.commit_max and op < self.op) : (op += 1) {
                 // We may have breaks or stale headers in our uncommitted chain here. However:
-                // * the leader will drop any prepare_ok messages that do not fit the pipeline, and
-                // * being able to send what we have will allow the pipeline to commit earlier.
+                // * being able to send what we have will allow the pipeline to commit earlier, and
+                // * the leader will drop any prepare_ok for a prepare not in the pipeline.
+                // This is safe only because the leader can verify against the prepare checksum.
                 if (self.journal.entry_for_op_exact(op)) |header| {
                     self.send_prepare_ok(header);
                 }
