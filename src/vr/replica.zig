@@ -1459,23 +1459,48 @@ pub fn Replica(
         }
 
         fn commit_ops_commit(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
-            assert(self.committing);
             assert(destination_replica == null);
 
-            // The prepare could not be read, or things changed while we were reading from disk:
-            if (prepare == null or (self.status != .normal and self.status != .view_change)) {
-                self.committing = false;
+            assert(self.committing);
+            self.committing = false;
+
+            if (prepare == null) {
+                log.debug("{}: commit_ops_commit: prepare == null", .{self.replica});
                 return;
             }
 
-            // Guard against any re-entrancy concurrent to reading this prepare from disk:
-            assert(prepare.?.header.op == self.commit_min + 1);
+            if (self.status == .view_change) {
+                if (self.leader_index(self.view) != self.replica) {
+                    log.debug("{}: commit_ops_commit: no longer leader", .{self.replica});
+                    return;
+                }
 
-            const commit_min = self.commit_min;
+                // Only the leader may commit during a view change before starting the new view.
+                // Fall through if this is indeed the case.
+            } else if (self.status != .normal) {
+                log.debug("{}: commit_ops_commit: no longer in normal status", .{self.replica});
+                return;
+            }
+
+            const op = self.commit_min + 1;
+
+            if (prepare.?.header.op != op) {
+                log.debug("{}: commit_ops_commit: op changed", .{self.replica});
+                return;
+            }
+
+            if (prepare.?.header.checksum != self.journal.entry_for_op_exact(op).?.checksum) {
+                log.debug("{}: commit_ops_commit: checksum changed", .{self.replica});
+                return;
+            }
+
             self.commit_op(prepare.?);
-            assert(self.commit_min == commit_min + 1);
+
+            assert(self.commit_min == op);
+            assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
+            self.committing = true;
             self.commit_ops_read();
         }
 
