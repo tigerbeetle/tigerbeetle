@@ -885,8 +885,10 @@ pub fn Replica(
 
             self.view_jump(message.header);
 
-            assert(!self.view_jump_barrier or self.status == .normal);
+            // In ignore_view_change_message(), we will allow a start_view message through for the
+            // same view in normal status if a view jump barrier exists that needs to be cleared:
             assert(self.status == .view_change or self.view_jump_barrier);
+            assert(self.status == .normal or !self.view_jump_barrier);
             assert(message.header.view == self.view);
 
             var latest = Header.reserved();
@@ -2142,7 +2144,9 @@ pub fn Replica(
             }
 
             if (message.header.view == self.view and self.status == .normal) {
-                if (message.header.command != .start_view or !self.view_jump_barrier) {
+                if (message.header.command == .start_view and self.view_jump_barrier) {
+                    // Fall through, we requested this start_view to clear the view jump barrier.
+                } else {
                     log.debug("{}: on_{s}: ignoring (view started)", .{ self.replica, command });
                     return true;
                 }
@@ -2799,13 +2803,13 @@ pub fn Replica(
             }
         }
 
-        /// During a view change, for uncommitted ops, which may be one or two, we optimize for latency:
+        /// During a view change, for uncommitted ops, which are few, we optimize for latency:
         ///
         /// * request a `prepare` or `nack_prepare` from all followers in parallel,
-        /// * repair as soon as we receive a `prepare`, or
-        /// * discard as soon as we receive a majority of `nack_prepare` messages for the same checksum.
+        /// * repair as soon as we get a `prepare`, or
+        /// * discard as soon as we get a majority of `nack_prepare` messages for the same checksum.
         ///
-        /// For committed ops, which likely represent the bulk of repairs, we optimize for throughput:
+        /// For committed ops, which represent the bulk of ops, we optimize for throughput:
         ///
         /// * have multiple requests in flight to prime the repair queue,
         /// * rotate these requests across the cluster round-robin,
@@ -2850,17 +2854,24 @@ pub fn Replica(
                     }
                 } else {
                     self.nack_prepare_op = op;
-                    self.reset_quorum_messages(&self.nack_prepare_from_other_replicas, .nack_prepare);
+                    self.reset_quorum_messages(
+                        &self.nack_prepare_from_other_replicas,
+                        .nack_prepare,
+                    );
                 }
-                log.debug("{}: repair_prepare: requesting uncommitted op={}", .{ self.replica, op });
+                log.debug("{}: repair_prepare: requesting op={} (priority, from all replicas)", .{
+                    self.replica,
+                    op,
+                });
                 assert(self.nack_prepare_op.? == op);
                 assert(request_prepare.context != 0);
                 self.send_header_to_other_replicas(request_prepare);
             } else {
-                log.debug("{}: repair_prepare: requesting committed op={}", .{ self.replica, op });
+                log.debug("{}: repair_prepare: requesting op={}", .{ self.replica, op });
                 // We expect that `repair_prepare()` is called in reverse chronological order:
                 // Any uncommitted ops should have already been dealt with.
-                // We never roll back committed ops, and thus never regard any `nack_prepare` responses.
+                // We never roll back committed ops, and thus never regard `nack_prepare` responses.
+                // Alternatively, we may not be the leader, in which case we do distinguish anyway.
                 assert(self.nack_prepare_op == null);
                 assert(request_prepare.context != 0);
                 if (self.choose_any_other_replica()) |replica| {
@@ -3265,7 +3276,7 @@ pub fn Replica(
         }
 
         fn set_latest_op_and_k(self: *Self, latest: *const Header, k: u64, method: []const u8) void {
-            assert(self.status == .view_change);
+            assert(self.status == .view_change or self.status == .normal);
 
             assert(latest.valid_checksum());
             assert(latest.invalid() == null);
@@ -3562,7 +3573,7 @@ pub fn Replica(
         }
 
         fn view_jump(self: *Self, header: *const Header) void {
-            const to_status: Status = switch (header.command) {
+            const into: Status = switch (header.command) {
                 .prepare, .commit => .normal,
                 .start_view_change, .do_view_change, .start_view => .view_change,
                 else => unreachable,
@@ -3570,75 +3581,90 @@ pub fn Replica(
 
             if (self.status != .normal and self.status != .view_change) return;
 
-            // If this is for an older view, then ignore:
             if (header.view < self.view) return;
 
             // Compare status transitions and decide whether to view jump or ignore:
             switch (self.status) {
-                .normal => switch (to_status) {
-                    // If the transition is to `.normal`, then ignore if this is for the same view:
+                .normal => switch (into) {
+                    // If the transition is to `.normal`, then ignore if for the same view:
                     .normal => if (header.view == self.view) return,
                     // If the transition is to `.view_change`, then ignore if the view has started:
                     .view_change => if (header.view == self.view) return,
                     else => unreachable,
                 },
-                .view_change => switch (to_status) {
+                .view_change => switch (into) {
                     // This is an interesting special case:
                     // If the transition is to `.normal` in the same view, then we missed the
                     // `start_view` message and we must also consider this a view jump:
-                    // If we don't view jump here, then our `view_change_timeout` will fire and we will
-                    // disrupt the cluster by starting another view change for a newer view.
+                    // If we don't view jump here, then our `view_change_timeout` will fire and we
+                    // will disrupt the cluster by starting another view change for a newer view.
                     .normal => {},
-                    // If the transition is to `.view_change`, then ignore if this is for the same view:
+                    // If the transition is to `.view_change`, then ignore if for the same view:
                     .view_change => if (header.view == self.view) return,
                     else => unreachable,
                 },
                 else => unreachable,
             }
 
-            if (to_status == .normal) {
-                assert(header.view >= self.view);
-
-                const command: []const u8 = @tagName(header.command);
+            if (into == .normal) {
                 if (header.view == self.view) {
-                    assert(self.status == .view_change and to_status == .normal);
-                    log.debug("{}: view_jump: exiting view change and starting view", .{self.replica});
+                    assert(self.status == .view_change);
+                    log.debug("{}: view_jump: exiting view change", .{self.replica});
                 } else {
+                    assert(header.view > self.view);
+                    assert(self.status == .normal or self.status == .view_change);
                     log.debug("{}: view_jump: jumping to newer view", .{self.replica});
                 }
 
                 if (self.op > self.commit_max) {
-                    // We have uncommitted ops, and these may have been removed or replaced by the new
-                    // leader through a view change in which we were not involved.
+                    // We have uncommitted ops, and these may have been removed or replaced by the
+                    // new leader through any view change(s) in which we were not involved.
                     //
-                    // In Section 5.2, the VR paper simply removes these uncommitted ops and does a
-                    // state transfer. However, while strictly safe, this impairs safety in terms of
-                    // durability, and adds unnecessary repair overhead if the ops were committed.
+                    // A commit number from the new leader may therefore now refer to a different op
+                    // than what we have in our log, even if our hash chain is fully intact.
                     //
-                    // We rather impose a view jump barrier to keep `commit_ops()` from
-                    // committing. This preserves and maximizes durability and minimizes repair traffic.
+                    // CRITICAL: We must not commit while this ambiguity is not resolved.
                     //
-                    // This view jump barrier is cleared or may be resolved, respectively, as soon as:
+                    // In Section 5.2, the VRR paper deals with this scenario by simply removing
+                    // the uncommitted ops and doing a state transfer.
+                    //
+                    // However, while strictly safe, this impairs safety in terms of durability, and
+                    // adds unnecessary repair overhead if it turns out that the ops were in fact
+                    // committed.
+                    //
+                    // We rather impose a view jump barrier to keep from committing, for as long as
+                    // there is ambiguity around what specific op a commit number represents.
+                    // This preserves and maximizes durability and minimizes repair traffic.
+                    //
+                    // This view jump barrier is cleared or resolved, respectively, as soon as:
                     // 1. we receive a new prepare from the leader that advances our latest op, or
-                    // 2. we request and receive a `start_view` message from the leader for this view.
+                    // 2. we request and receive a `start_view` message from the leader of the view.
                     //
-                    // This is safe because advancing our latest op in the current view or receiving the
-                    // latest op from the leader both ensure that we have the latest hash chain head.
+                    // This is safe because advancing our latest op in the current view or receiving
+                    // it from the leader ensures that we have the latest hash chain head.
                     log.debug("{}: view_jump: imposing view jump barrier", .{self.replica});
                     self.view_jump_barrier = true;
                 } else {
+                    // TODO Should this not rather be <=?
                     assert(self.op == self.commit_max);
 
-                    // We may still need to resolve any prior view jump barrier:
-                    // For example, if we jump to view 3 and jump again to view 7 both in normal status.
+                    // Crucially, we may still need to resolve any prior view jump barrier:
+                    // For example, if we jump to view 3 and then view 7 both in normal status.
                     assert(self.view_jump_barrier == true or self.view_jump_barrier == false);
                 }
-            } else if (to_status == .view_change) {
+            } else if (into == .view_change) {
                 assert(header.view > self.view);
+                assert(self.status == .normal or self.status == .view_change);
 
-                // The view change will set the latest op in on_do_view_change() or on_start_view():
-                // There is no need to impose a view jump barrier and any existing barrier is cleared.
-                // We only need to transition to view change status.
+                // This view change will terminate by setting the latest op in on_do_view_change()
+                // or in on_start_view(), or in a newer view change that will do the same, or in a
+                // newer view in normal status that will in turn impose a view jump barrier.
+                //
+                // There is therefore no need to impose a view jump barrier here.
+                //
+                // Furthermore, any existing view jump barrier is resolved, which is also important
+                // as we may be the leader of the new view and may need to commit to start the view.
+
                 if (self.view_jump_barrier) {
                     log.debug("{}: view_jump: clearing view jump barrier", .{self.replica});
                     self.view_jump_barrier = false;
@@ -3647,7 +3673,7 @@ pub fn Replica(
                 unreachable;
             }
 
-            switch (to_status) {
+            switch (into) {
                 .normal => self.transition_to_normal_status(header.view),
                 .view_change => self.transition_to_view_change_status(header.view),
                 else => unreachable,
