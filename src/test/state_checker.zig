@@ -36,7 +36,6 @@ pub const StateChecker = struct {
 
     pub fn init(allocator: *mem.Allocator, cluster: *Cluster) !StateChecker {
         const state = cluster.state_machines[0].state;
-        log.debug("starting state={}", .{state});
 
         var state_machine_states: [config.replicas_max]u128 = undefined;
         for (cluster.state_machines) |state_machine, i| {
@@ -44,11 +43,18 @@ pub const StateChecker = struct {
             state_machine_states[i] = state_machine.state;
         }
 
-        return StateChecker{
+        var history = StateTransitions.init(allocator);
+        errdefer history.deinit();
+
+        var state_checker = StateChecker{
             .state_machine_states = state_machine_states,
-            .history = StateTransitions.init(allocator),
+            .history = history,
             .state = state,
         };
+
+        try state_checker.history.putNoClobber(state, state_checker.transitions);
+
+        return state_checker;
     }
 
     pub fn deinit(state_checker: *StateChecker) void {
@@ -65,14 +71,14 @@ pub const StateChecker = struct {
         state_checker.state_machine_states[replica] = b;
 
         // If some other replica has already reached this state, then it will be in the history:
-        if (state_checker.history.getPtr(b)) |transition| {
+        if (state_checker.history.get(b)) |transition| {
             // A replica may transition more than once to the same state, for example, when
             // restarting after a crash and replaying the log. The more important invariant is that
             // the cluster as a whole may not transition to the same state more than once, and once
             // transitioned may not regress.
             log.info(
                 "{d:0>4}/{d:0>4} {x:0>32} > {x:0>32} {}",
-                .{ transition.*, state_checker.transitions, a, b, replica },
+                .{ transition, state_checker.transitions, a, b, replica },
             );
             return;
         }
@@ -82,6 +88,13 @@ pub const StateChecker = struct {
         for (state_checker.client_requests) |*queue| {
             if (queue.peek_ptr()) |input| {
                 if (b == StateMachine.hash(state_checker.state, std.mem.asBytes(input))) {
+                    const transitions_executed = state_checker.history.get(a).?;
+                    if (transitions_executed < state_checker.transitions) {
+                        @panic("replica skipped interim transitions");
+                    } else {
+                        assert(transitions_executed == state_checker.transitions);
+                    }
+
                     state_checker.state = b;
                     state_checker.transitions += 1;
 
