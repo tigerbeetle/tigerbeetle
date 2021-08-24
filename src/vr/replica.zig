@@ -3288,14 +3288,24 @@ pub fn Replica(
             }
         }
 
-        fn set_latest_op_and_k(self: *Self, latest: *const Header, k: u64, method: []const u8) void {
+        fn set_latest_op_and_k(
+            self: *Self,
+            latest: *const Header,
+            k: u64,
+            method: []const u8,
+        ) void {
             assert(self.status == .view_change or self.status == .normal);
 
             assert(latest.valid_checksum());
             assert(latest.invalid() == null);
             assert(latest.command == .prepare);
             assert(latest.cluster == self.cluster);
-            assert(latest.view < self.view); // Latest normal view before this view change.
+            if (self.status == .view_change) {
+                assert(latest.view < self.view); // Latest normal view before this view change.
+            } else {
+                assert(self.view_jump_barrier);
+                assert(latest.view <= self.view);
+            }
             // Uncommitted ops may not survive a view change so we must assert `latest.op` against
             // `commit_max` and not `self.op`. However, committed ops (`commit_max`) must survive:
             assert(latest.op >= self.commit_max);
