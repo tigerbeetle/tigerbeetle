@@ -5,13 +5,13 @@ pub const deployment_environment = .development;
 pub const log_level = 6;
 
 /// The maximum number of replicas allowed in a cluster.
-pub const replicas_max = 6;
+pub const replicas_max = 5;
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
 /// This impacts the amount of memory allocated at initialization by the server.
 /// This determines the size of the VR client table used to cache replies to clients by client ID.
 /// Each client has one entry in the VR client table to store the latest `message_size_max` reply.
-pub const clients_max = 32;
+pub const clients_max = 3;
 
 /// The minimum number of nodes required to form quorums for leader election or replication:
 /// Majority quorums are only required across leader election and replication phases (not within).
@@ -60,7 +60,7 @@ pub const commits_max = transfers_max;
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
 pub const journal_size_max = switch (deployment_environment) {
     .production => 128 * 1024 * 1024 * 1024,
-    else => 256 * 1024 * 1024,
+    else => 128 * 1024 * 1024,
 };
 
 /// The maximum number of batch entries in the journal file:
@@ -86,13 +86,13 @@ pub const connections_max = replicas_max + clients_max;
 pub const message_size_max = 2 * 1024 * 1024;
 
 /// The number of full-sized messages allocated at initialization by the message bus.
-pub const message_bus_messages_max = connections_max * 4;
+pub const message_bus_messages_max = connections_max * 3;
 /// The number of header-sized messages allocated at initialization by the message bus.
 /// These are much smaller/cheaper and we can therefore have many of them.
 pub const message_bus_headers_max = connections_max * connection_send_queue_max;
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
-pub const pipelining_max = 32;
+pub const pipelining_max = clients_max;
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and jitter are applied within this range.
