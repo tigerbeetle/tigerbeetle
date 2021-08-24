@@ -129,7 +129,7 @@ pub fn main() !void {
         @panic("unable to complete transitions before ticks_max");
     }
 
-    logger.info("\nPASSED", .{});
+    logger.info("\n          PASSED", .{});
 }
 
 /// Returns true, `p` percent of the time, else false.
