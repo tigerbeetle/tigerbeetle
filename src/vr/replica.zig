@@ -933,7 +933,7 @@ pub fn Replica(
             assert(message.header.replica != self.replica);
             assert(self.leader());
 
-            const start_view = self.create_do_view_change_or_start_view_message(.start_view) orelse {
+            const start_view = self.create_view_change_message(.start_view) orelse {
                 log.debug("{}: on_request_start_view: dropping start_view, no message available", .{
                     self.replica,
                 });
@@ -1496,7 +1496,7 @@ pub fn Replica(
 
             // TODO We can optimize this to commit into the client table reply if it exists.
             const reply = self.message_bus.get_message() orelse {
-                log.info("{}: commit_ops_commit: waiting for a message", .{self.replica});
+                log.info("{}: commit_ops_commit: waiting for message", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(reply);
@@ -1602,7 +1602,7 @@ pub fn Replica(
 
                 // TODO We can optimize this to commit into the client table reply if it exists.
                 const reply = self.message_bus.get_message() orelse {
-                    log.info("{}: commit_pipeline: waiting for a message", .{self.replica});
+                    log.info("{}: commit_pipeline: waiting for message", .{self.replica});
                     return;
                 };
                 defer self.message_bus.unref(reply);
@@ -1742,10 +1742,10 @@ pub fn Replica(
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_do_view_change_or_start_view_message(self: *Self, command: Command) ?*Message {
+        fn create_view_change_message(self: *Self, command: Command) ?*Message {
             assert(command == .do_view_change or command == .start_view);
 
-            // We may also send a start_view message in normal status to resolve a follower's view jump:
+            // We may send a start_view message in normal status to resolve a follower's view jump:
             assert(self.status == .normal or self.status == .view_change);
 
             const message = self.message_bus.get_message() orelse return null;
@@ -3076,10 +3076,8 @@ pub fn Replica(
             );
             assert(count_start_view_change >= self.f);
 
-            const message = self.create_do_view_change_or_start_view_message(.do_view_change) orelse {
-                log.warn("{}: send_do_view_change: dropping do_view_change, no message available", .{
-                    self.replica,
-                });
+            const message = self.create_view_change_message(.do_view_change) orelse {
+                log.warn("{}: send_do_view_change: waiting for message", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(message);
@@ -3387,8 +3385,8 @@ pub fn Replica(
             assert(self.journal.faulty.len == 0);
             assert(self.nack_prepare_op == null);
 
-            const start_view = self.create_do_view_change_or_start_view_message(.start_view) orelse {
-                log.warn("{}: start_view_as_the_new_leader: waiting for a message", .{self.replica});
+            const start_view = self.create_view_change_message(.start_view) orelse {
+                log.warn("{}: start_view_as_the_new_leader: waiting for message", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(start_view);
