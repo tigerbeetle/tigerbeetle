@@ -2934,13 +2934,22 @@ pub fn Replica(
 
         fn reset_quorum_messages(self: *Self, messages: *QuorumMessages, command: Command) void {
             assert(messages.len == config.replicas_max);
+            var view: ?u32 = null;
             var count: usize = 0;
             for (messages) |*received, replica| {
                 if (received.*) |message| {
                     assert(replica < self.replica_count);
                     assert(message.header.command == command);
                     assert(message.header.replica == replica);
-                    assert(message.header.view == self.view);
+                    // We may have transitioned into a newer view:
+                    // However, all messages in the quorum should have the same view.
+                    assert(message.header.view <= self.view);
+                    if (view) |v| {
+                        assert(message.header.view == v);
+                    } else {
+                        view = message.header.view;
+                    }
+
                     self.message_bus.unref(message);
                     count += 1;
                 }
