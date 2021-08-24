@@ -1494,7 +1494,14 @@ pub fn Replica(
                 return;
             }
 
-            self.commit_op(prepare.?);
+            // TODO We can optimize this to commit into the client table reply if it exists.
+            const reply = self.message_bus.get_message() orelse {
+                log.info("{}: commit_ops_commit: waiting for a message", .{self.replica});
+                return;
+            };
+            defer self.message_bus.unref(reply);
+
+            self.commit_op(prepare.?, reply);
 
             assert(self.commit_min == op);
             assert(self.commit_min <= self.commit_max);
@@ -1504,7 +1511,7 @@ pub fn Replica(
             self.commit_ops_read();
         }
 
-        fn commit_op(self: *Self, prepare: *const Message) void {
+        fn commit_op(self: *Self, prepare: *const Message, reply: *Message) void {
             // TODO Can we add more checks around allowing commit_op() during a view change?
             assert(self.status == .normal or self.status == .view_change);
             assert(prepare.header.command == .prepare);
@@ -1515,12 +1522,6 @@ pub fn Replica(
             if (!self.valid_hash_chain("commit_op")) return;
             assert(!self.view_jump_barrier);
             assert(self.op >= self.commit_max);
-
-            const reply = self.message_bus.get_message() orelse {
-                log.debug("{}: commit_op: waiting for a message", .{self.replica});
-                return;
-            };
-            defer self.message_bus.unref(reply);
 
             log.debug("{}: commit_op: executing op={} checksum={} ({s})", .{
                 self.replica,
@@ -1599,7 +1600,14 @@ pub fn Replica(
                 );
                 assert(count >= self.f + 1);
 
-                self.commit_op(prepare.message);
+                // TODO We can optimize this to commit into the client table reply if it exists.
+                const reply = self.message_bus.get_message() orelse {
+                    log.info("{}: commit_pipeline: waiting for a message", .{self.replica});
+                    return;
+                };
+                defer self.message_bus.unref(reply);
+
+                self.commit_op(prepare.message, reply);
 
                 assert(self.commit_min == self.commit_max);
                 assert(self.commit_max == prepare.message.header.op);
