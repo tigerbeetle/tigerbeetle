@@ -667,14 +667,18 @@ pub fn Replica(
             }
 
             assert(self.status == .normal);
-            assert(message.header.view == self.view);
             assert(self.follower());
+            assert(message.header.view == self.view);
             assert(message.header.replica == self.leader_index(message.header.view));
 
-            // We may not always have the latest commit entry but if we do these checksums must match:
+            // We may not always have the latest commit entry but if we do our checksum must match:
             if (self.journal.entry_for_op_exact(message.header.commit)) |commit_entry| {
                 if (commit_entry.checksum == message.header.context) {
-                    log.debug("{}: on_commit: verified commit checksum", .{self.replica});
+                    log.debug("{}: on_commit: checksum verified", .{self.replica});
+                } else if (self.view_jump_barrier) {
+                    log.debug("{}: on_commit: checksum failed, but barrier is in place", .{
+                        self.replica,
+                    });
                 } else {
                     @panic("commit checksum verification failed");
                 }
