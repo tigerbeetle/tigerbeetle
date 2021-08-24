@@ -62,11 +62,11 @@ pub fn PacketSimulator(comptime Packet: type) type {
             var self = Self{
                 .paths = try allocator.alloc(
                     std.PriorityQueue(Data),
-                    options.node_count * options.node_count,
+                    @as(usize, options.node_count) * options.node_count,
                 ),
                 .path_clogged_till = try allocator.alloc(
                     u64,
-                    options.node_count * options.node_count,
+                    @as(usize, options.node_count) * options.node_count,
                 ),
                 .options = options,
                 .prng = std.rand.DefaultPrng.init(options.seed),
@@ -103,12 +103,12 @@ pub fn PacketSimulator(comptime Packet: type) type {
         fn path_index(self: *Self, path: Path) usize {
             assert(path.source < self.options.node_count and path.target < self.options.node_count);
 
-            return path.source * self.options.node_count + path.target;
+            return @as(usize, path.source) * self.options.node_count + path.target;
         }
 
         fn path_queue(self: *Self, path: Path) *std.PriorityQueue(Data) {
             var index = self.path_index(path);
-            return &self.paths[path.source * self.options.node_count + path.target];
+            return &self.paths[@as(usize, path.source) * self.options.node_count + path.target];
         }
 
         fn is_clogged(self: *Self, path: Path) bool {
