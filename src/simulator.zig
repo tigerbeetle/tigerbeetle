@@ -26,22 +26,25 @@ pub fn main() !void {
     // TODO Use std.testing.allocator when all deinit() leaks are fixed.
     const allocator = std.heap.page_allocator;
 
-    const seed = 0;
+    var args = std.process.args();
+
+    // Skip argv[0] which is the name of this executable:
+    _ = args.nextPosix();
+
+    const seed = if (args.nextPosix()) |bytes| parse_seed(bytes) else std.crypto.random.int(u64);
 
     var prng = std.rand.DefaultPrng.init(seed);
     const random = &prng.random;
 
     const replica_count = 1 + prng.random.uintLessThan(u8, config.replicas_max);
-    const client_count = 1 + prng.random.uintLessThan(u8, std.math.min(config.clients_max, 5));
+    const client_count = 1 + prng.random.uintLessThan(u8, config.clients_max);
     const node_count = replica_count + client_count;
 
+    const ticks_max = 10_000_000;
     const transitions_max = config.journal_size_max / config.message_size_max;
-
-    logger.info("\n          SEED={} REPLICAS={} CLIENTS={}\n", .{
-        seed,
-        replica_count,
-        client_count,
-    });
+    const request_probability = 1 + prng.random.uintLessThan(u8, 99);
+    const idle_on_probability = prng.random.uintLessThan(u8, 20);
+    const idle_off_probability = 1 + prng.random.uintLessThan(u8, 10);
 
     cluster = try Cluster.create(allocator, &prng.random, .{
         .cluster = 0,
@@ -52,13 +55,13 @@ pub fn main() !void {
             .packet_simulator_options = .{
                 .node_count = node_count,
                 .seed = prng.random.int(u64),
-                .one_way_delay_mean = 25,
-                .one_way_delay_min = 10,
-                .packet_loss_probability = 10,
-                .path_maximum_capacity = 20,
-                .path_clog_duration_mean = 200,
-                .path_clog_probability = 2,
-                .packet_replay_probability = 2,
+                .one_way_delay_mean = prng.random.uintLessThan(u16, 25),
+                .one_way_delay_min = prng.random.uintLessThan(u16, 5),
+                .packet_loss_probability = prng.random.uintLessThan(u8, 50),
+                .path_maximum_capacity = 1 + prng.random.uintLessThan(u8, 20),
+                .path_clog_duration_mean = prng.random.uintLessThan(u16, 2000),
+                .path_clog_probability = prng.random.uintLessThan(u8, 5),
+                .packet_replay_probability = prng.random.uintLessThan(u8, 50),
             },
         },
     });
@@ -71,9 +74,40 @@ pub fn main() !void {
         replica.on_change_state = on_change_replica;
     }
 
+    logger.info("\n" ++
+        "          SEED={}\n\n" ++
+        "          replicas={}\n" ++
+        "          clients={}\n" ++
+        "          request_probability={}%\n" ++
+        "          idle_on_probability={}%\n" ++
+        "          idle_off_probability={}%\n" ++
+        "          one_way_delay_mean={} ticks\n" ++
+        "          one_way_delay_min={} ticks\n" ++
+        "          packet_loss_probability={}%\n" ++
+        "          path_maximum_capacity={} messages\n" ++
+        "          path_clog_duration_mean={} ticks\n" ++
+        "          path_clog_probability={}%\n" ++
+        "          packet_replay_probability={}%\n", .{
+        seed,
+        replica_count,
+        client_count,
+
+        request_probability,
+        idle_on_probability,
+        idle_off_probability,
+
+        cluster.options.network_options.packet_simulator_options.one_way_delay_mean,
+        cluster.options.network_options.packet_simulator_options.one_way_delay_min,
+        cluster.options.network_options.packet_simulator_options.packet_loss_probability,
+        cluster.options.network_options.packet_simulator_options.path_maximum_capacity,
+        cluster.options.network_options.packet_simulator_options.path_clog_duration_mean,
+        cluster.options.network_options.packet_simulator_options.path_clog_probability,
+        cluster.options.network_options.packet_simulator_options.packet_replay_probability,
+    });
+
     var idle = false;
     var tick: u64 = 0;
-    while (tick < 1_000_000 and cluster.state_checker.transitions < transitions_max) : (tick += 1) {
+    while (tick < ticks_max and cluster.state_checker.transitions < transitions_max) : (tick += 1) {
         for (cluster.replicas) |*replica, i| {
             replica.tick();
             cluster.state_checker.check_state(@intCast(u8, i));
@@ -84,11 +118,15 @@ pub fn main() !void {
         for (cluster.clients) |*client| client.tick();
 
         if (idle) {
-            if (chance(random, 10)) idle = false;
+            if (chance(random, idle_off_probability)) idle = false;
         } else {
-            if (chance(random, 50)) maybe_send_random_request(random);
-            if (chance(random, 20)) idle = true;
+            if (chance(random, request_probability)) maybe_send_random_request(random);
+            if (chance(random, idle_on_probability)) idle = true;
         }
+    }
+
+    if (cluster.state_checker.transitions < transitions_max) {
+        @panic("unable to complete transitions before ticks_max");
     }
 
     logger.info("\nPASSED", .{});
@@ -147,6 +185,13 @@ fn client_callback(
     results: Client.Error![]const u8,
 ) void {
     assert(user_data == 0);
+}
+
+fn parse_seed(bytes: []const u8) u64 {
+    return std.fmt.parseUnsigned(u64, bytes, 10) catch |err| switch (err) {
+        error.Overflow => @panic("--seed: value exceeds a 64-bit unsigned integer"),
+        error.InvalidCharacter => @panic("--seed: value contains an invalid character"),
+    };
 }
 
 pub fn log(
