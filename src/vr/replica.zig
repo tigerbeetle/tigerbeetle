@@ -3004,9 +3004,6 @@ pub fn Replica(
                 return;
             }
 
-            assert(!self.view_jump_barrier);
-            assert(self.op >= self.commit_max);
-
             if (self.journal.has_clean(header)) {
                 log.debug("{}: send_prepare_ok: op={} checksum={}", .{
                     self.replica,
