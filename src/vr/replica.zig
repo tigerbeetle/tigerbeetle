@@ -630,7 +630,8 @@ pub fn Replica(
             assert(prepare.message.header.op <= self.op);
 
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
-            const threshold = self.f + 1;
+            const threshold = if (self.replica_count < 3) self.replica_count else self.f + 1;
+
             const count = self.add_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
                 message,
@@ -763,7 +764,7 @@ pub fn Replica(
             // Wait until we have `f` messages (excluding ourself) for quorum:
             assert(self.replica_count > 1);
             assert(self.f > 0 or self.replica_count == 2);
-            const threshold = std.math.max(1, self.f);
+            const threshold = if (self.replica_count < 3) self.replica_count - 1 else self.f;
 
             const count = self.add_message_and_receive_quorum_exactly_once(
                 &self.start_view_change_from_other_replicas,
@@ -819,7 +820,10 @@ pub fn Replica(
             }
 
             // Wait until we have `f + 1` messages (including ourself) for quorum:
-            const threshold = self.f + 1;
+            assert(self.replica_count > 1);
+            assert(self.f > 0 or self.replica_count == 2);
+            const threshold = if (self.replica_count < 3) self.replica_count else self.f + 1;
+
             const count = self.add_message_and_receive_quorum_exactly_once(
                 &self.do_view_change_from_all_replicas,
                 message,
@@ -1095,7 +1099,12 @@ pub fn Replica(
             assert(self.replica_count > 1);
             assert(self.f > 0 or self.replica_count == 2);
             assert(self.f + 1 == (self.replica_count - 1) / 2 + 1);
-            const threshold = if (self.journal.faulty.bit(op)) self.f + 1 else std.math.max(1, self.f);
+            const threshold = if (self.replica_count < 3)
+                self.replica_count - 1
+            else if (self.journal.faulty.bit(op))
+                self.f + 1
+            else
+                self.f;
 
             // Wait until we have `threshold` messages for quorum:
             const count = self.add_message_and_receive_quorum_exactly_once(
@@ -3301,6 +3310,19 @@ pub fn Replica(
                 assert(latest.view <= self.view);
                 assert(self.view_jump_barrier);
             }
+
+            log.debug("{}: {s}: view={} op={}..{} commit={}..{} checksum={} offset={}", .{
+                self.replica,
+                method,
+                self.view,
+                self.op,
+                latest.op,
+                self.commit_max,
+                k,
+                latest.checksum,
+                latest.offset,
+            });
+
             // Uncommitted ops may not survive a view change so we must assert `latest.op` against
             // `commit_max` and not `self.op`. However, committed ops (`commit_max`) must survive:
             assert(latest.op >= self.commit_max);
@@ -3325,18 +3347,6 @@ pub fn Replica(
             }
             assert(k >= latest.commit);
             assert(k >= self.commit_max - std.math.min(config.pipelining_max, self.commit_max));
-
-            log.debug("{}: {s}: view={} op={}..{} commit={}..{} checksum={} offset={}", .{
-                self.replica,
-                method,
-                self.view,
-                self.op,
-                latest.op,
-                self.commit_max,
-                k,
-                latest.checksum,
-                latest.offset,
-            });
 
             assert(self.commit_min <= self.commit_max);
             assert(self.op >= self.commit_max or self.op < self.commit_max);
