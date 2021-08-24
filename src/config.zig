@@ -60,7 +60,7 @@ pub const commits_max = transfers_max;
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
 pub const journal_size_max = switch (deployment_environment) {
     .production => 128 * 1024 * 1024 * 1024,
-    else => 128 * 1024 * 1024,
+    else => 256 * 1024 * 1024,
 };
 
 /// The maximum number of batch entries in the journal file:
