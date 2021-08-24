@@ -1693,21 +1693,24 @@ pub fn Replica(
             const clients = self.client_table.count();
             assert(clients <= config.clients_max);
             if (clients == config.clients_max) {
-                var evictee: ?Header = null;
+                var evictee: ?*Message = null;
                 var iterated: usize = 0;
                 var iterator = self.client_table.valueIterator();
-                while (iterator.next()) |entry| {
+                while (iterator.next()) |entry| : (iterated += 1) {
                     assert(entry.reply.header.command == .reply);
                     assert(entry.reply.header.context == 0);
                     assert(entry.reply.header.op == entry.reply.header.commit);
                     assert(entry.reply.header.commit >= entry.session);
 
-                    assert(evictee == null or (entry.reply.header.commit ^ evictee.?.commit) != 0);
-                    assert(evictee == null or (entry.reply.header.client ^ evictee.?.client) != 0);
+                    if (evictee) |evictee_reply| {
+                        assert(entry.reply.header.client != evictee_reply.header.client);
+                        assert(entry.reply.header.commit != evictee_reply.header.commit);
 
-                    iterated += 1;
-                    if (evictee == null or entry.reply.header.commit < evictee.?.commit) {
-                        evictee = entry.reply.header.*;
+                        if (entry.reply.header.commit < evictee_reply.header.commit) {
+                            evictee = entry.reply;
+                        }
+                    } else {
+                        evictee = entry.reply;
                     }
                 }
                 assert(iterated == clients);
@@ -1715,10 +1718,11 @@ pub fn Replica(
                     self.replica,
                     clients,
                     config.clients_max,
-                    evictee.?.client,
+                    evictee.?.header.client,
                 });
-                assert(self.client_table.remove(evictee.?.client));
-                assert(!self.client_table.contains(evictee.?.client));
+                assert(self.client_table.remove(evictee.?.header.client));
+                assert(!self.client_table.contains(evictee.?.header.client));
+                self.message_bus.unref(evictee.?);
             }
 
             log.debug("{}: create_client_table_entry: client={} session={} request={}", .{
