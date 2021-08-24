@@ -3280,14 +3280,30 @@ pub fn Replica(
             assert(latest.command == .prepare);
             assert(latest.cluster == self.cluster);
             assert(latest.view < self.view); // Latest normal view before this view change.
-            // Ops may be rewound through a view change so we use `self.commit_max` and not `self.op`:
+            // Uncommitted ops may not survive a view change so we must assert `latest.op` against
+            // `commit_max` and not `self.op`. However, committed ops (`commit_max`) must survive:
             assert(latest.op >= self.commit_max);
-            // We expect that `commit_min` may be greater than `latest.commit` because the latter is
-            // only the commit number at the time the latest op was prepared (but not committed).
-            // We therefore only assert `latest.commit` against `commit_max` above and `k` below.
-
+            assert(latest.op >= latest.commit);
+            assert(latest.op >= k);
+            // We expect that `commit_max` (and `commit_min`) may be greater than `latest.commit`
+            // because `latest.commit` is the commit number at the time the `latest.op` prepared.
+            // We expect that `commit_max` (and `commit_min`) may also be greater even than `k`
+            // because we may be the old leader joining towards the end of the view change and we
+            // may have committed the `latest.op` already. However, this is bounded by pipelining.
+            // The intersection property only requires that all "possibly" committed operations must
+            // survive into the new view so that they can then be committed by the new leader. This
+            // guarantees that if the old leader "possibly" committed the operation, then the new
+            // leader will also commit the operation.
+            if (k < self.commit_max and self.commit_min == self.commit_max) {
+                log.debug("{}: {s}: k={} < commit_max={} and commit_min == commit_max", .{
+                    self.replica,
+                    method,
+                    k,
+                    self.commit_max,
+                });
+            }
             assert(k >= latest.commit);
-            assert(k >= self.commit_max);
+            assert(k >= self.commit_max - std.math.min(config.pipelining_max, self.commit_max));
 
             log.debug("{}: {s}: view={} op={}..{} commit={}..{} checksum={} offset={}", .{
                 self.replica,
@@ -3301,8 +3317,16 @@ pub fn Replica(
                 latest.offset,
             });
 
+            assert(self.commit_min <= self.commit_max);
+            assert(self.op >= self.commit_max or self.op < self.commit_max);
+
             self.op = latest.op;
-            self.commit_max = k;
+            // Crucially, we must never rewind `commit_max` (and then `commit_min`) because
+            // `commit_min` represents what we have already applied to our state machine:
+            self.commit_max = std.math.max(self.commit_max, k);
+
+            assert(self.commit_min <= self.commit_max);
+            assert(self.op >= self.commit_max);
 
             // Do not set the latest op as dirty if we already have it exactly:
             // Otherwise, this would trigger a repair and delay the view change.
