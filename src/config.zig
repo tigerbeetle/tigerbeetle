@@ -13,15 +13,16 @@ pub const replicas_max = 5;
 /// Each client has one entry in the VR client table to store the latest `message_size_max` reply.
 pub const clients_max = 3;
 
-/// The minimum number of nodes required to form quorums for leader election or replication:
-/// Majority quorums are only required across leader election and replication phases (not within).
-/// As per Flexible Paxos, provided quorum_leader_election + quorum_replication > cluster_nodes:
-/// 1. you may increase quorum_leader_election above a majority, so that
-/// 2. you can decrease quorum_replication below a majority, to optimize the common case.
+/// The minimum number of nodes required to form a quorum for replication:
+/// Majority quorums are only required across view change and replication phases (not within).
+/// As per Flexible Paxos, provided `quorum_replication + quorum_view_change > replicas`:
+/// 1. you may increase `quorum_view_change` above a majority, so that
+/// 2. you can decrease `quorum_replication` below a majority, to optimize the common case.
 /// This improves latency by reducing the number of nodes required for synchronous replication.
 /// This reduces redundancy only in the short term, asynchronous replication will still continue.
-pub const quorum_leader_election = -1;
-pub const quorum_replication = 2;
+/// The size of the replication quorum is limited to the minimum of this value and actual majority.
+/// The size of the view change quorum will then be automatically inferred from quorum_replication.
+pub const quorum_replication_max = 3;
 
 /// The default server port to listen on if not specified in `--addresses`:
 pub const port = 3001;

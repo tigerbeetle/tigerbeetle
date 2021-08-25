@@ -84,8 +84,11 @@ pub fn Replica(
         /// The index of this replica's address in the configuration array held by the MessageBus:
         replica: u8,
 
-        /// The maximum number of replicas that may be faulty:
-        f: u8,
+        /// The minimum number of replicas required to form a replication quorum:
+        quorum_replication: u8,
+
+        /// The minimum number of replicas required to form a view change quorum:
+        quorum_view_change: u8,
 
         /// A distributed fault-tolerant clock for lower and upper bounds on the leader's wall clock:
         clock: Clock,
@@ -210,13 +213,21 @@ pub fn Replica(
             message_bus: *MessageBus,
             state_machine: *StateMachine,
         ) !Self {
-            // The smallest f such that 2f + 1 is less than or equal to the number of replicas.
-            const f = (replica_count - 1) / 2;
-
             assert(replica_count > 0);
-            assert(replica_count > f);
             assert(replica < replica_count);
-            assert(f > 0 or replica_count <= 2);
+
+            const majority = (replica_count / 2) + 1;
+            assert(majority <= replica_count);
+
+            assert(config.quorum_replication_max >= 2);
+            const quorum_replication = std.math.min(config.quorum_replication_max, majority);
+            assert(quorum_replication >= 2 or quorum_replication == replica_count);
+
+            const quorum_view_change = std.math.max(
+                replica_count - quorum_replication + 1,
+                majority,
+            );
+            assert(quorum_replication + quorum_view_change > replica_count);
 
             var client_table = ClientTable.init(allocator);
             errdefer client_table.deinit();
@@ -248,7 +259,8 @@ pub fn Replica(
                 .cluster = cluster,
                 .replica_count = replica_count,
                 .replica = replica,
-                .f = f,
+                .quorum_replication = quorum_replication,
+                .quorum_view_change = quorum_view_change,
                 .clock = try Clock.init(
                     allocator,
                     replica_count,
@@ -307,6 +319,13 @@ pub fn Replica(
                 },
                 .prng = std.rand.DefaultPrng.init(replica),
             };
+
+            log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={}", .{
+                self.replica,
+                self.replica_count,
+                self.quorum_view_change,
+                self.quorum_replication,
+            });
 
             // To reduce the probability of clustering, for efficient linear probing, the hash map will
             // always overallocate capacity by a factor of two.
@@ -630,7 +649,7 @@ pub fn Replica(
             assert(prepare.message.header.op <= self.op);
 
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
-            const threshold = if (self.replica_count < 3) self.replica_count else self.f + 1;
+            const threshold = self.quorum_replication;
 
             const count = self.add_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
@@ -772,8 +791,7 @@ pub fn Replica(
 
             // Wait until we have `f` messages (excluding ourself) for quorum:
             assert(self.replica_count > 1);
-            assert(self.f > 0 or self.replica_count == 2);
-            const threshold = if (self.replica_count < 3) self.replica_count - 1 else self.f;
+            const threshold = self.quorum_view_change - 1;
 
             const count = self.add_message_and_receive_quorum_exactly_once(
                 &self.start_view_change_from_other_replicas,
@@ -830,8 +848,7 @@ pub fn Replica(
 
             // Wait until we have `f + 1` messages (including ourself) for quorum:
             assert(self.replica_count > 1);
-            assert(self.f > 0 or self.replica_count == 2);
-            const threshold = if (self.replica_count < 3) self.replica_count else self.f + 1;
+            const threshold = self.quorum_view_change;
 
             const count = self.add_message_and_receive_quorum_exactly_once(
                 &self.do_view_change_from_all_replicas,
@@ -1106,14 +1123,11 @@ pub fn Replica(
             // We require a `nack_prepare` from a majority of followers if our op is faulty:
             // Otherwise, we know we do not have the op and need only `f` other nacks.
             assert(self.replica_count > 1);
-            assert(self.f > 0 or self.replica_count == 2);
-            assert(self.f + 1 == (self.replica_count - 1) / 2 + 1);
-            const threshold = if (self.replica_count < 3)
-                self.replica_count - 1
-            else if (self.journal.faulty.bit(op))
-                self.f + 1
+            // TODO Review these thresholds:
+            const threshold = if (self.journal.faulty.bit(op))
+                self.quorum_replication
             else
-                self.f;
+                self.quorum_replication - 1;
 
             // Wait until we have `threshold` messages for quorum:
             const count = self.add_message_and_receive_quorum_exactly_once(
@@ -1616,7 +1630,7 @@ pub fn Replica(
                     .prepare_ok,
                     prepare.message.header.checksum,
                 );
-                assert(count >= self.f + 1);
+                assert(count >= self.quorum_replication);
 
                 // TODO We can optimize this to commit into the client table reply if it exists.
                 const reply = self.message_bus.get_message() orelse {
@@ -3109,7 +3123,7 @@ pub fn Replica(
                 .start_view_change,
                 0,
             );
-            assert(count_start_view_change >= self.f);
+            assert(count_start_view_change >= self.quorum_view_change - 1);
 
             const message = self.create_view_change_message(.do_view_change) orelse {
                 log.warn("{}: send_do_view_change: waiting for message", .{self.replica});
