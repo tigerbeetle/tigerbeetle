@@ -1,0 +1,213 @@
+const std = @import("std");
+const assert = std.debug.assert;
+const mem = std.mem;
+
+const config = @import("config.zig");
+
+const Client = @import("test/cluster.zig").Client;
+const Cluster = @import("test/cluster.zig").Cluster;
+const Header = @import("vr.zig").Header;
+const Replica = @import("test/cluster.zig").Replica;
+const StateChecker = @import("test/state_checker.zig").StateChecker;
+const StateMachine = @import("test/cluster.zig").StateMachine;
+
+const logger = std.log.scoped(.state_checker);
+
+/// Set this to `false` if you want to see how literally everything works.
+/// This will run much slower but will trace all logic across the cluster.
+const log_state_transitions_only = true;
+
+/// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
+pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
+
+var cluster: *Cluster = undefined;
+
+pub fn main() !void {
+    // TODO Use std.testing.allocator when all deinit() leaks are fixed.
+    const allocator = std.heap.page_allocator;
+
+    var args = std.process.args();
+
+    // Skip argv[0] which is the name of this executable:
+    _ = args.nextPosix();
+
+    const seed = if (args.nextPosix()) |bytes| parse_seed(bytes) else std.crypto.random.int(u64);
+
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = &prng.random;
+
+    const replica_count = 1 + prng.random.uintLessThan(u8, config.replicas_max);
+    const client_count = 1 + prng.random.uintLessThan(u8, config.clients_max);
+    const node_count = replica_count + client_count;
+
+    const ticks_max = 10_000_000;
+    const transitions_max = config.journal_size_max / config.message_size_max;
+    const request_probability = 1 + prng.random.uintLessThan(u8, 99);
+    const idle_on_probability = prng.random.uintLessThan(u8, 20);
+    const idle_off_probability = 1 + prng.random.uintLessThan(u8, 10);
+
+    cluster = try Cluster.create(allocator, &prng.random, .{
+        .cluster = 0,
+        .replica_count = replica_count,
+        .client_count = client_count,
+        .seed = prng.random.int(u64),
+        .network_options = .{
+            .packet_simulator_options = .{
+                .node_count = node_count,
+                .seed = prng.random.int(u64),
+                .one_way_delay_mean = prng.random.uintLessThan(u16, 25),
+                .one_way_delay_min = prng.random.uintLessThan(u16, 5),
+                .packet_loss_probability = prng.random.uintLessThan(u8, 50),
+                .path_maximum_capacity = 1 + prng.random.uintLessThan(u8, 20),
+                .path_clog_duration_mean = prng.random.uintLessThan(u16, 2000),
+                .path_clog_probability = prng.random.uintLessThan(u8, 5),
+                .packet_replay_probability = prng.random.uintLessThan(u8, 50),
+            },
+        },
+    });
+    defer cluster.destroy();
+
+    cluster.state_checker = try StateChecker.init(allocator, cluster);
+    defer cluster.state_checker.deinit();
+
+    for (cluster.replicas) |*replica| {
+        replica.on_change_state = on_change_replica;
+    }
+
+    logger.info("\n" ++
+        "          SEED={}\n\n" ++
+        "          replicas={}\n" ++
+        "          clients={}\n" ++
+        "          request_probability={}%\n" ++
+        "          idle_on_probability={}%\n" ++
+        "          idle_off_probability={}%\n" ++
+        "          one_way_delay_mean={} ticks\n" ++
+        "          one_way_delay_min={} ticks\n" ++
+        "          packet_loss_probability={}%\n" ++
+        "          path_maximum_capacity={} messages\n" ++
+        "          path_clog_duration_mean={} ticks\n" ++
+        "          path_clog_probability={}%\n" ++
+        "          packet_replay_probability={}%\n", .{
+        seed,
+        replica_count,
+        client_count,
+
+        request_probability,
+        idle_on_probability,
+        idle_off_probability,
+
+        cluster.options.network_options.packet_simulator_options.one_way_delay_mean,
+        cluster.options.network_options.packet_simulator_options.one_way_delay_min,
+        cluster.options.network_options.packet_simulator_options.packet_loss_probability,
+        cluster.options.network_options.packet_simulator_options.path_maximum_capacity,
+        cluster.options.network_options.packet_simulator_options.path_clog_duration_mean,
+        cluster.options.network_options.packet_simulator_options.path_clog_probability,
+        cluster.options.network_options.packet_simulator_options.packet_replay_probability,
+    });
+
+    var idle = false;
+    var tick: u64 = 0;
+    while (tick < ticks_max and cluster.state_checker.transitions < transitions_max) : (tick += 1) {
+        for (cluster.replicas) |*replica, i| {
+            replica.tick();
+            cluster.state_checker.check_state(@intCast(u8, i));
+        }
+
+        cluster.network.packet_simulator.tick();
+
+        for (cluster.clients) |*client| client.tick();
+
+        if (idle) {
+            if (chance(random, idle_off_probability)) idle = false;
+        } else {
+            if (chance(random, request_probability)) maybe_send_random_request(random);
+            if (chance(random, idle_on_probability)) idle = true;
+        }
+    }
+
+    if (cluster.state_checker.transitions < transitions_max) {
+        @panic("unable to complete transitions before ticks_max");
+    }
+
+    logger.info("\n          PASSED", .{});
+}
+
+/// Returns true, `p` percent of the time, else false.
+fn chance(random: *std.rand.Random, p: u8) bool {
+    assert(p <= 100);
+    return random.uintAtMost(u8, 100) <= p;
+}
+
+fn on_change_replica(replica: *Replica) void {
+    assert(cluster.state_machines[replica.replica].state == replica.state_machine.state);
+    cluster.state_checker.check_state(replica.replica);
+}
+
+fn maybe_send_random_request(random: *std.rand.Random) void {
+    const client_index = random.uintLessThan(u8, cluster.options.client_count);
+
+    const client = &cluster.clients[client_index];
+    const checker_request_queue = &cluster.state_checker.client_requests[client_index];
+
+    // Ensure that we don't shortchange testing of the full client request queue length:
+    assert(client.request_queue.buffer.len <= checker_request_queue.buffer.len);
+    if (client.request_queue.full()) return;
+    if (checker_request_queue.full()) return;
+
+    const message = client.get_message() orelse return;
+    defer client.unref(message);
+
+    const body_size_max = config.message_size_max - @sizeOf(Header);
+    const body_size: u32 = switch (random.uintLessThan(u8, 100)) {
+        0...10 => 0,
+        11...89 => random.uintLessThan(u32, body_size_max),
+        90...99 => body_size_max,
+        else => unreachable,
+    };
+
+    const body = message.buffer[@sizeOf(Header)..][0..body_size];
+    if (chance(random, 10)) {
+        std.mem.set(u8, body, 0);
+    } else {
+        random.bytes(body);
+    }
+
+    // While hashing the client ID with the request body prevents input collisions across clients,
+    // it's still possible for the same client to generate the same body, and therefore input hash.
+    checker_request_queue.push(StateMachine.hash(client.id, body)) catch unreachable;
+
+    client.request(0, client_callback, .hash, message, body_size);
+}
+
+fn client_callback(
+    user_data: u128,
+    operation: StateMachine.Operation,
+    results: Client.Error![]const u8,
+) void {
+    assert(user_data == 0);
+}
+
+fn parse_seed(bytes: []const u8) u64 {
+    return std.fmt.parseUnsigned(u64, bytes, 10) catch |err| switch (err) {
+        error.Overflow => @panic("--seed: value exceeds a 64-bit unsigned integer"),
+        error.InvalidCharacter => @panic("--seed: value contains an invalid character"),
+    };
+}
+
+pub fn log(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (log_state_transitions_only and scope != .state_checker) return;
+
+    const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
+    const prefix = if (log_state_transitions_only) "" else prefix_default;
+
+    // Print the message to stdout, silently ignoring any errors
+    const held = std.debug.getStderrMutex().acquire();
+    defer held.release();
+    const stderr = std.io.getStdErr().writer();
+    nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
+}

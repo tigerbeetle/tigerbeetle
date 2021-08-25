@@ -325,10 +325,14 @@ pub const CommitTransfersResult = packed struct {
 };
 
 comptime {
-    if (std.Target.current.os.tag != .linux) @compileError("linux required for io_uring");
+    const target = std.Target.current;
+
+    if (target.os.tag != .linux and !target.isDarwin()) {
+        @compileError("linux or macos required for io");
+    }
 
     // We require little-endian architectures everywhere for efficient network deserialization:
-    if (std.Target.current.cpu.arch.endian() != std.builtin.Endian.Little) {
+    if (target.cpu.arch.endian() != std.builtin.Endian.Little) {
         @compileError("big-endian systems not supported");
     }
 }
