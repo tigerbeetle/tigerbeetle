@@ -2430,8 +2430,8 @@ pub fn Replica(
         ///
         /// Our guiding principles around repairs in general:
         ///
-        /// * The latest op makes sense of everything else and must not be replaced with a different op
-        /// or advanced except by the leader in the current view.
+        /// * The latest op makes sense of everything else and must not be replaced with a different
+        /// op or advanced except by the leader in the current view.
         ///
         /// * Do not jump to a view in normal status without imposing a view jump barrier.
         ///
@@ -2440,16 +2440,16 @@ pub fn Replica(
         /// * Do not commit until the hash chain between `self.commit_min` and `self.op` is fully
         /// connected, to ensure that all the ops in this range are correct.
         ///
-        /// * Ensure that `self.commit_max` is never advanced for a newer view without first imposing a
-        /// view jump barrier, otherwise `self.commit_max` may again refer to different ops.
+        /// * Ensure that `self.commit_max` is never advanced for a newer view without first
+        /// imposing a view jump barrier, otherwise `self.commit_max` may refer to different ops.
         ///
         /// * Ensure that `self.op` is never advanced by a repair since repairs may occur in a view
         /// change where the view has not yet started.
         ///
-        /// * Do not assume that an existing op with a older viewstamp can be replaced by an op with a
-        /// newer viewstamp, but only compare ops in the same view or with reference to the hash chain.
-        /// See Figure 3.7 on page 41 in Diego Ongaro's Raft thesis for an example of where an op with
-        /// an older view number may be committed instead of an op with a newer view number:
+        /// * Do not assume that an existing op with a older viewstamp can be replaced by an op with
+        /// a newer viewstamp, but only compare ops in the same view or with reference to the chain.
+        /// See Figure 3.7 on page 41 in Diego Ongaro's Raft thesis for an example of where an op
+        /// with an older view number may be committed instead of an op with a newer view number:
         /// http://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf.
         ///
         fn repair_header(self: *Self, header: *const Header) bool {
@@ -2464,11 +2464,16 @@ pub fn Replica(
             }
 
             if (header.op > self.op) {
-                log.debug("{}: repair_header: ignoring (would advance self.op)", .{self.replica});
+                log.debug("{}: repair_header: false (advances self.op)", .{self.replica});
                 return false;
             } else if (header.op == self.op) {
-                if (self.journal.entry_for_op_exact_with_checksum(self.op, header.checksum) == null) {
-                    log.debug("{}: repair_header: ignoring (would replace self.op)", .{self.replica});
+                if (self.journal.entry_for_op_exact_with_checksum(self.op, header.checksum)) |_| {
+                    // Fall through below to check if self.op is uncommitted AND reordered,
+                    // which we would see by the presence of an earlier op with higher view number,
+                    // that breaks the chain with self.op. In this case, we must skip the repair to
+                    // avoid overwriting any overlapping op.
+                } else {
+                    log.debug("{}: repair_header: false (changes self.op)", .{self.replica});
                     return false;
                 }
             }
@@ -2477,61 +2482,54 @@ pub fn Replica(
                 // Do not replace any existing op lightly as doing so may impair durability and even
                 // violate correctness by undoing a prepare already acknowledged to the leader:
                 if (existing.checksum == header.checksum) {
-                    if (self.journal.dirty.bit(header.op)) {
-                        // We may safely replace this existing op (with hash chain and overlap caveats):
-                        log.debug("{}: repair_header: exists (dirty checksum)", .{self.replica});
-                    } else {
-                        log.debug("{}: repair_header: ignoring (clean checksum)", .{self.replica});
+                    if (!self.journal.dirty.bit(header.op)) {
+                        log.debug("{}: repair_header: false (checksum clean)", .{self.replica});
                         return false;
                     }
+
+                    log.debug("{}: repair_header: exists, checksum dirty", .{self.replica});
                 } else if (existing.view == header.view) {
-                    // We expect that the same view and op must have the same checksum:
+                    // The journal must have wrapped:
+                    // We expect that the same view and op will have the same checksum.
                     assert(existing.op != header.op);
 
-                    // The journal must have wrapped:
-                    if (existing.op < header.op) {
-                        // We may safely replace this existing op (with hash chain and overlap caveats):
-                        log.debug("{}: repair_header: exists (same view, older op)", .{self.replica});
-                    } else if (existing.op > header.op) {
-                        log.debug("{}: repair_header: ignoring (same view, newer op)", .{self.replica});
+                    if (existing.op > header.op) {
+                        log.debug("{}: repair_header: false (view has newer op)", .{self.replica});
                         return false;
-                    } else {
-                        unreachable;
                     }
+
+                    log.debug("{}: repair_header: exists, view has older op", .{self.replica});
                 } else {
                     assert(existing.view != header.view);
                     assert(existing.op == header.op or existing.op != header.op);
 
-                    if (self.repair_header_would_connect_hash_chain(header)) {
-                        // We may safely replace this existing op:
-                        log.debug("{}: repair_header: exists (hash chain break)", .{self.replica});
-                    } else {
-                        // We cannot replace this existing op until we are sure that doing so would not
+                    if (!self.repair_header_would_connect_hash_chain(header)) {
+                        // We cannot replace this op until we are sure that doing so would not
                         // violate any prior commitments made to the leader.
-                        log.debug("{}: repair_header: ignoring (hash chain doubt)", .{self.replica});
+                        log.debug("{}: repair_header: false (exists)", .{self.replica});
                         return false;
                     }
+
+                    log.debug("{}: repair_header: exists, connects hash chain", .{self.replica});
                 }
             } else {
-                // We may repair the gap (with hash chain and overlap caveats):
                 log.debug("{}: repair_header: gap", .{self.replica});
             }
 
             // Caveat: Do not repair an existing op or gap if doing so would break the hash chain:
             if (self.repair_header_would_break_hash_chain_with_next_entry(header)) {
-                log.debug("{}: repair_header: ignoring (would break hash chain)", .{self.replica});
+                log.debug("{}: repair_header: false (breaks hash chain)", .{self.replica});
                 return false;
             }
 
             // Caveat: Do not repair an existing op or gap if doing so would overlap another:
             if (self.repair_header_would_overlap_another(header)) {
-                if (self.repair_header_would_connect_hash_chain(header)) {
-                    // We may overlap previous entries in order to connect the hash chain:
-                    log.debug("{}: repair_header: overlap (would connect hash chain)", .{self.replica});
-                } else {
-                    log.debug("{}: repair_header: ignoring (would overlap another)", .{self.replica});
+                if (!self.repair_header_would_connect_hash_chain(header)) {
+                    log.debug("{}: repair_header: false (overlap)", .{self.replica});
                     return false;
                 }
+                // We may have to overlap previous entries in order to connect the hash chain:
+                log.debug("{}: repair_header: overlap, connects hash chain", .{self.replica});
             }
 
             // TODO Snapshots: Skip if this header is already snapshotted.
@@ -2782,8 +2780,8 @@ pub fn Replica(
                 op -= 1;
 
                 if (self.journal.dirty.bit(op)) {
-                    // If this is an uncommitted op, and we are the leader in `view_change` status, then
-                    // we will `request_prepare` from the rest of the cluster, set `nack_prepare_op`,
+                    // If this is an uncommitted op, and we are the leader in `view_change` status,
+                    // then we will `request_prepare` from the cluster, set `nack_prepare_op`,
                     // and stop repairing any further prepares:
                     // This will also rebroadcast any `request_prepare` every `repair_timeout` tick.
                     self.repair_prepare(op);
@@ -3365,10 +3363,10 @@ pub fn Replica(
 
             // Do not set the latest op as dirty if we already have it exactly:
             // Otherwise, this would trigger a repair and delay the view change.
-            if (self.journal.entry_for_op_exact_with_checksum(latest.op, latest.checksum) == null) {
-                self.journal.set_entry_as_dirty(latest);
-            } else {
+            if (self.journal.entry_for_op_exact_with_checksum(latest.op, latest.checksum)) |_| {
                 log.debug("{}: {s}: latest op exists exactly", .{ self.replica, method });
+            } else {
+                self.journal.set_entry_as_dirty(latest);
             }
 
             assert(self.op == latest.op);
