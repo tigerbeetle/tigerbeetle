@@ -729,9 +729,14 @@ pub fn Replica(
             assert(message.header.op <= self.op); // Repairs may never advance `self.op`.
 
             if (self.journal.has_clean(message.header)) {
-                log.debug("{}: on_repair: duplicate", .{self.replica});
+                log.debug("{}: on_repair: ignoring (duplicate)", .{self.replica});
                 self.send_prepare_ok(message.header);
                 defer self.flush_loopback_queue();
+                return;
+            }
+
+            if (self.view_jump_barrier) {
+                log.debug("{}: on_repair: ignoring (view jump barrier)", .{self.replica});
                 return;
             }
 
@@ -1159,6 +1164,11 @@ pub fn Replica(
 
             // We expect at least one header in the body, or otherwise no response to our request.
             assert(message.header.size > @sizeOf(Header));
+
+            if (self.view_jump_barrier) {
+                log.debug("{}: on_headers: ignoring (view jump barrier)", .{self.replica});
+                return;
+            }
 
             var op_min: ?u64 = null;
             var op_max: ?u64 = null;
@@ -2376,9 +2386,16 @@ pub fn Replica(
 
             // Request any missing or disconnected headers:
             // TODO Snapshots: Ensure that self.commit_min op always exists in the journal.
+            assert(!self.view_jump_barrier);
             var broken = self.journal.find_latest_headers_break_between(self.commit_min, self.op);
             if (broken) |range| {
-                log.debug("{}: repair: latest break: {}", .{ self.replica, range });
+                log.debug("{}: repair: latest break: op_min={} op_max={} (commit_min={} op={})", .{
+                    self.replica,
+                    range.op_min,
+                    range.op_max,
+                    self.commit_min,
+                    self.op,
+                });
                 assert(range.op_min > self.commit_min);
                 assert(range.op_max < self.op);
                 // A range of `op_min=0` or `op_max=0` should be impossible as a header break:
@@ -2453,6 +2470,9 @@ pub fn Replica(
         /// http://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf.
         ///
         fn repair_header(self: *Self, header: *const Header) bool {
+            // Do not try to do any repairs while we cannot trust `self.op`:
+            assert(!self.view_jump_barrier);
+
             assert(header.valid_checksum());
             assert(header.invalid() == null);
             assert(header.command == .prepare);
@@ -2580,9 +2600,12 @@ pub fn Replica(
         /// 3. We do another stale prepare that replaces the first op because it connects to the second.
         ///
         /// This would violate our quorum replication commitment to the leader.
-        /// The mistake in this example was not that we ignored the break to the left, which we must do
-        /// to repair reordered ops, but that we did not check for complete connection to the right.
+        /// The mistake in this example was not that we ignored the break to the left, which we must
+        /// do to repair reordered ops, but that we did not check for connection to the right.
         fn repair_header_would_connect_hash_chain(self: *Self, header: *const Header) bool {
+            // We must be able to trust `self.op` if this function is to be reliable.
+            assert(!self.view_jump_barrier);
+
             var entry = header;
 
             while (entry.op < self.op) {
