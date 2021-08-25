@@ -45,6 +45,7 @@ pub fn FIFO(comptime T: type) type {
             var it = self.out;
             while (it) |elem| : (it = elem.next) {
                 if (to_remove == elem.next) {
+                    if (to_remove == self.in) self.in = elem;
                     elem.next = to_remove.next;
                     to_remove.next = null;
                     break;
@@ -91,5 +92,13 @@ test "push/pop/peek/remove" {
     fifo.remove(&three);
     testing.expectEqual(@as(?*Foo, &one), fifo.pop());
     testing.expectEqual(@as(?*Foo, &two), fifo.pop());
+    testing.expectEqual(@as(?*Foo, null), fifo.pop());
+
+    fifo.push(&one);
+    fifo.push(&two);
+    fifo.remove(&two);
+    fifo.push(&three);
+    testing.expectEqual(@as(?*Foo, &one), fifo.pop());
+    testing.expectEqual(@as(?*Foo, &three), fifo.pop());
     testing.expectEqual(@as(?*Foo, null), fifo.pop());
 }

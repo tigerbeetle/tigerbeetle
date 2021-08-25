@@ -3,6 +3,9 @@ const assert = std.debug.assert;
 const mem = std.mem;
 const os = std.os;
 
+const is_darwin = std.Target.current.isDarwin();
+const sock_flags = os.SOCK_CLOEXEC | (if (is_darwin) os.SOCK_NONBLOCK else 0);
+
 const config = @import("config.zig");
 const log = std.log.scoped(.message_bus);
 
@@ -150,7 +153,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
         fn init_tcp(address: std.net.Address) !os.socket_t {
             const fd = try os.socket(
                 address.any.family,
-                os.SOCK_STREAM | os.SOCK_CLOEXEC,
+                os.SOCK_STREAM | sock_flags,
                 os.IPPROTO_TCP,
             );
             errdefer os.close(fd);
@@ -161,42 +164,71 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 }
             }.set;
 
-            try set(fd, os.SOL_SOCKET, os.SO_REUSEADDR, 1);
-            if (config.tcp_rcvbuf > 0) {
-                // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in the event of an EPERM):
-                set(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, config.tcp_rcvbuf) catch |err| {
-                    switch (err) {
-                        error.PermissionDenied => {
-                            try set(fd, os.SOL_SOCKET, os.SO_RCVBUF, config.tcp_rcvbuf);
-                        },
-                        else => return err,
-                    }
-                };
-            }
-            if (config.tcp_sndbuf > 0) {
-                // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in the event of an EPERM):
-                set(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, config.tcp_sndbuf) catch |err| {
-                    switch (err) {
-                        error.PermissionDenied => {
-                            try set(fd, os.SOL_SOCKET, os.SO_SNDBUF, config.tcp_sndbuf);
-                        },
-                        else => return err,
-                    }
-                };
-            }
-            if (config.tcp_keepalive) {
-                try set(fd, os.SOL_SOCKET, os.SO_KEEPALIVE, 1);
-                try set(fd, os.IPPROTO_TCP, os.TCP_KEEPIDLE, config.tcp_keepidle);
-                try set(fd, os.IPPROTO_TCP, os.TCP_KEEPINTVL, config.tcp_keepintvl);
-                try set(fd, os.IPPROTO_TCP, os.TCP_KEEPCNT, config.tcp_keepcnt);
-            }
-            if (config.tcp_user_timeout > 0) {
-                try set(fd, os.IPPROTO_TCP, os.TCP_USER_TIMEOUT, config.tcp_user_timeout);
-            }
-            if (config.tcp_nodelay) {
-                try set(fd, os.IPPROTO_TCP, os.TCP_NODELAY, 1);
+            // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
+            if (is_darwin) {
+                try set(fd, os.SOL_SOCKET, os.SO_NOSIGPIPE, 1);
             }
 
+            // Set tcp recv buffer size
+            if (config.tcp_rcvbuf > 0) rcvbuf: {
+                if (!is_darwin) {
+                    // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
+                    if (set(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, config.tcp_rcvbuf)) |_| {
+                        break :rcvbuf;
+                    } else |err| switch (err) {
+                        error.PermissionDenied => {},
+                        else => |e| return e,
+                    }
+                }
+                try set(fd, os.SOL_SOCKET, os.SO_RCVBUF, config.tcp_rcvbuf);
+            }
+
+            // Set tcp send buffer size
+            if (config.tcp_sndbuf > 0) sndbuf: {
+                if (!is_darwin) {
+                    // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
+                    if (set(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, config.tcp_sndbuf)) |_| {
+                        break :sndbuf;
+                    } else |err| switch (err) {
+                        error.PermissionDenied => {},
+                        else => |e| return e,
+                    }
+                }
+                try set(fd, os.SOL_SOCKET, os.SO_SNDBUF, config.tcp_sndbuf);
+            }
+
+            // Set tcp keep alive
+            if (config.tcp_keepalive) {
+                try set(fd, os.SOL_SOCKET, os.SO_KEEPALIVE, 1);
+                if (!is_darwin) {
+                    try set(fd, os.IPPROTO_TCP, os.TCP_KEEPIDLE, config.tcp_keepidle);
+                    try set(fd, os.IPPROTO_TCP, os.TCP_KEEPINTVL, config.tcp_keepintvl);
+                    try set(fd, os.IPPROTO_TCP, os.TCP_KEEPCNT, config.tcp_keepcnt);
+                }
+            }
+
+            // Set tcp user timeout
+            if (config.tcp_user_timeout > 0) {
+                if (!is_darwin) {
+                    try set(fd, os.IPPROTO_TCP, os.TCP_USER_TIMEOUT, config.tcp_user_timeout);
+                }
+            }
+
+            // Set tcp no-delay
+            if (config.tcp_nodelay) {
+                const TCP_NODELAY: ?u32 = if (@hasDecl(os, "TCP_NODELAY")) 
+                    @as(u32, os.TCP_NODELAY)
+                else if (is_darwin)
+                    @as(u32, 1)
+                else
+                    null;
+
+                if (TCP_NODELAY) |tcp_nodelay| {
+                    try set(fd, os.IPPROTO_TCP, tcp_nodelay, 1);
+                }
+            }
+
+            try set(fd, os.SOL_SOCKET, os.SO_REUSEADDR, 1);
             try os.bind(fd, &address.any, address.getOsSockLen());
             try os.listen(fd, config.tcp_backlog);
 
@@ -300,7 +332,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 on_accept,
                 &bus.process.accept_completion,
                 bus.process.accept_fd,
-                os.SOCK_CLOEXEC,
+                sock_flags,
             );
         }
 
@@ -427,7 +459,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 // The first replica's network address family determines the
                 // family for all other replicas:
                 const family = bus.configuration[0].any.family;
-                connection.fd = os.socket(family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0) catch return;
+                connection.fd = os.socket(family, os.SOCK_STREAM | sock_flags, 0) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;
@@ -598,7 +630,10 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     .shutdown => {
                         // The shutdown syscall will cause currently in progress send/recv
                         // operations to be gracefully closed while keeping the fd open.
-                        const rc = os.linux.shutdown(connection.fd, os.SHUT_RDWR);
+                        //
+                        // TODO: Investigate differences between shutdown() on Linux vs Darwin.
+                        // Especially how this interacts with our assumptions around pending I/O.
+                        const rc = os.system.shutdown(connection.fd, os.SHUT_RDWR);
                         switch (os.errno(rc)) {
                             0 => {},
                             os.EBADF => unreachable,
@@ -851,7 +886,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     &connection.recv_completion,
                     connection.fd,
                     connection.recv_message.?.buffer[connection.recv_progress..config.message_size_max],
-                    os.MSG_NOSIGNAL,
+                    if (is_darwin) 0 else os.MSG_NOSIGNAL,
                 );
             }
 
@@ -894,7 +929,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     &connection.send_completion,
                     connection.fd,
                     message.buffer[connection.send_progress..message.header.size],
-                    os.MSG_NOSIGNAL,
+                    if (is_darwin) 0 else os.MSG_NOSIGNAL,
                 );
             }
 
