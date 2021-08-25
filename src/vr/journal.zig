@@ -334,14 +334,18 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         const HeaderRange = struct { op_min: u64, op_max: u64 };
 
-        /// Finds the latest break in headers, searching between `op_min` and `op_max` (both inclusive).
-        /// A break is a missing header or a header not connected to the next header (by hash chain).
-        /// Upon finding the highest break, extends the range downwards to cover as much as possible.
+        /// Finds the latest break in headers between `op_min` and `op_max` (both inclusive).
+        /// A break is a missing header or a header not connected to the next header by hash chain.
+        /// On finding the highest break, extends the range downwards to cover as much as possible.
+        /// We expect that `op_min` and `op_max` (`replica.commit_min` and `replica.op`) must exist.
+        /// A range will never include `op_min` because this is already committed.
+        /// A range will never include `op_max` because this must be up to date as the latest op.
+        /// We must therefore first resolve any view jump barrier so that we can trust `op_max`.
         ///
         /// For example: If ops 3, 9 and 10 are missing, returns: `{ .op_min = 9, .op_max = 10 }`.
         ///
-        /// Another example: If op 17 is disconnected from op 18, 16 is connected to 17, and 12-15 are
-        /// missing, returns: `{ .op_min = 12, .op_max = 17 }`.
+        /// Another example: If op 17 is disconnected from op 18, 16 is connected to 17, and 12-15
+        /// are missing, returns: `{ .op_min = 12, .op_max = 17 }`.
         pub fn find_latest_headers_break_between(
             self: *Self,
             op_min: u64,
@@ -350,8 +354,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(op_min <= op_max);
             var range: ?HeaderRange = null;
 
-            // We set B, the op after op_max, to null because we only examine breaks <= op_max:
-            // In other words, we may report a missing header for op_max itself but not a broken chain.
+            // We set B, the op after op_max, to null because we only examine breaks < op_max:
             var B: ?*const Header = null;
 
             var op = op_max + 1;
@@ -363,18 +366,23 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 if (A) |a| {
                     if (B) |b| {
                         // If A was reordered then A may have a newer op than B (but an older view).
-                        // However, here we use entry_for_op_exact() so we can assert a.op + 1 == b.op:
+                        // However, here we use entry_for_op_exact() to assert a.op + 1 == b.op:
                         assert(a.op + 1 == b.op);
-                        // Further, while repair_header() should never put an older view to the right
-                        // of a newer view, it may put a newer view to the left of an older view.
-                        // We therefore do not assert a.view <= b.view unless the hash chain is intact.
+
+                        // We do not assert a.view <= b.view here unless the chain is intact because
+                        // repair_header() may put a newer view to the left of an older view.
 
                         // A exists and B exists:
                         if (range) |*r| {
                             assert(b.op == r.op_min);
-                            if (a.checksum == b.parent) {
+                            if (a.op == op_min) {
+                                // A is committed, because we pass `commit_min` as `op_min`:
+                                // Do not add A to range because A cannot be a break if committed.
+                                break;
+                            } else if (a.checksum == b.parent) {
                                 // A is connected to B, but B is disconnected, add A to range:
                                 assert(a.view <= b.view);
+                                assert(a.op > op_min);
                                 r.op_min = a.op;
                             } else if (a.view < b.view) {
                                 // A is not connected to B, and A is older than B, add A to range:
@@ -391,13 +399,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                             assert(a.view <= b.view);
                         } else if (a.view < b.view) {
                             // A is not connected to B, and A is older than B, open range:
+                            assert(a.op > op_min);
                             range = .{ .op_min = a.op, .op_max = a.op };
                         } else if (a.view > b.view) {
                             // A is not connected to B, but A is newer than B, open and close range:
-                            // TODO Add unit test especially for this.
-                            // This is important if we see `self.op < self.commit_max` then request
-                            // prepares and then later receive a newer view to the left of `self.op`.
-                            // We must then repair `self.op` which was reordered through a view change.
+                            assert(b.op < op_max);
                             range = .{ .op_min = b.op, .op_max = b.op };
                             break;
                         } else {
@@ -405,9 +411,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                             unreachable;
                         }
                     } else {
-                        // A exists and B does not exist (or B has a lower op number):
+                        // A exists and B does not exist (or B has a older/newer op number):
                         if (range) |r| {
-                            // We therefore cannot compare A to B, A may be older/newer, close range:
+                            // We cannot compare A to B, A may be older/newer, close range:
                             assert(r.op_min == op + 1);
                             break;
                         } else {
@@ -416,21 +422,30 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         }
                     }
                 } else {
-                    // A does not exist (or A has a lower op number):
-                    if (self.entry_for_op(op)) |wrapped_a| assert(wrapped_a.op < op);
+                    assert(op > op_min);
+                    assert(op < op_max);
 
+                    // A does not exist, or A has an older (or newer if reordered) op number:
                     if (range) |*r| {
                         // Add A to range:
                         assert(r.op_min == op + 1);
                         r.op_min = op;
                     } else {
                         // Open range:
-                        assert(B != null or op == op_max);
+                        assert(B != null);
                         range = .{ .op_min = op, .op_max = op };
                     }
                 }
 
                 B = A;
+            }
+
+            if (range) |r| {
+                // We can never repair op_min (replica.commit_min) since that is already committed:
+                assert(r.op_min > op_min);
+                // We can never repair op_max (replica.op) since that is the latest op:
+                // We can assume this because any existing view jump barrier must first be resolved.
+                assert(r.op_max < op_max);
             }
 
             return range;
