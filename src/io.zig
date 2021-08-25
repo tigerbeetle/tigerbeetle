@@ -7,8 +7,15 @@ const io_uring_cqe = linux.io_uring_cqe;
 const io_uring_sqe = linux.io_uring_sqe;
 
 const FIFO = @import("fifo.zig").FIFO;
+const IO_Darwin = @import("io_darwin.zig").IO;
 
-pub const IO = struct {
+pub const IO = switch (std.Target.current.os.tag) {
+    .linux => IO_Linux,
+    .macos, .tvos, .watchos, .ios => IO_Darwin,
+    else => @compileError("IO is not supported for platform"),
+};
+
+const IO_Linux = struct {
     ring: IO_Uring,
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
