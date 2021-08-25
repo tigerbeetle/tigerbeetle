@@ -675,12 +675,12 @@ pub fn Replica(
             if (self.journal.entry_for_op_exact(message.header.commit)) |commit_entry| {
                 if (commit_entry.checksum == message.header.context) {
                     log.debug("{}: on_commit: checksum verified", .{self.replica});
-                } else if (self.view_jump_barrier) {
-                    log.debug("{}: on_commit: checksum failed, but barrier is in place", .{
-                        self.replica,
-                    });
-                } else {
+                } else if (self.valid_hash_chain("on_commit")) {
                     @panic("commit checksum verification failed");
+                } else {
+                    // We may have a view jump barrier in place, or we may be repairing after
+                    // resolving the view jump barrier.
+                    log.debug("{}: on_commit: skipping checksum verification", .{self.replica});
                 }
             }
 
