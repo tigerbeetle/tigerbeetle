@@ -26,15 +26,15 @@ Furthermore, these systems may achieve performance but at the expense of reliabi
 
 Our survey led us to conclude that, while there are mechanisms available to shard account balances to parallelize updates and improve performance, there are still significant performance gains to be had in designing a database that is purpose built for storing balances and processing updates in a reliable manner.
 
-## ProtoBeetle - 200,000 transfers per second
+## ProtoBeetle - 400,000 transfers per second
 
-In the month of July 2020, we developed a prototype of TigerBeetle in Node as a performance sketch to measure the basic components of the design (batching, TCP protocol, cryptographic checksums everywhere, fsync journalling, in-memory business logic and hash table operations). **ProtoBeetle ran at 200,000 transfers per second on our office laptops**, supporting our back-of-the-envelope numbers.
+In the month of July 2020, we developed a prototype of TigerBeetle in Node as a performance sketch to measure the basic components of the design (batching, TCP protocol, cryptographic checksums everywhere, fsync journalling, in-memory business logic and hash table operations). **ProtoBeetle ran at 200,000 two-phase commit transfers per second on our office laptops**, supporting our back-of-the-envelope numbers.
 
 We then integrated ProtoBeetle into [Mojaloop](https://mojaloop.io/) and our reference minimum deployment cluster of **Mojaloop went from 76 TPS on MySQL to 1757 TPS on ProtoBeetle**. A single stateless Mojaloop pod was unable to saturate ProtoBeetle. Most of the throughput was spent converting Mojaloop's individual HTTP requests into TCP batches.
 
 **[Watch a 10-minute talk introducing ProtoBeetle.](https://youtu.be/QOC6PHFPtAM?t=324)**
 
-## AlphaBeetle - 500,000 transfers per second
+## AlphaBeetle - 800,000 transfers per second
 
 After ProtoBeetle, from September through October 2020, we knuckled down and rewrote TigerBeetle in C/Zig to create the alpha version of TigerBeetle, using [io_uring](https://kernel.dk/io_uring.pdf) as a foundation for fast I/O.
 
@@ -75,9 +75,13 @@ scripts/benchmark.sh
 Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
 
 ```
-./tigerbeetle --cluster=1 --addresses=3001,3002,3003 --replica=0
-./tigerbeetle --cluster=1 --addresses=3001,3002,3003 --replica=1
-./tigerbeetle --cluster=1 --addresses=3001,3002,3003 --replica=2
+./tigerbeetle init --cluster=1 --replica=0 --directory=.
+./tigerbeetle init --cluster=1 --replica=1 --directory=.
+./tigerbeetle init --cluster=1 --replica=2 --directory=.
+
+./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001,3002,3003
+./tigerbeetle start --cluster=1 --replica=1 --directory=. --addresses=3001,3002,3003
+./tigerbeetle start --cluster=1 --replica=2 --directory=. --addresses=3001,3002,3003
 ```
 
 Run the TigerBeetle binary to see all command line arguments:
