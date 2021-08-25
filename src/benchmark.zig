@@ -4,18 +4,22 @@ const config = @import("config.zig");
 
 const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
-const Client = @import("client.zig").Client;
-const ClientError = @import("client.zig").ClientError;
+
 const MessageBus = @import("message_bus.zig").MessageBusClient;
-const TigerBeetle = @import("tigerbeetle.zig");
-const Transfer = TigerBeetle.Transfer;
-const Commit = TigerBeetle.Commit;
-const Account = TigerBeetle.Account;
-const CreateAccountsResult = TigerBeetle.CreateAccountsResult;
-const CreateTransfersResult = TigerBeetle.CreateTransfersResult;
-const Operation = @import("state_machine.zig").StateMachine.Operation;
-const Header = @import("vr.zig").Header;
+const StateMachine = @import("state_machine.zig").StateMachine;
+const Operation = StateMachine.Operation;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
+
+const vr = @import("vr.zig");
+const Header = vr.Header;
+const Client = vr.Client(StateMachine, MessageBus);
+
+const tb = @import("tigerbeetle.zig");
+const Transfer = tb.Transfer;
+const Commit = tb.Commit;
+const Account = tb.Account;
+const CreateAccountsResult = tb.CreateAccountsResult;
+const CreateTransfersResult = tb.CreateTransfersResult;
 
 const MAX_TRANSFERS: u32 = 1_000_000;
 const BATCH_SIZE: u32 = 10_000;
@@ -26,7 +30,7 @@ const BATCHES: f32 = MAX_TRANSFERS / BATCH_SIZE;
 const TOTAL_BATCHES = @ceil(BATCHES);
 
 const log = std.log;
-pub const log_level: std.log.Level = .info;
+pub const log_level: std.log.Level = .notice;
 
 var accounts = [_]Account{
     Account{
@@ -58,27 +62,32 @@ var max_create_transfers_latency: i64 = 0;
 var max_commit_transfers_latency: i64 = 0;
 
 pub fn main() !void {
+    const stdout = std.io.getStdOut().writer();
+    const stderr = std.io.getStdErr().writer();
+
     if (std.builtin.mode != .ReleaseSafe and std.builtin.mode != .ReleaseFast) {
-        log.warn("The client has not been built in ReleaseSafe or ReleaseFast mode.\n", .{});
+        try stderr.print("Benchmark must be built as ReleaseSafe for minimum performance.\n", .{});
     }
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = &arena.allocator;
 
-    const client_id: u128 = 123;
-    const cluster_id: u128 = 746649394563965214; // a5ca1ab1ebee11e
+    const client_id = std.crypto.random.int(u128);
+    const cluster_id: u32 = 0;
     var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
     var io = try IO.init(32, 0);
     var message_bus = try MessageBus.init(allocator, cluster_id, address[0..], client_id, &io);
     defer message_bus.deinit();
     var client = try Client.init(
         allocator,
+        client_id,
         cluster_id,
-        @intCast(u16, address.len),
+        @intCast(u8, address.len),
         &message_bus,
     );
     defer client.deinit();
-    message_bus.process = .{ .client = &client };
+    message_bus.set_on_message(*Client, &client, Client.on_message);
 
     // Pre-allocate a million transfers:
     var transfers = try arena.allocator.alloc(Transfer, MAX_TRANSFERS);
@@ -111,7 +120,7 @@ pub fn main() !void {
 
     try wait_for_connect(&client, &io);
 
-    log.info("creating accounts...", .{});
+    try stdout.print("creating accounts...\n", .{});
     var queue = TimedQueue.init(&client, &io);
     try queue.push(.{
         .operation = Operation.create_accounts,
@@ -121,7 +130,7 @@ pub fn main() !void {
     assert(queue.end != null);
     assert(queue.batches.empty());
 
-    log.info("batching transfers...", .{});
+    try stdout.print("batching transfers...\n", .{});
     var count: u64 = 0;
     queue.reset();
     while (count < transfers.len) {
@@ -141,29 +150,25 @@ pub fn main() !void {
     }
     assert(count == MAX_TRANSFERS);
 
-    log.info("starting benchmark...", .{});
+    try stdout.print("starting benchmark...\n", .{});
     try queue.execute();
     assert(queue.end != null);
     assert(queue.batches.empty());
 
     var ms = queue.end.? - queue.start.?;
-    const transfer_type = if (IS_TWO_PHASE_COMMIT) "two-phase commit" else "";
+    const transfer_type = if (IS_TWO_PHASE_COMMIT) "two-phase commit " else "";
     const result: i64 = @divFloor(@intCast(i64, transfers.len * 1000), ms);
-    log.info("============================================", .{});
-    log.info("{} {s} transfers per second\n", .{
+    try stdout.print("============================================\n", .{});
+    try stdout.print("{} {s}transfers per second\n\n", .{
         result,
         transfer_type,
     });
-    log.info("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
+    try stdout.print("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
         queue.max_transfers_latency,
     });
-    log.info("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
+    try stdout.print("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
         queue.max_commits_latency,
     });
-
-    if (result < @divFloor(@intCast(i64, BENCHMARK * (100 - RESULT_TOLERANCE)), 100)) {
-        log.warn("There has been a performance regression. previous benchmark={}\n", .{BENCHMARK});
-    }
 }
 
 const Batch = struct {
@@ -214,10 +219,9 @@ const TimedQueue = struct {
         self.reset();
         log.debug("executing batches...", .{});
 
-        var batch: ?Batch = self.batches.peek();
         const now = std.time.milliTimestamp();
         self.start = now;
-        if (batch) |*starting_batch| {
+        if (self.batches.peek_ptr()) |starting_batch| {
             log.debug("sending first batch...", .{});
             self.batch_start = now;
             var message = self.client.get_message() orelse {
@@ -245,7 +249,7 @@ const TimedQueue = struct {
         }
     }
 
-    pub fn lap(user_data: u128, operation: Operation, results: ClientError![]const u8) void {
+    pub fn lap(user_data: u128, operation: Operation, results: Client.Error![]const u8) void {
         const now = std.time.milliTimestamp();
         const value = results catch |err| {
             log.emerg("Client returned error={o}", .{@errorName(err)});
@@ -279,8 +283,7 @@ const TimedQueue = struct {
             else => unreachable,
         }
 
-        var batch: ?Batch = self.batches.peek();
-        if (batch) |*next_batch| {
+        if (self.batches.peek_ptr()) |next_batch| {
             var message = self.client.get_message() orelse {
                 @panic("Client message pool has been exhausted.");
             };
@@ -291,6 +294,7 @@ const TimedQueue = struct {
                 message.buffer[@sizeOf(Header)..],
                 std.mem.sliceAsBytes(next_batch.data),
             );
+
             self.batch_start = std.time.milliTimestamp();
             self.client.request(
                 @intCast(u128, @ptrToInt(self)),

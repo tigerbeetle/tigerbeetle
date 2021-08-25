@@ -1,5 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const is_darwin = std.Target.current.isDarwin();
+const config = @import("./config.zig");
 
 pub const Time = struct {
     const Self = @This();
@@ -15,14 +17,33 @@ pub const Time = struct {
     /// This clock is not affected by discontinuous jumps in the system time, for example if the
     /// system administrator manually changes the clock.
     pub fn monotonic(self: *Self) u64 {
-        // The true monotonic clock on Linux is not in fact CLOCK_MONOTONIC:
-        // CLOCK_MONOTONIC excludes elapsed time while the system is suspended (e.g. VM migration).
-        // CLOCK_BOOTTIME is the same as CLOCK_MONOTONIC but includes elapsed time during a suspend.
-        // For more detail and why CLOCK_MONOTONIC_RAW is even worse than CLOCK_MONOTONIC,
-        // see https://github.com/ziglang/zig/pull/933#discussion_r656021295.
-        var ts: std.os.timespec = undefined;
-        std.os.clock_gettime(std.os.CLOCK_BOOTTIME, &ts) catch @panic("CLOCK_BOOTTIME required");
-        const m = @intCast(u64, ts.tv_sec) * std.time.ns_per_s + @intCast(u64, ts.tv_nsec);
+        const m = blk: {
+            // Uses mach_continuous_time() instead of mach_absolute_time() as it counts while suspended.
+            // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
+            // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
+            if (is_darwin) {
+                const darwin = struct {
+                    const mach_timebase_info_t = std.os.darwin.mach_timebase_info_data;
+                    extern "c" fn mach_timebase_info(info: *mach_timebase_info_t) std.os.darwin.kern_return_t;
+                    extern "c" fn mach_continuous_time() u64;
+                };
+
+                const now = darwin.mach_continuous_time();
+                var info: darwin.mach_timebase_info_t = undefined;
+                if (darwin.mach_timebase_info(&info) != 0) @panic("mach_timebase_info() failed");
+                return (now * info.numer) / info.denom;
+            }
+
+            // The true monotonic clock on Linux is not in fact CLOCK_MONOTONIC:
+            // CLOCK_MONOTONIC excludes elapsed time while the system is suspended (e.g. VM migration).
+            // CLOCK_BOOTTIME is the same as CLOCK_MONOTONIC but includes elapsed time during a suspend.
+            // For more detail and why CLOCK_MONOTONIC_RAW is even worse than CLOCK_MONOTONIC,
+            // see https://github.com/ziglang/zig/pull/933#discussion_r656021295.
+            var ts: std.os.timespec = undefined;
+            std.os.clock_gettime(std.os.CLOCK_BOOTTIME, &ts) catch @panic("CLOCK_BOOTTIME required");
+            break :blk @intCast(u64, ts.tv_sec) * std.time.ns_per_s + @intCast(u64, ts.tv_nsec);
+        };
+
         // "Oops!...I Did It Again"
         if (m < self.monotonic_guard) @panic("a hardware/kernel bug regressed the monotonic clock");
         self.monotonic_guard = m;
@@ -32,35 +53,13 @@ pub const Time = struct {
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
     /// This clock is affected by discontinuous jumps in the system time.
     pub fn realtime(self: *Self) i64 {
+        // macos has supported clock_gettime() since 10.12:
+        // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
+        
         var ts: std.os.timespec = undefined;
         std.os.clock_gettime(std.os.CLOCK_REALTIME, &ts) catch unreachable;
         return @as(i64, ts.tv_sec) * std.time.ns_per_s + ts.tv_nsec;
     }
 
     pub fn tick(self: *Self) void {}
-};
-
-pub const DeterministicTime = struct {
-    const Self = @This();
-
-    /// The duration of a single tick in nanoseconds.
-    resolution: u64,
-
-    /// The number of ticks elapsed since initialization.
-    ticks: u64 = 0,
-
-    /// The instant in time chosen as the origin of this time source.
-    epoch: i64 = 0,
-
-    pub fn monotonic(self: *Self) u64 {
-        return self.ticks * self.resolution;
-    }
-
-    pub fn realtime(self: *Self) i64 {
-        return self.epoch + @intCast(i64, self.monotonic());
-    }
-
-    pub fn tick(self: *Self) void {
-        self.ticks += 1;
-    }
 };

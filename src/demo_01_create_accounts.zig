@@ -1,13 +1,8 @@
-const std = @import("std");
-
 usingnamespace @import("tigerbeetle.zig");
 usingnamespace @import("demo.zig");
 
 pub fn main() !void {
-    const fd = try connect(config.port);
-    defer std.os.close(fd);
-
-    var accounts = [_]Account{
+    const accounts = [_]Account{
         Account{
             .id = 1,
             .user_data = 0,
@@ -34,5 +29,5 @@ pub fn main() !void {
         },
     };
 
-    try send(fd, .create_accounts, accounts, CreateAccountsResult);
+    try Demo.request(.create_accounts, accounts, Demo.on_create_accounts);
 }

@@ -3,91 +3,106 @@ const assert = std.debug.assert;
 
 usingnamespace @import("tigerbeetle.zig");
 
-pub const Header = @import("vr.zig").Header;
-pub const Operation = @import("state_machine.zig").Operation;
+const IO = @import("io.zig").IO;
+const MessageBus = @import("message_bus.zig").MessageBusClient;
+const StateMachine = @import("state_machine.zig").StateMachine;
 
-pub fn connect(port: u16) !std.os.fd_t {
-    var addr = try std.net.Address.parseIp4("127.0.0.1", port);
-    var connection = try std.net.tcpConnectToAddress(addr);
-    return connection.handle;
-}
+const vr = @import("vr.zig");
+const Header = vr.Header;
+const Client = vr.Client(StateMachine, MessageBus);
 
-// TODO We can share most of what follows with `src/benchmark.zig`:
+pub const log_level: std.log.Level = .alert;
 
-pub const cluster_id: u128 = 746649394563965214; // a5ca1ab1ebee11e
-pub const client_id: u128 = 123;
-pub var request_number: u32 = 0;
-var sent_ping = false;
+pub const Demo = struct {
+    pub fn request(
+        operation: StateMachine.Operation,
+        batch: anytype,
+        on_reply: fn (
+            user_data: u128,
+            operation: StateMachine.Operation,
+            results: Client.Error![]const u8,
+        ) void,
+    ) !void {
+        const allocator = std.heap.page_allocator;
+        const client_id = std.crypto.random.int(u128);
+        const cluster_id: u32 = 0;
+        var addresses = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
-pub fn send(fd: std.os.fd_t, operation: Operation, batch: anytype, Results: anytype) !void {
-    // This is required to greet the cluster and identify the connection as being from a client:
-    if (!sent_ping) {
-        sent_ping = true;
+        var io = try IO.init(32, 0);
+        defer io.deinit();
 
-        var ping = Header{
-            .command = .ping,
-            .cluster = cluster_id,
-            .client = client_id,
-            .view = 0,
-        };
-        ping.set_checksum_body(&[0]u8{});
-        ping.set_checksum();
+        var message_bus = try MessageBus.init(allocator, cluster_id, &addresses, client_id, &io);
+        defer message_bus.deinit();
 
-        assert((try std.os.sendto(fd, std.mem.asBytes(&ping), 0, null, 0)) == @sizeOf(Header));
+        var client = try Client.init(
+            allocator,
+            client_id,
+            cluster_id,
+            @intCast(u8, addresses.len),
+            &message_bus,
+        );
+        defer client.deinit();
 
-        var pong: [@sizeOf(Header)]u8 = undefined;
-        var pong_size: u64 = 0;
-        while (pong_size < @sizeOf(Header)) {
-            var pong_bytes = try std.os.recvfrom(fd, pong[pong_size..], 0, null, null);
-            if (pong_bytes == 0) @panic("server closed the connection (while waiting for pong)");
-            pong_size += pong_bytes;
+        message_bus.set_on_message(*Client, &client, Client.on_message);
+
+        var message = client.get_message() orelse unreachable;
+        defer client.unref(message);
+
+        const body = std.mem.asBytes(&batch);
+        std.mem.copy(u8, message.buffer[@sizeOf(Header)..], body);
+
+        client.request(
+            0,
+            on_reply,
+            operation,
+            message,
+            body.len,
+        );
+
+        while (client.request_queue.count > 0) {
+            client.tick();
+            try io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
     }
 
-    request_number += 1;
-
-    var body = std.mem.asBytes(batch[0..]);
-
-    var request = Header{
-        .cluster = cluster_id,
-        .client = client_id,
-        .view = 0,
-        .request = request_number,
-        .command = .request,
-        .operation = operation,
-        .size = @intCast(u32, @sizeOf(Header) + body.len),
-    };
-    request.set_checksum_body(body[0..]);
-    request.set_checksum();
-
-    const header = std.mem.asBytes(&request);
-    assert((try std.os.sendto(fd, header[0..], 0, null, 0)) == header.len);
-    if (body.len > 0) {
-        assert((try std.os.sendto(fd, body[0..], 0, null, 0)) == body.len);
+    pub fn on_create_accounts(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
+        print_results(CreateAccountsResult, results);
     }
 
-    var recv: [1024 * 1024]u8 = undefined;
-    const recv_bytes = try std.os.recvfrom(fd, recv[0..], 0, null, null);
-    assert(recv_bytes >= @sizeOf(Header));
-
-    var response = std.mem.bytesAsValue(Header, recv[0..@sizeOf(Header)]);
-
-    // TODO Add jsonStringfy to vr.Header:
-    //const stdout = std.io.getStdOut().writer();
-    //try response.jsonStringify(.{}, stdout);
-    //try stdout.writeAll("\n");
-    std.debug.print("{}\n", .{response});
-
-    assert(response.valid_checksum());
-    assert(recv_bytes >= response.size);
-
-    const response_body = recv[@sizeOf(Header)..response.size];
-    assert(response.valid_checksum_body(response_body));
-
-    for (std.mem.bytesAsSlice(Results, response_body)) |result| {
-        // TODO
-        //try result.jsonStringify(.{}, stdout);
-        //try stdout.writeAll("\n");
-        std.debug.print("{}\n", .{result});
+    pub fn on_lookup_accounts(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
+        print_results(Account, results);
     }
-}
+
+    pub fn on_create_transfers(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
+        print_results(CreateTransfersResult, results);
+    }
+
+    pub fn on_commit_transfers(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
+        print_results(CommitTransfersResult, results);
+    }
+
+    fn print_results(comptime Results: type, results: Client.Error![]const u8) void {
+        const body = results catch unreachable;
+        const slice = std.mem.bytesAsSlice(Results, body);
+        for (slice) |result| {
+            std.debug.print("{}\n", .{result});
+        }
+        if (slice.len == 0) std.debug.print("OK\n", .{});
+    }
+};

@@ -1,10 +1,10 @@
 # tigerbeetle
 
-*TigerBeetle is a purpose-built financial accounting database, designed for high-throughput low-latency two-phase prepare/commit transfers between accounts.*
+*TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
-Watch a video introduction of TigerBeetle given to the [Interledger](https://interledger.org/) community on 25 November 2020:
+Watch an introduction to TigerBeetle on [Zig SHOWTIME](https://www.youtube.com/watch?v=BH2jvJ74npM) for our design decisions regarding performance, safety, and financial accounting primitives:
 
-[![Interledger Community Call video on 25 November covering TigerBeetle](https://img.youtube.com/vi/J1OaBRTV2vs/0.jpg)](https://www.youtube.com/watch?v=J1OaBRTV2vs)
+[![A million financial transactions per second in Zig](https://img.youtube.com/vi/BH2jvJ74npM/0.jpg)](https://www.youtube.com/watch?v=BH2jvJ74npM)
 
 ## The Problem - Realtime Processing of Balance Updates
 
@@ -42,23 +42,23 @@ TigerBeetle's Zig implementation of io_uring was [submitted](https://github.com/
 
 **[Watch a presentation of TigerBeetle given to the Interledger community on 25 November 2020.](https://www.youtube.com/watch?v=J1OaBRTV2vs)**
 
-## BetaBeetle (under active development)
+## BetaBeetle - High availability
 
-The [beta version](https://github.com/coilhq/tigerbeetle/tree/beta2) of **TigerBeetle is now under active development** and [our design document](./docs/DESIGN.md) details our design decisions regarding performance and safety, and where we want to go regarding accounting features.
+BetaBeetle, the beta distributed version of TigerBeetle, was developed from January 2021 through August 2021, for strict serializability, fault tolerance and automated leader election with the pioneering [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus protocol, plus the CTRL protocol from [Protocol-Aware Recovery for Consensus-Based Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs).
+
+## TigerBeetle (under active development)
+
+The production version of **TigerBeetle is now under active development** and our [project board](https://github.com/coilhq/tigerbeetle/projects) provides a glimpse of where we want to go.
 
 ## QuickStart
 
-**Prerequisites:** The current beta version of TigerBeetle targets Linux and takes advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via [io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on recent versions of Linux with an updated kernel.
-
-Later portable versions of TigerBeetle may supplement `io_uring` with `kqueue` for macOS and FreeBSD support, or `IOCP` for Windows support.
+**Prerequisites:** The current beta version of TigerBeetle targets macOS and Linux and takes advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via [io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on macOS or on recent versions of Linux with an updated kernel.
 
 ```bash
 git clone https://github.com/coilhq/tigerbeetle.git
 cd tigerbeetle
 scripts/install.sh
 ```
-
-If you want to run Parallels on macOS on an M1 chip, we recommend the [server install image of Ubuntu 20.10 Groovy Gorilla for ARM64](https://releases.ubuntu.com/20.10/), which ships with Linux 5.8 and which will support installing Parallels Tools easily.
 
 ## Benchmark
 
@@ -75,9 +75,9 @@ scripts/benchmark.sh
 Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
 
 ```
-./tigerbeetle --cluster-id=0a5ca1ab1ebee11e --replica-addresses=3001,3002,3003 --replica-index=0
-./tigerbeetle --cluster-id=0a5ca1ab1ebee11e --replica-addresses=3001,3002,3003 --replica-index=1
-./tigerbeetle --cluster-id=0a5ca1ab1ebee11e --replica-addresses=3001,3002,3003 --replica-index=2
+./tigerbeetle --cluster=1 --addresses=3001,3002,3003 --replica=0
+./tigerbeetle --cluster=1 --addresses=3001,3002,3003 --replica=1
+./tigerbeetle --cluster=1 --addresses=3001,3002,3003 --replica=2
 ```
 
 Run the TigerBeetle binary to see all command line arguments:
