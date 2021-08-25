@@ -46,17 +46,18 @@ pub const IO = struct {
             }
         }.callback;
 
-        // Submit a timeout which sets the timed_out ptr value to true to terminate the loop 
-        const timed_out_ptr = &timed_out;
+        // Submit a timeout which sets the timed_out value to true to terminate the loop below.
         self.timeout(
             *bool,
-            timed_out_ptr,
+            &timed_out,
             on_timeout,
             &completion,
             nanoseconds,
         );
 
-        while (!(timed_out_ptr.*)) {
+        // Loop until our timeout completion is processed above, which sets timed_out to true.
+        // LLVM shouldn't be able to cache timed_out's value here since its address escapes above.
+        while (!timed_out) {
             try self.flush(true);
         }
     }
