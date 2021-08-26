@@ -227,6 +227,18 @@ pub fn Replica(
                 replica_count - quorum_replication + 1,
                 majority,
             );
+            // The view change quorum may be more expensive to make the replication quorum cheaper.
+            // The insight is that the replication phase is by far more common than the view change.
+            // This trade-off allows us to optimize for the common case.
+            // See the comments in `config.zig` for further explanation.
+            assert(quorum_view_change >= majority);
+
+            if (replica_count <= 2) {
+                assert(quorum_replication == replica_count);
+                assert(quorum_view_change == replica_count);
+            }
+
+            // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
             var client_table = ClientTable.init(allocator);
@@ -1123,11 +1135,10 @@ pub fn Replica(
             // We require a `nack_prepare` from a majority of followers if our op is faulty:
             // Otherwise, we know we do not have the op and need only `f` other nacks.
             assert(self.replica_count > 1);
-            // TODO Review these thresholds:
             const threshold = if (self.journal.faulty.bit(op))
-                self.quorum_replication
+                self.quorum_view_change
             else
-                self.quorum_replication - 1;
+                self.quorum_view_change - 1;
 
             // Wait until we have `threshold` messages for quorum:
             const count = self.add_message_and_receive_quorum_exactly_once(
@@ -1319,24 +1330,42 @@ pub fn Replica(
             message: *Message,
             threshold: u32,
         ) ?usize {
+            assert(threshold >= 1);
+            assert(threshold <= self.replica_count);
+
             assert(messages.len == config.replicas_max);
             assert(message.header.cluster == self.cluster);
             assert(message.header.replica < self.replica_count);
             assert(message.header.view == self.view);
             switch (message.header.command) {
                 .prepare_ok => {
+                    if (self.replica_count <= 2) assert(threshold == self.replica_count);
+
                     assert(self.status == .normal);
                     assert(self.leader());
                 },
-                .start_view_change => assert(self.status == .view_change),
-                .do_view_change, .nack_prepare => {
+                .start_view_change => {
+                    assert(self.replica_count > 1);
+                    if (self.replica_count == 2) assert(threshold == 1);
+
+                    assert(self.status == .view_change);
+                },
+                .do_view_change => {
+                    assert(self.replica_count > 1);
+                    if (self.replica_count == 2) assert(threshold == 2);
+
+                    assert(self.status == .view_change);
+                    assert(self.leader_index(self.view) == self.replica);
+                },
+                .nack_prepare => {
+                    assert(self.replica_count > 1);
+                    if (self.replica_count == 2) assert(threshold >= 1);
+
                     assert(self.status == .view_change);
                     assert(self.leader_index(self.view) == self.replica);
                 },
                 else => unreachable,
             }
-            assert(threshold >= 1);
-            assert(threshold <= self.replica_count);
 
             const command: []const u8 = @tagName(message.header.command);
 
