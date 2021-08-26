@@ -16,7 +16,7 @@ const output = std.log.scoped(.state_checker);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
-const log_state_transitions_only = true;
+const log_state_transitions_only = std.builtin.mode != .Debug;
 
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
@@ -32,7 +32,23 @@ pub fn main() !void {
     // Skip argv[0] which is the name of this executable:
     _ = args.nextPosix();
 
-    const seed = if (args.nextPosix()) |bytes| parse_seed(bytes) else std.crypto.random.int(u64);
+    const seed_random = std.crypto.random.int(u64);
+    const seed = if (args.nextPosix()) |bytes| parse_seed(bytes) else seed_random;
+
+    if (std.builtin.mode == .ReleaseFast or std.builtin.mode == .ReleaseSmall) {
+        // We do not support ReleaseFast or ReleaseSmall because they disable assertions.
+        @panic("the simulator must be run with -OReleaseSafe");
+    }
+
+    if (seed == seed_random) {
+        if (std.builtin.mode != .ReleaseSafe) {
+            // If no seed is provided, than Debug is too slow and ReleaseSafe is much faster.
+            @panic("no seed provided: the simulator must be run with -OReleaseSafe");
+        }
+        if (log_level == .debug) {
+            output.warn("no seed provided: full debug logs are enabled, this will be slow", .{});
+        }
+    }
 
     var prng = std.rand.DefaultPrng.init(seed);
     const random = &prng.random;
