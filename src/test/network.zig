@@ -105,6 +105,11 @@ pub const Network = struct {
     pub fn send_message(network: *Network, message: *Message, path: Path) void {
         // TODO: we want to unref this message at some point between send()
         // and recv() for better realism.
+        log.debug("send_message: {} > {}: {}", .{
+            path.source,
+            path.target,
+            message.header.command,
+        });
         network.packet_simulator.submit_packet(
             .{
                 .message = message.ref(),
@@ -135,7 +140,7 @@ pub const Network = struct {
         const target_bus = &network.busses.items[path.target];
 
         const message = target_bus.get_message() orelse {
-            log.notice("deliver_message: target message bus has no free messages, dropping", .{});
+            log.debug("deliver_message: target message bus has no free messages, dropping", .{});
             return;
         };
         defer target_bus.unref(message);
@@ -146,6 +151,12 @@ pub const Network = struct {
             .source = raw_process_to_process(network.processes.items[path.source]),
             .target = raw_process_to_process(network.processes.items[path.target]),
         };
+
+        log.debug("deliver_message: {} > {}: {}", .{
+            process_path.source,
+            process_path.target,
+            packet.message.header.command,
+        });
 
         if (message.header.command == .request or message.header.command == .prepare) {
             const sector_ceil = vr.sector_ceil(message.header.size);
