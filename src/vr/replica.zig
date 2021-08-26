@@ -2371,6 +2371,11 @@ pub fn Replica(
         /// Since we work backwards from the latest entry, we should always be able to fix the chain.
         /// Once headers are connected, backfill any dirty or faulty prepares.
         fn repair(self: *Self) void {
+            if (!self.repair_timeout.ticking) {
+                log.debug("{}: repair: ignoring (optimistic, not ticking)", .{self.replica});
+                return;
+            }
+
             self.repair_timeout.reset();
 
             assert(self.status == .normal or self.status == .view_change);
@@ -3861,8 +3866,6 @@ pub fn Replica(
                 .append => {},
                 // If this was a repair, continue immediately to repair the next prepare:
                 // This is an optimization to eliminate waiting until the next repair timeout.
-                // TODO: this should only happen during certain times (e.g. a
-                // view change), we don't yet check this.
                 .repair => self.repair(),
             }
         }
