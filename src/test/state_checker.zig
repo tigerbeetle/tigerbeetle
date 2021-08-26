@@ -121,4 +121,22 @@ pub const StateChecker = struct {
 
         @panic("replica transitioned to an invalid state");
     }
+
+    pub fn convergence(state_checker: *StateChecker) bool {
+        const cluster = @fieldParentPtr(Cluster, "state_checker", state_checker);
+
+        const a = state_checker.state_machine_states[0];
+        for (state_checker.state_machine_states[1..cluster.options.replica_count]) |b| {
+            if (b != a) return false;
+        }
+
+        const transitions_executed = state_checker.history.get(a).?;
+        if (transitions_executed < state_checker.transitions) {
+            @panic("cluster reached convergence but on a regressed state");
+        } else {
+            assert(transitions_executed == state_checker.transitions);
+        }
+
+        return true;
+    }
 };

@@ -44,7 +44,7 @@ pub fn main() !void {
     const transitions_max = config.journal_size_max / config.message_size_max;
     const request_probability = 1 + prng.random.uintLessThan(u8, 99);
     const idle_on_probability = prng.random.uintLessThan(u8, 20);
-    const idle_off_probability = 1 + prng.random.uintLessThan(u8, 10);
+    const idle_off_probability = 10 + prng.random.uintLessThan(u8, 10);
 
     cluster = try Cluster.create(allocator, &prng.random, .{
         .cluster = 0,
@@ -105,9 +105,11 @@ pub fn main() !void {
         cluster.options.network_options.packet_simulator_options.packet_replay_probability,
     });
 
+    var requests_sent: u64 = 0;
     var idle = false;
+
     var tick: u64 = 0;
-    while (tick < ticks_max and cluster.state_checker.transitions < transitions_max) : (tick += 1) {
+    while (tick < ticks_max) : (tick += 1) {
         for (cluster.replicas) |*replica, i| {
             replica.tick();
             cluster.state_checker.check_state(@intCast(u8, i));
@@ -117,17 +119,30 @@ pub fn main() !void {
 
         for (cluster.clients) |*client| client.tick();
 
-        if (idle) {
-            if (chance(random, idle_off_probability)) idle = false;
+        if (cluster.state_checker.transitions == transitions_max) {
+            if (cluster.state_checker.convergence()) break;
+            continue;
         } else {
-            if (chance(random, request_probability)) maybe_send_random_request(random);
-            if (chance(random, idle_on_probability)) idle = true;
+            assert(cluster.state_checker.transitions < transitions_max);
+        }
+
+        if (requests_sent < transitions_max) {
+            if (idle) {
+                if (chance(random, idle_off_probability)) idle = false;
+            } else {
+                if (chance(random, request_probability)) {
+                    if (send_request(random)) requests_sent += 1;
+                }
+                if (chance(random, idle_on_probability)) idle = true;
+            }
         }
     }
 
     if (cluster.state_checker.transitions < transitions_max) {
-        @panic("unable to complete transitions before ticks_max");
+        @panic("unable to complete transitions_max before ticks_max");
     }
+
+    assert(cluster.state_checker.convergence());
 
     logger.info("\n          PASSED", .{});
 }
@@ -143,7 +158,7 @@ fn on_change_replica(replica: *Replica) void {
     cluster.state_checker.check_state(replica.replica);
 }
 
-fn maybe_send_random_request(random: *std.rand.Random) void {
+fn send_request(random: *std.rand.Random) bool {
     const client_index = random.uintLessThan(u8, cluster.options.client_count);
 
     const client = &cluster.clients[client_index];
@@ -151,10 +166,10 @@ fn maybe_send_random_request(random: *std.rand.Random) void {
 
     // Ensure that we don't shortchange testing of the full client request queue length:
     assert(client.request_queue.buffer.len <= checker_request_queue.buffer.len);
-    if (client.request_queue.full()) return;
-    if (checker_request_queue.full()) return;
+    if (client.request_queue.full()) return false;
+    if (checker_request_queue.full()) return false;
 
-    const message = client.get_message() orelse return;
+    const message = client.get_message() orelse return false;
     defer client.unref(message);
 
     const body_size_max = config.message_size_max - @sizeOf(Header);
@@ -177,6 +192,8 @@ fn maybe_send_random_request(random: *std.rand.Random) void {
     checker_request_queue.push(StateMachine.hash(client.id, body)) catch unreachable;
 
     client.request(0, client_callback, .hash, message, body_size);
+
+    return true;
 }
 
 fn client_callback(
