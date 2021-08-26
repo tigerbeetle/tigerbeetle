@@ -501,7 +501,7 @@ pub fn Replica(
             assert(message.header.view <= self.view); // The client's view may be behind ours.
 
             const realtime = self.clock.realtime_synchronized() orelse {
-                log.debug("{}: on_request: dropping (clock not synchronized)", .{self.replica});
+                log.alert("{}: on_request: dropping (clock not synchronized)", .{self.replica});
                 return;
             };
 
@@ -960,7 +960,7 @@ pub fn Replica(
             assert(self.leader());
 
             const start_view = self.create_view_change_message(.start_view) orelse {
-                log.debug("{}: on_request_start_view: dropping start_view, no message available", .{
+                log.alert("{}: on_request_start_view: dropping start_view, no message available", .{
                     self.replica,
                 });
                 return;
@@ -1044,7 +1044,7 @@ pub fn Replica(
             assert(message.header.replica != self.replica);
 
             const response = self.message_bus.get_message() orelse {
-                log.debug("{}: on_request_headers: dropping response, no message available", .{
+                log.alert("{}: on_request_headers: dropping response, no message available", .{
                     self.replica,
                 });
                 return;
@@ -1528,7 +1528,7 @@ pub fn Replica(
 
             // TODO We can optimize this to commit into the client table reply if it exists.
             const reply = self.message_bus.get_message() orelse {
-                log.info("{}: commit_ops_commit: waiting for message", .{self.replica});
+                log.alert("{}: commit_ops_commit: waiting for message", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(reply);
@@ -1634,7 +1634,7 @@ pub fn Replica(
 
                 // TODO We can optimize this to commit into the client table reply if it exists.
                 const reply = self.message_bus.get_message() orelse {
-                    log.info("{}: commit_pipeline: waiting for message", .{self.replica});
+                    log.alert("{}: commit_pipeline: waiting for message", .{self.replica});
                     return;
                 };
                 defer self.message_bus.unref(reply);
@@ -3126,7 +3126,7 @@ pub fn Replica(
             assert(count_start_view_change >= self.quorum_view_change - 1);
 
             const message = self.create_view_change_message(.do_view_change) orelse {
-                log.warn("{}: send_do_view_change: waiting for message", .{self.replica});
+                log.alert("{}: send_do_view_change: waiting for message", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(message);
@@ -3451,7 +3451,7 @@ pub fn Replica(
             assert(self.nack_prepare_op == null);
 
             const start_view = self.create_view_change_message(.start_view) orelse {
-                log.warn("{}: start_view_as_the_new_leader: waiting for message", .{self.replica});
+                log.alert("{}: start_view_as_the_new_leader: waiting for message", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(start_view);
