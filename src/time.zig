@@ -55,7 +55,7 @@ pub const Time = struct {
     pub fn realtime(self: *Self) i64 {
         // macos has supported clock_gettime() since 10.12:
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
-        
+
         var ts: std.os.timespec = undefined;
         std.os.clock_gettime(std.os.CLOCK_REALTIME, &ts) catch unreachable;
         return @as(i64, ts.tv_sec) * std.time.ns_per_s + ts.tv_nsec;

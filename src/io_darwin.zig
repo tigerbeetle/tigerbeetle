@@ -66,7 +66,7 @@ pub const IO = struct {
         var io_pending = self.io_pending.peek();
         var events: [256]os.Kevent = undefined;
 
-        // Check timeouts and fill events with completions in io_pending 
+        // Check timeouts and fill events with completions in io_pending
         // (they will be submitted through kevent).
         // Timeouts are expired here and possibly pushed to the completed queue.
         const next_timeout = self.flush_timeouts();
@@ -89,7 +89,7 @@ pub const IO = struct {
             }
 
             const new_events = try os.kevent(
-                self.kq, 
+                self.kq,
                 events[0..change_events],
                 events[0..events.len],
                 &ts,
@@ -140,7 +140,7 @@ pub const IO = struct {
         }
         return events.len;
     }
-    
+
     fn flush_timeouts(self: *IO) ?u64 {
         var min_timeout: ?u64 = null;
         var timeouts: ?*Completion = self.timeouts.peek();
@@ -150,8 +150,8 @@ pub const IO = struct {
             // NOTE: We could cache `now` above the loop but monotonic() should be cheap to call.
             const now = self.time.monotonic();
             const expires = completion.operation.timeout.expires;
-            
-            // NOTE: remove() could be O(1) here with a doubly-linked-list 
+
+            // NOTE: remove() could be O(1) here with a doubly-linked-list
             // since we know the previous Completion.
             if (now >= expires) {
                 self.timeouts.remove(completion);
@@ -173,7 +173,7 @@ pub const IO = struct {
     pub const Completion = struct {
         next: ?*Completion,
         context: ?*c_void,
-        callback: fn(*IO, *Completion) void,
+        callback: fn (*IO, *Completion) void,
         operation: Operation,
     };
 
@@ -257,7 +257,7 @@ pub const IO = struct {
                             else => {},
                         };
                     },
-                    else => {}
+                    else => {},
                 }
 
                 // Complete the Completion
@@ -374,7 +374,7 @@ pub const IO = struct {
             context,
             callback,
             completion,
-            .connect, 
+            .connect,
             .{
                 .socket = socket,
                 .address = address,
@@ -388,7 +388,7 @@ pub const IO = struct {
                         true => os.getsockoptError(op.socket),
                         else => os.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
                     };
-                    
+
                     op.initiated = true;
                     return result;
                 }
@@ -530,7 +530,7 @@ pub const IO = struct {
                 fn doOperation(op: anytype) ReadError!usize {
                     while (true) {
                         const rc = os.system.pread(
-                            op.fd, 
+                            op.fd,
                             op.buf,
                             op.len,
                             @bitCast(isize, op.offset),

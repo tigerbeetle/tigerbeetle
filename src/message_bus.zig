@@ -216,7 +216,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
             // Set tcp no-delay
             if (config.tcp_nodelay) {
-                const TCP_NODELAY: ?u32 = if (@hasDecl(os, "TCP_NODELAY")) 
+                const TCP_NODELAY: ?u32 = if (@hasDecl(os, "TCP_NODELAY"))
                     @as(u32, os.TCP_NODELAY)
                 else if (is_darwin)
                     @as(u32, 1)
