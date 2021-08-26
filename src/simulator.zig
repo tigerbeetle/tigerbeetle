@@ -136,8 +136,6 @@ pub fn main() !void {
                 }
                 if (chance(random, idle_on_probability)) idle = true;
             }
-        } else {
-            output.warn("all requests sent", .{});
         }
     }
 
