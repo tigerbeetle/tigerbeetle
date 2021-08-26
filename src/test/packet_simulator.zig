@@ -150,7 +150,10 @@ pub fn PacketSimulator(comptime Packet: type) type {
                 var to: u8 = 0;
                 while (to < self.options.node_count) : (to += 1) {
                     const path = .{ .source = from, .target = to };
-                    if (self.is_clogged(path)) continue;
+                    if (self.is_clogged(path)) {
+                        log.debug("clogged path={}", .{path});
+                        continue;
+                    }
 
                     const queue = self.path_queue(path);
                     while (queue.peek()) |*data| {
@@ -172,6 +175,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
 
                             data.callback(data.packet, path);
                         } else {
+                            log.debug("delivering packet from={} to={}", .{ from, to });
                             data.callback(data.packet, path);
                             data.packet.deinit(path);
                         }
@@ -180,6 +184,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
                     const reverse_path: Path = .{ .source = to, .target = from };
 
                     if (self.should_clog(reverse_path)) {
+                        log.debug("reverse path clogged", .{});
                         var ticks = self.options.path_clog_duration_mean *
                             @floatToInt(u64, self.prng.random.floatExp(f64));
 
