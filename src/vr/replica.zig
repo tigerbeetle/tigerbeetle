@@ -673,8 +673,10 @@ pub fn Replica(
             assert(!prepare.ok_quorum_received);
             prepare.ok_quorum_received = true;
 
-            log.debug("{}: on_prepare_ok: quorum received", .{self.replica});
-            // TODO Improve logging.
+            log.debug("{}: on_prepare_ok: quorum received, context={}", .{
+                self.replica,
+                prepare.message.header.checksum,
+            });
 
             self.commit_pipeline();
         }
@@ -1233,6 +1235,17 @@ pub fn Replica(
             const prepare = self.pipeline.peek_ptr().?;
             assert(prepare.message.header.command == .prepare);
 
+            if (prepare.ok_quorum_received) {
+                self.prepare_timeout.reset();
+
+                // We were unable to commit at the time because we were waiting for a message.
+                log.debug("{}: on_prepare_timeout: quorum already received, retrying commit", .{
+                    self.replica,
+                });
+                self.commit_pipeline();
+                return;
+            }
+
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [config.replicas_max]u8 = undefined;
             var waiting_len: usize = 0;
@@ -1256,6 +1269,7 @@ pub fn Replica(
             assert(waiting_len <= self.replica_count);
             for (waiting[0..waiting_len]) |replica| {
                 assert(replica < self.replica_count);
+
                 log.debug("{}: on_prepare_timeout: waiting for replica {}", .{
                     self.replica,
                     replica,
@@ -1650,6 +1664,7 @@ pub fn Replica(
                 assert(self.commit_max + 1 == prepare.message.header.op);
 
                 if (!prepare.ok_quorum_received) {
+                    // Eventually handled by on_prepare_timeout().
                     log.debug("{}: commit_pipeline: waiting for quorum", .{self.replica});
                     return;
                 }
@@ -1663,6 +1678,7 @@ pub fn Replica(
 
                 // TODO We can optimize this to commit into the client table reply if it exists.
                 const reply = self.message_bus.get_message() orelse {
+                    // Eventually handled by on_prepare_timeout().
                     log.alert("{}: commit_pipeline: waiting for message", .{self.replica});
                     return;
                 };
