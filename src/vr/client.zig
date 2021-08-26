@@ -134,6 +134,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             switch (message.header.command) {
                 .pong => self.on_pong(message),
                 .reply => self.on_reply(message),
+                .eviction => self.on_eviction(message),
                 else => {
                     // This could be because of a misdirected packet.
                     log.warn(
@@ -212,6 +213,33 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         /// Releases a message back to the message bus.
         pub fn unref(self: *Self, message: *Message) void {
             self.message_bus.unref(message);
+        }
+
+        fn on_eviction(self: *Self, eviction: *const Message) void {
+            assert(eviction.header.command == .eviction);
+            assert(eviction.header.cluster == self.cluster);
+
+            if (eviction.header.client != self.id) {
+                log.warn("{}: on_eviction: ignoring (wrong client={})", .{
+                    self.id,
+                    eviction.header.client,
+                });
+                return;
+            }
+
+            if (eviction.header.view < self.view) {
+                log.debug("{}: on_eviction: ignoring (older view={})", .{
+                    self.id,
+                    eviction.header.view,
+                });
+                return;
+            }
+
+            assert(eviction.header.client == self.id);
+            assert(eviction.header.view >= self.view);
+
+            log.emerg("{}: session evicted: too many concurrent client sessions", .{self.id});
+            @panic("session evicted: too many concurrent client sessions");
         }
 
         fn on_pong(self: *Self, pong: *const Message) void {
