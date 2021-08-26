@@ -11,7 +11,8 @@ const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StateMachine = @import("test/cluster.zig").StateMachine;
 
-const logger = std.log.scoped(.state_checker);
+/// The `log` namespace in this root file is required to implement our custom `log` function.
+const output = std.log.scoped(.state_checker);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
@@ -74,7 +75,7 @@ pub fn main() !void {
         replica.on_change_state = on_change_replica;
     }
 
-    logger.info("\n" ++
+    output.info("\n" ++
         "          SEED={}\n\n" ++
         "          replicas={}\n" ++
         "          clients={}\n" ++
@@ -135,16 +136,19 @@ pub fn main() !void {
                 }
                 if (chance(random, idle_on_probability)) idle = true;
             }
+        } else {
+            output.warn("all requests sent", .{});
         }
     }
 
     if (cluster.state_checker.transitions < transitions_max) {
+        output.emerg("you can reproduce this failure with seed={}", .{seed});
         @panic("unable to complete transitions_max before ticks_max");
     }
 
     assert(cluster.state_checker.convergence());
 
-    logger.info("\n          PASSED", .{});
+    output.info("\n          PASSED", .{});
 }
 
 /// Returns true, `p` percent of the time, else false.
