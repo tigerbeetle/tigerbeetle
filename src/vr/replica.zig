@@ -1746,7 +1746,7 @@ pub fn Replica(
                     }
                 }
                 assert(iterated == clients);
-                log.notice("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
+                log.alert("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
                     self.replica,
                     clients,
                     config.clients_max,
@@ -3141,6 +3141,24 @@ pub fn Replica(
             self.send_message_to_replica(self.leader_index(self.view), message);
         }
 
+        fn send_eviction_message_to_client(self: *Self, client: u128) void {
+            assert(self.status == .normal);
+            assert(self.leader());
+
+            log.alert("{}: too many sessions, sending eviction message to client={}", .{
+                self.replica,
+                client,
+            });
+
+            self.send_header_to_client(client, .{
+                .command = .eviction,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .client = client,
+            });
+        }
+
         fn send_header_to_client(self: *Self, client: u128, header: Header) void {
             const message = self.create_message_from_header(header) orelse {
                 log.alert("{}: no header-only message available, dropping message to client {}", .{
@@ -3182,11 +3200,6 @@ pub fn Replica(
             defer self.message_bus.unref(message);
 
             self.send_message_to_replica(replica, message);
-        }
-
-        fn send_eviction_message_to_client(self: *Self, client: u128) void {
-            // TODO
-            @panic("received more than config.clients_max connections");
         }
 
         fn send_message_to_other_replicas(self: *Self, message: *Message) void {
