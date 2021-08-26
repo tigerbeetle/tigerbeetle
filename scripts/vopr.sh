@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -e
-for I in {1..100}
-do
-    zig/zig run src/simulator.zig -OReleaseSafe
-done
+if [ "$1" ]; then
+    echo "Running the simulator in debug mode with full debug logging enabled..."
+    echo ""
+    zig/zig run src/simulator.zig -ODebug -- $1
+else
+    for I in {1..1000}
+    do
+        zig/zig run src/simulator.zig -OReleaseSafe
+    done
+fi

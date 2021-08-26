@@ -224,8 +224,8 @@ fn client_callback(
 
 fn parse_seed(bytes: []const u8) u64 {
     return std.fmt.parseUnsigned(u64, bytes, 10) catch |err| switch (err) {
-        error.Overflow => @panic("--seed: value exceeds a 64-bit unsigned integer"),
-        error.InvalidCharacter => @panic("--seed: value contains an invalid character"),
+        error.Overflow => @panic("seed exceeds a 64-bit unsigned integer"),
+        error.InvalidCharacter => @panic("seed contains an invalid character"),
     };
 }
 
