@@ -145,17 +145,50 @@ pub fn Clock(comptime Time: type) type {
             if (self.synchronization_disabled) return;
 
             // A network routing fault must have replayed one of our outbound messages back against us:
-            if (replica == self.replica) return;
+            if (replica == self.replica) {
+                log.warn("{}: learn: replica == self.replica", .{self.replica});
+                return;
+            }
 
-            // Our m0 and m2 readings should always be monotonically increasing.
+            // Our m0 and m2 readings should always be monotonically increasing if not equal.
+            // Crucially, it is possible for a very fast network to have m0 == m2, especially where
+            // `config.tick_ms` is at a more course granularity. We must therefore tolerate RTT=0 or
+            // otherwise we would have a liveness bug simply because we would be throwing away
+            // perfectly good clock samples.
             // This condition should never be true. Reject this as a bad sample:
-            if (m0 >= m2) return;
+            if (m0 > m2) {
+                log.warn("{}: learn: m0={} > m2={}", .{ self.replica, m0, m2 });
+                return;
+            }
 
             // We may receive delayed packets after a reboot, in which case m0/m2 may be invalid:
-            if (m0 < self.window.monotonic) return;
-            if (m2 < self.window.monotonic) return;
+            if (m0 < self.window.monotonic) {
+                log.warn("{}: learn: m0={} < window.monotonic={}", .{
+                    self.replica,
+                    m0,
+                    self.window.monotonic,
+                });
+                return;
+            }
+
+            if (m2 < self.window.monotonic) {
+                log.warn("{}: learn: m2={} < window.monotonic={}", .{
+                    self.replica,
+                    m2,
+                    self.window.monotonic,
+                });
+                return;
+            }
+
             const elapsed: u64 = m2 - self.window.monotonic;
-            if (elapsed > window_max) return;
+            if (elapsed > window_max) {
+                log.warn("{}: learn: elapsed={} > window_max={}", .{
+                    self.replica,
+                    elapsed,
+                    window_max,
+                });
+                return;
+            }
 
             const round_trip_time: u64 = m2 - m0;
             const one_way_delay: u64 = round_trip_time / 2;
@@ -168,8 +201,9 @@ pub fn Clock(comptime Time: type) type {
             );
             const clock_offset_corrected = clock_offset + asymmetric_delay;
 
-            log.debug("learn: replica={} m0={} t1={} m2={} t2={} one_way_delay={} " ++
+            log.debug("{}: learn: replica={} m0={} t1={} m2={} t2={} one_way_delay={} " ++
                 "asymmetric_delay={} clock_offset={}", .{
+                self.replica,
                 replica,
                 m0,
                 t1,
@@ -181,10 +215,13 @@ pub fn Clock(comptime Time: type) type {
             });
 
             // The less network delay, the more likely we have an accurante clock offset measurement:
-            self.window.sources[replica] = minimum_one_way_delay(self.window.sources[replica], Sample{
-                .clock_offset = clock_offset_corrected,
-                .one_way_delay = one_way_delay,
-            });
+            self.window.sources[replica] = minimum_one_way_delay(
+                self.window.sources[replica],
+                Sample{
+                    .clock_offset = clock_offset_corrected,
+                    .one_way_delay = one_way_delay,
+                },
+            );
 
             self.window.samples += 1;
 
@@ -231,9 +268,12 @@ pub fn Clock(comptime Time: type) type {
             if (self.synchronization_disabled) return;
             self.synchronize();
             // Expire the current epoch if successive windows failed to synchronize:
-            // Gradual clock drift prevents us from using an epoch for more than a few tens of seconds.
+            // Gradual clock drift prevents us from using an epoch for more than a few seconds.
             if (self.epoch.elapsed(self) >= epoch_max) {
-                log.alert("no agreement on cluster time (partitioned or too many clock faults)", .{});
+                log.alert(
+                    "{}: no agreement on cluster time (partitioned or too many clock faults)",
+                    .{self.replica},
+                );
                 self.epoch.reset(self);
             }
         }
@@ -246,6 +286,8 @@ pub fn Clock(comptime Time: type) type {
             one_way_delay: u64,
             clock_offset: i64,
         ) i64 {
+            // Note that `one_way_delay` may be 0 for very fast networks.
+
             const error_margin = 10 * std.time.ns_per_ms;
 
             if (self.epoch.sources[replica]) |epoch| {
@@ -275,12 +317,14 @@ pub fn Clock(comptime Time: type) type {
                 // We took too long to synchronize the window, expire stale samples...
                 const sources_sampled = self.window.sources_sampled();
                 if (sources_sampled <= @divTrunc(self.window.sources.len, 2)) {
-                    log.crit("synchronization window failed, partitioned (sources={} samples={})", .{
+                    log.crit("{}: synchronization failed, partitioned (sources={} samples={})", .{
+                        self.replica,
                         sources_sampled,
                         self.window.samples,
                     });
                 } else {
-                    log.crit("synchronization window failed, no agreement (sources={} samples={})", .{
+                    log.crit("{}: synchronization failed, no agreement (sources={} samples={})", .{
+                        self.replica,
                         sources_sampled,
                         self.window.samples,
                     });
@@ -326,7 +370,7 @@ pub fn Clock(comptime Time: type) type {
         fn after_synchronization(self: *Self) void {
             const new_interval = self.epoch.synchronized.?;
 
-            log.info("replica={} synchronized: truechimers={}/{} clock_offset={}..{} accuracy={}", .{
+            log.debug("{}: synchronized: truechimers={}/{} clock_offset={}..{} accuracy={}", .{
                 self.replica,
                 new_interval.sources_true,
                 self.epoch.sources.len,
@@ -344,12 +388,12 @@ pub fn Clock(comptime Time: type) type {
             if (system == cluster) {} else if (system < lower) {
                 const delta = lower - system;
                 if (delta < std.time.ns_per_ms) {
-                    log.info("replica={} system time is {} behind", .{
+                    log.info("{}: system time is {} behind", .{
                         self.replica,
                         fmtDurationSigned(delta),
                     });
                 } else {
-                    log.err("replica={} system time is {} behind, clamping system time to cluster time", .{
+                    log.err("{}: system time is {} behind, clamping system time to cluster time", .{
                         self.replica,
                         fmtDurationSigned(delta),
                     });
@@ -357,12 +401,12 @@ pub fn Clock(comptime Time: type) type {
             } else {
                 const delta = system - upper;
                 if (delta < std.time.ns_per_ms) {
-                    log.info("replica={} system time is {} ahead", .{
+                    log.info("{}: system time is {} ahead", .{
                         self.replica,
                         fmtDurationSigned(delta),
                     });
                 } else {
-                    log.err("replica={} system time is {} ahead, clamping system time to cluster time", .{
+                    log.err("{}: system time is {} ahead, clamping system time to cluster time", .{
                         self.replica,
                         fmtDurationSigned(delta),
                     });
