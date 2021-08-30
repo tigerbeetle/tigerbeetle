@@ -157,7 +157,7 @@ export type Result = CreateAccountsError | CreateTransfersError | CommitTransfer
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export enum Operation {
-  CREATE_ACCOUNT = 2,
+  CREATE_ACCOUNT = 3,
   CREATE_TRANSFER,
   COMMIT_TRANSFER,
   ACCOUNT_LOOKUP
