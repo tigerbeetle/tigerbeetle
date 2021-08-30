@@ -2107,6 +2107,14 @@ pub fn Replica(
             } else if (message.header.operation == .register) {
                 log.debug("{}: on_request: new session", .{self.replica});
                 return false;
+            } else if (self.pipeline_prepare_for_client(message.header.client)) |_| {
+                // The client registered with the previous leader, which committed and replied back
+                // to the client before the view change, after which the register operation was
+                // reloaded into the pipeline to be driven to completion by the new leader, which
+                // now receives a request from the client that appears to have no session.
+                // However, the session is about to be registered, so we must wait for it to commit.
+                log.debug("{}: on_request: waiting for session to commit", .{self.replica});
+                return true;
             } else {
                 // We must have all commits to know whether a session has been evicted. For example,
                 // there is the risk of sending an eviction message (even as the leader) if we are
@@ -2332,6 +2340,8 @@ pub fn Replica(
                 assert(prepare.message.header.op == op);
                 assert(prepare.message.header.parent == parent);
 
+                // A client may have multiple requests in the pipeline if these were committed by
+                // the previous leader and were reloaded into the pipeline after a view change.
                 if (prepare.message.header.client == client) return prepare;
 
                 parent = prepare.message.header.checksum;
