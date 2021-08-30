@@ -38,7 +38,7 @@
     "benchmark": "./scripts/benchmark.sh",
     "build": "yarn build:tsc && yarn build:zig",
     "build:tsc": "tsc",
-    "build:zig": "mkdir -p dist &&  zig/zig build-lib -OReleaseSafe -dynamic -lc -isystem build/node-$(node --version)/include/node src/node.zig -femit-bin=dist/client.node",
+    "build:zig": "mkdir -p dist && zig/zig build-lib -OReleaseSafe -dynamic -lc -isystem build/node-$(node --version)/include/node src/node.zig -femit-bin=dist/client.node",
     "clean": "rm -rf build dist node_modules src/zig-cache zig",
     "install:zig": "./src/tigerbeetle/scripts/install_zig.sh",
     "postinstall": "./scripts/postinstall.sh",
