@@ -48,7 +48,7 @@ BetaBeetle, the beta distributed version of TigerBeetle, was developed from Janu
 
 ## TigerBeetle (under active development)
 
-The production version of **TigerBeetle is now under active development**. Our [design doc](docs/design.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/coilhq/tigerbeetle/projects) provides a glimpse of where we want to go.
+The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/coilhq/tigerbeetle/projects) provides a glimpse of where we want to go.
 
 ## QuickStart
 
