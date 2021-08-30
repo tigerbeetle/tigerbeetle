@@ -1,12 +1,12 @@
 # Design Document
 
-This is a living document that keeps a (best effort) record of the design decisions behind TigerBeetle, a clustered accounting database. TigerBeetle is under active development. These design components are in various stages of completion and iteration cycle.
+This is a living document that keeps a (best effort) record of the design decisions behind TigerBeetle, a distributed financial accounting database. TigerBeetle is under active development. These design components are in various stages of completion and iteration cycle.
 
 ## Mission
 
 **We want to make it easy for others to build the next generation of financial services and applications without having to cobble together an accounting or ledger system of record from scratch.**
 
-We are implementing the latest research and technology to deliver unprecedented safety, durability and performance while reducing operational cost by orders of magnitude and providing a fantastic developer experience.
+TigerBeetle implements the latest research and technology to deliver unprecedented safety, durability and performance while reducing operational cost by orders of magnitude and providing a fantastic developer experience.
 
 ## Safety
 
@@ -16,17 +16,17 @@ TigerBeetle is designed to a higher safety standard than a general-purpose relat
 
 * TigerBeetle **detects and repairs disk corruption** ([3.45% per 32 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), **detects and repairs misdirected writes** where the disk firmware writes to the wrong sector ([0.042% per 17 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), and **prevents data tampering** with hash-chained cryptographic checksums.
 
-* TigerBeetle **uses Direct I/O** to avoid cache coherency bugs in the kernel page cache after an EIO fsync error.
+* TigerBeetle **uses Direct I/O by design** to side step cache coherency bugs in the kernel page cache after an EIO fsync error.
 
-* TigerBeetle **exceeds the fsync durability of a single disk** and the hardware of a single server because disk firmware can have bugs and because single server systems fail all the time.
+* TigerBeetle **exceeds the fsync durability of a single disk** and the hardware of a single server because disk firmware can contain bugs and because single server systems fail.
 
-* TigerBeetle **provides strict serializability**, the gold standard of consistency, as a replicated state machine, and as a cluster of TigerBeetle servers, for fault-tolerance.
+* TigerBeetle **provides strict serializability**, the gold standard of consistency, as a replicated state machine, and as a cluster of TigerBeetle servers (called replicas), for optimal high availability and distributed fault-tolerance.
 
-* TigerBeetle **performs synchronous replication** to a quorum of TigerBeetle servers using [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf), a distributed consensus protocol and member of the Multi-Paxos family, to handle automated leader election and eliminate split brain.
+* TigerBeetle **performs synchronous replication** to a quorum of TigerBeetle servers using the pioneering [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus protocol, for low-latency automated leader election and to eliminate the risk of split brain associated with manual failover.
 
-* TigerBeetle is “fault-aware” and **recovers from local storage failures in the context of the global consensus protocol**, providing [more safety than replicated state machines such as ZooKeeper and LogCabin](https://www.youtube.com/watch?v=fDY6Wi0GcPs). For example, TigerBeetle disentangles corruption in the middle of the journal caused by bitrot from torn writes at the end of the journal caused by power failure.
+* TigerBeetle is “fault-aware” and **recovers from local storage failures in the context of the global consensus protocol**, providing [more safety than replicated state machines such as ZooKeeper and LogCabin](https://www.youtube.com/watch?v=fDY6Wi0GcPs). For example, TigerBeetle can disentangle corruption in the middle of the committed journal (caused by bitrot) from torn writes at the end of the journal (caused by power failure) to uphold durability guarantees given for committed data and maximize availability.
 
-* TigerBeetle does not depend on synchronized system clocks, does not use leader leases, and **performs leader-based timestamping** so that your application can deal only with safe relative quantities of time with respect to transfer timeouts.
+* TigerBeetle does not depend on synchronized system clocks, does not use leader leases, and **performs leader-based timestamping** so that your application can deal only with safe relative quantities of time with respect to transfer timeouts. To ensure that the leader's clock is within safe bounds of "true time", TigerBeetle combines all the clocks in the cluster to create a fault-tolerant clock that we call ["cluster time"](https://www.tigerbeetle.com/post/three-clocks-are-better-than-one).
 
 ## Performance
 
@@ -34,27 +34,27 @@ TigerBeetle provides more performance than a general-purpose relational database
 
 * TigerBeetle **uses small, simple fixed-size data structures** (accounts and transfers) and a tightly scoped domain.
 
-* TigerBeetle **performs all balance tracking logic in the database**. This is a paradigm shift where we move the code once to the data, not the data back and forth to the code in the critical path, and this eliminates the need for complicated caching logic outside the database. The “Accounting” business logic is built in to TigerBeetle so that you can keep your application layer simple, and completely stateless.
+* TigerBeetle **performs all balance tracking logic in the database**. This is a paradigm shift where we move the code once to the data, not the data back and forth to the code in the critical path. This eliminates the need for complex caching logic outside the database. The “Accounting” business logic is built in to TigerBeetle so that you can **keep your application layer simple, and completely stateless**.
 
 * TigerBeetle **supports batching by design**. You can batch all the transfer prepares or commits that you receive in a fixed 10ms window (or in a dynamic 1ms through 10ms window according to load) and then send them all in a single network request to the database. This enables low-overhead networking, large sequential disk write patterns and amortized fsync and consensus across hundreds and thousands of transfers.
 
-> Everything is a batch. It's your choice whether a batch contains 100 transfers or 10,000 transfers but our early measurements show that latency is also better for the latter. 50ms for a hundred transfers vs 20ms for ten thousand, thanks to Little's Law. TigerBeetle is able to amortize the cost of I/O for increasing latency returns, even for fairly large batch sizes, by avoiding the worse queueing delay cost incurred by small batches.
+> Everything is a batch. It's your choice whether a batch contains 100 transfers or 10,000 transfers but our measurements show that **latency is _less_ where batch sizes are larger, thanks to Little's Law** (e.g. 50ms for a batch of a hundred transfers vs 20ms for a batch of ten thousand transfers). TigerBeetle is able to amortize the cost of I/O to achieve lower latency, even for fairly large batch sizes, by eliminating the cost of queueing delay incurred by small batches.
 
-* However, even if your system is not under load, TigerBeetle **optimizes the latency of small batches**. After copying from the kernel's TCP receive buffer (TigerBeetle does not do user-space TCP), TigerBeetle **does zero-copy Direct I/O** from network protocol to disk, to state machine and back, primarily to reduce memory pressure and avoid L1-L3 cache pollution.
+* If your system is not under load, TigerBeetle also **optimizes the latency of small batches**. After copying from the kernel's TCP receive buffer (TigerBeetle does not do user-space TCP), TigerBeetle **does zero-copy Direct I/O** from network protocol to disk, and then to state machine and back, to reduce memory pressure and L1-L3 cache pollution.
 
 * TigerBeetle **uses io_uring for zero-syscall networking and storage I/O**. The cost of a syscall in terms of context switches adds up quickly for a few thousand transfers.
 
 * TigerBeetle **does zero-deserialization** by using fixed-size data structures, that are optimized for cache line alignment to **minimize L1-L3 cache misses**.
 
-* TigerBeetle **takes advantage of Flexible Paxos** to reduce the cost of synchronous replication down to a single remote replica (in addition to the leader) and then **uses asynchronous replication** between the remaining followers. This improves write availability, without sacrificing strict serializability or durability guarantees. This can also reduce server deployment cost by up to 20% since a 4-node cluster under Flexible Paxos can now provide the same `f=2` guarantee for the replication quorum compared with a 5-node cluster.
-
-* TigerBeetle **masks transient gray failure performance problems**. For example, if a disk write that typically takes 4ms starts taking 4 seconds because the disk is slowly failing, TigerBeetle will use cluster redundancy to mask the gray failure automatically without the user seeing any 4 second latency spike. This is a relatively new performance technique known as "tail tolerance" in the literature and something not provided by most existing databases.
+* TigerBeetle **takes advantage of Heidi Howard's Flexible Quorums** to reduce the cost of **synchronous replication to one (or two) remote replicas at most** (in addition to the leader) with **asynchronous replication** between the remaining followers. This improves write availability, without sacrificing strict serializability or durability. This also reduces server deployment cost by as much as 20% because a 4-node cluster with Flexible Quorums can now provide the same `f=2` guarantee for the replication quorum as a 5-node cluster.
 
 > ["The major availability breakdowns and performance anomalies we see in cloud environments tend to be caused by subtle underlying faults, i.e. gray failure (slowly failing hardware) rather than fail-stop failure."](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
 
+* TigerBeetle **routes around transient gray failure latency spikes**. For example, if a disk write that typically takes 4ms starts taking 4 seconds because the disk is slowly failing, TigerBeetle will use cluster redundancy to mask the gray failure automatically without the user seeing any 4 second latency spike. This is a relatively new performance technique in the literature known as "tail tolerance".
+
 ## Developer-Friendly
 
-TigerBeetle does all the typical ledger validation, balance tracking, persistence and replication for you, all you have to do is use the TigerBeetle client to:
+TigerBeetle does all ledger validation, balance tracking, persistence and replication for you, all you have to do is use the TigerBeetle client to:
 
 1. send in a batch of prepares to TigerBeetle (in a single network request), and then
 2. send in a batch of commits to TigerBeetle (in a single network request).
@@ -69,26 +69,22 @@ We take the same three classic LMAX steps:
 
 1. journal incoming events safely to disk, and replicate to backup nodes, then
 2. apply these events to in-memory state, then
-3. ACK
+3. ACK to the client
 
 And then we introduce something new:
 
 4. delete the local journalling step entirely, and
-5. replace it with parallel 3-out-of-5 quorum replication to 5 distributed journal nodes.
+5. replace it with parallel replication to 3/5 distributed replicas.
 
 Our architecture then becomes three easy steps:
 
-1. replicate incoming events safely to a quorum of distributed journal nodes, then
+1. replicate incoming events safely to a quorum of distributed replicas, then
 2. apply these events to in-memory state, then
-3. ACK
+3. ACK to the client
 
 That's how TigerBeetle **eliminates gray failure in the leader's local disk**, and how TigerBeetle **eliminates gray failure in the network links to the replication nodes**.
 
-Like LMAX, TigerBeetle uses a thread-per-core design for optimal performance, with strict single-threading to enforce the single writer principle and avoid the costs of multi-threaded coordinated access to data.
-
-### Data Center Cluster or Application Embedded Library
-
-While TigerBeetle would typically be deployed as a networked client-server database cluster in the cloud or on-premise data center, TigerBeetle takes inspiration from SQLite and we want to enable the core disk safety and ledger logic of TigerBeetle to be embeddable as an in-process library within any mobile or desktop application that needs a financial system of record.
+Like LMAX, TigerBeetle uses a thread-per-core design for optimal performance, with strict single-threading to enforce the single writer principle and to avoid the costs of multi-threaded coordinated access to data.
 
 ## Data Structures
 
@@ -108,7 +104,7 @@ Events are **immutable data structures** that **instantiate or mutate state data
 * Events only ever have one immutable version, which can be referenced directly by the event's id.
 * Events should be retained for auditing purposes. However, events may be drained into a separate cold storage system, once their effect has been captured in a state snapshot, to compact the journal and improve startup times.
 
-**create_transfer**: Create a transfer between accounts (maps to a "prepare"). We use 64-bit words at a minimum to avoid unaligned operations on less than a machine word and to simplify struct packing. We group fields in descending order of size to avoid unnecessary struct padding in C implementations.
+**create_transfer**: Create a transfer between accounts (maps to a "prepare"). We group fields in descending order of size to avoid unnecessary struct padding in C implementations.
 
 ```
           create_transfer {
@@ -116,7 +112,7 @@ Events are **immutable data structures** that **instantiate or mutate state data
         debit_account_id: 16 bytes (128-bit)
        credit_account_id: 16 bytes (128-bit)
                user_data: 16 bytes (128-bit) [optional, e.g. opaque third-party identifier to link this transfer (many-to-one) to an external entity]
-                reserved: 32 bytes (256-bit) [optional, e.g. a SHA256 condition to validate against the preimage of the corresponding `commit-transfer` event]
+                reserved: 32 bytes (256-bit) [optional, e.g. a hashlock condition to validate against the preimage of the corresponding `commit-transfer` event]
                  timeout:  8 bytes ( 64-bit) [required for two phase commit, a quantity of time, i.e. an offset in nanoseconds from timestamp]
                     code:  4 bytes ( 32-bit) [optional, a chart of accounts code describing the reason for the transfer e.g. deposit, settlement]
                    flags:  4 bytes ( 32-bit) [optional, to modify the usage of the reserved field, and for future feature expansion]
@@ -130,7 +126,7 @@ Events are **immutable data structures** that **instantiate or mutate state data
 ```
           commit_transfer {
                       id: 16 bytes (128-bit)
-                reserved: 32 bytes (256-bit) [optional, e.g. a SHA256 preimage to validate against the condition of the corresponding `create-transfer` event]
+                reserved: 32 bytes (256-bit) [optional, e.g. a hashlock preimage to validate against the condition of the corresponding `create-transfer` event]
                    flags:  8 bytes ( 64-bit) [optional, used to indicate transfer success/failure, whether or not this is dependent on another commit, and for future feature expansion]
                timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
 } = 64 bytes (1 CPU cache line)
@@ -138,20 +134,20 @@ Events are **immutable data structures** that **instantiate or mutate state data
 
 **create_account**: Create an account.
 
-* We use the terms `credit` and `debit` instead of "payable" or "receivable" since the meaning of a credit balance depends on whether the account is an asset or liability, income or expense.
+* We use the terms `credit` and `debit` instead of "payable" or "receivable" since the meaning of a credit balance depends on whether the account is an asset or liability or equity, income or expense.
 * An `accepted` amount refers to an amount posted by a committed transfer.
-* A `reserved` amount refers to an inflight amount posted by a created transfer only, where the commit is still outstanding, and where the transfer timeout has not yet fired.
+* A `reserved` amount refers to an inflight amount posted by a two-phace commit transfer only, where the commit is still outstanding, and where the transfer timeout has not yet fired. In other words, the transfer amount has been reserved in the account balance (to avoid double-spending) but not yet committed. The reserved amount will rollback if the transfer ultimately fails.
 * The total debit balance of an account is given by adding `debits_accepted` plus `debits_reserved`. Likewise for the total credit balance of an account.
 * The total balance of an account can be derived by subtracting the total credit balance from the total debit balance.
 * We keep both sides of the ledger (debit and credit) separate to avoid dealing with signed numbers, and to preserve more information about the nature of an account. For example, two accounts could have the same balance of 0, but one account could have 1,000,000 units on both sides of the ledger, whereas another account could have 1 unit on both sides, both balancing out to 0.
-* Once created, an account may be changed only through transfer events, to keep a paper trail that is critical for auditing.
+* Once created, an account may be changed only through transfer events, to keep an immutable paper trail for auditing.
 
 ```
            create_account {
                       id: 16 bytes (128-bit)
                user_data: 16 bytes (128-bit) [optional, opaque third-party identifier to link this account (many-to-one) to an external entity]
                 reserved: 48 bytes (384-bit) [reserved for future accounting policy primitives]
-                    unit:  2 bytes ( 16-bit) [optional, opaque unit of value, e.g. gold bars or marbles]
+                    unit:  2 bytes ( 16-bit) [optional, opaque unit of value, e.g. a currency code, or even something exotic like gold bars]
                     code:  2 bytes ( 16-bit) [optional, opaque chart of accounts code to describe the type of account, e.g. a clearing account]
                    flags:  4 bytes ( 32-bit) [optional, net balance limits: e.g. debits_must_not_exceed_credits or credits_must_not_exceed_debits]
          debits_reserved:  8 bytes ( 64-bit)
@@ -168,27 +164,15 @@ States are **data structures** that capture the results of events:
 
 * States can always be derived by replaying all events.
 
-TigerBeetle provides two state data structures:
+TigerBeetle provides **exactly one state data structure**:
 
-* **Transfer**: A transfer (and whether created/accepted/rejected).
 * **Account**: An account showing the effect of all transfers.
 
-However:
+To simplify, to reduce memory copies and to reuse the wire format of event data structures as much as possible, we reuse our `create_account` event data structure to instantiate the corresponding state data structure.
 
-* To simplify client-side implementations, to reduce memory copies and to reuse the wire format of event data structures as much as possible, we reuse our `create_transfer`, `create_account` event data structures to instantiate the corresponding state data structures, with the caveat that the accept/reject bit flag in any `flags` field is reserved for the state equivalent only.
-* We use the `flags` field to track the created/accepted/rejected state of a transfer state.
+## Fault Models
 
-To give you an idea of how this works in practice:
-
-* The `create_transfer` event is immutable and we persist this in the log.
-* We also reuse and apply this as a separate `transfer` state (as yet uncommitted, neither accepted or rejected) to our in-memory hash table and any subsequent state snapshot.
-* When we receive a corresponding `commit_transfer` event, we then modify the `transfer` state (not the original `create_transfer` event which remains immutable, "what-you-sent-is-what-we-persist") to indicate whether the transfer was accepted or rejected.
-* We do not support custom commit results beyond accepted or rejected. A participant cannot indicate to TigerBeetle why they are rejecting the transfer. However, they may include an opaque reason in any of the custom fields.
-* The creation timestamp of a transfer is stored in the `create_transfer` state and in the `transfer` state. However, the commit timestamp is stored in the `commit_transfer` event only.
-
-## Fault Model
-
-We adopt the following fault model with respect to storage, network, memory and processing:
+We adopt the following fault models with respect to storage, network, memory and processing:
 
 ### Storage Fault Model
 
@@ -236,7 +220,9 @@ We adopt the following fault model with respect to storage, network, memory and 
 
 * The system clock may jump backwards or forwards in time, at any time.
 
-* NTP can help, but we do not depend on NTP.
+* NTP can help, but we cannot depend on NTP for strict serializability.
+
+* NTP may stop working because of a network partition, which may not impact TigerBeetle. We therefore need to detect when a TigerBeetle cluster's clocks are not being synchronized by NTP, so that financial transaction timestamps are accurate and within the operator's tolerance for error.
 
 ## Timestamps
 
@@ -246,9 +232,9 @@ Timestamps are assigned at the moment a batch of events is received by the Tiger
 
 Should the user need to specify an expiration timestamp, this can be done in terms of **a relative quantity of time**, i.e. an offset relative to the event timestamp that will be assigned by the TigerBeetle leader, rather than in terms of **an absolute moment in time** that is set according to another system's clock.
 
-For example, the user may say to the TigerBeetle leader: "please expire this transfer 7 seconds after the timestamp you assign to it when you receive it from me".
+For example, the user may say to the TigerBeetle leader: "expire this transfer 7 seconds after the timestamp you assign to it when you receive it from me".
 
-The intention of this design decision is to reduce the blast radius in the worst case to the clock skew experienced by the network link between the client and the leader, instead of the clock skew experienced by all distributed systems participating in two-phase transfers. Where the leader is embedded within a local process, the blast radius is even less.
+The intention of this design decision is to minimize and restrict the blast radius of inaccurate timestamps in the worst case to be limited to only the one way delay in the network link between the client and the leader, instead of the clock skew experienced by all distributed systems participating in two-phase transfers.
 
 ## Protocol
 
@@ -289,9 +275,9 @@ The `DATA` in **the response** to a `create_transfer` command looks like this:
 
 ### Protocol Design Decisions
 
-The header is a multiple of 128 bytes because we want to keep the subsequent data aligned to 64-byte cache line boundaries. We don't want any structure to straddle multiple cache lines unnecessarily.
+The header is a multiple of 128 bytes because we want to keep the subsequent data aligned to 64-byte cache line boundaries. We don't want any structure to straddle multiple cache lines unnecessarily for the sake of simplicity with respect to struct alignment and because this can have a performance impact through false sharing.
 
-We order the header struct as we do to keep any future C implementations padding-free.
+We order the header struct as we do to keep any C protocol implementations padding-free.
 
 We use BLAKE3 as our checksum, truncating the checksum to 128 bits.
 
@@ -314,16 +300,15 @@ We want:
 * **C ABI compatibility** to embed the TigerBeetle leader library or TigerBeetle network client directly into any language, to match the portability and ease of use of the [SQLite library](https://www.sqlite.org/index.html), the most used database engine in the world.
 * **Control of the memory layout, alignment, and padding of data structures** to avoid cache misses and unaligned accesses, and to allow zero-copy parsing of data structures from off the network.
 * **Explicit static memory allocation** from the network all the way to the disk with **no hidden memory allocations**.
-* **OOM safety** as the TigerBeetle leader library needs to manage GBs of in-memory state without crashing the embedding process.
+* **OOM safety** as the TigerBeetle leader library needs to manage GBs of in-memory state without crashing.
 * Direct access to **io_uring** for fast, simple networking and file system operations.
 * Direct access to **fast CPU instructions** such as `POPCNT`, which are essential for the hash table implementation we want to use.
 * Direct access to **existing C libraries** without the overhead of FFI.
-* **No artificial bottlenecks**. For example, Node has a [2x TCP throughput bottleneck](https://github.com/nodejs/node/pull/6923) because of surplus memory copies in the design of the socket stream interface, and libuv [forces unnecessary syscalls and context switches when offloading I/O to the thread pool](https://www.scylladb.com/2020/05/05/how-io_uring-and-ebpf-will-revolutionize-programming-in-linux/) wasting thousands of NVMe IOPS.
 * **Strict single-threaded control flow** to eliminate data races by design and to enforce the single writer principle.
 * **Compiler support for error sets** to enforce [fine-grained error handling](https://www.eecg.utoronto.ca/~yuan/papers/failure_analysis_osdi14.pdf).
 * A developer-friendly and fast build system.
 
-C is a natural choice, however Zig retains C ABI interoperability, offers relief from undefined behavior and makefiles, and provides an order of magnitude improvement in runtime safety and fine-grained error handling. Zig is a good fit with its emphasis on explicit memory allocation and OOM safety. Since Zig is pre-1.0.0 we plan to use only stable language features. It's a great time for TigerBeetle to adopt Zig since our stable roadmaps will probably coincide, and we can catch and surf the swell as it breaks.
+Zig retains C ABI interoperability, offers relief from undefined behavior and makefiles, and provides an order of magnitude improvement in runtime safety and fine-grained error handling. Zig is a good fit with its emphasis on explicit memory allocation and OOM safety. Since Zig is pre-1.0.0 we plan to use only stable language features. It's a great time for TigerBeetle to adopt Zig since our stable roadmaps will probably coincide. We can catch and surf the swell as it breaks.
 
 ## What is a tiger beetle?
 
@@ -353,31 +338,9 @@ of Hours of Disk and SSD Deployments](https://www.usenix.org/system/files/confer
 
 * [The Tail at Scale](https://www2.cs.duke.edu/courses/cps296.4/fall13/838-CloudPapers/dean_longtail.pdf) - "A simple way to curb latency variability is to issue the same request to multiple replicas and use the results from whichever replica responds first."
 
-* [Werner Vogels on Amazon Aurora](https://www.allthingsdistributed.com/2019/03/Amazon-Aurora-design-cloud-native-relational-database.html) - *Bringing it all back home*... choice quotes:
-
-  > Everything fails all the time. The larger the system, the larger the probability that something is broken somewhere: a network link, an SSD, an entire instance, or a software component.
-
-  > And then, there's the truly insidious problem of "gray failures." These occur when components do not fail completely, but become slow. If the system design does not anticipate the lag, the slow cog can degrade the performance of the overall system.
-
-  > ... you might have three physical writes to perform with a write quorum of 2. You don't have to wait for all three to complete before the logical write operation is declared a success. It's OK if one write fails, or is slow, because the overall operation outcome and latency aren't impacted by the outlier. This is a big deal: A write can be successful and fast even when something is broken.
-
-* [Amazon Aurora: Design Considerations for High Throughput Cloud-Native Relational Databases](https://www.allthingsdistributed.com/files/p1041-verbitski.pdf)
-
-* [Amazon Aurora: On Avoiding Distributed Consensus for I/Os, Commits, and Membership Changes](https://dl.acm.org/doi/pdf/10.1145/3183713.3196937?download=true)
-
-* [Amazon Aurora Under The Hood - Quorum and Correlated Failure](https://aws.amazon.com/blogs/database/amazon-aurora-under-the-hood-quorum-and-correlated-failure/)
-
-* [Amazon Aurora Under The Hood - Quorum Reads and Mutating State](https://aws.amazon.com/blogs/database/amazon-aurora-under-the-hood-quorum-reads-and-mutating-state/)
-
-* [Amazon Aurora Under The Hood - Reducing Costs using Quorum Sets](https://aws.amazon.com/blogs/database/amazon-aurora-under-the-hood-reducing-costs-using-quorum-sets/)
-
-* [Amazon Aurora Under The Hood - Quorum Membership](https://aws.amazon.com/blogs/database/amazon-aurora-under-the-hood-quorum-membership/)
-
 * [Viewstamped Replication Revisited](http://pmg.csail.mit.edu/papers/vr-revisited.pdf)
 
-* [Viewstamped Replication: The Less-Famous Consensus Protocol](https://brooker.co.za/blog/2014/05/19/vr.html)
-
-* [Viewstamped Replication Explained](https://blog.brunobonacci.com/2018/07/15/viewstamped-replication-explained/)
+* [Viewstamped Replication: A New Primary Copy Method to Support Highly-Available Distributed Systems](http://pmg.csail.mit.edu/papers/vr.pdf)
 
 * [ZFS: The Last Word in File Systems (Jeff Bonwick and Bill Moore)](https://www.youtube.com/watch?v=NRoUC9P1PmA) - On disk failure and corruption, the need for checksums... and checksums to check the checksums, and the power of copy-on-write for crash-safety.
 
