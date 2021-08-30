@@ -34,7 +34,7 @@
     "node": ">=14.0.0"
   },
   "scripts": {
-    "prepack": "git submodule deinit --all && git submodule update --init && yarn build",
+    "prepack": "git submodule deinit --all && git submodule update --init && yarn build:tsc",
     "benchmark": "./scripts/benchmark.sh",
     "build": "yarn build:tsc && yarn build:zig",
     "build:tsc": "tsc",
