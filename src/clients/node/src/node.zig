@@ -117,7 +117,7 @@ fn globalsCast(globals_raw: *c_void) *Globals {
 
 const Context = struct {
     io: *IO,
-    addresses: [32]std.net.Address,
+    addresses: []std.net.Address,
     message_bus: MessageBus,
     client: Client,
 
@@ -133,33 +133,33 @@ const Context = struct {
 
         context.io = io;
 
-        const addresses = try vr.parse_addresses(allocator, addresses_raw);
-        errdefer allocator.free(addresses);
-        assert(addresses.len > 0);
-        for (addresses) |address, index| context.addresses[index] = address;
+        context.addresses = try vr.parse_addresses(allocator, addresses_raw);
+        errdefer allocator.free(context.addresses);
+        assert(context.addresses.len > 0);
+
+        const client_id = std.crypto.random.int(u128);
 
         context.message_bus = try MessageBus.init(
             allocator,
             cluster,
-            &context.addresses,
-            std.crypto.random.int(u128),
+            context.addresses,
+            client_id,
             context.io,
         );
         errdefer context.message_bus.deinit();
 
         context.client = try Client.init(
             allocator,
-            std.crypto.random.int(u128),
+            client_id,
             cluster,
-            @intCast(u8, addresses.len),
+            @intCast(u8, context.addresses.len),
             &context.message_bus,
         );
         errdefer context.client.deinit();
+
         context.message_bus.set_on_message(*Client, &context.client, Client.on_message);
 
-        const ret = try translate.create_external(env, context);
-
-        return ret;
+        return try translate.create_external(env, context);
     }
 };
 
