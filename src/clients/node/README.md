@@ -29,7 +29,7 @@ A client needs to be configured with a `cluster_id` and `replica_addresses`. Thi
 import { createClient } from 'tigerbeetle-node'
 
 const client = createClient({
-  cluster_id: 0x0a5ca1ab1ebee11en,
+  cluster_id: 1,
   replica_addresses: ['3001', '3002', '3003']
 })
 ```

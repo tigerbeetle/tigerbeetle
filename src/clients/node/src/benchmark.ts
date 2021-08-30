@@ -20,7 +20,7 @@ const PREVIOUS_BENCHMARK = IS_RAW_REQUEST ? PREVIOUS_RAW_REQUEST_RESULT : PREVIO
 const TOLERANCE = 10 // percent that the benchmark is allowed to deviate from the previous benchmark
 
 const client = createClient({
-  cluster_id: 0x0a5ca1ab1ebee11en,
+  cluster_id: 1,
   replica_addresses: ['3001']
 })
 

@@ -4,16 +4,17 @@ interface Binding {
   request: (context: Context, operation: Operation, batch: Event[], result: ResultCallback) => void
   raw_request: (context: Context, operation: Operation, raw_batch: Buffer, result: ResultCallback) => void
   tick: (context: Context) => void,
-  deinit: (context: Context) => void
+  deinit: (context: Context) => void,
+  tick_ms: number
 }
 
 interface BindingInitArgs {
-  cluster_id: bigint, // u128
+  cluster_id: number, // u32
   replica_addresses: Buffer,
 }
 
 export interface InitArgs {
-  cluster_id: bigint, // u128
+  cluster_id: number, // u32
   replica_addresses: Array<string | number>,
 }
 
@@ -156,7 +157,7 @@ export type Result = CreateAccountsError | CreateTransfersError | CommitTransfer
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export enum Operation {
-  CREATE_ACCOUNT = 2,
+  CREATE_ACCOUNT = 3,
   CREATE_TRANSFER,
   COMMIT_TRANSFER,
   ACCOUNT_LOOKUP
@@ -337,7 +338,7 @@ export function createClient (args: InitArgs): Client {
 
   _interval = setInterval(() => {
     binding.tick(context)
-  }, 5)
+  }, binding.tick_ms)
 
   return _client
 }
