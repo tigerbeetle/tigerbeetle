@@ -10,7 +10,7 @@ import { CommitFlags,
 } from '.'
 
 const client = createClient({
-  cluster_id: 0x0a5ca1ab1ebee11en,
+  cluster_id: 1,
   replica_addresses: ['3001']
 })
 

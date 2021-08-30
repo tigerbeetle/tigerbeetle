@@ -15,15 +15,15 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 const CommitTransfersResult = tb.CommitTransfersResult;
 
-const Header = @import("tigerbeetle/src/vr.zig").Header;
-const Operation = @import("tigerbeetle/src/state_machine.zig").Operation;
+const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachine;
+const Operation = StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
-const Client = @import("tigerbeetle/src/client.zig").Client;
-const ClientError = @import("tigerbeetle/src/client.zig").ClientError;
 const IO = @import("tigerbeetle/src/io.zig").IO;
 const config = @import("tigerbeetle/src/config.zig");
 
 const vr = @import("tigerbeetle/src/vr.zig");
+const Header = vr.Header;
+const Client = vr.Client(StateMachine, MessageBus);
 
 pub const log_level: std.log.Level = .info;
 
@@ -34,6 +34,14 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     translate.register_function(env, exports, "request", request) catch return null;
     translate.register_function(env, exports, "raw_request", raw_request) catch return null;
     translate.register_function(env, exports, "tick", tick) catch return null;
+
+    translate.u32_into_object(
+        env,
+        exports,
+        "tick_ms",
+        config.tick_ms,
+        "failed to add tick_ms to exports",
+    ) catch return null;
 
     const allocator = std.heap.c_allocator;
     var global = Globals.init(allocator, env) catch {
@@ -109,7 +117,7 @@ fn globalsCast(globals_raw: *c_void) *Globals {
 
 const Context = struct {
     io: *IO,
-    configuration: [32]std.net.Address,
+    addresses: []std.net.Address,
     message_bus: MessageBus,
     client: Client,
 
@@ -117,40 +125,41 @@ const Context = struct {
         env: c.napi_env,
         allocator: *std.mem.Allocator,
         io: *IO,
-        cluster: u128,
-        configuration_raw: []const u8,
+        cluster: u32,
+        addresses_raw: []const u8,
     ) !c.napi_value {
         const context = try allocator.create(Context);
         errdefer allocator.destroy(context);
 
         context.io = io;
 
-        const configuration = try vr.parse_configuration(allocator, configuration_raw);
-        errdefer allocator.free(configuration);
-        assert(configuration.len > 0);
-        for (configuration) |address, index| context.configuration[index] = address;
+        context.addresses = try vr.parse_addresses(allocator, addresses_raw);
+        errdefer allocator.free(context.addresses);
+        assert(context.addresses.len > 0);
+
+        const client_id = std.crypto.random.int(u128);
 
         context.message_bus = try MessageBus.init(
             allocator,
             cluster,
-            context.configuration[0..configuration.len],
-            std.crypto.random.int(u128),
+            context.addresses,
+            client_id,
             context.io,
         );
         errdefer context.message_bus.deinit();
 
         context.client = try Client.init(
             allocator,
+            client_id,
             cluster,
-            @intCast(u16, configuration.len),
+            @intCast(u8, context.addresses.len),
             &context.message_bus,
         );
         errdefer context.client.deinit();
-        context.message_bus.process = .{ .client = &context.client };
 
-        const ret = try translate.create_external(env, context);
+        context.message_bus.set_on_message(*Client, &context.client, Client.on_message);
 
-        return ret;
+        return try translate.create_external(env, context);
     }
 };
 
@@ -421,8 +430,8 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
         "Function init() must receive 1 argument exactly.",
     ) catch return null;
 
-    const cluster = translate.u128_from_object(env, argv[0], "cluster_id") catch return null;
-    const configuration = translate.slice_from_object(
+    const cluster = translate.u32_from_object(env, argv[0], "cluster_id") catch return null;
+    const addresses = translate.slice_from_object(
         env,
         argv[0],
         "replica_addresses",
@@ -432,7 +441,8 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 
     const globals_raw = translate.globals(env) catch return null;
     const globals = globalsCast(globals_raw.?);
-    const context = Context.create(env, allocator, &globals.io, cluster, configuration) catch {
+
+    const context = Context.create(env, allocator, &globals.io, cluster, addresses) catch {
         // TODO: switch on err and provide more detailed messages
         translate.throw(env, "Failed to initialize Client.") catch return null;
     };
@@ -440,7 +450,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     return context;
 }
 
-/// This function decodes and validates an array of Node objects, one-by-one, directly into an 
+/// This function decodes and validates an array of Node objects, one-by-one, directly into an
 /// available message before requesting the client to send it.
 fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 4;
@@ -493,7 +503,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
     return null;
 }
 
-/// The batch has already been encoded into a byte slice. This means that we only have to do one 
+/// The batch has already been encoded into a byte slice. This means that we only have to do one
 /// copy directly into an available message. No validation of the encoded data is performed except
 /// that it will fit into the message buffer.
 fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
@@ -547,7 +557,7 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     return null;
 }
 
-fn create_client_error(env: c.napi_env, client_error: ClientError) !c.napi_value {
+fn create_client_error(env: c.napi_env, client_error: Client.Error) !c.napi_value {
     return switch (client_error) {
         error.TooManyOutstandingRequests => try translate.create_error(
             env,
@@ -556,7 +566,7 @@ fn create_client_error(env: c.napi_env, client_error: ClientError) !c.napi_value
     };
 }
 
-fn on_result(user_data: u128, operation: Operation, results: ClientError![]const u8) void {
+fn on_result(user_data: u128, operation: Operation, results: Client.Error![]const u8) void {
     // A reference to the user's JS callback was made in `request` or `raw_request`. This MUST be
     // cleaned up regardless of the result of this function.
     const env = @bitCast(translate.UserData, user_data).env;
@@ -581,7 +591,7 @@ fn on_result(user_data: u128, operation: Operation, results: ClientError![]const
 
     if (results) |value| {
         const napi_results = switch (operation) {
-            .reserved, .init => {
+            .reserved, .init, .register => {
                 translate.throw(env, "Reserved operation.") catch return;
             },
             .create_accounts => encode_napi_results_array(
