@@ -9,12 +9,12 @@ interface Binding {
 }
 
 interface BindingInitArgs {
-  cluster_id: bigint, // u128
+  cluster_id: number, // u32
   replica_addresses: Buffer,
 }
 
 export interface InitArgs {
-  cluster_id: bigint, // u128
+  cluster_id: number, // u32
   replica_addresses: Array<string | number>,
 }
 
