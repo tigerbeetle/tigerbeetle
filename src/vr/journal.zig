@@ -1001,15 +1001,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
 
             // Drain the list of ranges that were waiting on this range to complete.
-            while (range.next) |waiting| {
+            var current = range.next;
+            range.next = null;
+            while (current) |waiting| {
                 assert(waiting.locked == false);
-                range.next = waiting.next;
+                current = waiting.next;
                 waiting.next = null;
-
                 self.lock_sectors(@fieldParentPtr(Self.Write, "range", waiting));
-                assert(range.next == waiting.next);
             }
-            assert(range.next == null);
 
             // The callback may set range, so we can't set range to undefined after running the callback.
             const callback = range.callback;
