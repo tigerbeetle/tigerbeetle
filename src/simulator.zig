@@ -127,6 +127,8 @@ pub fn main() !void {
 
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
+        for (cluster.storages) |*storage| storage.tick();
+
         for (cluster.replicas) |*replica, i| {
             replica.tick();
             cluster.state_checker.check_state(@intCast(u8, i));

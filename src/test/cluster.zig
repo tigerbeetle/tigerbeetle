@@ -133,13 +133,11 @@ pub const Cluster = struct {
         for (cluster.state_machines) |*state_machine| state_machine.deinit();
         cluster.allocator.free(cluster.state_machines);
 
-        for (cluster.storages) |*storage| storage.deinit();
+        for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
         cluster.allocator.free(cluster.storages);
 
         cluster.network.deinit();
 
         cluster.allocator.destroy(cluster);
     }
-
-    pub fn tick() void {}
 };
