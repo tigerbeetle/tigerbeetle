@@ -561,8 +561,9 @@ test "linked accounts" {
     const input = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(.create_accounts, input, output);
+    // Use a timestamp of 0 since this is just a test
+    state_machine.prepare(0, .create_accounts, input);
+    const size = state_machine.commit(0, .create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try testing.expectEqualSlices(

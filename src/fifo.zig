@@ -67,38 +67,38 @@ test "push/pop/peek/remove" {
     var fifo: FIFO(Foo) = .{};
 
     fifo.push(&one);
-    testing.expectEqual(@as(?*Foo, &one), fifo.peek());
+    try testing.expectEqual(@as(?*Foo, &one), fifo.peek());
 
     fifo.push(&two);
     fifo.push(&three);
-    testing.expectEqual(@as(?*Foo, &one), fifo.peek());
+    try testing.expectEqual(@as(?*Foo, &one), fifo.peek());
 
     fifo.remove(&one);
-    testing.expectEqual(@as(?*Foo, &two), fifo.pop());
-    testing.expectEqual(@as(?*Foo, &three), fifo.pop());
-    testing.expectEqual(@as(?*Foo, null), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, &two), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, &three), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, null), fifo.pop());
 
     fifo.push(&one);
     fifo.push(&two);
     fifo.push(&three);
     fifo.remove(&two);
-    testing.expectEqual(@as(?*Foo, &one), fifo.pop());
-    testing.expectEqual(@as(?*Foo, &three), fifo.pop());
-    testing.expectEqual(@as(?*Foo, null), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, &one), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, &three), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, null), fifo.pop());
 
     fifo.push(&one);
     fifo.push(&two);
     fifo.push(&three);
     fifo.remove(&three);
-    testing.expectEqual(@as(?*Foo, &one), fifo.pop());
-    testing.expectEqual(@as(?*Foo, &two), fifo.pop());
-    testing.expectEqual(@as(?*Foo, null), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, &one), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, &two), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, null), fifo.pop());
 
     fifo.push(&one);
     fifo.push(&two);
     fifo.remove(&two);
     fifo.push(&three);
-    testing.expectEqual(@as(?*Foo, &one), fifo.pop());
-    testing.expectEqual(@as(?*Foo, &three), fifo.pop());
-    testing.expectEqual(@as(?*Foo, null), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, &one), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, &three), fifo.pop());
+    try testing.expectEqual(@as(?*Foo, null), fifo.pop());
 }
