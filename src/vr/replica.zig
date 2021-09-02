@@ -1504,9 +1504,14 @@ pub fn Replica(
                 return;
             }
 
-            if (!self.valid_hash_chain("commit_ops")) return;
-            assert(!self.view_jump_barrier);
-            assert(self.op >= self.commit_max);
+            // We check the hash chain before we read each op, rather than once upfront, because
+            // it's possible for `commit_max` to change while we read asynchronously, after we
+            // validate the hash chain and before we resolve any related view jump barrier.
+            // We therefore cannot keep committing until we reach `commit_max`. We need to verify
+            // the hash chain before each read. Once verified (before the read) we can commit in the
+            // callback after the read, but if we see a change we need to stop committing any
+            // further ops, because `commit_max` may have been bumped and may refer to a different
+            // op.
 
             assert(!self.committing);
             self.committing = true;
@@ -1519,6 +1524,13 @@ pub fn Replica(
             assert(self.status == .normal or self.status == .view_change);
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
+
+            if (!self.valid_hash_chain("commit_ops_read")) {
+                self.committing = false;
+                return;
+            }
+            assert(!self.view_jump_barrier);
+            assert(self.op >= self.commit_max);
 
             // We may receive commit numbers for ops we do not yet have (`commit_max > self.op`):
             // Even a naive state transfer may fail to correct for this.
@@ -1594,9 +1606,15 @@ pub fn Replica(
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
 
-            if (!self.valid_hash_chain("commit_op")) return;
-            assert(!self.view_jump_barrier);
-            assert(self.op >= self.commit_max);
+            // If we are a follower committing through `commit_ops()` then a view jump barrier may
+            // have been imposed since we last checked in `commit_ops_read()`. However, this relates
+            // to subsequent ops, since we would have already verified the hash chain for this op.
+
+            // TODO Capture the highest valid `commit_max` op within the view jump barrier so we can
+            // assert that the view jump barrier does not include this currently committing op.
+
+            assert(self.journal.entry_for_op_exact(self.commit_min).?.checksum ==
+                prepare.header.parent);
 
             log.debug("{}: commit_op: executing op={} checksum={} ({s})", .{
                 self.replica,
@@ -2855,22 +2873,12 @@ pub fn Replica(
             assert(self.repairs_allowed());
             assert(self.journal.dirty.len > 0);
 
-            if (self.journal.writes.available() == 0) {
-                log.debug("{}: repair_prepares: waiting for available IOP", .{self.replica});
-                return;
-            }
-
-            // We may be appending to or repairing the journal concurrently.
-            // We do not want to re-request any of these prepares unnecessarily.
-            // TODO Add journal.writing bits to clear this up (and needed anyway - why?).
-            if (self.journal.writes.executing() > 0) {
-                log.debug("{}: repair_prepares: waiting for dirty bits to settle", .{self.replica});
-                return;
-            }
-
             // Request enough prepares to utilize our max IO depth:
             var budget = self.journal.writes.available();
-            assert(budget > 0);
+            if (budget == 0) {
+                log.debug("{}: repair_prepares: waiting for IOP", .{self.replica});
+                return;
+            }
 
             var op = self.op + 1;
             while (op > 0) {
@@ -2881,20 +2889,21 @@ pub fn Replica(
                     // then we will `request_prepare` from the cluster, set `nack_prepare_op`,
                     // and stop repairing any further prepares:
                     // This will also rebroadcast any `request_prepare` every `repair_timeout` tick.
-                    self.repair_prepare(op);
-                    if (self.nack_prepare_op) |nack_prepare_op| {
-                        assert(nack_prepare_op == op);
-                        assert(self.status == .view_change);
-                        assert(self.leader_index(self.view) == self.replica);
-                        assert(op > self.commit_max);
-                        return;
-                    }
+                    if (self.repair_prepare(op)) {
+                        if (self.nack_prepare_op) |nack_prepare_op| {
+                            assert(nack_prepare_op == op);
+                            assert(self.status == .view_change);
+                            assert(self.leader_index(self.view) == self.replica);
+                            assert(op > self.commit_max);
+                            return;
+                        }
 
-                    // Otherwise, we continue to request prepares until our budget is used up:
-                    budget -= 1;
-                    if (budget == 0) {
-                        log.debug("{}: repair_prepares: request budget used up", .{self.replica});
-                        return;
+                        // Otherwise, we continue to request prepares until our budget is used:
+                        budget -= 1;
+                        if (budget == 0) {
+                            log.debug("{}: repair_prepares: request budget used", .{self.replica});
+                            return;
+                        }
                     }
                 } else {
                     assert(!self.journal.faulty.bit(op));
@@ -2918,16 +2927,29 @@ pub fn Replica(
         ///
         /// This is effectively "many-to-one" repair, where a single replica recovers using the
         /// resources of many replicas, for faster recovery.
-        fn repair_prepare(self: *Self, op: u64) void {
+        fn repair_prepare(self: *Self, op: u64) bool {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.bit(op));
+
+            const checksum = self.journal.entry_for_op_exact(op).?.checksum;
+
+            // We may be appending to or repairing the journal concurrently.
+            // We do not want to re-request any of these prepares unnecessarily.
+            if (self.journal.writing(op, checksum)) {
+                log.debug("{}: repair_prepare: already writing op={} checksum={}", .{
+                    self.replica,
+                    op,
+                    checksum,
+                });
+                return false;
+            }
 
             const request_prepare = Header{
                 .command = .request_prepare,
                 // If we request a prepare from a follower, as below, it is critical to pass a checksum:
                 // Otherwise we could receive different prepares for the same op number.
-                .context = self.journal.entry_for_op_exact(op).?.checksum,
+                .context = checksum,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
@@ -2958,25 +2980,32 @@ pub fn Replica(
                         .nack_prepare,
                     );
                 }
-                log.debug("{}: repair_prepare: requesting op={} (priority, from all replicas)", .{
+                log.debug("{}: repair_prepare: requesting op={} checksum={} (priority)", .{
                     self.replica,
                     op,
+                    checksum,
                 });
                 assert(self.nack_prepare_op.? == op);
-                assert(request_prepare.context != 0);
+                assert(request_prepare.context == checksum);
                 self.send_header_to_other_replicas(request_prepare);
             } else {
-                log.debug("{}: repair_prepare: requesting op={}", .{ self.replica, op });
+                log.debug("{}: repair_prepare: requesting op={} checksum={}", .{
+                    self.replica,
+                    op,
+                    checksum,
+                });
                 // We expect that `repair_prepare()` is called in reverse chronological order:
                 // Any uncommitted ops should have already been dealt with.
                 // We never roll back committed ops, and thus never regard `nack_prepare` responses.
                 // Alternatively, we may not be the leader, in which case we do distinguish anyway.
                 assert(self.nack_prepare_op == null);
-                assert(request_prepare.context != 0);
+                assert(request_prepare.context == checksum);
                 if (self.choose_any_other_replica()) |replica| {
                     self.send_header_to_replica(replica, request_prepare);
                 }
             }
+
+            return true;
         }
 
         fn repairs_allowed(self: *Self) bool {
@@ -3870,7 +3899,20 @@ pub fn Replica(
             assert(message.header.op <= self.op);
 
             if (!self.journal.has(message.header)) {
-                log.debug("{}: write_prepare: ignoring (header changed)", .{self.replica});
+                log.debug("{}: write_prepare: ignoring op={} checksum={} (header changed)", .{
+                    self.replica,
+                    message.header.op,
+                    message.header.checksum,
+                });
+                return;
+            }
+
+            if (self.journal.writing(message.header.op, message.header.checksum)) {
+                log.debug("{}: write_prepare: ignoring op={} checksum={} (already writing)", .{
+                    self.replica,
+                    message.header.op,
+                    message.header.checksum,
+                });
                 return;
             }
 

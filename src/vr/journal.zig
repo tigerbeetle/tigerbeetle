@@ -656,7 +656,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.has_dirty(message.header));
 
             const write = self.writes.acquire() orelse {
-                self.write_prepare_debug(message.header, "no iop available");
+                self.write_prepare_debug(message.header, "no IOP available");
                 callback(replica, null, trigger);
                 return;
             };
@@ -683,32 +683,25 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             self.write_sectors(
-                write_prepare_on_write_message,
+                write_prepare_header,
                 write,
                 sectors,
                 self.offset_in_circular_buffer(message.header.offset),
             );
         }
 
-        fn write_prepare_on_write_message(write: *Self.Write) void {
+        /// Attempt to lock the in-memory sector containing the header being written.
+        /// If the sector is already locked, add this write to the wait queue.
+        fn write_prepare_header(write: *Self.Write) void {
             const self = write.self;
             const message = write.message;
 
             if (!self.has(message.header)) {
-                // We've moved on and decided that another message should take this place,
-                // so cancel the write.
                 self.write_prepare_debug(message.header, "entry changed while writing sectors");
                 self.write_prepare_release(write, null);
                 return;
             }
 
-            // TODO Snapshots
-            self.write_prepare_header(write);
-        }
-
-        /// Attempt to lock the in-memory sector containing the header being written.
-        /// If the sector is already locked, add this write to the wait queue.
-        fn write_prepare_header(self: *Self, write: *Self.Write) void {
             assert(!write.header_sector_locked);
             assert(write.header_sector_next == null);
 
@@ -730,6 +723,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn write_prepare_on_lock_header_sector(self: *Self, write: *Write) void {
             assert(write.header_sector_locked);
+
+            // TODO It's possible within this section that the header has since been replaced but we
+            // continue writing, even when the dirty bit is no longer set. This is not a problem
+            // but it would be good to stop writing as soon as we see we no longer need to.
+            // For this, we'll need to have a way to tweak write_prepare_release() to release locks.
+            // At present, we don't return early here simply because it doesn't yet do that.
 
             const message = write.message;
             const offset = write_prepare_header_offset(write.message);
@@ -867,9 +866,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// the body of the journal (using the previous entry's offset and size).
         fn write_prepare_header_once(self: *Self, header: *const Header) bool {
             // TODO Snapshots
-            // TODO: check to make sure that we check this after every IO and return
-            // early if the write was canceled.
-            assert(self.dirty.bit(header.op));
             if (header.command == .reserved) {
                 log.debug("{}: write_prepare_header_once: dirty reserved header", .{
                     self.replica,
@@ -1014,6 +1010,22 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const callback = range.callback;
             range.* = undefined;
             callback(write);
+        }
+
+        pub fn writing(self: *Self, op: u64, checksum: u128) bool {
+            var it = self.writes.iterate();
+            while (it.next()) |write| {
+                // It's possible that we might be writing the same op but with a different checksum.
+                // For example, if the op we are writing did not survive the view change and was
+                // replaced by another op. We must therefore do the search primarily on checksum.
+                // However, we compare against the 64-bit op first, since it's a cheap machine word.
+                if (write.message.header.op == op and write.message.header.checksum == checksum) {
+                    // If we truly are writing, then the dirty bit must be set:
+                    assert(self.dirty.bit(op));
+                    return true;
+                }
+            }
+            return false;
         }
     };
 }
