@@ -59,6 +59,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
             @typeInfo(PacketStatistics).Enum.fields.len,
 
         pub fn init(allocator: *std.mem.Allocator, options: PacketSimulatorOptions) !Self {
+            assert(options.one_way_delay_mean >= options.one_way_delay_min);
             var self = Self{
                 .paths = try allocator.alloc(
                     std.PriorityQueue(Data),
@@ -133,13 +134,12 @@ pub fn PacketSimulator(comptime Packet: type) type {
             return self.prng.random.uintAtMost(u8, 100) < self.options.packet_replay_probability;
         }
 
-        /// We assume the one way delay will follow an exponential distrbution with there being a
-        /// minimum delay.
+        /// Return a value produced using an exponential distribution with
+        /// the minimum and mean specified in self.options
         fn one_way_delay(self: *Self) u64 {
-            return math.min(
-                self.options.one_way_delay_min,
-                self.options.one_way_delay_mean * @floatToInt(u64, self.prng.random.floatExp(f64)),
-            );
+            const min = self.options.one_way_delay_min;
+            const mean = self.options.one_way_delay_mean;
+            return min + @floatToInt(u64, @intToFloat(f64, mean - min) * self.prng.random.floatExp(f64));
         }
 
         pub fn tick(self: *Self) void {
@@ -185,9 +185,8 @@ pub fn PacketSimulator(comptime Packet: type) type {
 
                     if (self.should_clog(reverse_path)) {
                         log.debug("reverse path clogged", .{});
-                        var ticks = self.options.path_clog_duration_mean *
-                            @floatToInt(u64, self.prng.random.floatExp(f64));
-
+                        const mean = @intToFloat(f64, self.options.path_clog_duration_mean);
+                        const ticks = @floatToInt(u64, mean * self.prng.random.floatExp(f64));
                         self.clog_for(reverse_path, ticks);
                     }
                 }
