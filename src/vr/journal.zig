@@ -164,7 +164,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const size_circular_buffer = size - size_headers_copies;
             if (size_circular_buffer < 64 * 1024 * 1024) return error.SizeTooSmallForCircularBuffer;
 
-            log.debug("{}: journal: size={} headers_len={} headers={} circular_buffer={}", .{
+            log.debug("{}: size={} headers_len={} headers={} circular_buffer={}", .{
                 replica,
                 std.fmt.fmtIntSizeBin(size),
                 headers.len,
@@ -528,7 +528,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + self.size_headers);
 
             log.debug(
-                "{}: journal: read_sectors: offset={} len={}",
+                "{}: read_sectors: offset={} len={}",
                 .{ replica.replica, offset, buffer.len },
             );
 
@@ -586,7 +586,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn remove_entry(self: *Self, header: *const Header) void {
             // Copy the header.op by value to avoid a reset() followed by undefined header.op usage:
             const op = header.op;
-            log.debug("{}: journal: remove_entry: op={}", .{ self.replica, op });
+            log.debug("{}: remove_entry: op={}", .{ self.replica, op });
 
             assert(self.entry(header).?.checksum == header.checksum);
             assert(self.headers[op].checksum == header.checksum); // TODO Snapshots
@@ -602,7 +602,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // TODO Snapshots
             // TODO Optimize to jump directly to op:
             assert(op_min > 0);
-            log.debug("{}: journal: remove_entries_from: op_min={}", .{ self.replica, op_min });
+            log.debug("{}: remove_entries_from: op_min={}", .{ self.replica, op_min });
             for (self.headers) |*header| {
                 if (header.op >= op_min and header.command == .prepare) {
                     self.remove_entry(header);
@@ -614,7 +614,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn set_entry_as_dirty(self: *Self, header: *const Header) void {
-            log.debug("{}: journal: set_entry_as_dirty: op={} checksum={}", .{
+            log.debug("{}: set_entry_as_dirty: op={} checksum={}", .{
                 self.replica,
                 header.op,
                 header.checksum,
@@ -739,7 +739,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 std.mem.sliceAsBytes(self.headers)[offset..][0..config.sector_size],
             );
 
-            log.debug("{}: journal: write_header: op={} sectors[{}..{}]", .{
+            log.debug("{}: write_header: op={} sectors[{}..{}]", .{
                 self.replica,
                 message.header.op,
                 offset,
@@ -826,7 +826,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn write_prepare_debug(self: *Self, header: *const Header, status: []const u8) void {
-            log.debug("{}: journal: write: view={} op={} offset={} len={}: {} {s}", .{
+            log.debug("{}: write: view={} op={} offset={} len={}: {} {s}", .{
                 self.replica,
                 header.view,
                 header.op,
@@ -871,7 +871,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // early if the write was canceled.
             assert(self.dirty.bit(header.op));
             if (header.command == .reserved) {
-                log.debug("{}: journal: write_prepare_header_once: dirty reserved header", .{
+                log.debug("{}: write_prepare_header_once: dirty reserved header", .{
                     self.replica,
                 });
                 return false;
@@ -879,19 +879,19 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (self.previous_entry(header)) |previous| {
                 assert(previous.command == .prepare);
                 if (previous.checksum != header.parent) {
-                    log.debug("{}: journal: write_headers_once: no hash chain", .{self.replica});
+                    log.debug("{}: write_headers_once: no hash chain", .{self.replica});
                     return false;
                 }
                 // TODO Add is_dirty(header)
                 // TODO Snapshots
                 if (self.dirty.bit(previous.op)) {
-                    log.debug("{}: journal: write_prepare_header_once: previous entry is dirty", .{
+                    log.debug("{}: write_prepare_header_once: previous entry is dirty", .{
                         self.replica,
                     });
                     return false;
                 }
             } else {
-                log.debug("{}: journal: write_prepare_header_once: no previous entry", .{self.replica});
+                log.debug("{}: write_prepare_header_once: no previous entry", .{self.replica});
                 return false;
             }
             return true;
@@ -905,7 +905,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             buffer: []const u8,
             offset: u64,
         ) void {
-            log.debug("{}: journal: write_prepare_header_to_version: version={} offset={} len={}", .{
+            log.debug("{}: write_prepare_header_to_version: version={} offset={} len={}", .{
                 self.replica,
                 version,
                 offset,
@@ -959,7 +959,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 }
             }
 
-            log.debug("{}: journal: write_sectors: offset={} len={} locked", .{
+            log.debug("{}: write_sectors: offset={} len={} locked", .{
                 self.replica,
                 write.range.offset,
                 write.range.buffer.len,
@@ -994,7 +994,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(write.range.locked);
             write.range.locked = false;
 
-            log.debug("{}: journal: write_sectors: offset={} len={} unlocked", .{
+            log.debug("{}: write_sectors: offset={} len={} unlocked", .{
                 self.replica,
                 write.range.offset,
                 write.range.buffer.len,
