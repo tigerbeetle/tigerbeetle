@@ -1014,6 +1014,7 @@ test "write/fsync/read" {
         const Context = @This();
 
         io: IO,
+        done: bool = false,
         fd: os.fd_t,
 
         write_buf: [20]u8 = [_]u8{97} ** 20,
@@ -1046,12 +1047,12 @@ test "write/fsync/read" {
                 &self.write_buf,
                 10,
             );
-            try self.io.run();
+            while (!self.done) try self.io.tick();
 
-            testing.expectEqual(self.write_buf.len, self.written);
-            testing.expect(self.fsynced);
-            testing.expectEqual(self.read_buf.len, self.read);
-            testing.expectEqualSlices(u8, &self.write_buf, &self.read_buf);
+            try testing.expectEqual(self.write_buf.len, self.written);
+            try testing.expect(self.fsynced);
+            try testing.expectEqual(self.read_buf.len, self.read);
+            try testing.expectEqualSlices(u8, &self.write_buf, &self.read_buf);
         }
 
         fn write_callback(
@@ -1079,6 +1080,7 @@ test "write/fsync/read" {
             result: IO.ReadError!usize,
         ) void {
             self.read = result catch @panic("read error");
+            self.done = true;
         }
     }.run_test();
 }
@@ -1090,8 +1092,8 @@ test "openat/close" {
         const Context = @This();
 
         io: IO,
+        done: bool = false,
         fd: os.fd_t = 0,
-        closed: bool = false,
 
         fn run_test() !void {
             const path = "test_io_openat_close";
@@ -1111,9 +1113,9 @@ test "openat/close" {
                 os.O_CLOEXEC | os.O_RDWR | os.O_CREAT,
                 0o666,
             );
-            try self.io.run();
-            testing.expect(self.fd > 0);
-            testing.expect(self.closed);
+            while (!self.done) try self.io.tick();
+
+            try testing.expect(self.fd > 0);
         }
 
         fn openat_callback(
@@ -1131,7 +1133,7 @@ test "openat/close" {
             result: IO.CloseError!void,
         ) void {
             result catch @panic("close error");
-            self.closed = true;
+            self.done = true;
         }
     }.run_test();
 }
@@ -1143,6 +1145,7 @@ test "accept/connect/send/receive" {
         const Context = @This();
 
         io: IO,
+        done: bool = false,
         server: os.socket_t,
         client: os.socket_t,
 
@@ -1192,12 +1195,12 @@ test "accept/connect/send/receive" {
             var server_completion: IO.Completion = undefined;
             self.io.accept(*Context, &self, accept_callback, &server_completion, server, 0);
 
-            try self.io.run();
+            while (!self.done) try self.io.tick();
 
-            testing.expectEqual(self.send_buf.len, self.sent);
-            testing.expectEqual(self.recv_buf.len, self.received);
+            try testing.expectEqual(self.send_buf.len, self.sent);
+            try testing.expectEqual(self.recv_buf.len, self.received);
 
-            testing.expectEqualSlices(u8, self.send_buf[0..self.received], &self.recv_buf);
+            try testing.expectEqualSlices(u8, self.send_buf[0..self.received], &self.recv_buf);
         }
 
         fn connect_callback(
@@ -1248,6 +1251,7 @@ test "accept/connect/send/receive" {
             result: IO.RecvError!usize,
         ) void {
             self.received = result catch @panic("recv error");
+            self.done = true;
         }
     }.run_test();
 }
@@ -1281,11 +1285,12 @@ test "timeout" {
                     ms * std.time.ns_per_ms,
                 );
             }
-            try self.io.run();
+            while (self.count < count) try self.io.tick();
 
-            testing.expectEqual(@as(u32, count), self.count);
+            try self.io.tick();
+            try testing.expectEqual(@as(u32, count), self.count);
 
-            testing.expectApproxEqAbs(
+            try testing.expectApproxEqAbs(
                 @as(f64, ms),
                 @intToFloat(f64, self.stop_time - start_time),
                 margin,
@@ -1330,9 +1335,10 @@ test "submission queue full" {
                     ms * std.time.ns_per_ms,
                 );
             }
-            try self.io.run();
+            while (self.count < count) try self.io.tick();
 
-            testing.expectEqual(@as(u32, count), self.count);
+            try self.io.tick();
+            try testing.expectEqual(@as(u32, count), self.count);
         }
 
         fn timeout_callback(
