@@ -467,19 +467,21 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             // Do not use this pointer beyond this function's scope, as the
             // header memory may then change:
-            const exact = replica.journal.entry_for_op_exact_with_checksum(op, checksum) orelse {
+            const exact = self.entry_for_op_exact_with_checksum(op, checksum) orelse {
                 self.read_prepare_log(op, checksum, "no entry exactly");
                 callback(replica, null, null);
                 return;
             };
 
-            if (replica.journal.faulty.bit(op)) {
+            if (self.faulty.bit(op)) {
+                assert(self.dirty.bit(op));
+
                 self.read_prepare_log(op, checksum, "faulty");
                 callback(replica, null, null);
                 return;
             }
 
-            if (replica.journal.dirty.bit(op)) {
+            if (self.dirty.bit(op)) {
                 self.read_prepare_log(op, checksum, "dirty");
                 callback(replica, null, null);
                 return;
@@ -547,7 +549,22 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.reads.release(read);
             }
 
+            if (op > replica.op) {
+                self.read_prepare_log(op, checksum, "beyond replica.op");
+                read.callback(replica, null, null);
+                return;
+            }
+
+            _ = replica.journal.entry_for_op_exact_with_checksum(op, checksum) orelse {
+                self.read_prepare_log(op, checksum, "no entry exactly");
+                read.callback(replica, null, null);
+                return;
+            };
+
             if (!read.message.header.valid_checksum()) {
+                self.faulty.set(op);
+                self.dirty.set(op);
+
                 self.read_prepare_log(op, checksum, "corrupt header after read");
                 read.callback(replica, null, null);
                 return;
@@ -555,6 +572,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             const body = read.message.buffer[@sizeOf(Header)..read.message.header.size];
             if (!read.message.header.valid_checksum_body(body)) {
+                self.faulty.set(op);
+                self.dirty.set(op);
+
                 self.read_prepare_log(op, checksum, "corrupt body after read");
                 read.callback(replica, null, null);
                 return;
