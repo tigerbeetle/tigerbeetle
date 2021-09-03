@@ -87,6 +87,8 @@ pub fn main() !void {
             .read_latency_mean = 3 + prng.random.uintLessThan(u16, 10),
             .write_latency_min = prng.random.uintLessThan(u16, 3),
             .write_latency_mean = 3 + prng.random.uintLessThan(u16, 10),
+            .read_fault_probability = prng.random.uintLessThan(u8, 3),
+            .write_fault_probability = prng.random.uintLessThan(u8, 3),
         },
     });
     defer cluster.destroy();
@@ -98,20 +100,30 @@ pub fn main() !void {
         replica.on_change_state = on_change_replica;
     }
 
-    output.info("\n" ++
-        "          SEED={}\n\n" ++
-        "          replicas={}\n" ++
-        "          clients={}\n" ++
-        "          request_probability={}%\n" ++
-        "          idle_on_probability={}%\n" ++
-        "          idle_off_probability={}%\n" ++
-        "          one_way_delay_mean={} ticks\n" ++
-        "          one_way_delay_min={} ticks\n" ++
-        "          packet_loss_probability={}%\n" ++
-        "          path_maximum_capacity={} messages\n" ++
-        "          path_clog_duration_mean={} ticks\n" ++
-        "          path_clog_probability={}%\n" ++
-        "          packet_replay_probability={}%\n", .{
+    output.info(
+        \\
+        \\          SEED={}
+        \\
+        \\          replicas={}
+        \\          clients={}
+        \\          request_probability={}%
+        \\          idle_on_probability={}%
+        \\          idle_off_probability={}%
+        \\          one_way_delay_mean={} ticks
+        \\          one_way_delay_min={} ticks
+        \\          packet_loss_probability={}%
+        \\          path_maximum_capacity={} messages
+        \\          path_clog_duration_mean={} ticks
+        \\          path_clog_probability={}%
+        \\          packet_replay_probability={}%
+        \\          read_latency_min={}
+        \\          read_latency_mean={}
+        \\          write_latency_min={}
+        \\          write_latency_mean={}
+        \\          read_fault_probability={}%
+        \\          write_fault_probability={}%
+        \\
+    , .{
         seed,
         replica_count,
         client_count,
@@ -127,6 +139,13 @@ pub fn main() !void {
         cluster.options.network_options.packet_simulator_options.path_clog_duration_mean,
         cluster.options.network_options.packet_simulator_options.path_clog_probability,
         cluster.options.network_options.packet_simulator_options.packet_replay_probability,
+
+        cluster.options.storage_options.read_latency_min,
+        cluster.options.storage_options.read_latency_mean,
+        cluster.options.storage_options.write_latency_min,
+        cluster.options.storage_options.write_latency_mean,
+        cluster.options.storage_options.read_fault_probability,
+        cluster.options.storage_options.write_fault_probability,
     });
 
     var requests_sent: u64 = 0;
