@@ -103,22 +103,28 @@ pub const Storage = struct {
         replica_count: u8,
         out: *[config.replicas_max]FaultyArea,
     ) []FaultyArea {
-        assert(replica_count > 0);
-        if (replica_count == 1) {
-            // If there is only one replica in the cluster, storage faults are not recoverable.
-            out[0] = .{ .offset = 0, .size = 0 };
-            return out[0..1];
-        }
 
         // Distribute the faulty areas among replicas in a random order
         var replicas_buffer = [config.replicas_max]u8{ 0, 1, 2, 3, 4 };
         const replicas = replicas_buffer[0..replica_count];
         prng.shuffle(u8, replicas);
 
+        assert(replica_count > 0);
+        if (replica_count == 1) {
+            // If there is only one replica in the cluster, storage faults are not recoverable.
+            out[0] = .{ .offset = 0, .size = 0 };
+            return out[0..1];
+        } else if (replica_count == 2) {
+            out[replicas[0]] = .{ .offset = 0, .size = size };
+            out[replicas[1]] = .{ .offset = 0, .size = 0 };
+            return out[0..2];
+        }
+
         // We need to ensure there is message_size_max fault-free padding
         // between faulty areas of memory so that a single message
         // cannot straddle the corruptable areas of a majority of replicas.
         comptime assert(config.message_size_max % config.sector_size == 0);
+
         const faulty_size = vr.sector_floor(size / (replica_count / 2)) - config.message_size_max;
         for (out[0..replica_count]) |*faulty_area, i| {
             faulty_area.size = faulty_size;
