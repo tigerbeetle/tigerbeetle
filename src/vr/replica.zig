@@ -1011,6 +1011,12 @@ pub fn Replica(
                 if (!self.journal.dirty.bit(op)) {
                     assert(!self.journal.faulty.bit(op));
 
+                    log.debug("{}: on_request_prepare: op={} checksum={} reading", .{
+                        self.replica,
+                        op,
+                        checksum,
+                    });
+
                     self.journal.read_prepare(
                         on_request_prepare_read,
                         op,
@@ -1021,6 +1027,12 @@ pub fn Replica(
                     // We have guaranteed the prepare and our copy is clean (not safe to nack).
                     return;
                 } else if (self.journal.faulty.bit(op)) {
+                    log.debug("{}: on_request_prepare: op={} checksum={} faulty", .{
+                        self.replica,
+                        op,
+                        checksum,
+                    });
+
                     // We have gauranteed the prepare but our copy is faulty (not safe to nack).
                     return;
                 }
@@ -1035,6 +1047,13 @@ pub fn Replica(
                 if (self.journal.entry_for_op_exact_with_checksum(op, checksum) != null) {
                     assert(self.journal.dirty.bit(op) and !self.journal.faulty.bit(op));
                 }
+
+                log.debug("{}: on_request_prepare: op={} checksum={} nacking", .{
+                    self.replica,
+                    op,
+                    checksum,
+                });
+
                 self.send_header_to_replica(message.header.replica, .{
                     .command = .nack_prepare,
                     .context = checksum.?,
@@ -1047,7 +1066,17 @@ pub fn Replica(
         }
 
         fn on_request_prepare_read(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
-            const message = prepare orelse return;
+            const message = prepare orelse {
+                log.debug("{}: on_request_prepare_read: prepare=null", .{self.replica});
+                return;
+            };
+
+            log.debug("{}: on_request_prepare_read: op={} checksum={} sending to replica={}", .{
+                self.replica,
+                message.header.op,
+                message.header.checksum,
+                destination_replica.?,
+            });
 
             assert(destination_replica.? != self.replica);
             self.send_message_to_replica(destination_replica.?, message);
@@ -2989,7 +3018,7 @@ pub fn Replica(
                         .nack_prepare,
                     );
                 }
-                log.debug("{}: repair_prepare: requesting op={} checksum={} (priority)", .{
+                log.debug("{}: repair_prepare: requesting op={} checksum={} (uncommitted)", .{
                     self.replica,
                     op,
                     checksum,
@@ -2998,11 +3027,12 @@ pub fn Replica(
                 assert(request_prepare.context == checksum);
                 self.send_header_to_other_replicas(request_prepare);
             } else {
-                log.debug("{}: repair_prepare: requesting op={} checksum={}", .{
+                log.debug("{}: repair_prepare: requesting op={} checksum={} (committed)", .{
                     self.replica,
                     op,
                     checksum,
                 });
+
                 // We expect that `repair_prepare()` is called in reverse chronological order:
                 // Any uncommitted ops should have already been dealt with.
                 // We never roll back committed ops, and thus never regard `nack_prepare` responses.
