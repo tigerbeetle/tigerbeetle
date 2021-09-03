@@ -87,8 +87,8 @@ pub fn main() !void {
             .read_latency_mean = 3 + prng.random.uintLessThan(u16, 10),
             .write_latency_min = prng.random.uintLessThan(u16, 3),
             .write_latency_mean = 3 + prng.random.uintLessThan(u16, 10),
-            .read_fault_probability = prng.random.uintLessThan(u8, 3),
-            .write_fault_probability = prng.random.uintLessThan(u8, 3),
+            .read_fault_probability = prng.random.uintLessThan(u8, 10),
+            .write_fault_probability = prng.random.uintLessThan(u8, 10),
         },
     });
     defer cluster.destroy();
