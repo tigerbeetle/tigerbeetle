@@ -81,6 +81,13 @@ pub fn main() !void {
                 .packet_replay_probability = prng.random.uintLessThan(u8, 50),
             },
         },
+        .storage_options = .{
+            .seed = prng.random.int(u64),
+            .read_latency_min = prng.random.uintLessThan(u16, 3),
+            .read_latency_mean = 3 + prng.random.uintLessThan(u16, 10),
+            .write_latency_min = prng.random.uintLessThan(u16, 3),
+            .write_latency_mean = 3 + prng.random.uintLessThan(u16, 10),
+        },
     });
     defer cluster.destroy();
 
