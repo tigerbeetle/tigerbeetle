@@ -3008,6 +3008,13 @@ pub fn Replica(
                 // Only the leader is allowed to do repairs in a view change:
                 assert(self.leader_index(self.view) == self.replica);
 
+                log.debug("{}: repair_prepare: op={} checksum={} faulty={} (uncommitted)", .{
+                    self.replica,
+                    op,
+                    checksum,
+                    self.journal.faulty.bit(op),
+                });
+
                 if (self.replica_count == 2 and !self.journal.faulty.bit(op)) {
                     // This is required to avoid a liveness issue for a cluster-of-two where a new
                     // leader learns of an op during a view change but where the op is faulty on
@@ -3040,19 +3047,16 @@ pub fn Replica(
                         .nack_prepare,
                     );
                 }
-                log.debug("{}: repair_prepare: requesting op={} checksum={} (uncommitted)", .{
-                    self.replica,
-                    op,
-                    checksum,
-                });
+
                 assert(self.nack_prepare_op.? == op);
                 assert(request_prepare.context == checksum);
                 self.send_header_to_other_replicas(request_prepare);
             } else {
-                log.debug("{}: repair_prepare: requesting op={} checksum={} (committed)", .{
+                log.debug("{}: repair_prepare: op={} checksum={} faulty={} (committed)", .{
                     self.replica,
                     op,
                     checksum,
+                    self.journal.faulty.bit(op),
                 });
 
                 // We expect that `repair_prepare()` is called in reverse chronological order:
