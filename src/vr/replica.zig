@@ -1191,32 +1191,8 @@ pub fn Replica(
             assert(self.nack_prepare_from_other_replicas[self.replica] == null);
             log.debug("{}: on_nack_prepare: quorum received", .{self.replica});
 
-            assert(self.valid_hash_chain("on_nack_prepare"));
-
-            assert(op > self.commit_max);
-            assert(op <= self.op);
-            assert(self.journal.entry_for_op_exact_with_checksum(op, checksum) != null);
-            assert(self.journal.dirty.bit(op));
-
-            log.debug("{}: on_nack_prepare: discarding uncommitted ops={}..{}", .{
-                self.replica,
-                op,
-                self.op,
-            });
-
-            self.journal.remove_entries_from(op);
-            self.op = op - 1;
-
-            assert(self.journal.entry_for_op(op) == null);
-            assert(!self.journal.dirty.bit(op));
-            assert(!self.journal.faulty.bit(op));
-
-            // We require that `self.op` always exists. Rewinding `self.op` could change that.
-            // However, we do this only as the leader within a view change, with all headers intact.
-            assert(self.journal.entry_for_op_exact(self.op) != null);
-
+            self.discard_uncommitted_ops_from(op, checksum);
             self.reset_quorum_nack_prepare();
-
             self.repair();
         }
 
@@ -1932,6 +1908,40 @@ pub fn Replica(
             message.header.set_checksum();
 
             return message.ref();
+        }
+
+        /// Discards uncommitted ops during a view change from after and including `op`.
+        /// This is required to maximize availability in the presence of storage faults.
+        /// Refer to the CTRL protocol from Protocol-Aware Recovery for Consensus-Based Storage.
+        fn discard_uncommitted_ops_from(self: *Self, op: u64, checksum: u128) void {
+            assert(self.status == .view_change);
+            assert(self.leader_index(self.view) == self.replica);
+            assert(self.repairs_allowed());
+
+            assert(self.valid_hash_chain("discard_uncommitted_ops_from"));
+
+            assert(op > self.commit_max);
+            assert(op <= self.op);
+            assert(self.journal.entry_for_op_exact_with_checksum(op, checksum) != null);
+            assert(self.journal.dirty.bit(op));
+
+            log.debug("{}: discard_uncommitted_ops_from: ops={}..{} view={}", .{
+                self.replica,
+                op,
+                self.op,
+                self.view,
+            });
+
+            self.journal.remove_entries_from(op);
+            self.op = op - 1;
+
+            assert(self.journal.entry_for_op(op) == null);
+            assert(!self.journal.dirty.bit(op));
+            assert(!self.journal.faulty.bit(op));
+
+            // We require that `self.op` always exists. Rewinding `self.op` could change that.
+            // However, we do this only as the leader within a view change, with all headers intact.
+            assert(self.journal.entry_for_op_exact(self.op) != null);
         }
 
         /// Returns whether the replica is a follower for the current view.
@@ -2997,6 +3007,18 @@ pub fn Replica(
             if (self.status == .view_change and op > self.commit_max) {
                 // Only the leader is allowed to do repairs in a view change:
                 assert(self.leader_index(self.view) == self.replica);
+
+                if (self.replica_count == 2 and !self.journal.faulty.bit(op)) {
+                    // This is required to avoid a liveness issue for a cluster-of-two where a new
+                    // leader learns of an op during a view change but where the op is faulty on
+                    // the old leader. We must immediately roll back the op since it could not have
+                    // been committed by the old leader if we know we do not have it, and because
+                    // the old leader cannot send a nack_prepare for its faulty copy.
+                    // For this to be correct, the recovery protocol must set all headers as faulty,
+                    // not only as dirty.
+                    self.discard_uncommitted_ops_from(op, checksum);
+                    return false;
+                }
 
                 // Initialize the `nack_prepare` quorum counter for this uncommitted op:
                 // It is also possible that we may start repairing a lower uncommitted op, having
