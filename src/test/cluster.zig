@@ -26,6 +26,7 @@ pub const ClusterOptions = struct {
     seed: u64,
 
     network_options: NetworkOptions,
+    storage_options: Storage.Options,
 };
 
 pub const Cluster = struct {
@@ -85,7 +86,11 @@ pub const Cluster = struct {
                 .offset_coefficient_B = 0,
             };
             cluster.state_machines[replica_index] = StateMachine.init(options.seed);
-            cluster.storages[replica_index] = try Storage.init(allocator, config.journal_size_max);
+            cluster.storages[replica_index] = try Storage.init(
+                allocator,
+                config.journal_size_max,
+                options.storage_options,
+            );
             const message_bus = try cluster.network.init_message_bus(
                 options.cluster,
                 .{ .replica = @intCast(u8, replica_index) },
