@@ -236,6 +236,9 @@ pub fn Replica(
             if (replica_count <= 2) {
                 assert(quorum_replication == replica_count);
                 assert(quorum_view_change == replica_count);
+            } else {
+                assert(quorum_replication < replica_count);
+                assert(quorum_view_change < replica_count);
             }
 
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
@@ -1137,10 +1140,16 @@ pub fn Replica(
             // We require a `nack_prepare` from a majority of followers if our op is faulty:
             // Otherwise, we know we do not have the op and need only `f` other nacks.
             assert(self.replica_count > 1);
-            const threshold = if (self.journal.faulty.bit(op))
+            const threshold = if (self.replica_count == 2)
+                self.replica_count - 1
+            else if (self.journal.faulty.bit(op))
                 self.quorum_view_change
             else
                 self.quorum_view_change - 1;
+
+            // We should never expect to receive a nack from ourselves:
+            // Detect if we ever set `threshold` to `quorum_view_change` for a cluster-of-two again.
+            assert(threshold < self.replica_count);
 
             // Wait until we have `threshold` messages for quorum:
             const count = self.add_message_and_receive_quorum_exactly_once(
