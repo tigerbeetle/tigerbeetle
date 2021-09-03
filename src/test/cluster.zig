@@ -78,6 +78,9 @@ pub const Cluster = struct {
             };
         }
 
+        var buffer: [config.replicas_max]Storage.FaultyArea = undefined;
+        const faulty_areas = Storage.generate_faulty_areas(prng, config.journal_size_max, options.replica_count, &buffer);
+
         for (cluster.replicas) |*replica, replica_index| {
             const time: Time = .{
                 .resolution = config.tick_ms * std.time.ns_per_ms,
@@ -90,6 +93,8 @@ pub const Cluster = struct {
                 allocator,
                 config.journal_size_max,
                 options.storage_options,
+                @intCast(u8, replica_index),
+                faulty_areas[replica_index],
             );
             const message_bus = try cluster.network.init_message_bus(
                 options.cluster,
