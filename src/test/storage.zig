@@ -4,7 +4,7 @@ const math = std.math;
 const mem = std.mem;
 
 const config = @import("../config.zig");
-const vr = @import("../vr.zig");
+const vsr = @import("../vsr.zig");
 
 const log = std.log.scoped(.storage);
 

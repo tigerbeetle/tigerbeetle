@@ -9,7 +9,7 @@ const epoch_max: u64 = config.clock_epoch_max_ms * std.time.ns_per_ms;
 const window_min: u64 = config.clock_synchronization_window_min_ms * std.time.ns_per_ms;
 const window_max: u64 = config.clock_synchronization_window_max_ms * std.time.ns_per_ms;
 
-const Marzullo = @import("../marzullo.zig").Marzullo;
+const Marzullo = @import("marzullo.zig").Marzullo;
 
 pub fn Clock(comptime Time: type) type {
     return struct {

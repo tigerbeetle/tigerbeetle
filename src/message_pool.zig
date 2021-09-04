@@ -4,8 +4,8 @@ const mem = std.mem;
 
 const config = @import("config.zig");
 
-const vr = @import("vr.zig");
-const Header = vr.Header;
+const vsr = @import("vsr.zig");
+const Header = vsr.Header;
 
 comptime {
     // message_size_max must be a multiple of sector_size for Direct I/O
@@ -13,7 +13,7 @@ comptime {
 }
 
 /// Add an extra sector_size bytes to allow a partially received subsequent
-/// message to be shifted to make space for 0 padding to vr.sector_ceil.
+/// message to be shifted to make space for 0 padding to vsr.sector_ceil.
 const message_size_max_padded = config.message_size_max + config.sector_size;
 
 /// A pool of reference-counted Messages, memory for which is allocated only once

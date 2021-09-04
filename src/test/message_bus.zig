@@ -5,7 +5,7 @@ const config = @import("../config.zig");
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
-const Header = @import("../vr.zig").Header;
+const Header = @import("../vsr.zig").Header;
 
 const Network = @import("network.zig").Network;
 

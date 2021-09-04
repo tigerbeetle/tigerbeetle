@@ -7,9 +7,9 @@ const IO = @import("io.zig").IO;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const StateMachine = @import("state_machine.zig").StateMachine;
 
-const vr = @import("vr.zig");
-const Header = vr.Header;
-const Client = vr.Client(StateMachine, MessageBus);
+const vsr = @import("vsr.zig");
+const Header = vsr.Header;
+const Client = vsr.Client(StateMachine, MessageBus);
 
 pub const log_level: std.log.Level = .alert;
 

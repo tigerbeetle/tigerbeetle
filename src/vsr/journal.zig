@@ -6,8 +6,8 @@ const math = std.math;
 const config = @import("../config.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
-const vr = @import("../vr.zig");
-const Header = vr.Header;
+const vsr = @import("../vsr.zig");
+const Header = vsr.Header;
 
 const log = std.log.scoped(.journal);
 
@@ -262,7 +262,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         pub fn next_offset(self: *Self, header: *const Header) u64 {
             // TODO Snapshots
             assert(header.command == .prepare);
-            return header.offset + vr.sector_ceil(header.size);
+            return header.offset + vsr.sector_ceil(header.size);
         }
 
         pub fn has(self: *Self, header: *const Header) bool {
@@ -487,7 +487,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            const physical_size = vr.sector_ceil(exact.size);
+            const physical_size = vsr.sector_ceil(exact.size);
             assert(physical_size >= exact.size);
 
             const message = replica.message_bus.get_message() orelse {
@@ -692,7 +692,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
 
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
-            const sectors = message.buffer[0..vr.sector_ceil(message.header.size)];
+            const sectors = message.buffer[0..vsr.sector_ceil(message.header.size)];
             assert(message.header.offset + sectors.len <= self.size_circular_buffer);
 
             if (std.builtin.mode == .Debug) {
@@ -871,7 +871,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn write_prepare_header_offset(message: *Message) u64 {
             comptime assert(config.sector_size % @sizeOf(Header) == 0);
-            return vr.sector_floor(message.header.op * @sizeOf(Header));
+            return vsr.sector_floor(message.header.op * @sizeOf(Header));
         }
 
         fn write_headers_increment_version(self: *Self) u1 {
