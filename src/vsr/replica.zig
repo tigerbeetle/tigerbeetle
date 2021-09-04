@@ -1180,15 +1180,43 @@ pub fn Replica(
             // TODO However our op may change in between sending the request and getting the nack.
             assert(message.header.context == checksum);
 
-            // We require a `nack_prepare` from a majority of followers if our op is faulty:
-            // Otherwise, we know we do not have the op and need only `f` other nacks.
+            // Here are what our nack quorums look like, if we know our op is faulty:
+            // These are for various replication quorums under Flexible Paxos.
+            // We need to have enough nacks to guarantee that `quorum_replication` was not reached,
+            // because if the replication quorum was reached, then it may have been committed.
+            // We add `1` in each case because our op is faulty and may have been counted.
+            //
+            // replica_count=2 - quorum_replication=2 + 1 = 0 + 1 = 1 nacks required
+            // replica_count=3 - quorum_replication=2 + 1 = 1 + 1 = 2 nacks required
+            // replica_count=4 - quorum_replication=2 + 1 = 2 + 1 = 3 nacks required
+            // replica_count=4 - quorum_replication=3 + 1 = 1 + 1 = 2 nacks required
+            // replica_count=5 - quorum_replication=2 + 1 = 3 + 1 = 4 nacks required
+            // replica_count=5 - quorum_replication=3 + 1 = 2 + 1 = 3 nacks required
+            //
+            // Otherwise, if we know we do not have the op, then we can exclude ourselves.
             assert(self.replica_count > 1);
-            const threshold = if (self.replica_count == 2)
-                self.replica_count - 1
-            else if (self.journal.faulty.bit(op))
-                self.quorum_view_change
+
+            const threshold = if (self.journal.faulty.bit(op))
+                self.replica_count - self.quorum_replication + 1
             else
-                self.quorum_view_change - 1;
+                self.replica_count - self.quorum_replication;
+
+            if (threshold == 0) {
+                assert(self.replica_count == 2);
+                assert(!self.journal.faulty.bit(op));
+
+                // This is a special case for a cluster-of-two, handled in `repair_prepare()`.
+                log.debug("{}: on_nack_prepare: ignoring (cluster-of-two, not faulty)", .{
+                    self.replica,
+                });
+                return;
+            }
+
+            log.debug("{}: on_nack_prepare: quorum_replication={} threshold={}", .{
+                self.replica,
+                self.quorum_replication,
+                threshold,
+            });
 
             // We should never expect to receive a nack from ourselves:
             // Detect if we ever set `threshold` to `quorum_view_change` for a cluster-of-two again.
