@@ -5,6 +5,7 @@ demos/bitcast/transfers
 dist/
 journal
 main
+simulator
 tigerbeetle
 cluster_*_replica_*.tigerbeetle
 zig/
