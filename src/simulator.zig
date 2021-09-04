@@ -57,7 +57,7 @@ pub fn main() !void {
     const client_count = 1 + prng.random.uintLessThan(u8, config.clients_max);
     const node_count = replica_count + client_count;
 
-    const ticks_max = 10_000_000;
+    const ticks_max = 100_000_000;
     const transitions_max = config.journal_size_max / config.message_size_max;
     const request_probability = 1 + prng.random.uintLessThan(u8, 99);
     const idle_on_probability = prng.random.uintLessThan(u8, 20);
@@ -77,7 +77,7 @@ pub fn main() !void {
                 .packet_loss_probability = prng.random.uintLessThan(u8, 50),
                 .path_maximum_capacity = 1 + prng.random.uintLessThan(u8, 20),
                 .path_clog_duration_mean = prng.random.uintLessThan(u16, 1000),
-                .path_clog_probability = prng.random.uintLessThan(u8, 5),
+                .path_clog_probability = prng.random.uintLessThan(u8, 1),
                 .packet_replay_probability = prng.random.uintLessThan(u8, 50),
             },
         },
