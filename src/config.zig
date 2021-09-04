@@ -193,16 +193,6 @@ pub const rtt_multiple = 2;
 pub const backoff_min_ticks = 100 / tick_ms;
 pub const backoff_max_ticks = 10000 / tick_ms;
 
-/// TODO
-pub const election_timeout_rtt_multiple = rtt_multiple * 10;
-pub const election_timeout_min_ticks = 100 / tick_ms;
-pub const election_timeout_max_ticks = 30000 / tick_ms;
-
-/// TODO
-pub const view_change_timeout_rtt_multiple = rtt_multiple * 10;
-pub const view_change_timeout_min_ticks = 500 / tick_ms;
-pub const view_change_timeout_max_ticks = 10000 / tick_ms;
-
 /// The maximum skew between two clocks to allow when considering them to be in agreement.
 /// The principle is that no two clocks tick exactly alike but some clocks more or less agree.
 /// The maximum skew across the cluster as a whole is this value times the total number of clocks.

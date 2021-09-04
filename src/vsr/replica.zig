@@ -181,11 +181,11 @@ pub fn Replica(
 
         /// The number of ticks without hearing from the leader before starting a view change.
         /// This transitions from .normal status to .view_change status.
-        election_timeout: Timeout,
+        normal_status_timeout: Timeout,
 
         /// The number of ticks before a view change is timed out:
         /// This transitions from `view_change` status to `view_change` status but for a newer view.
-        view_change_timeout: Timeout,
+        view_change_status_timeout: Timeout,
 
         /// The number of ticks before resending a `start_view_change` or `do_view_change` message:
         view_change_message_timeout: Timeout,
@@ -312,13 +312,13 @@ pub fn Replica(
                     .id = replica,
                     .after = 100,
                 },
-                .election_timeout = Timeout{
-                    .name = "election_timeout",
+                .normal_status_timeout = Timeout{
+                    .name = "normal_status_timeout",
                     .id = replica,
                     .after = 500,
                 },
-                .view_change_timeout = Timeout{
-                    .name = "view_change_timeout",
+                .view_change_status_timeout = Timeout{
+                    .name = "view_change_status_timeout",
                     .id = replica,
                     .after = 500,
                 },
@@ -361,7 +361,7 @@ pub fn Replica(
             } else {
                 log.debug("{}: init: follower", .{self.replica});
                 self.ping_timeout.start();
-                self.election_timeout.start();
+                self.normal_status_timeout.start();
                 self.repair_timeout.start();
             }
 
@@ -386,16 +386,16 @@ pub fn Replica(
             self.ping_timeout.tick();
             self.prepare_timeout.tick();
             self.commit_timeout.tick();
-            self.election_timeout.tick();
-            self.view_change_timeout.tick();
+            self.normal_status_timeout.tick();
+            self.view_change_status_timeout.tick();
             self.view_change_message_timeout.tick();
             self.repair_timeout.tick();
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.prepare_timeout.fired()) self.on_prepare_timeout();
             if (self.commit_timeout.fired()) self.on_commit_timeout();
-            if (self.election_timeout.fired()) self.on_election_timeout();
-            if (self.view_change_timeout.fired()) self.on_view_change_timeout();
+            if (self.normal_status_timeout.fired()) self.on_normal_status_timeout();
+            if (self.view_change_status_timeout.fired()) self.on_view_change_status_timeout();
             if (self.view_change_message_timeout.fired()) self.on_view_change_message_timeout();
             if (self.repair_timeout.fired()) self.on_repair_timeout();
 
@@ -607,7 +607,7 @@ pub fn Replica(
             assert(message.header.op > self.op);
             assert(message.header.op > self.commit_min);
 
-            if (self.follower()) self.election_timeout.reset();
+            if (self.follower()) self.normal_status_timeout.reset();
 
             if (message.header.op > self.op + 1) {
                 log.debug("{}: on_prepare: newer op", .{self.replica});
@@ -720,7 +720,7 @@ pub fn Replica(
                 }
             }
 
-            self.election_timeout.reset();
+            self.normal_status_timeout.reset();
 
             self.commit_ops(message.header.commit);
         }
@@ -1361,13 +1361,13 @@ pub fn Replica(
             });
         }
 
-        fn on_election_timeout(self: *Self) void {
+        fn on_normal_status_timeout(self: *Self) void {
             assert(self.status == .normal);
             assert(self.follower());
             self.transition_to_view_change_status(self.view + 1);
         }
 
-        fn on_view_change_timeout(self: *Self) void {
+        fn on_view_change_status_timeout(self: *Self) void {
             assert(self.status == .view_change);
             self.transition_to_view_change_status(self.view + 1);
         }
@@ -3697,8 +3697,8 @@ pub fn Replica(
 
                 self.ping_timeout.start();
                 self.commit_timeout.start();
-                self.election_timeout.stop();
-                self.view_change_timeout.stop();
+                self.normal_status_timeout.stop();
+                self.view_change_status_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
 
@@ -3712,8 +3712,8 @@ pub fn Replica(
 
                 self.ping_timeout.start();
                 self.commit_timeout.stop();
-                self.election_timeout.start();
-                self.view_change_timeout.stop();
+                self.normal_status_timeout.start();
+                self.view_change_status_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
 
@@ -3742,8 +3742,8 @@ pub fn Replica(
 
             self.ping_timeout.stop();
             self.commit_timeout.stop();
-            self.election_timeout.stop();
-            self.view_change_timeout.start();
+            self.normal_status_timeout.stop();
+            self.view_change_status_timeout.start();
             self.view_change_message_timeout.start();
             self.repair_timeout.stop();
 
@@ -3907,7 +3907,7 @@ pub fn Replica(
                     // This is an interesting special case:
                     // If the transition is to `.normal` in the same view, then we missed the
                     // `start_view` message and we must also consider this a view jump:
-                    // If we don't view jump here, then our `view_change_timeout` will fire and we
+                    // If we don't view jump here, then our `view_change_status_timeout` will fire and we
                     // will disrupt the cluster by starting another view change for a newer view.
                     .normal => {},
                     // If the transition is to `.view_change`, then ignore if for the same view:
