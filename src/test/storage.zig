@@ -72,6 +72,14 @@ pub const Storage = struct {
         }
     };
 
+    /// Faulty areas are always sized to message_size_max
+    /// If the faulty areas of all replicas are superimposed, the padding between them is always message_size_max.
+    /// For a single replica, the padding between faulty areas depends on the number of other replicas.
+    pub const FaultyAreas = struct {
+        first_offset: u64,
+        period: u64,
+    };
+
     memory: []align(config.sector_size) u8,
     size: u64,
 
@@ -80,66 +88,21 @@ pub const Storage = struct {
     prng: std.rand.DefaultPrng,
 
     // We can't allow storage faults for the same message in a majority of
-    // the replicas as that would make consensus impossible.
-    // These fields indicate the memory where we are allowed to inject storage faults
-    // based on the replica index and count.
-    faulty_size: u64,
-    faulty_offset: u64,
+    // the replicas as that would make recovery impossible. Instead, we only
+    // allow faults in certian areas which differ between replicas.
+    faulty_areas: FaultyAreas,
 
     reads: std.PriorityQueue(*Storage.Read),
     writes: std.PriorityQueue(*Storage.Write),
 
     ticks: u64 = 0,
 
-    pub const FaultyArea = struct {
-        offset: u64,
-        size: u64,
-    };
-
-    /// The return value is a slice into the provided out array.
-    pub fn generate_faulty_areas(
-        prng: *std.rand.Random,
-        size: u64,
-        replica_count: u8,
-        out: *[config.replicas_max]FaultyArea,
-    ) []FaultyArea {
-
-        // Distribute the faulty areas among replicas in a random order
-        var replicas_buffer = [config.replicas_max]u8{ 0, 1, 2, 3, 4 };
-        const replicas = replicas_buffer[0..replica_count];
-        prng.shuffle(u8, replicas);
-
-        assert(replica_count > 0);
-        if (replica_count == 1) {
-            // If there is only one replica in the cluster, storage faults are not recoverable.
-            out[0] = .{ .offset = 0, .size = 0 };
-            return out[0..1];
-        } else if (replica_count == 2) {
-            out[replicas[0]] = .{ .offset = 0, .size = size };
-            out[replicas[1]] = .{ .offset = 0, .size = 0 };
-            return out[0..2];
-        }
-
-        // We need to ensure there is message_size_max fault-free padding
-        // between faulty areas of memory so that a single message
-        // cannot straddle the corruptable areas of a majority of replicas.
-        comptime assert(config.message_size_max % config.sector_size == 0);
-
-        const faulty_size = vr.sector_floor(size / (replica_count / 2)) - config.message_size_max;
-        for (out[0..replica_count]) |*faulty_area, i| {
-            faulty_area.size = faulty_size;
-            faulty_area.offset = (faulty_size + config.message_size_max) * (replicas[i] / 2);
-        }
-
-        return out[0..replica_count];
-    }
-
     pub fn init(
         allocator: *mem.Allocator,
         size: u64,
         options: Storage.Options,
         replica_index: u8,
-        faulty_area: FaultyArea,
+        faulty_areas: FaultyAreas,
     ) !Storage {
         assert(options.write_latency_mean >= options.write_latency_min);
         assert(options.read_latency_mean >= options.read_latency_min);
@@ -163,8 +126,7 @@ pub const Storage = struct {
             .options = options,
             .replica_index = replica_index,
             .prng = std.rand.DefaultPrng.init(options.seed),
-            .faulty_size = faulty_area.size,
-            .faulty_offset = faulty_area.offset,
+            .faulty_areas = faulty_areas,
             .reads = reads,
             .writes = writes,
         };
@@ -213,16 +175,14 @@ pub const Storage = struct {
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
-        if (read.offset >= storage.faulty_offset and
-            read.offset + read.buffer.len <= storage.faulty_offset + storage.faulty_size and
-            storage.x_in_100(storage.options.read_fault_probability))
-        {
-            // Randomly corrupt one of the sectors the read is targeting
+        const faulty = storage.faulty_sectors(read.offset, read.buffer.len);
+        if (faulty.len > 0 and storage.x_in_100(storage.options.write_fault_probability)) {
+            // Randomly corrupt one of the faulty sectors the read targeted
             // TODO: inject more realistic and varied storage faults as described above.
-            const sector_count = @divExact(read.buffer.len, config.sector_size);
-            const faulty_sector = storage.prng.random.uintLessThan(usize, sector_count);
-            const faulty_sector_offset = read.offset + faulty_sector * config.sector_size;
-            const faulty_sector_bytes = storage.memory[faulty_sector_offset..][0..config.sector_size];
+            const sector_count = @divExact(faulty.len, config.sector_size);
+            const faulty_sector = storage.prng.random.uintLessThan(u64, sector_count);
+            const faulty_sector_offset = faulty_sector * config.sector_size;
+            const faulty_sector_bytes = faulty[faulty_sector_offset..][0..config.sector_size];
 
             log.info("corrupting sector at offset {} during read by replica {}", .{
                 faulty_sector_offset,
@@ -259,16 +219,14 @@ pub const Storage = struct {
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
         mem.copy(u8, storage.memory[write.offset..][0..write.buffer.len], write.buffer);
 
-        if (write.offset >= storage.faulty_offset and
-            write.offset + write.buffer.len <= storage.faulty_offset + storage.faulty_size and
-            storage.x_in_100(storage.options.write_fault_probability))
-        {
-            // Randomly corrupt one of the sectors the write targeted
+        const faulty = storage.faulty_sectors(write.offset, write.buffer.len);
+        if (faulty.len > 0 and storage.x_in_100(storage.options.write_fault_probability)) {
+            // Randomly corrupt one of the faulty sectors the write targeted
             // TODO: inject more realistic and varied storage faults as described above.
-            const sector_count = @divExact(write.buffer.len, config.sector_size);
-            const faulty_sector = storage.prng.random.uintLessThan(usize, sector_count);
-            const faulty_sector_offset = write.offset + faulty_sector * config.sector_size;
-            const faulty_sector_bytes = storage.memory[faulty_sector_offset..][0..config.sector_size];
+            const sector_count = @divExact(faulty.len, config.sector_size);
+            const faulty_sector = storage.prng.random.uintLessThan(u64, sector_count);
+            const faulty_sector_offset = faulty_sector * config.sector_size;
+            const faulty_sector_bytes = faulty[faulty_sector_offset..][0..config.sector_size];
 
             log.info("corrupting sector at offset {} during write by replica {}", .{
                 faulty_sector_offset,
@@ -308,5 +266,88 @@ pub const Storage = struct {
     fn x_in_100(storage: *Storage, x: u8) bool {
         assert(x <= 100);
         return x > storage.prng.random.uintLessThan(u8, 100);
+    }
+
+    /// The return value is a slice into the provided out array.
+    pub fn generate_faulty_areas(
+        prng: *std.rand.Random,
+        size: u64,
+        replica_count: u8,
+        out: *[config.replicas_max]FaultyAreas,
+    ) []FaultyAreas {
+        comptime assert(config.message_size_max % config.sector_size == 0);
+        const message_size_max = config.message_size_max;
+
+        // We need to ensure there is message_size_max fault-free padding
+        // between faulty areas of memory so that a single message
+        // cannot straddle the corruptable areas of a majority of replicas.
+        switch (replica_count) {
+            1 => {
+                // If there is only one replica in the cluster, storage faults are not recoverable.
+                out[0] = .{ .first_offset = size, .period = 1 };
+            },
+            2 => {
+                //  0123456789
+                // 0X   X   X
+                // 1  X   X   X
+                out[0] = .{ .first_offset = 0 * message_size_max, .period = 4 * message_size_max };
+                out[1] = .{ .first_offset = 2 * message_size_max, .period = 4 * message_size_max };
+            },
+            3 => {
+                //  0123456789
+                // 0X     X
+                // 1  X     X
+                // 2    X     X
+                out[0] = .{ .first_offset = 0 * message_size_max, .period = 6 * message_size_max };
+                out[1] = .{ .first_offset = 2 * message_size_max, .period = 6 * message_size_max };
+                out[2] = .{ .first_offset = 4 * message_size_max, .period = 6 * message_size_max };
+            },
+            4 => {
+                //  0123456789
+                // 0X   X   X
+                // 1X   X   X
+                // 2  X   X   X
+                // 3  X   X   X
+                out[0] = .{ .first_offset = 0 * message_size_max, .period = 4 * message_size_max };
+                out[1] = .{ .first_offset = 0 * message_size_max, .period = 4 * message_size_max };
+                out[2] = .{ .first_offset = 2 * message_size_max, .period = 4 * message_size_max };
+                out[3] = .{ .first_offset = 2 * message_size_max, .period = 4 * message_size_max };
+            },
+            5 => {
+                //  0123456789
+                // 0X     X
+                // 1X     X
+                // 2  X     X
+                // 3  X     X
+                // 4    X     X
+                out[0] = .{ .first_offset = 0 * message_size_max, .period = 6 * message_size_max };
+                out[1] = .{ .first_offset = 0 * message_size_max, .period = 6 * message_size_max };
+                out[2] = .{ .first_offset = 2 * message_size_max, .period = 6 * message_size_max };
+                out[3] = .{ .first_offset = 2 * message_size_max, .period = 6 * message_size_max };
+                out[4] = .{ .first_offset = 4 * message_size_max, .period = 6 * message_size_max };
+            },
+            else => unreachable,
+        }
+
+        prng.shuffle(FaultyAreas, out[0..replica_count]);
+        return out[0..replica_count];
+    }
+
+    /// Given an offest and size of a read/write, returns a slice into storage.memory of any
+    /// faulty sectors touched by the read/write
+    fn faulty_sectors(storage: *Storage, offset: u64, size: u64) []align(config.sector_size) u8 {
+        assert(size <= config.message_size_max);
+        const message_size_max = config.message_size_max;
+        const period = storage.faulty_areas.period;
+
+        const faulty_offset = storage.faulty_areas.first_offset + (offset / period) * period;
+
+        const start = std.math.max(offset, faulty_offset);
+        const end = std.math.min(offset + size, faulty_offset + message_size_max);
+
+        // The read/write does not touch any faulty sectors
+        if (start >= end) return &[0]u8{};
+
+        return storage.memory[start..end];
     }
 };
