@@ -832,7 +832,10 @@ pub fn Replica(
 
             assert(count == threshold);
             assert(self.start_view_change_from_other_replicas[self.replica] == null);
-            log.debug("{}: on_start_view_change: quorum received", .{self.replica});
+            log.debug("{}: on_start_view_change: view={} quorum received", .{
+                self.replica,
+                self.view,
+            });
 
             assert(!self.start_view_change_quorum);
             assert(!self.do_view_change_quorum);
@@ -889,7 +892,10 @@ pub fn Replica(
 
             assert(count == threshold);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
-            log.debug("{}: on_do_view_change: quorum received", .{self.replica});
+            log.debug("{}: on_do_view_change: view={} quorum received", .{
+                self.replica,
+                self.view,
+            });
 
             var latest = Header.reserved();
             var k: ?u64 = null;
@@ -3735,7 +3741,11 @@ pub fn Replica(
         /// on its own timer, or because it receives a start_view_change or do_view_change message for
         /// a view with a larger number than its own view.
         fn transition_to_view_change_status(self: *Self, new_view: u32) void {
-            log.debug("{}: transition_to_view_change_status: view={}", .{ self.replica, new_view });
+            log.debug("{}: transition_to_view_change_status: view={}..{}", .{
+                self.replica,
+                self.view,
+                new_view,
+            });
             assert(new_view > self.view);
             self.view = new_view;
             self.status = .view_change;
