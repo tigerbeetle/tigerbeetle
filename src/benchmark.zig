@@ -22,7 +22,7 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
 const MAX_TRANSFERS: u32 = 1_000_000;
-const BATCH_SIZE: u32 = 10_000;
+const BATCH_SIZE: u32 = 5_000;
 const IS_TWO_PHASE_COMMIT = false;
 const BENCHMARK = if (IS_TWO_PHASE_COMMIT) 500_000 else 1_000_000;
 const RESULT_TOLERANCE = 10; // percent
@@ -163,10 +163,12 @@ pub fn main() !void {
         result,
         transfer_type,
     });
-    try stdout.print("create_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
+    try stdout.print("create_transfers max p100 latency per {} transfers = {}ms\n", .{
+        BATCH_SIZE,
         queue.max_transfers_latency,
     });
-    try stdout.print("commit_transfers max p100 latency per 10,000 transfers = {}ms\n", .{
+    try stdout.print("commit_transfers max p100 latency per {} transfers = {}ms\n", .{
+        BATCH_SIZE,
         queue.max_commits_latency,
     });
 }
