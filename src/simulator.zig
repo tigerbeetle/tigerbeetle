@@ -74,7 +74,7 @@ pub fn main() !void {
                 .seed = prng.random.int(u64),
                 .one_way_delay_mean = 3 + prng.random.uintLessThan(u16, 10),
                 .one_way_delay_min = prng.random.uintLessThan(u16, 3),
-                .packet_loss_probability = prng.random.uintLessThan(u8, 50),
+                .packet_loss_probability = prng.random.uintLessThan(u8, 30),
                 .path_maximum_capacity = 1 + prng.random.uintLessThan(u8, 20),
                 .path_clog_duration_mean = prng.random.uintLessThan(u16, 1000),
                 .path_clog_probability = prng.random.uintLessThan(u8, 1),
