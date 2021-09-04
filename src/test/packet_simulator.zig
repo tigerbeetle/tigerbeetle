@@ -150,10 +150,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
                 var to: u8 = 0;
                 while (to < self.options.node_count) : (to += 1) {
                     const path = .{ .source = from, .target = to };
-                    if (self.is_clogged(path)) {
-                        log.debug("clogged path={}", .{path});
-                        continue;
-                    }
+                    if (self.is_clogged(path)) continue;
 
                     const queue = self.path_queue(path);
                     while (queue.peek()) |*data| {
