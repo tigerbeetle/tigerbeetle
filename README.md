@@ -94,7 +94,7 @@ Run the TigerBeetle binary to see all command line arguments:
 
 * [tigerbeetle-node](https://github.com/coilhq/tigerbeetle-node) is a TigerBeetle Node.js client written in TypeScript (and Zig with [Node's N-API](https://nodejs.org/api/n-api.html) for ABI stability).
 
-* [client.zig](./src/client.zig) is a TigerBeetle Zig client.
+* [client.zig](./src/vr/client.zig) is a TigerBeetle Zig client.
 
 * [demo.zig](./src/demo.zig) is a lightweight TigerBeetle client for demonstration purposes only, which we used to create [six demos you can work your way through and modify](./docs/DEEP_DIVE.md) to explore TigerBeetle's commands.
 
