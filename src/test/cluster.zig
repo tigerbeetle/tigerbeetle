@@ -78,7 +78,7 @@ pub const Cluster = struct {
             };
         }
 
-        var buffer: [config.replicas_max]Storage.FaultyArea = undefined;
+        var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
         const faulty_areas = Storage.generate_faulty_areas(prng, config.journal_size_max, options.replica_count, &buffer);
 
         for (cluster.replicas) |*replica, replica_index| {
