@@ -6,7 +6,7 @@ const config = @import("config.zig");
 
 const Client = @import("test/cluster.zig").Client;
 const Cluster = @import("test/cluster.zig").Cluster;
-const Header = @import("vr.zig").Header;
+const Header = @import("vsr.zig").Header;
 const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StateMachine = @import("test/cluster.zig").StateMachine;

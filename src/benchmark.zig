@@ -10,9 +10,9 @@ const StateMachine = @import("state_machine.zig").StateMachine;
 const Operation = StateMachine.Operation;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
-const vr = @import("vr.zig");
-const Header = vr.Header;
-const Client = vr.Client(StateMachine, MessageBus);
+const vsr = @import("vsr.zig");
+const Header = vsr.Header;
+const Client = vsr.Client(StateMachine, MessageBus);
 
 const tb = @import("tigerbeetle.zig");
 const Transfer = tb.Transfer;

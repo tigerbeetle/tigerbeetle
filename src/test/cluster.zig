@@ -13,9 +13,9 @@ const MessageBus = @import("message_bus.zig").MessageBus;
 const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;
 
-const vr = @import("../vr.zig");
-pub const Replica = vr.Replica(StateMachine, MessageBus, Storage, Time);
-pub const Client = vr.Client(StateMachine, MessageBus);
+const vsr = @import("../vsr.zig");
+pub const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
+pub const Client = vsr.Client(StateMachine, MessageBus);
 
 pub const ClusterOptions = struct {
     cluster: u32,

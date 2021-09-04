@@ -7,11 +7,11 @@ const config = @import("../config.zig");
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
-const vr = @import("../vr.zig");
-const Header = vr.Header;
-const Timeout = vr.Timeout;
-const Command = vr.Command;
-const Version = vr.Version;
+const vsr = @import("../vsr.zig");
+const Header = vsr.Header;
+const Timeout = vsr.Timeout;
+const Command = vsr.Command;
+const Version = vsr.Version;
 
 const log = std.log.scoped(.replica);
 
@@ -70,8 +70,8 @@ pub fn Replica(
     return struct {
         const Self = @This();
 
-        const Journal = vr.Journal(Self, Storage);
-        const Clock = vr.Clock(Time);
+        const Journal = vsr.Journal(Self, Storage);
+        const Clock = vsr.Clock(Time);
 
         allocator: *Allocator,
 

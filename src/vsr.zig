@@ -2,7 +2,7 @@ const std = @import("std");
 const math = std.math;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
-const log = std.log.scoped(.vr);
+const log = std.log.scoped(.vsr);
 
 const config = @import("config.zig");
 
@@ -10,10 +10,10 @@ const config = @import("config.zig");
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
 pub const Version: u8 = 0;
 
-pub const Replica = @import("vr/replica.zig").Replica;
-pub const Client = @import("vr/client.zig").Client;
-pub const Clock = @import("vr/clock.zig").Clock;
-pub const Journal = @import("vr/journal.zig").Journal;
+pub const Replica = @import("vsr/replica.zig").Replica;
+pub const Client = @import("vsr/client.zig").Client;
+pub const Clock = @import("vsr/clock.zig").Clock;
+pub const Journal = @import("vsr/journal.zig").Journal;
 
 /// Viewstamped Replication protocol commands:
 pub const Command = packed enum(u8) {

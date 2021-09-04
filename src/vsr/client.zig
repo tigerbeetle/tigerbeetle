@@ -3,8 +3,8 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const config = @import("../config.zig");
-const vr = @import("../vr.zig");
-const Header = vr.Header;
+const vsr = @import("../vsr.zig");
+const Header = vsr.Header;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const Message = @import("../message_pool.zig").MessagePool.Message;
@@ -71,11 +71,11 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
         /// The number of ticks without a reply before the client resends the inflight request.
         /// Dynamically adjusted as a function of recent request round-trip time.
-        request_timeout: vr.Timeout,
+        request_timeout: vsr.Timeout,
 
         /// The number of ticks before the client broadcasts a ping to the cluster.
         /// Used for end-to-end keepalive, and to discover a new leader between requests.
-        ping_timeout: vr.Timeout,
+        ping_timeout: vsr.Timeout,
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the client's ID.
@@ -173,7 +173,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 .request = self.request_number,
                 .cluster = self.cluster,
                 .command = .request,
-                .operation = vr.Operation.from(StateMachine, operation),
+                .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(u32, @sizeOf(Header) + message_body_size),
             };
 
