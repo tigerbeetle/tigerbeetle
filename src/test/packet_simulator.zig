@@ -123,10 +123,10 @@ pub fn PacketSimulator(comptime Packet: type) type {
         fn clog_for(self: *Self, path: Path, ticks: u64) void {
             const clog_expiry = &self.path_clogged_till[self.path_index(path)];
             clog_expiry.* = self.ticks + ticks;
-            log.debug("Path path.source={} path.target={} clogged until tick={}.", .{
+            log.debug("Path path.source={} path.target={} clogged for ticks={}", .{
                 path.source,
                 path.target,
-                clog_expiry.*,
+                ticks,
             });
         }
 
@@ -159,7 +159,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
 
                         if (self.should_drop()) {
                             self.stats[@enumToInt(PacketStatistics.dropped)] += 1;
-                            log.debug("dropped packet from={} to={}.", .{ from, to });
+                            log.alert("dropped packet from={} to={}.", .{ from, to });
                             data.packet.deinit(path);
                             continue;
                         }
@@ -199,9 +199,13 @@ pub fn PacketSimulator(comptime Packet: type) type {
             const queue = self.path_queue(path);
             var queue_length = queue.count();
             if (queue_length + 1 > queue.capacity()) {
-                log.debug("submit_packet: {} reached capacity, dropping packet", .{path});
-                Packet.deinit(&packet, path);
-                return;
+                const index = self.prng.random.uintLessThanBiased(u64, queue_length);
+                const data = queue.removeIndex(index);
+                data.packet.deinit(path);
+                log.alert("submit_packet: {} reached capacity, dropped packet={}", .{
+                    path,
+                    index,
+                });
             }
 
             queue.add(.{
