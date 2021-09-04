@@ -806,6 +806,20 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(message.header.view == self.view);
 
+            if (self.leader_index(self.view) == self.replica) {
+                // If we are the leader of the new view, then wait until we have a message to send a
+                // do_view_change message to ourself. The on_do_view_change() handler will panic if
+                // we received a start_view_change quorum without a do_view_change to ourself.
+                if (self.message_bus.get_message()) |available| {
+                    self.message_bus.unref(available);
+                } else {
+                    log.alert("{}: on_start_view_change: waiting for message for do_view_change", .{
+                        self.replica,
+                    });
+                    return;
+                }
+            }
+
             // Wait until we have `f` messages (excluding ourself) for quorum:
             assert(self.replica_count > 1);
             const threshold = self.quorum_view_change - 1;
