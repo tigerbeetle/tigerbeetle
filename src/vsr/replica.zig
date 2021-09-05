@@ -907,6 +907,13 @@ pub fn Replica(
                     assert(m.header.replica == replica);
                     assert(m.header.view == self.view);
 
+                    log.debug("{}: on_do_view_change: replica={} latest op={} commit={}", .{
+                        self.replica,
+                        m.header.replica,
+                        m.header.op,
+                        m.header.commit,
+                    });
+
                     if (k == null or m.header.commit > k.?) k = m.header.commit;
                     self.set_latest_header(self.message_body_as_headers(m), &latest);
                 }
@@ -930,6 +937,10 @@ pub fn Replica(
             assert(self.start_view_change_quorum);
             assert(!self.do_view_change_quorum);
             self.do_view_change_quorum = true;
+
+            self.discard_uncommitted_headers();
+            assert(self.op >= self.commit_max);
+            assert(self.journal.entry_for_op_exact(self.op) != null);
 
             // Start repairs according to the CTRL protocol:
             assert(!self.repair_timeout.ticking);
@@ -1956,6 +1967,78 @@ pub fn Replica(
             message.header.set_checksum();
 
             return message.ref();
+        }
+
+        /// Discards uncommitted headers during a view change before the new leader starts the view.
+        /// This is required to maximize availability in the presence of storage faults.
+        /// Refer to the CTRL protocol from Protocol-Aware Recovery for Consensus-Based Storage.
+        ///
+        /// It's possible for the new leader to have done an op jump in a previous view, and so
+        /// introduced a header gap for an op, which was then discarded by another leader during a
+        /// newer view change, before surviving into this view as a gap because our latest op was
+        /// set as the latest op for the quorum.
+        ///
+        /// In this case, it may be impossible for the new leader to repair the missing header since
+        /// the rest of the cluster may have already discarded it. We therefore iterate over our
+        /// uncommitted header gaps and compare them with the quorum of do_view_change messages
+        /// received from other replicas, before starting the new view, to discard any that may be
+        /// impossible to repair.
+        fn discard_uncommitted_headers(self: *Self) void {
+            assert(self.status == .view_change);
+            assert(self.leader_index(self.view) == self.replica);
+            assert(self.do_view_change_quorum);
+            assert(!self.repair_timeout.ticking);
+            assert(self.op >= self.commit_max);
+            assert(self.replica_count > 1);
+
+            const threshold = self.replica_count - self.quorum_replication;
+            if (threshold == 0) {
+                assert(self.replica_count == 2);
+                return;
+            }
+
+            var op = self.op;
+            while (op > self.commit_max) : (op -= 1) {
+                if (self.journal.entry_for_op_exact(op) != null) continue;
+
+                log.debug("{}: discard_uncommitted_headers: op={} gap", .{ self.replica, op });
+
+                var nacks: usize = 0;
+                for (self.do_view_change_from_all_replicas) |received, replica| {
+                    if (received) |m| {
+                        assert(m.header.command == .do_view_change);
+                        assert(m.header.cluster == self.cluster);
+                        assert(m.header.replica == replica);
+                        assert(m.header.view == self.view);
+
+                        if (replica != self.replica) {
+                            if (m.header.op < op) nacks += 1;
+
+                            log.debug("{}: discard_uncommitted_headers: replica={} op={}", .{
+                                self.replica,
+                                m.header.replica,
+                                m.header.op,
+                            });
+                        }
+                    }
+                }
+
+                log.debug("{}: discard_uncommitted_headers: op={} nacks={} threshold={}", .{
+                    self.replica,
+                    op,
+                    nacks,
+                    threshold,
+                });
+
+                if (nacks >= threshold) {
+                    self.journal.remove_entries_from(op);
+                    self.op = op - 1;
+
+                    assert(self.journal.entry_for_op(op) == null);
+                    assert(!self.journal.dirty.bit(op));
+                    assert(!self.journal.faulty.bit(op));
+                }
+            }
         }
 
         /// Discards uncommitted ops during a view change from after and including `op`.
