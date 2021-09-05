@@ -1124,8 +1124,10 @@ pub fn Replica(
             assert(message.header.replica != self.replica);
 
             const response = self.message_bus.get_message() orelse {
-                log.alert("{}: on_request_headers: dropping response, no message available", .{
+                log.alert("{}: on_request_headers: ignoring (op={}..{}, no message available)", .{
                     self.replica,
+                    message.header.commit,
+                    message.header.op,
                 });
                 return;
             };
@@ -1161,7 +1163,11 @@ pub fn Replica(
             );
 
             if (count == 0) {
-                log.debug("{}: on_request_headers: no headers found, dropping", .{self.replica});
+                log.debug("{}: on_request_headers: ignoring (op={}..{}, no headers)", .{
+                    self.replica,
+                    op_min,
+                    op_max,
+                });
                 return;
             }
 
