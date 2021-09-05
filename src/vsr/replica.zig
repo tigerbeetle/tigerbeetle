@@ -495,8 +495,7 @@ pub fn Replica(
             const t1 = @bitCast(i64, message.header.offset);
             const m2 = self.clock.monotonic();
 
-            // TODO Drop the @intCast when the client table branch lands.
-            self.clock.learn(@intCast(u8, message.header.replica), m0, t1, m2);
+            self.clock.learn(message.header.replica, m0, t1, m2);
         }
 
         /// The primary advances op-number, adds the request to the end of the log, and updates the
@@ -1202,8 +1201,16 @@ pub fn Replica(
                 return;
             }
 
+            if (message.header.context != checksum) {
+                log.debug("{}: on_nack_prepare: ignoring (repairing another checksum)", .{
+                    self.replica,
+                });
+                return;
+            }
+
             // Followers may not send a `nack_prepare` for a different checksum:
-            // TODO However our op may change in between sending the request and getting the nack.
+            // However our op may change in between sending the request and getting the nack.
+            assert(message.header.op == op);
             assert(message.header.context == checksum);
 
             // Here are what our nack quorums look like, if we know our op is faulty:
@@ -2615,8 +2622,6 @@ pub fn Replica(
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
 
-            // TODO Handle case where we are requesting reordered headers that no longer exist.
-
             // We expect these always to exist:
             assert(self.journal.entry_for_op_exact(self.commit_min) != null);
             assert(self.journal.entry_for_op_exact(self.op) != null);
@@ -3233,7 +3238,7 @@ pub fn Replica(
         /// Replicates to the next replica in the configuration (until we get back to the leader):
         /// Replication starts and ends with the leader, we never forward back to the leader.
         /// Does not flood the network with prepares that have already committed.
-        /// TODO Use recent heartbeat data for next replica to leapfrog if faulty.
+        /// TODO Use recent heartbeat data for next replica to leapfrog if faulty (optimization).
         fn replicate(self: *Self, message: *Message) void {
             assert(self.status == .normal);
             assert(message.header.command == .prepare);
@@ -3729,8 +3734,6 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
-
-            // TODO Do one last count of our do_view_change quorum messages.
 
             assert(!self.view_jump_barrier);
             assert(!self.committing);
