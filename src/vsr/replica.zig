@@ -1705,8 +1705,10 @@ pub fn Replica(
             assert(self.journal.entry_for_op_exact(self.commit_min).?.checksum ==
                 prepare.header.parent);
 
-            log.debug("{}: commit_op: executing op={} checksum={} ({s})", .{
+            log.debug("{}: commit_op: executing view={} {} op={} checksum={} ({s})", .{
                 self.replica,
+                self.view,
+                self.leader_index(self.view) == self.replica,
                 prepare.header.op,
                 prepare.header.checksum,
                 @tagName(prepare.header.operation.cast(StateMachine)),
