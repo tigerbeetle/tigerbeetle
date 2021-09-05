@@ -1048,6 +1048,9 @@ pub fn Replica(
                         checksum,
                     });
 
+                    // TODO Do not reissue the read if we are already reading in order to send to
+                    // this particular destination replica.
+
                     self.journal.read_prepare(
                         on_request_prepare_read,
                         op,
