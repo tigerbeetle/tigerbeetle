@@ -2669,11 +2669,13 @@ pub fn Replica(
             assert(!self.view_jump_barrier);
             var broken = self.journal.find_latest_headers_break_between(self.commit_min, self.op);
             if (broken) |range| {
-                log.debug("{}: repair: latest break: op_min={} op_max={} (commit_min={} op={})", .{
+                log.debug("{}: repair: break: view={} op_min={} op_max={} (commit={}..{} op={})", .{
                     self.replica,
+                    self.view,
                     range.op_min,
                     range.op_max,
                     self.commit_min,
+                    self.commit_max,
                     self.op,
                 });
                 assert(range.op_min > self.commit_min);
