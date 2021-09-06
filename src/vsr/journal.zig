@@ -82,7 +82,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
         };
 
-        allocator: *Allocator,
         storage: *Storage,
         replica: u8,
         size: u64,
@@ -146,10 +145,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             std.mem.set(Header, headers, Header.reserved());
 
             var dirty = try BitSet.init(allocator, headers.len);
-            errdefer dirty.deinit();
+            errdefer dirty.deinit(allocator);
 
             var faulty = try BitSet.init(allocator, headers.len);
-            errdefer faulty.deinit();
+            errdefer faulty.deinit(allocator);
 
             const headers_iops = (try allocator.allocAdvanced(
                 [config.sector_size]u8,
@@ -176,7 +175,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
 
             var self = Self{
-                .allocator = allocator,
                 .storage = storage,
                 .replica = replica,
                 .size = size,
@@ -203,7 +201,23 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self) void {}
+        pub fn deinit(self: *Self, allocator: *Allocator) void {
+            const replica = @fieldParentPtr(Replica, "journal", self);
+
+            self.dirty.deinit(allocator);
+            self.faulty.deinit(allocator);
+            allocator.free(self.headers);
+            allocator.free(self.headers_iops);
+
+            {
+                var it = self.reads.iterate();
+                while (it.next()) |read| replica.message_bus.unref(read.message);
+            }
+            {
+                var it = self.writes.iterate();
+                while (it.next()) |write| replica.message_bus.unref(write.message);
+            }
+        }
 
         /// Asserts that headers are .reserved (zeroed) from `op_min` (inclusive).
         pub fn assert_headers_reserved_from(self: *Self, op_min: u64) void {
@@ -1208,25 +1222,21 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
 // TODO Snapshots
 pub const BitSet = struct {
-    allocator: *Allocator,
     bits: []bool,
 
     /// The number of bits set (updated incrementally as bits are set or cleared):
     len: u64 = 0,
 
     fn init(allocator: *Allocator, count: u64) !BitSet {
-        var bits = try allocator.alloc(bool, count);
+        const bits = try allocator.alloc(bool, count);
         errdefer allocator.free(bits);
         std.mem.set(bool, bits, false);
 
-        return BitSet{
-            .allocator = allocator,
-            .bits = bits,
-        };
+        return BitSet{ .bits = bits };
     }
 
-    fn deinit(self: *BitSet) void {
-        self.allocator.free(self.bits);
+    fn deinit(self: *BitSet, allocator: *Allocator) void {
+        allocator.free(self.bits);
     }
 
     /// Clear the bit for an op (idempotent):

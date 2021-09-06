@@ -75,13 +75,11 @@ pub fn Clock(comptime Time: type) type {
             }
         };
 
-        allocator: *std.mem.Allocator,
-
         /// The index of the replica using this clock to provide synchronized time.
         replica: u8,
 
         /// The underlying time source for this clock (system time or deterministic time).
-        time: Time,
+        time: *Time,
 
         /// An epoch from which the clock can read synchronized clock timestamps within safe bounds.
         /// At least `config.clock_synchronization_window_min_ms` is needed for this to be ready to use.
@@ -101,7 +99,7 @@ pub fn Clock(comptime Time: type) type {
             /// The size of the cluster, i.e. the number of clock sources (including this replica).
             replica_count: u8,
             replica: u8,
-            time: Time,
+            time: *Time,
         ) !Self {
             assert(replica_count > 0);
             assert(replica < replica_count);
@@ -119,7 +117,6 @@ pub fn Clock(comptime Time: type) type {
             errdefer allocator.free(marzullo_tuples);
 
             var self = Self{
-                .allocator = allocator,
                 .replica = replica,
                 .time = time,
                 .epoch = epoch,
@@ -134,6 +131,12 @@ pub fn Clock(comptime Time: type) type {
             self.window.reset(&self);
 
             return self;
+        }
+
+        pub fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
+            allocator.free(self.epoch.sources);
+            allocator.free(self.window.sources);
+            allocator.free(self.marzullo_tuples);
         }
 
         /// Called by `Replica.on_pong()` with:
