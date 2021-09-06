@@ -88,12 +88,13 @@ fn start(
         replica_index,
         &io,
     );
+    var time: Time = .{};
     var replica = try Replica.init(
         arena,
         cluster,
         @intCast(u8, addresses.len),
         replica_index,
-        Time{},
+        &time,
         &storage,
         &message_bus,
         &state_machine,

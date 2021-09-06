@@ -21,7 +21,7 @@ pub const Status = enum {
     recovering,
 };
 
-const ClientTable = std.AutoHashMap(u128, ClientTableEntry);
+const ClientTable = std.AutoHashMapUnmanaged(u128, ClientTableEntry);
 
 /// We found two bugs in the VRR paper relating to the client table:
 ///
@@ -72,8 +72,6 @@ pub fn Replica(
 
         const Journal = vsr.Journal(Self, Storage);
         const Clock = vsr.Clock(Time);
-
-        allocator: *Allocator,
 
         /// The number of the cluster to which this replica belongs:
         cluster: u32,
@@ -203,7 +201,7 @@ pub fn Replica(
             cluster: u32,
             replica_count: u8,
             replica: u8,
-            time: Time,
+            time: *Time,
             storage: *Storage,
             message_bus: *MessageBus,
             state_machine: *StateMachine,
@@ -239,9 +237,9 @@ pub fn Replica(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
-            var client_table = ClientTable.init(allocator);
-            errdefer client_table.deinit();
-            try client_table.ensureCapacity(@intCast(u32, config.clients_max));
+            var client_table: ClientTable = .{};
+            errdefer client_table.deinit(allocator);
+            try client_table.ensureCapacity(allocator, @intCast(u32, config.clients_max));
             assert(client_table.capacity() >= config.clients_max);
 
             var init_prepare = Header{
@@ -265,7 +263,6 @@ pub fn Replica(
             init_prepare.set_checksum();
 
             var self = Self{
-                .allocator = allocator,
                 .cluster = cluster,
                 .replica_count = replica_count,
                 .replica = replica,
@@ -364,8 +361,45 @@ pub fn Replica(
             return self;
         }
 
-        pub fn deinit(self: *Self) void {
-            self.client_table.deinit();
+        /// Free all memory and unref all messages held by the replica
+        /// This does not deinitialize the StateMachine, MessageBus, Storage, or Time
+        pub fn deinit(self: *Self, allocator: *Allocator) void {
+            self.journal.deinit(allocator);
+            self.clock.deinit(allocator);
+
+            {
+                var it = self.client_table.iterator();
+                while (it.next()) |entry| {
+                    self.message_bus.unref(entry.value_ptr.reply);
+                }
+                self.client_table.deinit(allocator);
+            }
+
+            {
+                var it = self.pipeline.iterator();
+                while (it.next()) |prepare| {
+                    self.message_bus.unref(prepare.message);
+                    for (prepare.ok_from_all_replicas) |message| {
+                        if (message) |m| self.message_bus.unref(m);
+                    }
+                }
+            }
+
+            if (self.loopback_queue) |loopback_message| {
+                assert(loopback_message.next == null);
+                self.message_bus.unref(loopback_message);
+                self.loopback_queue = null;
+            }
+
+            for (self.start_view_change_from_other_replicas) |message| {
+                if (message) |m| self.message_bus.unref(m);
+            }
+            for (self.do_view_change_from_all_replicas) |message| {
+                if (message) |m| self.message_bus.unref(m);
+            }
+            for (self.nack_prepare_from_other_replicas) |message| {
+                if (message) |m| self.message_bus.unref(m);
+            }
         }
 
         /// Time is measured in logical ticks that are incremented on every call to tick().
@@ -2234,6 +2268,7 @@ pub fn Replica(
             if (self.loopback_queue) |message| {
                 defer self.message_bus.unref(message);
 
+                assert(message.next == null);
                 self.loopback_queue = null;
                 assert(message.header.replica == self.replica);
                 self.on_message(message);

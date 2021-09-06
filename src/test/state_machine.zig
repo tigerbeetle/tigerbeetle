@@ -18,8 +18,6 @@ pub const StateMachine = struct {
         return .{ .state = hash(0, std.mem.asBytes(&seed)) };
     }
 
-    pub fn deinit(state_machine: *StateMachine) void {}
-
     pub fn prepare(
         state_machine: *StateMachine,
         realtime: i64,

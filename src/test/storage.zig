@@ -132,6 +132,12 @@ pub const Storage = struct {
         };
     }
 
+    /// Cancel any currently in progress reads/writes but leave the stored data untouched.
+    pub fn reset(storage: *Storage) void {
+        storage.reads.len = 0;
+        storage.writes.len = 0;
+    }
+
     pub fn deinit(storage: *Storage, allocator: *mem.Allocator) void {
         allocator.free(storage.memory);
         storage.reads.deinit();

@@ -107,7 +107,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
             return @as(usize, path.source) * self.options.node_count + path.target;
         }
 
-        fn path_queue(self: *Self, path: Path) *std.PriorityQueue(Data) {
+        pub fn path_queue(self: *Self, path: Path) *std.PriorityQueue(Data) {
             var index = self.path_index(path);
             return &self.paths[@as(usize, path.source) * self.options.node_count + path.target];
         }

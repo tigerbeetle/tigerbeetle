@@ -103,6 +103,7 @@ pub fn main() !void {
     for (cluster.replicas) |*replica| {
         replica.on_change_state = on_change_replica;
     }
+    cluster.on_change_state = on_change_replica;
 
     output.info(
         \\
