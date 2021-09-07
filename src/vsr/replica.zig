@@ -1583,6 +1583,8 @@ pub fn Replica(
         }
 
         /// Commit ops up to commit number `commit` (inclusive).
+        /// A function which calls `commit_ops()` to set `commit_max` must first call `view_jump()`.
+        /// Otherwise, we may fork the log.
         fn commit_ops(self: *Self, commit: u64) void {
             // TODO Restrict `view_change` status only to the leader purely as defense-in-depth.
             // Be careful of concurrency when doing this, as successive view changes can happen quickly.
@@ -3588,6 +3590,7 @@ pub fn Replica(
                     assert(!self.do_view_change_quorum);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.op == self.op);
                     assert(replica == self.leader_index(self.view));
                 },
                 .start_view => switch (self.status) {
@@ -3684,7 +3687,7 @@ pub fn Replica(
             assert(latest.command == .prepare);
             assert(latest.cluster == self.cluster);
             if (self.status == .view_change) {
-                assert(latest.view < self.view); // Latest normal view before this view change.
+                assert(latest.view < self.view); // The prepare's view before this view change.
             } else {
                 assert(latest.view <= self.view);
                 assert(self.view_jump_barrier);
