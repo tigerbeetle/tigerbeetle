@@ -32,6 +32,9 @@ pub const Command = packed enum(u8) {
     do_view_change,
     start_view,
 
+    recovery,
+    recovery_response,
+
     request_start_view,
     request_headers,
     request_prepare,
