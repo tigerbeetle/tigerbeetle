@@ -2808,7 +2808,10 @@ pub fn Replica(
                     // that breaks the chain with self.op. In this case, we must skip the repair to
                     // avoid overwriting any overlapping op.
                 } else {
-                    log.debug("{}: repair_header: false (changes self.op)", .{self.replica});
+                    log.debug("{}: repair_header: false (changes self.op={})", .{
+                        self.replica,
+                        self.op,
+                    });
                     return false;
                 }
             }
@@ -3183,12 +3186,16 @@ pub fn Replica(
                 // Only the leader is allowed to do repairs in a view change:
                 assert(self.leader_index(self.view) == self.replica);
 
-                log.debug("{}: repair_prepare: op={} checksum={} faulty={} (uncommitted)", .{
-                    self.replica,
-                    op,
-                    checksum,
-                    self.journal.faulty.bit(op),
-                });
+                const reason = if (self.journal.faulty.bit(op)) "faulty" else "dirty";
+                log.debug(
+                    "{}: repair_prepare: op={} checksum={} (uncommitted, {s}, view_change)",
+                    .{
+                        self.replica,
+                        op,
+                        checksum,
+                        reason,
+                    },
+                );
 
                 if (self.replica_count == 2 and !self.journal.faulty.bit(op)) {
                     // This is required to avoid a liveness issue for a cluster-of-two where a new
@@ -3227,11 +3234,14 @@ pub fn Replica(
                 assert(request_prepare.context == checksum);
                 self.send_header_to_other_replicas(request_prepare);
             } else {
-                log.debug("{}: repair_prepare: op={} checksum={} faulty={} (committed)", .{
+                const nature = if (op > self.commit_max) "uncommitted" else "committed";
+                const reason = if (self.journal.faulty.bit(op)) "faulty" else "dirty";
+                log.debug("{}: repair_prepare: op={} checksum={} ({s}, {s})", .{
                     self.replica,
                     op,
                     checksum,
-                    self.journal.faulty.bit(op),
+                    nature,
+                    reason,
                 });
 
                 // We expect that `repair_prepare()` is called in reverse chronological order:
@@ -3742,7 +3752,8 @@ pub fn Replica(
             assert(self.op >= self.commit_max);
 
             // Do not set the latest op as dirty if we already have it exactly:
-            // Otherwise, this would trigger a repair and delay the view change.
+            // Otherwise, this would trigger a repair and delay the view change, or worse, it would
+            // prevent us from assisting another replica to recover when we do in fact have the op.
             if (self.journal.entry_for_op_exact_with_checksum(latest.op, latest.checksum)) |_| {
                 log.debug("{}: {s}: latest op exists exactly", .{ self.replica, method });
             } else {
