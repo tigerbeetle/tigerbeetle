@@ -109,6 +109,9 @@ pub fn Replica(
         /// The current view, initially 0:
         view: u32,
 
+        /// The latest view, in which the replica's status was normal.
+        view_normal: u32,
+
         /// Whether we have experienced a view jump:
         /// If this is true then we must request a start_view message from the leader before
         /// committing to avoid committing ops that may have been changed through a view change.
@@ -294,6 +297,7 @@ pub fn Replica(
                 .state_machine = state_machine,
                 .client_table = client_table,
                 .view = init_prepare.view,
+                .view_normal = init_prepare.view,
                 .op = init_prepare.op,
                 .commit_min = init_prepare.commit,
                 .commit_max = init_prepare.commit,
@@ -896,8 +900,9 @@ pub fn Replica(
                 self.view,
             });
 
-            var latest = Header.reserved();
+            var v: ?u32 = null;
             var k: ?u64 = null;
+            var latest = Header.reserved();
 
             for (self.do_view_change_from_all_replicas) |received, replica| {
                 if (received) |m| {
@@ -906,15 +911,29 @@ pub fn Replica(
                     assert(m.header.replica == replica);
                     assert(m.header.view == self.view);
 
-                    log.debug("{}: on_do_view_change: replica={} latest op={} commit={}", .{
+                    // The latest normal view experienced by this replica:
+                    var mv = @intCast(u32, m.header.offset);
+                    assert(mv < m.header.view);
+
+                    var head = Header.reserved();
+                    self.set_latest_header(self.message_body_as_headers(m), &head);
+                    assert(m.header.op == head.op);
+
+                    log.debug("{}: on_do_view_change: replica={} v'={} op={} commit={} head={}", .{
                         self.replica,
                         m.header.replica,
+                        mv,
                         m.header.op,
                         m.header.commit,
+                        head,
                     });
 
+                    if (v == null or mv > v.? or (mv == v.? and m.header.op > latest.op)) {
+                        v = mv;
+                        latest = head;
+                    }
+
                     if (k == null or m.header.commit > k.?) k = m.header.commit;
-                    self.set_latest_header(self.message_body_as_headers(m), &latest);
                 }
             }
 
@@ -1942,6 +1961,11 @@ pub fn Replica(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
+                // The latest normal view (as specified in the 2012 paper) is different to the view
+                // number contained in the prepare headers we include in the body. The former shows
+                // how recent a view change the replica participated in, which may be much higher.
+                // We use the `offset` field to send this in addition to the current view number:
+                .offset = if (command == .do_view_change) self.view_normal else 0,
                 .op = self.op,
                 .commit = self.commit_max,
             };
@@ -3795,6 +3819,7 @@ pub fn Replica(
             // For example, this could happen after a state transfer triggered by an op jump.
             assert(new_view >= self.view);
             self.view = new_view;
+            self.view_normal = new_view;
             self.status = .normal;
 
             if (self.leader()) {
