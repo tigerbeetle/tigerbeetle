@@ -95,6 +95,8 @@ pub const message_bus_messages_max = connections_max * 4;
 pub const message_bus_headers_max = connections_max * connection_send_queue_max * 2;
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
+/// This is immutable once assigned per cluster, as replicas need to know how many operations might
+/// possibly be uncommitted during a view change, and this must be constant for all replicas.
 pub const pipelining_max = clients_max;
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
