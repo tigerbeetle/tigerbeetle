@@ -2,6 +2,8 @@
 
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
+**[Take part in TigerBeetle's $20k consensus challenge: Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous)**
+
 Watch an introduction to TigerBeetle on [Zig SHOWTIME](https://www.youtube.com/watch?v=BH2jvJ74npM) for our design decisions regarding performance, safety, and financial accounting primitives:
 
 [![A million financial transactions per second in Zig](https://img.youtube.com/vi/BH2jvJ74npM/0.jpg)](https://www.youtube.com/watch?v=BH2jvJ74npM)
@@ -97,6 +99,10 @@ Run the TigerBeetle binary to see all command line arguments:
 * [client.zig](./src/client.zig) is a TigerBeetle Zig client.
 
 * [demo.zig](./src/demo.zig) is a lightweight TigerBeetle client for demonstration purposes only, which we used to create [six demos you can work your way through and modify](./docs/DEEP_DIVE.md) to explore TigerBeetle's commands.
+
+## Community
+
+[Join the TigerBeetle community in Discord.](https://discord.com/invite/uWCGp46uG5)
 
 ## Performance Demos
 
