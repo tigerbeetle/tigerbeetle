@@ -2,7 +2,7 @@
 
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
-**[Take part in TigerBeetle's $20k consensus challenge: Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous)**
+**Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous)**
 
 Watch an introduction to TigerBeetle on [Zig SHOWTIME](https://www.youtube.com/watch?v=BH2jvJ74npM) for our design decisions regarding performance, safety, and financial accounting primitives:
 
