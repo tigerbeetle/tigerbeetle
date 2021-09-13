@@ -1,19 +1,20 @@
-FROM ubuntu:20.10
-WORKDIR /tmp/zig
+FROM ubuntu:20.10 as build
 
 RUN  apt-get update \
   && apt-get install -y wget xz-utils
-RUN wget -q https://ziglang.org/builds/zig-linux-x86_64-0.6.0+fd4783906.tar.xz && \
-        tar -xf zig-linux-x86_64-0.6.0+fd4783906.tar.xz && \
-        mv "zig-linux-x86_64-0.6.0+fd4783906" /usr/local/lib/zig && \
-        ln -s /usr/local/lib/zig/zig /usr/local/bin/zig && \
-        rm zig-linux-x86_64-0.6.0+fd4783906.tar.xz
 
-WORKDIR /opt/alpha-beetle
+WORKDIR /opt/beta-beetle
 
-COPY ./io_uring.zig .
-COPY ./server.zig .
+COPY src ./src
+COPY scripts ./scripts
+COPY build.zig ./build.zig
 
-RUN zig build-exe server.zig
+ENV PATH="${PATH}:/opt/beta-beetle/zig"
+RUN ./scripts/install.sh
 
-CMD ["./server"]
+FROM ubuntu:20.10
+WORKDIR /opt/beta-beetle
+
+COPY --from=build /opt/beta-beetle/tigerbeetle ./tigerbeetle
+
+ENTRYPOINT ["./tigerbeetle"]
