@@ -4,9 +4,14 @@ demos/bitcast/decode
 demos/bitcast/transfers
 dist/
 journal
+simulator
 main
 tigerbeetle
 cluster_*_replica_*.tigerbeetle
 zig/
 zig-cache/
 zig-out/
+
+# Project Files
+.idea
+*.iml
