@@ -117,6 +117,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// A faulty bit is used then only to qualify the severity of the dirty bit.
         faulty: BitSet,
 
+        recovered: bool = true,
+        recovering: bool = false,
+
         pub fn init(
             allocator: *Allocator,
             storage: *Storage,
@@ -190,6 +193,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.dirty.bits.len == self.headers.len);
             assert(self.faulty.bits.len == self.headers.len);
 
+            // Op 0 is always the cluster initialization op.
+            // TODO This will change when we implement synchronized incremental snapshots.
             assert(init_prepare.valid_checksum());
             assert(init_prepare.invalid() == null);
             self.headers[0] = init_prepare.*;
@@ -602,11 +607,157 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             );
         }
 
+        pub fn recover(self: *Self) void {
+            assert(!self.recovered);
+
+            if (self.recovering) return;
+            self.recovering = true;
+
+            log.debug("{}: recover: recovering", .{self.replica});
+
+            self.recover_headers(0, 0);
+            self.recover_headers(0, 1);
+        }
+
+        fn recover_headers(self: *Self, offset: u64, version: u1) void {
+            const replica = @fieldParentPtr(Replica, "journal", self);
+
+            assert(!self.recovered);
+            assert(self.recovering);
+
+            if (offset == self.size_headers) {
+                log.debug("{}: recover_headers: version={} recovered", .{
+                    self.replica,
+                    version,
+                });
+                if (self.reads.executing() == 0) {
+                    log.debug("{}: recover_headers: both versions recovered", .{self.replica});
+                    self.recovered = true;
+                    self.recovering = false;
+                    // The initialization op (TODO Snapshots):
+                    assert(!self.dirty.bit(0));
+                    assert(!self.faulty.bit(0));
+                    // From here it's over to the Recovery protocol from VRR 2012.
+                }
+                return;
+            }
+            assert(offset < self.size_headers);
+
+            const message = replica.message_bus.get_message() orelse unreachable;
+            defer replica.message_bus.unref(message);
+
+            // We use the count of reads executing to know when both versions have finished reading:
+            // We expect that no other process is issuing reads while we are recovering.
+            assert(self.reads.executing() < 2);
+
+            const read = self.reads.acquire() orelse unreachable;
+            read.* = .{
+                .self = self,
+                .completion = undefined,
+                .message = message.ref(),
+                .callback = undefined,
+                .op = undefined,
+                .checksum = offset,
+                .destination_replica = version,
+            };
+
+            const buffer = self.recover_headers_buffer(message, offset);
+            assert(buffer.len > 0);
+
+            log.debug("{}: recover_headers: version={} offset={} size={} recovering", .{
+                self.replica,
+                version,
+                offset,
+                buffer.len,
+            });
+
+            self.storage.read_sectors(
+                recover_headers_on_read,
+                &read.completion,
+                buffer,
+                self.offset_in_headers_version(offset, version),
+            );
+        }
+
+        fn recover_headers_buffer(self: *Self, message: *Message, offset: u64) []u8 {
+            const max = std.math.min(message.buffer.len, self.size_headers - offset);
+            assert(max % config.sector_size == 0);
+            return message.buffer[0..max];
+        }
+
+        fn recover_headers_on_read(completion: *Storage.Read) void {
+            const read = @fieldParentPtr(Self.Read, "completion", completion);
+            const self = read.self;
+            const replica = @fieldParentPtr(Replica, "journal", self);
+            const message = read.message;
+
+            const offset = @intCast(u64, read.checksum);
+            const version = @intCast(u1, read.destination_replica.?);
+            const buffer = self.recover_headers_buffer(message, offset);
+
+            log.debug("{}: recover_headers: version={} offset={} size={} recovered", .{
+                self.replica,
+                version,
+                offset,
+                buffer.len,
+            });
+
+            assert(offset % @sizeOf(Header) == 0);
+            assert(buffer.len >= @sizeOf(Header));
+            assert(buffer.len % @sizeOf(Header) == 0);
+
+            for (std.mem.bytesAsSlice(Header, buffer)) |*header, index| {
+                const op = offset / @sizeOf(Header) + index;
+
+                if (header.valid_checksum()) {
+                    // This header is valid.
+                    if (self.entry_for_op(op)) |existing| {
+                        if (existing.checksum == header.checksum) {
+                            // We also have the same header from the other version.
+                            assert(!self.faulty.bit(op));
+                        } else if (existing.command == .reserved) {
+                            self.set_entry_as_dirty(header);
+                            self.faulty.clear(op);
+                        } else {
+                            // Don't replace any existing op from the other version.
+                            // First come, first served.
+                            // We'll sort out the right order later when we recover higher up.
+                            assert(!self.faulty.bit(op));
+                        }
+                    } else if (header.command == .reserved) {
+                        self.dirty.set(op);
+                        self.faulty.clear(op);
+                    } else {
+                        self.set_entry_as_dirty(header);
+                    }
+                } else {
+                    // This header is corrupt.
+                    if (self.entry_for_op(op)) |_| {
+                        // However, we have a valid header from the other version.
+                    } else {
+                        self.dirty.set(op);
+                        self.faulty.set(op);
+                    }
+                }
+            }
+
+            // We must release before we call `recover_headers()` in case Storage is synchronous.
+            // Otherwise, we would run out of messages and reads.
+            replica.message_bus.unref(read.message);
+            self.reads.release(read);
+
+            self.recover_headers(offset + buffer.len, version);
+        }
+
         /// A safe way of removing an entry, where the header must match the current entry to succeed.
         fn remove_entry(self: *Self, header: *const Header) void {
             // Copy the header.op by value to avoid a reset() followed by undefined header.op usage:
             const op = header.op;
-            log.debug("{}: remove_entry: op={}", .{ self.replica, op });
+            log.debug("{}: remove_entry: op={} checksum={}", .{
+                self.replica,
+                op,
+                header.checksum,
+            });
 
             assert(self.entry(header).?.checksum == header.checksum);
             assert(self.headers[op].checksum == header.checksum); // TODO Snapshots
@@ -885,6 +1036,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// Otherwise, we only need to write the headers once because their other copy can be located in
         /// the body of the journal (using the previous entry's offset and size).
         fn write_prepare_header_once(self: *Self, header: *const Header) bool {
+            // TODO Optimize this to decide whether to write once or twice once we add support to
+            // recover from either header version at startup.
+            const always_write_twice = true;
+            if (always_write_twice) return false;
+
             // TODO Snapshots
             if (header.command == .reserved) {
                 log.debug("{}: write_prepare_header_once: dirty reserved header", .{
