@@ -1362,6 +1362,20 @@ pub fn Replica(
 
                 log.debug("{}: on_prepare_timeout: waiting for journal", .{self.replica});
                 assert(prepare.ok_from_all_replicas[self.replica] == null);
+
+                // We may be slow and waiting for the write to complete.
+                //
+                // We may even have maxed out our IO depth and been unable to initiate the write,
+                // which can happen if `config.pipelining_max` exceeds `config.io_depth_write`.
+                // This can lead to deadlock for a cluster of one or two (if we do not retry here),
+                // since there is no other way for the leader to repair the dirty op because no
+                // other replica has it.
+                //
+                // Retry the write through `on_repair()` which will work out which is which.
+                // We do expect that the op would have been run through `on_prepare()` already.
+                assert(prepare.message.header.op <= self.op);
+                self.on_repair(prepare.message);
+
                 return;
             }
 

@@ -127,11 +127,9 @@ pub fn main() !void {
         seed,
         replica_count,
         client_count,
-
         request_probability,
         idle_on_probability,
         idle_off_probability,
-
         cluster.options.network_options.packet_simulator_options.one_way_delay_mean,
         cluster.options.network_options.packet_simulator_options.one_way_delay_min,
         cluster.options.network_options.packet_simulator_options.packet_loss_probability,
@@ -139,7 +137,6 @@ pub fn main() !void {
         cluster.options.network_options.packet_simulator_options.path_clog_duration_mean,
         cluster.options.network_options.packet_simulator_options.path_clog_probability,
         cluster.options.network_options.packet_simulator_options.packet_replay_probability,
-
         cluster.options.storage_options.read_latency_min,
         cluster.options.storage_options.read_latency_mean,
         cluster.options.storage_options.write_latency_min,
