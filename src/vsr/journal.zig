@@ -505,7 +505,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             const read = self.reads.acquire() orelse {
-                self.read_prepare_log(op, checksum, "no iop available");
+                self.read_prepare_log(op, checksum, "waiting for IOP");
                 callback(replica, null, null);
                 return;
             };
@@ -676,7 +676,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.has_dirty(message.header));
 
             const write = self.writes.acquire() orelse {
-                self.write_prepare_debug(message.header, "no IOP available");
+                self.write_prepare_debug(message.header, "waiting for IOP");
                 callback(replica, null, trigger);
                 return;
             };
