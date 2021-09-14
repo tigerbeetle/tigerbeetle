@@ -379,6 +379,13 @@ pub fn Replica(
 
             self.clock.tick();
 
+            if (!self.journal.recovered) {
+                self.journal.recover();
+                return;
+            } else {
+                assert(!self.journal.recovering);
+            }
+
             self.ping_timeout.tick();
             self.prepare_timeout.tick();
             self.commit_timeout.tick();
@@ -424,6 +431,14 @@ pub fn Replica(
                 return;
             }
 
+            if (!self.journal.recovered) {
+                self.journal.recover();
+                log.debug("{}: on_message: waiting for journal to recover", .{self.replica});
+                return;
+            } else {
+                assert(!self.journal.recovering);
+            }
+
             assert(message.header.replica < self.replica_count);
             switch (message.header.command) {
                 .ping => self.on_ping(message),
@@ -435,6 +450,7 @@ pub fn Replica(
                 .start_view_change => self.on_start_view_change(message),
                 .do_view_change => self.on_do_view_change(message),
                 .start_view => self.on_start_view(message),
+                .recovery => self.on_recovery(message),
                 .request_start_view => self.on_request_start_view(message),
                 .request_prepare => self.on_request_prepare(message),
                 .request_headers => self.on_request_headers(message),
@@ -1039,6 +1055,66 @@ pub fn Replica(
 
             self.send_message_to_replica(message.header.replica, start_view);
         }
+
+        /// TODO This is a work in progress (out of scope for the bounty)
+        fn on_recovery(self: *Self, message: *const Message) void {
+            if (self.status != .normal) {
+                log.debug("{}: on_recovery: ignoring ({})", .{ self.replica, self.status });
+                return;
+            }
+
+            if (message.header.replica == self.replica) {
+                log.warn("{}: on_recovery: ignoring (self)", .{self.replica});
+                return;
+            }
+
+            const response = self.message_bus.get_message() orelse {
+                log.alert("{}: on_recovery: ignoring (waiting for message)", .{self.replica});
+                return;
+            };
+            defer self.message_bus.unref(response);
+
+            response.header.* = .{
+                .command = .recovery_response,
+                .cluster = self.cluster,
+                .context = message.header.context,
+                .replica = self.replica,
+                .view = self.view,
+                .op = self.op,
+                .commit = self.commit_max,
+            };
+
+            const count_max = 8; // The number of prepare headers to include in the body.
+
+            const size_max = @sizeOf(Header) * std.math.min(
+                std.math.max(@divFloor(response.buffer.len, @sizeOf(Header)), 2),
+                1 + count_max,
+            );
+            assert(size_max > @sizeOf(Header));
+
+            const count = self.journal.copy_latest_headers_between(
+                0,
+                self.op,
+                std.mem.bytesAsSlice(Header, response.buffer[@sizeOf(Header)..size_max]),
+            );
+
+            // We expect that self.op always exists.
+            assert(count > 0);
+
+            response.header.size = @intCast(u32, @sizeOf(Header) + @sizeOf(Header) * count);
+
+            response.header.set_checksum_body(response.body());
+            response.header.set_checksum();
+
+            assert(self.status == .normal);
+            // The checksum for a recovery message is deterministic, and cannot be used as a nonce:
+            assert(response.header.context != message.header.checksum);
+
+            self.send_message_to_replica(message.header.replica, response);
+        }
+
+        /// TODO This is a work in progress (out of scope for the bounty)
+        fn on_recovery_response(self: *Self, message: *Message) void {}
 
         fn on_request_prepare(self: *Self, message: *const Message) void {
             if (self.ignore_repair_message(message)) return;
