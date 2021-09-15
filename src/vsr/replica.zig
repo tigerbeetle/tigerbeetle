@@ -488,7 +488,15 @@ pub fn Replica(
             if (message.header.client > 0) {
                 assert(message.header.replica == 0);
 
-                self.send_header_to_client(message.header.client, pong);
+                // We must only ever send our view number to a client via a pong message if we are
+                // in normal status. Otherwise, we may be partitioned from the cluster with a newer
+                // view number, leak this to the client, which would then pass this to the cluster
+                // in subsequent client requests, which would then ignore these client requests with
+                // a newer view number, locking out the client. The principle here is that we must
+                // never send view numbers for views that have not yet started.
+                if (self.status == .normal) {
+                    self.send_header_to_client(message.header.client, pong);
+                }
             } else if (message.header.replica == self.replica) {
                 log.warn("{}: on_ping: ignoring (self)", .{self.replica});
             } else {
