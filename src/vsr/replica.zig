@@ -456,6 +456,9 @@ pub fn Replica(
                 return;
             }
 
+            // No client or replica should ever send a .reserved message.
+            assert(message.header.command != .reserved);
+
             if (message.header.cluster != self.cluster) {
                 log.warn("{}: on_message: wrong cluster (cluster must be {} not {})", .{
                     self.replica,
@@ -485,18 +488,21 @@ pub fn Replica(
                 .do_view_change => self.on_do_view_change(message),
                 .start_view => self.on_start_view(message),
                 .recovery => self.on_recovery(message),
+                .recovery_response => return, // TODO
                 .request_start_view => self.on_request_start_view(message),
                 .request_prepare => self.on_request_prepare(message),
                 .request_headers => self.on_request_headers(message),
                 .headers => self.on_headers(message),
                 .nack_prepare => self.on_nack_prepare(message),
-                else => {
+                // A replica should never handle misdirected messages intended for a client:
+                .eviction, .reply => {
                     log.warn("{}: on_message: ignoring misdirected {s} message", .{
                         self.replica,
                         @tagName(message.header.command),
                     });
                     return;
                 },
+                .reserved => unreachable,
             }
 
             if (self.loopback_queue) |loopback_message| {
