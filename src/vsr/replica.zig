@@ -747,6 +747,10 @@ pub fn Replica(
             self.commit_pipeline();
         }
 
+        /// Known issue:
+        /// TODO The leader should stand down if it sees too many retries in on_prepare_timeout().
+        /// It's possible for the network to be one-way partitioned so that followers don't see the
+        /// leader as down, but neither can the leader hear from the followers.
         fn on_commit(self: *Self, message: *const Message) void {
             self.view_jump(message.header);
 
