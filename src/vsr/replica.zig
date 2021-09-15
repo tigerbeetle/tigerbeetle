@@ -1510,7 +1510,7 @@ pub fn Replica(
             }
 
             // Cycle through the list to reach live replicas and get around partitions:
-            assert(self.prepare_timeout.attempts > 0);
+            // We do not assert `prepare_timeout.attempts > 0` since the counter may wrap back to 0.
             const replica = waiting[self.prepare_timeout.attempts % waiting_len];
             assert(replica != self.replica);
 
