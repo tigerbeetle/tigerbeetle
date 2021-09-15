@@ -34,12 +34,9 @@ pub fn main() !void {
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
-        const arg_two = args_next(&args, allocator);
-        if (arg_two == null) break :seed_from_arg seed_random;
-
-        const parsed_arg_seed = parse_seed(arg_two.?);
-        defer allocator.free(arg_two.?);
-        break :seed_from_arg parsed_arg_seed;
+        const arg_two = args_next(&args, allocator) orelse break :seed_from_arg seed_random;
+        defer allocator.free(arg_two);
+        break :seed_from_arg parse_seed(arg_two);
     };
 
     if (std.builtin.mode == .ReleaseFast or std.builtin.mode == .ReleaseSmall) {
