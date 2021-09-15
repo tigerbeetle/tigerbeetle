@@ -136,11 +136,11 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 .reply => self.on_reply(message),
                 .eviction => self.on_eviction(message),
                 else => {
-                    // This could be because of a misdirected packet.
-                    log.warn(
-                        "{}: on_message: unexpected command {}",
-                        .{ self.id, message.header.command },
-                    );
+                    log.warn("{}: on_message: ignoring misdirected {s} message", .{
+                        self.id,
+                        @tagName(message.header.command),
+                    });
+                    return;
                 },
             }
         }

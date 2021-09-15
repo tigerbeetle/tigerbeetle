@@ -490,7 +490,13 @@ pub fn Replica(
                 .request_headers => self.on_request_headers(message),
                 .headers => self.on_headers(message),
                 .nack_prepare => self.on_nack_prepare(message),
-                else => unreachable,
+                else => {
+                    log.warn("{}: on_message: ignoring misdirected {s} message", .{
+                        self.replica,
+                        @tagName(message.header.command),
+                    });
+                    return;
+                },
             }
 
             if (self.loopback_queue) |loopback_message| {
