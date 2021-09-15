@@ -1,4 +1,3 @@
-.vscode
 demos/bitcast/bench-decode
 demos/bitcast/decode
 demos/bitcast/transfers
@@ -11,7 +10,3 @@ cluster_*_replica_*.tigerbeetle
 zig/
 zig-cache/
 zig-out/
-
-# Project Files
-.idea
-*.iml
