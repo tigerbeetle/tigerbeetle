@@ -30,10 +30,17 @@ pub fn main() !void {
     var args = std.process.args();
 
     // Skip argv[0] which is the name of this executable:
-    _ = args.nextPosix();
+    _ = args_next(&args, allocator);
 
     const seed_random = std.crypto.random.int(u64);
-    const seed = if (args.nextPosix()) |bytes| parse_seed(bytes) else seed_random;
+    const seed = seed_from_arg: {
+        const arg_two = args_next(&args, allocator);
+        if (arg_two == null) break :seed_from_arg seed_random;
+
+        const parsed_arg_seed = parse_seed(arg_two.?);
+        defer allocator.free(arg_two.?);
+        break :seed_from_arg parsed_arg_seed;
+    };
 
     if (std.builtin.mode == .ReleaseFast or std.builtin.mode == .ReleaseSmall) {
         // We do not support ReleaseFast or ReleaseSmall because they disable assertions.
@@ -194,6 +201,14 @@ pub fn main() !void {
 fn chance(random: *std.rand.Random, p: u8) bool {
     assert(p <= 100);
     return random.uintAtMost(u8, 100) <= p;
+}
+
+/// Returns the next argument for the simulator or null (if none available)
+fn args_next(args: *std.process.ArgIterator, allocator: *std.mem.Allocator) ?[:0]const u8 {
+    return if (args.next(allocator)) |err_or_bytes|
+        err_or_bytes catch @panic("Unable to extract next value from args")
+    else
+        null;
 }
 
 fn on_change_replica(replica: *Replica) void {
