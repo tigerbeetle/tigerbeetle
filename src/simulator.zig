@@ -202,10 +202,8 @@ fn chance(random: *std.rand.Random, p: u8) bool {
 
 /// Returns the next argument for the simulator or null (if none available)
 fn args_next(args: *std.process.ArgIterator, allocator: *std.mem.Allocator) ?[:0]const u8 {
-    return if (args.next(allocator)) |err_or_bytes|
-        err_or_bytes catch @panic("Unable to extract next value from args")
-    else
-        null;
+    const err_or_bytes = args.next(allocator) orelse return null;
+    return err_or_bytes catch @panic("Unable to extract next value from args");
 }
 
 fn on_change_replica(replica: *Replica) void {
