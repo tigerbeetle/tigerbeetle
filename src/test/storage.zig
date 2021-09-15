@@ -182,7 +182,7 @@ pub const Storage = struct {
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
         const faulty = storage.faulty_sectors(read.offset, read.buffer.len);
-        if (faulty.len > 0 and storage.x_in_100(storage.options.write_fault_probability)) {
+        if (faulty.len > 0 and storage.x_in_100(storage.options.read_fault_probability)) {
             // Randomly corrupt one of the faulty sectors the read targeted
             // TODO: inject more realistic and varied storage faults as described above.
             const sector_count = @divExact(faulty.len, config.sector_size);
