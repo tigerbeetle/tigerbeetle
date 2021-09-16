@@ -198,7 +198,7 @@ pub fn main() !void {
 /// Returns true, `p` percent of the time, else false.
 fn chance(random: *std.rand.Random, p: u8) bool {
     assert(p <= 100);
-    return random.uintAtMost(u8, 100) <= p;
+    return random.uintLessThan(u8, 100) < p;
 }
 
 /// Returns the next argument for the simulator or null (if none available)
