@@ -12,7 +12,25 @@ pub const PacketSimulatorOptions = struct {
     packet_loss_probability: u8,
     packet_replay_probability: u8,
     seed: u64,
+
+    replica_count: u8,
+    client_count: u8,
     node_count: u8,
+
+    /// How the partitions should be generated
+    partition_mode: PartitionMode,
+
+    /// Probability per tick that a partition will occur
+    partition_probability: u8,
+
+    /// Probability per tick that a partition will resolve
+    unpartition_probability: u8,
+
+    /// Minimum time a partition lasts
+    partition_stability: u32,
+
+    /// Minimum time the cluster is fully connected until it is partitioned again
+    unpartition_stability: u32,
 
     /// The maximum number of in-flight packets a path can have before packets are randomly dropped.
     path_maximum_capacity: u8,
@@ -27,11 +45,33 @@ pub const Path = struct {
     target: u8,
 };
 
+/// Determines how the partitions are created. Partitions
+/// are two-way, i.e. if i cannot communicate with j, then
+/// j cannot communicate with i.
+///
+/// Only replicas are partitioned. There will always be exactly two partitions.
+pub const PartitionMode = enum {
+    /// Draws the size of the partition uniformly at random from (1, n-1).
+    /// Replicas are randomly assigned a partition.
+    uniform_size,
+
+    /// Assigns each node to a partition uniformly at random. This biases towards
+    /// equal-size partitions.
+    uniform_partition,
+
+    /// Isolates exactly one replica.
+    isolate_single,
+
+    /// User-defined partitioning algorithm.
+    custom,
+};
+
 /// A fully connected network of nodes used for testing. Simulates the fault model:
 /// Packets may be dropped.
 /// Packets may be delayed.
 /// Packets may be replayed.
 pub const PacketStatistics = enum(u8) {
+    dropped_due_to_partition,
     dropped_due_to_congestion,
     dropped,
     replay,
@@ -58,6 +98,11 @@ pub fn PacketSimulator(comptime Packet: type) type {
         stats: [@typeInfo(PacketStatistics).Enum.fields.len]u32 = [_]u32{0} **
             @typeInfo(PacketStatistics).Enum.fields.len,
 
+        is_partitioned: bool,
+        partition: []bool,
+        replicas: []u8,
+        stability: u32,
+
         pub fn init(allocator: *std.mem.Allocator, options: PacketSimulatorOptions) !Self {
             assert(options.one_way_delay_mean >= options.one_way_delay_min);
             var self = Self{
@@ -71,7 +116,16 @@ pub fn PacketSimulator(comptime Packet: type) type {
                 ),
                 .options = options,
                 .prng = std.rand.DefaultPrng.init(options.seed),
+
+                .is_partitioned = false,
+                .stability = options.unpartition_stability,
+                .partition = try allocator.alloc(bool, @as(usize, options.replica_count)),
+                .replicas = try allocator.alloc(u8, @as(usize, options.replica_count)),
             };
+
+            for (self.replicas) |_, i| {
+                self.replicas[i] = @intCast(u8, i);
+            }
 
             for (self.paths) |*queue| {
                 queue.* = std.PriorityQueue(Data).init(allocator, Self.order_packets);
@@ -134,6 +188,14 @@ pub fn PacketSimulator(comptime Packet: type) type {
             return self.prng.random.uintAtMost(u8, 100) < self.options.packet_replay_probability;
         }
 
+        fn should_partition(self: *Self) bool {
+            return self.prng.random.uintAtMost(u8, 100) < self.options.partition_probability;
+        }
+
+        fn should_unpartition(self: *Self) bool {
+            return self.prng.random.uintAtMost(u8, 100) < self.options.unpartition_probability;
+        }
+
         /// Return a value produced using an exponential distribution with
         /// the minimum and mean specified in self.options
         fn one_way_delay(self: *Self) u64 {
@@ -142,8 +204,90 @@ pub fn PacketSimulator(comptime Packet: type) type {
             return min + @floatToInt(u64, @intToFloat(f64, mean - min) * self.prng.random.floatExp(f64));
         }
 
+        /// Partitions the network. Guaranteed to isolate at least one replica.
+        fn partition_network(
+            self: *Self,
+        ) void {
+            assert(self.options.replica_count > 1);
+
+            self.is_partitioned = true;
+            self.stability = self.options.partition_stability;
+
+            switch (self.options.partition_mode) {
+                .uniform_size => {
+                    // Exclude cases sz == 0 and sz == replica_count
+                    const sz =
+                        1 + self.prng.random.uintAtMost(u8, self.options.replica_count - 2);
+                    self.prng.random.shuffle(u8, self.replicas);
+                    for (self.replicas) |r, i| {
+                        self.partition[r] = i < sz;
+                    }
+                },
+                .uniform_partition => {
+                    var only_same = true;
+                    self.partition[0] =
+                        self.prng.random.uintLessThan(u8, 2) == 1;
+
+                    var i: usize = 1;
+                    while (i < self.options.replica_count) : (i += 1) {
+                        self.partition[i] =
+                            self.prng.random.uintLessThan(u8, 2) == 1;
+                        only_same =
+                            only_same and (self.partition[i - 1] == self.partition[i]);
+                    }
+
+                    if (only_same) {
+                        const n = self.prng.random.uintLessThan(u8, self.options.replica_count);
+                        self.partition[n] = true;
+                    }
+                },
+                .isolate_single => {
+                    for (self.replicas) |_, i| {
+                        self.partition[i] = false;
+                    }
+                    const n = self.prng.random.uintLessThan(u8, self.options.replica_count);
+                    self.partition[n] = true;
+                },
+                // Put your own partitioning logic here.
+                .custom => unreachable,
+            }
+        }
+
+        fn unpartition_network(
+            self: *Self,
+        ) void {
+            self.is_partitioned = false;
+            self.stability = self.options.unpartition_stability;
+
+            for (self.replicas) |_, i| {
+                self.partition[i] = false;
+            }
+        }
+
+        fn replicas_are_in_different_partitions(self: *Self, from: u8, to: u8) bool {
+            return from < self.options.replica_count and
+                to < self.options.replica_count and
+                self.partition[from] != self.partition[to];
+        }
+
         pub fn tick(self: *Self) void {
             self.ticks += 1;
+
+            if (self.stability > 0) {
+                self.stability -= 1;
+            } else {
+                if (self.is_partitioned) {
+                    if (self.should_unpartition()) {
+                        self.unpartition_network();
+                        log.alert("unpartitioned network: partition={d}", .{self.partition});
+                    }
+                } else {
+                    if (self.should_partition()) {
+                        self.partition_network();
+                        log.alert("partitioned network: partition={d}", .{self.partition});
+                    }
+                }
+            }
 
             var from: u8 = 0;
             while (from < self.options.node_count) : (from += 1) {
@@ -156,6 +300,15 @@ pub fn PacketSimulator(comptime Packet: type) type {
                     while (queue.peek()) |*data| {
                         if (data.expiry > self.ticks) break;
                         _ = queue.remove();
+
+                        if (self.is_partitioned and
+                            self.replicas_are_in_different_partitions(from, to))
+                        {
+                            self.stats[@enumToInt(PacketStatistics.dropped_due_to_partition)] += 1;
+                            log.alert("dropped packet (different partitions): from={} to={}", .{ from, to });
+                            data.packet.deinit(path);
+                            continue;
+                        }
 
                         if (self.should_drop()) {
                             self.stats[@enumToInt(PacketStatistics.dropped)] += 1;
