@@ -10,6 +10,7 @@ const Header = @import("vsr.zig").Header;
 const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StateMachine = @import("test/cluster.zig").StateMachine;
+const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
 const output = std.log.scoped(.state_checker);
@@ -74,11 +75,21 @@ pub fn main() !void {
         .seed = prng.random.int(u64),
         .network_options = .{
             .packet_simulator_options = .{
+                .replica_count = replica_count,
+                .client_count = client_count,
                 .node_count = node_count,
+
                 .seed = prng.random.int(u64),
                 .one_way_delay_mean = 3 + prng.random.uintLessThan(u16, 10),
                 .one_way_delay_min = prng.random.uintLessThan(u16, 3),
                 .packet_loss_probability = prng.random.uintLessThan(u8, 30),
+
+                .partition_mode = random_partition_mode(random),
+                .partition_probability = prng.random.uintLessThan(u8, 3),
+                .unpartition_probability = 1 + prng.random.uintLessThan(u8, 10),
+                .partition_stability = 100 + prng.random.uintLessThan(u32, 100),
+                .unpartition_stability = prng.random.uintLessThan(u32, 20),
+
                 .path_maximum_capacity = 20 + prng.random.uintLessThan(u8, 20),
                 .path_clog_duration_mean = prng.random.uintLessThan(u16, 500),
                 .path_clog_probability = prng.random.uintLessThan(u8, 2),
@@ -261,6 +272,14 @@ fn client_callback(
     results: Client.Error![]const u8,
 ) void {
     assert(user_data == 0);
+}
+
+/// Returns a random partitioning mode, excluding .custom
+fn random_partition_mode(random: *std.rand.Random) PartitionMode {
+    const typeInfo = @typeInfo(PartitionMode).Enum;
+    var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 2);
+    if (enumAsInt >= @enumToInt(PartitionMode.custom)) enumAsInt += 1;
+    return @intToEnum(PartitionMode, enumAsInt);
 }
 
 fn parse_seed(bytes: []const u8) u64 {
