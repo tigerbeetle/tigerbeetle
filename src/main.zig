@@ -16,8 +16,8 @@ const Storage = @import("storage.zig").Storage;
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const StateMachine = @import("state_machine.zig").StateMachine;
 
-const vr = @import("vr.zig");
-const Replica = vr.Replica(StateMachine, MessageBus, Storage, Time);
+const vsr = @import("vsr.zig");
+const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
 
 pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -88,12 +88,13 @@ fn start(
         replica_index,
         &io,
     );
+    var time: Time = .{};
     var replica = try Replica.init(
         arena,
         cluster,
         @intCast(u8, addresses.len),
         replica_index,
-        Time{},
+        &time,
         &storage,
         &message_bus,
         &state_machine,

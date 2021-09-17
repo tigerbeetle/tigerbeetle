@@ -6,8 +6,8 @@ const math = std.math;
 const config = @import("../config.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
-const vr = @import("../vr.zig");
-const Header = vr.Header;
+const vsr = @import("../vsr.zig");
+const Header = vsr.Header;
 
 const log = std.log.scoped(.journal);
 
@@ -82,7 +82,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
         };
 
-        allocator: *Allocator,
         storage: *Storage,
         replica: u8,
         size: u64,
@@ -117,6 +116,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// A faulty bit is used then only to qualify the severity of the dirty bit.
         faulty: BitSet,
 
+        recovered: bool = true,
+        recovering: bool = false,
+
         pub fn init(
             allocator: *Allocator,
             storage: *Storage,
@@ -143,10 +145,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             std.mem.set(Header, headers, Header.reserved());
 
             var dirty = try BitSet.init(allocator, headers.len);
-            errdefer dirty.deinit();
+            errdefer dirty.deinit(allocator);
 
             var faulty = try BitSet.init(allocator, headers.len);
-            errdefer faulty.deinit();
+            errdefer faulty.deinit(allocator);
 
             const headers_iops = (try allocator.allocAdvanced(
                 [config.sector_size]u8,
@@ -173,7 +175,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
 
             var self = Self{
-                .allocator = allocator,
                 .storage = storage,
                 .replica = replica,
                 .size = size,
@@ -190,6 +191,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.dirty.bits.len == self.headers.len);
             assert(self.faulty.bits.len == self.headers.len);
 
+            // Op 0 is always the cluster initialization op.
+            // TODO This will change when we implement synchronized incremental snapshots.
             assert(init_prepare.valid_checksum());
             assert(init_prepare.invalid() == null);
             self.headers[0] = init_prepare.*;
@@ -198,7 +201,23 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self) void {}
+        pub fn deinit(self: *Self, allocator: *Allocator) void {
+            const replica = @fieldParentPtr(Replica, "journal", self);
+
+            self.dirty.deinit(allocator);
+            self.faulty.deinit(allocator);
+            allocator.free(self.headers);
+            allocator.free(self.headers_iops);
+
+            {
+                var it = self.reads.iterate();
+                while (it.next()) |read| replica.message_bus.unref(read.message);
+            }
+            {
+                var it = self.writes.iterate();
+                while (it.next()) |write| replica.message_bus.unref(write.message);
+            }
+        }
 
         /// Asserts that headers are .reserved (zeroed) from `op_min` (inclusive).
         pub fn assert_headers_reserved_from(self: *Self, op_min: u64) void {
@@ -262,7 +281,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         pub fn next_offset(self: *Self, header: *const Header) u64 {
             // TODO Snapshots
             assert(header.command == .prepare);
-            return header.offset + vr.sector_ceil(header.size);
+            return header.offset + vsr.sector_ceil(header.size);
         }
 
         pub fn has(self: *Self, header: *const Header) bool {
@@ -467,25 +486,27 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             // Do not use this pointer beyond this function's scope, as the
             // header memory may then change:
-            const exact = replica.journal.entry_for_op_exact_with_checksum(op, checksum) orelse {
+            const exact = self.entry_for_op_exact_with_checksum(op, checksum) orelse {
                 self.read_prepare_log(op, checksum, "no entry exactly");
                 callback(replica, null, null);
                 return;
             };
 
-            if (replica.journal.faulty.bit(op)) {
+            if (self.faulty.bit(op)) {
+                assert(self.dirty.bit(op));
+
                 self.read_prepare_log(op, checksum, "faulty");
                 callback(replica, null, null);
                 return;
             }
 
-            if (replica.journal.dirty.bit(op)) {
+            if (self.dirty.bit(op)) {
                 self.read_prepare_log(op, checksum, "dirty");
                 callback(replica, null, null);
                 return;
             }
 
-            const physical_size = vr.sector_ceil(exact.size);
+            const physical_size = vsr.sector_ceil(exact.size);
             assert(physical_size >= exact.size);
 
             const message = replica.message_bus.get_message() orelse {
@@ -503,7 +524,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             const read = self.reads.acquire() orelse {
-                self.read_prepare_log(op, checksum, "no iop available");
+                self.read_prepare_log(op, checksum, "waiting for IOP");
                 callback(replica, null, null);
                 return;
             };
@@ -547,7 +568,22 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.reads.release(read);
             }
 
+            if (op > replica.op) {
+                self.read_prepare_log(op, checksum, "beyond replica.op");
+                read.callback(replica, null, null);
+                return;
+            }
+
+            _ = replica.journal.entry_for_op_exact_with_checksum(op, checksum) orelse {
+                self.read_prepare_log(op, checksum, "no entry exactly");
+                read.callback(replica, null, null);
+                return;
+            };
+
             if (!read.message.header.valid_checksum()) {
+                self.faulty.set(op);
+                self.dirty.set(op);
+
                 self.read_prepare_log(op, checksum, "corrupt header after read");
                 read.callback(replica, null, null);
                 return;
@@ -555,6 +591,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             const body = read.message.buffer[@sizeOf(Header)..read.message.header.size];
             if (!read.message.header.valid_checksum_body(body)) {
+                self.faulty.set(op);
+                self.dirty.set(op);
+
                 self.read_prepare_log(op, checksum, "corrupt body after read");
                 read.callback(replica, null, null);
                 return;
@@ -582,11 +621,157 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             );
         }
 
+        pub fn recover(self: *Self) void {
+            assert(!self.recovered);
+
+            if (self.recovering) return;
+            self.recovering = true;
+
+            log.debug("{}: recover: recovering", .{self.replica});
+
+            self.recover_headers(0, 0);
+            self.recover_headers(0, 1);
+        }
+
+        fn recover_headers(self: *Self, offset: u64, version: u1) void {
+            const replica = @fieldParentPtr(Replica, "journal", self);
+
+            assert(!self.recovered);
+            assert(self.recovering);
+
+            if (offset == self.size_headers) {
+                log.debug("{}: recover_headers: version={} recovered", .{
+                    self.replica,
+                    version,
+                });
+                if (self.reads.executing() == 0) {
+                    log.debug("{}: recover_headers: both versions recovered", .{self.replica});
+                    self.recovered = true;
+                    self.recovering = false;
+                    // The initialization op (TODO Snapshots):
+                    assert(!self.dirty.bit(0));
+                    assert(!self.faulty.bit(0));
+                    // From here it's over to the Recovery protocol from VRR 2012.
+                }
+                return;
+            }
+            assert(offset < self.size_headers);
+
+            const message = replica.message_bus.get_message() orelse unreachable;
+            defer replica.message_bus.unref(message);
+
+            // We use the count of reads executing to know when both versions have finished reading:
+            // We expect that no other process is issuing reads while we are recovering.
+            assert(self.reads.executing() < 2);
+
+            const read = self.reads.acquire() orelse unreachable;
+            read.* = .{
+                .self = self,
+                .completion = undefined,
+                .message = message.ref(),
+                .callback = undefined,
+                .op = undefined,
+                .checksum = offset,
+                .destination_replica = version,
+            };
+
+            const buffer = self.recover_headers_buffer(message, offset);
+            assert(buffer.len > 0);
+
+            log.debug("{}: recover_headers: version={} offset={} size={} recovering", .{
+                self.replica,
+                version,
+                offset,
+                buffer.len,
+            });
+
+            self.storage.read_sectors(
+                recover_headers_on_read,
+                &read.completion,
+                buffer,
+                self.offset_in_headers_version(offset, version),
+            );
+        }
+
+        fn recover_headers_buffer(self: *Self, message: *Message, offset: u64) []u8 {
+            const max = std.math.min(message.buffer.len, self.size_headers - offset);
+            assert(max % config.sector_size == 0);
+            return message.buffer[0..max];
+        }
+
+        fn recover_headers_on_read(completion: *Storage.Read) void {
+            const read = @fieldParentPtr(Self.Read, "completion", completion);
+            const self = read.self;
+            const replica = @fieldParentPtr(Replica, "journal", self);
+            const message = read.message;
+
+            const offset = @intCast(u64, read.checksum);
+            const version = @intCast(u1, read.destination_replica.?);
+            const buffer = self.recover_headers_buffer(message, offset);
+
+            log.debug("{}: recover_headers: version={} offset={} size={} recovered", .{
+                self.replica,
+                version,
+                offset,
+                buffer.len,
+            });
+
+            assert(offset % @sizeOf(Header) == 0);
+            assert(buffer.len >= @sizeOf(Header));
+            assert(buffer.len % @sizeOf(Header) == 0);
+
+            for (std.mem.bytesAsSlice(Header, buffer)) |*header, index| {
+                const op = offset / @sizeOf(Header) + index;
+
+                if (header.valid_checksum()) {
+                    // This header is valid.
+                    if (self.entry_for_op(op)) |existing| {
+                        if (existing.checksum == header.checksum) {
+                            // We also have the same header from the other version.
+                            assert(!self.faulty.bit(op));
+                        } else if (existing.command == .reserved) {
+                            self.set_entry_as_dirty(header);
+                            self.faulty.clear(op);
+                        } else {
+                            // Don't replace any existing op from the other version.
+                            // First come, first served.
+                            // We'll sort out the right order later when we recover higher up.
+                            assert(!self.faulty.bit(op));
+                        }
+                    } else if (header.command == .reserved) {
+                        self.dirty.set(op);
+                        self.faulty.clear(op);
+                    } else {
+                        self.set_entry_as_dirty(header);
+                    }
+                } else {
+                    // This header is corrupt.
+                    if (self.entry_for_op(op)) |_| {
+                        // However, we have a valid header from the other version.
+                    } else {
+                        self.dirty.set(op);
+                        self.faulty.set(op);
+                    }
+                }
+            }
+
+            // We must release before we call `recover_headers()` in case Storage is synchronous.
+            // Otherwise, we would run out of messages and reads.
+            replica.message_bus.unref(read.message);
+            self.reads.release(read);
+
+            self.recover_headers(offset + buffer.len, version);
+        }
+
         /// A safe way of removing an entry, where the header must match the current entry to succeed.
         fn remove_entry(self: *Self, header: *const Header) void {
             // Copy the header.op by value to avoid a reset() followed by undefined header.op usage:
             const op = header.op;
-            log.debug("{}: remove_entry: op={}", .{ self.replica, op });
+            log.debug("{}: remove_entry: op={} checksum={}", .{
+                self.replica,
+                op,
+                header.checksum,
+            });
 
             assert(self.entry(header).?.checksum == header.checksum);
             assert(self.headers[op].checksum == header.checksum); // TODO Snapshots
@@ -656,7 +841,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.has_dirty(message.header));
 
             const write = self.writes.acquire() orelse {
-                self.write_prepare_debug(message.header, "no iop available");
+                self.write_prepare_debug(message.header, "waiting for IOP");
                 callback(replica, null, trigger);
                 return;
             };
@@ -672,7 +857,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
 
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
-            const sectors = message.buffer[0..vr.sector_ceil(message.header.size)];
+            const sectors = message.buffer[0..vsr.sector_ceil(message.header.size)];
             assert(message.header.offset + sectors.len <= self.size_circular_buffer);
 
             if (std.builtin.mode == .Debug) {
@@ -683,32 +868,25 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             self.write_sectors(
-                write_prepare_on_write_message,
+                write_prepare_header,
                 write,
                 sectors,
                 self.offset_in_circular_buffer(message.header.offset),
             );
         }
 
-        fn write_prepare_on_write_message(write: *Self.Write) void {
+        /// Attempt to lock the in-memory sector containing the header being written.
+        /// If the sector is already locked, add this write to the wait queue.
+        fn write_prepare_header(write: *Self.Write) void {
             const self = write.self;
             const message = write.message;
 
             if (!self.has(message.header)) {
-                // We've moved on and decided that another message should take this place,
-                // so cancel the write.
                 self.write_prepare_debug(message.header, "entry changed while writing sectors");
                 self.write_prepare_release(write, null);
                 return;
             }
 
-            // TODO Snapshots
-            self.write_prepare_header(write);
-        }
-
-        /// Attempt to lock the in-memory sector containing the header being written.
-        /// If the sector is already locked, add this write to the wait queue.
-        fn write_prepare_header(self: *Self, write: *Self.Write) void {
             assert(!write.header_sector_locked);
             assert(write.header_sector_next == null);
 
@@ -730,6 +908,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn write_prepare_on_lock_header_sector(self: *Self, write: *Write) void {
             assert(write.header_sector_locked);
+
+            // TODO It's possible within this section that the header has since been replaced but we
+            // continue writing, even when the dirty bit is no longer set. This is not a problem
+            // but it would be good to stop writing as soon as we see we no longer need to.
+            // For this, we'll need to have a way to tweak write_prepare_release() to release locks.
+            // At present, we don't return early here simply because it doesn't yet do that.
 
             const message = write.message;
             const offset = write_prepare_header_offset(write.message);
@@ -852,7 +1036,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn write_prepare_header_offset(message: *Message) u64 {
             comptime assert(config.sector_size % @sizeOf(Header) == 0);
-            return vr.sector_floor(message.header.op * @sizeOf(Header));
+            return vsr.sector_floor(message.header.op * @sizeOf(Header));
         }
 
         fn write_headers_increment_version(self: *Self) u1 {
@@ -866,10 +1050,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// Otherwise, we only need to write the headers once because their other copy can be located in
         /// the body of the journal (using the previous entry's offset and size).
         fn write_prepare_header_once(self: *Self, header: *const Header) bool {
+            // TODO Optimize this to decide whether to write once or twice once we add support to
+            // recover from either header version at startup.
+            const always_write_twice = true;
+            if (always_write_twice) return false;
+
             // TODO Snapshots
-            // TODO: check to make sure that we check this after every IO and return
-            // early if the write was canceled.
-            assert(self.dirty.bit(header.op));
             if (header.command == .reserved) {
                 log.debug("{}: write_prepare_header_once: dirty reserved header", .{
                     self.replica,
@@ -1001,45 +1187,56 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
 
             // Drain the list of ranges that were waiting on this range to complete.
-            while (range.next) |waiting| {
+            var current = range.next;
+            range.next = null;
+            while (current) |waiting| {
                 assert(waiting.locked == false);
-                range.next = waiting.next;
+                current = waiting.next;
                 waiting.next = null;
-
                 self.lock_sectors(@fieldParentPtr(Self.Write, "range", waiting));
-                assert(range.next == waiting.next);
             }
-            assert(range.next == null);
 
             // The callback may set range, so we can't set range to undefined after running the callback.
             const callback = range.callback;
             range.* = undefined;
             callback(write);
         }
+
+        pub fn writing(self: *Self, op: u64, checksum: u128) bool {
+            var it = self.writes.iterate();
+            while (it.next()) |write| {
+                // It's possible that we might be writing the same op but with a different checksum.
+                // For example, if the op we are writing did not survive the view change and was
+                // replaced by another op. We must therefore do the search primarily on checksum.
+                // However, we compare against the 64-bit op first, since it's a cheap machine word.
+                if (write.message.header.op == op and write.message.header.checksum == checksum) {
+                    // If we truly are writing, then the dirty bit must be set:
+                    assert(self.dirty.bit(op));
+                    return true;
+                }
+            }
+            return false;
+        }
     };
 }
 
 // TODO Snapshots
 pub const BitSet = struct {
-    allocator: *Allocator,
     bits: []bool,
 
     /// The number of bits set (updated incrementally as bits are set or cleared):
     len: u64 = 0,
 
     fn init(allocator: *Allocator, count: u64) !BitSet {
-        var bits = try allocator.alloc(bool, count);
+        const bits = try allocator.alloc(bool, count);
         errdefer allocator.free(bits);
         std.mem.set(bool, bits, false);
 
-        return BitSet{
-            .allocator = allocator,
-            .bits = bits,
-        };
+        return BitSet{ .bits = bits };
     }
 
-    fn deinit(self: *BitSet) void {
-        self.allocator.free(self.bits);
+    fn deinit(self: *BitSet, allocator: *Allocator) void {
+        allocator.free(self.bits);
     }
 
     /// Clear the bit for an op (idempotent):

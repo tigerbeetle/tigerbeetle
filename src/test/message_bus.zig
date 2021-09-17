@@ -5,7 +5,7 @@ const config = @import("../config.zig");
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
-const Header = @import("../vr.zig").Header;
+const Header = @import("../vsr.zig").Header;
 
 const Network = @import("network.zig").Network;
 
@@ -51,9 +51,6 @@ pub const MessageBus = struct {
         context: Context,
         comptime on_message: fn (context: Context, message: *Message) void,
     ) void {
-        assert(bus.on_message_callback == null);
-        assert(bus.on_message_context == null);
-
         bus.on_message_callback = struct {
             fn wrapper(_context: ?*c_void, message: *Message) void {
                 on_message(@intToPtr(Context, @ptrToInt(_context)), message);

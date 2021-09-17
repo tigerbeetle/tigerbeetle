@@ -7,7 +7,7 @@ const net = std.net;
 const os = std.os;
 
 const config = @import("config.zig");
-const vr = @import("vr.zig");
+const vsr = @import("vsr.zig");
 
 const usage = fmt.comptimePrint(
     \\Usage:
@@ -194,7 +194,7 @@ fn parse_cluster(raw_cluster: []const u8) u32 {
 
 /// Parse and allocate the addresses returning a slice into that array.
 fn parse_addresses(allocator: *std.mem.Allocator, raw_addresses: []const u8) []net.Address {
-    return vr.parse_addresses(allocator, raw_addresses) catch |err| switch (err) {
+    return vsr.parse_addresses(allocator, raw_addresses) catch |err| switch (err) {
         error.AddressHasTrailingComma => fatal("--addresses: invalid trailing comma", .{}),
         error.AddressLimitExceeded => {
             fatal("--addresses: too many addresses, at most {d} are allowed", .{

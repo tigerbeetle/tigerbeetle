@@ -9,8 +9,8 @@ const sock_flags = os.SOCK_CLOEXEC | (if (is_darwin) os.SOCK_NONBLOCK else 0);
 const config = @import("config.zig");
 const log = std.log.scoped(.message_bus);
 
-const vr = @import("vr.zig");
-const Header = vr.Header;
+const vsr = @import("vsr.zig");
+const Header = vsr.Header;
 
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
@@ -468,7 +468,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 bus.replicas[replica] = connection;
 
                 var attempts = &bus.replicas_connect_attempts[replica];
-                const ms = vr.exponential_backoff_with_jitter(
+                const ms = vsr.exponential_backoff_with_jitter(
                     &bus.prng,
                     config.connection_delay_min_ms,
                     config.connection_delay_max_ms,
@@ -775,7 +775,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 }
 
                 if (message.header.command == .request or message.header.command == .prepare) {
-                    const sector_ceil = vr.sector_ceil(message.header.size);
+                    const sector_ceil = vsr.sector_ceil(message.header.size);
                     if (message.header.size != sector_ceil) {
                         assert(message.header.size < sector_ceil);
                         assert(message.buffer.len == config.message_size_max + config.sector_size);
