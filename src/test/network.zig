@@ -4,7 +4,7 @@ const mem = std.mem;
 const assert = std.debug.assert;
 
 const config = @import("../config.zig");
-const vr = @import("../vr.zig");
+const vsr = @import("../vsr.zig");
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
@@ -159,7 +159,7 @@ pub const Network = struct {
         });
 
         if (message.header.command == .request or message.header.command == .prepare) {
-            const sector_ceil = vr.sector_ceil(message.header.size);
+            const sector_ceil = vsr.sector_ceil(message.header.size);
             if (message.header.size != sector_ceil) {
                 assert(message.header.size < sector_ceil);
                 assert(message.buffer.len == config.message_size_max + config.sector_size);

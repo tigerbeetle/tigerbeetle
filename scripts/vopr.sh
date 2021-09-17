@@ -5,7 +5,9 @@ set -e
 if [ ! -d "zig" ]; then
     scripts/install_zig.sh 0.8.0
     echo ""
-    echo "Running the VOPR for the first time..."
+    echo "Running the TigerBeetle VOPR for the first time..."
+    echo "Visit https://www.tigerbeetle.com"
+    sleep 2
 fi
 
 # If a seed is provided as an argument then replay the seed, otherwise test a 1,000 seeds:
@@ -23,8 +25,9 @@ if [ "$1" ]; then
 
     zig/zig run src/simulator.zig $BUILD_MODE -- $1
 else
+    zig/zig build-exe src/simulator.zig -OReleaseSafe
     for I in {1..1000}
     do
-        zig/zig run src/simulator.zig -OReleaseSafe
+        ./simulator
     done
 fi

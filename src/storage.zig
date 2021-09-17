@@ -8,7 +8,7 @@ const IO = @import("io.zig").IO;
 const is_darwin = std.Target.current.isDarwin();
 
 const config = @import("config.zig");
-const vr = @import("vr.zig");
+const vsr = @import("vsr.zig");
 
 pub const Storage = struct {
     /// See usage in Journal.write_sectors() for details.
@@ -169,7 +169,7 @@ pub const Storage = struct {
                     assert(target.len > 0);
                     std.mem.set(u8, target, 0);
 
-                    // We could set `read.target_max` to `vr.sector_ceil(read.buffer.len)` here
+                    // We could set `read.target_max` to `vsr.sector_ceil(read.buffer.len)` here
                     // in order to restart our pseudo-binary search on the rest of the sectors to be
                     // read, optimistically assuming that this is the last failing sector.
                     // However, data corruption that causes EIO errors often has spacial locality.

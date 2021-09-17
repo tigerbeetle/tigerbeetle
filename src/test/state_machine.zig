@@ -18,8 +18,6 @@ pub const StateMachine = struct {
         return .{ .state = hash(0, std.mem.asBytes(&seed)) };
     }
 
-    pub fn deinit(state_machine: *StateMachine) void {}
-
     pub fn prepare(
         state_machine: *StateMachine,
         realtime: i64,
@@ -49,9 +47,9 @@ pub const StateMachine = struct {
                 const client_input = hash(client, input);
                 const new_state = hash(state_machine.state, std.mem.asBytes(&client_input));
 
-                log.debug("state={} input={} input.len={} new state={}", .{
+                log.debug("state={x} input={x} input.len={} new state={x}", .{
                     state_machine.state,
-                    hash(0, input),
+                    client_input,
                     input.len,
                     new_state,
                 });

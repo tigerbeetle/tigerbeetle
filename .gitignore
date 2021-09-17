@@ -1,10 +1,10 @@
-.vscode
 demos/bitcast/bench-decode
 demos/bitcast/decode
 demos/bitcast/transfers
 dist/
 journal
 main
+simulator
 tigerbeetle
 cluster_*_replica_*.tigerbeetle
 zig/
