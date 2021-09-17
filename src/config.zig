@@ -5,15 +5,13 @@ pub const deployment_environment = .development;
 pub const log_level = 6;
 
 /// The maximum number of replicas allowed in a cluster.
-/// This has been limited to 5 just to decrease the amount of memory required by the VOPR simulator.
-pub const replicas_max = 5;
+pub const replicas_max = 6;
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
 /// This impacts the amount of memory allocated at initialization by the server.
 /// This determines the size of the VR client table used to cache replies to clients by client ID.
 /// Each client has one entry in the VR client table to store the latest `message_size_max` reply.
-/// This has been limited to 3 just to decrease the amount of memory required by the VOPR simulator.
-pub const clients_max = 3;
+pub const clients_max = 32;
 
 /// The minimum number of nodes required to form a quorum for replication:
 /// Majority quorums are only required across view change and replication phases (not within).
