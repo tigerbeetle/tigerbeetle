@@ -282,7 +282,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
                         log.alert("unpartitioned network: partition={d}", .{self.partition});
                     }
                 } else {
-                    if (self.should_partition()) {
+                    if (self.options.replica_count > 1 and self.should_partition()) {
                         self.partition_network();
                         log.alert("partitioned network: partition={d}", .{self.partition});
                     }
