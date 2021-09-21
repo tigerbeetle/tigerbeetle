@@ -21,9 +21,9 @@ const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
 const IO = @import("tigerbeetle/src/io.zig").IO;
 const config = @import("tigerbeetle/src/config.zig");
 
-const vr = @import("tigerbeetle/src/vr.zig");
-const Header = vr.Header;
-const Client = vr.Client(StateMachine, MessageBus);
+const vsr = @import("tigerbeetle/src/vsr.zig");
+const Header = vsr.Header;
+const Client = vsr.Client(StateMachine, MessageBus);
 
 pub const log_level: std.log.Level = .info;
 
@@ -133,7 +133,7 @@ const Context = struct {
 
         context.io = io;
 
-        context.addresses = try vr.parse_addresses(allocator, addresses_raw);
+        context.addresses = try vsr.parse_addresses(allocator, addresses_raw);
         errdefer allocator.free(context.addresses);
         assert(context.addresses.len > 0);
 
