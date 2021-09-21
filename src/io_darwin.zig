@@ -27,7 +27,9 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn tick(self: *IO) !void {
-        return self.flush(false);
+        // TODO This is a hack to block 1ms every 10ms tick on macOS while we fix `flush(false)`:
+        // What we're seeing for the tigerbeetle-node client is that recv() syscalls never complete.
+        return self.run_for_ns(std.time.ns_per_ms);
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
