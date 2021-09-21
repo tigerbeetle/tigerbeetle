@@ -1,12 +1,23 @@
 #!/bin/bash
 set -e
 
-if [ "$1" == "latest" ]; then
+# Default to the 0.8.1 build, or allow the latest dev build, or an explicit release version:
+if [ -z "$1" ]; then
+    ZIG_RELEASE="0.8.1"
+elif [ "$1" == "latest" ]; then
     ZIG_RELEASE="builds"
-    echo "Installing Zig latest build..."
 else
-    ZIG_RELEASE="0.8.0"
+    ZIG_RELEASE=$1
+fi
+
+# Validate the release version explicitly:
+if [[ $ZIG_RELEASE =~ ^builds$ ]]; then
+    echo "Installing Zig latest build..."
+elif [[ $ZIG_RELEASE =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Installing Zig $ZIG_RELEASE release build..."
+else
+    echo "Release version invalid"
+    exit 1
 fi
 
 # Determine the architecture:
@@ -30,6 +41,12 @@ if command -v wget &> /dev/null; then
     ZIG_URL=`wget --quiet -O - https://ziglang.org/download/index.json | grep "$ZIG_TARGET" | grep "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
 else
     ZIG_URL=`curl --silent https://ziglang.org/download/index.json | grep "$ZIG_TARGET" | grep "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
+fi
+
+# Ensure that the release is actually hosted on the ziglang.org website:
+if [ -z "$ZIG_URL" ]; then
+    echo "Release not found on ziglang.org"
+    exit 1
 fi
 
 # Work out the filename from the URL, as well as the directory without the ".tar.xz" file extension:
