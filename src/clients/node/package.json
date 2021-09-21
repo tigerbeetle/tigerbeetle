@@ -10,31 +10,30 @@
   },
   "preferUnplugged": true,
   "files": [
-    "LICENSE",
-    "README.md",
-    "package.json",
-    "tsconfig.json",
-    "yarn.lock",
     ".yarn/releases",
     ".yarnrc.yml",
+    "LICENSE",
+    "README.md",
     "dist",
     "!dist/client.node",
+    "package.json",
+    "scripts/download_node_headers.sh",
+    "scripts/postinstall.sh",
     "src/c.zig",
-    "src/index.ts",
-    "src/test.ts",
     "src/benchmark.ts",
+    "src/index.ts",
     "src/node.zig",
+    "src/test.ts",
     "src/tigerbeetle/src",
     "src/tigerbeetle/scripts",
     "src/translate.zig",
-    "scripts/download_node_headers.sh",
-    "scripts/postinstall.sh"
+    "tsconfig.json",
+    "yarn.lock"
   ],
   "engines": {
     "node": ">=14.0.0"
   },
   "scripts": {
-    "prepack": "git submodule deinit --all && git submodule update --init && yarn build:tsc",
     "benchmark": "./scripts/benchmark.sh",
     "build": "yarn build:tsc && yarn build:zig",
     "build:tsc": "tsc",
@@ -42,6 +41,7 @@
     "clean": "rm -rf build dist node_modules src/zig-cache zig",
     "install:zig": "./src/tigerbeetle/scripts/install_zig.sh",
     "postinstall": "./scripts/postinstall.sh",
+    "prepack": "git submodule deinit --all && git submodule update --init && yarn build:tsc",
     "test": "yarn build && node dist/test"
   },
   "author": "Coil Technologies, Inc",
