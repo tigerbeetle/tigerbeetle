@@ -1,12 +1,12 @@
 import assert, { AssertionError } from 'assert'
 import { CommitFlags,
+  createClient,
   Commit,
   Account,
-  createClient,
   Transfer,
   TransferFlags,
-  CreateTransferError,
-  CreateAccountError
+  CreateAccountError,
+  CreateTransferError
 } from '.'
 
 const client = createClient({
