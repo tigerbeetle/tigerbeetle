@@ -2,9 +2,7 @@
 [TigerBeetle](https://github.com/coilhq/tigerbeetle) client for NodeJS
 
 ## Installation
-**Prerequisites:** The current version of the client reuses components from TigerBeetle. As such it targets Linux kernel v5.6 or newer. Node >= 14.0.0 is also required.
-
-Later portable versions of TigerBeetle may supplement `io_uring` with `kqueue` for macOS and FreeBSD support, or `IOCP` for Windows support.
+**Prerequisites:** Node >= 14.0.0. Your operating system should be Linux (kernel >= v5.6) or macOS. Windows support is not yet available but is in the works.
 
 ```sh
 yarn add tigerbeetle-node
