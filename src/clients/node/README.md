@@ -1,13 +1,25 @@
 # tigerbeetle-node
-[TigerBeetle](https://github.com/coilhq/tigerbeetle) client for NodeJS
+[TigerBeetle](https://github.com/coilhq/tigerbeetle) client for NodeJS.
 
 ## Installation
-**Prerequisites:** Node >= 14.0.0. Your operating system should be Linux (kernel >= v5.6) or macOS. Windows support is not yet available but is in the works.
+The follow steps will install the `tigerbeetle-node` Node library to your local.
+
+### Prerequisites 
+
+* NodeJS >= `14.0.0`. _(If the correct version is not installed, an installation error will occur)_ 
+
+> Your operating system should be Linux (kernel >= v5.6) or macOS. Windows support is not yet available but is in the works.
+
+> Ensure you are not currently in the project (tigerbeetle-node) directory, but the `parent` directory instead;
+     
+### YARN Package Manager
 
 ```sh
 yarn add tigerbeetle-node
 ```
 or
+
+### NPM Package Manager 
 ```sh
 npm install tigerbeetle-node
 ```
@@ -22,7 +34,10 @@ yarn
 ```
 
 ## Usage
-A client needs to be configured with a `cluster_id` and `replica_addresses`. This instantiates the client where memory is allocated to internally buffer events to be sent. For the moment, only one client can be instantiated globally per process. Future releases will allow multiple client instantiations.
+A client needs to be configured with a `cluster_id` and `replica_addresses`. 
+This instantiates the client where memory is allocated to internally buffer events to be sent. 
+For the moment, only one client can be instantiated globally per process. 
+Future releases will allow multiple client instantiations.
 ```js
 import { createClient } from 'tigerbeetle-node'
 
@@ -32,7 +47,8 @@ const client = createClient({
 })
 ```
 
-One of the ways TigerBeetle achieves its performance is through batching. This is reflected in the below function interfaces where each one takes in an array of events.
+One of the ways TigerBeetle achieves its performance is through batching. 
+This is reflected in the below function interfaces where each one takes in an array of events.
 
 ### Account Creation
 
