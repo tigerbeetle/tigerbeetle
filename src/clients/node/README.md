@@ -1,5 +1,5 @@
 # tigerbeetle-node
-[TigerBeetle](https://github.com/coilhq/tigerbeetle) client for NodeJS.
+[TigerBeetle](https://github.com/coilhq/tigerbeetle) client for Node.js.
 
 ## Installation
 The follow steps will install the `tigerbeetle-node` Node library to your local.
