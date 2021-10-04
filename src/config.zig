@@ -177,6 +177,23 @@ pub const io_depth_read = 8;
 /// The maximum number of concurrent write I/O operations to allow at once.
 pub const io_depth_write = 8;
 
+// TODO docs
+pub const lsm_trees = 6;
+
+/// Max key size for the LSM Trees in bytes
+pub const lsm_key_size_max = 24;
+
+/// Size of pages used by the LSM tree implementation. These pages are passed
+/// through an LRU page cache.
+pub const lsm_table_page_size = 8 * sector_size;
+
+/// TODO: docs
+pub const lsm_snapshots_max = clients_max;
+
+/// TODO: use a bit less than a sector, make the total superblock size well
+/// aligned to a sector boundry
+pub const lsm_snapshot_table_refs_max = 62; // This is a rough estimate
+
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = 10;
