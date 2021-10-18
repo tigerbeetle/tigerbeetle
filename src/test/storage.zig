@@ -287,6 +287,7 @@ pub const Storage = struct {
         // We need to ensure there is message_size_max fault-free padding
         // between faulty areas of memory so that a single message
         // cannot straddle the corruptable areas of a majority of replicas.
+        comptime assert(config.replicas_max == 6);
         switch (replica_count) {
             1 => {
                 // If there is only one replica in the cluster, storage faults are not recoverable.
@@ -331,6 +332,21 @@ pub const Storage = struct {
                 out[2] = .{ .first_offset = 2 * message_size_max, .period = 6 * message_size_max };
                 out[3] = .{ .first_offset = 2 * message_size_max, .period = 6 * message_size_max };
                 out[4] = .{ .first_offset = 4 * message_size_max, .period = 6 * message_size_max };
+            },
+            6 => {
+                //  0123456789
+                // 0X     X
+                // 1X     X
+                // 2  X     X
+                // 3  X     X
+                // 4    X     X
+                // 5    X     X
+                out[0] = .{ .first_offset = 0 * message_size_max, .period = 6 * message_size_max };
+                out[1] = .{ .first_offset = 0 * message_size_max, .period = 6 * message_size_max };
+                out[2] = .{ .first_offset = 2 * message_size_max, .period = 6 * message_size_max };
+                out[3] = .{ .first_offset = 2 * message_size_max, .period = 6 * message_size_max };
+                out[4] = .{ .first_offset = 4 * message_size_max, .period = 6 * message_size_max };
+                out[5] = .{ .first_offset = 4 * message_size_max, .period = 6 * message_size_max };
             },
             else => unreachable,
         }
