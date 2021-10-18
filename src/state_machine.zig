@@ -305,10 +305,10 @@ pub const StateMachine = struct {
         assert(t.timestamp > self.commit_timestamp);
 
         if (t.flags.padding != 0) return .reserved_flag_padding;
-        if (t.flags.two_phase_commit and t.timeout == 0) {
+        if (t.flags.two_phase_commit) {
             // Otherwise reserved amounts may never be released:
-            return .two_phase_commit_must_timeout;
-        } else if (!t.flags.two_phase_commit and t.timeout != 0) {
+            if (t.timeout == 0) return .two_phase_commit_must_timeout;
+        } else if (t.timeout != 0) {
             return .timeout_reserved_for_two_phase_commit;
         }
         if (!t.flags.condition and !zeroed_32_bytes(t.reserved)) return .reserved_field;
@@ -341,17 +341,17 @@ pub const StateMachine = struct {
                 return .exists_with_different_debit_account_id;
             } else if (exists.credit_account_id != t.credit_account_id) {
                 return .exists_with_different_credit_account_id;
-            } else if (exists.amount != t.amount) {
-                return .exists_with_different_amount;
-            } else if (@bitCast(u32, exists.flags) != @bitCast(u32, t.flags)) {
+            }
+            if (exists.amount != t.amount) return .exists_with_different_amount;
+            if (@bitCast(u32, exists.flags) != @bitCast(u32, t.flags)) {
                 return .exists_with_different_flags;
-            } else if (exists.user_data != t.user_data) {
-                return .exists_with_different_user_data;
-            } else if (!equal_32_bytes(exists.reserved, t.reserved)) {
+            }
+            if (exists.user_data != t.user_data) return .exists_with_different_user_data;
+            if (!equal_32_bytes(exists.reserved, t.reserved)) {
                 return .exists_with_different_reserved_field;
-            } else if (exists.timeout != t.timeout) {
-                return .exists_with_different_timeout;
-            } else return .exists;
+            }
+            if (exists.timeout != t.timeout) return .exists_with_different_timeout;
+            return .exists;
         } else {
             insert.value_ptr.* = t;
             if (t.flags.two_phase_commit) {
@@ -436,9 +436,8 @@ pub const StateMachine = struct {
     }
 
     fn commit_transfer_rollback(self: *StateMachine, c: Commit) void {
-        //TODO Ensure the commit exists before changing balances? Otherwise I can do a double commit rollback
-        var c_read = self.get_commit(c.id).?;
-        var t = self.get_transfer(c_read.id).?;
+        assert(self.get_commit(c.id) != null);
+        var t = self.get_transfer(c.id).?;
         var dr = self.get_account(t.debit_account_id).?;
         var cr = self.get_account(t.credit_account_id).?;
         dr.debits_reserved += t.amount;
@@ -447,7 +446,7 @@ pub const StateMachine = struct {
             dr.debits_accepted -= t.amount;
             cr.credits_accepted -= t.amount;
         }
-        assert(self.commits.remove(c_read.id));
+        assert(self.commits.remove(c.id));
     }
 
     /// This is our core private method for changing balances.
@@ -460,7 +459,7 @@ pub const StateMachine = struct {
         return self.accounts.getPtr(id);
     }
 
-    /// See the comment for get_transfer().
+    /// See the comment for get_account().
     fn get_transfer(self: *StateMachine, id: u128) ?*Transfer {
         return self.transfers.getPtr(id);
     }
@@ -516,6 +515,150 @@ fn equal_48_bytes(a: [48]u8, b: [48]u8) bool {
 }
 
 const testing = std.testing;
+
+test "create/lookup accounts [REWORK-NEW]" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = &arena.allocator;
+
+    const AccTestVector = struct { outcome: CreateAccountResult, input: Account };
+
+    const test_timestamp: u64 = 1;
+    const acc_test_vector = [_]AccTestVector{
+        AccTestVector{
+            .outcome = CreateAccountResult.reserved_flag_padding,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 1,
+                .timestamp = test_timestamp,
+                .flags = .{ .padding = 1 },
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.reserved_field,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 2,
+                .timestamp = test_timestamp,
+                .reserved = [_]u8{1} ** 48,
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.exceeds_credits,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 3,
+                .timestamp = test_timestamp,
+                .debits_reserved = 10,
+                .flags = .{ .debits_must_not_exceed_credits = true },
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.exceeds_credits,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 4,
+                .timestamp = test_timestamp,
+                .debits_accepted = 10,
+                .flags = .{ .debits_must_not_exceed_credits = true },
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.exceeds_debits,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 5,
+                .timestamp = test_timestamp,
+                .credits_reserved = 10,
+                .flags = .{ .credits_must_not_exceed_debits = true },
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.exceeds_debits,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 6,
+                .timestamp = test_timestamp,
+                .credits_accepted = 10,
+                .flags = .{ .credits_must_not_exceed_debits = true },
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.ok,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 7,
+                .timestamp = test_timestamp,
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.exists,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 7,
+                .timestamp = (test_timestamp + 1),
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.ok,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 8,
+                .timestamp = (test_timestamp + 1),
+                .unit = 9,
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.exists_with_different_unit,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 8,
+                .timestamp = (test_timestamp + 2),
+                .unit = 10,
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.ok,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 9,
+                .timestamp = (test_timestamp + 2),
+                .code = 9,
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.exists_with_different_code,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 9,
+                .timestamp = (test_timestamp + 3),
+                .code = 10,
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.ok,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 10,
+                .timestamp = (test_timestamp + 3),
+                .flags = .{ .credits_must_not_exceed_debits = true },
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.exists_with_different_flags,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 10,
+                .timestamp = (test_timestamp + 4),
+                .flags = .{ .debits_must_not_exceed_credits = true },
+            }),
+        },
+    };
+
+    //var account_list = try std.ArrayListUnmanaged(Account).initCapacity(allocator, acc_test_vector.len);
+    //errdefer account_list.deinit(allocator);
+    //var accounts = account_list.items;
+
+    var state_machine = try StateMachine.init(allocator, acc_test_vector.len, 0, 0);
+    defer state_machine.deinit();
+
+    for (acc_test_vector) |itm, i| {
+        const create_result = state_machine.create_account(itm.input);
+        switch (itm.outcome) {
+            .ok => try testing.expectEqual(itm.input, state_machine.get_account(itm.input.id).?.*),
+            else => try testing.expectEqual(itm.outcome, create_result),
+        }
+    }
+
+    //.ok => std.debug.print("Out-> SUCCESS [{d} - {any}] \n", .{ i, result.outcome }), //TODO try testing.expectEqual(result, state_machine.get_account(accounts[i].id).?.*);
+    //else => std.debug.print("Out-> [{d} - {any}] \n", .{ i, result.outcome }), //TODO try testing.expectEqual(result, results[i]);
+}
 
 test "create/lookup accounts" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
