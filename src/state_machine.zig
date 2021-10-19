@@ -639,6 +639,22 @@ test "create/lookup accounts [REWORK-NEW]" {
                 .flags = .{ .debits_must_not_exceed_credits = true },
             }),
         },
+        AccTestVector{
+            .outcome = CreateAccountResult.ok,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 11,
+                .timestamp = (test_timestamp + 4),
+                .user_data = 'U',
+            }),
+        },
+        AccTestVector{
+            .outcome = CreateAccountResult.exists_with_different_user_data,
+            .input = std.mem.zeroInit(Account, .{
+                .id = 11,
+                .timestamp = (test_timestamp + 5),
+                .user_data = 'D',
+            }),
+        },
     };
 
     //var account_list = try std.ArrayListUnmanaged(Account).initCapacity(allocator, acc_test_vector.len);
