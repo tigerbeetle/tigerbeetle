@@ -130,7 +130,6 @@ export enum CommitTransferError {
   transfer_not_found,
   transfer_not_two_phase_commit,
   transfer_expired,
-  already_auto_committed,
   already_committed,
   already_committed_but_accepted,
   already_committed_but_rejected,
