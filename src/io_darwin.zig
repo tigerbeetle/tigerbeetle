@@ -405,6 +405,7 @@ pub const IO = struct {
         InputOutput,
         NoSpaceLeft,
         ReadOnlyFileSystem,
+        AccessDenied,
     } || os.UnexpectedError;
 
     pub fn fsync(
@@ -455,6 +456,8 @@ pub const IO = struct {
         NoSpaceLeft,
         NotDir,
         FileLocksNotSupported,
+        BadPathName,
+        InvalidUtf8,
         WouldBlock,
     } || os.UnexpectedError;
 
