@@ -516,20 +516,19 @@ fn equal_48_bytes(a: [48]u8, b: [48]u8) bool {
 
 const testing = std.testing;
 
-test "create/lookup accounts [REWORK-NEW]" {
+test "create/lookup accounts" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = &arena.allocator;
 
     const AccTestVector = struct { outcome: CreateAccountResult, input: Account };
 
-    const test_timestamp: u64 = 1;
     const acc_test_vector = [_]AccTestVector{
         AccTestVector{
             .outcome = CreateAccountResult.reserved_flag_padding,
             .input = std.mem.zeroInit(Account, .{
                 .id = 1,
-                .timestamp = test_timestamp,
+                .timestamp = 1,
                 .flags = .{ .padding = 1 },
             }),
         },
@@ -537,7 +536,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.reserved_field,
             .input = std.mem.zeroInit(Account, .{
                 .id = 2,
-                .timestamp = test_timestamp,
+                .timestamp = 1,
                 .reserved = [_]u8{1} ** 48,
             }),
         },
@@ -545,7 +544,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.exceeds_credits,
             .input = std.mem.zeroInit(Account, .{
                 .id = 3,
-                .timestamp = test_timestamp,
+                .timestamp = 1,
                 .debits_reserved = 10,
                 .flags = .{ .debits_must_not_exceed_credits = true },
             }),
@@ -554,7 +553,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.exceeds_credits,
             .input = std.mem.zeroInit(Account, .{
                 .id = 4,
-                .timestamp = test_timestamp,
+                .timestamp = 1,
                 .debits_accepted = 10,
                 .flags = .{ .debits_must_not_exceed_credits = true },
             }),
@@ -563,7 +562,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.exceeds_debits,
             .input = std.mem.zeroInit(Account, .{
                 .id = 5,
-                .timestamp = test_timestamp,
+                .timestamp = 1,
                 .credits_reserved = 10,
                 .flags = .{ .credits_must_not_exceed_debits = true },
             }),
@@ -572,7 +571,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.exceeds_debits,
             .input = std.mem.zeroInit(Account, .{
                 .id = 6,
-                .timestamp = test_timestamp,
+                .timestamp = 1,
                 .credits_accepted = 10,
                 .flags = .{ .credits_must_not_exceed_debits = true },
             }),
@@ -581,21 +580,21 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.ok,
             .input = std.mem.zeroInit(Account, .{
                 .id = 7,
-                .timestamp = test_timestamp,
+                .timestamp = 1,
             }),
         },
         AccTestVector{
             .outcome = CreateAccountResult.exists,
             .input = std.mem.zeroInit(Account, .{
                 .id = 7,
-                .timestamp = (test_timestamp + 1),
+                .timestamp = 2,
             }),
         },
         AccTestVector{
             .outcome = CreateAccountResult.ok,
             .input = std.mem.zeroInit(Account, .{
                 .id = 8,
-                .timestamp = (test_timestamp + 1),
+                .timestamp = 2,
                 .unit = 9,
             }),
         },
@@ -603,7 +602,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.exists_with_different_unit,
             .input = std.mem.zeroInit(Account, .{
                 .id = 8,
-                .timestamp = (test_timestamp + 2),
+                .timestamp = 3,
                 .unit = 10,
             }),
         },
@@ -611,7 +610,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.ok,
             .input = std.mem.zeroInit(Account, .{
                 .id = 9,
-                .timestamp = (test_timestamp + 2),
+                .timestamp = 3,
                 .code = 9,
             }),
         },
@@ -619,7 +618,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.exists_with_different_code,
             .input = std.mem.zeroInit(Account, .{
                 .id = 9,
-                .timestamp = (test_timestamp + 3),
+                .timestamp = 4,
                 .code = 10,
             }),
         },
@@ -627,7 +626,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.ok,
             .input = std.mem.zeroInit(Account, .{
                 .id = 10,
-                .timestamp = (test_timestamp + 3),
+                .timestamp = 4,
                 .flags = .{ .credits_must_not_exceed_debits = true },
             }),
         },
@@ -635,7 +634,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.exists_with_different_flags,
             .input = std.mem.zeroInit(Account, .{
                 .id = 10,
-                .timestamp = (test_timestamp + 4),
+                .timestamp = 5,
                 .flags = .{ .debits_must_not_exceed_credits = true },
             }),
         },
@@ -643,7 +642,7 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.ok,
             .input = std.mem.zeroInit(Account, .{
                 .id = 11,
-                .timestamp = (test_timestamp + 4),
+                .timestamp = 5,
                 .user_data = 'U',
             }),
         },
@@ -651,15 +650,11 @@ test "create/lookup accounts [REWORK-NEW]" {
             .outcome = CreateAccountResult.exists_with_different_user_data,
             .input = std.mem.zeroInit(Account, .{
                 .id = 11,
-                .timestamp = (test_timestamp + 5),
+                .timestamp = 6,
                 .user_data = 'D',
             }),
         },
     };
-
-    //var account_list = try std.ArrayListUnmanaged(Account).initCapacity(allocator, acc_test_vector.len);
-    //errdefer account_list.deinit(allocator);
-    //var accounts = account_list.items;
 
     var state_machine = try StateMachine.init(allocator, acc_test_vector.len, 0, 0);
     defer state_machine.deinit();
@@ -671,97 +666,6 @@ test "create/lookup accounts [REWORK-NEW]" {
             else => try testing.expectEqual(itm.outcome, create_result),
         }
     }
-
-    //.ok => std.debug.print("Out-> SUCCESS [{d} - {any}] \n", .{ i, result.outcome }), //TODO try testing.expectEqual(result, state_machine.get_account(accounts[i].id).?.*);
-    //else => std.debug.print("Out-> [{d} - {any}] \n", .{ i, result.outcome }), //TODO try testing.expectEqual(result, results[i]);
-}
-
-test "create/lookup accounts" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = &arena.allocator;
-
-    var accounts = [_]Account{
-        std.mem.zeroInit(Account, .{ .id = 1, .flags = .{ .padding = 1 } }), //.reserved_flag_padding
-        std.mem.zeroInit(Account, .{ .id = 2, .reserved = [_]u8{1} ** 48 }), //.reserved_field
-        std.mem.zeroInit(Account, .{
-            .id = 3,
-            .debits_reserved = 10,
-            .flags = .{ .debits_must_not_exceed_credits = true },
-        }), //.debits_must_not_exceed_credits
-        std.mem.zeroInit(Account, .{
-            .id = 4,
-            .debits_accepted = 10,
-            .flags = .{ .debits_must_not_exceed_credits = true },
-        }), //.debits_must_not_exceed_credits
-        std.mem.zeroInit(Account, .{
-            .id = 5,
-            .credits_reserved = 10,
-            .flags = .{ .credits_must_not_exceed_debits = true },
-        }), //.credits_must_not_exceed_debits
-        std.mem.zeroInit(Account, .{
-            .id = 6,
-            .credits_accepted = 10,
-            .flags = .{ .credits_must_not_exceed_debits = true },
-        }), //.credits_must_not_exceed_debits
-        std.mem.zeroInit(Account, .{ .id = 7 }),
-        std.mem.zeroInit(Account, .{ .id = 7 }), //.exists
-        std.mem.zeroInit(Account, .{ .id = 8, .unit = 9 }),
-        std.mem.zeroInit(Account, .{ .id = 8, .unit = 10 }), //.exists_with_different_unit
-        std.mem.zeroInit(Account, .{ .id = 9, .code = 9 }),
-        std.mem.zeroInit(Account, .{ .id = 9, .code = 10 }), //.exists_with_different_code
-        std.mem.zeroInit(Account, .{
-            .id = 10,
-            .flags = .{ .credits_must_not_exceed_debits = true },
-        }),
-        std.mem.zeroInit(Account, .{
-            .id = 10,
-            .flags = .{ .debits_must_not_exceed_credits = true },
-        }), //.exists_with_different_flags
-        std.mem.zeroInit(Account, .{ .id = 11, .user_data = 'U' }),
-        std.mem.zeroInit(Account, .{ .id = 11, .user_data = 'D' }), //.exists_with_different_user_data
-        //.exists_with_different_reserved_field - We do not currently have any reserved fields.
-    };
-
-    var state_machine = try StateMachine.init(allocator, accounts.len, 0, 0);
-    defer state_machine.deinit();
-
-    const input = std.mem.asBytes(&accounts);
-    const output = try allocator.alloc(u8, 4096);
-
-    // Use a timestamp of 0 since this is just a test
-    state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, input, output);
-    const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
-
-    try testing.expectEqualSlices(
-        CreateAccountsResult,
-        &[_]CreateAccountsResult{
-            CreateAccountsResult{ .index = 0, .result = .reserved_flag_padding },
-            CreateAccountsResult{ .index = 1, .result = .reserved_field },
-            CreateAccountsResult{ .index = 2, .result = .exceeds_credits },
-            CreateAccountsResult{ .index = 3, .result = .exceeds_credits },
-            CreateAccountsResult{ .index = 4, .result = .exceeds_debits },
-            CreateAccountsResult{ .index = 5, .result = .exceeds_debits },
-            //CreateAccountsResult{ .index = 6, .result = .ok },
-            CreateAccountsResult{ .index = 7, .result = .exists },
-            //CreateAccountsResult{ .index = 8, .result = .ok },
-            CreateAccountsResult{ .index = 9, .result = .exists_with_different_unit },
-            //CreateAccountsResult{ .index = 10, .result = .ok },
-            CreateAccountsResult{ .index = 11, .result = .exists_with_different_code },
-            //CreateAccountsResult{ .index = 12, .result = .ok },
-            CreateAccountsResult{ .index = 13, .result = .exists_with_different_flags },
-            //CreateAccountsResult{ .index = 14, .result = .ok },
-            CreateAccountsResult{ .index = 15, .result = .exists_with_different_user_data },
-        },
-        results,
-    );
-
-    try testing.expectEqual(accounts[6], state_machine.get_account(accounts[6].id).?.*);
-    try testing.expectEqual(accounts[8], state_machine.get_account(accounts[8].id).?.*);
-    try testing.expectEqual(accounts[10], state_machine.get_account(accounts[10].id).?.*);
-    try testing.expectEqual(accounts[12], state_machine.get_account(accounts[12].id).?.*);
-    try testing.expectEqual(accounts[14], state_machine.get_account(accounts[14].id).?.*);
 }
 
 test "linked accounts" {
@@ -857,162 +761,6 @@ test "create/lookup/rollback transfers" {
         std.mem.zeroInit(Account, .{ .id = 8 }),
     };
 
-    var transfers = [_]Transfer{
-        std.mem.zeroInit(Transfer, .{ .id = 1 }), //.amount_is_zero
-        std.mem.zeroInit(Transfer, .{ .id = 2, .flags = .{ .padding = 1 } }), //.reserved_flag_padding
-        std.mem.zeroInit(Transfer, .{ .id = 3, .flags = .{ .two_phase_commit = true } }), //.reserved_flag_padding
-        std.mem.zeroInit(Transfer, .{ .id = 4, .timeout = 1 }), //.timeout_reserved_for_two_phase_commit
-        std.mem.zeroInit(Transfer, .{
-            .id = 5,
-            .flags = .{ .condition = false },
-            .reserved = [_]u8{1} ** 32,
-        }), //.reserved_field
-        std.mem.zeroInit(Transfer, .{
-            .id = 6,
-            .amount = 10,
-            .debit_account_id = 1,
-            .credit_account_id = 1,
-        }), //.accounts_are_the_same
-        std.mem.zeroInit(Transfer, .{
-            .id = 7,
-            .amount = 10,
-            .debit_account_id = 100,
-            .credit_account_id = 1,
-        }), //.debit_account_not_found
-        std.mem.zeroInit(Transfer, .{
-            .id = 8,
-            .amount = 10,
-            .debit_account_id = 1,
-            .credit_account_id = 100,
-        }), //.credit_account_not_found
-        std.mem.zeroInit(Transfer, .{
-            .id = 9,
-            .amount = 10,
-            .debit_account_id = 3,
-            .credit_account_id = 4,
-        }), //.accounts_have_different_units
-        std.mem.zeroInit(Transfer, .{
-            .id = 10,
-            .amount = 1000,
-            .debit_account_id = 5,
-            .credit_account_id = 1,
-        }), //.exceeds_credits
-        std.mem.zeroInit(Transfer, .{
-            .id = 11,
-            .amount = 1000,
-            .debit_account_id = 1,
-            .credit_account_id = 6,
-        }), //.exceeds_debits
-        std.mem.zeroInit(
-            Transfer,
-            .{ .id = 12, .amount = 10, .debit_account_id = 7, .credit_account_id = 8 },
-        ), //.ok
-        std.mem.zeroInit(
-            Transfer,
-            .{ .id = 12, .amount = 10, .debit_account_id = 7, .credit_account_id = 8 },
-        ), //.exists
-        std.mem.zeroInit(
-            Transfer,
-            .{ .id = 12, .amount = 10, .debit_account_id = 8, .credit_account_id = 7 },
-        ), //.exists_with_different_debit_account_id
-        std.mem.zeroInit(
-            Transfer,
-            .{ .id = 12, .amount = 10, .debit_account_id = 7, .credit_account_id = 1 },
-        ), //.exists_with_different_credit_account_id
-        std.mem.zeroInit(
-            Transfer,
-            .{ .id = 12, .amount = 11, .debit_account_id = 7, .credit_account_id = 8 },
-        ), //.exists_with_different_amount
-        std.mem.zeroInit(
-            Transfer,
-            .{
-                .id = 12,
-                .amount = 10,
-                .debit_account_id = 7,
-                .credit_account_id = 8,
-                .flags = .{ .condition = true },
-            },
-        ), //.exists_with_different_flags
-        std.mem.zeroInit(
-            Transfer,
-            .{
-                .id = 12,
-                .amount = 10,
-                .debit_account_id = 7,
-                .credit_account_id = 8,
-                .user_data = 'A',
-            },
-        ), //.exists_with_different_user_data
-        //.exists_with_different_reserved_field - We do not currently have any reserved fields.
-        std.mem.zeroInit(
-            Transfer,
-            .{
-                .id = 13,
-                .amount = 10,
-                .debit_account_id = 7,
-                .credit_account_id = 8,
-                .flags = .{ .condition = true },
-                .reserved = [_]u8{1} ** 32,
-            },
-        ), //.ok
-        std.mem.zeroInit(
-            Transfer,
-            .{
-                .id = 13,
-                .amount = 10,
-                .debit_account_id = 7,
-                .credit_account_id = 8,
-                .flags = .{ .condition = true },
-                .reserved = [_]u8{2} ** 32,
-            },
-        ), //.exists_with_different_reserved_field
-        std.mem.zeroInit(
-            Transfer,
-            .{
-                .id = 13,
-                .amount = 10,
-                .debit_account_id = 7,
-                .credit_account_id = 8,
-                .flags = .{ .condition = true },
-                .reserved = [_]u8{1} ** 32,
-                .timeout = 10,
-            },
-        ), //.timeout_reserved_for_two_phase_commit
-        std.mem.zeroInit(
-            Transfer,
-            .{
-                .id = 14,
-                .amount = 10,
-                .debit_account_id = 7,
-                .credit_account_id = 8,
-                .flags = .{ .two_phase_commit = true },
-                .timeout = 0,
-            },
-        ), //.two_phase_commit_must_timeout
-        std.mem.zeroInit(
-            Transfer,
-            .{
-                .id = 15,
-                .amount = 10,
-                .debit_account_id = 7,
-                .credit_account_id = 8,
-                .flags = .{ .two_phase_commit = true },
-                .timeout = 20,
-            },
-        ), //.ok
-        std.mem.zeroInit(
-            Transfer,
-            .{
-                .id = 15,
-                .amount = 10,
-                .debit_account_id = 7,
-                .credit_account_id = 8,
-                .flags = .{ .two_phase_commit = true },
-                .timeout = 25,
-            },
-        ), //.exists_with_different_timeout
-    };
-
     var state_machine = try StateMachine.init(allocator, accounts.len, 1, 0);
     defer state_machine.deinit();
 
@@ -1020,32 +768,312 @@ test "create/lookup/rollback transfers" {
     const output = try allocator.alloc(u8, 4096);
 
     // Use a timestamp of 0 since this is just a test
-    comptime const timestamp: u8 = 0;
+    var timestamp: u8 = 0;
     state_machine.prepare(timestamp, .create_accounts, input);
     const size = state_machine.commit(timestamp, .create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
-    //Ensure the accounts were created successfully...
-    try testing.expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
-    try testing.expectEqual(accounts[1], state_machine.get_account(accounts[1].id).?.*);
-    try testing.expectEqual(accounts[2], state_machine.get_account(accounts[2].id).?.*);
-    try testing.expectEqual(accounts[3], state_machine.get_account(accounts[3].id).?.*);
-    try testing.expectEqual(accounts[4], state_machine.get_account(accounts[4].id).?.*);
-    try testing.expectEqual(accounts[5], state_machine.get_account(accounts[5].id).?.*);
-    try testing.expectEqual(accounts[6], state_machine.get_account(accounts[6].id).?.*);
-    try testing.expectEqual(accounts[7], state_machine.get_account(accounts[7].id).?.*);
+    for (accounts) |account, i| {
+        try testing.expectEqual(accounts[i], state_machine.get_account(accounts[i].id).?.*);
+    }
 
-    const input_transfers = std.mem.asBytes(&transfers);
-    const output_transfers = try allocator.alloc(u8, 4096);
+    const TranTestVector = struct { outcome: CreateTransferResult, input: Transfer };
 
-    state_machine.prepare(timestamp, .create_transfers, input_transfers);
-    const size_transfers = state_machine.commit(timestamp, .create_transfers, input_transfers, output_transfers);
-    const results_transfers = std.mem.bytesAsSlice(CreateTransfersResult, output_transfers[0..size_transfers]);
+    var timestamp_cont: u64 = (state_machine.commit_timestamp + 1);
+    const tran_test_vector = [_]TranTestVector{
+        TranTestVector{
+            .outcome = CreateTransferResult.amount_is_zero,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 1,
+                .timestamp = timestamp_cont,
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.reserved_flag_padding,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 2,
+                .timestamp = timestamp_cont,
+                .flags = .{ .padding = 1 },
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.two_phase_commit_must_timeout,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 3,
+                .timestamp = timestamp_cont,
+                .flags = .{ .two_phase_commit = true },
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.timeout_reserved_for_two_phase_commit,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 4,
+                .timestamp = timestamp_cont,
+                .timeout = 1,
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.reserved_field,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 5,
+                .timestamp = timestamp_cont,
+                .flags = .{ .condition = false },
+                .reserved = [_]u8{1} ** 32,
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.accounts_are_the_same,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 6,
+                .timestamp = timestamp_cont,
+                .amount = 10,
+                .debit_account_id = 1,
+                .credit_account_id = 1,
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.debit_account_not_found,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 7,
+                .timestamp = timestamp_cont,
+                .amount = 10,
+                .debit_account_id = 100,
+                .credit_account_id = 1,
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.credit_account_not_found,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 8,
+                .timestamp = timestamp_cont,
+                .amount = 10,
+                .debit_account_id = 1,
+                .credit_account_id = 100,
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.accounts_have_different_units,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 9,
+                .timestamp = timestamp_cont,
+                .amount = 10,
+                .debit_account_id = 3,
+                .credit_account_id = 4,
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exceeds_credits,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 10,
+                .timestamp = timestamp_cont,
+                .amount = 1000,
+                .debit_account_id = 5,
+                .credit_account_id = 1,
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exceeds_debits,
+            .input = std.mem.zeroInit(Transfer, .{
+                .id = 11,
+                .timestamp = timestamp_cont,
+                .amount = 1000,
+                .debit_account_id = 1,
+                .credit_account_id = 6,
+            }),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.ok,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 12,
+                    .timestamp = timestamp_cont,
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exists,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 12,
+                    .timestamp = (timestamp_cont + 1),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exists_with_different_debit_account_id,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 12,
+                    .timestamp = (timestamp_cont + 1),
+                    .amount = 10,
+                    .debit_account_id = 8,
+                    .credit_account_id = 7,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exists_with_different_credit_account_id,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 12,
+                    .timestamp = (timestamp_cont + 1),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 1,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exists_with_different_amount,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 12,
+                    .timestamp = (timestamp_cont + 1),
+                    .amount = 11,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exists_with_different_flags,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 12,
+                    .timestamp = (timestamp_cont + 1),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                    .flags = .{ .condition = true },
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exists_with_different_user_data,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 12,
+                    .timestamp = (timestamp_cont + 1),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                    .user_data = 'A',
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.ok,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 13,
+                    .timestamp = (timestamp_cont + 1),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                    .flags = .{ .condition = true },
+                    .reserved = [_]u8{1} ** 32,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exists_with_different_reserved_field,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 13,
+                    .timestamp = (timestamp_cont + 2),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                    .flags = .{ .condition = true },
+                    .reserved = [_]u8{2} ** 32,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.timeout_reserved_for_two_phase_commit,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 13,
+                    .timestamp = (timestamp_cont + 2),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                    .flags = .{ .condition = true },
+                    .reserved = [_]u8{1} ** 32,
+                    .timeout = 10,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.two_phase_commit_must_timeout,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 14,
+                    .timestamp = (timestamp_cont + 2),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                    .flags = .{ .two_phase_commit = true },
+                    .timeout = 0,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.ok,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 15,
+                    .timestamp = (timestamp_cont + 2),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                    .flags = .{ .two_phase_commit = true },
+                    .timeout = 20,
+                },
+            ),
+        },
+        TranTestVector{
+            .outcome = CreateTransferResult.exists_with_different_timeout,
+            .input = std.mem.zeroInit(
+                Transfer,
+                .{
+                    .id = 15,
+                    .timestamp = (timestamp_cont + 3),
+                    .amount = 10,
+                    .debit_account_id = 7,
+                    .credit_account_id = 8,
+                    .flags = .{ .two_phase_commit = true },
+                    .timeout = 25,
+                },
+            ),
+        },
+    };
 
-    //Ensure the transfers were created successfully...
-    try testing.expectEqual(transfers[11], state_machine.get_transfer(transfers[11].id).?.*); //id=12
-    try testing.expectEqual(transfers[18], state_machine.get_transfer(transfers[18].id).?.*); //id=13
-    try testing.expectEqual(transfers[22], state_machine.get_transfer(transfers[22].id).?.*); //id=15
+    for (tran_test_vector) |itm, i| {
+        const create_result = state_machine.create_transfer(itm.input);
+        switch (itm.outcome) {
+            .ok => try testing.expectEqual(itm.input, state_machine.get_transfer(itm.input.id).?.*),
+            else => try testing.expectEqual(itm.outcome, create_result),
+        }
+    }
 
     //2 phase commit [reserved]
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_reserved);
@@ -1059,55 +1087,26 @@ test "create/lookup/rollback transfers" {
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_accepted);
 
     //rollback transfer with id [12], amount of 10...
-    state_machine.create_transfer_rollback(state_machine.get_transfer(transfers[11].id).?.*);
+    state_machine.create_transfer_rollback(state_machine.get_transfer(tran_test_vector[11].input.id).?.*);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_accepted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_accepted);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_accepted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_accepted);
-    try testing.expect(state_machine.get_transfer(transfers[11].id) == null);
+    try testing.expect(state_machine.get_transfer(tran_test_vector[11].input.id) == null);
 
     //rollback transfer with id [15], amount of 10...
-    state_machine.create_transfer_rollback(state_machine.get_transfer(transfers[22].id).?.*);
+    state_machine.create_transfer_rollback(state_machine.get_transfer(tran_test_vector[22].input.id).?.*);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.debits_reserved);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.credits_reserved);
-    try testing.expect(state_machine.get_transfer(transfers[22].id) == null);
-
-    try testing.expectEqualSlices(
-        CreateTransfersResult,
-        &[_]CreateTransfersResult{
-            CreateTransfersResult{ .index = 0, .result = .amount_is_zero },
-            CreateTransfersResult{ .index = 1, .result = .reserved_flag_padding },
-            CreateTransfersResult{ .index = 2, .result = .two_phase_commit_must_timeout },
-            CreateTransfersResult{ .index = 3, .result = .timeout_reserved_for_two_phase_commit },
-            CreateTransfersResult{ .index = 4, .result = .reserved_field },
-            CreateTransfersResult{ .index = 5, .result = .accounts_are_the_same },
-            CreateTransfersResult{ .index = 6, .result = .debit_account_not_found },
-            CreateTransfersResult{ .index = 7, .result = .credit_account_not_found },
-            CreateTransfersResult{ .index = 8, .result = .accounts_have_different_units },
-            CreateTransfersResult{ .index = 9, .result = .exceeds_credits },
-            CreateTransfersResult{ .index = 10, .result = .exceeds_debits },
-            //CreateTransfersResult{ .index = 11, .result = .ok },
-            CreateTransfersResult{ .index = 12, .result = .exists },
-            CreateTransfersResult{ .index = 13, .result = .exists_with_different_debit_account_id },
-            CreateTransfersResult{ .index = 14, .result = .exists_with_different_credit_account_id },
-            CreateTransfersResult{ .index = 15, .result = .exists_with_different_amount },
-            CreateTransfersResult{ .index = 16, .result = .exists_with_different_flags },
-            CreateTransfersResult{ .index = 17, .result = .exists_with_different_user_data },
-            //CreateTransfersResult{ .index = 18, .result = .ok },
-            CreateTransfersResult{ .index = 19, .result = .exists_with_different_reserved_field },
-            CreateTransfersResult{ .index = 20, .result = .timeout_reserved_for_two_phase_commit },
-            CreateTransfersResult{ .index = 21, .result = .two_phase_commit_must_timeout },
-            //CreateTransfersResult{ .index = 22, .result = .ok },
-            CreateTransfersResult{ .index = 23, .result = .exists_with_different_timeout },
-        },
-        results_transfers,
-    );
+    try testing.expect(state_machine.get_transfer(tran_test_vector[22].input.id) == null);
 }
 
 test "create/lookup/rollback commits" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = &arena.allocator;
+
+    const CommitTestVector = struct { outcome: CommitTransferResult, input: Commit };
 
     var accounts = [_]Account{
         std.mem.zeroInit(Account, .{ .id = 1 }),
@@ -1179,46 +1178,24 @@ test "create/lookup/rollback commits" {
         }), //.credit_account_not_found / .debit_account_not_found
     };
 
-    var commits = [_]Commit{
-        std.mem.zeroInit(Commit, .{ .id = 1, .reserved = [_]u8{1} ** 32 }), //.reserved_field
-        std.mem.zeroInit(Commit, .{ .id = 1, .flags = .{ .padding = 1 } }), //.reserved_flag_padding
-        std.mem.zeroInit(Commit, .{ .id = 777 }), //.transfer_not_found
-        std.mem.zeroInit(Commit, .{ .id = 1 }), //.transfer_not_two_phase_commit
-        std.mem.zeroInit(Commit, .{ .id = 2 }), //.ok
-        std.mem.zeroInit(Commit, .{ .id = 2, .flags = .{ .reject = true } }), //.already_committed_but_accepted
-        std.mem.zeroInit(Commit, .{ .id = 2 }), //.already_committed
-        std.mem.zeroInit(Commit, .{ .id = 3, .flags = .{ .reject = true } }), //.ok
-        std.mem.zeroInit(Commit, .{ .id = 3 }), //.already_committed_but_rejected
-        std.mem.zeroInit(Commit, .{ .id = 4 }), //.transfer_expired
-        std.mem.zeroInit(Commit, .{ .id = 5 }), //.condition_requires_preimage
-        std.mem.zeroInit(Commit, .{ .id = 5, .reserved = [_]u8{1} ** 32, .flags = .{
-            .preimage = true,
-        } }), //.preimage_invalid
-        std.mem.zeroInit(Commit, .{ .id = 6, .flags = .{
-            .preimage = true,
-        } }), //.preimage_requires_condition
-        std.mem.zeroInit(Commit, .{ .id = 7 }), //.ok
-    };
-
-    var state_machine = try StateMachine.init(allocator, accounts.len, 10, 10);
+    var state_machine = try StateMachine.init(allocator, accounts.len, transfers.len, 1);
     defer state_machine.deinit();
 
-    const input_accounts = std.mem.asBytes(&accounts);
-    const output_accounts = try allocator.alloc(u8, 4096);
+    const input = std.mem.asBytes(&accounts);
+    const output = try allocator.alloc(u8, 4096);
 
     // Use a timestamp of 0 since this is just a test
-    comptime const timestamp: u8 = 0;
+    //ACCOUNTS
+    var timestamp: u8 = 0;
+    state_machine.prepare(timestamp, .create_accounts, input);
+    const size = state_machine.commit(timestamp, .create_accounts, input, output);
+    const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
-    // ACCOUNTS
-    state_machine.prepare(timestamp, .create_accounts, input_accounts);
-    const size = state_machine.commit(timestamp, .create_accounts, input_accounts, output_accounts);
-    const results = std.mem.bytesAsSlice(CreateAccountsResult, output_accounts[0..size]);
+    for (accounts) |account, i| {
+        try testing.expectEqual(accounts[i], state_machine.get_account(accounts[i].id).?.*);
+    }
 
-    //Ensure the accounts were created successfully...
-    try testing.expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*); //id=1
-    try testing.expectEqual(accounts[1], state_machine.get_account(accounts[1].id).?.*); //id=2
-
-    // TRANSFERS
+    //TRANSFERS
     const input_transfers = std.mem.asBytes(&transfers);
     const output_transfers = try allocator.alloc(u8, 4096);
 
@@ -1226,22 +1203,108 @@ test "create/lookup/rollback commits" {
     const size_transfers = state_machine.commit(timestamp, .create_transfers, input_transfers, output_transfers);
     const results_transfers = std.mem.bytesAsSlice(CreateTransfersResult, output_transfers[0..size_transfers]);
 
-    //Ensure the transfers were created successfully...
-    try testing.expectEqual(transfers[0], state_machine.get_transfer(transfers[0].id).?.*); //id=1
-    try testing.expectEqual(transfers[1], state_machine.get_transfer(transfers[1].id).?.*); //id=2
-    try testing.expectEqual(transfers[2], state_machine.get_transfer(transfers[2].id).?.*); //id=3
-    try testing.expectEqual(transfers[6], state_machine.get_transfer(transfers[6].id).?.*); //id=3
+    for (transfers) |transfer, i| {
+        try testing.expectEqual(transfers[i], state_machine.get_transfer(transfers[i].id).?.*);
+    }
 
-    // COMMITS
-    const input_commits = std.mem.asBytes(&commits);
-    const output_commits = try allocator.alloc(u8, 4096);
-
-    state_machine.prepare(timestamp, .commit_transfers, input_commits);
-
-    try testing.expectEqual(state_machine.commit_transfer(commits[0]), .reserved_field);
-    try testing.expectEqual(state_machine.commit_transfer(commits[1]), .reserved_flag_padding);
-    try testing.expectEqual(state_machine.commit_transfer(commits[2]), .transfer_not_found);
-    try testing.expectEqual(state_machine.commit_transfer(commits[3]), .transfer_not_two_phase_commit);
+    //COMMITS
+    var timestamp_cont: u64 = (state_machine.commit_timestamp + 1);
+    const commits = [_]CommitTestVector{ CommitTestVector{
+        .outcome = CommitTransferResult.reserved_field,
+        .input = std.mem.zeroInit(Commit, .{
+            .id = 1,
+            .timestamp = timestamp_cont,
+            .reserved = [_]u8{1} ** 32,
+        }),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.reserved_flag_padding,
+        .input = std.mem.zeroInit(Commit, .{
+            .id = 1,
+            .timestamp = timestamp_cont,
+            .flags = .{ .padding = 1 },
+        }),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.transfer_not_found,
+        .input = std.mem.zeroInit(Commit, .{
+            .id = 777,
+            .timestamp = timestamp_cont,
+        }),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.transfer_not_two_phase_commit,
+        .input = std.mem.zeroInit(
+            Commit,
+            .{ .id = 1, .timestamp = timestamp_cont },
+        ),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.ok,
+        .input = std.mem.zeroInit(
+            Commit,
+            .{ .id = 2, .timestamp = timestamp_cont },
+        ),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.already_committed_but_accepted,
+        .input = std.mem.zeroInit(
+            Commit,
+            .{
+                .id = 2,
+                .timestamp = (timestamp_cont + 1),
+                .flags = .{ .reject = true },
+            },
+        ),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.already_committed,
+        .input = std.mem.zeroInit(
+            Commit,
+            .{
+                .id = 2,
+                .timestamp = (timestamp_cont + 1),
+            },
+        ),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.ok,
+        .input = std.mem.zeroInit(Commit, .{
+            .id = 3,
+            .timestamp = (timestamp_cont + 1),
+            .flags = .{ .reject = true },
+        }),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.already_committed_but_rejected,
+        .input = std.mem.zeroInit(Commit, .{
+            .id = 3,
+            .timestamp = (timestamp_cont + 2),
+        }),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.transfer_expired,
+        .input = std.mem.zeroInit(Commit, .{
+            .id = 4,
+            .timestamp = (timestamp_cont + 2),
+        }),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.condition_requires_preimage,
+        .input = std.mem.zeroInit(Commit, .{
+            .id = 5,
+            .timestamp = (timestamp_cont + 2),
+        }),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.preimage_invalid,
+        .input = std.mem.zeroInit(Commit, .{
+            .id = 5,
+            .timestamp = (timestamp_cont + 2),
+            .reserved = [_]u8{1} ** 32,
+            .flags = .{
+                .preimage = true,
+            },
+        }),
+    }, CommitTestVector{
+        .outcome = CommitTransferResult.preimage_requires_condition,
+        .input = std.mem.zeroInit(Commit, .{
+            .id = 6,
+            .timestamp = (timestamp_cont + 2),
+            .flags = .{
+                .preimage = true,
+            },
+        }),
+    } };
 
     // Test Balance BEFORE commit
     // Account 1
@@ -1257,13 +1320,19 @@ test "create/lookup/rollback commits" {
     try testing.expectEqual(@as(u64, 15), acc_2_before.credits_accepted);
     try testing.expectEqual(@as(u64, 75), acc_2_before.credits_reserved);
 
-    try testing.expectEqual(state_machine.commit_transfer(commits[4]), .ok); //commit [id=2]
+    for (commits) |itm, i| {
+        const create_result = state_machine.commit_transfer(itm.input);
+        switch (itm.outcome) {
+            .ok => try testing.expectEqual(itm.input, state_machine.get_commit(itm.input.id).?.*),
+            else => try testing.expectEqual(itm.outcome, create_result),
+        }
+    }
 
     // Test Balance AFTER commit
     // Account 1
     const acc_1_after = state_machine.get_account(1).?.*;
     try testing.expectEqual(@as(u64, 30), acc_1_after.debits_accepted); //+15 (acceptance applied)
-    try testing.expectEqual(@as(u64, 60), acc_1_after.debits_reserved); //-15 (reserved moved)
+    try testing.expectEqual(@as(u64, 45), acc_1_after.debits_reserved); //-15 (reserved moved)
     try testing.expectEqual(@as(u64, 0), acc_1_after.credits_accepted);
     try testing.expectEqual(@as(u64, 0), acc_1_after.credits_reserved);
     // Account 2
@@ -1271,26 +1340,29 @@ test "create/lookup/rollback commits" {
     try testing.expectEqual(@as(u64, 0), acc_2_after.debits_accepted);
     try testing.expectEqual(@as(u64, 0), acc_2_after.debits_reserved);
     try testing.expectEqual(@as(u64, 30), acc_2_after.credits_accepted); //+15 (acceptance applied)
-    try testing.expectEqual(@as(u64, 60), acc_2_after.credits_reserved); //-15 (reserved moved)
-
-    try testing.expectEqual(state_machine.commit_transfer(commits[5]), .already_committed_but_accepted);
-    try testing.expectEqual(state_machine.commit_transfer(commits[6]), .already_committed);
-    try testing.expectEqual(state_machine.commit_transfer(commits[7]), .ok);
-    try testing.expectEqual(state_machine.commit_transfer(commits[8]), .already_committed_but_rejected);
-    try testing.expectEqual(state_machine.commit_transfer(commits[9]), .transfer_expired);
-    try testing.expectEqual(state_machine.commit_transfer(commits[10]), .condition_requires_preimage);
-    try testing.expectEqual(state_machine.commit_transfer(commits[11]), .preimage_invalid);
-    try testing.expectEqual(state_machine.commit_transfer(commits[12]), .preimage_requires_condition);
+    try testing.expectEqual(@as(u64, 45), acc_2_after.credits_reserved); //-15 (reserved moved)
 
     // Test COMMIT with invalid debit/credit accounts
     state_machine.create_account_rollback(accounts[3]);
     try testing.expect(state_machine.get_account(accounts[3].id) == null);
-    try testing.expectEqual(state_machine.commit_transfer(commits[13]), .credit_account_not_found);
+    try testing.expectEqual(
+        state_machine.commit_transfer(std.mem.zeroInit(Commit, .{
+            .id = 7,
+            .timestamp = (timestamp_cont + 2),
+        })),
+        .credit_account_not_found,
+    );
     state_machine.create_account_rollback(accounts[2]);
     try testing.expect(state_machine.get_account(accounts[2].id) == null);
-    try testing.expectEqual(state_machine.commit_transfer(commits[13]), .debit_account_not_found);
+    try testing.expectEqual(
+        state_machine.commit_transfer(std.mem.zeroInit(Commit, .{
+            .id = 7,
+            .timestamp = (timestamp_cont + 2),
+        })),
+        .debit_account_not_found,
+    );
 
-    state_machine.commit_transfer_rollback(commits[4]); //rollback [id=2] not rejected
+    state_machine.commit_transfer_rollback(commits[4].input); //rollback [id=2] not rejected
 
     // Account 1
     const acc_1_rollback = state_machine.get_account(1).?.*;
@@ -1305,7 +1377,7 @@ test "create/lookup/rollback commits" {
     try testing.expectEqual(@as(u64, 15), acc_2_rollback.credits_accepted); //-15 (rollback)
     try testing.expectEqual(@as(u64, 60), acc_2_rollback.credits_reserved);
 
-    state_machine.commit_transfer_rollback(commits[7]); //rollback [id=3] rejected
+    state_machine.commit_transfer_rollback(commits[7].input); //rollback [id=3] rejected
     // Account 1
     const acc_1_rollback_reject = state_machine.get_account(1).?.*;
     try testing.expectEqual(@as(u64, 15), acc_1_rollback_reject.debits_accepted); //remains unchanged
