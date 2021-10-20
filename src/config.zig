@@ -190,7 +190,7 @@ pub const lsm_key_size_max = 24;
 
 /// Size of pages used by the LSM tree implementation. These pages are passed
 /// through an LRU page cache.
-pub const lsm_table_page_size = 8 * sector_size;
+pub const lsm_table_page_size = 6 * sector_size;
 
 /// TODO: docs
 pub const lsm_snapshots_max = clients_max;

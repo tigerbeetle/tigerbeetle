@@ -261,8 +261,11 @@ pub fn LsmTree(
         };
 
         pub const ImmutableTable = struct {
-            /// header + index + filter size
-            const pages_offset = config.sector_size;
+            // TODO comptime function to calculate the size of {filter, index, pages} given types.
+            const index_offset = @sizeOf(vsr.Header);
+            const index_size = config.sector_size - @sizeOf(vsr.Header);
+            const pages_offset = index_offset + index_size;
+            const pages_size = config.message_size_max - pages_offset;
 
             // The actual data to be written to disk, all other fields are slices into this buffer
             buffer: []align(config.sector_size) const u8,
@@ -280,35 +283,54 @@ pub fn LsmTree(
                 mutable: *const MutableTable,
                 buffer: []align(config.sector_size) u8,
             ) ImmutableTable {
+                const index = buffer[index_offset..][0..index_size];
+                const pages = buffer[pages_offset..][0..pages_size];
+
+                // Copy values from MutableTable hash map to contiguous zone within pages:
                 const values_size = mutable.values.count() * @sizeOf(Value);
-                const values = mem.bytesAsSlice(Value, buffer[pages_offset..][0..values_size]);
-                var i: usize = 0;
-                var it = mutable.values.keyIterator();
-                while (it.next()) |value| : (i += 1) {
-                    values[i] = value.*;
+                const values = mem.bytesAsSlice(Value, pages[0..values_size]);
+                {
+                    var i: usize = 0;
+                    var it = mutable.values.keyIterator();
+                    while (it.next()) |value| : (i += 1) {
+                        values[i] = value.*;
+                    }
+                    assert(i == values.len);
                 }
 
+                // Sort values by key:
                 const less_than = struct {
                     pub fn less_than(_: void, a: Value, b: Value) bool {
-                        return std.math.order(key_from_value(a), key_from_value(b)) == .lt;
+                        return compare_keys(key_from_value(a), key_from_value(b)) == .lt;
                     }
                 }.less_than;
                 std.sort.insertionSort(Value, values, {}, less_than);
+                // TODO In Debug build do a single pass to assert sort order and no duplicates.
 
-                // page size = 7
-                // value size = 3
-                //
-                // steps:
-                // XXX XXX X|XX XXX XX|X XXX XXX|
-                // XXX XXX X|XX XXX XX|X XXX ___|XXX
-                // XXX XXX X|XX XXX __|XXX XXX _|XXX
-                // XXX XXX _|XXX XXX _|XXX XXX _|XXX
-                // XXX XXX _|XXX XXX _|XXX XXX _|XXX ___ _|
-                // XXX XXX X|XX XXX XX|X XXX XXX|
+                // Ensure values do not straddle page boundaries to avoid padding between pages:
+                // For example, 8/16/24/64/128-byte values all divide a 6 sector page perfectly.
+                comptime assert(config.lsm_table_page_size % @sizeOf(Value) == 0);
 
-                const values_per_page = config.lsm_table_page_size / @sizeOf(Value);
-                const full_pages = values.len / values_per_page;
-                const last_page_values = values.len - full_pages * values_per_page;
+                // Zero the end of the last page and any subsequent unused pages:
+                // We want to prevent random memory from bleeding out to storage.
+                std.mem.set(u8, pages[values_size..], 0);
+
+                const key_min = key_from_value(values[0]);
+                const key_max = key_from_value(values[values.len - 1]);
+
+                // Construct index, a key_min for every page:
+                // TODO Zero index padding.
+                {
+                    const values_per_page = @divExact(config.lsm_table_page_size, @sizeOf(Value));
+                    var i: usize = 0;
+                    while (i < values.len) : (i += values_per_page) {
+
+                    }
+                }
+                // TODO Zero header
+                // TODO Assign {id, count, timestamp} to header
+                // TODO header.set_checksum_body()
+                // TODO header.set_checksum()
             }
 
             pub fn get(table: *ImmutableTable, key: Key) ?Value {}
@@ -380,4 +402,46 @@ pub fn LsmTree(
             query: RangeQuery,
         ) RangeQueryIterator {}
     };
+}
+
+fn align_page_values(
+    page_size: usize,
+    value_size: usize,
+    pages: []align(config.sector_size) u8,
+    values_count: usize,
+) void {
+    assert(page_size > 0);
+    assert(value_size > 0);
+    assert(value_size < page_size);
+    assert(pages.len > 0);
+    assert(pages.len % page_size == 0);
+    assert(values_count > 0);
+
+    var remainder = values_count * values_size;
+
+    const values_per_page = page_size / value_size;
+    assert(values_per_page > 0);
+
+    const pages_count = std.math.divCeil(values_count, values_per_page) catch unreachable;
+
+    var page_index: usize = pages_count;
+    while (page_index > 0) {
+        page_index -= 1;
+
+        const page_values_size = std.math.min(
+            page_index * values_per_page + values_per_page,
+            values_count,
+        ) * value_size;
+
+        remainder -= page_values_size;
+
+        const page = pages[page_index * page_size ..][0..page_size];
+        const page_values = page[0..page_values_size];
+        const page_padding = page[page_values_size..];
+
+        if (page_index > 0) {
+            std.mem.copyBackwards(u8, page_values, pages[remainder..][0..page_values_size]);
+        }
+        std.mem.set(u8, page_padding, 0);
+    }
 }
