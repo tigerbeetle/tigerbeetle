@@ -1121,7 +1121,7 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
-        }), //.transfer_not_two_phase_commit
+        }),
         std.mem.zeroInit(Transfer, .{
             .id = 2,
             .amount = 15,
@@ -1129,7 +1129,7 @@ test "create/lookup/rollback commits" {
             .credit_account_id = 2,
             .flags = .{ .two_phase_commit = true },
             .timeout = 25,
-        }), //.ok
+        }),
         std.mem.zeroInit(Transfer, .{
             .id = 3,
             .amount = 15,
@@ -1137,7 +1137,7 @@ test "create/lookup/rollback commits" {
             .credit_account_id = 2,
             .flags = .{ .two_phase_commit = true },
             .timeout = 25,
-        }), //.ok
+        }),
         std.mem.zeroInit(Transfer, .{
             .id = 4,
             .amount = 15,
@@ -1145,7 +1145,7 @@ test "create/lookup/rollback commits" {
             .credit_account_id = 2,
             .flags = .{ .two_phase_commit = true },
             .timeout = 1,
-        }), //.ok
+        }),
         std.mem.zeroInit(Transfer, .{
             .id = 5,
             .amount = 15,
@@ -1156,7 +1156,7 @@ test "create/lookup/rollback commits" {
                 .condition = true,
             },
             .timeout = 25,
-        }), //.condition_requires_preimage
+        }),
         std.mem.zeroInit(Transfer, .{
             .id = 6,
             .amount = 15,
@@ -1167,7 +1167,7 @@ test "create/lookup/rollback commits" {
                 .condition = false,
             },
             .timeout = 25,
-        }), //.condition_requires_preimage
+        }),
         std.mem.zeroInit(Transfer, .{
             .id = 7,
             .amount = 15,
@@ -1175,7 +1175,7 @@ test "create/lookup/rollback commits" {
             .credit_account_id = 4,
             .flags = .{ .two_phase_commit = true },
             .timeout = 25,
-        }), //.credit_account_not_found / .debit_account_not_found
+        }),
     };
 
     var state_machine = try StateMachine.init(allocator, accounts.len, transfers.len, 1);
