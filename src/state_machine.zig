@@ -718,7 +718,6 @@ test "linked accounts" {
     const input = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    // Use a timestamp of 0 since this is just a test:
     state_machine.prepare(0, .create_accounts, input);
     const size = state_machine.commit(0, .create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
@@ -773,7 +772,6 @@ test "create/lookup/rollback transfers" {
     const input = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    // Use a timestamp of 0 since this is just a test
     state_machine.prepare(0, .create_accounts, input);
     const size = state_machine.commit(0, .create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
@@ -1150,7 +1148,6 @@ test "create/lookup/rollback commits" {
     const input = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    // Use a timestamp of 0 since this is just a test
     // Accounts:
     state_machine.prepare(0, .create_accounts, input);
     const size = state_machine.commit(0, .create_accounts, input, output);
