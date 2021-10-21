@@ -521,149 +521,105 @@ test "create/lookup accounts" {
     defer arena.deinit();
     const allocator = &arena.allocator;
 
-    const AccTestVector = struct { outcome: CreateAccountResult, input: Account };
+    const Vector = struct { result: CreateAccountResult, object: Account };
 
-    const acc_test_vector = [_]AccTestVector{
-        AccTestVector{
-            .outcome = CreateAccountResult.reserved_flag_padding,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 1,
-                .timestamp = 1,
-                .flags = .{ .padding = 1 },
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.reserved_field,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 2,
-                .timestamp = 1,
-                .reserved = [_]u8{1} ** 48,
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.exceeds_credits,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 3,
-                .timestamp = 1,
-                .debits_reserved = 10,
-                .flags = .{ .debits_must_not_exceed_credits = true },
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.exceeds_credits,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 4,
-                .timestamp = 1,
-                .debits_accepted = 10,
-                .flags = .{ .debits_must_not_exceed_credits = true },
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.exceeds_debits,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 5,
-                .timestamp = 1,
-                .credits_reserved = 10,
-                .flags = .{ .credits_must_not_exceed_debits = true },
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.exceeds_debits,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 6,
-                .timestamp = 1,
-                .credits_accepted = 10,
-                .flags = .{ .credits_must_not_exceed_debits = true },
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.ok,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 7,
-                .timestamp = 1,
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.exists,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 7,
-                .timestamp = 2,
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.ok,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 8,
-                .timestamp = 2,
-                .unit = 9,
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.exists_with_different_unit,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 8,
-                .timestamp = 3,
-                .unit = 10,
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.ok,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 9,
-                .timestamp = 3,
-                .code = 9,
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.exists_with_different_code,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 9,
-                .timestamp = 4,
-                .code = 10,
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.ok,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 10,
-                .timestamp = 4,
-                .flags = .{ .credits_must_not_exceed_debits = true },
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.exists_with_different_flags,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 10,
-                .timestamp = 5,
-                .flags = .{ .debits_must_not_exceed_credits = true },
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.ok,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 11,
-                .timestamp = 5,
-                .user_data = 'U',
-            }),
-        },
-        AccTestVector{
-            .outcome = CreateAccountResult.exists_with_different_user_data,
-            .input = std.mem.zeroInit(Account, .{
-                .id = 11,
-                .timestamp = 6,
-                .user_data = 'D',
-            }),
-        },
+    const vectors = [_]Vector{
+        Vector{ .result = .reserved_flag_padding, .object = std.mem.zeroInit(Account, .{
+            .id = 1,
+            .timestamp = 1,
+            .flags = .{ .padding = 1 },
+        }) },
+        Vector{ .result = .reserved_field, .object = std.mem.zeroInit(Account, .{
+            .id = 2,
+            .timestamp = 1,
+            .reserved = [_]u8{1} ** 48,
+        }) },
+        Vector{ .result = .exceeds_credits, .object = std.mem.zeroInit(Account, .{
+            .id = 3,
+            .timestamp = 1,
+            .debits_reserved = 10,
+            .flags = .{ .debits_must_not_exceed_credits = true },
+        }) },
+        Vector{ .result = .exceeds_credits, .object = std.mem.zeroInit(Account, .{
+            .id = 4,
+            .timestamp = 1,
+            .debits_accepted = 10,
+            .flags = .{ .debits_must_not_exceed_credits = true },
+        }) },
+        Vector{ .result = .exceeds_debits, .object = std.mem.zeroInit(Account, .{
+            .id = 5,
+            .timestamp = 1,
+            .credits_reserved = 10,
+            .flags = .{ .credits_must_not_exceed_debits = true },
+        }) },
+        Vector{ .result = .exceeds_debits, .object = std.mem.zeroInit(Account, .{
+            .id = 6,
+            .timestamp = 1,
+            .credits_accepted = 10,
+            .flags = .{ .credits_must_not_exceed_debits = true },
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Account, .{
+            .id = 7,
+            .timestamp = 1,
+        }) },
+        Vector{ .result = .exists, .object = std.mem.zeroInit(Account, .{
+            .id = 7,
+            .timestamp = 2,
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Account, .{
+            .id = 8,
+            .timestamp = 2,
+            .user_data = 'U',
+            .unit = 9,
+        }) },
+        Vector{ .result = .exists_with_different_unit, .object = std.mem.zeroInit(Account, .{
+            .id = 8,
+            .timestamp = 3,
+            .user_data = 'U',
+            .unit = 10,
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Account, .{
+            .id = 9,
+            .timestamp = 3,
+            .code = 9,
+            .user_data = 'U',
+        }) },
+        Vector{ .result = .exists_with_different_code, .object = std.mem.zeroInit(Account, .{
+            .id = 9,
+            .timestamp = 4,
+            .code = 10,
+            .user_data = 'D',
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Account, .{
+            .id = 10,
+            .timestamp = 4,
+            .flags = .{ .credits_must_not_exceed_debits = true },
+        }) },
+        Vector{ .result = .exists_with_different_flags, .object = std.mem.zeroInit(Account, .{
+            .id = 10,
+            .timestamp = 5,
+            .flags = .{ .debits_must_not_exceed_credits = true },
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Account, .{
+            .id = 11,
+            .timestamp = 5,
+            .user_data = 'U',
+        }) },
+        Vector{ .result = .exists_with_different_user_data, .object = std.mem.zeroInit(Account, .{
+            .id = 11,
+            .timestamp = 6,
+            .user_data = 'D',
+        }) },
     };
 
-    var state_machine = try StateMachine.init(allocator, acc_test_vector.len, 0, 0);
+    var state_machine = try StateMachine.init(allocator, vectors.len, 0, 0);
     defer state_machine.deinit();
 
-    for (acc_test_vector) |itm, i| {
-        const create_result = state_machine.create_account(itm.input);
-        switch (itm.outcome) {
-            .ok => try testing.expectEqual(itm.input, state_machine.get_account(itm.input.id).?.*),
-            else => try testing.expectEqual(itm.outcome, create_result),
+    for (vectors) |vector| {
+        const create_result = state_machine.create_account(vector.object);
+        switch (vector.result) {
+            .ok => try testing.expectEqual(vector.object, state_machine.get_account(vector.object.id).?.*),
+            else => try testing.expectEqual(vector.result, create_result),
         }
     }
 }
@@ -681,13 +637,17 @@ test "linked accounts" {
         std.mem.zeroInit(Account, .{ .id = 7, .code = 200 }),
 
         // A chain of 4 events (the last event in the chain closes the chain with linked=false):
-        std.mem.zeroInit(Account, .{ .id = 0, .flags = .{ .linked = true } }), // Commit/rollback.
-        std.mem.zeroInit(Account, .{ .id = 1, .flags = .{ .linked = true } }), // Commit/rollback.
-        std.mem.zeroInit(Account, .{ .id = 0, .flags = .{ .linked = true } }), // Fail with .exists.
-        std.mem.zeroInit(Account, .{ .id = 2 }), // Fail without committing.
+        // Commit/rollback:
+        std.mem.zeroInit(Account, .{ .id = 0, .flags = .{ .linked = true } }),
+        // Commit/rollback:
+        std.mem.zeroInit(Account, .{ .id = 1, .flags = .{ .linked = true } }),
+        // Fail with .exists:
+        std.mem.zeroInit(Account, .{ .id = 0, .flags = .{ .linked = true } }),
+        // Fail without committing.
+        std.mem.zeroInit(Account, .{ .id = 2 }),
 
         // An individual event (successful):
-        // This should not see any effect from the failed chain above.
+        // This should not see any effect from the failed chain above:
         std.mem.zeroInit(Account, .{ .id = 0, .code = 200 }),
 
         // A chain of 2 events (the first event fails the chain):
@@ -709,12 +669,12 @@ test "linked accounts" {
     var state_machine = try StateMachine.init(allocator, accounts.len, transfers_max, commits_max);
     defer state_machine.deinit();
 
-    const input = std.mem.asBytes(&accounts);
+    const object = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    // Use a timestamp of 0 since this is just a test
-    state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, input, output);
+    // Use a timestamp of 0 since this is just a test:
+    state_machine.prepare(0, .create_accounts, object);
+    const size = state_machine.commit(0, .create_accounts, object, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try testing.expectEqualSlices(
@@ -764,341 +724,230 @@ test "create/lookup/rollback transfers" {
     var state_machine = try StateMachine.init(allocator, accounts.len, 1, 0);
     defer state_machine.deinit();
 
-    const input = std.mem.asBytes(&accounts);
+    const object = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
     // Use a timestamp of 0 since this is just a test
     var timestamp: u8 = 0;
-    state_machine.prepare(timestamp, .create_accounts, input);
-    const size = state_machine.commit(timestamp, .create_accounts, input, output);
+    state_machine.prepare(timestamp, .create_accounts, object);
+    const size = state_machine.commit(timestamp, .create_accounts, object, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     for (accounts) |account, i| {
         try testing.expectEqual(accounts[i], state_machine.get_account(accounts[i].id).?.*);
     }
 
-    const TranTestVector = struct { outcome: CreateTransferResult, input: Transfer };
+    const Vector = struct { result: CreateTransferResult, object: Transfer };
 
     var timestamp_cont: u64 = (state_machine.commit_timestamp + 1);
-    const tran_test_vector = [_]TranTestVector{
-        TranTestVector{
-            .outcome = CreateTransferResult.amount_is_zero,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 1,
-                .timestamp = timestamp_cont,
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.reserved_flag_padding,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 2,
-                .timestamp = timestamp_cont,
-                .flags = .{ .padding = 1 },
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.two_phase_commit_must_timeout,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 3,
-                .timestamp = timestamp_cont,
-                .flags = .{ .two_phase_commit = true },
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.timeout_reserved_for_two_phase_commit,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 4,
-                .timestamp = timestamp_cont,
-                .timeout = 1,
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.reserved_field,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 5,
-                .timestamp = timestamp_cont,
-                .flags = .{ .condition = false },
-                .reserved = [_]u8{1} ** 32,
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.accounts_are_the_same,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 6,
-                .timestamp = timestamp_cont,
-                .amount = 10,
-                .debit_account_id = 1,
-                .credit_account_id = 1,
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.debit_account_not_found,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 7,
-                .timestamp = timestamp_cont,
-                .amount = 10,
-                .debit_account_id = 100,
-                .credit_account_id = 1,
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.credit_account_not_found,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 8,
-                .timestamp = timestamp_cont,
-                .amount = 10,
-                .debit_account_id = 1,
-                .credit_account_id = 100,
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.accounts_have_different_units,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 9,
-                .timestamp = timestamp_cont,
-                .amount = 10,
-                .debit_account_id = 3,
-                .credit_account_id = 4,
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exceeds_credits,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 10,
-                .timestamp = timestamp_cont,
-                .amount = 1000,
-                .debit_account_id = 5,
-                .credit_account_id = 1,
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exceeds_debits,
-            .input = std.mem.zeroInit(Transfer, .{
-                .id = 11,
-                .timestamp = timestamp_cont,
-                .amount = 1000,
-                .debit_account_id = 1,
-                .credit_account_id = 6,
-            }),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.ok,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 12,
-                    .timestamp = timestamp_cont,
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exists,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 12,
-                    .timestamp = (timestamp_cont + 1),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exists_with_different_debit_account_id,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 12,
-                    .timestamp = (timestamp_cont + 1),
-                    .amount = 10,
-                    .debit_account_id = 8,
-                    .credit_account_id = 7,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exists_with_different_credit_account_id,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 12,
-                    .timestamp = (timestamp_cont + 1),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 1,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exists_with_different_amount,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 12,
-                    .timestamp = (timestamp_cont + 1),
-                    .amount = 11,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exists_with_different_flags,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 12,
-                    .timestamp = (timestamp_cont + 1),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                    .flags = .{ .condition = true },
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exists_with_different_user_data,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 12,
-                    .timestamp = (timestamp_cont + 1),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                    .user_data = 'A',
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.ok,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 13,
-                    .timestamp = (timestamp_cont + 1),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                    .flags = .{ .condition = true },
-                    .reserved = [_]u8{1} ** 32,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exists_with_different_reserved_field,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 13,
-                    .timestamp = (timestamp_cont + 2),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                    .flags = .{ .condition = true },
-                    .reserved = [_]u8{2} ** 32,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.timeout_reserved_for_two_phase_commit,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 13,
-                    .timestamp = (timestamp_cont + 2),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                    .flags = .{ .condition = true },
-                    .reserved = [_]u8{1} ** 32,
-                    .timeout = 10,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.two_phase_commit_must_timeout,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 14,
-                    .timestamp = (timestamp_cont + 2),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                    .flags = .{ .two_phase_commit = true },
-                    .timeout = 0,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.ok,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 15,
-                    .timestamp = (timestamp_cont + 2),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                    .flags = .{ .two_phase_commit = true },
-                    .timeout = 20,
-                },
-            ),
-        },
-        TranTestVector{
-            .outcome = CreateTransferResult.exists_with_different_timeout,
-            .input = std.mem.zeroInit(
-                Transfer,
-                .{
-                    .id = 15,
-                    .timestamp = (timestamp_cont + 3),
-                    .amount = 10,
-                    .debit_account_id = 7,
-                    .credit_account_id = 8,
-                    .flags = .{ .two_phase_commit = true },
-                    .timeout = 25,
-                },
-            ),
-        },
+    const vectors = [_]Vector{
+        Vector{ .result = .amount_is_zero, .object = std.mem.zeroInit(Transfer, .{
+            .id = 1,
+            .timestamp = timestamp_cont,
+        }) },
+        Vector{ .result = .reserved_flag_padding, .object = std.mem.zeroInit(Transfer, .{
+            .id = 2,
+            .timestamp = timestamp_cont,
+            .flags = .{ .padding = 1 },
+        }) },
+        Vector{ .result = .two_phase_commit_must_timeout, .object = std.mem.zeroInit(Transfer, .{
+            .id = 3,
+            .timestamp = timestamp_cont,
+            .flags = .{ .two_phase_commit = true },
+        }) },
+        Vector{ .result = .timeout_reserved_for_two_phase_commit, .object = std.mem.zeroInit(Transfer, .{
+            .id = 4,
+            .timestamp = timestamp_cont,
+            .timeout = 1,
+        }) },
+        Vector{ .result = .reserved_field, .object = std.mem.zeroInit(Transfer, .{
+            .id = 5,
+            .timestamp = timestamp_cont,
+            .flags = .{ .condition = false },
+            .reserved = [_]u8{1} ** 32,
+        }) },
+        Vector{ .result = .accounts_are_the_same, .object = std.mem.zeroInit(Transfer, .{
+            .id = 6,
+            .timestamp = timestamp_cont,
+            .amount = 10,
+            .debit_account_id = 1,
+            .credit_account_id = 1,
+        }) },
+        Vector{ .result = .debit_account_not_found, .object = std.mem.zeroInit(Transfer, .{
+            .id = 7,
+            .timestamp = timestamp_cont,
+            .amount = 10,
+            .debit_account_id = 100,
+            .credit_account_id = 1,
+        }) },
+        Vector{ .result = .credit_account_not_found, .object = std.mem.zeroInit(Transfer, .{
+            .id = 8,
+            .timestamp = timestamp_cont,
+            .amount = 10,
+            .debit_account_id = 1,
+            .credit_account_id = 100,
+        }) },
+        Vector{ .result = .accounts_have_different_units, .object = std.mem.zeroInit(Transfer, .{
+            .id = 9,
+            .timestamp = timestamp_cont,
+            .amount = 10,
+            .debit_account_id = 3,
+            .credit_account_id = 4,
+        }) },
+        Vector{ .result = .exceeds_credits, .object = std.mem.zeroInit(Transfer, .{
+            .id = 10,
+            .timestamp = timestamp_cont,
+            .amount = 1000,
+            .debit_account_id = 5,
+            .credit_account_id = 1,
+        }) },
+        Vector{ .result = .exceeds_debits, .object = std.mem.zeroInit(Transfer, .{
+            .id = 11,
+            .timestamp = timestamp_cont,
+            .amount = 1000,
+            .debit_account_id = 1,
+            .credit_account_id = 6,
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Transfer, .{
+            .id = 12,
+            .timestamp = timestamp_cont,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+        }) },
+        Vector{ .result = .exists, .object = std.mem.zeroInit(Transfer, .{
+            .id = 12,
+            .timestamp = timestamp_cont + 1,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+        }) },
+        Vector{ .result = .exists_with_different_debit_account_id, .object = std.mem.zeroInit(Transfer, .{
+            .id = 12,
+            .timestamp = timestamp_cont + 1,
+            .amount = 10,
+            .debit_account_id = 8,
+            .credit_account_id = 7,
+        }) },
+        Vector{ .result = .exists_with_different_credit_account_id, .object = std.mem.zeroInit(Transfer, .{
+            .id = 12,
+            .timestamp = timestamp_cont + 1,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 1,
+        }) },
+        Vector{ .result = .exists_with_different_amount, .object = std.mem.zeroInit(Transfer, .{
+            .id = 12,
+            .timestamp = timestamp_cont + 1,
+            .amount = 11,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+        }) },
+        Vector{ .result = .exists_with_different_flags, .object = std.mem.zeroInit(Transfer, .{
+            .id = 12,
+            .timestamp = timestamp_cont + 1,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+            .flags = .{ .condition = true },
+        }) },
+        Vector{ .result = .exists_with_different_user_data, .object = std.mem.zeroInit(Transfer, .{
+            .id = 12,
+            .timestamp = timestamp_cont + 1,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+            .user_data = 'A',
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Transfer, .{
+            .id = 13,
+            .timestamp = timestamp_cont + 1,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+            .flags = .{ .condition = true },
+            .reserved = [_]u8{1} ** 32,
+        }) },
+        Vector{ .result = .exists_with_different_reserved_field, .object = std.mem.zeroInit(Transfer, .{
+            .id = 13,
+            .timestamp = timestamp_cont + 2,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+            .flags = .{ .condition = true },
+            .reserved = [_]u8{2} ** 32,
+        }) },
+        Vector{ .result = .timeout_reserved_for_two_phase_commit, .object = std.mem.zeroInit(Transfer, .{
+            .id = 13,
+            .timestamp = timestamp_cont + 2,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+            .flags = .{ .condition = true },
+            .reserved = [_]u8{1} ** 32,
+            .timeout = 10,
+        }) },
+        Vector{ .result = .two_phase_commit_must_timeout, .object = std.mem.zeroInit(Transfer, .{
+            .id = 14,
+            .timestamp = timestamp_cont + 2,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+            .flags = .{ .two_phase_commit = true },
+            .timeout = 0,
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Transfer, .{
+            .id = 15,
+            .timestamp = timestamp_cont + 2,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+            .flags = .{ .two_phase_commit = true },
+            .timeout = 20,
+        }) },
+        Vector{ .result = .exists_with_different_timeout, .object = std.mem.zeroInit(Transfer, .{
+            .id = 15,
+            .timestamp = timestamp_cont + 3,
+            .amount = 10,
+            .debit_account_id = 7,
+            .credit_account_id = 8,
+            .flags = .{ .two_phase_commit = true },
+            .timeout = 25,
+        }) },
     };
 
-    for (tran_test_vector) |itm, i| {
-        const create_result = state_machine.create_transfer(itm.input);
-        switch (itm.outcome) {
-            .ok => try testing.expectEqual(itm.input, state_machine.get_transfer(itm.input.id).?.*),
-            else => try testing.expectEqual(itm.outcome, create_result),
+    for (vectors) |vector| {
+        const create_result = state_machine.create_transfer(vector.object);
+        switch (vector.result) {
+            .ok => try testing.expectEqual(vector.object, state_machine.get_transfer(vector.object.id).?.*),
+            else => try testing.expectEqual(vector.result, create_result),
         }
     }
 
-    //2 phase commit [reserved]
+    //2 phase commit [reserved]:
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_reserved);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_reserved);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_reserved);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_reserved);
-    //1 phase commit [accepted]
+    //1 phase commit [accepted]:
     try testing.expectEqual(@as(u64, 20), state_machine.get_account(7).?.*.debits_accepted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_accepted);
     try testing.expectEqual(@as(u64, 20), state_machine.get_account(8).?.*.credits_accepted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_accepted);
 
-    //rollback transfer with id [12], amount of 10...
-    state_machine.create_transfer_rollback(state_machine.get_transfer(tran_test_vector[11].input.id).?.*);
+    // Rollback transfer with id [12], amount of 10:
+    state_machine.create_transfer_rollback(state_machine.get_transfer(vectors[11].object.id).?.*);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_accepted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_accepted);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_accepted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_accepted);
-    try testing.expect(state_machine.get_transfer(tran_test_vector[11].input.id) == null);
+    try testing.expect(state_machine.get_transfer(vectors[11].object.id) == null);
 
-    //rollback transfer with id [15], amount of 10...
-    state_machine.create_transfer_rollback(state_machine.get_transfer(tran_test_vector[22].input.id).?.*);
+    // Rollback transfer with id [15], amount of 10:
+    state_machine.create_transfer_rollback(state_machine.get_transfer(vectors[22].object.id).?.*);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.debits_reserved);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.credits_reserved);
-    try testing.expect(state_machine.get_transfer(tran_test_vector[22].input.id) == null);
+    try testing.expect(state_machine.get_transfer(vectors[22].object.id) == null);
 }
 
 test "create/lookup/rollback commits" {
@@ -1106,7 +955,7 @@ test "create/lookup/rollback commits" {
     defer arena.deinit();
     const allocator = &arena.allocator;
 
-    const CommitTestVector = struct { outcome: CommitTransferResult, input: Commit };
+    const Vector = struct { result: CommitTransferResult, object: Commit };
 
     var accounts = [_]Account{
         std.mem.zeroInit(Account, .{ .id = 1 }),
@@ -1181,14 +1030,14 @@ test "create/lookup/rollback commits" {
     var state_machine = try StateMachine.init(allocator, accounts.len, transfers.len, 1);
     defer state_machine.deinit();
 
-    const input = std.mem.asBytes(&accounts);
+    const object = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
     // Use a timestamp of 0 since this is just a test
     //ACCOUNTS
     var timestamp: u8 = 0;
-    state_machine.prepare(timestamp, .create_accounts, input);
-    const size = state_machine.commit(timestamp, .create_accounts, input, output);
+    state_machine.prepare(timestamp, .create_accounts, object);
+    const size = state_machine.commit(timestamp, .create_accounts, object, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     for (accounts) |account, i| {
@@ -1196,11 +1045,11 @@ test "create/lookup/rollback commits" {
     }
 
     //TRANSFERS
-    const input_transfers = std.mem.asBytes(&transfers);
+    const object_transfers = std.mem.asBytes(&transfers);
     const output_transfers = try allocator.alloc(u8, 4096);
 
-    state_machine.prepare(timestamp, .create_transfers, input_transfers);
-    const size_transfers = state_machine.commit(timestamp, .create_transfers, input_transfers, output_transfers);
+    state_machine.prepare(timestamp, .create_transfers, object_transfers);
+    const size_transfers = state_machine.commit(timestamp, .create_transfers, object_transfers, output_transfers);
     const results_transfers = std.mem.bytesAsSlice(CreateTransfersResult, output_transfers[0..size_transfers]);
 
     for (transfers) |transfer, i| {
@@ -1209,138 +1058,107 @@ test "create/lookup/rollback commits" {
 
     //COMMITS
     var timestamp_cont: u64 = (state_machine.commit_timestamp + 1);
-    const commits = [_]CommitTestVector{ CommitTestVector{
-        .outcome = CommitTransferResult.reserved_field,
-        .input = std.mem.zeroInit(Commit, .{
+    const vectors = [_]Vector{
+        Vector{ .result = .reserved_field, .object = std.mem.zeroInit(Commit, .{
             .id = 1,
             .timestamp = timestamp_cont,
             .reserved = [_]u8{1} ** 32,
-        }),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.reserved_flag_padding,
-        .input = std.mem.zeroInit(Commit, .{
+        }) },
+        Vector{ .result = .reserved_flag_padding, .object = std.mem.zeroInit(Commit, .{
             .id = 1,
             .timestamp = timestamp_cont,
             .flags = .{ .padding = 1 },
-        }),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.transfer_not_found,
-        .input = std.mem.zeroInit(Commit, .{
+        }) },
+        Vector{ .result = .transfer_not_found, .object = std.mem.zeroInit(Commit, .{
             .id = 777,
             .timestamp = timestamp_cont,
-        }),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.transfer_not_two_phase_commit,
-        .input = std.mem.zeroInit(
-            Commit,
-            .{ .id = 1, .timestamp = timestamp_cont },
-        ),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.ok,
-        .input = std.mem.zeroInit(
-            Commit,
-            .{ .id = 2, .timestamp = timestamp_cont },
-        ),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.already_committed_but_accepted,
-        .input = std.mem.zeroInit(
-            Commit,
-            .{
-                .id = 2,
-                .timestamp = (timestamp_cont + 1),
-                .flags = .{ .reject = true },
-            },
-        ),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.already_committed,
-        .input = std.mem.zeroInit(
-            Commit,
-            .{
-                .id = 2,
-                .timestamp = (timestamp_cont + 1),
-            },
-        ),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.ok,
-        .input = std.mem.zeroInit(Commit, .{
+        }) },
+        Vector{ .result = .transfer_not_two_phase_commit, .object = std.mem.zeroInit(Commit, .{
+            .id = 1,
+            .timestamp = timestamp_cont,
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Commit, .{
+            .id = 2,
+            .timestamp = timestamp_cont,
+        }) },
+        Vector{ .result = .already_committed_but_accepted, .object = std.mem.zeroInit(Commit, .{
+            .id = 2,
+            .timestamp = (timestamp_cont + 1),
+            .flags = .{ .reject = true },
+        }) },
+        Vector{ .result = .already_committed, .object = std.mem.zeroInit(Commit, .{
+            .id = 2,
+            .timestamp = (timestamp_cont + 1),
+        }) },
+        Vector{ .result = .ok, .object = std.mem.zeroInit(Commit, .{
             .id = 3,
             .timestamp = (timestamp_cont + 1),
             .flags = .{ .reject = true },
-        }),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.already_committed_but_rejected,
-        .input = std.mem.zeroInit(Commit, .{
+        }) },
+        Vector{ .result = .already_committed_but_rejected, .object = std.mem.zeroInit(Commit, .{
             .id = 3,
             .timestamp = (timestamp_cont + 2),
-        }),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.transfer_expired,
-        .input = std.mem.zeroInit(Commit, .{
+        }) },
+        Vector{ .result = .transfer_expired, .object = std.mem.zeroInit(Commit, .{
             .id = 4,
             .timestamp = (timestamp_cont + 2),
-        }),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.condition_requires_preimage,
-        .input = std.mem.zeroInit(Commit, .{
+        }) },
+        Vector{ .result = .condition_requires_preimage, .object = std.mem.zeroInit(Commit, .{
             .id = 5,
             .timestamp = (timestamp_cont + 2),
-        }),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.preimage_invalid,
-        .input = std.mem.zeroInit(Commit, .{
+        }) },
+        Vector{ .result = .preimage_invalid, .object = std.mem.zeroInit(Commit, .{
             .id = 5,
             .timestamp = (timestamp_cont + 2),
+            .flags = .{ .preimage = true },
             .reserved = [_]u8{1} ** 32,
-            .flags = .{
-                .preimage = true,
-            },
-        }),
-    }, CommitTestVector{
-        .outcome = CommitTransferResult.preimage_requires_condition,
-        .input = std.mem.zeroInit(Commit, .{
+        }) },
+        Vector{ .result = .preimage_requires_condition, .object = std.mem.zeroInit(Commit, .{
             .id = 6,
             .timestamp = (timestamp_cont + 2),
-            .flags = .{
-                .preimage = true,
-            },
-        }),
-    } };
+            .flags = .{ .preimage = true },
+        }) },
+    };
 
-    // Test Balance BEFORE commit
-    // Account 1
-    const acc_1_before = state_machine.get_account(1).?.*;
-    try testing.expectEqual(@as(u64, 15), acc_1_before.debits_accepted);
-    try testing.expectEqual(@as(u64, 75), acc_1_before.debits_reserved);
-    try testing.expectEqual(@as(u64, 0), acc_1_before.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), acc_1_before.credits_reserved);
-    // Account 2
-    const acc_2_before = state_machine.get_account(2).?.*;
-    try testing.expectEqual(@as(u64, 0), acc_2_before.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), acc_2_before.debits_reserved);
-    try testing.expectEqual(@as(u64, 15), acc_2_before.credits_accepted);
-    try testing.expectEqual(@as(u64, 75), acc_2_before.credits_reserved);
+    // Test balances BEFORE commit
+    // Account 1:
+    const account_1_before = state_machine.get_account(1).?.*;
+    try testing.expectEqual(@as(u64, 15), account_1_before.debits_accepted);
+    try testing.expectEqual(@as(u64, 75), account_1_before.debits_reserved);
+    try testing.expectEqual(@as(u64, 0), account_1_before.credits_accepted);
+    try testing.expectEqual(@as(u64, 0), account_1_before.credits_reserved);
+    // Account 2:
+    const account_2_before = state_machine.get_account(2).?.*;
+    try testing.expectEqual(@as(u64, 0), account_2_before.debits_accepted);
+    try testing.expectEqual(@as(u64, 0), account_2_before.debits_reserved);
+    try testing.expectEqual(@as(u64, 15), account_2_before.credits_accepted);
+    try testing.expectEqual(@as(u64, 75), account_2_before.credits_reserved);
 
-    for (commits) |itm, i| {
-        const create_result = state_machine.commit_transfer(itm.input);
-        switch (itm.outcome) {
-            .ok => try testing.expectEqual(itm.input, state_machine.get_commit(itm.input.id).?.*),
-            else => try testing.expectEqual(itm.outcome, create_result),
+    for (vectors) |vector| {
+        const create_result = state_machine.commit_transfer(vector.object);
+        switch (vector.result) {
+            .ok => try testing.expectEqual(vector.object, state_machine.get_commit(vector.object.id).?.*),
+            else => try testing.expectEqual(vector.result, create_result),
         }
     }
 
-    // Test Balance AFTER commit
-    // Account 1
-    const acc_1_after = state_machine.get_account(1).?.*;
-    try testing.expectEqual(@as(u64, 30), acc_1_after.debits_accepted); //+15 (acceptance applied)
-    try testing.expectEqual(@as(u64, 45), acc_1_after.debits_reserved); //-15 (reserved moved)
-    try testing.expectEqual(@as(u64, 0), acc_1_after.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), acc_1_after.credits_reserved);
-    // Account 2
-    const acc_2_after = state_machine.get_account(2).?.*;
-    try testing.expectEqual(@as(u64, 0), acc_2_after.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), acc_2_after.debits_reserved);
-    try testing.expectEqual(@as(u64, 30), acc_2_after.credits_accepted); //+15 (acceptance applied)
-    try testing.expectEqual(@as(u64, 45), acc_2_after.credits_reserved); //-15 (reserved moved)
+    // Test balances AFTER commit
+    // Account 1:
+    const account_1_after = state_machine.get_account(1).?.*;
+    try testing.expectEqual(@as(u64, 30), account_1_after.debits_accepted);
+    //+15 (acceptance applied):
+    try testing.expectEqual(@as(u64, 45), account_1_after.debits_reserved);
+    //-15 (reserved moved):
+    try testing.expectEqual(@as(u64, 0), account_1_after.credits_accepted);
+    try testing.expectEqual(@as(u64, 0), account_1_after.credits_reserved);
+    // Account 2:
+    const account_2_after = state_machine.get_account(2).?.*;
+    try testing.expectEqual(@as(u64, 0), account_2_after.debits_accepted);
+    try testing.expectEqual(@as(u64, 0), account_2_after.debits_reserved);
+    //+15 (acceptance applied):
+    try testing.expectEqual(@as(u64, 30), account_2_after.credits_accepted);
+    //-15 (reserved moved):
+    try testing.expectEqual(@as(u64, 45), account_2_after.credits_reserved);
 
     // Test COMMIT with invalid debit/credit accounts
     state_machine.create_account_rollback(accounts[3]);
@@ -1362,34 +1180,41 @@ test "create/lookup/rollback commits" {
         .debit_account_not_found,
     );
 
-    state_machine.commit_transfer_rollback(commits[4].input); //rollback [id=2] not rejected
+    //rollback [id=2] not rejected:
+    state_machine.commit_transfer_rollback(vectors[4].object);
 
-    // Account 1
-    const acc_1_rollback = state_machine.get_account(1).?.*;
-    try testing.expectEqual(@as(u64, 15), acc_1_rollback.debits_accepted); //-15 (rollback)
-    try testing.expectEqual(@as(u64, 60), acc_1_rollback.debits_reserved);
-    try testing.expectEqual(@as(u64, 0), acc_1_rollback.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), acc_1_rollback.credits_reserved);
-    // Account 2
-    const acc_2_rollback = state_machine.get_account(2).?.*;
-    try testing.expectEqual(@as(u64, 0), acc_2_rollback.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), acc_2_rollback.debits_reserved);
-    try testing.expectEqual(@as(u64, 15), acc_2_rollback.credits_accepted); //-15 (rollback)
-    try testing.expectEqual(@as(u64, 60), acc_2_rollback.credits_reserved);
+    // Account 1:
+    const account_1_rollback = state_machine.get_account(1).?.*;
+    //-15 (rollback):
+    try testing.expectEqual(@as(u64, 15), account_1_rollback.debits_accepted);
+    try testing.expectEqual(@as(u64, 60), account_1_rollback.debits_reserved);
+    try testing.expectEqual(@as(u64, 0), account_1_rollback.credits_accepted);
+    try testing.expectEqual(@as(u64, 0), account_1_rollback.credits_reserved);
+    // Account 2:
+    const account_2_rollback = state_machine.get_account(2).?.*;
+    try testing.expectEqual(@as(u64, 0), account_2_rollback.debits_accepted);
+    try testing.expectEqual(@as(u64, 0), account_2_rollback.debits_reserved);
+    //-15 (rollback):
+    try testing.expectEqual(@as(u64, 15), account_2_rollback.credits_accepted);
+    try testing.expectEqual(@as(u64, 60), account_2_rollback.credits_reserved);
 
-    state_machine.commit_transfer_rollback(commits[7].input); //rollback [id=3] rejected
-    // Account 1
-    const acc_1_rollback_reject = state_machine.get_account(1).?.*;
-    try testing.expectEqual(@as(u64, 15), acc_1_rollback_reject.debits_accepted); //remains unchanged
-    try testing.expectEqual(@as(u64, 75), acc_1_rollback_reject.debits_reserved); //+15 rolled back
-    try testing.expectEqual(@as(u64, 0), acc_1_rollback_reject.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), acc_1_rollback_reject.credits_reserved);
-    // Account 2
-    const acc_2_rollback_reject = state_machine.get_account(2).?.*;
-    try testing.expectEqual(@as(u64, 0), acc_2_rollback_reject.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), acc_2_rollback_reject.debits_reserved);
-    try testing.expectEqual(@as(u64, 15), acc_2_rollback_reject.credits_accepted);
-    try testing.expectEqual(@as(u64, 75), acc_2_rollback_reject.credits_reserved); //+15 rolled back
+    //rollback [id=3] rejected:
+    state_machine.commit_transfer_rollback(vectors[7].object);
+    // Account 1:
+    const account_1_rollback_reject = state_machine.get_account(1).?.*;
+    try testing.expectEqual(@as(u64, 15), account_1_rollback_reject.debits_accepted);
+    //remains unchanged:
+    try testing.expectEqual(@as(u64, 75), account_1_rollback_reject.debits_reserved);
+    //+15 rolled back:
+    try testing.expectEqual(@as(u64, 0), account_1_rollback_reject.credits_accepted);
+    try testing.expectEqual(@as(u64, 0), account_1_rollback_reject.credits_reserved);
+    // Account 2:
+    const account_2_rollback_reject = state_machine.get_account(2).?.*;
+    try testing.expectEqual(@as(u64, 0), account_2_rollback_reject.debits_accepted);
+    try testing.expectEqual(@as(u64, 0), account_2_rollback_reject.debits_reserved);
+    try testing.expectEqual(@as(u64, 15), account_2_rollback_reject.credits_accepted);
+    //+15 rolled back"
+    try testing.expectEqual(@as(u64, 75), account_2_rollback_reject.credits_reserved);
 }
 
 fn test_routine_zeroed(comptime len: usize) !void {
