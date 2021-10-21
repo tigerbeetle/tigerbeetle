@@ -739,7 +739,7 @@ test "create/lookup/rollback transfers" {
 
     const Vector = struct { result: CreateTransferResult, object: Transfer };
 
-    var timestamp_cont: u64 = (state_machine.commit_timestamp + 1);
+    const timestamp_cont: u64 = (state_machine.commit_timestamp + 1);
     const vectors = [_]Vector{
         Vector{ .result = .amount_is_zero, .object = std.mem.zeroInit(Transfer, .{
             .id = 1,
@@ -1057,7 +1057,7 @@ test "create/lookup/rollback commits" {
     }
 
     //COMMITS
-    var timestamp_cont: u64 = (state_machine.commit_timestamp + 1);
+    const timestamp_cont: u64 = (state_machine.commit_timestamp + 1);
     const vectors = [_]Vector{
         Vector{ .result = .reserved_field, .object = std.mem.zeroInit(Commit, .{
             .id = 1,
@@ -1083,39 +1083,39 @@ test "create/lookup/rollback commits" {
         }) },
         Vector{ .result = .already_committed_but_accepted, .object = std.mem.zeroInit(Commit, .{
             .id = 2,
-            .timestamp = (timestamp_cont + 1),
+            .timestamp = timestamp_cont + 1,
             .flags = .{ .reject = true },
         }) },
         Vector{ .result = .already_committed, .object = std.mem.zeroInit(Commit, .{
             .id = 2,
-            .timestamp = (timestamp_cont + 1),
+            .timestamp = timestamp_cont + 1,
         }) },
         Vector{ .result = .ok, .object = std.mem.zeroInit(Commit, .{
             .id = 3,
-            .timestamp = (timestamp_cont + 1),
+            .timestamp = timestamp_cont + 1,
             .flags = .{ .reject = true },
         }) },
         Vector{ .result = .already_committed_but_rejected, .object = std.mem.zeroInit(Commit, .{
             .id = 3,
-            .timestamp = (timestamp_cont + 2),
+            .timestamp = timestamp_cont + 2,
         }) },
         Vector{ .result = .transfer_expired, .object = std.mem.zeroInit(Commit, .{
             .id = 4,
-            .timestamp = (timestamp_cont + 2),
+            .timestamp = timestamp_cont + 2,
         }) },
         Vector{ .result = .condition_requires_preimage, .object = std.mem.zeroInit(Commit, .{
             .id = 5,
-            .timestamp = (timestamp_cont + 2),
+            .timestamp = timestamp_cont + 2,
         }) },
         Vector{ .result = .preimage_invalid, .object = std.mem.zeroInit(Commit, .{
             .id = 5,
-            .timestamp = (timestamp_cont + 2),
+            .timestamp = timestamp_cont + 2,
             .flags = .{ .preimage = true },
             .reserved = [_]u8{1} ** 32,
         }) },
         Vector{ .result = .preimage_requires_condition, .object = std.mem.zeroInit(Commit, .{
             .id = 6,
-            .timestamp = (timestamp_cont + 2),
+            .timestamp = timestamp_cont + 2,
             .flags = .{ .preimage = true },
         }) },
     };
@@ -1166,7 +1166,7 @@ test "create/lookup/rollback commits" {
     try testing.expectEqual(
         state_machine.commit_transfer(std.mem.zeroInit(Commit, .{
             .id = 7,
-            .timestamp = (timestamp_cont + 2),
+            .timestamp = timestamp_cont + 2,
         })),
         .credit_account_not_found,
     );
@@ -1175,7 +1175,7 @@ test "create/lookup/rollback commits" {
     try testing.expectEqual(
         state_machine.commit_transfer(std.mem.zeroInit(Commit, .{
             .id = 7,
-            .timestamp = (timestamp_cont + 2),
+            .timestamp = timestamp_cont + 2,
         })),
         .debit_account_not_found,
     );
