@@ -1216,7 +1216,7 @@ test "accept/connect/send/receive" {
                 completion,
                 self.client,
                 &self.send_buf,
-                os.MSG_NOSIGNAL,
+                if (std.Target.current.os.tag == .linux) os.MSG_NOSIGNAL else 0,
             );
         }
 
@@ -1241,7 +1241,7 @@ test "accept/connect/send/receive" {
                 completion,
                 self.accepted_sock,
                 &self.recv_buf,
-                os.MSG_NOSIGNAL,
+                if (std.Target.current.os.tag == .linux) os.MSG_NOSIGNAL else 0,
             );
         }
 
