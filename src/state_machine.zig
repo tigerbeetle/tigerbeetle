@@ -650,11 +650,14 @@ test "create/lookup accounts" {
                 .user_data = 'U',
             }),
         },
-        Vector{ .result = .exists_with_different_user_data, .object = std.mem.zeroInit(Account, .{
-            .id = 11,
-            .timestamp = 6,
-            .user_data = 'D',
-        }) },
+        Vector{
+            .result = .exists_with_different_user_data,
+            .object = std.mem.zeroInit(Account, .{
+                .id = 11,
+                .timestamp = 6,
+                .user_data = 'D',
+            }),
+        },
     };
 
     var state_machine = try StateMachine.init(allocator, vectors.len, 0, 0);
