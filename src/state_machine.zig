@@ -773,9 +773,8 @@ test "create/lookup/rollback transfers" {
     const output = try allocator.alloc(u8, 4096);
 
     // Use a timestamp of 0 since this is just a test
-    var timestamp: u8 = 0;
-    state_machine.prepare(timestamp, .create_accounts, input);
-    const size = state_machine.commit(timestamp, .create_accounts, input, output);
+    state_machine.prepare(0, .create_accounts, input);
+    const size = state_machine.commit(0, .create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     for (accounts) |account, i| {
@@ -784,20 +783,20 @@ test "create/lookup/rollback transfers" {
 
     const Vector = struct { result: CreateTransferResult, object: Transfer };
 
-    const timestamp_vector: u64 = (state_machine.commit_timestamp + 1);
+    const timestamp: u64 = (state_machine.commit_timestamp + 1);
     const vectors = [_]Vector{
         Vector{
             .result = .amount_is_zero,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 1,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
             }),
         },
         Vector{
             .result = .reserved_flag_padding,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 2,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .flags = .{ .padding = 1 },
             }),
         },
@@ -805,7 +804,7 @@ test "create/lookup/rollback transfers" {
             .result = .two_phase_commit_must_timeout,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 3,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .flags = .{ .two_phase_commit = true },
             }),
         },
@@ -813,7 +812,7 @@ test "create/lookup/rollback transfers" {
             .result = .timeout_reserved_for_two_phase_commit,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 4,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .timeout = 1,
             }),
         },
@@ -821,7 +820,7 @@ test "create/lookup/rollback transfers" {
             .result = .reserved_field,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 5,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .flags = .{ .condition = false },
                 .reserved = [_]u8{1} ** 32,
             }),
@@ -830,7 +829,7 @@ test "create/lookup/rollback transfers" {
             .result = .accounts_are_the_same,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 6,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .amount = 10,
                 .debit_account_id = 1,
                 .credit_account_id = 1,
@@ -840,7 +839,7 @@ test "create/lookup/rollback transfers" {
             .result = .debit_account_not_found,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 7,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .amount = 10,
                 .debit_account_id = 100,
                 .credit_account_id = 1,
@@ -850,7 +849,7 @@ test "create/lookup/rollback transfers" {
             .result = .credit_account_not_found,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 8,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .amount = 10,
                 .debit_account_id = 1,
                 .credit_account_id = 100,
@@ -860,7 +859,7 @@ test "create/lookup/rollback transfers" {
             .result = .accounts_have_different_units,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 9,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .amount = 10,
                 .debit_account_id = 3,
                 .credit_account_id = 4,
@@ -870,7 +869,7 @@ test "create/lookup/rollback transfers" {
             .result = .exceeds_credits,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 10,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .amount = 1000,
                 .debit_account_id = 5,
                 .credit_account_id = 1,
@@ -880,7 +879,7 @@ test "create/lookup/rollback transfers" {
             .result = .exceeds_debits,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 11,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .amount = 1000,
                 .debit_account_id = 1,
                 .credit_account_id = 6,
@@ -890,7 +889,7 @@ test "create/lookup/rollback transfers" {
             .result = .ok,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 12,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -900,7 +899,7 @@ test "create/lookup/rollback transfers" {
             .result = .exists,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 12,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -910,7 +909,7 @@ test "create/lookup/rollback transfers" {
             .result = .exists_with_different_debit_account_id,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 12,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
                 .amount = 10,
                 .debit_account_id = 8,
                 .credit_account_id = 7,
@@ -920,7 +919,7 @@ test "create/lookup/rollback transfers" {
             .result = .exists_with_different_credit_account_id,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 12,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 1,
@@ -930,7 +929,7 @@ test "create/lookup/rollback transfers" {
             .result = .exists_with_different_amount,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 12,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
                 .amount = 11,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -940,7 +939,7 @@ test "create/lookup/rollback transfers" {
             .result = .exists_with_different_flags,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 12,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -951,7 +950,7 @@ test "create/lookup/rollback transfers" {
             .result = .exists_with_different_user_data,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 12,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -962,7 +961,7 @@ test "create/lookup/rollback transfers" {
             .result = .ok,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 13,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -974,7 +973,7 @@ test "create/lookup/rollback transfers" {
             .result = .exists_with_different_reserved_field,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 13,
-                .timestamp = timestamp_vector + 2,
+                .timestamp = timestamp + 2,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -986,7 +985,7 @@ test "create/lookup/rollback transfers" {
             .result = .timeout_reserved_for_two_phase_commit,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 13,
-                .timestamp = timestamp_vector + 2,
+                .timestamp = timestamp + 2,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -999,7 +998,7 @@ test "create/lookup/rollback transfers" {
             .result = .two_phase_commit_must_timeout,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 14,
-                .timestamp = timestamp_vector + 2,
+                .timestamp = timestamp + 2,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -1011,7 +1010,7 @@ test "create/lookup/rollback transfers" {
             .result = .ok,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 15,
-                .timestamp = timestamp_vector + 2,
+                .timestamp = timestamp + 2,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -1023,7 +1022,7 @@ test "create/lookup/rollback transfers" {
             .result = .exists_with_different_timeout,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 15,
-                .timestamp = timestamp_vector + 3,
+                .timestamp = timestamp + 3,
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
@@ -1152,9 +1151,8 @@ test "create/lookup/rollback commits" {
 
     // Use a timestamp of 0 since this is just a test
     //ACCOUNTS
-    var timestamp: u8 = 0;
-    state_machine.prepare(timestamp, .create_accounts, input);
-    const size = state_machine.commit(timestamp, .create_accounts, input, output);
+    state_machine.prepare(0, .create_accounts, input);
+    const size = state_machine.commit(0, .create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     for (accounts) |account, i| {
@@ -1165,8 +1163,8 @@ test "create/lookup/rollback commits" {
     const object_transfers = std.mem.asBytes(&transfers);
     const output_transfers = try allocator.alloc(u8, 4096);
 
-    state_machine.prepare(timestamp, .create_transfers, object_transfers);
-    const size_transfers = state_machine.commit(timestamp, .create_transfers, object_transfers, output_transfers);
+    state_machine.prepare(0, .create_transfers, object_transfers);
+    const size_transfers = state_machine.commit(0, .create_transfers, object_transfers, output_transfers);
     const results_transfers = std.mem.bytesAsSlice(CreateTransfersResult, output_transfers[0..size_transfers]);
 
     for (transfers) |transfer, i| {
@@ -1174,13 +1172,13 @@ test "create/lookup/rollback commits" {
     }
 
     //COMMITS
-    const timestamp_vector: u64 = (state_machine.commit_timestamp + 1);
+    const timestamp: u64 = (state_machine.commit_timestamp + 1);
     const vectors = [_]Vector{
         Vector{
             .result = .reserved_field,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 1,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .reserved = [_]u8{1} ** 32,
             }),
         },
@@ -1188,7 +1186,7 @@ test "create/lookup/rollback commits" {
             .result = .reserved_flag_padding,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 1,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
                 .flags = .{ .padding = 1 },
             }),
         },
@@ -1196,28 +1194,28 @@ test "create/lookup/rollback commits" {
             .result = .transfer_not_found,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 777,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
             }),
         },
         Vector{
             .result = .transfer_not_two_phase_commit,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 1,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
             }),
         },
         Vector{
             .result = .ok,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 2,
-                .timestamp = timestamp_vector,
+                .timestamp = timestamp,
             }),
         },
         Vector{
             .result = .already_committed_but_accepted,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 2,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
                 .flags = .{ .reject = true },
             }),
         },
@@ -1225,14 +1223,14 @@ test "create/lookup/rollback commits" {
             .result = .already_committed,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 2,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
             }),
         },
         Vector{
             .result = .ok,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 3,
-                .timestamp = timestamp_vector + 1,
+                .timestamp = timestamp + 1,
                 .flags = .{ .reject = true },
             }),
         },
@@ -1240,28 +1238,28 @@ test "create/lookup/rollback commits" {
             .result = .already_committed_but_rejected,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 3,
-                .timestamp = timestamp_vector + 2,
+                .timestamp = timestamp + 2,
             }),
         },
         Vector{
             .result = .transfer_expired,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 4,
-                .timestamp = timestamp_vector + 2,
+                .timestamp = timestamp + 2,
             }),
         },
         Vector{
             .result = .condition_requires_preimage,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 5,
-                .timestamp = timestamp_vector + 2,
+                .timestamp = timestamp + 2,
             }),
         },
         Vector{
             .result = .preimage_invalid,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 5,
-                .timestamp = timestamp_vector + 2,
+                .timestamp = timestamp + 2,
                 .flags = .{ .preimage = true },
                 .reserved = [_]u8{1} ** 32,
             }),
@@ -1270,7 +1268,7 @@ test "create/lookup/rollback commits" {
             .result = .preimage_requires_condition,
             .object = std.mem.zeroInit(Commit, .{
                 .id = 6,
-                .timestamp = timestamp_vector + 2,
+                .timestamp = timestamp + 2,
                 .flags = .{ .preimage = true },
             }),
         },
@@ -1322,7 +1320,7 @@ test "create/lookup/rollback commits" {
     try testing.expectEqual(
         state_machine.commit_transfer(std.mem.zeroInit(Commit, .{
             .id = 7,
-            .timestamp = timestamp_vector + 2,
+            .timestamp = timestamp + 2,
         })),
         .credit_account_not_found,
     );
@@ -1331,7 +1329,7 @@ test "create/lookup/rollback commits" {
     try testing.expectEqual(
         state_machine.commit_transfer(std.mem.zeroInit(Commit, .{
             .id = 7,
-            .timestamp = timestamp_vector + 2,
+            .timestamp = timestamp + 2,
         })),
         .debit_account_not_found,
     );
