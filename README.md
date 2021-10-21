@@ -72,6 +72,14 @@ scripts/benchmark.sh
 
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
+## The VOPR
+
+The VOPR is a batteries-included generic implementation of TigerBeetle's version of Viewstamped Replication (VSR). Check out the [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr) repository for details on how to run the VOPR and interpret its output.
+
+VOPR means Viewstamped Operation Replicator. It features a built-in [state checker](src/test/state_checker.zig) that can hook into all the replicas, and check all their state transitions the instant they take place, using cryptographic hash chaining to prove causality and check that all interim state transitions are valid, based on any of the set of inflight client requests at the time, without divergent states, and to check for convergence to the highest state at the end of the simulation. 
+
+At the same time the VOPR is also a fuzzing [simulator](src/simulator.zig) we call *The VOPR* to simulate a whole cluster of servers and clients interacting, all within a single process, with a [network simulator](src/test/packet_simulator.zig) to simulate all kinds of network faults between them, and with an in-memory [storage simulator](src/test/storage.zig) to simulate all kinds of storage faults, so you can explore huge state spaces in a short amount of time.
+
 ## Launch a Local Cluster
 
 Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
