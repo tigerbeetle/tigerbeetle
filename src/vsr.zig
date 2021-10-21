@@ -42,6 +42,9 @@ pub const Command = packed enum(u8) {
     nack_prepare,
 
     eviction,
+
+    request_table,
+    table,
 };
 
 /// This type exists to avoid making the Header type dependant on the state
