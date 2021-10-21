@@ -72,9 +72,7 @@ scripts/benchmark.sh
 
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
-## Test
-
-The [QuickStart](#quickstart) step above will install Zig for you to the root of the `tigerbeetle` directory.
+## Tests
 
 ### Unit Tests
 
@@ -83,6 +81,8 @@ To run the unit tests:
 ```bash
 zig/zig build test
 ```
+
+The [QuickStart](#quickstart) step above will install Zig for you to the root of the `tigerbeetle` directory.
 
 ### Simulation Tests
 
