@@ -105,6 +105,7 @@ pub const IO = struct {
 
             for (events[0..new_events]) |event| {
                 const completion = @intToPtr(*Completion, event.udata);
+                completion.next = null;
                 self.completed.push(completion);
             }
         }
