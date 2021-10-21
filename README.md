@@ -74,9 +74,11 @@ scripts/benchmark.sh
 
 ## Test
 
-The [QuickStart](#quickstart) above will install Zig for you to the root of the `tigerbeetle` directory. To run the unit tests:
+The [QuickStart](#quickstart) step above will install Zig for you to the root of the `tigerbeetle` directory.
 
-````bash
+To run the unit tests:
+
+```bash
 zig/zig build test
 ```
 
@@ -84,7 +86,7 @@ To run TigerBeetle's long-running simulation fuzz test, called *The VOPR*:
 
 ```bash
 scripts/vopr.sh
-````
+```
 
 *The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames, by our love for fuzzing over the years, by [Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
 
