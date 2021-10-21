@@ -72,13 +72,27 @@ scripts/benchmark.sh
 
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
-## The VOPR
+## Test
 
-The VOPR is a batteries-included generic implementation of TigerBeetle's version of Viewstamped Replication (VSR). Check out the [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr) repository for details on how to run the VOPR and interpret its output.
+The [QuickStart](#quickstart) above will install Zig for you to the root of the `tigerbeetle` directory. To run the unit tests:
 
-VOPR means Viewstamped Operation Replicator. It features a built-in [state checker](src/test/state_checker.zig) that can hook into all the replicas, and check all their state transitions the instant they take place, using cryptographic hash chaining to prove causality and check that all interim state transitions are valid, based on any of the set of inflight client requests at the time, without divergent states, and to check for convergence to the highest state at the end of the simulation. 
+````bash
+zig/zig build test
+```
 
-At the same time the VOPR is also a fuzzing [simulator](src/simulator.zig) we call *The VOPR* to simulate a whole cluster of servers and clients interacting, all within a single process, with a [network simulator](src/test/packet_simulator.zig) to simulate all kinds of network faults between them, and with an in-memory [storage simulator](src/test/storage.zig) to simulate all kinds of storage faults, so you can explore huge state spaces in a short amount of time.
+To run TigerBeetle's long-running simulation fuzz test, called *The VOPR*:
+
+```bash
+scripts/vopr.sh
+````
+
+*The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames, by our love for fuzzing over the years, by [Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
+
+*The VOPR* is [a deterministic simulator](src/simulator.zig) that can fuzz many clusters of TigerBeetle servers and clients interacting through TigerBeetle's Viewstamped Replication consensus protocol, but all within a single developer machine process, with [a network simulator](src/test/packet_simulator.zig) to simulate all kinds of network faults, and with an in-memory [storage simulator](src/test/storage.zig) to simulate all kinds of storage faults, to explore and test TigerBeetle against huge state spaces in a short amount of time, by literally speeding up the passing of time within the simulation itself.
+
+Beyond being a deterministic simulator, *The VOPR* also features [a state checker](src/test/state_checker.zig) that can hook into all the replicas, and check all their state transitions the instant they take place, using cryptographic hash chaining to prove causality and check that all interim state transitions are valid, based on any of the set of inflight client requests at the time, without divergent states, and then check for convergence to the highest state at the end of the simulation, to distinguish between correctness or liveness bugs.
+
+Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr) bug bounty challenge repository for more details on how to run the VOPR and interpret its output.
 
 ## Launch a Local Cluster
 
