@@ -76,13 +76,17 @@ scripts/benchmark.sh
 
 The [QuickStart](#quickstart) step above will install Zig for you to the root of the `tigerbeetle` directory.
 
+### Unit Tests
+
 To run the unit tests:
 
 ```bash
 zig/zig build test
 ```
 
-To run TigerBeetle's long-running simulation fuzz test, called *The VOPR*:
+### Simulation Test
+
+To run TigerBeetle's long-running simulation test, called *The VOPR*:
 
 ```bash
 scripts/vopr.sh
