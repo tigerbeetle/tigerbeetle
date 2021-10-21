@@ -674,6 +674,7 @@ test "linked accounts" {
     defer arena.deinit();
     const allocator = &arena.allocator;
 
+    const accounts_max = 5;
     const transfers_max = 0;
     const commits_max = 0;
 
@@ -1150,7 +1151,7 @@ test "create/lookup/rollback commits" {
     const output = try allocator.alloc(u8, 4096);
 
     // Use a timestamp of 0 since this is just a test
-    //ACCOUNTS
+    // Accounts:
     state_machine.prepare(0, .create_accounts, input);
     const size = state_machine.commit(0, .create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
@@ -1159,7 +1160,7 @@ test "create/lookup/rollback commits" {
         try testing.expectEqual(accounts[i], state_machine.get_account(accounts[i].id).?.*);
     }
 
-    //TRANSFERS
+    //Transfers:
     const object_transfers = std.mem.asBytes(&transfers);
     const output_transfers = try allocator.alloc(u8, 4096);
 
@@ -1171,7 +1172,7 @@ test "create/lookup/rollback commits" {
         try testing.expectEqual(transfers[i], state_machine.get_transfer(transfers[i].id).?.*);
     }
 
-    //COMMITS
+    // Commits:
     const timestamp: u64 = (state_machine.commit_timestamp + 1);
     const vectors = [_]Vector{
         Vector{
