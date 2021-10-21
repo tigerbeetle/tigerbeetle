@@ -84,15 +84,15 @@ To run the unit tests:
 zig/zig build test
 ```
 
-### Simulation Test
+### Simulation Tests
 
-To run TigerBeetle's long-running simulation test, called *The VOPR*:
+To run TigerBeetle's long-running simulation, called *The VOPR*:
 
 ```bash
 scripts/vopr.sh
 ```
 
-*The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames, by our love for fuzzing over the years, by [Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
+*The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames, by our love of fuzzing over the years, by [Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
 
 *The VOPR* is [a deterministic simulator](src/simulator.zig) that can fuzz many clusters of TigerBeetle servers and clients interacting through TigerBeetle's Viewstamped Replication consensus protocol, but all within a single developer machine process, with [a network simulator](src/test/packet_simulator.zig) to simulate all kinds of network faults, and with an in-memory [storage simulator](src/test/storage.zig) to simulate all kinds of storage faults, to explore and test TigerBeetle against huge state spaces in a short amount of time, by literally speeding up the passing of time within the simulation itself.
 
