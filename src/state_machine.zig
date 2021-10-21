@@ -664,10 +664,9 @@ test "create/lookup accounts" {
     defer state_machine.deinit();
 
     for (vectors) |vector| {
-        const create_result = state_machine.create_account(vector.object);
-        switch (vector.result) {
-            .ok => try testing.expectEqual(vector.object, state_machine.get_account(vector.object.id).?.*),
-            else => try testing.expectEqual(vector.result, create_result),
+        try testing.expectEqual(vector.result, state_machine.create_account(vector.object));
+        if (vector.result == .ok) {
+            try testing.expectEqual(vector.object, state_machine.get_account(vector.object.id).?.*);
         }
     }
 }
@@ -1035,19 +1034,18 @@ test "create/lookup/rollback transfers" {
     };
 
     for (vectors) |vector| {
-        const create_result = state_machine.create_transfer(vector.object);
-        switch (vector.result) {
-            .ok => try testing.expectEqual(vector.object, state_machine.get_transfer(vector.object.id).?.*),
-            else => try testing.expectEqual(vector.result, create_result),
+        try testing.expectEqual(vector.result, state_machine.create_transfer(vector.object));
+        if (vector.result == .ok) {
+            try testing.expectEqual(vector.object, state_machine.get_transfer(vector.object.id).?.*);
         }
     }
 
-    //2 phase commit [reserved]:
+    // 2 phase commit [reserved]:
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_reserved);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_reserved);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_reserved);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_reserved);
-    //1 phase commit [accepted]:
+    // 1 phase commit [accepted]:
     try testing.expectEqual(@as(u64, 20), state_machine.get_account(7).?.*.debits_accepted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_accepted);
     try testing.expectEqual(@as(u64, 20), state_machine.get_account(8).?.*.credits_accepted);
@@ -1160,7 +1158,7 @@ test "create/lookup/rollback commits" {
         try testing.expectEqual(accounts[i], state_machine.get_account(accounts[i].id).?.*);
     }
 
-    //Transfers:
+    // Transfers:
     const object_transfers = std.mem.asBytes(&transfers);
     const output_transfers = try allocator.alloc(u8, 4096);
 
@@ -1290,10 +1288,9 @@ test "create/lookup/rollback commits" {
     try testing.expectEqual(@as(u64, 75), account_2_before.credits_reserved);
 
     for (vectors) |vector| {
-        const create_result = state_machine.commit_transfer(vector.object);
-        switch (vector.result) {
-            .ok => try testing.expectEqual(vector.object, state_machine.get_commit(vector.object.id).?.*),
-            else => try testing.expectEqual(vector.result, create_result),
+        try testing.expectEqual(vector.result, state_machine.commit_transfer(vector.object));
+        if (vector.result == .ok) {
+            try testing.expectEqual(vector.object, state_machine.get_commit(vector.object.id).?.*);
         }
     }
 
@@ -1301,18 +1298,18 @@ test "create/lookup/rollback commits" {
     // Account 1:
     const account_1_after = state_machine.get_account(1).?.*;
     try testing.expectEqual(@as(u64, 30), account_1_after.debits_accepted);
-    //+15 (acceptance applied):
+    // +15 (acceptance applied):
     try testing.expectEqual(@as(u64, 45), account_1_after.debits_reserved);
-    //-15 (reserved moved):
+    // -15 (reserved moved):
     try testing.expectEqual(@as(u64, 0), account_1_after.credits_accepted);
     try testing.expectEqual(@as(u64, 0), account_1_after.credits_reserved);
     // Account 2:
     const account_2_after = state_machine.get_account(2).?.*;
     try testing.expectEqual(@as(u64, 0), account_2_after.debits_accepted);
     try testing.expectEqual(@as(u64, 0), account_2_after.debits_reserved);
-    //+15 (acceptance applied):
+    // +15 (acceptance applied):
     try testing.expectEqual(@as(u64, 30), account_2_after.credits_accepted);
-    //-15 (reserved moved):
+    // -15 (reserved moved):
     try testing.expectEqual(@as(u64, 45), account_2_after.credits_reserved);
 
     // Test COMMIT with invalid debit/credit accounts
@@ -1335,12 +1332,12 @@ test "create/lookup/rollback commits" {
         .debit_account_not_found,
     );
 
-    //rollback [id=2] not rejected:
+    // Rollback [id=2] not rejected:
     state_machine.commit_transfer_rollback(vectors[4].object);
 
     // Account 1:
     const account_1_rollback = state_machine.get_account(1).?.*;
-    //-15 (rollback):
+    // -15 (rollback):
     try testing.expectEqual(@as(u64, 15), account_1_rollback.debits_accepted);
     try testing.expectEqual(@as(u64, 60), account_1_rollback.debits_reserved);
     try testing.expectEqual(@as(u64, 0), account_1_rollback.credits_accepted);
@@ -1349,18 +1346,18 @@ test "create/lookup/rollback commits" {
     const account_2_rollback = state_machine.get_account(2).?.*;
     try testing.expectEqual(@as(u64, 0), account_2_rollback.debits_accepted);
     try testing.expectEqual(@as(u64, 0), account_2_rollback.debits_reserved);
-    //-15 (rollback):
+    // -15 (rollback):
     try testing.expectEqual(@as(u64, 15), account_2_rollback.credits_accepted);
     try testing.expectEqual(@as(u64, 60), account_2_rollback.credits_reserved);
 
-    //rollback [id=3] rejected:
+    // Rollback [id=3] rejected:
     state_machine.commit_transfer_rollback(vectors[7].object);
     // Account 1:
     const account_1_rollback_reject = state_machine.get_account(1).?.*;
     try testing.expectEqual(@as(u64, 15), account_1_rollback_reject.debits_accepted);
-    //remains unchanged:
+    // Remains unchanged:
     try testing.expectEqual(@as(u64, 75), account_1_rollback_reject.debits_reserved);
-    //+15 rolled back:
+    // +15 rolled back:
     try testing.expectEqual(@as(u64, 0), account_1_rollback_reject.credits_accepted);
     try testing.expectEqual(@as(u64, 0), account_1_rollback_reject.credits_reserved);
     // Account 2:
@@ -1368,7 +1365,7 @@ test "create/lookup/rollback commits" {
     try testing.expectEqual(@as(u64, 0), account_2_rollback_reject.debits_accepted);
     try testing.expectEqual(@as(u64, 0), account_2_rollback_reject.debits_reserved);
     try testing.expectEqual(@as(u64, 15), account_2_rollback_reject.credits_accepted);
-    //+15 rolled back"
+    // +15 rolled back"
     try testing.expectEqual(@as(u64, 75), account_2_rollback_reject.credits_reserved);
 }
 
