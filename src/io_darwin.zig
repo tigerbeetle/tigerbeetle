@@ -399,27 +399,7 @@ pub const IO = struct {
         );
     }
 
-    pub const FsyncError = error{
-        FileDescriptorInvalid,
-        DiskQuota,
-        ArgumentsInvalid,
-        InputOutput,
-        NoSpaceLeft,
-        ReadOnlyFileSystem,
-        AccessDenied,
-    } || os.UnexpectedError;
-
-    pub fn fsync(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: FsyncError!void,
-        ) void,
         completion: *Completion,
-        fd: os.fd_t,
         flags: u32,
     ) void {
         self.submit(
@@ -439,28 +419,7 @@ pub const IO = struct {
         );
     }
 
-    pub const OpenatError = error{
-        AccessDenied,
-        FileDescriptorInvalid,
-        DeviceBusy,
-        PathAlreadyExists,
-        FileTooBig,
-        ArgumentsInvalid,
-        IsDir,
-        SymLinkLoop,
-        ProcessFdQuotaExceeded,
-        NameTooLong,
-        SystemFdQuotaExceeded,
-        NoDevice,
-        FileNotFound,
-        SystemResources,
-        NoSpaceLeft,
-        NotDir,
-        FileLocksNotSupported,
-        BadPathName,
-        InvalidUtf8,
-        WouldBlock,
-    } || os.UnexpectedError;
+    pub const OpenatError = os.OpenError;
 
     pub fn openat(
         self: *IO,

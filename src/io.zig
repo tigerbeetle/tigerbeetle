@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const os = std.os;
 const linux = os.linux;
+const is_darwin = std.Target.current.os.tag.isDarwin();
 
 const FIFO = @import("fifo.zig").FIFO;
 const IO_Linux = @import("io_linux.zig").IO;
@@ -167,6 +168,7 @@ test "accept/connect/send/receive" {
 
     try struct {
         const Context = @This();
+        const io_flags = if (is_darwin) 0 else os.MSG_NOSIGNAL;
 
         io: IO,
         done: bool = false,
@@ -240,7 +242,7 @@ test "accept/connect/send/receive" {
                 completion,
                 self.client,
                 &self.send_buf,
-                if (std.Target.current.os.tag == .linux) os.MSG_NOSIGNAL else 0,
+                io_flags,
             );
         }
 
@@ -265,7 +267,7 @@ test "accept/connect/send/receive" {
                 completion,
                 self.accepted_sock,
                 &self.recv_buf,
-                if (std.Target.current.os.tag == .linux) os.MSG_NOSIGNAL else 0,
+                io_flags,
             );
         }
 
