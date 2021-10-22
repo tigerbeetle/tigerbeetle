@@ -190,11 +190,17 @@ test "IO data echo" {
         io: IO,
         tx: Pipe,
         rx: Pipe,
+        timer: *Time,
+        started: u64,
+        current: u64,
         server: Socket = .{},
         transferred: u64 = 0,
 
-        const buffer_size = 1 * 1024 * 1024; // 1mb
-        const run_until_transferred = 1 * 1024 * 1024 * 1024; // 1gb
+        // 1mb: larger than socket buffer so forces io_pending on darwin
+        const buffer_size = 1 * 1024 * 1024;
+
+        // max time for the benchmark to run
+        const run_duration = 1 * std.time.ns_per_s;
 
         const Context = @This();
         const Socket = struct {
@@ -212,12 +218,27 @@ test "IO data echo" {
             defer testing.allocator.free(buf);
             std.mem.set(u8, buf, 0);
             
+            var timer = Time{};
+            const started = timer.monotonic();
             var self = Context{
                 .io = try IO.init(32, 0),
+                .timer = &timer,
+                .started = started,
+                .current = started,
                 .tx = .{ .buffer = buf[0*buffer_size..][0..buffer_size] },
                 .rx = .{ .buffer = buf[1*buffer_size..][0..buffer_size] },
             };
-            defer self.io.deinit();
+
+            defer {
+                self.io.deinit();
+                const elapsed_ns = self.current - started;
+                const transferred_mb = @intToFloat(f64, self.transferred) / 1024 / 1024;
+
+                std.debug.warn("\nIO throughput test: took {}ms @ {d:.2} MB/s\n", .{
+                    elapsed_ns / std.time.ns_per_ms,
+                    transferred_mb / (@intToFloat(f64, elapsed_ns) / std.time.ns_per_s),
+                });
+            }
             
             self.server.fd = try os.socket(os.AF_INET, os.SOCK_STREAM | sock_flags, 0);
             defer os.close(self.server.fd);
@@ -253,20 +274,8 @@ test "IO data echo" {
                 address,
             );
 
-            var timer = Time{};
-            const started = timer.monotonic();
-            defer {
-                const elapsed_ns = timer.monotonic() - started;
-                const transferred_mb = @intToFloat(f64, self.transferred) / 1024 / 1024;
-
-                std.debug.warn("\nIO throughput test: took {}ms @ {d:.2} MB/s\n", .{
-                    elapsed_ns / std.time.ns_per_ms,
-                    transferred_mb / (@intToFloat(f64, elapsed_ns) / std.time.ns_per_s),
-                });
-            }
-
             var tick: usize = 0xdeadbeef;
-            while (self.transferred < run_until_transferred) : (tick +%= 1) {
+            while (self.isRunning()) : (tick +%= 1) {
                 if (tick % 61 == 0) {
                     const timeout_ns = tick % (10 * std.time.ns_per_ms);
                     try self.io.run_for_ns(@intCast(u63, timeout_ns));
@@ -279,6 +288,15 @@ test "IO data echo" {
             try testing.expect(self.tx.socket.fd != -1);
             try testing.expect(self.rx.socket.fd != -1);
             os.close(self.rx.socket.fd);
+        }
+
+        fn isRunning(self: Context) bool {
+            // Make sure that we're connected
+            if (self.rx.socket.fd == -1) 
+                return true;
+
+            const elapsed = self.current - self.started;
+            return elapsed < run_duration;
         }
 
         fn on_accept(
@@ -332,6 +350,10 @@ test "IO data echo" {
 
             assert(bytes <= buffer_size);
             self.transferred += bytes;
+
+            self.current = self.timer.monotonic();
+            if (!self.isRunning())
+                return;
             
             const pipe = &@field(self, pipe_name);
             pipe.transferred += bytes;
