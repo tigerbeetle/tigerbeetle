@@ -1,4 +1,5 @@
 const std = @import("std");
+const math = std.math;
 const mem = std.mem;
 const vsr = @import("vsr.zig");
 
@@ -46,7 +47,7 @@ pub const CompositeKey = extern struct {
         assert(@alignOf(CompositeKey) == 16);
     }
 
-    pub fn compare_keys(a: CompositeKey, b: CompositeKey) std.math.Order {
+    pub fn compare_keys(a: CompositeKey, b: CompositeKey) math.Order {
         if (a.secondary < b.secondary) {
             return .lt;
         } else if (a.secondary > b.secondary) {
@@ -183,12 +184,17 @@ const LsmTreeOptions = struct {
 pub fn LsmTree(
     comptime Key: type,
     comptime Value: type,
-    comptime compare_keys: fn (Key, Key) std.math.Order,
+    comptime compare_keys: fn (Key, Key) math.Order,
     comptime key_from_value: fn (Value) Key,
     comptime tombstone: fn (Value) bool,
     comptime tombstone_from_key: fn (Key) Value,
     comptime Storage: type,
 ) type {
+    assert(@sizeOf(Key) >= 4);
+    assert(@sizeOf(Key) % 4 == 0);
+
+    const value_size = @sizeOf(Value);
+    const key_size = @sizeOf(Key);
     return struct {
         const Self = @This();
 
@@ -214,7 +220,7 @@ pub fn LsmTree(
                 key_max: Key,
 
                 comptime {
-                    assert(@sizeOf(Table) == 32 + @sizeOf(Key) * 2);
+                    assert(@sizeOf(Table) == 32 + key_size * 2);
                     assert(@alignOf(Table) == 16);
                 }
             };
@@ -238,40 +244,75 @@ pub fn LsmTree(
             const Values = std.HashMapUnmanaged(Value, void, ValuesContext, 50);
 
             values: Values = .{},
+            /// Used as a scratch buffer to provide a sorted iterator for construction
+            /// of ImmutableTables.
+            values_sorted: *[page_values_count]Value,
 
-            pub fn init(allocator: *std.mem.Allocator, size: usize) !MutableTable {
-                var table: MutableTable = .{};
-                try table.values.ensureTotalCapacity(size);
-
+            pub fn init(allocator: *std.mem.Allocator) !MutableTable {
+                var table: MutableTable = .{
+                    .values_sorted = try table.allocator.create([page_values_count]Value),
+                };
+                errdefer allocator.destroy(table.values_sorted);
+                try table.values.ensureTotalCapacity(page_values_count);
                 return table;
             }
 
             /// Add the given value to the table
             pub fn put(table: *MutableTable, value: Value) void {
                 table.values.putAssumeCapacity(value, {});
+                // The hash map implementation may allocate more memory
+                // than strictly needed due to a growth factor.
+                assert(table.values.count() <= page_values_count);
             }
 
             pub fn remove(table: *MutableTable, key: Key) void {
                 table.values.putAssumeCapacity(tombstone_from_key(key), {});
+                // The hash map implementation may allocate more memory
+                // than strictly needed due to a growth factor.
+                assert(table.values.count() <= page_values_count);
             }
 
             pub fn get(table: *MutableTable, key: Key) ?Value {
                 return table.values.get(tombstone_from_key(key));
             }
+
+            pub const Iterator = struct {
+                values: []Value,
+
+                /// Returns the number of values copied, 0 if there are no values left.
+                pub fn copy_values(iterator: *Iterator, target: []Value) usize {
+                    const count = math.min(iterator.values.len, target.len);
+                    mem.copy(Value, target, iterator.values[0..count]);
+                    iterator.values = iterator.values[count..];
+                    return count;
+                }
+            };
+
+            pub fn iterator(table: *MutableTable) Iterator {
+                var i: usize = 0;
+                var it = table.values.keyIterator();
+                while (it.next()) |value| : (i += 1) {
+                    table.values_sorted[i] = value.*;
+                }
+                const values = table.values_sorted[0..i];
+                assert(values.len == table.values.count());
+
+                // Sort values by key:
+                const less_than = struct {
+                    pub fn less_than(_: void, a: Value, b: Value) bool {
+                        return compare_keys(key_from_value(a), key_from_value(b)) == .lt;
+                    }
+                }.less_than;
+                std.sort.insertionSort(Value, values, {}, less_than);
+
+                return Iterator{ .values = values };
+            }
         };
 
         pub const ImmutableTable = struct {
-            const Layout = struct {
-                index_offset: comptime_int,
-                index_size: comptime_int,
-                pages_offset: comptime_int,
-                pages_size: comptime_int,
-                filter_offset: comptime_int,
-                filter_size: comptime_int,
-            };
+            const page_size = config.lsm_table_page_size;
 
-            const layout: Layout = blk: {
-                const page_size = config.lsm_table_page_size;
+            const layout = blk: {
                 const filter_bytes_per_key = 2;
 
                 var filter_size = 0;
@@ -283,11 +324,65 @@ pub fn LsmTree(
                 var pages_offset: comptime_int = undefined;
 
                 while (true) : (pages_size -= page_size) {
-                    filter_size = @divExact(pages_size, @sizeOf(Value)) * filter_bytes_per_key;
-                    index_size = @divExact(pages_size, page_size) * @sizeOf(Key);
+                    filter_size = @divExact(pages_size, value_size) * filter_bytes_per_key;
+                    index_size = @divExact(pages_size, page_size) * key_size;
                     pages_offset = vsr.sector_ceil(@sizeOf(vsr.Header) + filter_size + index_size);
                     if (pages_offset + pages_size <= config.message_size_max) break;
                 }
+
+                var page_keys_count: comptime_int = undefined;
+                var page_values_count: comptime_int = undefined;
+
+                // Searching the values array is more expensive than searching the per-page index
+                // as the larger values size leads to more cache misses. We can therefore speed
+                // up lookups by making the per page index larger at the cost of reducing the
+                // number of values that may be stored per page.
+                //
+                // X = values per page
+                // Y = keys per page
+                //
+                // R = config.lsm_table_value_to_index_ratio_min
+                //
+                // To maximize:
+                //     Y
+                // Given constraints:
+                //     page_size >= X * value_size + Y * key_size
+                //     (X * value_size) / (Y * key_size) >= R
+                //     X >= Y
+                //
+                // Plots of above constraints:
+                //     https://www.desmos.com/calculator/elqqaalgbc
+                //
+                // page_size - X * value_size = Y * key_size
+                // Y = (page_size - X * value_size) / key_size
+                //
+                // (X * value_size) / (page_size - X * value_size) = R
+                // (X * value_size) = R * page_size - R * X * value_size
+                // (R + 1) * X * value_size = R * page_size
+                // X = R * page_size / ((R + 1)* value_size)
+                //
+                // Y = (page_size - (R * page_size / ((R + 1) * value_size)) * value_size) / key_size
+                // Y = (page_size - (R / (R + 1)) * page_size) / key_size
+                // Y = page_size / ((R + 1) * key_size)
+                page_keys_count = math.min(
+                    page_size / ((config.lsm_table_value_to_index_ratio_min + 1) * key_size),
+                    page_size / (value_size + key_size),
+                );
+
+                // Round to the next lowest power of two. This speeds up lookups in the Eytzinger
+                // layout and should help ensure better alignment for the following values.
+                // We could round to the nearest power of two, but then we would need
+                // care to avoid breaking e.g. the X >= Y invariant above.
+                page_keys_count = math.floorPowerOfTwo(comptime_int, page_keys_count);
+
+                // If the index is smaller than 16 keys then there are key sizes >= 4 such that
+                // the total index size is not 64 byte cache line aligned.
+                assert(@sizeOf(Key) >= 4);
+                assert(@sizeOf(Key) % 4 == 0);
+                if (page_keys_count < config.cache_line_size / 4) page_keys_count = 0;
+                assert((page_keys_count * key_size) % config.cache_line_size == 0);
+
+                page_values_count = (page_size - page_keys_count * key_size) / value_size;
 
                 break :blk .{
                     .filter_offset = @sizeOf(vsr.Header),
@@ -300,6 +395,9 @@ pub fn LsmTree(
                     .pages_size = pages_size,
 
                     .table_size = pages_offset + pages_size,
+
+                    .page_keys_count = page_keys_count,
+                    .page_values_count = page_values_count,
                 };
             };
 
@@ -310,6 +408,15 @@ pub fn LsmTree(
             const pages_offset = layout.pages_offset;
             const pages_size = layout.pages_size;
             const table_size = layout.table_size;
+            const page_keys_count = layout.page_keys_count;
+            const page_values_count = layout.page_values_count;
+
+            const page_keys_offset = 0;
+            const page_keys_size = page_keys_count * key_size;
+            const page_values_offset = page_keys_offset + page_keys_size;
+            const page_values_size = page_values_count * value_size;
+            const page_padding_offset = page_values_offset + page_values_size;
+            const page_padding_size = page_size - page_padding_offset;
 
             comptime {
                 const page_size = config.lsm_table_page_size;
@@ -319,8 +426,8 @@ pub fn LsmTree(
                 assert(index_size > 0);
                 assert(pages_size > 0);
 
-                assert(filter_size == @divExact(pages_size, @sizeOf(Value)) * filter_bytes_per_key);
-                assert(index_size == @divExact(pages_size, page_size) * @sizeOf(Key));
+                assert(filter_size == @divExact(pages_size, value_size) * filter_bytes_per_key);
+                assert(index_size == @divExact(pages_size, page_size) * key_size);
                 assert(pages_size % page_size == 0);
 
                 assert(table_size == @sizeOf(vsr.Header) + filter_size + index_size + pages_size);
@@ -329,6 +436,20 @@ pub fn LsmTree(
                 assert(filter_offset == @sizeOf(vsr.Header));
                 assert(index_offset == filter_offset + filter_size);
                 assert(pages_offset == vsr.sector_ceil(index_offset + index_size));
+
+                assert(page_keys_count >= 0);
+                assert(page_keys_count == 0 or math.isPowerOfTwo(page_keys_count));
+                assert(page_keys_size == 0 or page_values_size / page_keys_size >=
+                    config.lsm_table_value_to_index_ratio_min);
+
+                assert(page_values_count > 0);
+                assert(page_values_offset % config.cache_line_size == 0);
+                // You can have any value size you want, as long as it fits
+                // neatly into the CPU cache lines :)
+                assert((page_values_count * value_size) % config.cache_line_size == 0);
+
+                assert(page_padding_size >= 0);
+                assert(page_size == page_keys_size + page_values_size + page_padding_size);
             }
 
             /// The actual data to be written to disk.
@@ -344,32 +465,30 @@ pub fn LsmTree(
             pub fn create(
                 cluster: u32,
                 id: u32,
-                mutable: *const MutableTable,
+                iterator: *MutableTable.Iterator,
                 buffer: []align(config.sector_size) u8,
             ) ImmutableTable {
                 const header = mem.bytesAsValue(vsr.Header, buffer[0..@sizeOf(vsr.Header)]);
                 const index = mem.bytesAsSlice(Key, buffer[index_offset..][0..index_size]);
                 const pages = buffer[pages_offset..][0..pages_size];
 
-                // Copy values from MutableTable hash map to contiguous zone within pages:
-                const values_size = mutable.values.count() * @sizeOf(Value);
-                const values = mem.bytesAsSlice(Value, pages[0..values_size]);
-                {
-                    var i: usize = 0;
-                    var it = mutable.values.keyIterator();
-                    while (it.next()) |value| : (i += 1) {
-                        values[i] = value.*;
-                    }
-                    assert(i == values.len);
-                }
+                // TODO: finish this loop
+                var page_index: usize = 0;
+                while (true) : (page_index += 1) {
+                    const page = pages[page_index * page_size ..][0..page_size];
+                    const page_values_bytes = page[page_values_offset..][0..page_values_size];
+                    const page_values = mem.bytesAsSlice(Value, page_values_bytes);
+                    assert(page_values.len == page_values_count);
+                    const count = iterator.copy_values(page_values);
+                    assert(count <= page_values_count);
+                    // The page is empty
+                    if (count == 0) break;
 
-                // Sort values by key:
-                const less_than = struct {
-                    pub fn less_than(_: void, a: Value, b: Value) bool {
-                        return compare_keys(key_from_value(a), key_from_value(b)) == .lt;
-                    }
-                }.less_than;
-                std.sort.insertionSort(Value, values, {}, less_than);
+                    mem.set(u8, mem.sliceAsBytes(page_values[count..]), 0);
+                    mem.set(u8, page[page_padding_offset..][0..page_padding_size], 0);
+
+                    // TODO: construct the Eytzinger layout key index
+                }
 
                 if (builtin.mode == .Debug) {
                     var a = values[0];
@@ -385,13 +504,13 @@ pub fn LsmTree(
 
                 // Ensure values do not straddle page boundaries to avoid padding between pages:
                 // For example, 8/16/24/64/128-byte values all divide a 6 sector page perfectly.
-                comptime assert(config.lsm_table_page_size % @sizeOf(Value) == 0);
+                comptime assert(config.lsm_table_page_size % value_size == 0);
 
                 mem.set(u8, buffer[filter_offset..][0..filter_size], 0);
 
                 // Construct index, a key_min for every page:
                 {
-                    const values_per_page = @divExact(config.lsm_table_page_size, @sizeOf(Value));
+                    const values_per_page = @divExact(config.lsm_table_page_size, value_size);
                     var i: usize = 0;
                     while (i < values.len) : (i += 1) {
                         index[i] = values[i * values_per_page];

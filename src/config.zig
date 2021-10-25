@@ -159,6 +159,9 @@ pub const tcp_user_timeout = (tcp_keepidle + tcp_keepintvl * tcp_keepcnt) * 1000
 /// Whether to disable Nagle's algorithm to eliminate send buffering delays:
 pub const tcp_nodelay = true;
 
+/// Size of a CPU cache line in bytes
+pub const cache_line_size = 64;
+
 /// The minimum size of an aligned kernel page and an Advanced Format disk sector:
 /// This is necessary for direct I/O without the kernel having to fix unaligned pages with a copy.
 /// The new Advanced Format sector size is backwards compatible with the old 512 byte sector size.
@@ -198,6 +201,8 @@ pub const lsm_snapshots_max = clients_max;
 /// TODO: use a bit less than a sector, make the total superblock size well
 /// aligned to a sector boundry
 pub const lsm_snapshot_table_refs_max = 62; // This is a rough estimate
+
+pub const lsm_table_value_to_index_ratio_min = 16;
 
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
