@@ -470,13 +470,11 @@ test "pipe data over socket" {
         fn run() !void {
             const tx_buf = try testing.allocator.alloc(u8, buffer_size);
             defer testing.allocator.free(tx_buf);
-
             const rx_buf = try testing.allocator.alloc(u8, buffer_size);
             defer testing.allocator.free(rx_buf);
 
             std.mem.set(u8, tx_buf, 1);
             std.mem.set(u8, rx_buf, 0);
-
             var self = Context{
                 .io = try IO.init(32, 0),
                 .tx = .{ .buffer = tx_buf },
