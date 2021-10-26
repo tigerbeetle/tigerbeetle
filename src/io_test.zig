@@ -6,8 +6,6 @@ const is_darwin = std.Target.current.isDarwin();
 
 const Time = @import("time.zig").Time;
 const IO = @import("io.zig").IO;
-const io_flags = if (is_darwin) 0 else os.MSG_NOSIGNAL;
-const sock_flags = os.SOCK_CLOEXEC | (if (is_darwin) os.SOCK_NONBLOCK else 0);
 
 test "IO data pipe" {
     try struct {
@@ -46,8 +44,8 @@ test "IO data pipe" {
             };
             defer self.io.deinit();
             
-            self.server.fd = try os.socket(os.AF_INET, os.SOCK_STREAM | sock_flags, 0);
-            defer os.close(self.server.fd);
+            self.server.fd = try IO.socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+            defer os.closeSocket(self.server.fd);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             try os.setsockopt(
@@ -56,6 +54,7 @@ test "IO data pipe" {
                 os.SO_REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
+
             try os.bind(self.server.fd, &address.any, address.getOsSockLen());
             try os.listen(self.server.fd, 1);
 
@@ -65,11 +64,10 @@ test "IO data pipe" {
                 on_accept, 
                 &self.server.completion, 
                 self.server.fd,
-                sock_flags,
             );
 
-            self.tx.socket.fd = try os.socket(os.AF_INET, os.SOCK_STREAM | sock_flags, 0);
-            defer os.close(self.tx.socket.fd);
+            self.tx.socket.fd = try IO.socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+            defer os.closeSocket(self.tx.socket.fd);
 
             self.io.connect(
                 *Context,
@@ -93,7 +91,7 @@ test "IO data pipe" {
             try testing.expect(self.server.fd != -1);
             try testing.expect(self.tx.socket.fd != -1);
             try testing.expect(self.rx.socket.fd != -1);
-            os.close(self.rx.socket.fd);
+            os.closeSocket(self.rx.socket.fd);
 
             try testing.expectEqual(self.tx.transferred, buffer_size);
             try testing.expectEqual(self.rx.transferred, buffer_size);
@@ -137,7 +135,6 @@ test "IO data pipe" {
                     &self.tx.socket.completion,
                     self.tx.socket.fd,
                     self.tx.buffer[self.tx.transferred..],
-                    io_flags,
                 );
             }
         }
@@ -164,7 +161,6 @@ test "IO data pipe" {
                     &self.rx.socket.completion,
                     self.rx.socket.fd,
                     self.rx.buffer[self.rx.transferred..],
-                    io_flags,
                 );
             }
         }
@@ -240,8 +236,8 @@ test "IO data echo" {
                 });
             }
             
-            self.server.fd = try os.socket(os.AF_INET, os.SOCK_STREAM | sock_flags, 0);
-            defer os.close(self.server.fd);
+            self.server.fd = try IO.socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+            defer os.closeSocket(self.server.fd);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             try os.setsockopt(
@@ -259,11 +255,10 @@ test "IO data echo" {
                 on_accept, 
                 &self.server.completion, 
                 self.server.fd,
-                sock_flags,
             );
 
-            self.tx.socket.fd = try os.socket(os.AF_INET, os.SOCK_STREAM | sock_flags, 0);
-            defer os.close(self.tx.socket.fd);
+            self.tx.socket.fd = try IO.socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+            defer os.closeSocket(self.tx.socket.fd);
 
             self.io.connect(
                 *Context,
@@ -287,7 +282,7 @@ test "IO data echo" {
             try testing.expect(self.server.fd != -1);
             try testing.expect(self.tx.socket.fd != -1);
             try testing.expect(self.rx.socket.fd != -1);
-            os.close(self.rx.socket.fd);
+            os.closeSocket(self.rx.socket.fd);
         }
 
         fn isRunning(self: Context) bool {
@@ -379,7 +374,6 @@ test "IO data echo" {
                     &pipe.socket.completion,
                     pipe.socket.fd,
                     pipe.buffer[pipe.transferred..],
-                    io_flags,
                 );
             }
 

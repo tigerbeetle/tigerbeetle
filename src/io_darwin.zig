@@ -1,5 +1,6 @@
 const std = @import("std");
 const os = std.os;
+const mem = std.mem;
 const assert = std.debug.assert;
 
 const FIFO = @import("fifo.zig").FIFO;
@@ -183,7 +184,6 @@ pub const IO = struct {
     const Operation = union(enum) {
         accept: struct {
             socket: os.socket_t,
-            flags: u32,
         },
         close: struct {
             fd: os.fd_t,
@@ -195,13 +195,6 @@ pub const IO = struct {
         },
         fsync: struct {
             fd: os.fd_t,
-            flags: u32,
-        },
-        openat: struct {
-            fd: os.fd_t,
-            path: [*:0]const u8,
-            flags: u32,
-            mode: os.mode_t,
         },
         read: struct {
             fd: os.fd_t,
@@ -213,13 +206,11 @@ pub const IO = struct {
             socket: os.socket_t,
             buf: [*]u8,
             len: u32,
-            flags: u32,
         },
         send: struct {
             socket: os.socket_t,
             buf: [*]const u8,
             len: u32,
-            flags: u32,
         },
         timeout: struct {
             expires: u64,
@@ -298,7 +289,6 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         socket: os.socket_t,
-        flags: u32,
     ) void {
         self.submit(
             context,
@@ -307,11 +297,32 @@ pub const IO = struct {
             .accept,
             .{
                 .socket = socket,
-                .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) AcceptError!os.socket_t {
-                    return os.accept(op.socket, null, null, op.flags);
+                    const fd = try os.accept(
+                        op.socket, 
+                        null, 
+                        null, 
+                        os.SOCK_NONBLOCK | os.SOCK_CLOEXEC,
+                    );
+                    errdefer os.close(fd);
+
+                    // darwin doesn't support os.MSG_NOSIGNAL, 
+                    // but instead a socket option to avoid SIGPIPE.
+                    os.setsockopt(
+                        fd, 
+                        os.SOL_SOCKET, 
+                        os.SO_NOSIGPIPE, 
+                        &mem.toBytes(@as(c_int, 1))
+                    ) catch |err| switch (err) {
+                        error.TimeoutTooBig => unreachable,
+                        error.PermissionDenied => error.NetworkSubsystemFailed,
+                        error.AlreadyConnected => error.NetworkSubsystemFailed,
+                        error.InvalidProtocolOption => error.ProtocolFailure,
+                        else => |e| return e,
+                    };
+                    return fd;
                 }
             },
         );
@@ -399,8 +410,17 @@ pub const IO = struct {
         );
     }
 
+    pub fn fsync(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: FsyncError!void,
+        ) void,
         completion: *Completion,
-        flags: u32,
+        fd: os.fd_t,
     ) void {
         self.submit(
             context,
@@ -409,47 +429,10 @@ pub const IO = struct {
             .fsync,
             .{
                 .fd = fd,
-                .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) FsyncError!void {
                     _ = os.fcntl(op.fd, os.F_FULLFSYNC, 1) catch return os.fsync(op.fd);
-                }
-            },
-        );
-    }
-
-    pub const OpenatError = os.OpenError;
-
-    pub fn openat(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: OpenatError!os.fd_t,
-        ) void,
-        completion: *Completion,
-        fd: os.fd_t,
-        path: [*:0]const u8,
-        flags: u32,
-        mode: os.mode_t,
-    ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .openat,
-            .{
-                .fd = fd,
-                .path = path,
-                .mode = mode,
-                .flags = flags,
-            },
-            struct {
-                fn doOperation(op: anytype) OpenatError!os.fd_t {
-                    return os.openatZ(op.fd, op.path, op.flags, op.mode);
                 }
             },
         );
@@ -537,7 +520,6 @@ pub const IO = struct {
         completion: *Completion,
         socket: os.socket_t,
         buffer: []u8,
-        flags: u32,
     ) void {
         self.submit(
             context,
@@ -548,11 +530,10 @@ pub const IO = struct {
                 .socket = socket,
                 .buf = buffer.ptr,
                 .len = @intCast(u32, buffer_limit(buffer.len)),
-                .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) RecvError!usize {
-                    return os.recv(op.socket, op.buf[0..op.len], op.flags);
+                    return os.recv(op.socket, op.buf[0..op.len], 0);
                 }
             },
         );
@@ -572,7 +553,6 @@ pub const IO = struct {
         completion: *Completion,
         socket: os.socket_t,
         buffer: []const u8,
-        flags: u32,
     ) void {
         self.submit(
             context,
@@ -583,11 +563,10 @@ pub const IO = struct {
                 .socket = socket,
                 .buf = buffer.ptr,
                 .len = @intCast(u32, buffer_limit(buffer.len)),
-                .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) SendError!usize {
-                    return os.send(op.socket, op.buf[0..op.len], op.flags);
+                    return os.send(op.socket, op.buf[0..op.len], 0);
                 }
             },
         );
@@ -656,5 +635,14 @@ pub const IO = struct {
                 }
             },
         );
+    }
+
+    pub fn socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+        const fd = try os.socket(family, sock_type | os.SOCK_NONBLOCK, protocl);
+        errdefer os.close(fd);
+        
+        // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
+        os.setsockopt(fd, os.SOL_SOCKET, os.SO_NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
+        return fd;
     }
 };

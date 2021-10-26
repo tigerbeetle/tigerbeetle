@@ -187,7 +187,7 @@ pub const IO = struct {
                         op.socket,
                         &op.address,
                         &op.address_size,
-                        op.flags,
+                        os.SOCK_CLOEXEC,
                     );
                 },
                 .close => |op| {
@@ -202,10 +202,7 @@ pub const IO = struct {
                     );
                 },
                 .fsync => |op| {
-                    linux.io_uring_prep_fsync(sqe, op.fd, op.flags);
-                },
-                .openat => |op| {
-                    linux.io_uring_prep_openat(sqe, op.fd, op.path, op.flags, op.mode);
+                    linux.io_uring_prep_fsync(sqe, op.fd, 0);
                 },
                 .read => |op| {
                     linux.io_uring_prep_read(
@@ -216,10 +213,10 @@ pub const IO = struct {
                     );
                 },
                 .recv => |op| {
-                    linux.io_uring_prep_recv(sqe, op.socket, op.buffer, op.flags);
+                    linux.io_uring_prep_recv(sqe, op.socket, op.buffer, os.MSG_NOSIGNAL);
                 },
                 .send => |op| {
-                    linux.io_uring_prep_send(sqe, op.socket, op.buffer, op.flags);
+                    linux.io_uring_prep_send(sqe, op.socket, op.buffer, os.MSG_NOSIGNAL);
                 },
                 .timeout => |*op| {
                     linux.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
@@ -313,37 +310,6 @@ pub const IO = struct {
                         os.EROFS => error.ReadOnlyFileSystem,
                         else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
                     } else assert(completion.result == 0);
-                    completion.callback(completion.context, completion, &result);
-                },
-                .openat => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {
-                            completion.io.enqueue(completion);
-                            return;
-                        },
-                        os.EACCES => error.AccessDenied,
-                        os.EBADF => error.FileDescriptorInvalid,
-                        os.EBUSY => error.DeviceBusy,
-                        os.EEXIST => error.PathAlreadyExists,
-                        os.EFAULT => unreachable,
-                        os.EFBIG => error.FileTooBig,
-                        os.EINVAL => error.ArgumentsInvalid,
-                        os.EISDIR => error.IsDir,
-                        os.ELOOP => error.SymLinkLoop,
-                        os.EMFILE => error.ProcessFdQuotaExceeded,
-                        os.ENAMETOOLONG => error.NameTooLong,
-                        os.ENFILE => error.SystemFdQuotaExceeded,
-                        os.ENODEV => error.NoDevice,
-                        os.ENOENT => error.FileNotFound,
-                        os.ENOMEM => error.SystemResources,
-                        os.ENOSPC => error.NoSpaceLeft,
-                        os.ENOTDIR => error.NotDir,
-                        os.EOPNOTSUPP => error.FileLocksNotSupported,
-                        os.EOVERFLOW => error.FileTooBig,
-                        os.EPERM => error.AccessDenied,
-                        os.EWOULDBLOCK => error.WouldBlock,
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else @intCast(os.fd_t, completion.result);
                     completion.callback(completion.context, completion, &result);
                 },
                 .read => {
@@ -460,7 +426,6 @@ pub const IO = struct {
             socket: os.socket_t,
             address: os.sockaddr = undefined,
             address_size: os.socklen_t = @sizeOf(os.sockaddr),
-            flags: u32,
         },
         close: struct {
             fd: os.fd_t,
@@ -471,13 +436,6 @@ pub const IO = struct {
         },
         fsync: struct {
             fd: os.fd_t,
-            flags: u32,
-        },
-        openat: struct {
-            fd: os.fd_t,
-            path: [*:0]const u8,
-            flags: u32,
-            mode: os.mode_t,
         },
         read: struct {
             fd: os.fd_t,
@@ -487,12 +445,10 @@ pub const IO = struct {
         recv: struct {
             socket: os.socket_t,
             buffer: []u8,
-            flags: u32,
         },
         send: struct {
             socket: os.socket_t,
             buffer: []const u8,
-            flags: u32,
         },
         timeout: struct {
             timespec: os.__kernel_timespec,
@@ -529,7 +485,6 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         socket: os.socket_t,
-        flags: u32,
     ) void {
         completion.* = .{
             .io = self,
@@ -548,7 +503,6 @@ pub const IO = struct {
                     .socket = socket,
                     .address = undefined,
                     .address_size = @sizeOf(os.sockaddr),
-                    .flags = flags,
                 },
             },
         };
@@ -666,7 +620,6 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         fd: os.fd_t,
-        flags: u32,
     ) void {
         completion.* = .{
             .io = self,
@@ -683,67 +636,6 @@ pub const IO = struct {
             .operation = .{
                 .fsync = .{
                     .fd = fd,
-                    .flags = flags,
-                },
-            },
-        };
-        self.enqueue(completion);
-    }
-
-    pub const OpenatError = error{
-        AccessDenied,
-        FileDescriptorInvalid,
-        DeviceBusy,
-        PathAlreadyExists,
-        FileTooBig,
-        ArgumentsInvalid,
-        IsDir,
-        SymLinkLoop,
-        ProcessFdQuotaExceeded,
-        NameTooLong,
-        SystemFdQuotaExceeded,
-        NoDevice,
-        FileNotFound,
-        SystemResources,
-        NoSpaceLeft,
-        NotDir,
-        FileLocksNotSupported,
-        WouldBlock,
-    } || os.UnexpectedError;
-
-    pub fn openat(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: OpenatError!os.fd_t,
-        ) void,
-        completion: *Completion,
-        fd: os.fd_t,
-        path: [*:0]const u8,
-        flags: u32,
-        mode: os.mode_t,
-    ) void {
-        completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
-                    callback(
-                        @intToPtr(Context, @ptrToInt(ctx)),
-                        comp,
-                        @intToPtr(*const OpenatError!os.fd_t, @ptrToInt(res)).*,
-                    );
-                }
-            }.wrapper,
-            .operation = .{
-                .openat = .{
-                    .fd = fd,
-                    .path = path,
-                    .flags = flags,
-                    .mode = mode,
                 },
             },
         };
@@ -819,7 +711,6 @@ pub const IO = struct {
         completion: *Completion,
         socket: os.socket_t,
         buffer: []u8,
-        flags: u32,
     ) void {
         completion.* = .{
             .io = self,
@@ -837,7 +728,6 @@ pub const IO = struct {
                 .recv = .{
                     .socket = socket,
                     .buffer = buffer,
-                    .flags = flags,
                 },
             },
         };
@@ -871,7 +761,6 @@ pub const IO = struct {
         completion: *Completion,
         socket: os.socket_t,
         buffer: []const u8,
-        flags: u32,
     ) void {
         completion.* = .{
             .io = self,
@@ -889,7 +778,6 @@ pub const IO = struct {
                 .send = .{
                     .socket = socket,
                     .buffer = buffer,
-                    .flags = flags,
                 },
             },
         };
@@ -980,5 +868,9 @@ pub const IO = struct {
             },
         };
         self.enqueue(completion);
+    }
+
+    pub fn socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+        return os.socket(domain, sock_type, protocol);
     }
 };

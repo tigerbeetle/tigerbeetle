@@ -1,8 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const os = std.os;
-const linux = os.linux;
-const is_darwin = std.Target.current.os.tag.isDarwin();
+const testing = std.testing;
 
 const FIFO = @import("fifo.zig").FIFO;
 const IO_Linux = @import("io_linux.zig").IO;
@@ -29,12 +28,10 @@ pub fn buffer_limit(buffer_len: usize) usize {
 }
 
 test "ref all decls" {
-    std.testing.refAllDecls(IO);
+    testing.refAllDecls(IO);
 }
 
-test "write/fsync/read" {
-    const testing = std.testing;
-
+test "write/fsync/read/close" {
     try struct {
         const Context = @This();
 
@@ -105,50 +102,6 @@ test "write/fsync/read" {
             result: IO.ReadError!usize,
         ) void {
             self.read = result catch @panic("read error");
-            self.done = true;
-        }
-    }.run_test();
-}
-
-test "openat/close" {
-    const testing = std.testing;
-
-    try struct {
-        const Context = @This();
-
-        io: IO,
-        done: bool = false,
-        fd: os.fd_t = 0,
-
-        fn run_test() !void {
-            const path = "test_io_openat_close";
-            defer std.fs.cwd().deleteFile(path) catch {};
-
-            var self: Context = .{ .io = try IO.init(32, 0) };
-            defer self.io.deinit();
-
-            var completion: IO.Completion = undefined;
-            self.io.openat(
-                *Context,
-                &self,
-                openat_callback,
-                &completion,
-                linux.AT_FDCWD,
-                path,
-                os.O_CLOEXEC | os.O_RDWR | os.O_CREAT,
-                0o666,
-            );
-            while (!self.done) try self.io.tick();
-
-            try testing.expect(self.fd > 0);
-        }
-
-        fn openat_callback(
-            self: *Context,
-            completion: *IO.Completion,
-            result: IO.OpenatError!os.fd_t,
-        ) void {
-            self.fd = result catch @panic("openat error");
             self.io.close(*Context, self, close_callback, completion, self.fd);
         }
 
@@ -157,18 +110,15 @@ test "openat/close" {
             completion: *IO.Completion,
             result: IO.CloseError!void,
         ) void {
-            result catch @panic("close error");
+            _ = result catch @panic("close error");
             self.done = true;
         }
     }.run_test();
 }
 
 test "accept/connect/send/receive" {
-    const testing = std.testing;
-
     try struct {
         const Context = @This();
-        const io_flags = if (is_darwin) 0 else os.MSG_NOSIGNAL;
 
         io: IO,
         done: bool = false,
@@ -186,11 +136,11 @@ test "accept/connect/send/receive" {
         fn run_test() !void {
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
-            const server = try os.socket(address.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0);
-            defer os.close(server);
+            const server = try IO.socket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            defer os.closeSocket(server);
 
-            const client = try os.socket(address.any.family, os.SOCK_STREAM | os.SOCK_CLOEXEC, 0);
-            defer os.close(client);
+            const client = try IO.socket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            defer os.closeSocket(client);
 
             try os.setsockopt(
                 server,
@@ -219,7 +169,7 @@ test "accept/connect/send/receive" {
             );
 
             var server_completion: IO.Completion = undefined;
-            self.io.accept(*Context, &self, accept_callback, &server_completion, server, 0);
+            self.io.accept(*Context, &self, accept_callback, &server_completion, server);
 
             while (!self.done) try self.io.tick();
 
@@ -242,7 +192,6 @@ test "accept/connect/send/receive" {
                 completion,
                 self.client,
                 &self.send_buf,
-                io_flags,
             );
         }
 
@@ -267,7 +216,6 @@ test "accept/connect/send/receive" {
                 completion,
                 self.accepted_sock,
                 &self.recv_buf,
-                io_flags,
             );
         }
 
