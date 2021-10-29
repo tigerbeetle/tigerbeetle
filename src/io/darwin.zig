@@ -85,7 +85,9 @@ pub const IO = struct {
             // - tick() is non-blocking (wait_for_completions = false)
             // - run_for_ns() always submits a timeout
             if (change_events == 0 and self.completed.peek() == null) {
-                if (!wait_for_completions) return;
+                // if (!wait_for_completions) return;
+                if (io_inflight == 0 and !wait_for_completions)
+                    return;
                 const timeout_ns = next_timeout orelse @panic("kevent() blocking forever");
                 ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
                 ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
@@ -100,10 +102,12 @@ pub const IO = struct {
 
             // Mark the io events submitted only after kevent() successfully processed them
             self.io_pending.out = io_pending;
+            io_inflight += change_events;
             if (io_pending == null) {
                 self.io_pending.in = null;
             }
 
+            io_inflight -= new_events;
             for (events[0..new_events]) |event| {
                 const completion = @intToPtr(*Completion, event.udata);
                 completion.next = null;
@@ -638,7 +642,7 @@ pub const IO = struct {
     }
 
     pub fn socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
-        const fd = try os.socket(family, sock_type | os.SOCK_NONBLOCK, protocl);
+        const fd = try os.socket(family, sock_type | os.SOCK_NONBLOCK, protocol);
         errdefer os.close(fd);
         
         // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
