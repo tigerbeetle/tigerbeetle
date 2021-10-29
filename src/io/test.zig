@@ -228,7 +228,6 @@ test "timeout" {
         fn run_test() !void {
             var timer = Time{};
             const start_time = timer.monotonic();
-
             var self: Context = .{
                 .timer = &timer,
                 .io = try IO.init(32, 0),
