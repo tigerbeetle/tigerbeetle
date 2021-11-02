@@ -450,6 +450,14 @@ pub fn LsmTree(
 
                 assert(page_padding_size >= 0);
                 assert(page_size == page_keys_size + page_values_size + page_padding_size);
+
+                // We expect no page padding at least for TigerBeetle's objects and indexes:
+                if ((key_size == 8 and value_size == 128) or
+                    (key_size == 8 and value_size == 64) or
+                    (key_size == 24 and value_size == 24))
+                {
+                    assert(page_padding_size == 0);
+                }
             }
 
             /// The actual data to be written to disk.
