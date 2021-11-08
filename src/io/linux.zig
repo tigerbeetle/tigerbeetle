@@ -6,8 +6,8 @@ const IO_Uring = linux.IO_Uring;
 const io_uring_cqe = linux.io_uring_cqe;
 const io_uring_sqe = linux.io_uring_sqe;
 
-const FIFO = @import("fifo.zig").FIFO;
-const buffer_limit = @import("io.zig").buffer_limit;
+const FIFO = @import("../fifo.zig").FIFO;
+const buffer_limit = @import("../io.zig").buffer_limit;
 
 pub const IO = struct {
     ring: IO_Uring,
@@ -871,6 +871,6 @@ pub const IO = struct {
     }
 
     pub fn socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
-        return os.socket(domain, sock_type, protocol);
+        return os.socket(family, sock_type, protocol);
     }
 };

@@ -3,9 +3,9 @@ const os = std.os;
 const mem = std.mem;
 const assert = std.debug.assert;
 
-const FIFO = @import("fifo.zig").FIFO;
-const Time = @import("time.zig").Time;
-const buffer_limit = @import("io.zig").buffer_limit;
+const FIFO = @import("../fifo.zig").FIFO;
+const Time = @import("../time.zig").Time;
+const buffer_limit = @import("../io.zig").buffer_limit;
 
 pub const IO = struct {
     kq: os.fd_t,

@@ -3,8 +3,8 @@ const os = std.os;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const Time = @import("time.zig").Time;
-const IO = @import("io.zig").IO;
+const Time = @import("../time.zig").Time;
+const IO = @import("../io.zig").IO;
 
 test "write/fsync/read/close" {
     try struct {
@@ -58,7 +58,7 @@ test "write/fsync/read/close" {
             result: IO.WriteError!usize,
         ) void {
             self.written = result catch @panic("write error");
-            self.io.fsync(*Context, self, fsync_callback, completion, self.fd, 0);
+            self.io.fsync(*Context, self, fsync_callback, completion, self.fd);
         }
 
         fn fsync_callback(
@@ -216,7 +216,7 @@ test "timeout" {
         io: IO,
         timer: *Time,
         count: u32 = 0,
-        stop_time: i64 = 0,
+        stop_time: u64 = 0,
 
         fn run_test() !void {
             var timer = Time{};
@@ -303,11 +303,129 @@ test "submission queue full" {
     }.run_test();
 }
 
-test "IO tick only" {
+test "tick to wait" {
     // Use only IO.tick() to see if pending IO is actually processsed
+
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        accepted: os.socket_t = -1,
+        connected: bool = false,
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(1, 0) };
+            defer self.io.deinit();
+
+            const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
+            const kernel_backlog = 1;
+
+            const server = try IO.socket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            defer os.closeSocket(server);
+            
+            try os.setsockopt(
+                server,
+                os.SOL_SOCKET,
+                os.SO_REUSEADDR,
+                &std.mem.toBytes(@as(c_int, 1)),
+            );
+            try os.bind(server, &address.any, address.getOsSockLen());
+            try os.listen(server, kernel_backlog);
+
+            const client = try IO.socket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            defer os.closeSocket(client);
+
+            // Start the accept
+            var server_completion: IO.Completion = undefined;
+            self.io.accept(*Context, &self, accept_callback, &server_completion, server);
+
+            // Start the connect
+            var client_completion: IO.Completion = undefined;
+            self.io.connect(
+                *Context,
+                &self,
+                connect_callback,
+                &client_completion,
+                client,
+                address,
+            );
+
+            // Tick the IO to drain the accept & connect completions
+            while (self.accepted == -1 and !self.connected)
+                try self.io.tick();
+
+            assert(self.connected);
+            assert(self.accepted != -1);
+            defer os.closeSocket(self.accepted);
+
+            // Start receiving on the client
+            var recv_completion: IO.Completion = undefined;
+            var recv_buffer: [64]u8 = undefined;
+            std.mem.set(u8, &recv_buffer, 0xaa);
+            self.io.recv(
+                *Context, 
+                &self, 
+                recv_callback, 
+                &recv_completion, 
+                client,
+                &recv_buffer,
+            );
+
+            // Drain out the recv completion from any internal IO queues
+            try self.io.tick();
+            try self.io.tick();
+            try self.io.tick();
+
+            // Complete the recv() *outside* of the IO instance.
+            // Other tests already check .tick() with IO based completions.
+            // This simulates IO being completed by an external system
+            var send_buf = std.mem.zeroes([64]u8);
+            const wrote = try os.write(self.accepted, &send_buf);
+            try testing.expectEqual(wrote, send_buf.len);
+
+            // Wait for the recv() to complete using only IO.tick().
+            // If tick is broken, then this will deadlock
+            while (!self.received) {
+                try self.io.tick();
+            }
+
+            // Make sure the receive actually happened
+            assert(self.received);
+            try testing.expect(std.mem.eql(u8 &recv_buffer, &send_buf));
+        }
+
+        fn accept_callback(
+            self: *Context,
+            completion: *IO.Completion,
+            result: IO.AcceptError!os.socket_t,
+        ) void {
+            assert(self.accepted == -1);
+            self.accepted = result catch @panic("accept error");
+        }
+
+        fn connect_callback(
+            self: *Context,
+            completion: *IO.Completion,
+            result: IO.ConnectError!void,
+        ) void {
+            result catch @panic("connect error");
+            assert(!self.connected);
+            self.connected = true;
+        }
+
+        fn recv_callback(
+            self: *Context,
+            completion: *IO.Completion,
+            result: IO.RecvError!usize,
+        ) void {
+            _ = result catch |err| std.debug.panic("recv error: {}", .{err});
+            assert(!self.received);
+            self.received = true;
+        }
+    }.run_test();
 }
 
-test "IO data pipe" {
+test "pipe data over socket" {
     try struct {
         io: IO,
         tx: Pipe,
@@ -477,20 +595,3 @@ test "IO data pipe" {
 
     }.run();
 }
-
-test "IO data dropping" {
-    // test pending socket IO cancellation
-}
-
-test "IO data concurrency" {
-    // test mass IO concurrency
-
-    // N clients -> server -> N sockets
-    //
-    // client N sends to server socket N
-    // server socket N receives
-    // server socket N sends to client N + 1
-    // client N + 1 receives
-    // repeat with N = N + 1
-}
-
