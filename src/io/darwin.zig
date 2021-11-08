@@ -641,7 +641,7 @@ pub const IO = struct {
         );
     }
 
-    pub fn socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+    pub fn openSocket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         const fd = try os.socket(family, sock_type | os.SOCK_NONBLOCK, protocol);
         errdefer os.close(fd);
         
