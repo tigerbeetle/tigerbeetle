@@ -24,7 +24,7 @@ test "write/fsync/read/close" {
         fn run_test() !void {
             const path = "test_io_write_fsync_read";
             const file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = true });
-            defer file.close();
+            // defer file.close(); // closed at the end
             defer std.fs.cwd().deleteFile(path) catch {};
 
             var self: Context = .{
@@ -111,10 +111,10 @@ test "accept/connect/send/receive" {
         fn run_test() !void {
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
-            const server = try IO.socket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            const server = try IO.openSocket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
             defer os.closeSocket(server);
 
-            const client = try IO.socket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            const client = try IO.openSocket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
             defer os.closeSocket(client);
 
             try os.setsockopt(
@@ -245,7 +245,7 @@ test "timeout" {
 
             try testing.expectApproxEqAbs(
                 @as(f64, ms),
-                @intToFloat(f64, self.stop_time - start_time),
+                @intToFloat(f64, (self.stop_time - start_time) / std.time.ns_per_ms),
                 margin,
             );
         }
@@ -312,6 +312,7 @@ test "tick to wait" {
         io: IO,
         accepted: os.socket_t = -1,
         connected: bool = false,
+        received: bool = false,
 
         fn run_test() !void {
             var self: Context = .{ .io = try IO.init(1, 0) };
@@ -320,7 +321,7 @@ test "tick to wait" {
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
 
-            const server = try IO.socket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            const server = try IO.openSocket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
             defer os.closeSocket(server);
             
             try os.setsockopt(
@@ -332,7 +333,7 @@ test "tick to wait" {
             try os.bind(server, &address.any, address.getOsSockLen());
             try os.listen(server, kernel_backlog);
 
-            const client = try IO.socket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            const client = try IO.openSocket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
             defer os.closeSocket(client);
 
             // Start the accept
@@ -351,6 +352,8 @@ test "tick to wait" {
             );
 
             // Tick the IO to drain the accept & connect completions
+            assert(!self.connected);
+            assert(self.accepted == -1);
             while (self.accepted == -1 and !self.connected)
                 try self.io.tick();
 
@@ -385,13 +388,14 @@ test "tick to wait" {
 
             // Wait for the recv() to complete using only IO.tick().
             // If tick is broken, then this will deadlock
+            assert(!self.received);
             while (!self.received) {
                 try self.io.tick();
             }
 
             // Make sure the receive actually happened
             assert(self.received);
-            try testing.expect(std.mem.eql(u8 &recv_buffer, &send_buf));
+            try testing.expect(std.mem.eql(u8, &recv_buffer, &send_buf));
         }
 
         fn accept_callback(
@@ -462,7 +466,7 @@ test "pipe data over socket" {
             };
             defer self.io.deinit();
             
-            self.server.fd = try IO.socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+            self.server.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
             defer os.closeSocket(self.server.fd);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
@@ -484,7 +488,7 @@ test "pipe data over socket" {
                 self.server.fd,
             );
 
-            self.tx.socket.fd = try IO.socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+            self.tx.socket.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
             defer os.closeSocket(self.tx.socket.fd);
 
             self.io.connect(
