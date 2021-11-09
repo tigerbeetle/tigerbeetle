@@ -436,7 +436,7 @@ test "pipe data over socket" {
         rx: Pipe,
         server: Socket = .{},
 
-        const buffer_size = 256 * 1024 * 1024;
+        const buffer_size = 1 * 1024 * 1024;
 
         const Context = @This();
         const Socket = struct {

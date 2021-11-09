@@ -28,9 +28,7 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn tick(self: *IO) !void {
-        // TODO This is a hack to block 1ms every 10ms tick on macOS while we fix `flush(false)`:
-        // What we're seeing for the tigerbeetle-node client is that recv() syscalls never complete.
-        return self.run_for_ns(std.time.ns_per_ms);
+        return self.flush(false);
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
@@ -85,9 +83,7 @@ pub const IO = struct {
             // - tick() is non-blocking (wait_for_completions = false)
             // - run_for_ns() always submits a timeout
             if (change_events == 0 and self.completed.peek() == null) {
-                // if (!wait_for_completions) return;
-                if (io_inflight == 0 and !wait_for_completions)
-                    return;
+                if (!wait_for_completions) return;
                 const timeout_ns = next_timeout orelse @panic("kevent() blocking forever");
                 ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
                 ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
@@ -102,12 +98,10 @@ pub const IO = struct {
 
             // Mark the io events submitted only after kevent() successfully processed them
             self.io_pending.out = io_pending;
-            io_inflight += change_events;
             if (io_pending == null) {
                 self.io_pending.in = null;
             }
 
-            io_inflight -= new_events;
             for (events[0..new_events]) |event| {
                 const completion = @intToPtr(*Completion, event.udata);
                 completion.next = null;
@@ -280,7 +274,7 @@ pub const IO = struct {
         }
     }
 
-    pub const AcceptError = os.AcceptError;
+    pub const AcceptError = os.AcceptError || os.SetSockOptError;
 
     pub fn accept(
         self: *IO,
@@ -319,13 +313,14 @@ pub const IO = struct {
                         os.SOL_SOCKET, 
                         os.SO_NOSIGPIPE, 
                         &mem.toBytes(@as(c_int, 1))
-                    ) catch |err| switch (err) {
+                    ) catch |err| return switch (err) {
                         error.TimeoutTooBig => unreachable,
                         error.PermissionDenied => error.NetworkSubsystemFailed,
                         error.AlreadyConnected => error.NetworkSubsystemFailed,
                         error.InvalidProtocolOption => error.ProtocolFailure,
-                        else => |e| return e,
+                        else => |e| e,
                     };
+
                     return fd;
                 }
             },
@@ -413,6 +408,8 @@ pub const IO = struct {
             },
         );
     }
+
+    pub const FsyncError = os.SyncError;
 
     pub fn fsync(
         self: *IO,
@@ -646,7 +643,7 @@ pub const IO = struct {
         errdefer os.close(fd);
         
         // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
-        os.setsockopt(fd, os.SOL_SOCKET, os.SO_NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
+        try os.setsockopt(fd, os.SOL_SOCKET, os.SO_NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
         return fd;
     }
 };
