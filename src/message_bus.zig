@@ -214,7 +214,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 // https://github.com/rust-lang/libc/search?q=TCP_NODELAY
                 // https://github.com/ziglang/zig/search?q=TCP_NODELAY
                 const TCP_NODELAY: u32 = 1;
-                try set(fd, os.IPPROTO_TCP, tcp_nodelay, 1);
+                try set(fd, os.IPPROTO_TCP, TCP_NODELAY, 1);
             }
 
             try set(fd, os.SOL_SOCKET, os.SO_REUSEADDR, 1);
