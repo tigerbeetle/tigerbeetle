@@ -108,7 +108,6 @@ pub const IO = struct {
 
             // Mark the io events submitted only after kevent() successfully processed them
             self.io_pending.out = io_pending;
-            io_inflight += change_events;
             if (io_pending == null) {
                 self.io_pending.in = null;
             }
