@@ -4,9 +4,6 @@ const math = std.math;
 
 // TODO Add prefeching when @prefetch is available: https://github.com/ziglang/zig/issues/3600.
 //
-// TODO Godbolt shows that this code is not actually compiled to be branchless by llvm. This seems
-// to be an llvm issue as the equivalent C code is compiled to be branchless by gcc but not clang.
-//
 // TODO The Zig self hosted compiler will implement inlining itself before passing the IR to llvm,
 // which should eliminate the current poor codegen of key_from_value/compare_keys.
 pub fn binary_search(
@@ -24,7 +21,12 @@ pub fn binary_search(
     while (length > 1) {
         const half = length / 2;
         const mid = offset + half;
-        offset = if (compare_keys(key_from_value(values[mid]), key) == .lt) mid else offset;
+
+        // This trick seems to be what's needed to get llvm to emit branchless code for this,
+        // a ternay-style if expression was generated as a jump here for whatever reason.
+        const next_offsets = [_]usize{ offset, mid };
+        offset = next_offsets[@boolToInt(compare_keys(key_from_value(values[mid]), key) == .lt)];
+
         length -= half;
     }
 
