@@ -354,7 +354,8 @@ test "tick to wait" {
             // Tick the IO to drain the accept & connect completions
             assert(!self.connected);
             assert(self.accepted == -1);
-            while (self.accepted == -1 and !self.connected)
+            
+            while (self.accepted == -1 or !self.connected)
                 try self.io.tick();
 
             assert(self.connected);
