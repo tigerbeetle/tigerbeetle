@@ -183,15 +183,27 @@ pub const io_depth_write = 8;
 // TODO docs
 pub const lsm_trees = 6;
 
+/// Number of levels in an LSM tree.
+/// TODO tune this.
+pub const lsm_levels = 7;
+
 /// Max key size for the LSM Trees in bytes
 pub const lsm_key_size_max = 24;
 
-/// Size of pages used by the LSM tree implementation. These pages are passed
-/// through an LRU page cache.
-pub const lsm_table_page_size = 6 * sector_size;
+/// Size of blocks used by the LSM tree implementation. These blocks are passed
+/// through an LRU block cache.
+pub const lsm_table_block_size = 64 * 1024;
+
+/// Maximum number of blocks in a table
+pub const lsm_table_blocks_max = (64 * 1024 * 1024) / lsm_table_block_size;
+comptime {
+    // This is only here so that you, dear reader, don't have to do the math on the above
+    // line in your head to know the result.
+    assert(lsm_table_blocks_max == 819);
+}
 
 /// TODO: docs
-pub const lsm_snapshots_max = clients_max;
+pub const lsm_snapshots_max = 32;
 
 /// TODO: use a bit less than a sector, make the total superblock size well
 /// aligned to a sector boundry
