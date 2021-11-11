@@ -24,61 +24,73 @@ const vsr = @import("vsr.zig");
 // pub fn decode_superblock(buffer) void
 //
 
-pub const CompositeKey = extern struct {
-    const tombstone_bit = 1 << 63;
+pub fn CompositeKey(comptime Secondary: type) type {
+    assert(Secondary == u128 or Secondary == u64);
 
-    pub const Value = extern struct {
-        secondary: u128,
-        /// The most significant bit indicates if the value is a tombstone
+    return extern struct {
+        const Self = @This();
+
+        const tombstone_bit = 1 << 63;
+        // If zeroed padding is needed after the timestamp field
+        const pad = Secondary == u128;
+
+        pub const Value = extern struct {
+            secondary: Secondary,
+            /// The most significant bit indicates if the value is a tombstone
+            timestamp: u64,
+            padding: (if (pad) u64 else void) = (if (pad) 0 else {}),
+
+            comptime {
+                assert(@sizeOf(Value) == @sizeOf(Secondary) * 2);
+                assert(@alignOf(Value) == @alignOf(Secondary));
+            }
+        };
+
+        secondary: Secondary,
+        /// The most significant bit must be unset as it is used to indicate a tombstone
         timestamp: u64,
+        padding: (if (pad) u64 else void) = (if (pad) 0 else {}),
 
         comptime {
-            assert(@sizeOf(Value) == 24);
-            assert(@alignOf(Value) == 16);
+            assert(@sizeOf(Self) == @sizeOf(Secondary) * 2);
+            assert(@alignOf(Self) == @alignOf(Secondary));
+        }
+
+        // TODO: consider optimizing this by reinterpreting the raw memory in an advantageous way
+        // This may require modifying the struct layout.
+        pub fn compare_keys(a: Self, b: Self) math.Order {
+            if (a.secondary < b.secondary) {
+                return .lt;
+            } else if (a.secondary > b.secondary) {
+                return .gt;
+            } else if (a.timestamp < b.timestamp) {
+                return .lt;
+            } else if (a.timestamp > b.timestamp) {
+                return .gt;
+            } else {
+                return .eq;
+            }
+        }
+
+        pub fn key_from_value(value: Value) Self {
+            return .{
+                .secondary = value.secondary,
+                .timestamp = @truncate(u63, key.timestamp),
+            };
+        }
+
+        pub fn tombstone(value: Value) bool {
+            return value.timestamp & tombstone_bit != 0;
+        }
+
+        pub fn tombstone_from_key(key: Self) Value {
+            return .{
+                .secondary = key.secondary,
+                .timestamp = key.timestamp | tombstone_bit,
+            };
         }
     };
-
-    secondary: u128,
-    /// The most significant bit must be unset as it is used to indicate a tombstone
-    timestamp: u64,
-
-    comptime {
-        assert(@sizeOf(CompositeKey) == 24);
-        assert(@alignOf(CompositeKey) == 16);
-    }
-
-    pub fn compare_keys(a: CompositeKey, b: CompositeKey) math.Order {
-        if (a.secondary < b.secondary) {
-            return .lt;
-        } else if (a.secondary > b.secondary) {
-            return .gt;
-        } else if (a.timestamp < b.timestamp) {
-            return .lt;
-        } else if (a.timestamp > b.timestamp) {
-            return .gt;
-        } else {
-            return .eq;
-        }
-    }
-
-    pub fn key_from_value(value: Value) CompositeKey {
-        return .{
-            .secondary = value.secondary,
-            .timestamp = @truncate(u63, key.timestamp),
-        };
-    }
-
-    pub fn tombstone(value: Value) bool {
-        return value.timestamp & tombstone_bit != 0;
-    }
-
-    pub fn tombstone_from_key(key: CompositeKey) Value {
-        return .{
-            .secondary = key.secondary,
-            .timestamp = key.timestamp | tombstone_bit,
-        };
-    }
-};
+}
 
 pub const TableFreeSet = struct {
     /// Bits set indicate free tables
