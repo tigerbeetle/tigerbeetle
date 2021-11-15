@@ -3,17 +3,17 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
+/// keys_count must be one less than a power of two. This allows us to align the layout
+/// such that great great grandchildren of a node are not unnecessarily split across cache lines.
 pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
     // This is not strictly necessary, but having less than 8 keys in the
     // Eytzinger layout would make having the layout at all somewhat pointless.
-    assert(keys_count >= 4);
-    assert(math.isPowerOfTwo(keys_count));
+    assert(keys_count >= 3);
+    assert(math.isPowerOfTwo(keys_count + 1));
     assert(values_max >= keys_count);
 
     return struct {
-        const eytzinger_tree: [keys_count - 1]u32 = blk: {
-            var tree: [keys_count - 1]u32 = undefined;
-
+        const tree: [keys_count]u32 = blk: {
             // n = 7:
             //   sorted values: 0 1 2 3 4 5 6
             //
@@ -49,38 +49,39 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // balanced construction would require sentinel values for the padding
             // due to negative lookups.
 
+            var nodes: [keys_count]u32 = undefined;
             var node: u32 = 0;
-            while (node < tree.len) : (node += 1) {
+            while (node < nodes.len) : (node += 1) {
                 // Left and right inclusive bounds for the children of this node,
                 // as if we were doing a binary search.
-                const l = if (left_ancestor(&tree, node)) |l| tree[l] + 1 else 0;
-                const r = if (right_ancestor(&tree, node)) |r| tree[r] - 1 else values_max - 1;
+                const l = if (left_ancestor(&nodes, node)) |l| nodes[l] + 1 else 0;
+                const r = if (right_ancestor(&nodes, node)) |r| nodes[r] - 1 else values_max - 1;
 
                 // The binary search index into source for this node in the Eytzinger layout.
                 // This is (r + l) / 2 ... but without overflow bugs.
-                tree[node] = l + (r - l) / 2;
+                nodes[node] = l + (r - l) / 2;
             }
 
-            break :blk tree;
+            break :blk nodes;
         };
 
-        fn left_ancestor(tree: []const u32, node: u32) ?u32 {
+        fn left_ancestor(nodes: []const u32, node: u32) ?u32 {
             var n = node;
             while (!is_right_child(n)) {
-                n = parent(tree, n) orelse return null;
+                n = parent(nodes, n) orelse return null;
             }
-            return parent(tree, n).?;
+            return parent(nodes, n).?;
         }
 
-        fn right_ancestor(tree: []const u32, node: u32) ?u32 {
+        fn right_ancestor(nodes: []const u32, node: u32) ?u32 {
             var n = node;
             while (!is_left_child(n)) {
-                n = parent(tree, n) orelse return null;
+                n = parent(nodes, n) orelse return null;
             }
-            return parent(tree, n).?;
+            return parent(nodes, n).?;
         }
 
-        fn parent(tree: []const u32, node: u32) ?u32 {
+        fn parent(nodes: []const u32, node: u32) ?u32 {
             if (node == 0) return null;
             return (node - 1) / 2;
         }
@@ -93,49 +94,89 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             return node != 0 and node % 2 != 0;
         }
 
-        pub fn layout(
+        /// Writes the Eytzinger layout to the passed layout buffer.
+        /// The values slice must be sorted by key in ascending order.
+        pub fn layout_from_keys_or_values(
             comptime Key: type,
             comptime Value: type,
             comptime key_from_value: fn (Value) Key,
             /// This sentinel must compare greater than all actual keys.
             comptime sentinel_key: Key,
-            keys: *[keys_count]Key,
             values: []const Value,
+            layout: *[keys_count + 1]Key,
         ) void {
-            comptime assert(eytzinger_tree.len + 1 == keys.len);
+            comptime assert(tree.len + 1 == layout.len);
             assert(values.len > 0);
             assert(values.len <= values_max);
 
-            // We leave the first slot in keys empty for purposes of alignment.
+            // We leave the first slot in layout empty for purposes of alignment.
             // If we did not do this, the level in the tree with 16 great great
             // grand childern would be split across cache lines with one child
             // in the first cache line and the other 15 in the second.
-            mem.set(u8, mem.asBytes(&keys[0]), 0);
+            mem.set(u8, mem.asBytes(&layout[0]), 0);
             // 0 8 4 12 2 6 10 14 1 3 5 7 9 11 13 15
             // ^
             // padding element
 
-            for (eytzinger_tree) |values_index, i| {
+            for (tree) |values_index, i| {
                 if (values_index < values.len) {
-                    keys[i + 1] = key_from_value(values[values_index]);
+                    layout[i + 1] = key_from_value(values[values_index]);
                 } else {
-                    keys[i + 1] = sentinel_key;
+                    layout[i + 1] = sentinel_key;
                 }
             }
         }
 
-        pub const Bounds = struct {
-            lower: ?u32,
-            upper: ?u32,
-        };
-
-        // TODO: examine the generated machine code for this function
-        inline fn search_keys(
+        /// Writes the Eytzinger layout to the passed layout buffer.
+        /// The values slice must be sorted by key in ascending order.
+        pub fn layout_from_keys(
             comptime Key: type,
+            /// This sentinel must compare greater than all actual keys.
+            comptime sentinel_key: Key,
+            keys: []const Key,
+            layout: *[keys_count + 1]Key,
+        ) void {
+            comptime assert(tree.len + 1 == layout.len);
+            assert(values.len > 0);
+            assert(values.len <= values_max);
+
+            // We leave the first slot in layout empty for purposes of alignment.
+            // If we did not do this, the level in the tree with 16 great great
+            // grand childern would be split across cache lines with one child
+            // in the first cache line and the other 15 in the second.
+            mem.set(u8, mem.asBytes(&layout[0]), 0);
+            // 0 8 4 12 2 6 10 14 1 3 5 7 9 11 13 15
+            // ^
+            // padding element
+
+            for (tree) |values_index, i| {
+                if (values_index < values.len) {
+                    layout[i + 1] = key_from_value(values[values_index]);
+                } else {
+                    layout[i + 1] = sentinel_key;
+                }
+            }
+        }
+
+        /// Returns a smaller slice into values where the target key may be found.
+        /// If the target key is present in values, the returned slice is guaranteed to contain it.
+        /// May return a slice of length one if an exact result is found.
+        /// May return a slice of length zero if the key is definitely not in values.
+        /// Otherwise, the caller will likely want to preform a binary search on the result.
+        /// TODO examine the generated machine code for this function
+        pub fn search_values(
+            comptime Key: type,
+            comptime Value: type,
             comptime compare_keys: fn (Key, Key) math.Order,
-            keys: *const [eytzinger_tree.len]Key,
+            layout: *const [keys_count + 1]Key,
+            values: []const Value,
             key: Key,
-        ) Bounds {
+        ) []const Value {
+            assert(values.len > 0);
+            assert(values.len <= values_max);
+
+            const keys = layout[1..];
+
             // "Array Layouts for Comparison-Based Search"
             //
             // Example using the n=21 tree above:
@@ -191,10 +232,45 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
                 break :blk if (lower == 0) null else @intCast(u32, lower - 1);
             };
 
-            return .{
-                .lower = lower_bound,
-                .upper = upper_bound,
-            };
+            // We want to exclude the bounding keys to avoid re-checking them, except in the case
+            // of an exact match. This condition checks for an inexact match.
+            const exclusion = @boolToInt(lower_bound == null or upper_bound == null or
+                lower_bound.? != upper_bound.?);
+
+            // The exclusion alone may result in an upper bound one less than the lower bound.
+            // However, we add one to the upper bound to make it exclusive for slicing.
+            // This case indicates that key is not present in values.
+            const values_lower = if (lower_bound) |l| tree[l] + exclusion else 0;
+            // This must be an exclusive upper bound but upper_bound is inclusive. Thus, add 1.
+            const values_upper = if (upper_bound) |u| tree[u] + 1 - exclusion else values.len;
+
+            return values[values_lower..math.min(values.len, values_upper)];
+        }
+
+        /// Returns an upper bound index into the corresponding values. The returned index is
+        /// less than values_count, or null to indicate that all keys are less than the target key.
+        /// TODO examine the generated machine code for this function
+        pub fn search_keys(
+            comptime Key: type,
+            comptime compare_keys: fn (Key, Key) math.Order,
+            layout: *const [keys_count + 1]Key,
+            values_count: u32,
+            key: Key,
+        ) ?u32 {
+            // See search_values() for the explanation and full implementation of the algorithm.
+            // This code is duplicated here to avoid unnecessary computation when only searching
+            // for an upper bound and to keep search_values() as readable as possible. Using helper
+            // functions would fragment the logic.
+            const keys = layout[1..];
+            var i: u32 = 0;
+            while (i < keys.len) {
+                // TODO use @prefetch when available: https://github.com/ziglang/zig/issues/3600
+                i = if (compare_keys(key, keys[i]) == .gt) 2 * i + 2 else 2 * i + 1;
+            }
+            const upper = @as(u64, i + 1) >> ffs(~(i + 1));
+
+            const out_of_bounds = upper == 0 or tree[upper - 1] >= values_count;
+            return if (out_of_bounds) null else tree[upper - 1];
         }
 
         // Returns one plus the index of the least significant 1-bit of x.
@@ -230,8 +306,8 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // we only need to check for the case where ~(i + 1) == 0 which happens
             // exactly when i + 1 is the maximum value for a u32.
             comptime {
-                // Max i after the while loop in search_keys() terminates.
-                const max_i = 2 * (eytzinger_tree.len - 1) + 2;
+                // Max i after the while loop in search_values() terminates.
+                const max_i = 2 * (tree.len - 1) + 2;
                 assert(max_i + 1 < math.maxInt(u32));
                 assert(~(max_i + 1) != 0);
             }
@@ -243,36 +319,6 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // our function must be a u6.
             comptime assert(31 + 1 <= math.maxInt(u6));
             return @ctz(u32, x) + 1;
-        }
-
-        /// Returns a smaller slice into values where the target key may be found.
-        /// If the target key is present in values, the returned slice is guaranteed to contain it.
-        /// May return a slice of length one if an exact result is found.
-        /// May return a slice of length zero if the key is definitely not in values.
-        /// Otherwise, the caller will likely want to preform a binary search on the result.
-        pub fn search(
-            comptime Key: type,
-            comptime Value: type,
-            comptime key_from_value: fn (Value) Key,
-            comptime compare_keys: fn (Key, Key) math.Order,
-            keys: *const [keys_count]Key,
-            values: []const Value,
-            key: Key,
-        ) []const Value {
-            assert(values.len > 0);
-            assert(values.len <= values_max);
-            const bounds = search_keys(Key, compare_keys, keys[1..], key);
-            // We want to exclude the bounding keys to avoid re-checking them, except in the case
-            // of an exact match. This condition checks for an inexact match.
-            const exclusion = @boolToInt(bounds.lower == null or bounds.upper == null or
-                bounds.lower.? != bounds.upper.?);
-            // The exclusion alone may result in an upper bound one less than the lower bound.
-            // However, we add one to the upper bound to make it exclusive for slicing.
-            // This case indicates that key is not present in values.
-            const lower = if (bounds.lower) |l| eytzinger_tree[l] + exclusion else 0;
-            // This must be an exclusive upper bound but bounds.upper is inclusive. Thus, add 1.
-            const upper = if (bounds.upper) |u| eytzinger_tree[u] + 1 - exclusion else values.len;
-            return values[lower..math.min(values.len, upper)];
         }
     };
 }
@@ -294,7 +340,12 @@ const test_eytzinger = struct {
 
     const sentinel_key = math.maxInt(u32);
 
-    fn layout(
+    pub const Bounds = struct {
+        lower: ?u32,
+        upper: ?u32,
+    };
+
+    fn layout_from_keys_or_values(
         comptime keys_count: usize,
         comptime values_max: usize,
         expect: []const u32,
@@ -304,11 +355,11 @@ const test_eytzinger = struct {
         var values: [values_max]Value = undefined;
         for (values) |*v, i| v.* = .{ .key = @intCast(u32, i) };
 
-        var keys: [keys_count]u32 = undefined;
+        var layout: [keys_count + 1]u32 = undefined;
 
-        e.layout(u32, Value, Value.to_key, sentinel_key, &keys, &values);
+        e.layout_from_keys_or_values(u32, Value, Value.to_key, sentinel_key, &values, &layout);
 
-        try std.testing.expectEqualSlices(u32, expect, &keys);
+        try std.testing.expectEqualSlices(u32, expect, &layout);
     }
 
     fn search(comptime keys_count: usize, comptime values_max: usize, sentinels_max: usize) !void {
@@ -320,14 +371,14 @@ const test_eytzinger = struct {
         // which could potentially catch bugs.
         for (values_full) |*v, i| v.* = .{ .key = @intCast(u32, 3 * i + 7) };
 
-        var keys_aligned: [keys_count]u32 = undefined;
+        var layout: [keys_count + 1]u32 = undefined;
 
         var sentinels: usize = 0;
         while (sentinels < sentinels_max) : (sentinels += 1) {
             const values = values_full[0 .. values_full.len - sentinels];
-            e.layout(u32, Value, Value.to_key, sentinel_key, &keys_aligned, values);
+            e.layout_from_keys_or_values(u32, Value, Value.to_key, sentinel_key, values, &layout);
 
-            const keys = keys_aligned[1..];
+            const keys = layout[1..];
 
             if (log) {
                 std.debug.print("keys count: {}, values max: {}, sentinels: {}\n", .{
@@ -336,7 +387,7 @@ const test_eytzinger = struct {
                     sentinels,
                 });
                 std.debug.print("values: {any}\n", .{values});
-                std.debug.print("eytzinger layout: {any}\n", .{e.eytzinger_tree});
+                std.debug.print("eytzinger layout: {any}\n", .{e.tree});
                 std.debug.print("keys: {any}\n", .{@as([]u32, keys)});
             }
 
@@ -347,7 +398,7 @@ const test_eytzinger = struct {
             var target_key: u32 = 0;
             while (target_key < values[values.len - 1].to_key() + 13) : (target_key += 1) {
                 if (log) std.debug.print("target key: {}\n", .{target_key});
-                var expect_keys: e.Bounds = .{
+                var expect_keys: Bounds = .{
                     .lower = null,
                     .upper = null,
                 };
@@ -373,19 +424,17 @@ const test_eytzinger = struct {
                     }
                 }
 
-                var actual_keys = e.search_keys(u32, compare_keys, keys, target_key);
-                // Interpret the semantics of the results of search_keys()
-                // This allows our test function to have a simpler linear scan implementation
-                // instead of needing to implement a binary tree.
-                if (actual_keys.upper) |u| {
-                    if (keys[u] == sentinel_key) {
-                        actual_keys.upper = null;
-                    }
-                }
-                try std.testing.expectEqual(expect_keys.lower, actual_keys.lower);
-                try std.testing.expectEqual(expect_keys.upper, actual_keys.upper);
+                const expect_upper_bound = if (expect_keys.upper) |u| e.tree[u] else null;
+                var actual_upper_bound = e.search_keys(
+                    u32,
+                    compare_keys,
+                    &layout,
+                    @intCast(u32, values.len),
+                    target_key,
+                );
+                try std.testing.expectEqual(expect_upper_bound, actual_upper_bound);
 
-                var expect_values: e.Bounds = .{
+                var expect_values: Bounds = .{
                     .lower = null,
                     .upper = null,
                 };
@@ -437,12 +486,11 @@ const test_eytzinger = struct {
                     assert(compare_keys(expect_slice[0].to_key(), target_key) == .eq);
                 }
 
-                const actual_slice = e.search(
+                const actual_slice = e.search_values(
                     u32,
                     Value,
-                    Value.to_key,
                     compare_keys,
-                    &keys_aligned,
+                    &layout,
                     values,
                     target_key,
                 );
@@ -458,16 +506,16 @@ const test_eytzinger = struct {
 
 test "eytzinger: equal key and value count" {
     // zig fmt: off
-    try test_eytzinger.layout(4, 4, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(3, 3, &[_]u32{ 0,
           1,
         0, 2,
     });
-    try test_eytzinger.layout(8, 8, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(7, 7, &[_]u32{ 0,
              3,
           1,    5,
         0, 2, 4, 6,
     });
-    try test_eytzinger.layout(16, 16, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(15, 15, &[_]u32{ 0,
                    7,
              3,          11,
           1,    5,    9,     13,
@@ -478,20 +526,20 @@ test "eytzinger: equal key and value count" {
 
 test "eytzinger: power of two value count > key count" {
     // zig fmt: off
-    try test_eytzinger.layout(4, 8, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(3, 8, &[_]u32{ 0,
           3,
         1, 5,
     });
-    try test_eytzinger.layout(4, 16, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(3, 16, &[_]u32{ 0,
           7,
         3, 11,
     });
-    try test_eytzinger.layout(8, 16, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(7, 16, &[_]u32{ 0,
               7,
           3,     11,
         1,  5, 9,  13,
     });
-    try test_eytzinger.layout(16, 32, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(15, 32, &[_]u32{ 0,
                    15,
              7,             23,
           3,   11,      19,     27,
@@ -502,38 +550,38 @@ test "eytzinger: power of two value count > key count" {
 
 test "eytzinger: non power of two value count" {
     // zig fmt: off
-    try test_eytzinger.layout(8, 13, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(7, 13, &[_]u32{ 0,
              6,
           2,    9,
         0, 4, 7, 11,
     });
-    try test_eytzinger.layout(8, 19, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(7, 19, &[_]u32{ 0,
              9,
           4,    14,
         1, 6, 11, 16,
     });
-    try test_eytzinger.layout(8, 20, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(7, 20, &[_]u32{ 0,
              9,
           4,    14,
         1, 6, 11, 17,
     });
-    try test_eytzinger.layout(16, 21, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(15, 21, &[_]u32{ 0,
                   10,
              4,           15,
           1,    7,    12,     18,
         0, 2, 5, 8, 11, 13, 16, 19,
     });
-    try test_eytzinger.layout(8, 7919, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(7, 7919, &[_]u32{ 0,
                    3959,
            1979,           5939,
         989,   2969,   4949,   6929,
     });
-    try test_eytzinger.layout(8, 7920, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(7, 7920, &[_]u32{ 0,
                    3959,
            1979,           5939,
         989,   2969,   4949,   6929,
     });
-    try test_eytzinger.layout(8, 7921, &[_]u32{ 0,
+    try test_eytzinger.layout_from_keys_or_values(7, 7921, &[_]u32{ 0,
                    3960,
            1979,           5940,
         989,   2969,   4950,   6930,
@@ -549,16 +597,17 @@ test "eytzinger: handle classic binary search overflow" {
 
     // We don't use the utilities in test_eytzinger as they place the key/value arrays
     // on the stack, which the OS doesn't like if you have 2^32 values.
-    const actual = eytzinger(4, math.maxInt(u32)).eytzinger_tree;
+    const actual = eytzinger(3, math.maxInt(u32)).tree;
     const expect = [_]u32{ 2_147_483_647, 1_073_741_823, 3_221_225_471 };
     try std.testing.expectEqualSlices(u32, &expect, &actual);
 }
 
 test "eytzinger: search" {
-    comptime var keys_count: u32 = 4;
-    inline while (keys_count <= 32) : (keys_count <<= 1) {
-        comptime var values_count = keys_count;
+    comptime var power_of_2: u32 = 4;
+    inline while (power_of_2 <= 32) : (power_of_2 <<= 1) {
+        comptime var values_count = power_of_2;
         inline while (values_count <= 64) : (values_count += 1) {
+            const keys_count = power_of_2 - 1;
             try test_eytzinger.search(keys_count, values_count, values_count - 1);
         }
     }
