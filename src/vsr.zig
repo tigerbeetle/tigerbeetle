@@ -45,8 +45,8 @@ pub const Command = enum(u8) {
 
     eviction,
 
-    request_table,
-    table,
+    request_block,
+    block,
 };
 
 /// This type exists to avoid making the Header type dependant on the state
