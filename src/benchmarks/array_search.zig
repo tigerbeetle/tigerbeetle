@@ -21,7 +21,7 @@ const head_fmt = "│ {s:3} │ {s:4} │ {s:4} │ {s:6} │ {s:8} │ {s:8} �
 const body_fmt = "│ {:2}B │ {:3}B │ {:4} │ {:6} │ {:6}ns │ {:6}ns │ {:10} │ {:12} │ {:10} │ {:12} │ {:13} │ {s:9} │";
 
 pub fn main() !void {
-    const searches = 10000;
+    const searches = 1_000_000;
     std.log.info("Samples: {}", .{searches});
     std.log.info(head_fmt, .{
         "Key", "Val", "Keys", "Values",
@@ -59,7 +59,7 @@ pub fn main() !void {
 
 fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) !void {
     assert(blob.len == layout.blob_size);
-    const Eytzinger = eytzinger(layout.keys_count, layout.values_count);
+    const Eytzinger = eytzinger(layout.keys_count - 1, layout.values_count);
     const Val = Value(layout);
     const Key = Val.Key;
     const Page = struct {
@@ -80,7 +80,9 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
         //std.sort.sort(Value, page.values[0..], {}, Value.key_lt);
         // TODO should the keys be randomized too?
         for (page.values) |*value, i| value.key = i;
-        Eytzinger.layout(Key, Val, Val.key_from_value, &page.summary, &page.values);
+        Eytzinger.layout_from_keys_or_values(
+            Key, Val, Val.key_from_value, Val.max_key,
+            &page.values, &page.summary);
     }
 
     {
@@ -91,7 +93,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
             const page_index = page_picker[i % page_picker.len];
             const target = value_picker[v % value_picker.len];
             const page = pages[page_index];
-            const bounds = Eytzinger.search(Key, Val, Val.key_from_value, Val.key_compare, &page.summary, &page.values, target);
+            const bounds = Eytzinger.search_values(Key, Val, Val.key_compare, &page.summary, &page.values, target);
             assert(bounds.len != 0);
             const hit = if (bounds.len == 1) bounds[0]
                 else bounds[binary_search(Key, Val, Val.key_from_value, Val.key_compare, bounds, target)];
@@ -159,7 +161,8 @@ const Layout = struct {
 
 fn Value(comptime layout: Layout) type {
     return struct {
-        pub const Key = math.IntFittingRange(0, 1 << (8 * layout.key_size) - 1);
+        pub const max_key = 1 << (8 * layout.key_size) - 1;
+        pub const Key = math.IntFittingRange(0, max_key);
         const Self = @This();
         key: Key,
         body: [layout.value_size - layout.key_size]u8,
