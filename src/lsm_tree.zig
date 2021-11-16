@@ -92,7 +92,9 @@ pub fn CompositeKey(comptime Secondary: type) type {
     };
 }
 
-// TODO add encode/decode function for run-length encoding to/from SuperBlock.
+/// The 0 address is reserved for usage as a sentinel and will never be returned
+/// by acquire().
+/// TODO add encode/decode function for run-length encoding to/from SuperBlock.
 pub const BlockFreeSet = struct {
     /// Bits set indicate free blocks
     free: std.bit_set.DynamicBitSetUnmanaged,
@@ -107,39 +109,23 @@ pub const BlockFreeSet = struct {
         set.free.deinit(allocator);
     }
 
-    pub fn acquire(set: *BlockFreeSet) ?u64 {
-        const address = set.free.findFirstSet() orelse return null;
-        set.free.unset(address);
-        return @intCast(u64, address);
+    pub fn acquire(set: *BlockFreeSet) u64 {
+        // TODO: To ensure this "unreachable" is never reached, the leader must reject
+        // new requests when storage space is too low to fulfill them.
+        const bit = set.free.findFirstSet() orelse unreachable;
+        set.free.unset(bit);
+        return @intCast(u64, address + 1);
     }
 
     pub fn release(set: *BlockFreeSet, address: u64) void {
-        assert(!set.free.isSet(address));
-        set.free.set(address);
+        const bit = address - 1;
+        assert(!set.free.isSet(bit));
+        set.free.set(bit);
     }
 };
 
 // vsr.zig
 pub const SuperBlock = packed struct {
-    // IDEA: to reduce the size of the superblock we could make the manifest use
-    // half disk sectors instead.
-    pub const Manifest = packed struct {
-        /// Hash chained checksum of manifest sectors stored outside the superblock.
-        /// On startup, all sectors of the manifest are read in from disk and the checksum
-        /// of each is calculated and chained together to produce this value. On writing a
-        /// new manifest sector, we calculate the checksum of that sector and combine it
-        /// with the current value of this checksum to obtain the new value.
-        /// If/when tables are removed from the manifest (e.g. due to compaction) we simply
-        /// rewrite the whole manifest.
-        parent_checksum: u128,
-        offset: u64,
-        sectors: u32,
-        /// This is stored in the superblock so that we can
-        /// append new table metadata to the same sector without
-        /// copy on write.
-        tail: [config.sector_size]u8,
-    };
-
     checksum: u128,
 
     // Monotonically increasing counter of superblock generations. This enables us to find the
@@ -155,8 +141,14 @@ pub const SuperBlock = packed struct {
     block_free_set_size: u32,
     block_free_set_checksum: u128,
 
-    manifests_positive: [config.lsm_trees]Manifest,
-    manifests_negative: [config.lsm_trees]Manifest,
+    /// The manifest addresses must be listed here in order:
+    /// 1. all positive manifest blocks of LSM 1, in order of their appearance in the manifest.
+    /// 2. all negative manifest blocks of LSM 1, in order of their appearance in the manifest.
+    /// 3. all positive manifest blocks of LSM 2, ...
+    /// 4. ...
+    manifest_addresses: [2048]u64,
+    manifest_checksums: [2048]u128,
+
     /// Timestamp of 0 indicates that the snapshot slot is free
     snapshot_timestamps: [config.lsm_snapshots_max]u64,
     snapshot_last_used: [config.lsm_snapshots_max]u64,
@@ -234,7 +226,6 @@ pub fn LsmTree(
                 }
             };
 
-            superblock: SuperBlock.Manifest,
             levels: [config.lsm_levels][]TableInfo,
 
             pub fn level_tables(manifest: *Manifest, level: u32, timestamp_max: u64) []TableInfo {}
@@ -562,7 +553,7 @@ pub fn LsmTree(
             }
         };
 
-        table_free_set: *BlockFreeSet,
+        block_free_set: *BlockFreeSet,
         storage: *Storage,
         options: LsmTreeOptions,
 
@@ -572,7 +563,7 @@ pub fn LsmTree(
 
         pub fn init(
             allocator: *std.mem.Allocator,
-            table_free_set: *BlockFreeSet,
+            block_free_set: *BlockFreeSet,
             storage: *Storage,
             options: LsmTreeOptions,
         ) !Self {}
