@@ -14,6 +14,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
 
     return struct {
         const tree: [keys_count]u32 = blk: {
+            @setEvalBranchQuota((keys_count + 1) * 4 * math.log2(keys_count));
             // n = 7:
             //   sorted values: 0 1 2 3 4 5 6
             //
