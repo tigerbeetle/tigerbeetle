@@ -1,7 +1,10 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 const vsr = @import("vsr.zig");
+
+const config = @import("config.zig");
 const eytzinger = @import("eytzinger.zig").eytzinger;
 
 // StateMachine:
@@ -30,6 +33,11 @@ pub fn CompositeKey(comptime Secondary: type) type {
 
     return extern struct {
         const Self = @This();
+
+        pub const sentinel_key: Self = .{
+            .secondary = math.maxInt(Secondary),
+            .timestamp = math.maxInt(u64),
+        };
 
         const tombstone_bit = 1 << 63;
         // If zeroed padding is needed after the timestamp field
@@ -76,7 +84,7 @@ pub fn CompositeKey(comptime Secondary: type) type {
         pub fn key_from_value(value: Value) Self {
             return .{
                 .secondary = value.secondary,
-                .timestamp = @truncate(u63, key.timestamp),
+                .timestamp = @truncate(u63, value.timestamp),
             };
         }
 
@@ -326,7 +334,9 @@ pub fn LsmTree(
             const block_body_size = block_size - @sizeOf(vsr.Header);
 
             const layout = blk: {
-                assert(config.lsm_table_block_size % sector_size == 0);
+                assert(config.lsm_table_block_size % config.sector_size == 0);
+                assert(math.isPowerOfTwo(table_size_max));
+                assert(math.isPowerOfTwo(block_size));
 
                 // Searching the values array is more expensive than searching the per-block index
                 // as the larger values size leads to more cache misses. We can therefore speed
@@ -368,8 +378,7 @@ pub fn LsmTree(
                 // layout and should help ensure better alignment for the following values.
                 // We could round to the nearest power of two, but then we would need
                 // care to avoid breaking e.g. the X >= Y invariant above.
-                block_keys_layout_count =
-                    math.floorPowerOfTwo(comptime_int, block_keys_layout_count);
+                block_keys_layout_count = math.floorPowerOfTwo(u64, block_keys_layout_count);
 
                 // If the index is smaller than 16 keys then there are key sizes >= 4 such that
                 // the total index size is not 64 byte cache line aligned.
@@ -392,21 +401,23 @@ pub fn LsmTree(
 
                 var data_index_size = 0;
                 var filter_index_size = 0;
-                var data_block_count = table_block_count_max - index.block_count;
-                var filter_block_count = 0;
-                while (true) : (data_block_count -= 1) {
-                    data_index_size = data_index_entry_size * data_block_count;
+                var data_blocks = table_block_count_max - index_block_count;
+                var filter_blocks = 0;
+                while (true) : (data_blocks -= 1) {
+                    data_index_size = data_index_entry_size * data_blocks;
 
-                    filter_block_count = data_block_count * block_value_count_max *
-                        filter_bytes_per_key / block_size;
-                    filter_index_size = filter_index_entry_size * filter_block_count;
+                    filter_blocks = math.divCeil(comptime_int, data_blocks * block_value_count_max *
+                        filter_bytes_per_key, block_size) catch unreachable;
+                    filter_index_size = filter_index_entry_size * filter_blocks;
 
-                    if (@sizeOf(vsr.Header) + data_index_size + filter_index_size <= block_size) {
+                    const index_size = @sizeOf(vsr.Header) + data_index_size + filter_index_size;
+                    const total_block_count = index_block_count + data_blocks + filter_blocks;
+                    if (index_size <= block_size and total_block_count <= table_block_count_max) {
                         break;
                     }
                 }
 
-                const total_block_count = index.block_count + data_block_count + filter_block_count;
+                const total_block_count = index_block_count + data_blocks + filter_blocks;
                 assert(total_block_count <= table_block_count_max);
 
                 break :blk .{
@@ -414,8 +425,8 @@ pub fn LsmTree(
                     .block_key_layout_size = block_key_layout_size,
                     .block_value_count_max = block_value_count_max,
 
-                    .data_block_count = data_block_count,
-                    .filter_block_count = filter_block_count,
+                    .data_block_count = data_blocks,
+                    .filter_block_count = filter_blocks,
                 };
             };
 
@@ -424,13 +435,10 @@ pub fn LsmTree(
             const data_block_count = layout.data_block_count;
 
             const index = struct {
-                const size = header_size + filter_checksums_size + data_checksums_size +
+                const size = @sizeOf(vsr.Header) + filter_checksums_size + data_checksums_size +
                     keys_size + filter_addresses_size + data_addresses_size;
 
-                const header_offset = 0;
-                const header_size = @sizeOf(vsr.Header);
-
-                const filter_checksums_offset = header_size;
+                const filter_checksums_offset = @sizeOf(vsr.Header);
                 const filter_checksums_size = filter_block_count * checksum_size;
 
                 const data_checksums_offset = filter_checksums_offset + filter_checksums_size;
@@ -439,7 +447,7 @@ pub fn LsmTree(
                 const keys_offset = data_checksums_offset + data_checksums_size;
                 const keys_size = data_block_count * key_size;
 
-                const filter_addresses_offset = keys_offset + key_size;
+                const filter_addresses_offset = keys_offset + keys_size;
                 const filter_addresses_size = filter_block_count * address_size;
 
                 const data_addresses_offset = filter_addresses_offset + filter_addresses_size;
@@ -447,28 +455,99 @@ pub fn LsmTree(
             };
 
             const filter = struct {
-                const header_offset = 0;
-                const header_size = @sizeOf(vsr.Header);
-
-                const filter_offset = header_size;
+                const filter_offset = @sizeOf(vsr.Header);
             };
 
             const data = struct {
                 const key_count = layout.block_key_count;
                 const value_count_max = layout.block_value_count_max;
 
-                const header_offset = 0;
-                const header_size = @sizeOf(vsr.Header);
-
-                const key_layout_offset = header_size;
+                const key_layout_offset = @sizeOf(vsr.Header);
                 const key_layout_size = layout.block_key_layout_size;
 
                 const values_offset = key_layout_offset + key_layout_size;
-                const values_size = block_value_count_max * value_size;
+                const values_size = value_count_max * value_size;
 
                 const padding_offset = values_offset + values_size;
                 const padding_size = block_size - padding_offset;
             };
+
+            const compile_log_layout = false;
+            comptime {
+                if (compile_log_layout) {
+                    @compileError(std.fmt.comptimePrint(
+                        \\
+                        \\
+                        \\lsm parameters:
+                        \\    key size: {}
+                        \\    value size: {}
+                        \\    table size max: {}
+                        \\    block size: {}
+                        \\layout:
+                        \\    index block count: {}
+                        \\    filter block count: {}
+                        \\    data block count: {}
+                        \\index:
+                        \\    size: {}
+                        \\    filter_checksums_offset: {}
+                        \\    filter_checksums_size: {}
+                        \\    data_checksums_offset: {}
+                        \\    data_checksums_size: {}
+                        \\    keys_offset: {}
+                        \\    keys_size: {}
+                        \\    filter_addresses_offset: {}
+                        \\    filter_addresses_size: {}
+                        \\    data_addresses_offset: {}
+                        \\    data_addresses_size: {}
+                        \\filter:
+                        \\    filter_offset: {}
+                        \\data:
+                        \\    key_count: {}
+                        \\    value_count_max: {}
+                        \\    key_layout_offset: {}
+                        \\    key_layout_size: {}
+                        \\    values_offset: {}
+                        \\    values_size: {}
+                        \\    padding_offset: {}
+                        \\    padding_size: {}
+                        \\
+                    ,
+                        .{
+                            key_size,
+                            value_size,
+                            table_size_max,
+                            block_size,
+
+                            index_block_count,
+                            filter_block_count,
+                            data_block_count,
+
+                            index.size,
+                            index.filter_checksums_offset,
+                            index.filter_checksums_size,
+                            index.data_checksums_offset,
+                            index.data_checksums_size,
+                            index.keys_offset,
+                            index.keys_size,
+                            index.filter_addresses_offset,
+                            index.filter_addresses_size,
+                            index.data_addresses_offset,
+                            index.data_addresses_size,
+
+                            filter.filter_offset,
+
+                            data.key_count,
+                            data.value_count_max,
+                            data.key_layout_offset,
+                            data.key_layout_size,
+                            data.values_offset,
+                            data.values_size,
+                            data.padding_offset,
+                            data.padding_size,
+                        },
+                    ));
+                }
+            }
 
             comptime {
                 assert(index_block_count > 0);
@@ -476,12 +555,21 @@ pub fn LsmTree(
                 assert(data_block_count > 0);
                 assert(index_block_count + filter_block_count +
                     data_block_count <= table_block_count_max);
+                const filter_bytes_per_key = 2;
+                assert(filter_block_count * block_size >= data_block_count *
+                    data.value_count_max * filter_bytes_per_key);
 
-                assert(index.size ==
+                assert(index.size == @sizeOf(vsr.Header) +
                     data_block_count * (key_size + address_size + checksum_size) +
                     filter_block_count * (address_size + checksum_size));
                 assert(index.size == index.data_addresses_offset + index.data_addresses_size);
                 assert(index.size <= block_size);
+                assert(index.keys_size > 0);
+                assert(index.keys_size % key_size == 0);
+                assert(@divExact(index.data_addresses_size, @sizeOf(u64)) == data_block_count);
+                assert(@divExact(index.filter_addresses_size, @sizeOf(u64)) == filter_block_count);
+                assert(@divExact(index.data_checksums_size, @sizeOf(u128)) == data_block_count);
+                assert(@divExact(index.filter_checksums_size, @sizeOf(u128)) == filter_block_count);
 
                 if (data.key_count > 0) {
                     assert(data.key_count >= 3);
@@ -492,9 +580,12 @@ pub fn LsmTree(
                 } else {
                     assert(data.key_count == 0);
                     assert(data.key_layout_size == 0);
+                    assert(data.values_offset == data.key_layout_offset);
                 }
 
                 assert(data.value_count_max > 0);
+                assert(data.value_count_max >= data.key_count);
+                assert(@divExact(data.values_size, value_size) == data.value_count_max);
                 assert(data.values_offset % config.cache_line_size == 0);
                 // You can have any size value you want, as long as it fits
                 // neatly into the CPU cache lines :)
@@ -503,6 +594,7 @@ pub fn LsmTree(
                 assert(data.padding_size >= 0);
                 assert(block_size == @sizeOf(vsr.Header) + data.key_layout_size +
                     data.values_size + data.padding_size);
+                assert(block_size == data.padding_offset + data.padding_size);
 
                 // We expect no block padding at least for TigerBeetle's objects and indexes:
                 if ((key_size == 8 and value_size == 128) or
@@ -587,7 +679,7 @@ pub fn LsmTree(
                     mem.set(u8, values_padding, 0);
                     mem.set(u8, block_padding, 0);
 
-                    const header_bytes = block[data.header_offset..][0..data.header_size];
+                    const header_bytes = block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
                     header.* = .{
@@ -625,7 +717,7 @@ pub fn LsmTree(
                 mem.set(u64, index_filter_addresses, 0);
                 mem.set(u128, index_filter_checksums, 0);
 
-                const header_bytes = index_block[index.header_offset..][0..index.header_size];
+                const header_bytes = index_block[0..@sizeOf(vsr.Header)];
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
                 header.* = .{
@@ -653,8 +745,6 @@ pub fn LsmTree(
         block_free_set: *BlockFreeSet,
         storage: *Storage,
         options: LsmTreeOptions,
-
-        write_transaction: WriteTransaction,
 
         manifest: []Manifest,
 
@@ -716,4 +806,21 @@ pub fn LsmTree(
             query: RangeQuery,
         ) RangeQueryIterator {}
     };
+}
+
+test {
+    const Key = CompositeKey(u128);
+    const TestTree = LsmTree(
+        Key,
+        Key.Value,
+        Key.compare_keys,
+        Key.key_from_value,
+        Key.sentinel_key,
+        Key.tombstone,
+        Key.tombstone_from_key,
+        @import("test/storage.zig").Storage,
+    );
+
+    _ = TestTree;
+    _ = TestTree.ImmutableTable;
 }
