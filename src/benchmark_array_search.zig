@@ -2,8 +2,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 
-const binary_search = @import("../binary_search.zig").binary_search;
-const eytzinger = @import("../eytzinger.zig").eytzinger;
+const binary_search = @import("./binary_search.zig").binary_search;
+const eytzinger = @import("./eytzinger.zig").eytzinger;
+const perf = @import("./benchmarks/perf.zig");
 
 const KiB = 1 << 10;
 const GiB = 1 << 30;
@@ -191,9 +192,9 @@ const BenchmarkResult = struct {
     branch_misses: usize,
 };
 
-const PERF = @import("./perf.zig").PERF;
-const perf_event_attr = @import("./perf.zig").perf_event_attr;
-const perf_event_open = @import("./perf.zig").perf_event_open;
+const PERF = perf.PERF;
+const perf_event_attr = perf.perf_event_attr;
+const perf_event_open = perf.perf_event_open;
 const perf_counters = [_]PERF.COUNT.HW{
     PERF.COUNT.HW.CPU_CYCLES,
     PERF.COUNT.HW.INSTRUCTIONS,
