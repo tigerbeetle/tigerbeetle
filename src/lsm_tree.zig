@@ -452,10 +452,17 @@ pub fn LsmTree(
 
                 const data_addresses_offset = filter_addresses_offset + filter_addresses_size;
                 const data_addresses_size = data_block_count * address_size;
+
+                const padding_offset = data_addresses_offset + data_addresses_size;
+                const padding_size = block_size - padding_offset;
             };
 
             const filter = struct {
                 const filter_offset = @sizeOf(vsr.Header);
+                const filter_size = 0;
+
+                const padding_offset = filter_offset + filter_size;
+                const padding_size = block_size - padding_offset;
             };
 
             const data = struct {
@@ -570,6 +577,11 @@ pub fn LsmTree(
                 assert(@divExact(index.filter_addresses_size, @sizeOf(u64)) == filter_block_count);
                 assert(@divExact(index.data_checksums_size, @sizeOf(u128)) == data_block_count);
                 assert(@divExact(index.filter_checksums_size, @sizeOf(u128)) == filter_block_count);
+                assert(block_size == index.padding_offset + index.padding_size);
+                assert(block_size == index.size + index.padding_size);
+
+                assert(block_size == filter.padding_offset + filter.padding_size);
+                assert(block_size == @sizeOf(vsr.Header) + filter.filter_size + filter.padding_size);
 
                 if (data.key_count > 0) {
                     assert(data.key_count >= 3);
@@ -713,9 +725,15 @@ pub fn LsmTree(
                     u128,
                     index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
                 );
-                for (filter_blocks) |*block| mem.set(u8, block, 0);
+                for (filter_blocks) |*block| {
+                    mem.set(u8, block[0..@sizeOf(vsr.Header)], 0);
+                    comptime assert(filter.padding_offset == @sizeOf(vsr.Header));
+                    mem.set(u8, block[filter.padding_offset..][0..filter.padding_size], 0);
+                }
                 mem.set(u64, index_filter_addresses, 0);
                 mem.set(u128, index_filter_checksums, 0);
+
+                mem.set(u8, index_block[index.padding_offset..][0..index.padding_size], 0);
 
                 const header_bytes = index_block[0..@sizeOf(vsr.Header)];
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
