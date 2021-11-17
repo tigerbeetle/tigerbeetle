@@ -188,28 +188,18 @@ pub const lsm_trees = 6;
 pub const lsm_levels = 7;
 
 /// Max key size for the LSM Trees in bytes
-pub const lsm_key_size_max = 24;
+pub const lsm_key_size_max = 32;
+
+pub const lsm_table_size_max = 64 * 1024 * 1024;
 
 /// Size of blocks used by the LSM tree implementation. These blocks are passed
 /// through an LRU block cache.
 pub const lsm_table_block_size = 64 * 1024;
 
-/// Maximum number of blocks in a table
-pub const lsm_table_blocks_max = (64 * 1024 * 1024) / lsm_table_block_size;
-comptime {
-    // This is only here so that you, dear reader, don't have to do the math on the above
-    // line in your head to know the result.
-    assert(lsm_table_blocks_max == 819);
-}
-
 /// TODO: docs
 pub const lsm_snapshots_max = 32;
 
-/// TODO: use a bit less than a sector, make the total superblock size well
-/// aligned to a sector boundry
-pub const lsm_snapshot_table_refs_max = 62; // This is a rough estimate
-
-pub const lsm_table_value_to_index_ratio_min = 16;
+pub const lsm_value_to_key_layout_ratio_min = 16;
 
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
