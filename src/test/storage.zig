@@ -199,7 +199,10 @@ pub const Storage = struct {
         }
 
         mem.copy(u8, read.buffer, storage.memory[read.offset..][0..read.buffer.len]);
-        read.callback(read);
+
+        const callback = read.callback;
+        read.* = undefined;
+        callback(read);
     }
 
     pub fn write_sectors(
@@ -242,7 +245,9 @@ pub const Storage = struct {
             storage.prng.random.bytes(faulty_sector_bytes);
         }
 
-        write.callback(write);
+        const callback = write.callback;
+        write.* = undefined;
+        callback(write);
     }
 
     fn assert_bounds_and_alignment(storage: *Storage, buffer: []const u8, offset: u64) void {
