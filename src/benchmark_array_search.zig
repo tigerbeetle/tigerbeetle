@@ -6,8 +6,8 @@ const binary_search = @import("./binary_search.zig").binary_search;
 const eytzinger = @import("./eytzinger.zig").eytzinger;
 const perf = @import("./benchmarks/perf.zig");
 
-const KiB = 1 << 10;
 const GiB = 1 << 30;
+const searches = 100_000;
 
 const kv_types = .{
     .{.key_size = 8, .value_size = 128},
@@ -18,18 +18,17 @@ const kv_types = .{
 // keys_per_summary = values_per_page / summary_fraction
 const summary_fractions = .{4, 8, 16, 32};
 const values_per_page = .{128, 256, 512, 1024, 2048, 4096, 8192};
-const head_fmt = "│ {s:3} │ {s:4} │ {s:4} │ {s:6} │ {s:8} │ {s:8} │ {s:10} │ {s:12} │ {s:10} │ {s:12} │ {s:13} │ {s:9} │";
-const body_fmt = "│ {:2}B │ {:3}B │ {:4} │ {:6} │ {:6}ns │ {:6}ns │ {:10} │ {:12} │ {:10} │ {:12} │ {:13} │ {s:9} │";
+const body_fmt = "{:_>2}B/{:_>3}B {:_>4}/{:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns CY={:_>6} IN={:_>6} CR={:_>5} CM={:_>5} BM={}\n";
 
 pub fn main() !void {
-    const searches = 1_000_000;
     std.log.info("Samples: {}", .{searches});
-    std.log.info(head_fmt, .{
-        "Key", "Val", "Keys", "Values",
-        "wall", "utime",
-        "CPU Cycles", "Instructions", "Cache Refs", "Cache Misses", "Branch Misses",
-        "Algorithm",
-    });
+    std.log.info("WT: Wall time/search", .{});
+    std.log.info("UT: utime time/search", .{});
+    std.log.info("CY: CPU cycles/search", .{});
+    std.log.info("IN: instructions/search", .{});
+    std.log.info("CR: cache references/search", .{});
+    std.log.info("CM: cache misses/search", .{});
+    std.log.info("BM: branch misses/search", .{});
 
     var seed: u64 = undefined;
     try std.os.getrandom(std.mem.asBytes(&seed));
@@ -86,6 +85,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
             &page.values, &page.summary);
     }
 
+    const stdout = std.io.getStdOut().writer();
     {
         var benchmark = try Benchmark.begin();
         var i: usize = 0;
@@ -104,11 +104,13 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
         }
 
         const result = try benchmark.end(layout.searches);
-        std.log.info(body_fmt, .{
+        try stdout.print(body_fmt, .{
             layout.key_size,
             layout.value_size,
             layout.keys_count,
             layout.values_count,
+            "E",
+            "B",
             result.wall_time,
             result.utime,
             result.cpu_cycles,
@@ -116,7 +118,40 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
             result.cache_references,
             result.cache_misses,
             result.branch_misses,
-            "Eytzinger",
+        });
+    }
+
+    for (pages) |*page| std.sort.sort(Key, page.summary[0..], {}, Val.key_lt);
+    {
+        var benchmark = try Benchmark.begin();
+        var i: usize = 0;
+        var v: usize = 0;
+        while (i < layout.searches) : (i += 1) {
+            const target = value_picker[v % value_picker.len];
+            const p = page_picker[i % page_picker.len];
+            const page = pages[p];
+            const bounds = binary_search_keys(layout, Key, Val, Val.key_compare, &page.summary, &page.values, target);
+            assert(bounds.len != 0);
+            const hit = if (bounds.len == 1) bounds[0]
+                else bounds[binary_search(Key, Val, Val.key_from_value, Val.key_compare, bounds, target)];
+            assert(hit.key == target);
+            if (i % pages.len == 0) v += 1;
+        }
+        const result = try benchmark.end(layout.searches);
+        try stdout.print(body_fmt, .{
+            layout.key_size,
+            layout.value_size,
+            layout.keys_count,
+            layout.values_count,
+            "B",
+            "B",
+            result.wall_time,
+            result.utime,
+            result.cpu_cycles,
+            result.instructions,
+            result.cache_references,
+            result.cache_misses,
+            result.branch_misses,
         });
     }
 
@@ -134,11 +169,13 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
             if (i % pages.len == 0) v += 1;
         }
         const result = try benchmark.end(layout.searches);
-        std.log.info(body_fmt, .{
+        try stdout.print(body_fmt, .{
             layout.key_size,
             layout.value_size,
             layout.keys_count,
             layout.values_count,
+            "_",
+            "B",
             result.wall_time,
             result.utime,
             result.cpu_cycles,
@@ -146,7 +183,6 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
             result.cache_references,
             result.cache_misses,
             result.branch_misses,
-            "BinSearch",
         });
     }
 }
@@ -174,6 +210,14 @@ fn Value(comptime layout: Layout) type {
 
         fn key_from_value(self: Self) Key {
             return self.key;
+        }
+
+        fn key_from_key(x: Key) Key {
+            return x;
+        }
+
+        fn key_lt(_: void, a: Key, b: Key) bool {
+            return a < b;
         }
 
         fn key_compare(a: Key, b: Key) math.Order {
@@ -277,4 +321,24 @@ fn readPerfFd(fd: std.os.fd_t) !usize {
     const n = try std.os.read(fd, std.mem.asBytes(&result));
     assert(n == @sizeOf(usize));
     return result;
+}
+
+fn binary_search_keys(
+    comptime layout: Layout,
+    comptime Key: type,
+    comptime Val: type,
+    comptime compare_keys: fn (Key, Key) math.Order,
+    summary: []const Key,
+    values: []const Val,
+    key: Key,
+) []const Val {
+    assert(summary.len == layout.keys_count);
+    assert(values.len == layout.values_count);
+    const key_index = binary_search(Key, Key, Val.key_from_key, compare_keys, summary, key);
+    const key_stride = layout.values_count / layout.keys_count;
+    const high = key_index * key_stride;
+    if (key_index < summary.len and summary[key_index] == key) {
+        return if (high == 0) values[0..1] else values[high-1..high];
+    }
+    return values[high - key_stride..high];
 }
