@@ -630,6 +630,7 @@ pub fn LsmTree(
             /// The first bytes are a vsr.Header containing checksum, id, count and timestamp.
             buffer: []align(config.sector_size) const u8,
             table_info: Manifest.TableInfo,
+            flush_iterator: FlushIterator,
 
             pub fn create(
                 cluster: u32,
@@ -644,19 +645,6 @@ pub fn LsmTree(
                 const filter_blocks = blocks[index_block_count..][0..filter_block_count];
                 const data_blocks =
                     blocks[index_block_count + filter_block_count ..][0..data_block_count];
-
-                const index_keys = mem.bytesAsSlice(
-                    Key,
-                    index_block[index.keys_offset..][0..index.keys_size],
-                );
-                const index_data_addresses = mem.bytesAsSlice(
-                    u64,
-                    index_block[index.data_addresses_offset..][0..index.data_addresses_size],
-                );
-                const index_data_checksums = mem.bytesAsSlice(
-                    u128,
-                    index_block[index.data_checksums_offset..][0..index.data_checksums_size],
-                );
 
                 var key_min: Key = undefined;
 
@@ -724,34 +712,27 @@ pub fn LsmTree(
                     header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                     header.set_checksum();
 
-                    index_keys[i] = key_from_value(values[values.len - 1]);
-                    index_data_addresses[i] = header.op;
-                    index_data_checksums[i] = header.checksum;
+                    table.index_keys()[i] = key_from_value(values[values.len - 1]);
+                    table.index_data_addresses()[i] = header.op;
+                    table.index_data_checksums()[i] = header.checksum;
                 } else data_block_count;
 
                 assert(data_blocks_used > 0);
 
                 const index_keys_padding = mem.sliceAsBytes(index_keys[data_blocks_used..]);
                 mem.set(u8, index_keys_padding, 0);
-                mem.set(u64, index_data_addresses[data_blocks_used..], 0);
-                mem.set(u128, index_data_checksums[data_blocks_used..], 0);
+                mem.set(u64, table.index_data_addresses()[data_blocks_used..], 0);
+                mem.set(u128, table.index_data_checksums()[data_blocks_used..], 0);
 
                 // TODO implement filters
-                const index_filter_addresses = mem.bytesAsSlice(
-                    u64,
-                    index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
-                );
-                const index_filter_checksums = mem.bytesAsSlice(
-                    u128,
-                    index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
-                );
+                const filter_blocks_used = 0;
                 for (filter_blocks) |*block| {
                     mem.set(u8, block[0..@sizeOf(vsr.Header)], 0);
                     comptime assert(filter.padding_offset == @sizeOf(vsr.Header));
                     mem.set(u8, block[filter.padding_offset..][0..filter.padding_size], 0);
                 }
-                mem.set(u64, index_filter_addresses, 0);
-                mem.set(u128, index_filter_checksums, 0);
+                mem.set(u64, table.index_filter_addresses(), 0);
+                mem.set(u128, table.index_filter_checksums(), 0);
 
                 mem.set(u8, index_block[index.padding_offset..][0..index.padding_size], 0);
 
@@ -761,6 +742,8 @@ pub fn LsmTree(
                 header.* = .{
                     .cluster = cluster,
                     .op = block_free_set.acquire(),
+                    .commit = filter_blocks_used,
+                    .offset = data_blocks_used,
                     .size = index.size,
                     .command = .block,
                 };
@@ -776,8 +759,105 @@ pub fn LsmTree(
                         .key_min = key_min,
                         .key_max = index_keys[data_blocks_used - 1],
                     },
+                    .flush_iterator = .{},
                 };
             }
+
+            inline fn index_keys(table: *ImmutableTable) []Key {
+                return mem.bytesAsSlice(
+                    Key,
+                    table.buffer[index.keys_offset..][0..index.keys_size],
+                );
+            }
+
+            inline fn index_data_addresses(table: *ImmutableTable) []u64 {
+                return mem.bytesAsSlice(
+                    u64,
+                    table.buffer[index.data_addresses_offset..][0..index.data_addresses_size],
+                );
+            }
+
+            inline fn index_data_checksums(table: *ImmutableTable) []u128 {
+                return mem.bytesAsSlice(
+                    u128,
+                    table.buffer[index.data_checksums_offset..][0..index.data_checksums_size],
+                );
+            }
+
+            inline fn index_filter_addresses(table: *ImmutableTable) []u64 {
+                return mem.bytesAsSlice(
+                    u64,
+                    table.buffer[index.filter_addresses_offset..][0..index.filter_addresses_size],
+                );
+            }
+
+            inline fn index_filter_checksums(table: *ImmutableTable) []u128 {
+                return mem.bytesAsSlice(
+                    u128,
+                    table.buffer[index.filter_checksums_offset..][0..index.filter_checksums_size],
+                );
+            }
+
+            pub const FlushIterator = struct {
+                const Callback = fn () void;
+
+                write: Storage.Write = undefined,
+                /// The index of the block that is currently being written/will be written next.
+                block: u32 = 0,
+
+                blocks_max: u32 = undefined,
+                callback: Callback = undefined,
+
+                pub fn flush(it: *FlushIterator, blocks_max: ?u32, callback: Callback) void {
+                    it.blocks_max = blocks_max orelse math.maxInt(u32);
+                    it.callback = callback;
+                    it.flush_internal();
+                }
+
+                fn flush_internal(it: *FlushIterator) void {
+                    const table = @fieldParentPtr(ImmutableTable, "flush_iterator", it);
+
+                    const index_header = mem.bytesAsValue(table.buffer[0..@sizeOf(vsr.Header)]);
+                    const filter_blocks_used = index_header.commit;
+                    const data_blocks_used = index_header.offset;
+                    const total_blocks_used = 1 + filter_blocks_used + data_blocks_used;
+
+                    if (it.block == total_blocks_used) {
+                        it.flush_complete();
+                        return;
+                    }
+                    assert(it.block < total_blocks_used);
+
+                    if (it.blocks_max == 0) {
+                        it.flush_complete();
+                        return;
+                    }
+
+                    if (it.block == 1 + filter_blocks_used) {
+                        const filter_blocks_unused = filter_block_count - filter_blocks_used;
+                        it.block += filter_blocks_unused;
+                    }
+
+                    const block_buffer = table.buffer[it.block * block_size ..][0..block_size];
+                    const header = mem.bytesAsValue(block_buffer[0..@sizeOf(vsr.Header)]);
+                    const address = header.op;
+                    storage.write_block(on_flush, &it.write, block_buffer, address);
+                }
+
+                fn flush_complete(it: *FlushIterator) void {
+                    const callback = it.callback;
+                    it.blocks_max = undefined;
+                    it.callback = undefined;
+                    callback();
+                }
+
+                fn on_flush(write: *Storage.Write) void {
+                    const it = @fieldParentPtr(FlushIterator, "write", write);
+                    it.block += 1;
+                    it.blocks_max -= 1;
+                    it.flush_internal();
+                }
+            };
         };
 
         block_free_set: *BlockFreeSet,
