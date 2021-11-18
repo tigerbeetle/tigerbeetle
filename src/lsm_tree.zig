@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
@@ -124,7 +125,8 @@ pub const BlockFreeSet = struct {
         // new requests when storage space is too low to fulfill them.
         const bit = set.free.findFirstSet() orelse unreachable;
         set.free.unset(bit);
-        return @intCast(u64, address + 1);
+        const address = bit + 1;
+        return @intCast(u64, address);
     }
 
     pub fn release(set: *BlockFreeSet, address: u64) void {
@@ -248,13 +250,15 @@ pub fn LsmTree(
         // Point queries go through the object cache instead of directly accessing this table.
         // Range queries are not supported on MemTables, they must instead be made immutable.
         pub const MutableTable = struct {
+            const block_value_count_max = ImmutableTable.data.value_count_max;
+
             const ValuesContext = struct {
-                pub fn eql(a: Value, b: Value) bool {
+                pub fn eql(_: ValuesContext, a: Value, b: Value) bool {
                     return compare_keys(key_from_value(a), key_from_value(b)) == .eq;
                 }
-                pub fn hash(value: Value) u64 {
+                pub fn hash(_: ValuesContext, value: Value) u64 {
                     const key = key_from_value(value);
-                    return std.hash_map.getAutoHashFn(Key, ValuesContext)(key);
+                    return std.hash_map.getAutoHashFn(Key, ValuesContext)(.{}, key);
                 }
             };
             const Values = std.HashMapUnmanaged(Value, void, ValuesContext, 50);
@@ -296,10 +300,10 @@ pub fn LsmTree(
                 values: []Value,
 
                 /// Returns the number of values copied, 0 if there are no values left.
-                pub fn copy_values(iterator: *Iterator, target: []Value) usize {
-                    const count = math.min(iterator.values.len, target.len);
-                    mem.copy(Value, target, iterator.values[0..count]);
-                    iterator.values = iterator.values[count..];
+                pub fn copy_values(i: *Iterator, target: []Value) usize {
+                    const count = math.min(i.values.len, target.len);
+                    mem.copy(Value, target, i.values[0..count]);
+                    i.values = i.values[count..];
                     return count;
                 }
             };
@@ -656,7 +660,10 @@ pub fn LsmTree(
                     // For each block we write the sorted values, initialize the Eytzinger layout,
                     // complete the block header, and add the block's max key to the table index.
 
-                    const values_bytes = block[data.values_offset..][0..data.values_size];
+                    const values_bytes = @alignCast(
+                        @alignOf(Value),
+                        block[data.values_offset..][0..data.values_size],
+                    );
                     const values_max = mem.bytesAsSlice(Value, values_bytes);
                     assert(values_max.len == data.value_count_max);
 
@@ -679,12 +686,21 @@ pub fn LsmTree(
                     }
 
                     assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
-                    const key_layout_bytes =
-                        block[data.key_layout_offset..][0..data.key_layout_size];
+                    const key_layout_bytes = @alignCast(
+                        @alignOf(Key),
+                        block[data.key_layout_offset..][0..data.key_layout_size],
+                    );
                     const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
                     const e = eytzinger(data.key_count, data.value_count_max);
-                    e.layout(Key, Value, key_from_value, sentinel_key, key_layout, values);
+                    e.layout_from_keys_or_values(
+                        Key,
+                        Value,
+                        key_from_value,
+                        sentinel_key,
+                        values,
+                        key_layout,
+                    );
 
                     const values_padding = mem.sliceAsBytes(values_max[value_count..]);
                     const block_padding = block[data.padding_offset..][0..data.padding_size];
@@ -697,14 +713,14 @@ pub fn LsmTree(
                     header.* = .{
                         .cluster = cluster,
                         .op = block_free_set.acquire(),
-                        .size = block_size - values_padding.len - block_padding.len,
+                        .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
                         .command = .block,
                     };
 
                     header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                     header.set_checksum();
 
-                    index_keys[i] = values[values.len - 1];
+                    index_keys[i] = key_from_value(values[values.len - 1]);
                     index_data_addresses[i] = header.op;
                     index_data_checksums[i] = header.checksum;
                 } else data_block_count;
@@ -839,6 +855,8 @@ test {
         @import("test/storage.zig").Storage,
     );
 
+    // TODO ref all decls instead
     _ = TestTree;
     _ = TestTree.ImmutableTable;
+    _ = TestTree.ImmutableTable.create;
 }
