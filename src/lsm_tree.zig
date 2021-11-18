@@ -184,10 +184,9 @@ pub const Table = packed struct {
     // data (append up to maximum size)
 };
 
-pub const Forest = struct {
-    transfers_lsm: TransfersLsm,
-    transfers_indexes_lsm: TransfersIndexesLsm,
-    // ...
+pub const LsmForest = struct {
+    block_free_set: BlockFreeSet,
+    mutable_table_iterator_buffer: [config.lsm_mutable_table_size_max]u8,
 };
 
 const LsmTreeOptions = struct {
@@ -247,10 +246,10 @@ pub fn LsmTree(
             pub fn level_tables(manifest: *Manifest, level: u32, timestamp_max: u64) []TableInfo {}
         };
 
-        // Point queries go through the object cache instead of directly accessing this table.
-        // Range queries are not supported on MemTables, they must instead be made immutable.
+        /// Point queries go through the object cache instead of directly accessing this table.
+        /// Range queries are not supported on MutableTable, they must instead be made immutable.
         pub const MutableTable = struct {
-            const block_value_count_max = ImmutableTable.data.value_count_max;
+            const value_count_max = config.lsm_mutable_table_size_max / value_size;
 
             const ValuesContext = struct {
                 pub fn eql(_: ValuesContext, a: Value, b: Value) bool {
@@ -261,20 +260,22 @@ pub fn LsmTree(
                     return std.hash_map.getAutoHashFn(Key, ValuesContext)(.{}, key);
                 }
             };
-            const Values = std.HashMapUnmanaged(Value, void, ValuesContext, 50);
+            const load_factor = 50;
+            const Values = std.HashMapUnmanaged(Value, void, ValuesContext, load_factor);
 
             values: Values = .{},
-            /// Used as a scratch buffer to provide a sorted iterator for construction
-            /// of ImmutableTables.
-            values_sorted: *[block_value_count_max]Value,
 
             pub fn init(allocator: *std.mem.Allocator) !MutableTable {
-                var table: MutableTable = .{
-                    .values_sorted = try table.allocator.create([block_value_count_max]Value),
-                };
-                errdefer allocator.destroy(table.values_sorted);
-                try table.values.ensureTotalCapacity(block_value_count_max);
+                var table: MutableTable = .{};
+                // TODO This allocates a bit more memory than we need as it rounds up to the next
+                // power of two or similar based on the hash map's growth factor. We never resize
+                // the hashmap so this is wasted memory for us.
+                try table.values.ensureTotalCapacity(value_count_max);
                 return table;
+            }
+
+            pub fn deinit(table: *MutableTable, allocator: *std.mem.Allocator) void {
+                table.values.deinit(allocator);
             }
 
             /// Add the given value to the table
@@ -282,14 +283,14 @@ pub fn LsmTree(
                 table.values.putAssumeCapacity(value, {});
                 // The hash map implementation may allocate more memory
                 // than strictly needed due to a growth factor.
-                assert(table.values.count() <= block_value_count_max);
+                assert(table.values.count() <= value_count_max);
             }
 
             pub fn remove(table: *MutableTable, key: Key) void {
                 table.values.putAssumeCapacity(tombstone_from_key(key), {});
                 // The hash map implementation may allocate more memory
                 // than strictly needed due to a growth factor.
-                assert(table.values.count() <= block_value_count_max);
+                assert(table.values.count() <= value_count_max);
             }
 
             pub fn get(table: *MutableTable, key: Key) ?Value {
@@ -297,24 +298,27 @@ pub fn LsmTree(
             }
 
             pub const Iterator = struct {
-                values: []Value,
+                values_sorted: []Value,
 
                 /// Returns the number of values copied, 0 if there are no values left.
-                pub fn copy_values(i: *Iterator, target: []Value) usize {
-                    const count = math.min(i.values.len, target.len);
-                    mem.copy(Value, target, i.values[0..count]);
-                    i.values = i.values[count..];
+                pub fn copy_values(it: *Iterator, target: []Value) usize {
+                    const count = math.min(it.values_sorted.len, target.len);
+                    mem.copy(Value, target, it.values_sorted[0..count]);
+                    it.values_sorted = it.values_sorted[count..];
                     return count;
                 }
             };
 
-            pub fn iterator(table: *MutableTable) Iterator {
+            pub fn iterator(table: *MutableTable, sort_buffer: []align(@alignOf(Value)) u8) Iterator {
+                assert(sort_buffer.len == config.lsm_mutable_table_size_max);
+                const values_buffer = mem.bytesAsSlice(Value, sort_buffer[0..value_count_max]);
+
                 var i: usize = 0;
                 var it = table.values.keyIterator();
                 while (it.next()) |value| : (i += 1) {
-                    table.values_sorted[i] = value.*;
+                    values_buffer[i] = value.*;
                 }
-                const values = table.values_sorted[0..i];
+                const values = values_buffer[0..i];
                 assert(values.len == table.values.count());
 
                 // Sort values by key:
@@ -325,7 +329,7 @@ pub fn LsmTree(
                 }.less_than;
                 std.sort.insertionSort(Value, values, {}, less_than);
 
-                return Iterator{ .values = values };
+                return Iterator{ .values_sorted = values };
             }
         };
 
@@ -779,6 +783,11 @@ pub fn LsmTree(
         block_free_set: *BlockFreeSet,
         storage: *Storage,
         options: LsmTreeOptions,
+
+        /// We size and allocate this buffer as a function of MutableTable.value_count_max,
+        /// leaving off unneeded data blocks at the end. This saves memory for each LSM tree,
+        /// which is important as we have many LSM trees.
+        immutable_table_buffer: []u8,
 
         manifest: []Manifest,
 
