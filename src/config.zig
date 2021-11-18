@@ -201,6 +201,8 @@ pub const lsm_table_size_max = 64 * 1024 * 1024;
 /// through an LRU block cache.
 pub const lsm_table_block_size = 64 * 1024;
 
+pub const lsm_mutable_table_size_max = 4 * message_size_max;
+
 /// TODO: docs
 pub const lsm_snapshots_max = 32;
 
