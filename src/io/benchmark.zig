@@ -17,7 +17,7 @@ pub fn main() !void {
         transferred: u64 = 0,
 
         // 1 MB: larger than socket buffer so forces io_pending on darwin
-        // Cnofigure this value to smaller amounts to test IO scheduling overhead
+        // Configure this value to smaller amounts to test IO scheduling overhead
         const buffer_size = 1 * 1024 * 1024;
 
         // max time for the benchmark to run
@@ -39,10 +39,10 @@ pub fn main() !void {
             const allocator = &gpa.allocator;
             defer assert(gpa.deinit());
 
-            const buf = try allocator.alloc(u8, buffer_size * 2);
-            defer allocator.free(buf);
-            std.mem.set(u8, buf, 0);
-            
+            const buffer = try allocator.alloc(u8, buffer_size * 2);
+            defer allocator.free(buffer);
+            std.mem.set(u8, buffer, 0);
+
             var timer = Time{};
             const started = timer.monotonic();
             var self = Context{
@@ -50,8 +50,8 @@ pub fn main() !void {
                 .timer = &timer,
                 .started = started,
                 .current = started,
-                .tx = .{ .buffer = buf[0*buffer_size..][0..buffer_size] },
-                .rx = .{ .buffer = buf[1*buffer_size..][0..buffer_size] },
+                .tx = .{ .buffer = buffer[0 * buffer_size ..][0..buffer_size] },
+                .rx = .{ .buffer = buffer[1 * buffer_size ..][0..buffer_size] },
             };
 
             defer {
@@ -64,7 +64,7 @@ pub fn main() !void {
                     transferred_mb / (@intToFloat(f64, elapsed_ns) / std.time.ns_per_s),
                 });
             }
-            
+
             // Setup the server socket
             self.server.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
             defer os.closeSocket(self.server.fd);
@@ -81,10 +81,10 @@ pub fn main() !void {
 
             // Start accepting the client
             self.io.accept(
-                *Context, 
-                &self, 
-                on_accept, 
-                &self.server.completion, 
+                *Context,
+                &self,
+                on_accept,
+                &self.server.completion,
                 self.server.fd,
             );
 
@@ -125,7 +125,7 @@ pub fn main() !void {
 
         fn isRunning(self: Context) bool {
             // Make sure that we're connected
-            if (self.rx.socket.fd == -1) 
+            if (self.rx.socket.fd == -1)
                 return true;
 
             // Make sure that we haven't run too long as configured
@@ -166,12 +166,12 @@ pub fn main() !void {
         };
 
         fn do_transfer(
-            self: *Context, 
-            comptime pipe_name: []const u8, 
+            self: *Context,
+            comptime pipe_name: []const u8,
             comptime transfer_type: TransferType,
             bytes: usize,
         ) void {
-            // The type of IO to perform 
+            // The type of IO to perform
             // and what type of IO to perform next after the current one completes.
             const transfer_info = switch (transfer_type) {
                 .read => .{
@@ -210,7 +210,7 @@ pub fn main() !void {
                         result: transfer_info.IoError!usize,
                     ) void {
                         const _bytes = result catch |err| {
-                            std.debug.panic("{} error: {}", .{transfer_info.io_func, err});
+                            std.debug.panic("{} error: {}", .{ transfer_info.io_func, err });
                         };
                         assert(&@field(_self, pipe_name).socket.completion == completion);
                         _self.do_transfer(pipe_name, transfer_type, _bytes);

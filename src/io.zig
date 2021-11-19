@@ -1,7 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const os = std.os;
-const testing = std.testing;
 
 const FIFO = @import("fifo.zig").FIFO;
 const IO_Linux = @import("io/linux.zig").IO;
@@ -27,7 +26,6 @@ pub fn buffer_limit(buffer_len: usize) usize {
     return std.math.min(limit, buffer_len);
 }
 
-test "ref all decls" {
-    
+test "I/O" {
+    _ = @import("io/test.zig");
 }
-

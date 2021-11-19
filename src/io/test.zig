@@ -221,7 +221,7 @@ test "timeout" {
         fn run_test() !void {
             var timer = Time{};
             const start_time = timer.monotonic();
-            
+
             var self: Context = .{
                 .timer = &timer,
                 .io = try IO.init(32, 0),
@@ -323,7 +323,7 @@ test "tick to wait" {
 
             const server = try IO.openSocket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
             defer os.closeSocket(server);
-            
+
             try os.setsockopt(
                 server,
                 os.SOL_SOCKET,
@@ -354,7 +354,7 @@ test "tick to wait" {
             // Tick the IO to drain the accept & connect completions
             assert(!self.connected);
             assert(self.accepted == -1);
-            
+
             while (self.accepted == -1 or !self.connected)
                 try self.io.tick();
 
@@ -367,10 +367,10 @@ test "tick to wait" {
             var recv_buffer: [64]u8 = undefined;
             std.mem.set(u8, &recv_buffer, 0xaa);
             self.io.recv(
-                *Context, 
-                &self, 
-                recv_callback, 
-                &recv_completion, 
+                *Context,
+                &self,
+                recv_callback,
+                &recv_completion,
                 client,
                 &recv_buffer,
             );
@@ -453,20 +453,20 @@ test "pipe data over socket" {
         fn run() !void {
             const tx_buf = try testing.allocator.alloc(u8, buffer_size);
             defer testing.allocator.free(tx_buf);
-            
+
             const rx_buf = try testing.allocator.alloc(u8, buffer_size);
             defer testing.allocator.free(rx_buf);
 
             std.mem.set(u8, tx_buf, 1);
             std.mem.set(u8, rx_buf, 0);
-            
+
             var self = Context{
                 .io = try IO.init(32, 0),
                 .tx = .{ .buffer = tx_buf },
                 .rx = .{ .buffer = rx_buf },
             };
             defer self.io.deinit();
-            
+
             self.server.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
             defer os.closeSocket(self.server.fd);
 
@@ -482,10 +482,10 @@ test "pipe data over socket" {
             try os.listen(self.server.fd, 1);
 
             self.io.accept(
-                *Context, 
-                &self, 
-                on_accept, 
-                &self.server.completion, 
+                *Context,
+                &self,
+                on_accept,
+                &self.server.completion,
                 self.server.fd,
             );
 
@@ -541,7 +541,7 @@ test "pipe data over socket" {
         ) void {
             assert(self.tx.socket.fd != -1);
             assert(&self.tx.socket.completion == completion);
-            
+
             assert(self.tx.transferred == 0);
             self.do_sender(0);
         }
@@ -597,6 +597,5 @@ test "pipe data over socket" {
             assert(&self.rx.socket.completion == completion);
             self.do_receiver(bytes);
         }
-
     }.run();
 }
