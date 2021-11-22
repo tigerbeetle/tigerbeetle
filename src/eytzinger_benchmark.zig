@@ -20,6 +20,17 @@ const summary_fractions = .{4, 8, 16, 32};
 const values_per_page = .{128, 256, 512, 1024, 2048, 4096, 8192};
 const body_fmt = "{:_>2}B/{:_>3}B {:_>4}/{:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns CY={:_>6} IN={:_>6} CR={:_>5} CM={:_>5} BM={}\n";
 
+const summary_sizes = blk: {
+    var sizes: [values_per_page.len][summary_fractions.len]usize = undefined;
+    for (values_per_page) |values_count, v| {
+        for (summary_fractions) |fraction, k| {
+            // Set in reverse order so that the summary sizes ascend.
+            sizes[v][summary_fractions.len - k - 1] = values_count / fraction;
+        }
+    }
+    break :blk sizes;
+};
+
 pub fn main() !void {
     std.log.info("Samples: {}", .{searches});
     std.log.info("WT: Wall time/search", .{});
@@ -40,10 +51,9 @@ pub fn main() !void {
     const blob_size = GiB;
     var blob = try arena.allocator.alloc(u8, blob_size);
 
-    inline for (summary_fractions) |summary_fraction| {
-        inline for (values_per_page) |values_count| {
-            inline for (kv_types) |kv| {
-                const keys_count = values_count / summary_fraction;
+    inline for (kv_types) |kv| {
+        inline for (values_per_page) |values_count, v| {
+            inline for (summary_sizes[v]) |keys_count| {
                 try run_benchmark(.{
                     .blob_size = blob_size,
                     .key_size = kv.key_size,
