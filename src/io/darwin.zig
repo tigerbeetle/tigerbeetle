@@ -313,8 +313,8 @@ pub const IO = struct {
                     );
                     errdefer os.close(fd);
 
-                    // darwin doesn't support os.MSG_NOSIGNAL,
-                    // but instead a socket option to avoid SIGPIPE.
+                    // Darwin doesn't support os.MSG_NOSIGNAL to avoid getting SIGPIPE on socket send().
+                    // Instead, it uses the SO_NOSIGPIPE socket option which does the same for all send()s.
                     os.setsockopt(
                         fd,
                         os.SOL_SOCKET,

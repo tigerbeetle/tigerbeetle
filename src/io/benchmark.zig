@@ -125,8 +125,7 @@ pub fn main() !void {
 
         fn isRunning(self: Context) bool {
             // Make sure that we're connected
-            if (self.rx.socket.fd == -1)
-                return true;
+            if (self.rx.socket.fd == -1) return true;
 
             // Make sure that we haven't run too long as configured
             const elapsed = self.current - self.started;
@@ -171,8 +170,7 @@ pub fn main() !void {
             comptime transfer_type: TransferType,
             bytes: usize,
         ) void {
-            // The type of IO to perform
-            // and what type of IO to perform next after the current one completes.
+            // The type of IO to perform and what type of IO to perform next (after the current one completes).
             const transfer_info = switch (transfer_type) {
                 .read => .{
                     .IoError = IO.RecvError,
