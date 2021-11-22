@@ -12,7 +12,8 @@ const searches = 100_000;
 const kv_types = .{
     .{.key_size = 8, .value_size = 128},
     .{.key_size = 8, .value_size = 64},
-    .{.key_size = 24, .value_size = 24},
+    .{.key_size = 16, .value_size = 16},
+    .{.key_size = 32, .value_size = 32},
 };
 
 // keys_per_summary = values_per_page / summary_fraction
@@ -87,8 +88,6 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
     var pages = try blob_alloc.allocator.alloc(Page, page_count);
     random.bytes(std.mem.sliceAsBytes(pages));
     for (pages) |*page| {
-        //std.sort.sort(Value, page.values[0..], {}, Value.key_lt);
-        // TODO should the keys be randomized too?
         for (page.values) |*value, i| value.key = i;
         Eytzinger.layout_from_keys_or_values(
             Key, Val, Val.key_from_value, Val.max_key,
