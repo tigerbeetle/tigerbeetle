@@ -45,7 +45,7 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
-        const benchmark = b.addExecutable("benchmark_array_search", "src/benchmark_array_search.zig");
+        const benchmark = b.addExecutable("eytzinger_benchmark", "src/eytzinger_benchmark.zig");
         benchmark.setTarget(target);
         benchmark.setBuildMode(mode);
         //const run_cmd = tigerbeetle.run();
