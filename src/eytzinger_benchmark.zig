@@ -131,40 +131,6 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
         });
     }
 
-    for (pages) |*page| std.sort.sort(Key, page.summary[0..], {}, Val.key_lt);
-    {
-        var benchmark = try Benchmark.begin();
-        var i: usize = 0;
-        var v: usize = 0;
-        while (i < layout.searches) : (i += 1) {
-            const target = value_picker[v % value_picker.len];
-            const p = page_picker[i % page_picker.len];
-            const page = pages[p];
-            const bounds = binary_search_keys(layout, Key, Val, Val.key_compare, &page.summary, &page.values, target);
-            assert(bounds.len != 0);
-            const hit = if (bounds.len == 1) bounds[0]
-                else bounds[binary_search(Key, Val, Val.key_from_value, Val.key_compare, bounds, target)];
-            assert(hit.key == target);
-            if (i % pages.len == 0) v += 1;
-        }
-        const result = try benchmark.end(layout.searches);
-        try stdout.print(body_fmt, .{
-            layout.key_size,
-            layout.value_size,
-            layout.keys_count,
-            layout.values_count,
-            "B",
-            "B",
-            result.wall_time,
-            result.utime,
-            result.cpu_cycles,
-            result.instructions,
-            result.cache_references,
-            result.cache_misses,
-            result.branch_misses,
-        });
-    }
-
     {
         var benchmark = try Benchmark.begin();
         var i: usize = 0;
