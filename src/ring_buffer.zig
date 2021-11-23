@@ -14,43 +14,73 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
         /// The number of items in the buffer.
         count: usize = 0,
 
-        /// Add an element to the RingBuffer. Returns an error if the buffer
-        /// is already full and the element could not be added.
-        pub fn push(self: *Self, item: T) error{NoSpaceLeft}!void {
-            if (self.full()) return error.NoSpaceLeft;
-            self.buffer[(self.index + self.count) % self.buffer.len] = item;
-            self.count += 1;
+        // TODO add doc comments to these functions:
+        pub inline fn head(self: Self) ?T {
+            if (self.empty()) return null;
+            return self.buffer[self.index];
         }
 
-        /// Return, but do not remove, the next item, if any.
-        pub fn peek(self: *Self) ?T {
-            return (self.peek_ptr() orelse return null).*;
-        }
-
-        /// Return a pointer to, but do not remove, the next item, if any.
-        pub fn peek_ptr(self: *Self) ?*T {
+        pub inline fn head_ptr(self: *Self) ?*T {
             if (self.empty()) return null;
             return &self.buffer[self.index];
         }
 
-        /// Remove and return the next item, if any.
-        pub fn pop(self: *Self) ?T {
+        pub inline fn tail(self: Self) ?T {
             if (self.empty()) return null;
-            defer {
-                self.index = (self.index + 1) % self.buffer.len;
-                self.count -= 1;
-            }
-            return self.buffer[self.index];
+            return self.buffer[(self.index + self.count - 1) % self.buffer.len];
+        }
+
+        pub inline fn tail_ptr(self: *Self) ?*T {
+            if (self.empty()) return null;
+            return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
+        }
+
+        pub inline fn next_tail(self: Self) ?T {
+            if (self.full()) return null;
+            return self.buffer[(self.index + self.count) % self.buffer.len];
+        }
+
+        pub inline fn next_tail_ptr(self: *Self) ?*T {
+            if (self.full()) return null;
+            return &self.buffer[(self.index + self.count) % self.buffer.len];
+        }
+
+        pub inline fn advance_head(self: *Self) void {
+            self.index += 1;
+            self.index %= self.buffer.len;
+            self.count -= 1;
+        }
+
+        pub inline fn advance_tail(self: *Self) void {
+            assert(self.count < self.buffer.len);
+            self.count += 1;
         }
 
         /// Returns whether the ring buffer is completely full.
-        pub fn full(self: *const Self) bool {
+        pub inline fn full(self: Self) bool {
             return self.count == self.buffer.len;
         }
 
         /// Returns whether the ring buffer is completely empty.
-        pub fn empty(self: *const Self) bool {
+        pub inline fn empty(self: Self) bool {
             return self.count == 0;
+        }
+
+        // Higher level, less error-prone wrappers:
+
+        /// Add an element to the RingBuffer. Returns an error if the buffer
+        /// is already full and the element could not be added.
+        pub fn push(self: *Self, item: T) error{NoSpaceLeft}!void {
+            const ptr = self.next_tail_ptr() orelse return error.NoSpaceLeft;
+            ptr.* = item;
+            self.advance_tail();
+        }
+
+        /// Remove and return the next item, if any.
+        pub fn pop(self: *Self) ?T {
+            const result = self.head() orelse return null;
+            self.advance_head();
+            return result;
         }
 
         pub const Iterator = struct {
@@ -58,7 +88,10 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
             count: usize = 0,
 
             pub fn next(it: *Iterator) ?T {
-                return (it.next_ptr() orelse return null).*;
+                assert(it.count <= it.ring.count);
+                if (it.count == it.ring.count) return null;
+                defer it.count += 1;
+                return it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
             }
 
             pub fn next_ptr(it: *Iterator) ?*T {
@@ -79,43 +112,6 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
 
 const testing = std.testing;
 
-test "push/peek/pop/full/empty" {
-    var fifo = RingBuffer(u32, 3){};
-
-    try testing.expect(!fifo.full());
-    try testing.expect(fifo.empty());
-
-    try fifo.push(1);
-    try testing.expectEqual(@as(?u32, 1), fifo.peek());
-
-    try testing.expect(!fifo.full());
-    try testing.expect(!fifo.empty());
-
-    try fifo.push(2);
-    try testing.expectEqual(@as(?u32, 1), fifo.peek());
-
-    try fifo.push(3);
-    try testing.expectError(error.NoSpaceLeft, fifo.push(4));
-
-    try testing.expect(fifo.full());
-    try testing.expect(!fifo.empty());
-
-    try testing.expectEqual(@as(?u32, 1), fifo.peek());
-    try testing.expectEqual(@as(?u32, 1), fifo.pop());
-
-    try testing.expect(!fifo.full());
-    try testing.expect(!fifo.empty());
-
-    fifo.peek_ptr().?.* += 1000;
-
-    try testing.expectEqual(@as(?u32, 1002), fifo.pop());
-    try testing.expectEqual(@as(?u32, 3), fifo.pop());
-    try testing.expectEqual(@as(?u32, null), fifo.pop());
-
-    try testing.expect(!fifo.full());
-    try testing.expect(fifo.empty());
-}
-
 fn test_iterator(comptime T: type, ring: *T, values: []const u32) !void {
     const ring_index = ring.index;
 
@@ -133,22 +129,41 @@ fn test_iterator(comptime T: type, ring: *T, values: []const u32) !void {
     try testing.expectEqual(ring_index, ring.index);
 }
 
-test "iterator" {
+test "RingBuffer: low level interface" {
     const Ring = RingBuffer(u32, 2);
 
     var ring = Ring{};
     try test_iterator(Ring, &ring, &[_]u32{});
 
-    try ring.push(0);
+    try testing.expectEqual(@as(?u32, null), ring.head());
+    try testing.expectEqual(@as(?*u32, null), ring.head_ptr());
+    try testing.expectEqual(@as(?u32, null), ring.tail());
+    try testing.expectEqual(@as(?*u32, null), ring.tail_ptr());
+
+    ring.next_tail_ptr().?.* = 0;
+    ring.advance_tail();
+    try testing.expectEqual(@as(?u32, 0), ring.tail());
+    try testing.expectEqual(@as(u32, 0), ring.tail_ptr().?.*);
     try test_iterator(Ring, &ring, &[_]u32{0});
 
-    try ring.push(1);
+    ring.next_tail_ptr().?.* = 1;
+    ring.advance_tail();
+    try testing.expectEqual(@as(?u32, 1), ring.tail());
+    try testing.expectEqual(@as(u32, 1), ring.tail_ptr().?.*);
     try test_iterator(Ring, &ring, &[_]u32{ 0, 1 });
 
-    try testing.expectEqual(@as(?u32, 0), ring.pop());
+    try testing.expectEqual(@as(?u32, null), ring.next_tail());
+    try testing.expectEqual(@as(?*u32, null), ring.next_tail_ptr());
+
+    try testing.expectEqual(@as(?u32, 0), ring.head());
+    try testing.expectEqual(@as(u32, 0), ring.head_ptr().?.*);
+    ring.advance_head();
     try test_iterator(Ring, &ring, &[_]u32{1});
 
-    try ring.push(2);
+    ring.next_tail_ptr().?.* = 2;
+    ring.advance_tail();
+    try testing.expectEqual(@as(?u32, 2), ring.tail());
+    try testing.expectEqual(@as(u32, 2), ring.tail_ptr().?.*);
     try test_iterator(Ring, &ring, &[_]u32{ 1, 2 });
 
     var iterator = ring.iterator();
@@ -156,15 +171,67 @@ test "iterator" {
         item_ptr.* += 1000;
     }
 
-    try testing.expectEqual(@as(?u32, 1001), ring.pop());
+    try testing.expectEqual(@as(?u32, 1001), ring.head());
+    try testing.expectEqual(@as(u32, 1001), ring.head_ptr().?.*);
+    ring.advance_head();
     try test_iterator(Ring, &ring, &[_]u32{1002});
 
-    try ring.push(3);
+    ring.next_tail_ptr().?.* = 3;
+    ring.advance_tail();
+    try testing.expectEqual(@as(?u32, 3), ring.tail());
+    try testing.expectEqual(@as(u32, 3), ring.tail_ptr().?.*);
     try test_iterator(Ring, &ring, &[_]u32{ 1002, 3 });
 
-    try testing.expectEqual(@as(?u32, 1002), ring.pop());
+    try testing.expectEqual(@as(?u32, 1002), ring.head());
+    try testing.expectEqual(@as(u32, 1002), ring.head_ptr().?.*);
+    ring.advance_head();
     try test_iterator(Ring, &ring, &[_]u32{3});
 
-    try testing.expectEqual(@as(?u32, 3), ring.pop());
+    try testing.expectEqual(@as(?u32, 3), ring.head());
+    try testing.expectEqual(@as(u32, 3), ring.head_ptr().?.*);
+    ring.advance_head();
     try test_iterator(Ring, &ring, &[_]u32{});
+
+    try testing.expectEqual(@as(?u32, null), ring.head());
+    try testing.expectEqual(@as(?*u32, null), ring.head_ptr());
+    try testing.expectEqual(@as(?u32, null), ring.tail());
+    try testing.expectEqual(@as(?*u32, null), ring.tail_ptr());
+}
+
+test "RingBuffer: push/pop high level interface" {
+    var fifo = RingBuffer(u32, 3){};
+
+    try testing.expect(!fifo.full());
+    try testing.expect(fifo.empty());
+
+    try fifo.push(1);
+    try testing.expectEqual(@as(?u32, 1), fifo.head());
+
+    try testing.expect(!fifo.full());
+    try testing.expect(!fifo.empty());
+
+    try fifo.push(2);
+    try testing.expectEqual(@as(?u32, 1), fifo.head());
+
+    try fifo.push(3);
+    try testing.expectError(error.NoSpaceLeft, fifo.push(4));
+
+    try testing.expect(fifo.full());
+    try testing.expect(!fifo.empty());
+
+    try testing.expectEqual(@as(?u32, 1), fifo.head());
+    try testing.expectEqual(@as(?u32, 1), fifo.pop());
+
+    try testing.expect(!fifo.full());
+    try testing.expect(!fifo.empty());
+
+    try fifo.push(4);
+
+    try testing.expectEqual(@as(?u32, 2), fifo.pop());
+    try testing.expectEqual(@as(?u32, 3), fifo.pop());
+    try testing.expectEqual(@as(?u32, 4), fifo.pop());
+    try testing.expectEqual(@as(?u32, null), fifo.pop());
+
+    try testing.expect(!fifo.full());
+    try testing.expect(fifo.empty());
 }

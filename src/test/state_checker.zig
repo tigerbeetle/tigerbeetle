@@ -86,7 +86,7 @@ pub const StateChecker = struct {
         // The replica has transitioned to state `b` that is not yet in the history.
         // Check if this is a valid new state based on all currently inflight client requests.
         for (state_checker.client_requests) |*queue| {
-            if (queue.peek_ptr()) |input| {
+            if (queue.head_ptr()) |input| {
                 if (b == StateMachine.hash(state_checker.state, std.mem.asBytes(input))) {
                     const transitions_executed = state_checker.history.get(a).?;
                     if (transitions_executed < state_checker.transitions) {

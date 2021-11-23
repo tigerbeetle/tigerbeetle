@@ -919,7 +919,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 assert(connection.peer == .client or connection.peer == .replica);
                 assert(connection.state == .connected);
                 assert(connection.fd != -1);
-                const message = connection.send_queue.peek() orelse return;
+                const message = connection.send_queue.head() orelse return;
                 assert(!connection.send_submitted);
                 connection.send_submitted = true;
                 bus.io.send(
@@ -949,9 +949,9 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     connection.terminate(bus, .shutdown);
                     return;
                 };
-                assert(connection.send_progress <= connection.send_queue.peek_ptr().?.*.header.size);
+                assert(connection.send_progress <= connection.send_queue.head().?.header.size);
                 // If the message has been fully sent, move on to the next one.
-                if (connection.send_progress == connection.send_queue.peek_ptr().?.*.header.size) {
+                if (connection.send_progress == connection.send_queue.head().?.header.size) {
                     connection.send_progress = 0;
                     const message = connection.send_queue.pop().?;
                     bus.unref(message);
