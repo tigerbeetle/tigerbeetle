@@ -192,6 +192,8 @@ pub const lsm_trees = 6;
 /// TODO tune this.
 pub const lsm_levels = 7;
 
+pub const lsm_growth_factor = 10;
+
 /// Max key size for the LSM Trees in bytes
 pub const lsm_key_size_max = 32;
 
