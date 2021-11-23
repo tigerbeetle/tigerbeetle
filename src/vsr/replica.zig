@@ -1467,7 +1467,7 @@ pub fn Replica(
             assert(self.status == .normal);
             assert(self.leader());
 
-            const prepare = self.pipeline.peek_ptr().?;
+            const prepare = self.pipeline.head_ptr().?;
             assert(prepare.message.header.command == .prepare);
 
             if (prepare.ok_quorum_received) {
@@ -1925,7 +1925,7 @@ pub fn Replica(
             assert(self.leader());
             assert(self.pipeline.count > 0);
 
-            while (self.pipeline.peek_ptr()) |prepare| {
+            while (self.pipeline.head_ptr()) |prepare| {
                 assert(self.pipeline.count > 0);
                 assert(self.commit_min == self.commit_max);
                 assert(self.commit_max + self.pipeline.count == self.op);

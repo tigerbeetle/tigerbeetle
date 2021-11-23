@@ -279,7 +279,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 return;
             }
 
-            if (self.request_queue.peek_ptr()) |inflight| {
+            if (self.request_queue.head_ptr()) |inflight| {
                 if (reply.header.request < inflight.message.header.request) {
                     log.debug("{}: on_reply: ignoring (request {} < {})", .{
                         self.id,
@@ -334,7 +334,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
             // We must process the next request before releasing control back to the callback.
             // Otherwise, requests may run through send_request_for_the_first_time() more than once.
-            if (self.request_queue.peek_ptr()) |next_request| {
+            if (self.request_queue.head_ptr()) |next_request| {
                 self.send_request_for_the_first_time(next_request.message);
             }
 
@@ -363,7 +363,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         fn on_request_timeout(self: *Self) void {
             self.request_timeout.backoff(&self.prng);
 
-            const message = self.request_queue.peek_ptr().?.message;
+            const message = self.request_queue.head_ptr().?.message;
             assert(message.header.command == .request);
             assert(message.header.request < self.request_number);
             assert(message.header.checksum == self.parent);
@@ -478,7 +478,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         fn send_request_for_the_first_time(self: *Self, message: *Message) void {
-            assert(self.request_queue.peek_ptr().?.message == message);
+            assert(self.request_queue.head_ptr().?.message == message);
 
             assert(message.header.command == .request);
             assert(message.header.parent == 0);
