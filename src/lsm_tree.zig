@@ -105,36 +105,107 @@ pub fn CompositeKey(comptime Secondary: type) type {
 /// The 0 address is reserved for usage as a sentinel and will never be returned
 /// by acquire().
 /// TODO add encode/decode function for run-length encoding to/from SuperBlock.
+/// Bits set indicate free blocks.
 pub const BlockFreeSet = struct {
-    /// Bits set indicate free blocks
-    free: std.bit_set.DynamicBitSetUnmanaged,
+    l1: std.bit_set.DynamicBitSetUnmanaged, // Top-level index.
+    l2: std.bit_set.DynamicBitSetUnmanaged, // Second-level index.
+    l2_per_l1: usize,
+    blocks: std.bit_set.DynamicBitSetUnmanaged,
+    blocks_per_l2: usize,
 
-    pub fn init(allocator: *std.mem.Allocator, count: usize) !BlockFreeSet {
+    // 1 bit of l1 = bitwise OR of l2_per_l1 bits of l2.
+    // 1 bit of l2 = bitwise OR of ceil(total_blocks ÷ (l2_per_l1 × l1_size)) bits of blocks.
+    pub fn init(allocator: *std.mem.Allocator, l1_size: usize, l2_per_l1: usize, total_blocks: usize) !BlockFreeSet {
+        // Don't make the index too large.
+        const blocks_per_l2 = divCeil(usize, total_blocks, l1_size * l2_per_l1);
+        assert(blocks_per_l2 > 1);
+
+        var l1 = try std.bit_set.DynamicBitSetUnmanaged.initFull(l1_size, allocator);
+        errdefer l1.deinit(allocator);
+        var l2 = try std.bit_set.DynamicBitSetUnmanaged.initFull(l1_size * l2_per_l1, allocator);
+        errdefer l2.deinit(allocator);
+
+        const blocks = try std.bit_set.DynamicBitSetUnmanaged.initFull(total_blocks, allocator);
         return BlockFreeSet{
-            .free = try std.bit_set.DynamicBitSetUnmanaged.initFull(count, allocator),
+            .l1 = l1,
+            .l2 = l2,
+            .l2_per_l1 = l2_per_l1,
+            .blocks = blocks,
+            .blocks_per_l2 = blocks_per_l2,
         };
     }
 
     pub fn deinit(set: *BlockFreeSet, allocator: *std.mem.Allocator) void {
-        set.free.deinit(allocator);
+        set.l1.deinit(allocator);
+        set.l2.deinit(allocator);
+        set.blocks.deinit(allocator);
     }
 
     // TODO consider "caching" the first set bit to speed up subsequent acquire() calls
     pub fn acquire(set: *BlockFreeSet) u64 {
         // TODO: To ensure this "unreachable" is never reached, the leader must reject
         // new requests when storage space is too low to fulfill them.
-        const bit = set.free.findFirstSet() orelse unreachable;
-        set.free.unset(bit);
+        return set.try_acquire() orelse unreachable;
+    }
+
+    fn try_acquire(set: *BlockFreeSet) ?u64 {
+        const l1_bit = set.l1.findFirstSet() orelse return null;
+        const l2_start = l1_bit * set.l2_per_l1;
+        const l2_end = (l1_bit + 1) * set.l2_per_l1;
+        const l2_bit = findFirstSetBit(set.l2, l2_start, l2_end) orelse return null;
+        assert(set.l2.isSet(l2_bit));
+
+        const shard_start = l2_bit * set.blocks_per_l2;
+        const shard_end = shard_start + set.blocks_per_l2;
+        const bit = findFirstSetBit(set.blocks, shard_start, shard_end) orelse return null;
+        assert(set.blocks.isSet(bit));
+        set.blocks.unset(bit);
+
+        // Update the index if the last block in the shard was just allocated.
+        if (findFirstSetBit(set.blocks, shard_start, shard_end) == null) {
+            set.l2.unset(l2_bit);
+            if (findFirstSetBit(set.l2, l2_start, l2_end) == null) {
+                set.l1.unset(l1_bit);
+            }
+        }
+
         const address = bit + 1;
         return @intCast(u64, address);
     }
 
     pub fn release(set: *BlockFreeSet, address: u64) void {
         const bit = address - 1;
-        assert(!set.free.isSet(bit));
-        set.free.set(bit);
+        assert(!set.blocks.isSet(bit));
+        set.blocks.set(bit);
+
+        const l2_bit = @divTrunc(bit, set.blocks_per_l2);
+        const l1_bit = @divTrunc(l2_bit, set.l2_per_l1);
+        set.l2.set(l2_bit);
+        set.l1.set(l1_bit);
     }
 };
+
+// Returns the index of a set bit (relative to the start of the bitset) within start…end (inclusive…exclusive).
+fn findFirstSetBit(bitset: std.bit_set.DynamicBitSetUnmanaged, start: usize, end: usize) ?usize {
+    const MaskInt = std.bit_set.DynamicBitSetUnmanaged.MaskInt;
+    const word_start = @divTrunc(start, @bitSizeOf(MaskInt));
+    const word_offset = @mod(start, @bitSizeOf(MaskInt));
+    const word_end = divCeil(usize, end, @bitSizeOf(MaskInt));
+    assert(word_start < word_end);
+
+    // Only iterate over the subset of bits that were requested.
+    var iter = bitset.iterator(.{});
+    iter.words_remain = bitset.masks[word_start+1..word_end];
+    const mask = ~@as(MaskInt, 0);
+    iter.bits_remain = bitset.masks[word_start] & std.math.shl(MaskInt, mask, word_offset);
+
+    const b = start - word_offset + (iter.next() orelse return null);
+    return if (b < end) b else null;
+}
+
+fn divCeil(comptime T: type, a: T, b: T) T {
+    return @divTrunc(a + b - 1, b);
+}
 
 // vsr.zig
 pub const SuperBlock = packed struct {
@@ -948,4 +1019,69 @@ test {
     _ = TestTree;
     _ = TestTree.ImmutableTable;
     _ = TestTree.ImmutableTable.create;
+}
+
+fn testBlockFreeSet(l1_size: usize, l2_per_l1: usize, total_blocks: usize) !void {
+    const expectEqual = std.testing.expectEqual;
+    // Acquire everything, then release, then acquire again.
+    var set = try BlockFreeSet.init(std.testing.allocator, 64, 64, total_blocks);
+    defer set.deinit(std.testing.allocator);
+    var i: usize = 0;
+    while (i < total_blocks) : (i += 1) {
+        try expectEqual(@as(?u64, i + 1), set.try_acquire());
+    }
+    try expectEqual(@as(?u64, null), set.try_acquire());
+
+    i = 0;
+    while (i < total_blocks) : (i += 1) set.release(@as(u64, i + 1));
+
+    i = 0;
+    while (i < total_blocks) : (i += 1) {
+        try expectEqual(@as(?u64, i + 1), set.try_acquire());
+    }
+    try expectEqual(@as(?u64, null), set.try_acquire());
+}
+
+test "BlockFreeSet" {
+    const testing = std.testing;
+
+    try testBlockFreeSet(64, 64, 64 * 64 * 64);
+    var i: usize = 1;
+    while (i < 64) : (i += 1) {
+        try testBlockFreeSet(i, 64, 64 * 64 * 8);
+        try testBlockFreeSet(64, i, 64 * 64 * 8);
+        try testBlockFreeSet(64, 64, 64 * 64 * 8 + i);
+    }
+}
+
+test "findFirstSetBit" {
+    const BitSet = std.bit_set.DynamicBitSetUnmanaged;
+    const window = 8;
+
+    // Verify that only bits within the specified range are returned.
+    var size: usize = @bitSizeOf(BitSet.MaskInt);
+    while (size <= @bitSizeOf(BitSet.MaskInt) * 2) : (size += 1) {
+        var set = try BitSet.initEmpty(size, std.testing.allocator);
+        defer set.deinit(std.testing.allocator);
+
+        var s: usize = 0;
+        while (s < size - window) : (s += 1) {
+            var b: usize = 0;
+            while (b < size) : (b += 1) {
+                set.set(b);
+                const expect = if (s <= b and b < s + window) b else null;
+                try std.testing.expectEqual(expect, findFirstSetBit(set, s, s + window));
+                set.unset(b);
+            }
+        }
+    }
+
+    {
+        // Make sure the first bit is returned.
+        var set = try BitSet.initEmpty(16, std.testing.allocator);
+        defer set.deinit(std.testing.allocator);
+        set.set(2);
+        set.set(5);
+        try std.testing.expectEqual(@as(?usize, 2), findFirstSetBit(set, 1, 9));
+    }
 }
