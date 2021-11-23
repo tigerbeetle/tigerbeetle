@@ -3,8 +3,10 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
-const vsr = @import("vsr.zig");
 
+const RingBuffer = @import("ring_buffer.zig").RingBuffer;
+
+const vsr = @import("vsr.zig");
 const config = @import("config.zig");
 const eytzinger = @import("eytzinger.zig").eytzinger;
 
@@ -215,6 +217,9 @@ pub fn LsmTree(
 
     const value_size = @sizeOf(Value);
     const key_size = @sizeOf(Key);
+
+    const BlockPtr = *align(config.sector_size) [block_size]u8;
+
     return struct {
         const Self = @This();
 
@@ -652,11 +657,7 @@ pub fn LsmTree(
                     // For each block we write the sorted values, initialize the Eytzinger layout,
                     // complete the block header, and add the block's max key to the table index.
 
-                    const values_bytes = @alignCast(
-                        @alignOf(Value),
-                        block[data.values_offset..][0..data.values_size],
-                    );
-                    const values_max = mem.bytesAsSlice(Value, values_bytes);
+                    const values_max = data_block_values(block);
                     assert(values_max.len == data.value_count_max);
 
                     const value_count = iterator.copy_values(values_max);
@@ -705,6 +706,7 @@ pub fn LsmTree(
                     header.* = .{
                         .cluster = cluster,
                         .op = block_free_set.acquire(),
+                        .offset = values.len,
                         .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
                         .command = .block,
                     };
@@ -712,17 +714,18 @@ pub fn LsmTree(
                     header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                     header.set_checksum();
 
-                    table.index_keys()[i] = key_from_value(values[values.len - 1]);
-                    table.index_data_addresses()[i] = header.op;
-                    table.index_data_checksums()[i] = header.checksum;
+                    index_keys(index_block)[i] = key_from_value(values[values.len - 1]);
+                    index_data_addresses(index_block)[i] = header.op;
+                    index_data_checksums(index_block)[i] = header.checksum;
                 } else data_block_count;
 
                 assert(data_blocks_used > 0);
 
-                const index_keys_padding = mem.sliceAsBytes(index_keys[data_blocks_used..]);
-                mem.set(u8, index_keys_padding, 0);
-                mem.set(u64, table.index_data_addresses()[data_blocks_used..], 0);
-                mem.set(u128, table.index_data_checksums()[data_blocks_used..], 0);
+                const index_keys_padding = index_keys(index_block)[data_blocks_used..];
+                const index_keys_padding_bytes = mem.sliceAsBytes(index_keys_padding);
+                mem.set(u8, index_keys_padding_bytes, 0);
+                mem.set(u64, index_data_addresses(index_block)[data_blocks_used..], 0);
+                mem.set(u128, index_data_checksums(index_block)[data_blocks_used..], 0);
 
                 // TODO implement filters
                 const filter_blocks_used = 0;
@@ -731,8 +734,8 @@ pub fn LsmTree(
                     comptime assert(filter.padding_offset == @sizeOf(vsr.Header));
                     mem.set(u8, block[filter.padding_offset..][0..filter.padding_size], 0);
                 }
-                mem.set(u64, table.index_filter_addresses(), 0);
-                mem.set(u128, table.index_filter_checksums(), 0);
+                mem.set(u64, index_filter_addresses(index_block), 0);
+                mem.set(u128, index_filter_checksums(index_block), 0);
 
                 mem.set(u8, index_block[index.padding_offset..][0..index.padding_size], 0);
 
@@ -757,45 +760,46 @@ pub fn LsmTree(
                         .address = header.op,
                         .timestamp = timestamp,
                         .key_min = key_min,
-                        .key_max = index_keys[data_blocks_used - 1],
+                        .key_max = index_keys(index_block)[data_blocks_used - 1],
                     },
                     .flush_iterator = .{},
                 };
             }
 
-            inline fn index_keys(table: *ImmutableTable) []Key {
-                return mem.bytesAsSlice(
-                    Key,
-                    table.buffer[index.keys_offset..][0..index.keys_size],
-                );
+            inline fn index_keys(block: BlockPtr) []Key {
+                return mem.bytesAsSlice(Key, block[index.keys_offset..][0..index.keys_size]);
             }
 
-            inline fn index_data_addresses(table: *ImmutableTable) []u64 {
+            inline fn index_data_addresses(block: BlockPtr) []u64 {
                 return mem.bytesAsSlice(
                     u64,
-                    table.buffer[index.data_addresses_offset..][0..index.data_addresses_size],
+                    block[index.data_addresses_offset..][0..index.data_addresses_size],
                 );
             }
 
-            inline fn index_data_checksums(table: *ImmutableTable) []u128 {
+            inline fn index_data_checksums(block: BlockPtr) []u128 {
                 return mem.bytesAsSlice(
                     u128,
-                    table.buffer[index.data_checksums_offset..][0..index.data_checksums_size],
+                    block[index.data_checksums_offset..][0..index.data_checksums_size],
                 );
             }
 
-            inline fn index_filter_addresses(table: *ImmutableTable) []u64 {
+            inline fn index_filter_addresses(block: BlockPtr) []u64 {
                 return mem.bytesAsSlice(
                     u64,
-                    table.buffer[index.filter_addresses_offset..][0..index.filter_addresses_size],
+                    block[index.filter_addresses_offset..][0..index.filter_addresses_size],
                 );
             }
 
-            inline fn index_filter_checksums(table: *ImmutableTable) []u128 {
+            inline fn index_filter_checksums(block: BlockPtr) []u128 {
                 return mem.bytesAsSlice(
                     u128,
-                    table.buffer[index.filter_checksums_offset..][0..index.filter_checksums_size],
+                    block[index.filter_checksums_offset..][0..index.filter_checksums_size],
                 );
+            }
+
+            inline fn data_block_values(block: *align(config.sector_size) [block_size]u8) []Value {
+                return mem.bytesAsSlice(Value, block[data.values_offset..][0..data.values_size]);
             }
 
             pub const FlushIterator = struct {
@@ -841,7 +845,8 @@ pub fn LsmTree(
                     const block_buffer = table.buffer[it.block * block_size ..][0..block_size];
                     const header = mem.bytesAsValue(block_buffer[0..@sizeOf(vsr.Header)]);
                     const address = header.op;
-                    storage.write_block(on_flush, &it.write, block_buffer, address);
+                    // This needs to go through the block cache, which is owned by the forest.
+                    forest.write_block(on_flush, &it.write, block_buffer, address);
                 }
 
                 fn flush_complete(it: *FlushIterator) void {
@@ -856,6 +861,178 @@ pub fn LsmTree(
                     it.block += 1;
                     it.blocks_max -= 1;
                     it.flush_internal();
+                }
+            };
+        };
+
+        /// Compact tables in level a with overlapping tables in level b.
+        pub const CompactionIterator = struct {
+            pub const Callback = fn (it: *CompactionIterator) void;
+            const level_0_table_count_max = 10;
+            const level_a_table_count_max = level_0_table_count_max;
+
+            tick: u32 = 0,
+            iops_in_progress: u32 = 0,
+
+            /// Addresses of all source tables in level a
+            level_a_table_count: u32,
+            level_a_table_iterators: [level_a_table_count_max]TableIterator,
+
+            level_b_level_iterator: LevelIterator,
+
+            level_b_merge_block: *align(config.sector_size) [block_size]u8,
+            level_b_write_block: *align(config.sector_size) [block_size]u8,
+
+            pub fn init(allocator: *mem.Allocator) CompactionIterator {}
+
+            pub fn start(
+                level_a_tables: []u64,
+                level_b: u32,
+                level_b_key_min: Key,
+                level_b_key_max: Key,
+            ) void {}
+
+            pub fn tick(it: *CompactionIterator, callback: Callback) void {}
+
+            const TableIterator = struct {
+                parent: *CompactionIterator,
+                read_table_index: bool,
+                address: u64,
+                index: BlockPtr,
+                /// This is duplicated from the index header to reduce cache
+                /// misses in peek()/pop().
+                data_blocks_used: u32,
+                /// The index of the current block in the table index block.
+                block: u32,
+                /// The index of the current value in the current block.
+                value: u32,
+                blocks: RingBuffer(BlockPtr, 2),
+                read: Storage.Read = undefined,
+
+                fn init(allocator: *mem.Allocator) !TableIterator {
+                    const index = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                    errdefer allocator.free(index);
+
+                    const block_a = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                    errdefer allocator.free(block_a);
+
+                    const block_b = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                    errdefer allocator.free(block_b);
+
+                    return .{
+                        .parent = undefined,
+                        .read_table_index = undefined,
+                        // Use 0 so that we can assert(address != 0) in tick().
+                        .address = 0,
+                        .index = index[0..block_size],
+                        .data_blocks_used = undefined,
+                        .block = undefined,
+                        .value = undefined,
+                        .blocks = .{
+                            .buffer = .{
+                                block_a[0..block_size],
+                                block_b[0..block_size],
+                            },
+                        },
+                    };
+                }
+
+                fn deinit(it: *TableIterator, allocator: *mem.Allocator) void {
+                    allocator.free(it.index);
+                    allocator.free(blocks.buffer[0]);
+                    allocator.free(blocks.buffer[1]);
+                }
+
+                fn reset(it: *TableIterator, parent: *CompactionIterator, address: u64) void {
+                    it.* = .{
+                        .parent = parent,
+                        .read_table_index = true,
+                        .address = address,
+                        .index = it.index,
+                        .data_blocks_used = undefined,
+                        .block = 0,
+                        .value = 0,
+                        .blocks = it.blocks,
+                    };
+                }
+
+                /// Returns true if an IO operation was started. If this returns true,
+                /// then CompactionIterator.iop_done() will be called on completion.
+                fn tick(it: *TableIterator) bool {
+                    assert(it.address != 0);
+
+                    if (it.read_table_index) {
+                        forest.read_block(on_read_table_index, &it.read, it.index, address);
+                        return true;
+                    }
+
+                    if (it.block < it.data_blocks_used) {
+                        if (it.blocks.next_tail()) |block| {
+                            const addresses = ImmutableTable.index_data_addresses(it.index);
+                            const checksums = ImmutableTable.index_data_checksums(it.index);
+                            const address = addresses[it.block];
+                            const checksum = checksums[it.block];
+                            forest.read_block(on_read, &it.read, block, address, checksum);
+                            return true;
+                        }
+                    } else {
+                        assert(it.block == it.data_blocks_used);
+                    }
+
+                    return false;
+                }
+
+                fn on_read_table_index(read: *Storage.Read) void {
+                    const it = @fieldParentPtr(TableIterator, "read", read);
+
+                    assert(it.read_table_index);
+                    it.read_table_index = false;
+
+                    const header = mem.bytesAsValue(it.index[0..@sizeOf(vsr.Header)]);
+                    it.data_blocks_used = header.offset;
+
+                    it.tick();
+                }
+
+                fn on_read(read: *Storage.Read) void {
+                    const it = @fieldParentPtr(TableIterator, "read", read);
+                    assert(!it.read_table_index);
+                    it.blocks.advance_tail();
+                    it.block += 1;
+                    it.parent.iop_done();
+                }
+
+                fn peek(it: *TableIterator) ?Key {
+                    assert(!it.read_table_index);
+
+                    const block = it.blocks.peek_head() orelse {
+                        assert(it.block == it.data_blocks_used);
+                        return null;
+                    };
+
+                    assert(it.value < it.data_blocks_used);
+
+                    const values = ImmutableTable.data_block_values(block);
+                    return key_from_value(values[it.value]);
+                }
+
+                fn pop(it: *TableIterator) Value {
+                    assert(!it.read_table_index);
+
+                    const block = it.blocks.peek_head().?;
+
+                    assert(it.value < it.data_blocks_used);
+
+                    const values = ImmutableTable.data_block_values(block);
+                    const value = values[it.value];
+
+                    it.value += 1;
+                    if (it.value == it.data_blocks_used) {
+                        it.value = 0;
+                        it.blocks.advance_head();
+                    }
+
+                    return value;
                 }
             };
         };
