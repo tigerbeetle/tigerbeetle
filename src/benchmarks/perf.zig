@@ -1,5 +1,6 @@
+// Copyright (c) 2015-2021, Zig contributors
 // Backported from https://github.com/ziglang/zig/blob/master/lib/std/os/linux.zig
-// This can be removed once we upgrade Zig.
+// TODO Remove this file once we upgrade to Zig 0.9.0.
 const std = @import("std");
 const pid_t = std.os.linux.pid_t;
 const fd_t = std.os.linux.fd_t;
@@ -12,7 +13,11 @@ pub fn perf_event_open(
     flags: usize,
 ) !fd_t {
     const rc = perf_event_open_internal(attr, pid, cpu, group_fd, flags);
-    if (std.os.errno(rc) != 0) return error.Unexpected;
+    const errno = std.os.errno(rc);
+    if (errno != 0) {
+        std.log.err("perf_event_open_internal errno={}", .{errno});
+        return error.Unexpected;
+    }
     return @intCast(fd_t, rc);
 }
 
