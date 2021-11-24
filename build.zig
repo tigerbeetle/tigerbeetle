@@ -47,7 +47,7 @@ pub fn build(b: *std.build.Builder) void {
     {
         const benchmark = b.addExecutable("eytzinger_benchmark", "src/eytzinger_benchmark.zig");
         benchmark.setTarget(target);
-        benchmark.setBuildMode(mode);
+        benchmark.setBuildMode(.ReleaseSafe);
         const run_cmd = benchmark.run();
 
         const step = b.step("eytzinger_benchmark", "Benchmark array search");
