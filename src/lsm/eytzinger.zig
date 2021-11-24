@@ -100,7 +100,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
         pub fn layout_from_keys_or_values(
             comptime Key: type,
             comptime Value: type,
-            comptime key_from_value: fn (Value) Key,
+            comptime key_from_value: fn (Value) callconv(.Inline) Key,
             /// This sentinel must compare greater than all actual keys.
             comptime sentinel_key: Key,
             values: []const Value,
@@ -168,7 +168,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
         pub fn search_values(
             comptime Key: type,
             comptime Value: type,
-            comptime compare_keys: fn (Key, Key) math.Order,
+            comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
             layout: *const [keys_count + 1]Key,
             values: []const Value,
             key: Key,
@@ -253,7 +253,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
         /// TODO examine the generated machine code for this function
         pub fn search_keys(
             comptime Key: type,
-            comptime compare_keys: fn (Key, Key) math.Order,
+            comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
             layout: *const [keys_count + 1]Key,
             values_count: u32,
             key: Key,
@@ -330,12 +330,12 @@ const test_eytzinger = struct {
     const Value = extern struct {
         key: u32,
 
-        fn to_key(value: Value) u32 {
+        inline fn to_key(value: Value) u32 {
             return value.key;
         }
     };
 
-    fn compare_keys(a: u32, b: u32) math.Order {
+    inline fn compare_keys(a: u32, b: u32) math.Order {
         return math.order(a, b);
     }
 
