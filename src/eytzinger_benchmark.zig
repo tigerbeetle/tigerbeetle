@@ -19,7 +19,8 @@ const kv_types = .{
 // keys_per_summary = values_per_page / summary_fraction
 const summary_fractions = .{4, 8, 16, 32};
 const values_per_page = .{128, 256, 512, 1024, 2048, 4096, 8192};
-const body_fmt = "{:_>2}B/{:_>3}B {:_>4}/{:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns CY={:_>6} IN={:_>6} CR={:_>5} CM={:_>5} BM={}\n";
+const body_fmt = "{:_>2}B/{:_>3}B {:_>4}/{:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns" ++
+    " CY={:_>6} IN={:_>6} CR={:_>5} CM={:_>5} BM={}\n";
 
 const summary_sizes = blk: {
     var sizes: [values_per_page.len][summary_fractions.len]usize = undefined;
@@ -46,9 +47,11 @@ pub fn main() !void {
     try std.os.getrandom(std.mem.asBytes(&seed));
     var prng = std.rand.DefaultPrng.init(seed);
 
-    // Allocate from heap just once. All page allocations reuse this buffer.
+    // Allocate on the heap just once.
+    // All page allocations reuse this buffer to speed up the run time.
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+
     const blob_size = GiB;
     var blob = try arena.allocator.alloc(u8, blob_size);
 
@@ -71,11 +74,11 @@ pub fn main() !void {
 fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) !void {
     assert(blob.len == layout.blob_size);
     const Eytzinger = eytzinger(layout.keys_count - 1, layout.values_count);
-    const Val = Value(layout);
-    const Key = Val.Key;
+    const V = Value(layout);
+    const K = V.Key;
     const Page = struct {
-        summary: [layout.keys_count]Key,
-        values: [layout.values_count]Val,
+        keys: [layout.keys_count]K,
+        values: [layout.values_count]V,
     };
     const page_count = layout.blob_size / @sizeOf(Page);
 
@@ -90,8 +93,8 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
     for (pages) |*page| {
         for (page.values) |*value, i| value.key = i;
         Eytzinger.layout_from_keys_or_values(
-            Key, Val, Val.key_from_value, Val.max_key,
-            &page.values, &page.summary);
+            K, V, V.key_from_value, V.max_key,
+            &page.values, &page.keys);
     }
 
     const stdout = std.io.getStdOut().writer();
@@ -103,10 +106,8 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
             const page_index = page_picker[i % page_picker.len];
             const target = value_picker[v % value_picker.len];
             const page = pages[page_index];
-            const bounds = Eytzinger.search_values(Key, Val, Val.key_compare, &page.summary, &page.values, target);
-            assert(bounds.len != 0);
-            const hit = if (bounds.len == 1) bounds[0]
-                else bounds[binary_search(Key, Val, Val.key_from_value, Val.key_compare, bounds, target)];
+            const bounds = Eytzinger.search_values(K, V, V.key_compare, &page.keys, &page.values, target);
+            const hit = bounds[binary_search(K, V, V.key_from_value, V.key_compare, bounds, target)];
 
             assert(hit.key == target);
             if (i % pages.len == 0) v += 1;
@@ -136,9 +137,8 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
         var v: usize = 0;
         while (i < layout.searches) : (i += 1) {
             const target = value_picker[v % value_picker.len];
-            const p = page_picker[i % page_picker.len];
-            const page = pages[p];
-            const hit = page.values[binary_search(Key, Val, Val.key_from_value, Val.key_compare, page.values[0..], target)];
+            const page = pages[page_picker[i % page_picker.len]];
+            const hit = page.values[binary_search(K, V, V.key_from_value, V.key_compare, page.values[0..], target)];
 
             assert(hit.key == target);
             if (i % pages.len == 0) v += 1;
@@ -181,18 +181,15 @@ fn Value(comptime layout: Layout) type {
 
         comptime {
             assert(@sizeOf(Key) == layout.key_size);
+            assert(@sizeOf(Self) == layout.value_size);
         }
 
         fn key_from_value(self: Self) Key {
             return self.key;
         }
 
-        fn key_from_key(x: Key) Key {
+        inline fn key_from_key(x: Key) Key {
             return x;
-        }
-
-        fn key_lt(_: void, a: Key, b: Key) bool {
-            return a < b;
         }
 
         fn key_compare(a: Key, b: Key) math.Order {
@@ -262,6 +259,7 @@ const Benchmark = struct {
                 self.perf_fds[i] = -1;
             }
         }
+
         const rusage = std.os.getrusage(0);
         const err = std.os.linux.ioctl(self.perf_fds[0], PERF.EVENT_IOC.DISABLE, PERF.IOC_FLAG_GROUP);
         if (err == -1) return error.Unexpected;
@@ -295,24 +293,26 @@ fn readPerfFd(fd: std.os.fd_t) !usize {
     var result: usize = 0;
     const n = try std.os.read(fd, std.mem.asBytes(&result));
     assert(n == @sizeOf(usize));
+
     return result;
 }
 
 fn binary_search_keys(
     comptime layout: Layout,
     comptime Key: type,
-    comptime Val: type,
+    comptime V: type,
     comptime compare_keys: fn (Key, Key) math.Order,
-    summary: []const Key,
-    values: []const Val,
+    keys: []const Key,
+    values: []const V,
     key: Key,
-) []const Val {
-    assert(summary.len == layout.keys_count);
+) []const V {
+    assert(keys.len == layout.keys_count);
     assert(values.len == layout.values_count);
-    const key_index = binary_search(Key, Key, Val.key_from_key, compare_keys, summary, key);
+
+    const key_index = binary_search(Key, Key, V.key_from_key, compare_keys, keys, key);
     const key_stride = layout.values_count / layout.keys_count;
     const high = key_index * key_stride;
-    if (key_index < summary.len and summary[key_index] == key) {
+    if (key_index < keys.len and keys[key_index] == key) {
         return if (high == 0) values[0..1] else values[high-1..high];
     }
     return values[high - key_stride..high];
