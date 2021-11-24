@@ -184,7 +184,7 @@ fn Value(comptime layout: Layout) type {
             assert(@sizeOf(Self) == layout.value_size);
         }
 
-        fn key_from_value(self: Self) Key {
+        inline fn key_from_value(self: Self) Key {
             return self.key;
         }
 
@@ -192,7 +192,7 @@ fn Value(comptime layout: Layout) type {
             return x;
         }
 
-        fn key_compare(a: Key, b: Key) math.Order {
+        inline fn key_compare(a: Key, b: Key) math.Order {
             return math.order(a, b);
         }
     };

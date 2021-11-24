@@ -9,8 +9,8 @@ const math = std.math;
 pub fn binary_search(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) Key,
-    comptime compare_keys: fn (Key, Key) math.Order,
+    comptime key_from_value: fn (Value) callconv(.Inline) Key,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key: Key,
 ) usize {
@@ -40,12 +40,12 @@ const test_binary_search = struct {
 
     const Value = struct {
         key: u32,
-        fn to_key(v: Value) u32 {
+        inline fn to_key(v: Value) u32 {
             return v.key;
         }
     };
 
-    fn compare_keys(a: u32, b: u32) math.Order {
+    inline fn compare_keys(a: u32, b: u32) math.Order {
         return math.order(a, b);
     }
 
