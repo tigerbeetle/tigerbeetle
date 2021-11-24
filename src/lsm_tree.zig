@@ -107,37 +107,34 @@ pub fn CompositeKey(comptime Secondary: type) type {
 /// TODO add encode/decode function for run-length encoding to/from SuperBlock.
 /// Bits set indicate free blocks.
 pub const BlockFreeSet = struct {
-    l1: std.bit_set.DynamicBitSetUnmanaged, // Top-level index.
-    l2: std.bit_set.DynamicBitSetUnmanaged, // Second-level index.
-    l2_per_l1: usize,
+    // Each bit of `index` is the OR of `shard_size` bits of `blocks`.
+    index: std.bit_set.DynamicBitSetUnmanaged,
     blocks: std.bit_set.DynamicBitSetUnmanaged,
-    blocks_per_l2: usize,
 
-    // 1 bit of l1 = bitwise OR of l2_per_l1 bits of l2.
-    // 1 bit of l2 = bitwise OR of ceil(total_blocks ÷ (l2_per_l1 × l1_size)) bits of blocks.
-    pub fn init(allocator: *std.mem.Allocator, l1_size: usize, l2_per_l1: usize, total_blocks: usize) !BlockFreeSet {
-        // Don't make the index too large.
-        const blocks_per_l2 = divCeil(usize, total_blocks, l1_size * l2_per_l1);
-        assert(blocks_per_l2 > 1);
+    // Fixing the shard size to a constant rather than varying the shard size (but
+    // guaranteeing the index always a multiple of 64B) means that the top-level index
+    // may have some unused bits. But the shards themselves are always a multiple of
+    // the word size. In practice the tail end of the index will be accessed less
+    // frequently than the head/middle anyway.
+    //
+    // 10TiB disk / 64KiB block size / 640B shard size = 4096B index
+    const shard_size = 10 * (64 * 8); // 10 cache lines per shard
 
-        var l1 = try std.bit_set.DynamicBitSetUnmanaged.initFull(l1_size, allocator);
-        errdefer l1.deinit(allocator);
-        var l2 = try std.bit_set.DynamicBitSetUnmanaged.initFull(l1_size * l2_per_l1, allocator);
-        errdefer l2.deinit(allocator);
+    pub fn init(allocator: *std.mem.Allocator, total_blocks: usize) !BlockFreeSet {
+        // Round up to ensure that every block bit is covered by the index.
+        const index_size = divCeil(usize, total_blocks, shard_size);
+        var index = try std.bit_set.DynamicBitSetUnmanaged.initFull(index_size, allocator);
+        errdefer index.deinit(allocator);
 
         const blocks = try std.bit_set.DynamicBitSetUnmanaged.initFull(total_blocks, allocator);
         return BlockFreeSet{
-            .l1 = l1,
-            .l2 = l2,
-            .l2_per_l1 = l2_per_l1,
+            .index = index,
             .blocks = blocks,
-            .blocks_per_l2 = blocks_per_l2,
         };
     }
 
     pub fn deinit(set: *BlockFreeSet, allocator: *std.mem.Allocator) void {
-        set.l1.deinit(allocator);
-        set.l2.deinit(allocator);
+        set.index.deinit(allocator);
         set.blocks.deinit(allocator);
     }
 
@@ -149,24 +146,18 @@ pub const BlockFreeSet = struct {
     }
 
     fn try_acquire(set: *BlockFreeSet) ?u64 {
-        const l1_bit = set.l1.findFirstSet() orelse return null;
-        const l2_start = l1_bit * set.l2_per_l1;
-        const l2_end = (l1_bit + 1) * set.l2_per_l1;
-        const l2_bit = findFirstSetBit(set.l2, l2_start, l2_end) orelse return null;
-        assert(set.l2.isSet(l2_bit));
+        const index_bit = set.index.findFirstSet() orelse return null;
+        const shard_start = index_bit * shard_size;
+        const shard_end = std.math.min(shard_start + shard_size, set.blocks.bit_length);
+        assert(shard_start < set.blocks.bit_length);
 
-        const shard_start = l2_bit * set.blocks_per_l2;
-        const shard_end = shard_start + set.blocks_per_l2;
         const bit = findFirstSetBit(set.blocks, shard_start, shard_end) orelse return null;
         assert(set.blocks.isSet(bit));
         set.blocks.unset(bit);
 
-        // Update the index if the last block in the shard was just allocated.
+        // Update the index when every block in the shard is allocated.
         if (findFirstSetBit(set.blocks, shard_start, shard_end) == null) {
-            set.l2.unset(l2_bit);
-            if (findFirstSetBit(set.l2, l2_start, l2_end) == null) {
-                set.l1.unset(l1_bit);
-            }
+            set.index.unset(index_bit);
         }
 
         const address = bit + 1;
@@ -178,10 +169,8 @@ pub const BlockFreeSet = struct {
         assert(!set.blocks.isSet(bit));
         set.blocks.set(bit);
 
-        const l2_bit = @divTrunc(bit, set.blocks_per_l2);
-        const l1_bit = @divTrunc(l2_bit, set.l2_per_l1);
-        set.l2.set(l2_bit);
-        set.l1.set(l1_bit);
+        const index_bit = @divTrunc(bit, shard_size);
+        set.index.set(index_bit);
     }
 };
 
@@ -1021,10 +1010,10 @@ test {
     _ = TestTree.ImmutableTable.create;
 }
 
-fn testBlockFreeSet(l1_size: usize, l2_per_l1: usize, total_blocks: usize) !void {
+fn testBlockFreeSet(total_blocks: usize) !void {
     const expectEqual = std.testing.expectEqual;
     // Acquire everything, then release, then acquire again.
-    var set = try BlockFreeSet.init(std.testing.allocator, 64, 64, total_blocks);
+    var set = try BlockFreeSet.init(std.testing.allocator, total_blocks);
     defer set.deinit(std.testing.allocator);
     var i: usize = 0;
     while (i < total_blocks) : (i += 1) {
@@ -1042,15 +1031,27 @@ fn testBlockFreeSet(l1_size: usize, l2_per_l1: usize, total_blocks: usize) !void
     try expectEqual(@as(?u64, null), set.try_acquire());
 }
 
+fn testBlockIndexSize(expect_index_size: usize, total_blocks: usize) !void {
+    var set = try BlockFreeSet.init(std.testing.allocator, total_blocks);
+    defer set.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(expect_index_size, set.index.bit_length);
+}
+
 test "BlockFreeSet" {
     const testing = std.testing;
 
-    try testBlockFreeSet(64, 64, 64 * 64 * 64);
-    var i: usize = 1;
-    while (i < 64) : (i += 1) {
-        try testBlockFreeSet(i, 64, 64 * 64 * 8);
-        try testBlockFreeSet(64, i, 64 * 64 * 8);
-        try testBlockFreeSet(64, 64, 64 * 64 * 8 + i);
+    {
+        const block_bytes = 64 * 1024;
+        const blocks_in_tb = (1 << 40) / block_bytes;
+        try testBlockIndexSize(4096 * 8, 10 * blocks_in_tb);
+        try testBlockIndexSize(1, 1); // At least one index bit is required.
+    }
+
+    {
+        try testBlockFreeSet(64 * 64);
+        var i: usize = 1;
+        while (i < 128) : (i += 1) try testBlockFreeSet(64 * 8 + i);
     }
 }
 
