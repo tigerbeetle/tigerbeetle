@@ -24,7 +24,6 @@ test "write/fsync/read/close" {
         fn run_test() !void {
             const path = "test_io_write_fsync_read";
             const file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = true });
-            // defer file.close(); // closed at the end
             defer std.fs.cwd().deleteFile(path) catch {};
 
             var self: Context = .{

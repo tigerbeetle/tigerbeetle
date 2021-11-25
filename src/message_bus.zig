@@ -211,6 +211,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
             // Set tcp no-delay
             if (config.tcp_nodelay) {
+                // TODO: use the version in the zig standard library when upgrading to 0.9
                 // https://github.com/rust-lang/libc/search?q=TCP_NODELAY
                 // https://github.com/ziglang/zig/search?q=TCP_NODELAY
                 const TCP_NODELAY: u32 = 1;
