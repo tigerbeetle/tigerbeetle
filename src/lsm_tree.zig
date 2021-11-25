@@ -338,7 +338,12 @@ pub fn LsmTree(
             }
         };
 
-        pub const ImmutableTable = struct {
+        /// Note: any data block in the table might be less than full, not just the last block.
+        /// This is due to the restriction of bounded static memory allocation for LevelIterator
+        /// and CompactionIterator. However, LevelIterator will fill up
+        /// these blocks in subsequent levels because it always combines N
+        /// partial blocks into a single logical block.
+        pub const Table = struct {
             const address_size = @sizeOf(u64);
             const checksum_size = @sizeOf(u128);
             const table_size_max = config.lsm_table_size_max;
@@ -643,7 +648,7 @@ pub fn LsmTree(
                 timestamp: u64,
                 iterator: *MutableTable.Iterator,
                 buffer: []align(config.sector_size) u8,
-            ) ImmutableTable {
+            ) Table {
                 const blocks = mem.bytesAsSlice([block_size]u8, buffer);
 
                 const index_block = &blocks[0];
@@ -766,40 +771,55 @@ pub fn LsmTree(
                 };
             }
 
-            inline fn index_keys(block: BlockPtr) []Key {
-                return mem.bytesAsSlice(Key, block[index.keys_offset..][0..index.keys_size]);
+            inline fn index_keys(index_block: BlockPtr) []Key {
+                return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
             }
 
-            inline fn index_data_addresses(block: BlockPtr) []u64 {
+            inline fn index_data_addresses(index_block: BlockPtr) []u64 {
                 return mem.bytesAsSlice(
                     u64,
-                    block[index.data_addresses_offset..][0..index.data_addresses_size],
+                    index_block[index.data_addresses_offset..][0..index.data_addresses_size],
                 );
             }
 
-            inline fn index_data_checksums(block: BlockPtr) []u128 {
+            inline fn index_data_checksums(index_block: BlockPtr) []u128 {
                 return mem.bytesAsSlice(
                     u128,
-                    block[index.data_checksums_offset..][0..index.data_checksums_size],
+                    index_block[index.data_checksums_offset..][0..index.data_checksums_size],
                 );
             }
 
-            inline fn index_filter_addresses(block: BlockPtr) []u64 {
+            inline fn index_filter_addresses(index_block: BlockPtr) []u64 {
                 return mem.bytesAsSlice(
                     u64,
-                    block[index.filter_addresses_offset..][0..index.filter_addresses_size],
+                    index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
                 );
             }
 
-            inline fn index_filter_checksums(block: BlockPtr) []u128 {
+            inline fn index_filter_checksums(index_block: BlockPtr) []u128 {
                 return mem.bytesAsSlice(
                     u128,
-                    block[index.filter_checksums_offset..][0..index.filter_checksums_size],
+                    index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
                 );
             }
 
-            inline fn data_block_values(block: *align(config.sector_size) [block_size]u8) []Value {
-                return mem.bytesAsSlice(Value, block[data.values_offset..][0..data.values_size]);
+            inline fn data_blocks_used(index_block: BlockPtr) u32 {
+                const header = mem.bytesAsValue(index_block[0..@sizeOf(vsr.Header)]);
+                return @intCast(u32, header.offset);
+            }
+
+            inline fn data_block_values(data_block: BlockPtr) []Value {
+                return mem.bytesAsSlice(
+                    Value,
+                    data_block[data.values_offset..][0..data.values_size],
+                );
+            }
+
+            inline fn data_block_values_used(data_block: BlockPtr) u32 {
+                const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
+                const result = @intCast(u32, header.offset);
+                assert(result <= data.value_count_max);
+                return result;
             }
 
             pub const FlushIterator = struct {
@@ -819,7 +839,7 @@ pub fn LsmTree(
                 }
 
                 fn flush_internal(it: *FlushIterator) void {
-                    const table = @fieldParentPtr(ImmutableTable, "flush_iterator", it);
+                    const table = @fieldParentPtr(Table, "flush_iterator", it);
 
                     const index_header = mem.bytesAsValue(table.buffer[0..@sizeOf(vsr.Header)]);
                     const filter_blocks_used = index_header.commit;
@@ -871,14 +891,17 @@ pub fn LsmTree(
             const level_0_table_count_max = 10;
             const level_a_table_count_max = level_0_table_count_max;
 
+            const LevelAIterator = TableIterator(CompactionIterator, on_child_io_done);
+            const LevelBIterator = LevelIterator(CompactionIterator, on_child_io_done);
+
             tick: u32 = 0,
-            iops_in_progress: u32 = 0,
+            child_io_pending: u32 = 0,
 
             /// Addresses of all source tables in level a
             level_a_table_count: u32,
-            level_a_table_iterators: [level_a_table_count_max]TableIterator,
+            level_a_iterators: [level_a_table_count_max]LevelAIterator,
 
-            level_b_level_iterator: LevelIterator,
+            level_b_iterator: LevelBIterator,
 
             level_b_merge_block: *align(config.sector_size) [block_size]u8,
             level_b_write_block: *align(config.sector_size) [block_size]u8,
@@ -893,23 +916,160 @@ pub fn LsmTree(
             ) void {}
 
             pub fn tick(it: *CompactionIterator, callback: Callback) void {}
+        };
 
-            const TableIterator = struct {
-                parent: *CompactionIterator,
+        fn LevelIterator(comptime Parent: type, comptime io_done: fn (*Parent) void) type {
+            return struct {
+                const Self = @This();
+
+                parent: *Parent,
+                tables: RingBuffer(TableIterator(Self, on_io_done), 3),
+                level: u32,
+                key_min: Key,
+                key_max: Key,
+
+                fn init(allocator: *mem.Allocator) !Self {
+                    var table_a = try TableIterator.init(allocator);
+                    errdefer table_a.deinit(allocator);
+
+                    var table_b = try TableIterator.init(allocator);
+                    errdefer table_b.deinit(allocator);
+
+                    var table_c = try TableIterator.init(allocator);
+                    errdefer table_c.deinit(allocator);
+
+                    return Self{
+                        .parent = undefined,
+                        .tables = .{
+                            .buffer = .{
+                                table_a,
+                                table_b,
+                                table_c,
+                            },
+                        },
+                        .level = undefined,
+                        .key_min = undefined,
+                        .key_max = undefined,
+                    };
+                }
+
+                fn deinit(it: *Self, allocator: *mem.Allocator) void {
+                    for (it.tables.buffer) |*table| table.deinit(allocator);
+                    it.* = undefined;
+                }
+
+                fn reset(
+                    it: *Self,
+                    parent: *Parent,
+                    level: u32,
+                    key_min: Key,
+                    key_max: Key,
+                ) void {
+                    it.* = .{
+                        .tables = it.tables,
+                        .level = level,
+                        .key_min = key_min,
+                        .key_max = key_max,
+                    };
+                }
+
+                fn tick(it: *Self) bool {
+                    // It's critical that we get this correct to avoid data loss.
+                    {
+                        var tables_it = it.tables.iterator();
+                        while (tables_it.next_ptr()) |table| {
+                            if (table != it.tables.tail_ptr()) {
+                                assert(table.buffered_all_values());
+                            }
+                        }
+                    }
+
+                    if (it.tables.tail_ptr()) |tail| {
+                        // Buffer values as necessary for the current tail.
+                        if (tail.tick()) return true;
+                        // Don't start the next table iterator until the current tail iterator has
+                        // all remaining values buffered in memory.
+                        if (!tail.buffered_all_values()) {
+                            assert(tail.buffered_value_count() >= Table.data.value_count_max or
+                                tail.blocks.full());
+                            return false;
+                        }
+                    }
+
+                    if (it.tables.next_tail_ptr()) |next_tail| {
+                        // TODO this function doesn't exist yet
+                        const address = manifest.get_next_address() orelse return false;
+                        next_tail.reset(address);
+                        it.tables.advance_tail();
+                        const io_pending = next_tail.tick();
+                        assert(io_pending);
+                        return true;
+                    }
+
+                    assert(it.tables.full());
+                    return false;
+                }
+
+                fn on_io_done(it: *Self) void {
+                    const tail = it.tables.tail_ptr().?;
+                    if (tail.buffered_all_values()) {
+                        // Fall through if tick() doesn't start further I/O.
+                        if (it.tick()) return;
+                    } else {
+                        assert(tail.buffered_value_count() >= Table.data.value_count_max or
+                            tail.blocks.full());
+                    }
+                    io_done(it.parent);
+                }
+
+                /// Returns true if all remaining values in the level have been buffered.
+                fn buffered_all_values(it: Self) bool {
+                    // TODO look at the manifest to determine this.
+                }
+
+                /// Returns true if all values in the level have been consumed by pop().
+                fn consumed_all_values(it: Self) bool {
+                    return it.tables.empty() and it.buffered_all_values();
+                }
+
+                /// A null return value here does not necessarily mean that all values have
+                /// been consumed. Instead check consumed_all_values().
+                fn peek(it: *Self) ?Key {
+                    // This may be null if all table iterators were partially full.
+                    const table = it.tables.head_ptr() orelse return null;
+                    // This may be null if the current head iterator has
+                    // not yet buffered all remaining values.
+                    return table.peek();
+                }
+
+                /// Asserts that there is at least one value buffered.
+                fn pop(it: *Self) Value {
+                    const table = it.tables.head_ptr().?;
+                    const value = table.pop();
+                    if (table.consumed_all_values()) it.tables.advance_head();
+                    return value;
+                }
+            };
+        }
+
+        fn TableIterator(comptime Parent: type, comptime io_done: fn (*Parent) void) type {
+            return struct {
+                const Self = @This();
+
+                const data_blocks_allocated = 3;
+
+                parent: *Parent,
                 read_table_index: bool,
                 address: u64,
                 index: BlockPtr,
-                /// This is duplicated from the index header to reduce cache
-                /// misses in peek()/pop().
-                data_blocks_used: u32,
                 /// The index of the current block in the table index block.
                 block: u32,
                 /// The index of the current value in the current block.
                 value: u32,
-                blocks: RingBuffer(BlockPtr, 2),
+                blocks: RingBuffer(BlockPtr, data_blocks_allocated),
                 read: Storage.Read = undefined,
 
-                fn init(allocator: *mem.Allocator) !TableIterator {
+                fn init(allocator: *mem.Allocator) !Self {
                     const index = try allocator.alignedAlloc(u8, config.sector_size, block_size);
                     errdefer allocator.free(index);
 
@@ -919,46 +1079,51 @@ pub fn LsmTree(
                     const block_b = try allocator.alignedAlloc(u8, config.sector_size, block_size);
                     errdefer allocator.free(block_b);
 
+                    const block_c = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                    errdefer allocator.free(block_c);
+
                     return .{
                         .parent = undefined,
                         .read_table_index = undefined,
                         // Use 0 so that we can assert(address != 0) in tick().
                         .address = 0,
                         .index = index[0..block_size],
-                        .data_blocks_used = undefined,
                         .block = undefined,
                         .value = undefined,
                         .blocks = .{
                             .buffer = .{
                                 block_a[0..block_size],
                                 block_b[0..block_size],
+                                block_c[0..block_size],
                             },
                         },
                     };
                 }
 
-                fn deinit(it: *TableIterator, allocator: *mem.Allocator) void {
+                fn deinit(it: *Self, allocator: *mem.Allocator) void {
                     allocator.free(it.index);
-                    allocator.free(blocks.buffer[0]);
-                    allocator.free(blocks.buffer[1]);
+                    for (blocks.buffer) |block| allocator.free(block);
+                    it.* = undefined;
                 }
 
-                fn reset(it: *TableIterator, parent: *CompactionIterator, address: u64) void {
+                fn reset(it: *Self, parent: *Parent, address: u64) void {
                     it.* = .{
                         .parent = parent,
                         .read_table_index = true,
                         .address = address,
                         .index = it.index,
-                        .data_blocks_used = undefined,
                         .block = 0,
                         .value = 0,
                         .blocks = it.blocks,
                     };
                 }
 
+                /// Try to buffer at least a full block of values to be peek()'d.
+                /// A full block may not always be buffered if all 3 blocks are partially full
+                /// or if the end of the table is reached.
                 /// Returns true if an IO operation was started. If this returns true,
-                /// then CompactionIterator.iop_done() will be called on completion.
-                fn tick(it: *TableIterator) bool {
+                /// then io_done() will be called on completion.
+                fn tick(it: *Self) bool {
                     assert(it.address != 0);
 
                     if (it.read_table_index) {
@@ -966,68 +1131,101 @@ pub fn LsmTree(
                         return true;
                     }
 
-                    if (it.block < it.data_blocks_used) {
+                    if (!it.buffered_all_values()) {
                         if (it.blocks.next_tail()) |block| {
-                            const addresses = ImmutableTable.index_data_addresses(it.index);
-                            const checksums = ImmutableTable.index_data_checksums(it.index);
+                            const addresses = Table.index_data_addresses(it.index);
+                            const checksums = Table.index_data_checksums(it.index);
                             const address = addresses[it.block];
                             const checksum = checksums[it.block];
                             forest.read_block(on_read, &it.read, block, address, checksum);
                             return true;
                         }
-                    } else {
-                        assert(it.block == it.data_blocks_used);
                     }
 
                     return false;
                 }
 
                 fn on_read_table_index(read: *Storage.Read) void {
-                    const it = @fieldParentPtr(TableIterator, "read", read);
+                    const it = @fieldParentPtr(Self, "read", read);
 
                     assert(it.read_table_index);
                     it.read_table_index = false;
 
-                    const header = mem.bytesAsValue(it.index[0..@sizeOf(vsr.Header)]);
-                    it.data_blocks_used = header.offset;
-
-                    it.tick();
+                    const io_pending = it.tick();
+                    // After reading the table index, we always read at least one data block.
+                    assert(io_pending);
                 }
 
                 fn on_read(read: *Storage.Read) void {
-                    const it = @fieldParentPtr(TableIterator, "read", read);
+                    const it = @fieldParentPtr(Self, "read", read);
+
                     assert(!it.read_table_index);
+
                     it.blocks.advance_tail();
                     it.block += 1;
-                    it.parent.iop_done();
+
+                    // In the case of a partial block, read one further block. This ensures that
+                    // partial blocks will always get merged during compaction. Otherwise, it would
+                    // be possible for the partial block to get re-written to the new table without
+                    // becoming more full.
+                    if (it.buffered_value_count() < Table.data.value_count_max) {
+                        if (it.tick()) return;
+                    }
+
+                    io_done(it.parent);
                 }
 
-                fn peek(it: *TableIterator) ?Key {
+                fn buffered_value_count(it: Self) u32 {
+                    var count: u32 = 0;
+                    var blocks_it = it.blocks.iterator();
+                    while (blocks_it.next()) |block| {
+                        count += Table.data_block_values_used(block);
+                    }
+                    count -= it.value;
+                    return count;
+                }
+
+                /// Returns true if all remaining values in the table have been buffered.
+                fn buffered_all_values(it: Self) bool {
+                    const data_blocks_used = Table.data_blocks_used(it.index);
+                    assert(it.block <= data_blocks_used);
+                    return it.block == data_blocks_used;
+                }
+
+                /// Returns true if all values in the table have been consumed by pop().
+                fn consumed_all_values(it: Self) bool {
+                    return it.blocks.empty() and it.buffered_all_values();
+                }
+
+                /// A null return value here does not necessarily mean that all values have
+                /// been consumed. Instead check consumed_all_values().
+                fn peek(it: *Self) ?Key {
                     assert(!it.read_table_index);
 
-                    const block = it.blocks.peek_head() orelse {
-                        assert(it.block == it.data_blocks_used);
-                        return null;
-                    };
+                    const block = it.blocks.head() orelse return null;
 
-                    assert(it.value < it.data_blocks_used);
+                    // TODO we should be able to cross-check this with the header size
+                    // for more safety.
+                    assert(it.value < Table.data_block_values_used(block));
 
-                    const values = ImmutableTable.data_block_values(block);
+                    const values = Table.data_block_values(block);
                     return key_from_value(values[it.value]);
                 }
 
-                fn pop(it: *TableIterator) Value {
+                /// Asserts that there is at least one value buffered.
+                fn pop(it: *Self) Value {
                     assert(!it.read_table_index);
 
-                    const block = it.blocks.peek_head().?;
+                    const block = it.blocks.head().?;
 
-                    assert(it.value < it.data_blocks_used);
+                    const values_used = Table.data_block_values_used(block);
+                    assert(it.value < values_used);
 
-                    const values = ImmutableTable.data_block_values(block);
+                    const values = Table.data_block_values(block);
                     const value = values[it.value];
 
                     it.value += 1;
-                    if (it.value == it.data_blocks_used) {
+                    if (it.value == values_used) {
                         it.value = 0;
                         it.blocks.advance_head();
                     }
@@ -1035,7 +1233,7 @@ pub fn LsmTree(
                     return value;
                 }
             };
-        };
+        }
 
         block_free_set: *BlockFreeSet,
         storage: *Storage,
@@ -1123,6 +1321,6 @@ test {
 
     // TODO ref all decls instead
     _ = TestTree;
-    _ = TestTree.ImmutableTable;
-    _ = TestTree.ImmutableTable.create;
+    _ = TestTree.Table;
+    _ = TestTree.Table.create;
 }
