@@ -17,7 +17,7 @@ const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 
-const SendQueue = RingBuffer(*Message, config.connection_send_queue_max);
+const SendQueue = RingBuffer(*Message, config.connection_send_queue_max, .array);
 
 pub const MessageBusReplica = MessageBusImpl(.replica);
 pub const MessageBusClient = MessageBusImpl(.client);

@@ -13,7 +13,7 @@ const Message = MessagePool.Message;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
-const RequestQueue = RingBuffer(u128, config.message_bus_messages_max - 1);
+const RequestQueue = RingBuffer(u128, config.message_bus_messages_max - 1, .array);
 const StateTransitions = std.AutoHashMap(u128, u64);
 
 const log = std.log.scoped(.state_checker);
