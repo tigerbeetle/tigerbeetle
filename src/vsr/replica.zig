@@ -133,7 +133,7 @@ pub fn Replica(
 
         /// The leader's pipeline of inflight prepares waiting to commit in FIFO order.
         /// This allows us to pipeline without the complexity of out-of-order commits.
-        pipeline: RingBuffer(Prepare, config.pipelining_max) = .{},
+        pipeline: RingBuffer(Prepare, config.pipelining_max, .array) = .{},
 
         /// In some cases, a replica may send a message to itself. We do not submit these messages
         /// to the message bus but rather queue them here for guaranteed immediate delivery, which

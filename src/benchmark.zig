@@ -186,7 +186,10 @@ const TimedQueue = struct {
     max_commits_latency: i64,
     client: *Client,
     io: *IO,
-    batches: if (IS_TWO_PHASE_COMMIT) RingBuffer(Batch, 2 * TOTAL_BATCHES) else RingBuffer(Batch, TOTAL_BATCHES),
+    batches: if (IS_TWO_PHASE_COMMIT)
+        RingBuffer(Batch, 2 * TOTAL_BATCHES, .array)
+    else
+        RingBuffer(Batch, TOTAL_BATCHES, .array),
 
     pub fn init(client: *Client, io: *IO) TimedQueue {
         var self = TimedQueue{

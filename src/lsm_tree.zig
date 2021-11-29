@@ -923,7 +923,7 @@ pub fn LsmTree(
                 const Self = @This();
 
                 parent: *Parent,
-                tables: RingBuffer(TableIterator(Self, on_io_done), 3),
+                tables: RingBuffer(TableIterator(Self, on_io_done), 3, .array),
                 level: u32,
                 key_min: Key,
                 key_max: Key,
@@ -1066,7 +1066,7 @@ pub fn LsmTree(
                 block: u32,
                 /// The index of the current value in the current block.
                 value: u32,
-                blocks: RingBuffer(BlockPtr, data_blocks_allocated),
+                blocks: RingBuffer(BlockPtr, data_blocks_allocated, .array),
                 read: Storage.Read = undefined,
 
                 fn init(allocator: *mem.Allocator) !Self {
