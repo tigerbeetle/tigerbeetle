@@ -172,6 +172,104 @@ pub const BlockFreeSet = struct {
         const index_bit = @divTrunc(bit, shard_size);
         set.index.set(index_bit);
     }
+
+    pub fn decode(bytes: []const u8) !BlockFreeSet {
+        // TODO what if the size of the decoded block set disagrees with the configured total_blocks?
+        const set = try BlockFreeSet.init(total_blocks);
+        // TODO
+        return set;
+    }
+
+    // Returns the number of bytes that the BlockFreeSet needs to encode to.
+    pub fn predictSize(set: BlockFreeSet) usize {
+        return set.encodingSchema().size;
+    }
+
+    fn encodingSchema(set: BlockFreeSet) BlockFreeSetSchema {
+        const wc = divCeil(usize, set.blocks.bit_length, 64);
+        var runs: usize = 0;
+        for (set.blocks.masks[0..wc]) |word| {
+            if (word == 0 or word == ~@as(usize, 0)) runs += 1;
+        }
+        const literals = wc - runs;
+        const run_or_literal_size = divCeil(usize, runs + literals, 64) * 8; // 1 bit per run|literal, rounded up to word
+        const run_of_zeroes_or_ones_size = divCeil(usize, runs, 64) * 8; // 1 bit per run, rounded up to word
+        const run_lengths_size = divCeil(usize, runs, 8) * 8; // 1 byte per run
+
+        const run_or_literal_offset = @sizeOf(u64);
+        const run_of_zeroes_or_ones_offset = run_or_literal_offset + run_or_literal_size;
+        const run_lengths_offset = run_of_zeroes_or_ones_offset + run_of_zeroes_or_ones_size;
+        const literals_offset = run_lengths_offset + run_lengths_size;
+        return .{
+            .size = literals_offset + literals * 8,
+            .run_or_literal_count = @intCast(u32, runs + literals),
+            .run_or_literal_offset = run_or_literal_offset,
+            .run_of_zeroes_or_ones_offset = run_of_zeroes_or_ones_offset,
+            .run_lengths_offset = run_lengths_offset,
+            .literals_offset = literals_offset,
+        };
+    }
+
+    // Encoding:
+    // - u32 count of runs + count of literals
+    // - u32 (unused)
+    // - [run_or_literal_count]u1 run_of_zeroes_or_ones (padded to word size)
+    // - [number of runs]u1 run_of_zeroes_or_ones (padded to word size)
+    // - [number of literals]u64 literals
+    pub fn encodeTo(set: BlockFreeSet, dst: []u8) void {
+        const schema = set.encodingSchema();
+        assert(schema.size == dst.len);
+        for (dst) |*b| b.* = 0;
+
+        var run_or_literal = dst[schema.run_or_literal_offset..schema.run_of_zeroes_or_ones_offset];
+        var run_or_literal_i: usize = 0;
+        var run_of_zeroes_or_ones = dst[schema.run_of_zeroes_or_ones_offset..schema.run_lengths_offset];
+        var run_of_zeroes_or_ones_i: usize = 0;
+        var run_lengths = dst[schema.run_lengths_offset..schema.literals_offset];
+        var run_lengths_i: usize = 0;
+        var literals = dst[schema.literals_offset..schema.size];
+        var literals_i: usize = 0;
+
+        var w: usize = 0;
+        const wc = divCeil(usize, set.blocks.bit_length, 64); // TODO those extra bits are being encoded too...
+        while (w < wc) : (w += 1) {
+            const word = set.blocks.masks[w];
+            if (word == 0 or word == ~@as(usize, 0)) {
+                var run_len: usize = 1;
+                while (run_len < 256 and w + run_len < wc and set.blocks.masks[w + run_len] == word)
+                    : (run_len += 1) {}
+                run_lengths[run_lengths_i] = @intCast(u8, run_len - 1);
+                run_lengths_i += 1;
+                setBit(run_of_zeroes_or_ones, run_of_zeroes_or_ones_i);
+                run_of_zeroes_or_ones_i += 1;
+                setBit(run_or_literal, run_or_literal_i);
+            } else {
+                const o = 8 * literals_i;
+                std.mem.writeIntLittle(u64, literals[o .. o + 8][0..8], word);
+                literals_i += 1;
+            }
+            run_or_literal_i += 1;
+        }
+        std.mem.writeIntLittle(u32, dst[0..4], schema.run_or_literal_count);
+
+        assert(run_of_zeroes_or_ones_i == run_lengths.len);
+        assert(run_lengths_i == run_lengths.len);
+        assert(literals_i * 8 == literals.len);
+    }
+};
+
+fn setBit(b: []u8, i: usize) void {
+    assert(b[@divTrunc(i, 8)] & (@as(u8, 1) << @truncate(u3, i % 8)) == 0); // TODO remove this, its just for testing!
+    b[@divTrunc(i, 8)] |= @as(u8, 1) << @truncate(u3, i % 8);
+}
+
+const BlockFreeSetSchema = struct {
+    size: usize, // bytes
+    run_or_literal_count: u32,
+    run_or_literal_offset: usize,
+    run_of_zeroes_or_ones_offset: usize,
+    run_lengths_offset: usize,
+    literals_offset: usize,
 };
 
 // Returns the index of a set bit (relative to the start of the bitset) within start…end (inclusive…exclusive).
@@ -991,24 +1089,24 @@ pub fn LsmTree(
     };
 }
 
-test {
-    const Key = CompositeKey(u128);
-    const TestTree = LsmTree(
-        Key,
-        Key.Value,
-        Key.compare_keys,
-        Key.key_from_value,
-        Key.sentinel_key,
-        Key.tombstone,
-        Key.tombstone_from_key,
-        @import("test/storage.zig").Storage,
-    );
-
-    // TODO ref all decls instead
-    _ = TestTree;
-    _ = TestTree.ImmutableTable;
-    _ = TestTree.ImmutableTable.create;
-}
+//test {
+//    const Key = CompositeKey(u128);
+//    const TestTree = LsmTree(
+//        Key,
+//        Key.Value,
+//        Key.compare_keys,
+//        Key.key_from_value,
+//        Key.sentinel_key,
+//        Key.tombstone,
+//        Key.tombstone_from_key,
+//        @import("test/storage.zig").Storage,
+//    );
+//
+//    // TODO ref all decls instead
+//    _ = TestTree;
+//    _ = TestTree.ImmutableTable;
+//    _ = TestTree.ImmutableTable.create;
+//}
 
 fn testBlockFreeSet(total_blocks: usize) !void {
     const expectEqual = std.testing.expectEqual;
@@ -1039,20 +1137,51 @@ fn testBlockIndexSize(expect_index_size: usize, total_blocks: usize) !void {
 }
 
 test "BlockFreeSet" {
-    const testing = std.testing;
-
     {
         const block_bytes = 64 * 1024;
         const blocks_in_tb = (1 << 40) / block_bytes;
         try testBlockIndexSize(4096 * 8, 10 * blocks_in_tb);
         try testBlockIndexSize(1, 1); // At least one index bit is required.
     }
-
     {
         try testBlockFreeSet(64 * 64);
         var i: usize = 1;
         while (i < 128) : (i += 1) try testBlockFreeSet(64 * 8 + i);
     }
+}
+
+fn testBlockFreeSetEncode(total_blocks: usize, set_bits: usize) !void {
+    var seed: u64 = undefined;
+    try std.os.getrandom(std.mem.asBytes(&seed));
+    var prng = std.rand.DefaultPrng.init(seed);
+
+    var set = try BlockFreeSet.init(std.testing.allocator, total_blocks);
+    defer set.deinit(std.testing.allocator);
+
+    var b: usize = 0;
+    while (b < set_bits) : (b += 1) {
+        // Skip over the index for simplicity.
+        if (set_bits == total_blocks) {
+            set.blocks.set(b);
+        } else {
+            set.blocks.set(prng.random.uintLessThan(usize, total_blocks));
+        }
+    }
+
+    var buf = try std.testing.allocator.alloc(u8, set.predictSize());
+    defer std.testing.allocator.free(buf);
+    set.encodeTo(buf);
+}
+
+test "BlockFreeSet encoding/decoding" {
+    const total_blocks = 64 * 64 * 64;
+    var t: usize = 0;
+    while (t < 100) : (t += 1) {
+        try testBlockFreeSetEncode(total_blocks, total_blocks / 4);
+    }
+
+    try testBlockFreeSetEncode(64 * 64, 0); // fully allocated
+    try testBlockFreeSetEncode(64 * 64, 64 * 64); // fully free
 }
 
 test "findFirstSetBit" {
