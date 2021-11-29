@@ -158,7 +158,7 @@ const TimedQueue = struct {
     transfers_latency_max: i64,
     client: *Client,
     io: *IO,
-    batches: RingBuffer(Batch, batches_count),
+    batches: RingBuffer(Batch, batches_count, .array),
 
     pub fn init(client: *Client, io: *IO) TimedQueue {
         var self = TimedQueue{

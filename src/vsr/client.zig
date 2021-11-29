@@ -67,7 +67,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
         /// A client is allowed at most one inflight request at a time at the protocol layer.
         /// We therefore queue any further concurrent requests made by the application layer.
-        request_queue: RingBuffer(Request, config.client_request_queue_max) = .{},
+        request_queue: RingBuffer(Request, config.client_request_queue_max, .array) = .{},
 
         /// The number of ticks without a reply before the client resends the inflight request.
         /// Dynamically adjusted as a function of recent request round-trip time.

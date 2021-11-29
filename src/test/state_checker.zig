@@ -14,7 +14,7 @@ const Message = MessagePool.Message;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
-const RequestQueue = RingBuffer(u128, config.client_request_queue_max);
+const RequestQueue = RingBuffer(u128, config.client_request_queue_max, .array);
 const StateTransitions = std.AutoHashMap(u128, u64);
 
 const log = std.log.scoped(.state_checker);

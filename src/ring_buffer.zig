@@ -1,18 +1,45 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const math = std.math;
+const mem = std.mem;
 
 /// A First In, First Out ring buffer holding at most `size` elements.
-pub fn RingBuffer(comptime T: type, comptime size: usize) type {
+pub fn RingBuffer(
+    comptime T: type,
+    comptime size: usize,
+    comptime buffer_type: enum { array, pointer },
+) type {
     return struct {
         const Self = @This();
 
-        buffer: [size]T = undefined,
+        buffer: switch (buffer_type) {
+            .array => [size]T,
+            .pointer => *[size]T,
+        } = switch (buffer_type) {
+            .array => undefined,
+            .pointer => @compileError("init() must be used if buffer_type is .pointer!"),
+        },
 
         /// The index of the slot with the first item, if any.
         index: usize = 0,
 
         /// The number of items in the buffer.
         count: usize = 0,
+
+        pub usingnamespace switch (buffer_type) {
+            .array => struct {},
+            .pointer => struct {
+                pub fn init(allocator: *mem.Allocator) !Self {
+                    const buffer = try allocator.create([size]T);
+                    errdefer allocator.destroy(buffer);
+                    return Self{ .buffer = buffer };
+                }
+
+                pub fn deinit(self: *Self, allocator: *mem.Allocator) void {
+                    allocator.destroy(self.buffer);
+                }
+            },
+        };
 
         // TODO add doc comments to these functions:
         pub inline fn head(self: Self) ?T {
@@ -83,6 +110,19 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
             };
         }
 
+        pub fn push_slice(self: *Self, items: []const T) error{NoSpaceLeft}!void {
+            if (self.count + items.len > self.buffer.len) return error.NoSpaceLeft;
+
+            const pre_wrap_start = (self.index + self.count) % self.buffer.len;
+            const pre_wrap_count = math.min(items.len, self.buffer.len - pre_wrap_start);
+            const post_wrap_count = items.len - pre_wrap_count;
+
+            mem.copy(T, self.buffer[pre_wrap_start..], items[0..pre_wrap_count]);
+            mem.copy(T, self.buffer[0..post_wrap_count], items[pre_wrap_count..]);
+
+            self.count += items.len;
+        }
+
         /// Remove and return the next item, if any.
         pub fn pop(self: *Self) ?T {
             const result = self.head() orelse return null;
@@ -136,11 +176,30 @@ fn test_iterator(comptime T: type, ring: *T, values: []const u32) !void {
     try testing.expectEqual(ring_index, ring.index);
 }
 
-test "RingBuffer: low level interface" {
-    const Ring = RingBuffer(u32, 2);
+fn test_low_level_interface(comptime Ring: type, ring: *Ring) !void {
+    try ring.push_slice(&[_]u32{});
+    try test_iterator(Ring, ring, &[_]u32{});
 
-    var ring = Ring{};
-    try test_iterator(Ring, &ring, &[_]u32{});
+    try testing.expectError(error.NoSpaceLeft, ring.push_slice(&[_]u32{ 1, 2, 3 }));
+
+    try ring.push_slice(&[_]u32{1});
+    try testing.expectEqual(@as(?u32, 1), ring.tail());
+    try testing.expectEqual(@as(u32, 1), ring.tail_ptr().?.*);
+    ring.advance_head();
+
+    try testing.expectEqual(@as(usize, 1), ring.index);
+    try testing.expectEqual(@as(usize, 0), ring.count);
+    try ring.push_slice(&[_]u32{ 1, 2 });
+    try test_iterator(Ring, ring, &[_]u32{ 1, 2 });
+    ring.advance_head();
+    ring.advance_head();
+
+    try testing.expectEqual(@as(usize, 1), ring.index);
+    try testing.expectEqual(@as(usize, 0), ring.count);
+    try ring.push_slice(&[_]u32{1});
+    try testing.expectEqual(@as(?u32, 1), ring.tail());
+    try testing.expectEqual(@as(u32, 1), ring.tail_ptr().?.*);
+    ring.advance_head();
 
     try testing.expectEqual(@as(?u32, null), ring.head());
     try testing.expectEqual(@as(?*u32, null), ring.head_ptr());
@@ -151,13 +210,13 @@ test "RingBuffer: low level interface" {
     ring.advance_tail();
     try testing.expectEqual(@as(?u32, 0), ring.tail());
     try testing.expectEqual(@as(u32, 0), ring.tail_ptr().?.*);
-    try test_iterator(Ring, &ring, &[_]u32{0});
+    try test_iterator(Ring, ring, &[_]u32{0});
 
     ring.next_tail_ptr().?.* = 1;
     ring.advance_tail();
     try testing.expectEqual(@as(?u32, 1), ring.tail());
     try testing.expectEqual(@as(u32, 1), ring.tail_ptr().?.*);
-    try test_iterator(Ring, &ring, &[_]u32{ 0, 1 });
+    try test_iterator(Ring, ring, &[_]u32{ 0, 1 });
 
     try testing.expectEqual(@as(?u32, null), ring.next_tail());
     try testing.expectEqual(@as(?*u32, null), ring.next_tail_ptr());
@@ -165,13 +224,13 @@ test "RingBuffer: low level interface" {
     try testing.expectEqual(@as(?u32, 0), ring.head());
     try testing.expectEqual(@as(u32, 0), ring.head_ptr().?.*);
     ring.advance_head();
-    try test_iterator(Ring, &ring, &[_]u32{1});
+    try test_iterator(Ring, ring, &[_]u32{1});
 
     ring.next_tail_ptr().?.* = 2;
     ring.advance_tail();
     try testing.expectEqual(@as(?u32, 2), ring.tail());
     try testing.expectEqual(@as(u32, 2), ring.tail_ptr().?.*);
-    try test_iterator(Ring, &ring, &[_]u32{ 1, 2 });
+    try test_iterator(Ring, ring, &[_]u32{ 1, 2 });
 
     var iterator = ring.iterator();
     while (iterator.next_ptr()) |item_ptr| {
@@ -181,23 +240,23 @@ test "RingBuffer: low level interface" {
     try testing.expectEqual(@as(?u32, 1001), ring.head());
     try testing.expectEqual(@as(u32, 1001), ring.head_ptr().?.*);
     ring.advance_head();
-    try test_iterator(Ring, &ring, &[_]u32{1002});
+    try test_iterator(Ring, ring, &[_]u32{1002});
 
     ring.next_tail_ptr().?.* = 3;
     ring.advance_tail();
     try testing.expectEqual(@as(?u32, 3), ring.tail());
     try testing.expectEqual(@as(u32, 3), ring.tail_ptr().?.*);
-    try test_iterator(Ring, &ring, &[_]u32{ 1002, 3 });
+    try test_iterator(Ring, ring, &[_]u32{ 1002, 3 });
 
     try testing.expectEqual(@as(?u32, 1002), ring.head());
     try testing.expectEqual(@as(u32, 1002), ring.head_ptr().?.*);
     ring.advance_head();
-    try test_iterator(Ring, &ring, &[_]u32{3});
+    try test_iterator(Ring, ring, &[_]u32{3});
 
     try testing.expectEqual(@as(?u32, 3), ring.head());
     try testing.expectEqual(@as(u32, 3), ring.head_ptr().?.*);
     ring.advance_head();
-    try test_iterator(Ring, &ring, &[_]u32{});
+    try test_iterator(Ring, ring, &[_]u32{});
 
     try testing.expectEqual(@as(?u32, null), ring.head());
     try testing.expectEqual(@as(?*u32, null), ring.head_ptr());
@@ -205,8 +264,19 @@ test "RingBuffer: low level interface" {
     try testing.expectEqual(@as(?*u32, null), ring.tail_ptr());
 }
 
+test "RingBuffer: low level interface" {
+    const ArrayRing = RingBuffer(u32, 2, .array);
+    var array_ring: ArrayRing = .{};
+    try test_low_level_interface(ArrayRing, &array_ring);
+
+    const PointerRing = RingBuffer(u32, 2, .pointer);
+    var pointer_ring = try PointerRing.init(testing.allocator);
+    defer pointer_ring.deinit(testing.allocator);
+    try test_low_level_interface(PointerRing, &pointer_ring);
+}
+
 test "RingBuffer: push/pop high level interface" {
-    var fifo = RingBuffer(u32, 3){};
+    var fifo = RingBuffer(u32, 3, .array){};
 
     try testing.expect(!fifo.full());
     try testing.expect(fifo.empty());
