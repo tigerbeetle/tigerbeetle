@@ -815,11 +815,13 @@ pub fn LsmTree(
                 );
             }
 
-            inline fn data_block_values_used(data_block: BlockPtr) u32 {
+            inline fn data_block_values_used(data_block: BlockPtr) []const Value {
                 const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
-                const result = @intCast(u32, header.offset);
-                assert(result <= data.value_count_max);
-                return result;
+                // TODO we should be able to cross-check this with the header size
+                // for more safety.
+                const values_used = @intCast(u32, header.offset);
+                assert(values_used <= data.value_count_max);
+                return data_block_values(data_block)[0..values_used];
             }
 
             pub const FlushIterator = struct {
@@ -1056,31 +1058,45 @@ pub fn LsmTree(
             return struct {
                 const Self = @This();
 
-                const data_blocks_allocated = 3;
+                const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
 
                 parent: *Parent,
                 read_table_index: bool,
                 address: u64,
+
                 index: BlockPtr,
                 /// The index of the current block in the table index block.
                 block: u32,
-                /// The index of the current value in the current block.
+
+                /// This ring buffer is used to hold not yet popped values in the case that we run
+                /// out of blocks in the blocks ring buffer but haven't buffered a full block of
+                /// values in memory. In this case, we copy values from the head of blocks to this
+                /// ring buffer to make that block available for reading further values.
+                /// Thus, we guarantee that iterators will always have at least a block's worth of
+                /// values buffered. This simplifies the peek() interface as null always means that
+                /// iteration is complete.
+                values: ValuesRingBuffer,
+
+                blocks: RingBuffer(BlockPtr, 2, .array),
+                /// The index of the current value in the head of the blocks ring buffer.
                 value: u32,
-                blocks: RingBuffer(BlockPtr, data_blocks_allocated, .array),
+
                 read: Storage.Read = undefined,
+                /// This field is only used for safety checks, it does not affect the behavior.
+                read_pending = false,
 
                 fn init(allocator: *mem.Allocator) !Self {
                     const index = try allocator.alignedAlloc(u8, config.sector_size, block_size);
                     errdefer allocator.free(index);
+
+                    const values = try ValuesRingBuffer.init(allocator);
+                    errdefer values.deinit(allocator);
 
                     const block_a = try allocator.alignedAlloc(u8, config.sector_size, block_size);
                     errdefer allocator.free(block_a);
 
                     const block_b = try allocator.alignedAlloc(u8, config.sector_size, block_size);
                     errdefer allocator.free(block_b);
-
-                    const block_c = try allocator.alignedAlloc(u8, config.sector_size, block_size);
-                    errdefer allocator.free(block_c);
 
                     return .{
                         .parent = undefined,
@@ -1089,33 +1105,39 @@ pub fn LsmTree(
                         .address = 0,
                         .index = index[0..block_size],
                         .block = undefined,
-                        .value = undefined,
+                        .values = values,
                         .blocks = .{
                             .buffer = .{
                                 block_a[0..block_size],
                                 block_b[0..block_size],
-                                block_c[0..block_size],
                             },
                         },
+                        .value = undefined,
                     };
                 }
 
                 fn deinit(it: *Self, allocator: *mem.Allocator) void {
+                    assert(!it.read_pending);
                     allocator.free(it.index);
+                    values.deinit(allocator);
                     for (blocks.buffer) |block| allocator.free(block);
                     it.* = undefined;
                 }
 
                 fn reset(it: *Self, parent: *Parent, address: u64) void {
+                    assert(!it.read_pending);
                     it.* = .{
                         .parent = parent,
                         .read_table_index = true,
                         .address = address,
                         .index = it.index,
                         .block = 0,
+                        .values = .{ .buffer = it.values.buffer },
+                        .blocks = .{ .buffer = it.blocks.buffer },
                         .value = 0,
-                        .blocks = it.blocks,
                     };
+                    assert(values.empty());
+                    assert(blocks.empty());
                 }
 
                 /// Try to buffer at least a full block of values to be peek()'d.
@@ -1124,29 +1146,50 @@ pub fn LsmTree(
                 /// Returns true if an IO operation was started. If this returns true,
                 /// then io_done() will be called on completion.
                 fn tick(it: *Self) bool {
+                    assert(!it.read_pending);
                     assert(it.address != 0);
 
                     if (it.read_table_index) {
+                        assert(!it.read_pending);
+                        it.read_pending = true;
                         forest.read_block(on_read_table_index, &it.read, it.index, address);
                         return true;
                     }
 
-                    if (!it.buffered_all_values()) {
-                        if (it.blocks.next_tail()) |block| {
-                            const addresses = Table.index_data_addresses(it.index);
-                            const checksums = Table.index_data_checksums(it.index);
-                            const address = addresses[it.block];
-                            const checksum = checksums[it.block];
-                            forest.read_block(on_read, &it.read, block, address, checksum);
-                            return true;
-                        }
-                    }
+                    if (it.buffered_enough_values()) return false;
 
-                    return false;
+                    if (it.blocks.next_tail()) |next_tail| {
+                        it.read_next_data_block(next_tail);
+                        return true;
+                    } else {
+                        const values = Table.data_block_values_used(it.blocks.head().?);
+                        const values_remaining = values[it.value..];
+                        it.values.push_slice(values_remaining) catch unreachable;
+                        it.value = 0;
+                        it.blocks.advance_head();
+                        it.read_next_data_block(it.blocks.next_tail().?);
+                        return true;
+                    }
+                }
+
+                fn read_next_data_block(it: *Self, block: BlockPtr) void {
+                    assert(!it.read_table_index);
+                    assert(it.block < Table.data_blocks_used(it.index));
+
+                    const addresses = Table.index_data_addresses(it.index);
+                    const checksums = Table.index_data_checksums(it.index);
+                    const address = addresses[it.block];
+                    const checksum = checksums[it.block];
+
+                    assert(!it.read_pending);
+                    it.read_pending = true;
+                    forest.read_block(on_read, &it.read, block, address, checksum);
                 }
 
                 fn on_read_table_index(read: *Storage.Read) void {
                     const it = @fieldParentPtr(Self, "read", read);
+                    assert(it.read_pending);
+                    it.read_pending = false;
 
                     assert(it.read_table_index);
                     it.read_table_index = false;
@@ -1158,74 +1201,69 @@ pub fn LsmTree(
 
                 fn on_read(read: *Storage.Read) void {
                     const it = @fieldParentPtr(Self, "read", read);
+                    assert(it.read_pending);
+                    it.read_pending = false;
 
                     assert(!it.read_table_index);
 
                     it.blocks.advance_tail();
                     it.block += 1;
 
-                    // In the case of a partial block, read one further block. This ensures that
-                    // partial blocks will always get merged during compaction. Otherwise, it would
-                    // be possible for the partial block to get re-written to the new table without
-                    // becoming more full.
-                    if (it.buffered_value_count() < Table.data.value_count_max) {
-                        if (it.tick()) return;
+                    if (!it.tick()) {
+                        assert(it.buffered_enough_values());
+                        io_done(it.parent);
                     }
-
-                    io_done(it.parent);
                 }
 
-                fn buffered_value_count(it: Self) u32 {
-                    var count: u32 = 0;
+                fn buffered_enough_values(it: Self) bool {
+                    assert(!it.read_pending);
+
+                    // If we have read all values from disk into memory, return true.
+                    const data_blocks_used = Table.data_blocks_used(it.index);
+                    if (it.block == data_blocks_used) return true;
+                    assert(it.block < data_blocks_used);
+
+                    // If we have read a block's worth of values into memory, return true.
+                    var value_count: u32 = it.values.count;
                     var blocks_it = it.blocks.iterator();
                     while (blocks_it.next()) |block| {
-                        count += Table.data_block_values_used(block);
+                        value_count += Table.data_block_values_used(block).len;
                     }
-                    count -= it.value;
-                    return count;
+                    // We do this subtraction last to avoid underflow.
+                    value_count -= it.value;
+
+                    return value_count >= Table.data.value_count_max;
                 }
 
-                /// Returns true if all remaining values in the table have been buffered.
-                fn buffered_all_values(it: Self) bool {
-                    const data_blocks_used = Table.data_blocks_used(it.index);
-                    assert(it.block <= data_blocks_used);
-                    return it.block == data_blocks_used;
-                }
-
-                /// Returns true if all values in the table have been consumed by pop().
-                fn consumed_all_values(it: Self) bool {
-                    return it.blocks.empty() and it.buffered_all_values();
-                }
-
-                /// A null return value here does not necessarily mean that all values have
-                /// been consumed. Instead check consumed_all_values().
                 fn peek(it: *Self) ?Key {
+                    assert(!it.read_pending);
                     assert(!it.read_table_index);
 
-                    const block = it.blocks.head() orelse return null;
+                    if (it.values.head()) |value| return key_from_value(value);
 
-                    // TODO we should be able to cross-check this with the header size
-                    // for more safety.
-                    assert(it.value < Table.data_block_values_used(block));
+                    const block = it.blocks.head() orelse {
+                        assert(it.block == Table.data_blocks_used(it.index));
+                        return null;
+                    };
 
-                    const values = Table.data_block_values(block);
+                    const values = Table.data_block_values_used(block);
                     return key_from_value(values[it.value]);
                 }
 
-                /// Asserts that there is at least one value buffered.
+                /// This is only safe to call after peek() has returned non-null.
                 fn pop(it: *Self) Value {
+                    assert(!it.read_pending);
                     assert(!it.read_table_index);
+
+                    if (it.values.pop()) |value| return value;
 
                     const block = it.blocks.head().?;
 
-                    const values_used = Table.data_block_values_used(block);
-                    assert(it.value < values_used);
-
-                    const values = Table.data_block_values(block);
+                    const values = Table.data_block_values_used(block);
                     const value = values[it.value];
 
                     it.value += 1;
-                    if (it.value == values_used) {
+                    if (it.value == values.len) {
                         it.value = 0;
                         it.blocks.advance_head();
                     }
