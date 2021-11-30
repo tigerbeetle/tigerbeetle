@@ -924,38 +924,42 @@ pub fn LsmTree(
             return struct {
                 const Self = @This();
 
+                const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
+
                 parent: *Parent,
-                tables: RingBuffer(TableIterator(Self, on_io_done), 3, .array),
                 level: u32,
                 key_min: Key,
                 key_max: Key,
+                values: ValuesRingBuffer,
+                tables: RingBuffer(TableIterator(Self, on_io_done), 2, .array),
 
                 fn init(allocator: *mem.Allocator) !Self {
+                    var values = try ValuesRingBuffer.init(allocator);
+                    errdefer values.deinit(allocator);
+
                     var table_a = try TableIterator.init(allocator);
                     errdefer table_a.deinit(allocator);
 
                     var table_b = try TableIterator.init(allocator);
                     errdefer table_b.deinit(allocator);
 
-                    var table_c = try TableIterator.init(allocator);
-                    errdefer table_c.deinit(allocator);
-
                     return Self{
                         .parent = undefined,
+                        .level = undefined,
+                        .key_min = undefined,
+                        .key_max = undefined,
+                        .values = values,
                         .tables = .{
                             .buffer = .{
                                 table_a,
                                 table_b,
-                                table_c,
                             },
                         },
-                        .level = undefined,
-                        .key_min = undefined,
-                        .key_max = undefined,
                     };
                 }
 
                 fn deinit(it: *Self, allocator: *mem.Allocator) void {
+                    it.values.deinit(allocator);
                     for (it.tables.buffer) |*table| table.deinit(allocator);
                     it.* = undefined;
                 }
@@ -968,60 +972,58 @@ pub fn LsmTree(
                     key_max: Key,
                 ) void {
                     it.* = .{
-                        .tables = it.tables,
                         .level = level,
                         .key_min = key_min,
                         .key_max = key_max,
+                        .values = .{ .buffer = it.values.buffer },
+                        .tables = .{ .buffer = it.tables.buffer },
                     };
+                    assert(values.empty());
+                    assert(tables.empty());
                 }
 
                 fn tick(it: *Self) bool {
-                    // It's critical that we get this correct to avoid data loss.
-                    {
-                        var tables_it = it.tables.iterator();
-                        while (tables_it.next_ptr()) |table| {
-                            if (table != it.tables.tail_ptr()) {
-                                assert(table.buffered_all_values());
-                            }
-                        }
-                    }
+                    if (it.buffered_enough_values()) return false;
 
                     if (it.tables.tail_ptr()) |tail| {
                         // Buffer values as necessary for the current tail.
                         if (tail.tick()) return true;
-                        // Don't start the next table iterator until the current tail iterator has
-                        // all remaining values buffered in memory.
-                        if (!tail.buffered_all_values()) {
-                            assert(tail.buffered_value_count() >= Table.data.value_count_max or
-                                tail.blocks.full());
-                            return false;
-                        }
+                        // Since buffered_enough_values() was false above and tick did not start
+                        // new I/O, the tail table must have already buffered all values.
+                        // This is critical to ensure no values are skipped during iteration.
+                        assert(tail.buffered_all_values());
                     }
 
                     if (it.tables.next_tail_ptr()) |next_tail| {
-                        // TODO this function doesn't exist yet
-                        const address = manifest.get_next_address() orelse return false;
-                        next_tail.reset(address);
+                        read_next_table(next_tail);
                         it.tables.advance_tail();
-                        const io_pending = next_tail.tick();
-                        assert(io_pending);
+                        return true;
+                    } else {
+                        const table = it.tables.head().?;
+                        while (table.peek() != null) {
+                            it.values.push(table.pop()) catch unreachable;
+                        }
+                        it.tables.advance_head();
+
+                        read_next_table(it.tables.next_tail_ptr().?);
+                        it.tables.advance_tail();
                         return true;
                     }
+                }
 
-                    assert(it.tables.full());
-                    return false;
+                fn read_next_table(table: *TableIterator(Self, on_io_done)) void {
+                    // TODO this function doesn't exist yet
+                    const address = manifest.get_next_address() orelse return false;
+                    table.reset(address);
+                    const read_pending = table.tick();
+                    assert(read_pending);
                 }
 
                 fn on_io_done(it: *Self) void {
-                    const tail = it.tables.tail_ptr().?;
-                    if (tail.buffered_all_values()) {
-                        // Fall through if tick() doesn't start further I/O.
-                        if (it.tick()) return;
-                    } else {
-                        assert(tail.buffered_value_count() >= Table.data.value_count_max or
-                            tail.blocks.full());
+                    if (!it.tick()) {
+                        assert(it.buffered_enough_values());
+                        io_done(it.parent);
                     }
-                    io_done(it.parent);
                 }
 
                 /// Returns true if all remaining values in the level have been buffered.
@@ -1029,26 +1031,40 @@ pub fn LsmTree(
                     // TODO look at the manifest to determine this.
                 }
 
-                /// Returns true if all values in the level have been consumed by pop().
-                fn consumed_all_values(it: Self) bool {
-                    return it.tables.empty() and it.buffered_all_values();
+                fn buffered_value_count(it: Self) u32 {
+                    var value_count = @intCast(u32, it.values.count);
+                    var tables_it = it.tables.iterator();
+                    while (tables_it.next()) |table| {
+                        value_count += table.buffered_value_count();
+                    }
+                    return value_count;
                 }
 
-                /// A null return value here does not necessarily mean that all values have
-                /// been consumed. Instead check consumed_all_values().
-                fn peek(it: *Self) ?Key {
-                    // This may be null if all table iterators were partially full.
-                    const table = it.tables.head_ptr() orelse return null;
-                    // This may be null if the current head iterator has
-                    // not yet buffered all remaining values.
-                    return table.peek();
+                fn buffered_enough_values(it: Self) bool {
+                    return it.buffered_all_values() or
+                        it.buffered_value_count() >= Table.data.value_count_max;
                 }
 
-                /// Asserts that there is at least one value buffered.
+                fn peek(it: Self) ?Key {
+                    if (it.values.head()) |value| return key_from_value(value);
+
+                    const table = it.tables.head_ptr() orelse {
+                        assert(it.buffered_all_values());
+                        return null;
+                    };
+
+                    return table.peek().?;
+                }
+
+                /// This is only safe to call after peek() has returned non-null.
                 fn pop(it: *Self) Value {
+                    if (it.values.pop()) |value| return value;
+
                     const table = it.tables.head_ptr().?;
                     const value = table.pop();
-                    if (table.consumed_all_values()) it.tables.advance_head();
+
+                    if (table.peek() == null) it.tables.advance_head();
+
                     return value;
                 }
             };
@@ -1194,9 +1210,9 @@ pub fn LsmTree(
                     assert(it.read_table_index);
                     it.read_table_index = false;
 
-                    const io_pending = it.tick();
+                    const read_pending = it.tick();
                     // After reading the table index, we always read at least one data block.
-                    assert(io_pending);
+                    assert(read_pending);
                 }
 
                 fn on_read(read: *Storage.Read) void {
@@ -1215,15 +1231,18 @@ pub fn LsmTree(
                     }
                 }
 
-                fn buffered_enough_values(it: Self) bool {
+                /// Return true if all remaining values in the table have been buffered in memory.
+                fn buffered_all_values(it: Self) bool {
                     assert(!it.read_pending);
 
-                    // If we have read all values from disk into memory, return true.
                     const data_blocks_used = Table.data_blocks_used(it.index);
-                    if (it.block == data_blocks_used) return true;
-                    assert(it.block < data_blocks_used);
+                    assert(it.block <= data_blocks_used);
+                    return it.block == data_blocks_used;
+                }
 
-                    // If we have read a block's worth of values into memory, return true.
+                fn buffered_value_count(it: Self) u32 {
+                    assert(!it.read_pending);
+
                     var value_count: u32 = it.values.count;
                     var blocks_it = it.blocks.iterator();
                     while (blocks_it.next()) |block| {
@@ -1232,10 +1251,17 @@ pub fn LsmTree(
                     // We do this subtraction last to avoid underflow.
                     value_count -= it.value;
 
-                    return value_count >= Table.data.value_count_max;
+                    return value_count;
                 }
 
-                fn peek(it: *Self) ?Key {
+                fn buffered_enough_values(it: Self) bool {
+                    assert(!it.read_pending);
+
+                    return it.buffered_all_values() or
+                        it.buffered_value_count() >= Table.data.value_count_max;
+                }
+
+                fn peek(it: Self) ?Key {
                     assert(!it.read_pending);
                     assert(!it.read_table_index);
 
