@@ -40,7 +40,7 @@ pub fn main() !void {
         const elapsed_ns = self.current - started;
         const transferred_mb = @intToFloat(f64, self.transferred) / 1024 / 1024;
 
-        std.debug.warn("IO throughput test: took {}ms @ {d:.2} MB/s\n", .{
+        std.debug.print("IO throughput test: took {}ms @ {d:.2} MB/s\n", .{
             elapsed_ns / std.time.ns_per_ms,
             transferred_mb / (@intToFloat(f64, elapsed_ns) / std.time.ns_per_s),
         });
@@ -85,7 +85,7 @@ pub fn main() !void {
     // Run the IO loop, calling either tick() or run_for_ns() at "pseudo-random"
     // to benchmark each io-driving execution path
     var tick: usize = 0xdeadbeef;
-    while (self.isRunning()) : (tick +%= 1) {
+    while (self.is_running()) : (tick +%= 1) {
         if (tick % 61 == 0) {
             const timeout_ns = tick % (10 * std.time.ns_per_ms);
             try self.io.run_for_ns(@intCast(u63, timeout_ns));
@@ -124,7 +124,7 @@ const Context = struct {
         transferred: usize = 0,
     };
 
-    fn isRunning(self: Context) bool {
+    fn is_running(self: Context) bool {
         // Make sure that we're connected
         if (self.rx.socket.fd == -1) return true;
 
@@ -190,7 +190,7 @@ const Context = struct {
 
         // Check in with the benchmark timer to stop sending/receiving data
         self.current = self.timer.monotonic();
-        if (!self.isRunning())
+        if (!self.is_running())
             return;
 
         // Select which connection (tx or rx) depending on the type of transfer
