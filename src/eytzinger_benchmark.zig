@@ -7,7 +7,7 @@ const eytzinger = @import("./eytzinger.zig").eytzinger;
 const perf = @import("./benchmarks/perf.zig");
 
 const GiB = 1 << 30;
-const searches = 100_000;
+const searches = 500_000;
 
 const kv_types = .{
     .{.key_size = 8, .value_size = 128},
@@ -105,7 +105,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
         while (i < layout.searches) : (i += 1) {
             const page_index = page_picker[i % page_picker.len];
             const target = value_picker[v % value_picker.len];
-            const page = pages[page_index];
+            const page = &pages[page_index];
             const bounds = Eytzinger.search_values(K, V, V.key_compare, &page.keys, &page.values, target);
             const hit = bounds[binary_search(K, V, V.key_from_value, V.key_compare, bounds, target)];
 
@@ -137,7 +137,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
         var v: usize = 0;
         while (i < layout.searches) : (i += 1) {
             const target = value_picker[v % value_picker.len];
-            const page = pages[page_picker[i % page_picker.len]];
+            const page = &pages[page_picker[i % page_picker.len]];
             const hit = page.values[binary_search(K, V, V.key_from_value, V.key_compare, page.values[0..], target)];
 
             assert(hit.key == target);
