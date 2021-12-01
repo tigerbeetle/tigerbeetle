@@ -1,4 +1,10 @@
+const std = @import("std");
+const os = std.os;
+const assert = std.debug.assert;
 
+const FIFO = @import("../fifo.zig").FIFO;
+const Time = @import("../time.zig").Time;
+const buffer_limit = @import("../io.zig").buffer_limit;
 
 pub const IO = struct {
     afd: Afd,
@@ -154,7 +160,6 @@ pub const IO = struct {
         connect: struct {
             socket: os.socket_t,
             address: std.net.Address,
-            initiated: bool,
         },
         fsync: struct {
             fd: os.fd_t,
@@ -189,7 +194,7 @@ pub const IO = struct {
     fn submit(
         self: *IO,
         context: anytype,
-        callback: anytype,
+        comptime callback: anytype,
         completion: *Completion,
         comptime op_tag: std.meta.Tag(Operation),
         op_data: anytype,
@@ -199,22 +204,19 @@ pub const IO = struct {
         const Callback = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
                 // Perform the operation and get the result
-                const op_data = &@field(_completion.operation, @tagName(op_tag));
-                const result = OperationImpl.doOperation(op_data);
+                const _op_data = &@field(_completion.operation, @tagName(op_tag));
+                const result = OperationImpl.doOperation(_op_data);
 
                 // Schedule the socket and completion onto windows AFD when WouldBlock is detected
                 if (switch (op_tag) {
-                    .accept, .recv => Afd.Operation.read,
-                    .connect, .send => Afd.Operation.write,
+                    .accept, .recv => @as(?Afd.Operation, .read),
+                    .connect, .send => @as(?Afd.Operation, .write),
                     else => null,
                 }) |afd_op| blk: {
                     _ = result catch |err| switch (err) {
                         error.WouldBlock => {
-                            io.afd.schedule(
-                                op_data.socket,
-                                afd_op,
-                                &_completion.afd_completion,
-                            ) catch break :blk;
+                            const afd_completion = &_completion.afd_completion;
+                            io.afd.schedule(_op_data.socket, afd_op, afd_completion) catch break :blk;
                             return;
                         },
                         else => {},
@@ -222,8 +224,11 @@ pub const IO = struct {
                 }
                 
                 // The completion is finally ready to invoke the callback
-                const _context = @ptrCast(Context, _completion.context);
-                callback(_context, _completion, result);
+                callback(
+                    @ptrCast(Context, @alignCast(@alignOf(Context), _completion.context)),
+                    _completion,
+                    result,
+                );
             }
         };
 
@@ -398,12 +403,18 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = buffer.len,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
                 .offset = offset,
             },
             struct {
-                fn doOperation(op: anytype) ReadError!void {
-                    return os.pread(op.fd, op.buf[0..op.len], op.offset);
+                fn doOperation(op: anytype) ReadError!usize {
+                    return os.pread(op.fd, op.buf[0..op.len], op.offset) catch |err| switch (err) {
+                        error.OperationAborted => unreachable,
+                        error.BrokenPipe => unreachable,
+                        error.ConnectionTimedOut => unreachable,
+                        error.AccessDenied => error.InputOutput,
+                        else => |e| e,
+                    };
                 }
             },
         );
@@ -432,10 +443,10 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .buf = buffer.ptr,
-                .len = buffer.len,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn doOperation(op: anytype) RecvError!void {
+                fn doOperation(op: anytype) RecvError!usize {
                     return os.recv(op.socket, op.buf[0..op.len], 0);
                 }
             },
@@ -465,10 +476,10 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .buf = buffer.ptr,
-                .len = buffer.len,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn doOperation(op: anytype) SendError!void {
+                fn doOperation(op: anytype) SendError!usize {
                     return os.send(op.socket, op.buf[0..op.len], 0);
                 }
             },
@@ -528,16 +539,18 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = buffer.len,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
                 .offset = offset,
             },
             struct {
-                fn doOperation(op: anytype) WriteError!void {
+                fn doOperation(op: anytype) WriteError!usize {
                     return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
                 }
             },
         );
     }
+
+    pub const INVALID_SOCKET = os.windows.INVALID_SOCKET;
 
     pub fn openSocket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         return os.socket(family, sock_type | os.SOCK_NONBLOCK | os.SOCK_CLOEXEC, protocol);
@@ -567,16 +580,16 @@ const Afd = struct {
     const AFD_POLL_ACCEPT = 0x0080;
     const AFD_POLL_CONNECT_FAIL = 0x0100;
 
-    afd_handle: os.windows.HANDLE,
+    handle: os.windows.HANDLE,
 
-    fn open(iocp_handle: os.windows.HANDLE) !Afd {
+    fn init(iocp_handle: os.windows.HANDLE) !Afd {
         const name = "\\Device\\Afd\\tigerbeetle";
         var buf: [name.len]os.windows.WCHAR = undefined;
         const len = try std.unicode.utf8ToUtf16Le(&buf, name);
 
-        const bytes_len = try math.cast(c_ushort, name_len * @sizeOf(os.windows.WCHAR));
-        const afd_name = os.windows.UNICODE_STRING{
-            .buffer = &buf,
+        const bytes_len = try std.math.cast(c_ushort, len * @sizeOf(os.windows.WCHAR));
+        var afd_name = os.windows.UNICODE_STRING{
+            .Buffer = &buf,
             .Length = bytes_len,
             .MaximumLength = bytes_len,
         };
@@ -634,11 +647,12 @@ const Afd = struct {
     fn schedule(
         self: Afd,
         socket: os.socket_t,
+        operation: Operation,
         completion: *Completion,
     ) !void {
-        const afd_events: os.windows.ULONG = switch (readable) {
-            true => AFD_POLL_RECEIVE | AFD_POLL_ACCEPT | AFD_POLL_DISCONNECT,
-            else => AFD_POLL_SEND,
+        const afd_events: os.windows.ULONG = switch (operation) {
+            .read => AFD_POLL_RECEIVE | AFD_POLL_ACCEPT | AFD_POLL_DISCONNECT,
+            .write => AFD_POLL_SEND,
         };
 
         completion.afd_poll_info = .{
