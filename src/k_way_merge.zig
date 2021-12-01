@@ -3,14 +3,23 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
+pub const Direction = enum {
+    ascending,
+    descending,
+};
+
 pub fn KWayMergeIterator(
     comptime Context: type,
     comptime Key: type,
     comptime Value: type,
-    comptime keys_ordered: fn (Key, Key) bool,
+    comptime key_from_value: fn (Value) Key,
+    comptime compare_keys: fn (Key, Key) math.Order,
     comptime k_max: u32,
     comptime stream_peek: fn (context: *Context, stream_id: u32) ?Key,
     comptime stream_pop: fn (context: *Context, stream_id: u32) Value,
+    /// Returns true if stream a has higher precedence than stream b.
+    /// This is used to deduplicate values across streams.
+    comptime stream_precedence: fn (context: *Context, a: u32, b: u32) bool,
 ) type {
     return struct {
         const Self = @This();
@@ -19,13 +28,20 @@ pub fn KWayMergeIterator(
         keys: [k_max]Key,
         stream_ids: [k_max]u32,
         k: u32,
+        direction: Direction,
+        previous_key_popped: ?Key = null,
 
-        pub fn init(context: *Context, stream_ids: []const u32) Self {
+        pub fn init(
+            context: *Context,
+            stream_ids: []const u32,
+            direction: Direction,
+        ) Self {
             var it: Self = .{
                 .context = context,
                 .keys = undefined,
                 .stream_ids = undefined,
                 .k = 0,
+                .direction = direction,
             };
 
             for (stream_ids) |stream_id| {
@@ -39,11 +55,29 @@ pub fn KWayMergeIterator(
         }
 
         pub fn pop(it: *Self) ?Value {
+            while (it.pop_internal()) |value| {
+                const key = key_from_value(value);
+                if (it.previous_key_popped) |previous| {
+                    switch (compare_keys(previous, key)) {
+                        .lt => assert(it.direction == .ascending),
+                        // Discard this value and pop the next one.
+                        .eq => continue,
+                        .gt => assert(it.direction == .descending),
+                    }
+                }
+                it.previous_key_popped = key;
+                return value;
+            }
+
+            return null;
+        }
+
+        fn pop_internal(it: *Self) ?Value {
             if (it.k == 0) return null;
 
             const root = it.stream_ids[0];
             // We know that each input iterator is sorted, so we don't need to compare the next
-            // key on that iterator with the current min, we know it is greater.
+            // key on that iterator with the current min/max.
             const value = stream_pop(it.context, root);
 
             if (stream_peek(it.context, root)) |key| {
@@ -68,7 +102,7 @@ pub fn KWayMergeIterator(
 
         // Start at the root node.
         // Compare the current node with its children, if the order is correct stop.
-        // If the order is incorrect, swap the current node with the smaller child.
+        // If the order is incorrect, swap the current node with the appropriate child.
         fn down_heap(it: *Self) void {
             if (it.k == 0) return;
             var i: u32 = 0;
@@ -122,7 +156,11 @@ pub fn KWayMergeIterator(
         }
 
         inline fn ordered(it: Self, a: u32, b: ?u32) bool {
-            return b == null or keys_ordered(it.keys[a], it.keys[b.?]);
+            return b == null or switch (compare_keys(it.keys[a], it.keys[b.?])) {
+                .lt => it.direction == .ascending,
+                .eq => stream_precedence(it.context, it.stream_ids[a], it.stream_ids[b.?]),
+                .gt => it.direction == .descending,
+            };
         }
     };
 }
@@ -134,53 +172,85 @@ fn TestContext(comptime k_max: u32) type {
 
         const log = false;
 
-        streams: [k_max][]const u32,
+        const Value = struct {
+            key: u32,
+            version: u32,
 
-        fn keys_ordered(a: u32, b: u32) bool {
-            return a < b;
+            fn to_key(v: Value) u32 {
+                return v.key;
+            }
+        };
+
+        streams: [k_max][]const Value,
+
+        fn compare_keys(a: u32, b: u32) math.Order {
+            return math.order(a, b);
         }
 
         fn stream_peek(context: *Self, id: u32) ?u32 {
             const index = id - k_max;
             const stream = context.streams[index];
             if (stream.len == 0) return null;
-            return stream[0];
+            return stream[0].key;
         }
 
-        fn stream_pop(context: *Self, id: u32) u32 {
+        fn stream_pop(context: *Self, id: u32) Value {
             const index = id - k_max;
             const stream = context.streams[index];
             context.streams[index] = stream[1..];
             return stream[0];
         }
 
-        fn merge(streams: []const []const u32, expect: []const u32) !void {
+        fn stream_precedence(context: *Self, a: u32, b: u32) bool {
+            // Higher streams have higher precedence
+            return a > b;
+        }
+
+        fn merge(
+            direction: Direction,
+            streams_keys: []const []const u32,
+            expect: []const Value,
+        ) !void {
             const KWay = KWayMergeIterator(
                 Self,
                 u32,
-                u32,
-                keys_ordered,
+                Value,
+                Value.to_key,
+                compare_keys,
                 k_max,
                 stream_peek,
                 stream_pop,
+                stream_precedence,
             );
-            var actual = std.ArrayList(u32).init(testing.allocator);
+            var actual = std.ArrayList(Value).init(testing.allocator);
             defer actual.deinit();
 
-            var context: Self = .{ .streams = undefined };
-            mem.copy([]const u32, &context.streams, streams);
+            var streams: [k_max][]Value = undefined;
+
+            for (streams_keys) |stream_keys, i| {
+                errdefer for (streams[0..i]) |s| testing.allocator.free(s);
+                streams[i] = try testing.allocator.alloc(Value, stream_keys.len);
+                for (stream_keys) |key, j| {
+                    streams[i][j] = .{
+                        .key = key,
+                        .version = @intCast(u32, i),
+                    };
+                }
+            }
+            defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
 
             var stream_ids_buffer: [k_max]u32 = undefined;
-            const stream_ids = stream_ids_buffer[0..streams.len];
+            const stream_ids = stream_ids_buffer[0..streams_keys.len];
             for (stream_ids) |*id, i| id.* = @intCast(u32, i) + k_max;
 
-            var kway = KWay.init(&context, stream_ids);
+            var context: Self = .{ .streams = streams };
+            var kway = KWay.init(&context, stream_ids, direction);
 
             while (kway.pop()) |value| {
                 try actual.append(value);
             }
 
-            try testing.expectEqualSlices(u32, expect, actual.items);
+            try testing.expectEqualSlices(Value, expect, actual.items);
         }
 
         fn fuzz(random: *std.rand.Random, stream_key_count_max: u32) !void {
@@ -192,34 +262,65 @@ fn TestContext(comptime k_max: u32) type {
             const streams_buffer = try allocator.alloc(u32, k_max * stream_key_count_max);
             defer allocator.free(streams_buffer);
 
-            const expect_buffer = try allocator.alloc(u32, k_max * stream_key_count_max);
+            const expect_buffer = try allocator.alloc(Value, k_max * stream_key_count_max);
             defer allocator.free(expect_buffer);
 
             var k: u32 = 0;
             while (k < k_max) : (k += 1) {
                 if (log) std.debug.print("k = {}\n", .{k});
-                var i: u32 = 0;
-                while (i < k) : (i += 1) {
-                    const len = fuzz_stream_len(random, stream_key_count_max);
-                    streams[i] = streams_buffer[i * stream_key_count_max ..][0..len];
-                    fuzz_stream_values(random, streams[i]);
+                {
+                    var i: u32 = 0;
+                    while (i < k) : (i += 1) {
+                        const len = fuzz_stream_len(random, stream_key_count_max);
+                        streams[i] = streams_buffer[i * stream_key_count_max ..][0..len];
+                        fuzz_stream_keys(random, streams[i]);
 
-                    if (log) {
-                        std.debug.print("stream {} = ", .{i});
-                        for (streams[i]) |key| std.debug.print("{},", .{key});
-                        std.debug.print("\n", .{});
+                        if (log) {
+                            std.debug.print("stream {} = ", .{i});
+                            for (streams[i]) |key| std.debug.print("{},", .{key});
+                            std.debug.print("\n", .{});
+                        }
                     }
                 }
 
-                var expect_len: usize = 0;
-                for (streams[0..k]) |stream| {
-                    mem.copy(u32, expect_buffer[expect_len..], stream);
-                    expect_len += stream.len;
+                var expect_buffer_len: usize = 0;
+                for (streams[0..k]) |stream, version| {
+                    for (stream) |key| {
+                        expect_buffer[expect_buffer_len] = .{
+                            .key = key,
+                            .version = @intCast(u32, version),
+                        };
+                        expect_buffer_len += 1;
+                    }
                 }
-                const expect = expect_buffer[0..expect_len];
-                std.sort.sort(u32, expect, {}, less_than);
+                const expect_with_duplicates = expect_buffer[0..expect_buffer_len];
+                std.sort.sort(Value, expect_with_duplicates, {}, value_less_than);
 
-                try merge(streams[0..k], expect);
+                var target: usize = 0;
+                var previous_key: ?u32 = null;
+                for (expect_with_duplicates) |value| {
+                    if (previous_key) |previous| {
+                        if (value.key == previous_key) continue;
+                    }
+                    previous_key = value.key;
+                    expect_with_duplicates[target] = value;
+                    target += 1;
+                }
+                const expect = expect_with_duplicates[0..target];
+
+                if (log) {
+                    std.debug.print("expect = ", .{});
+                    for (expect) |value| std.debug.print("({},{}),", .{ value.key, value.version });
+                    std.debug.print("\n", .{});
+                }
+
+                try merge(.ascending, streams[0..k], expect);
+
+                for (streams[0..k]) |stream| mem.reverse(u32, stream);
+                mem.reverse(Value, expect);
+
+                try merge(.descending, streams[0..k], expect);
+
                 if (log) std.debug.print("\n", .{});
             }
         }
@@ -232,7 +333,7 @@ fn TestContext(comptime k_max: u32) type {
             };
         }
 
-        fn fuzz_stream_values(random: *std.rand.Random, stream: []u32) void {
+        fn fuzz_stream_keys(random: *std.rand.Random, stream: []u32) void {
             const key_max = random.intRangeLessThanBiased(u32, 512, 1024);
             switch (random.uintLessThanBiased(u8, 100)) {
                 0...4 => {
@@ -243,29 +344,87 @@ fn TestContext(comptime k_max: u32) type {
                 },
             }
             for (stream) |*key| key.* = key.* % key_max;
-            std.sort.sort(u32, stream, {}, less_than);
+            std.sort.sort(u32, stream, {}, key_less_than);
         }
 
-        fn less_than(_: void, a: u32, b: u32) bool {
+        fn key_less_than(_: void, a: u32, b: u32) bool {
             return a < b;
+        }
+
+        fn value_less_than(_: void, a: Value, b: Value) bool {
+            return switch (math.order(a.key, b.key)) {
+                .lt => true,
+                .eq => a.version > b.version,
+                .gt => false,
+            };
         }
     };
 }
 
 test "k_way_merge: unit" {
     try TestContext(1).merge(
+        .ascending,
         &[_][]const u32{
             &[_]u32{ 0, 3, 4, 8 },
         },
-        &[_]u32{ 0, 3, 4, 8 },
+        &[_]TestContext(1).Value{
+            .{ .key = 0, .version = 0 },
+            .{ .key = 3, .version = 0 },
+            .{ .key = 4, .version = 0 },
+            .{ .key = 8, .version = 0 },
+        },
+    );
+    try TestContext(1).merge(
+        .descending,
+        &[_][]const u32{
+            &[_]u32{ 8, 4, 3, 0 },
+        },
+        &[_]TestContext(1).Value{
+            .{ .key = 8, .version = 0 },
+            .{ .key = 4, .version = 0 },
+            .{ .key = 3, .version = 0 },
+            .{ .key = 0, .version = 0 },
+        },
     );
     try TestContext(3).merge(
+        .ascending,
         &[_][]const u32{
-            &[_]u32{ 0, 3, 4, 8 },
+            &[_]u32{ 0, 3, 4, 8, 11 },
+            &[_]u32{ 2, 11, 12, 13, 15 },
             &[_]u32{ 1, 2, 11 },
-            &[_]u32{ 2, 12, 13, 15 },
         },
-        &[_]u32{ 0, 1, 2, 2, 3, 4, 8, 11, 12, 13, 15 },
+        &[_]TestContext(3).Value{
+            .{ .key = 0, .version = 0 },
+            .{ .key = 1, .version = 2 },
+            .{ .key = 2, .version = 2 },
+            .{ .key = 3, .version = 0 },
+            .{ .key = 4, .version = 0 },
+            .{ .key = 8, .version = 0 },
+            .{ .key = 11, .version = 2 },
+            .{ .key = 12, .version = 1 },
+            .{ .key = 13, .version = 1 },
+            .{ .key = 15, .version = 1 },
+        },
+    );
+    try TestContext(3).merge(
+        .descending,
+        &[_][]const u32{
+            &[_]u32{ 11, 8, 4, 3, 0 },
+            &[_]u32{ 15, 13, 12, 11, 2 },
+            &[_]u32{ 11, 2, 1 },
+        },
+        &[_]TestContext(3).Value{
+            .{ .key = 15, .version = 1 },
+            .{ .key = 13, .version = 1 },
+            .{ .key = 12, .version = 1 },
+            .{ .key = 11, .version = 2 },
+            .{ .key = 8, .version = 0 },
+            .{ .key = 4, .version = 0 },
+            .{ .key = 3, .version = 0 },
+            .{ .key = 2, .version = 2 },
+            .{ .key = 1, .version = 2 },
+            .{ .key = 0, .version = 0 },
+        },
     );
 }
 
