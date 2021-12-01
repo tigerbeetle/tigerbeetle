@@ -4,10 +4,10 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const RingBuffer = @import("ring_buffer.zig").RingBuffer;
+const vsr = @import("../vsr.zig");
+const config = @import("../config.zig");
+const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
-const vsr = @import("vsr.zig");
-const config = @import("config.zig");
 const eytzinger = @import("eytzinger.zig").eytzinger;
 
 // StateMachine:
