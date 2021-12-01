@@ -320,7 +320,7 @@ test "tick to wait" {
         const Context = @This();
 
         io: IO,
-        accepted: os.socket_t = -1,
+        accepted: os.socket_t = IO.INVALID_SOCKET,
         connected: bool = false,
         received: bool = false,
 
@@ -363,12 +363,13 @@ test "tick to wait" {
 
             // Tick the IO to drain the accept & connect completions
             assert(!self.connected);
-            assert(self.accepted == -1);
-            while (self.accepted == -1 or !self.connected)
+            assert(self.accepted == IO.INVALID_SOCKET);
+
+            while (self.accepted == IO.INVALID_SOCKET or !self.connected)
                 try self.io.tick();
 
             assert(self.connected);
-            assert(self.accepted != -1);
+            assert(self.accepted != IO.INVALID_SOCKET);
             defer os.closeSocket(self.accepted);
 
             // Start receiving on the client
@@ -415,7 +416,7 @@ test "tick to wait" {
         ) void {
             _ = completion;
 
-            assert(self.accepted == -1);
+            assert(self.accepted == IO.INVALID_SOCKET);
             self.accepted = result catch @panic("accept error");
         }
 
@@ -456,7 +457,7 @@ test "pipe data over socket" {
 
         const Context = @This();
         const Socket = struct {
-            fd: os.socket_t = -1,
+            fd: os.socket_t = IO.INVALID_SOCKET,
             completion: IO.Completion = undefined,
         };
         const Pipe = struct {
@@ -524,9 +525,9 @@ test "pipe data over socket" {
                 }
             }
 
-            try testing.expect(self.server.fd != -1);
-            try testing.expect(self.tx.socket.fd != -1);
-            try testing.expect(self.rx.socket.fd != -1);
+            try testing.expect(self.server.fd != IO.INVALID_SOCKET);
+            try testing.expect(self.tx.socket.fd != IO.INVALID_SOCKET);
+            try testing.expect(self.rx.socket.fd != IO.INVALID_SOCKET);
             os.closeSocket(self.rx.socket.fd);
 
             try testing.expectEqual(self.tx.transferred, buffer_size);
@@ -539,7 +540,7 @@ test "pipe data over socket" {
             completion: *IO.Completion,
             result: IO.AcceptError!os.socket_t,
         ) void {
-            assert(self.rx.socket.fd == -1);
+            assert(self.rx.socket.fd == IO.INVALID_SOCKET);
             assert(&self.server.completion == completion);
             self.rx.socket.fd = result catch |err| std.debug.panic("accept error {}", .{err});
 
@@ -555,7 +556,7 @@ test "pipe data over socket" {
             _ = completion;
             _ = result catch unreachable;
 
-            assert(self.tx.socket.fd != -1);
+            assert(self.tx.socket.fd != IO.INVALID_SOCKET);
             assert(&self.tx.socket.completion == completion);
 
             assert(self.tx.transferred == 0);

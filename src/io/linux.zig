@@ -927,6 +927,8 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
+    pub const INVALID_SOCKET = -1;
+
     pub fn openSocket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         return os.socket(family, sock_type, protocol);
     }
