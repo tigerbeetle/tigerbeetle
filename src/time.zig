@@ -1,8 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const assert = std.debug.assert;
-const is_darwin = builtin.target.isDarwin();
 const config = @import("./config.zig");
+
+const assert = std.debug.assert;
+const is_darwin = builtin.target.os.tag.isDarwin();
+const is_windows = builtin.target.os.tag == .windows;
 
 pub const Time = struct {
     const Self = @This();
@@ -19,6 +21,29 @@ pub const Time = struct {
     /// system administrator manually changes the clock.
     pub fn monotonic(self: *Self) u64 {
         const m = blk: {
+            // Uses QueryPerformanceCounter() on windows due to it being the highest precision timer
+            // available while also accounting for time spent suspended by default:
+            // https://docs.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-queryunbiasedinterrupttime#remarks 
+            if (is_windows) {
+                // QPF need not be globally cached either as it ends up being a load from read-only
+                // memory mapped to all processed by the kernel called KUSER_SHARED_DATA (See "QpcFrequency")
+                // https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-kuser_shared_data
+                // https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
+                const qpc = std.os.windows.QueryPerformanceCounter();
+                const qpf = std.os.windows.QueryPerformanceFrequency();
+
+                // 10Mhz (1 qpc tick every 100ns) is a common QPF on modern systems.
+                // We can optimize towards this by converting to ns via a single multiply.
+                // https://github.com/microsoft/STL/blob/785143a0c73f030238ef618890fd4d6ae2b3a3a0/stl/inc/chrono#L694-L701
+                const common_qpf = 10_000_000;
+                if (qpf == common_qpf)
+                    break :blk qpc * (std.time.ns_per_s / common_qpf);
+
+                // Convert qpc to nanos using fixed point to avoid expensive extra divs and overflow.
+                const scale = (std.time.ns_per_s << 32) / qpf;
+                break :blk @truncate(u64, (@as(u96, qpc) * scale) >> 32);
+            }
+
             // Uses mach_continuous_time() instead of mach_absolute_time() as it counts while suspended.
             // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
             // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
@@ -29,9 +54,13 @@ pub const Time = struct {
                     extern "c" fn mach_continuous_time() u64;
                 };
 
-                const now = darwin.mach_continuous_time();
+                // mach_timebase_info() called through libc already does global caching for us
+                // https://opensource.apple.com/source/xnu/xnu-7195.81.3/libsyscall/wrappers/mach_timebase_info.c.auto.html
                 var info: darwin.mach_timebase_info_t = undefined;
-                if (darwin.mach_timebase_info(&info) != 0) @panic("mach_timebase_info() failed");
+                if (darwin.mach_timebase_info(&info) != 0) 
+                    @panic("mach_timebase_info() failed");
+
+                const now = darwin.mach_continuous_time();
                 return (now * info.numer) / info.denom;
             }
 
