@@ -31,27 +31,27 @@ pub fn KWayMergeIterator(
         direction: Direction,
         previous_key_popped: ?Key = null,
 
-        pub fn init(
-            context: *Context,
-            stream_ids: []const u32,
-            direction: Direction,
-        ) Self {
+        pub fn init(context: *Context, k: u32, direction: Direction) Self {
             var it: Self = .{
                 .context = context,
                 .keys = undefined,
                 .stream_ids = undefined,
-                .k = 0,
+                .k = k,
                 .direction = direction,
             };
 
-            for (stream_ids) |stream_id| {
-                it.keys[it.k] = stream_peek(context, stream_id) orelse continue;
-                it.stream_ids[it.k] = stream_id;
-                it.up_heap(it.k);
-                it.k += 1;
+            var i: u32 = 0;
+            while (i < k) : (i += 1) {
+                it.keys[i] = stream_peek(context, i) orelse continue;
+                it.stream_ids[i] = i;
+                it.up_heap(i);
             }
 
             return it;
+        }
+
+        pub fn empty(it: Self) bool {
+            return it.k == 0;
         }
 
         pub fn pop(it: *Self) ?Value {
