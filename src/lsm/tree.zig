@@ -11,6 +11,7 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
+const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
 
 // StateMachine:
 //
@@ -233,11 +234,6 @@ pub fn LsmTree(
             }
         };
 
-        /// Note: any data block in the table might be less than full, not just the last block.
-        /// This is due to the restriction of bounded static memory allocation for LevelIterator
-        /// and CompactionIterator. However, LevelIterator will fill up
-        /// these blocks in subsequent levels because it always combines N
-        /// partial blocks into a single logical block.
         pub const Table = struct {
             const address_size = @sizeOf(u64);
             const checksum_size = @sizeOf(u128);
@@ -338,14 +334,14 @@ pub fn LsmTree(
                     .block_key_layout_size = block_key_layout_size,
                     .block_value_count_max = block_value_count_max,
 
-                    .data_block_count = data_blocks,
+                    .data_block_count_max = data_blocks,
                     .filter_block_count = filter_blocks,
                 };
             };
 
             const index_block_count = 1;
             const filter_block_count = layout.filter_block_count;
-            const data_block_count = layout.data_block_count;
+            const data_block_count_max = layout.data_block_count_max;
 
             const index = struct {
                 const size = @sizeOf(vsr.Header) + filter_checksums_size + data_checksums_size +
@@ -355,16 +351,16 @@ pub fn LsmTree(
                 const filter_checksums_size = filter_block_count * checksum_size;
 
                 const data_checksums_offset = filter_checksums_offset + filter_checksums_size;
-                const data_checksums_size = data_block_count * checksum_size;
+                const data_checksums_size = data_block_count_max * checksum_size;
 
                 const keys_offset = data_checksums_offset + data_checksums_size;
-                const keys_size = data_block_count * key_size;
+                const keys_size = data_block_count_max * key_size;
 
                 const filter_addresses_offset = keys_offset + keys_size;
                 const filter_addresses_size = filter_block_count * address_size;
 
                 const data_addresses_offset = filter_addresses_offset + filter_addresses_size;
-                const data_addresses_size = data_block_count * address_size;
+                const data_addresses_size = data_block_count_max * address_size;
 
                 const padding_offset = data_addresses_offset + data_addresses_size;
                 const padding_size = block_size - padding_offset;
@@ -440,7 +436,7 @@ pub fn LsmTree(
 
                             index_block_count,
                             filter_block_count,
-                            data_block_count,
+                            data_block_count_max,
 
                             index.size,
                             index.filter_checksums_offset,
@@ -472,23 +468,23 @@ pub fn LsmTree(
             comptime {
                 assert(index_block_count > 0);
                 assert(filter_block_count > 0);
-                assert(data_block_count > 0);
+                assert(data_block_count_max > 0);
                 assert(index_block_count + filter_block_count +
-                    data_block_count <= table_block_count_max);
+                    data_block_count_max <= table_block_count_max);
                 const filter_bytes_per_key = 2;
-                assert(filter_block_count * block_size >= data_block_count *
+                assert(filter_block_count * block_size >= data_block_count_max *
                     data.value_count_max * filter_bytes_per_key);
 
                 assert(index.size == @sizeOf(vsr.Header) +
-                    data_block_count * (key_size + address_size + checksum_size) +
+                    data_block_count_max * (key_size + address_size + checksum_size) +
                     filter_block_count * (address_size + checksum_size));
                 assert(index.size == index.data_addresses_offset + index.data_addresses_size);
                 assert(index.size <= block_size);
                 assert(index.keys_size > 0);
                 assert(index.keys_size % key_size == 0);
-                assert(@divExact(index.data_addresses_size, @sizeOf(u64)) == data_block_count);
+                assert(@divExact(index.data_addresses_size, @sizeOf(u64)) == data_block_count_max);
                 assert(@divExact(index.filter_addresses_size, @sizeOf(u64)) == filter_block_count);
-                assert(@divExact(index.data_checksums_size, @sizeOf(u128)) == data_block_count);
+                assert(@divExact(index.data_checksums_size, @sizeOf(u128)) == data_block_count_max);
                 assert(@divExact(index.filter_checksums_size, @sizeOf(u128)) == filter_block_count);
                 assert(block_size == index.padding_offset + index.padding_size);
                 assert(block_size == index.size + index.padding_size);
@@ -549,7 +545,7 @@ pub fn LsmTree(
                 const index_block = &blocks[0];
                 const filter_blocks = blocks[index_block_count..][0..filter_block_count];
                 const data_blocks =
-                    blocks[index_block_count + filter_block_count ..][0..data_block_count];
+                    blocks[index_block_count + filter_block_count ..][0..data_block_count_max];
 
                 var key_min: Key = undefined;
 
@@ -606,7 +602,7 @@ pub fn LsmTree(
                     header.* = .{
                         .cluster = cluster,
                         .op = block_free_set.acquire(),
-                        .offset = values.len,
+                        .request = values.len,
                         .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
                         .command = .block,
                     };
@@ -617,7 +613,7 @@ pub fn LsmTree(
                     index_keys(index_block)[i] = key_from_value(values[values.len - 1]);
                     index_data_addresses(index_block)[i] = header.op;
                     index_data_checksums(index_block)[i] = header.checksum;
-                } else data_block_count;
+                } else data_block_count_max;
 
                 assert(data_blocks_used > 0);
 
@@ -646,7 +642,8 @@ pub fn LsmTree(
                     .cluster = cluster,
                     .op = block_free_set.acquire(),
                     .commit = filter_blocks_used,
-                    .offset = data_blocks_used,
+                    .request = data_blocks_used,
+                    .offset = timestamp,
                     .size = index.size,
                     .command = .block,
                 };
@@ -665,6 +662,190 @@ pub fn LsmTree(
                     .flush_iterator = .{},
                 };
             }
+
+            const Builder = struct {
+                const Self = @This();
+
+                forest: *Forest,
+                key_min: Key,
+                key_max: Key,
+
+                index_block: BlockPtr,
+                data_block: BlockPtr,
+                filter_block: BlockPtr,
+
+                block: u32 = 0,
+                value: u32 = 0,
+
+                pub fn init(allocator: *mem.Allocator) Self {
+                    // TODO
+                }
+
+                pub fn deinit(builder: *Self, allocator: *mem.Allocator) void {
+                    // TODO
+                }
+
+                pub fn data_block_append(builder: *Builder, value: Value) void {
+                    const values_max = data_block_values(builder.data_block);
+                    assert(values_max.len == data.value_count_max);
+
+                    values_max[builder.value] = value;
+                    builder.value += 1;
+                    // TODO add this value's key to the correct filter block.
+                }
+
+                pub fn data_block_full(builder: Builder) bool {
+                    return builder.value == data.value_count_max;
+                }
+
+                pub fn data_block_finish(builder: *Builder) void {
+                    // For each block we write the sorted values, initialize the Eytzinger layout,
+                    // complete the block header, and add the block's max key to the table index.
+
+                    assert(builder.value > 0);
+
+                    const block = builder.data_block;
+                    const values_max = data_block_values(block);
+                    assert(values_max.len == data.value_count_max);
+
+                    const values = values_max[0..builder.value];
+
+                    if (builtin.mode == .Debug) {
+                        var a = values[0];
+                        for (values[1..]) |b| {
+                            assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
+                            a = b;
+                        }
+                    }
+
+                    assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
+                    const key_layout_bytes = @alignCast(
+                        @alignOf(Key),
+                        block[data.key_layout_offset..][0..data.key_layout_size],
+                    );
+                    const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
+
+                    const e = eytzinger(data.key_count, data.value_count_max);
+                    e.layout_from_keys_or_values(
+                        Key,
+                        Value,
+                        key_from_value,
+                        sentinel_key,
+                        values,
+                        key_layout,
+                    );
+
+                    const values_padding = mem.sliceAsBytes(values_max[builder.value..]);
+                    const block_padding = block[data.padding_offset..][0..data.padding_size];
+                    mem.set(u8, values_padding, 0);
+                    mem.set(u8, block_padding, 0);
+
+                    const header_bytes = block[0..@sizeOf(vsr.Header)];
+                    const header = mem.bytesAsValue(vsr.Header, header_bytes);
+
+                    const address = forest.block_free_set.acquire();
+
+                    header.* = .{
+                        .cluster = forest.cluster,
+                        .op = address,
+                        .request = values.len,
+                        .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
+                        .command = .block,
+                    };
+
+                    header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
+                    header.set_checksum();
+
+                    const key_max = key_from_value(values[values.len - 1]);
+
+                    index_keys(builder.index)[builder.block] = key_max;
+                    index_data_addresses(builder.index)[builder.block] = address;
+                    index_data_checksums(builder.index)[builder.block] = header.checksum;
+
+                    if (builder.block == 0) builder.key_min = key_from_value(values[0]);
+                    builder.key_max = key_max;
+
+                    if (builder.block == 0 and values.len == 1) {
+                        assert(compare_keys(builder.key_min, builder.key_max) != .gt);
+                    } else {
+                        assert(compare_keys(builder.key_min, builder.key_max) == .lt);
+                    }
+
+                    builder.block += 1;
+                    builder.value = 0;
+                }
+
+                /// Returns true if there is space for at least one more data block in the filter.
+                pub fn filter_block_full(builder: Builder) bool {
+                    // TODO
+                }
+
+                pub fn filter_block_finish(builder: *Builder) void {
+                    // TODO
+                }
+
+                pub fn index_block_full(builder: Builder) bool {
+                    return builder.block == data_block_count_max;
+                }
+
+                pub fn index_block_finish(builder: *Builder, timestamp: u64) Manifest.TableInfo {
+                    assert(builder.block > 0);
+
+                    // TODO assert that filter is finished
+
+                    const index_block = builder.index_block;
+
+                    const index_keys_padding = index_keys(index_block)[builder.block..];
+                    const index_keys_padding_bytes = mem.sliceAsBytes(index_keys_padding);
+                    mem.set(u8, index_keys_padding_bytes, 0);
+                    mem.set(u64, index_data_addresses(index_block)[builder.block..], 0);
+                    mem.set(u128, index_data_checksums(index_block)[builder.block..], 0);
+
+                    // TODO implement filters
+                    const filter_blocks_used = 0;
+                    mem.set(u64, index_filter_addresses(index_block), 0);
+                    mem.set(u128, index_filter_checksums(index_block), 0);
+
+                    mem.set(u8, index_block[index.padding_offset..][0..index.padding_size], 0);
+
+                    const header_bytes = index_block[0..@sizeOf(vsr.Header)];
+                    const header = mem.bytesAsValue(vsr.Header, header_bytes);
+
+                    const address = builder.forest.block_free_set.acquire();
+
+                    header.* = .{
+                        .cluster = builder.forest.cluster,
+                        .op = address,
+                        .commit = filter_blocks_used,
+                        .request = builder.block,
+                        .offset = timestamp,
+                        .size = index.size,
+                        .command = .block,
+                    };
+                    header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
+                    header.set_checksum();
+
+                    const info: Manifest.TableInfo = .{
+                        .checksum = header.checksum,
+                        .address = address,
+                        .timestamp = timestamp,
+                        .key_min = builder.key_min,
+                        .key_max = builder.key_max,
+                    };
+
+                    // Reset the builder to its initial state, leaving the buffers untouched.
+                    builder.* = .{
+                        .forest = builder.forest,
+                        .key_min = undefined,
+                        .key_max = undefined,
+                        .index_block = builder.index_block,
+                        .filter_block = builder.filter_block,
+                        .data_block = builder.data_block,
+                    };
+
+                    return info;
+                }
+            };
 
             inline fn index_keys(index_block: BlockPtr) []Key {
                 return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
@@ -698,9 +879,14 @@ pub fn LsmTree(
                 );
             }
 
-            inline fn data_blocks_used(index_block: BlockPtr) u32 {
+            inline fn timestamp(index_block: BlockPtr) u32 {
                 const header = mem.bytesAsValue(index_block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.offset);
+            }
+
+            inline fn data_blocks_used(index_block: BlockPtr) u32 {
+                const header = mem.bytesAsValue(index_block[0..@sizeOf(vsr.Header)]);
+                return @intCast(u32, header.request);
             }
 
             inline fn data_block_values(data_block: BlockPtr) []Value {
@@ -714,9 +900,14 @@ pub fn LsmTree(
                 const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
                 // TODO we should be able to cross-check this with the header size
                 // for more safety.
-                const values_used = @intCast(u32, header.offset);
+                const values_used = @intCast(u32, header.request);
                 assert(values_used <= data.value_count_max);
                 return data_block_values(data_block)[0..values_used];
+            }
+
+            inline fn block_address(block: BlockPtr) u64 {
+                const header = mem.bytesAsValue(block[0..@sizeOf(vsr.Header)]);
+                return @intCast(u32, header.op);
             }
 
             pub const FlushIterator = struct {
@@ -740,7 +931,7 @@ pub fn LsmTree(
 
                     const index_header = mem.bytesAsValue(table.buffer[0..@sizeOf(vsr.Header)]);
                     const filter_blocks_used = index_header.commit;
-                    const data_blocks_used = index_header.offset;
+                    const data_blocks_used = index_header.request;
                     const total_blocks_used = 1 + filter_blocks_used + data_blocks_used;
 
                     if (it.block == total_blocks_used) {
@@ -783,39 +974,263 @@ pub fn LsmTree(
         };
 
         /// Compact tables in level a with overlapping tables in level b.
-        pub const CompactionIterator = struct {
-            pub const Callback = fn (it: *CompactionIterator) void;
+        pub const Compaction = struct {
+            pub const Callback = fn (it: *Compaction, done: bool) void;
+
             const level_0_table_count_max = 10;
             const level_a_table_count_max = level_0_table_count_max;
 
-            const LevelAIterator = TableIterator(CompactionIterator, on_child_io_done);
-            const LevelBIterator = LevelIterator(CompactionIterator, on_child_io_done);
+            const LevelAIterator = TableIterator(Compaction, on_io_done);
+            const LevelBIterator = LevelIterator(Compaction, on_io_done);
 
-            tick: u32 = 0,
-            child_io_pending: u32 = 0,
+            const MergeIterator = KWayMergeIterator(
+                Compaction,
+                Key,
+                Value,
+                key_from_value,
+                compare_keys,
+                // Add one for the level B iterator
+                level_a_table_count_max + 1,
+            );
+
+            const BlockWrite = struct {
+                block: BlockPtr,
+                submit: bool,
+                write: Storage.Write,
+            };
+
+            ticks: u32 = 0,
+            io_pending: u32 = 0,
+            callback: ?Callback = null,
+            /// This is an implementation detail, the caller should use the done
+            /// argument of the Callback to know when the compaction has finished.
+            last_tick: bool = false,
 
             /// Addresses of all source tables in level a
             level_a_table_count: u32,
-            level_a_iterators: [level_a_table_count_max]LevelAIterator,
+            level_a_iterators_max: [level_a_table_count_max]LevelAIterator,
 
             level_b_iterator: LevelBIterator,
 
-            level_b_merge_block: *align(config.sector_size) [block_size]u8,
-            level_b_write_block: *align(config.sector_size) [block_size]u8,
+            merge_iterator: MergeIterator,
 
-            pub fn init(allocator: *mem.Allocator) CompactionIterator {}
+            table_builder: Table.Builder,
+
+            index: BlockWrite,
+            filter: BlockWrite,
+            data: BlockWrite,
+
+            pub fn init(allocator: *mem.Allocator) Compaction {}
 
             pub fn start(
+                compaction: *Compaction,
                 level_a_tables: []u64,
                 level_b: u32,
                 level_b_key_min: Key,
                 level_b_key_max: Key,
-            ) void {}
+            ) void {
+                assert(compaction.io_pending == 0);
+                // There are at least 2 table inputs to the compaction.
+                assert(level_a_tables.len + 1 >= 2);
+            }
 
-            pub fn tick(it: *CompactionIterator, callback: Callback) void {}
+            pub fn tick(compaction: *Compaction, callback: Callback) void {
+                assert(!compaction.last_tick);
+                assert(compaction.io_pending == 0);
+                assert(compaction.callback == null);
+                compaction.callback = callback;
+
+                // Submit all read/write I/O before starting the CPU intensive k way merge.
+                // This allows the I/O to happen in parallel with the CPU work.
+                if (compaction.ticks >= 0) compaction.tick_read();
+                if (compaction.ticks >= 2) compaction.tick_write();
+
+                if (compaction.ticks == 1) {
+                    // We can't initialize the k way merge until we have at least one
+                    // value to peek() from each read stream.
+                    const k = compaction.level_a_table_count + 1;
+                    assert(k >= 2);
+                    compaction.merge_iterator = MergeIterator.init(compaction, k, .ascending);
+                }
+
+                if (compaction.ticks >= 1) {
+                    if (compaction.merge_iterator.empty()) {
+                        assert(compaction.ticks >= 2);
+                        assert(!compaction.last_tick);
+                        compaction.last_tick = true;
+                    } else {
+                        compaction.tick_merge();
+                    }
+                }
+
+                compaction.ticks += 1;
+
+                // We will always start I/O if the compaction has not yet been completed.
+                // The callbacks for this I/O must fire asynchronously.
+                assert(compaction.io_pending > 0);
+            }
+
+            fn tick_read(compaction: *Compaction) void {
+                for (compaction.level_a_iterators()) |*it| {
+                    if (it.tick()) compaction.io_pending += 1;
+                }
+                if (compaction.level_b_iterator.tick()) compaction.io_pending += 1;
+
+                if (compaction.last_tick) assert(compaction.io_pending == 0);
+            }
+
+            fn tick_write(compaction: *Compaction) void {
+                assert(compaction.ticks >= 2);
+                assert(compaction.data.submit);
+
+                compaction.maybe_submit_write(compaction.data, on_block_write("data"));
+                compaction.maybe_submit_write(compaction.filter, on_block_write("filter"));
+                compaction.maybe_submit_write(compaction.index, on_block_write("index"));
+
+                assert(compaction.io_pending > 0);
+                assert(!compaction.data.submit);
+                assert(!compaction.filter.submit);
+                assert(!compaction.index.submit);
+            }
+
+            fn tick_merge(compaction: *Compaction) void {
+                assert(!compaction.last_tick);
+                assert(compaction.ticks >= 1);
+                assert(!compaction.merge_iterator.empty());
+
+                assert(!compaction.data.submit);
+                assert(!compaction.filter.submit);
+                assert(!compaction.index.submit);
+
+                while (!compaction.table_builder.data_block_full()) {
+                    const value = compaction.merge_iterator.pop() orelse {
+                        compaction.assert_read_iterators_empty();
+                        break;
+                    };
+                    compaction.table_builder.data_block_append(value);
+                }
+                compaction.table_builder.data_block_finish();
+                swap_buffers(&compaction.data, &compaction.table_builder.data_block);
+
+                if (!compaction.merge_iterator.empty()) {
+                    const values_used = Table.data_block_values_used(compaction.data.block).len;
+                    assert(values_used == Table.data.value_count_max);
+                }
+
+                if (compaction.table_builder.filter_block_full() or
+                    compaction.table_builder.index_block_full() or
+                    compaction.merge_iterator.empty())
+                {
+                    compaction.table_builder.filter_block_finish();
+                    swap_buffers(&compaction.filter, &compaction.table_builder.filter_block);
+                }
+
+                if (compaction.table_builder.index_block_full() or
+                    compaction.merge_iterator.empty())
+                {
+                    const info = compaction.table_builder.index_block_finish();
+                    swap_buffers(&compaction.index, &compaction.table_builder.index_block);
+
+                    // TODO store info in the manifest at some point. We may need to wait
+                    // until the table has been fully written to disk, or until the
+                    // compaction finishes. Figure this out when implementing the Manifest.
+                    _ = info;
+                }
+
+                assert(compaction.data.submit);
+            }
+
+            fn on_io_done(compaction: *Compaction) void {
+                compaction.io_pending -= 1;
+                if (compaction.io_pending == 0) {
+                    const callback = compaction.callback.?;
+                    compaction.callback = null;
+                    callback(compaction, compaction.last_tick);
+                }
+            }
+
+            fn maybe_submit_write(
+                compaction: *Compaction,
+                block_write: *BlockWrite,
+                callback: fn (*Storage.Write) void,
+            ) void {
+                if (block_write.submit) {
+                    block_write.submit = false;
+                    compaction.io_pending += 1;
+                    const address = Table.block_address(block_write.block);
+                    forest.write_block(callback, &block_write.write, block_write.block, address);
+                }
+            }
+
+            fn on_block_write(comptime field: []const u8) fn (*Storage.Write) void {
+                return struct {
+                    fn callback(write: *Storage.Write) void {
+                        const block_write = @fieldParentPtr(BlockWrite, "write", write);
+                        const compaction = @fieldParentPtr(Compaction, field, block_write);
+                        on_io_done(compaction);
+                    }
+                }.callback;
+            }
+
+            fn swap_buffers(block_write: *BlockWrite, filled_block: *BlockPtr) void {
+                mem.swap(*BlockPtr, &block_write.block, filled_block);
+                assert(!block_write.submit);
+                block_write.submit = true;
+            }
+
+            fn level_a_iterators(compaction: *Compaction) []LevelAIterator {
+                return compaction.level_a_iterators_max[0..compaction.level_a_table_count];
+            }
+
+            fn assert_read_iterators_empty(compaction: Compaction) void {
+                for (compaction.level_a_iterators()) |it| {
+                    assert(it.buffered_all_values());
+                    assert(it.peek() == null);
+                }
+                assert(compaction.level_b_iterator.buffered_all_values());
+                assert(compaction.level_b_iterator.peek() == null);
+            }
+
+            fn stream_peek(compaction: *Compaction, stream_id: u32) ?Key {
+                if (stream_id == 0) {
+                    return compaction.level_b_iterator.peek();
+                } else {
+                    return compaction.level_a_iterators()[stream_id + 1].peek();
+                }
+            }
+
+            fn stream_pop(compaction: *Compaction, stream_id: u32) Value {
+                if (stream_id == 0) {
+                    return compaction.level_b_iterator.pop();
+                } else {
+                    return compaction.level_a_iterators()[stream_id + 1].pop();
+                }
+            }
+
+            /// Returns true if stream a has higher precedence than stream b.
+            /// This is used to deduplicate values across streams.
+            ///
+            /// This assumes that all overlapping tables in level A at the time the compaction was
+            /// started are included in the compaction. If this is not the case, the older table
+            /// in a pair of overlapping tables could be left in level A and shadow the newer table
+            /// in level B, resulting in data loss/invalid data.
+            fn stream_precedence(compaction: *Compaction, a: u32, b: u32) bool {
+                assert(a != b);
+                // A stream_id of 0 indicates the level B iterator.
+                // All tables in level A have higher precedence.
+                if (a == 0) return false;
+                if (b == 0) return true;
+
+                const it_a = compaction.level_a_iterators()[a + 1];
+                const it_b = compaction.level_a_iterators()[b + 1];
+                const timestamp_a = Table.timestamp(it_a.index);
+                const timestamp_b = Table.timestamp(it_b.index);
+                assert(timestamp_a != timestamp_b);
+                return timestamp_a > timestamp_b;
+            }
         };
 
-        fn LevelIterator(comptime Parent: type, comptime io_done: fn (*Parent) void) type {
+        fn LevelIterator(comptime Parent: type, comptime read_done: fn (*Parent) void) type {
             return struct {
                 const Self = @This();
 
@@ -826,7 +1241,7 @@ pub fn LsmTree(
                 key_min: Key,
                 key_max: Key,
                 values: ValuesRingBuffer,
-                tables: RingBuffer(TableIterator(Self, on_io_done), 2, .array),
+                tables: RingBuffer(TableIterator(Self, on_read_done), 2, .array),
 
                 fn init(allocator: *mem.Allocator) !Self {
                     var values = try ValuesRingBuffer.init(allocator);
@@ -906,7 +1321,7 @@ pub fn LsmTree(
                     }
                 }
 
-                fn read_next_table(table: *TableIterator(Self, on_io_done)) void {
+                fn read_next_table(table: *TableIterator(Self, on_read_done)) void {
                     // TODO this function doesn't exist yet
                     const address = manifest.get_next_address() orelse return false;
                     table.reset(address);
@@ -914,10 +1329,10 @@ pub fn LsmTree(
                     assert(read_pending);
                 }
 
-                fn on_io_done(it: *Self) void {
+                fn on_read_done(it: *Self) void {
                     if (!it.tick()) {
                         assert(it.buffered_enough_values());
-                        io_done(it.parent);
+                        read_done(it.parent);
                     }
                 }
 
@@ -965,7 +1380,7 @@ pub fn LsmTree(
             };
         }
 
-        fn TableIterator(comptime Parent: type, comptime io_done: fn (*Parent) void) type {
+        fn TableIterator(comptime Parent: type, comptime read_done: fn (*Parent) void) type {
             return struct {
                 const Self = @This();
 
@@ -1055,7 +1470,7 @@ pub fn LsmTree(
                 /// A full block may not always be buffered if all 3 blocks are partially full
                 /// or if the end of the table is reached.
                 /// Returns true if an IO operation was started. If this returns true,
-                /// then io_done() will be called on completion.
+                /// then read_done() will be called on completion.
                 fn tick(it: *Self) bool {
                     assert(!it.read_pending);
                     assert(it.address != 0);
@@ -1122,7 +1537,7 @@ pub fn LsmTree(
 
                     if (!it.tick()) {
                         assert(it.buffered_enough_values());
-                        io_done(it.parent);
+                        read_done(it.parent);
                     }
                 }
 
