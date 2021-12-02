@@ -53,4 +53,14 @@ pub fn build(b: *std.build.Builder) void {
         const step = b.step("eytzinger_benchmark", "Benchmark array search");
         step.dependOn(&run_cmd.step);
     }
+
+    {
+        const benchmark = b.addExecutable("benchmark_ewah", "src/ewah_benchmark.zig");
+        benchmark.setTarget(target);
+        benchmark.setBuildMode(.ReleaseSafe);
+        const run_cmd = benchmark.run();
+
+        const step = b.step("benchmark_ewah", "Benchmark EWAH codec");
+        step.dependOn(&run_cmd.step);
+    }
 }
