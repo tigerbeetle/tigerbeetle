@@ -9,6 +9,7 @@ const DynamicBitSetUnmanaged = std.bit_set.DynamicBitSetUnmanaged;
 /// Set bits indicate free blocks, unset bits are allocated.
 pub const BlockFreeSet = struct {
     // Each bit of `index` is the OR of `shard_size` bits of `blocks`.
+    // That is, if a shard has any free blocks, the corresponding index bit is set.
     index: DynamicBitSetUnmanaged,
     blocks: DynamicBitSetUnmanaged,
 
@@ -39,6 +40,21 @@ pub const BlockFreeSet = struct {
         set.blocks.deinit(allocator);
     }
 
+    pub fn grow(set: *BlockFreeSet, new_total_blocks: usize, allocator: *mem.Allocator) !void {
+        if (new_total_blocks < set.blocks.bit_length) return error.CannotShrinkBitset;
+        const old_total_blocks = set.blocks.bit_length;
+        if (new_total_blocks == old_total_blocks) return;
+        const new_index_size = divCeil(usize, new_total_blocks, shard_size);
+        assert(new_index_size >= set.index.bit_length);
+
+        if (set.blocks.bit_length % shard_size != 0) {
+            // The last shard now includes one or more new (unallocated) blocks.
+            set.index.set(set.index.bit_length - 1);
+        }
+        try set.blocks.resize(new_total_blocks, true, allocator);
+        try set.index.resize(new_index_size, true, allocator);
+    }
+
     // Marks a free block as allocated, and return the address. Panic if no blocks are available.
     // TODO consider "caching" the first set bit to speed up subsequent acquire() calls
     pub fn acquire(set: *BlockFreeSet) u64 {
@@ -55,8 +71,8 @@ pub const BlockFreeSet = struct {
 
         const bit = findFirstSetBit(set.blocks, shard_start, shard_end) orelse return null;
         assert(set.blocks.isSet(bit));
-        set.blocks.unset(bit);
 
+        set.blocks.unset(bit);
         // Update the index when every block in the shard is allocated.
         if (findFirstSetBit(set.blocks, shard_start, shard_end) == null) {
             set.index.unset(index_bit);
@@ -74,6 +90,7 @@ pub const BlockFreeSet = struct {
     pub fn release(set: *BlockFreeSet, address: u64) void {
         const bit = address - 1;
         assert(!set.blocks.isSet(bit));
+
         set.blocks.set(bit);
         set.index.set(@divTrunc(bit, shard_size));
     }
@@ -130,17 +147,18 @@ pub const BlockFreeSet = struct {
     }
 };
 
-fn getBit(b: []const u8, i: usize) bool {
-    return b[@divTrunc(i, 8)] & (@as(u8, 1) << @truncate(u3, i % 8)) != 0;
-}
-
-fn setBit(b: []u8, i: usize) void {
-    assert(b[@divTrunc(i, 8)] & (@as(u8, 1) << @truncate(u3, i % 8)) == 0); // TODO remove this, it's just for testing!
-    b[@divTrunc(i, 8)] |= @as(u8, 1) << @truncate(u3, i % 8);
-}
-
 const Mutable = enum { mutable, immutable };
-// The encoding assumes that the architecture is little-endian.
+/// RLE compression of the BlockFreeSet.
+///
+/// This encoding assumes that the architecture is little-endian with 64-bit words.
+///
+/// Encoding:
+/// - total_bits: u32: equivalent to total_blocks/BlockFreeSet.blocks.bit_length
+/// - run_or_literal_count: u32: runs + literals
+/// - run_or_literal: [run_or_literal_count]u1: 0=literal, 1=run (padded to word size)
+/// - run_of_zeroes_or_ones: [runs]u1: specify run type (padded to word size)
+/// - run_of_zeroes_or_ones: [runs]u8: one less than the run length (padded to word size)
+/// - literals: [number of literals]u64: 64-bit literals
 fn BitsetEncoder(comptime mut: Mutable) type {
     const Bytes = if (mut == .mutable) []u8 else []const u8;
     const U32 = if (mut == .mutable) *u32 else *const u32;
@@ -170,6 +188,7 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             const lit_offset = rl_offset + divCeil(usize, params.runs, 8) * 8;
             const end_offset = lit_offset + params.literals * 8;
             assert(end_offset % 8 == 0); // each section is a multiple of word size
+
             return .{
                 .runs = params.runs,
                 .literals = params.literals,
@@ -193,6 +212,7 @@ fn BitsetEncoder(comptime mut: Mutable) type {
         } {
             const offsets = &self.offsets;
             assert(buf.len == offsets.end);
+
             return .{
                 .total_blocks = @ptrCast(U32, @alignCast(4, buf[0..4])),
                 .run_or_literal_count = @ptrCast(U32, @alignCast(4, buf[4..8])),
@@ -206,22 +226,18 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             };
         }
 
-        // Encoding:
-        // - u32 count of runs + count of literals
-        // - u32 (unused)
-        // - [run_or_literal_count]u1 run_of_zeroes_or_ones (padded to word size)
-        // - [number of runs]u1 run_of_zeroes_or_ones (padded to word size)
-        // - [number of literals]u64 literals
         fn encode(self: Self, dst: []u8, bitset: DynamicBitSetUnmanaged) void {
             for (dst) |*b| b.* = 0;
 
             const slices = self.parse(dst);
+            slices.total_blocks.* = @intCast(u32, bitset.bit_length);
+            slices.run_or_literal_count.* = @intCast(u32, self.runs + self.literals);
+            const word_count = bitsetMasksLen(bitset);
+
             var run_or_literal_bit: usize = 0;
             var run_index: usize = 0;
             var literals_index: usize = 0;
-
             var word_index: usize = 0;
-            const word_count = bitsetMasksLen(bitset);
             while (word_index < word_count) {
                 const word = bitset.masks[word_index];
                 if (word == 0 or word == ~@as(usize, 0)) {
@@ -238,8 +254,6 @@ fn BitsetEncoder(comptime mut: Mutable) type {
                 }
                 run_or_literal_bit += 1;
             }
-            slices.total_blocks.* = @intCast(u32, bitset.bit_length);
-            slices.run_or_literal_count.* = @intCast(u32, self.runs + self.literals);
 
             assert(word_index == word_count);
             assert(slices.run_or_literal_count.* == run_or_literal_bit);
@@ -248,8 +262,6 @@ fn BitsetEncoder(comptime mut: Mutable) type {
         }
 
         fn decode(data: []const u8, allocator: *mem.Allocator) !DynamicBitSetUnmanaged {
-            assert(data.len % 8 == 0);
-            // TODO what if the size of the decoded block set disagrees with the configured total_blocks? maybe allow it to grow but not shrink?
             const run_or_literal_count = mem.readIntSliceLittle(u32, data[4..8]);
             const run_or_literal_words = divCeil(usize, run_or_literal_count, 64);
             const run_or_literal = mem.bytesAsSlice(u64, data[8 .. 8 + 8 * run_or_literal_words]);
@@ -270,43 +282,28 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             var blocks_index: usize = 0;
             for (mem.bytesAsSlice(u64, slices.run_or_literal)) |rol_word, rol_i| {
                 const last = rol_i == run_or_literal_words - 1;
-                // TODO fix fast paths
-                //if (!last && rol_word == ~@as(u64, 0)) { // Fast path: all runs.
-                //    //var word = std.bitset.IntegerBitSet(64).initFull();
-                //    var run: usize = 0;
-                //    while (run < 64) : (run += 1) {
-                //        const run_ones = getBit(slices.run_of_zeroes_or_ones, run_index);
-                //        const run_len = slices.run_lengths[run_index] + 1;
-                //        if (run_ones) {
-                //            // The bitset is all 1s by default, so just skip over the run.
-                //            //bit += run_len;
-                //            blocks_index += run_len;
-                //        } else {
-                //            var w: usize = 0;
-                //            while (w < run_len) : (w += 1) {
-                //                set.blocks.masks[blocks_index] = 0;
-                //                blocks_index += 1;
-                //            }
-                //            //const max = bit + run_len;
-                //            //while (bit < max) : (bit += 1) set.blocks.unset(bit);
-                //        }
-                //        run_index += 1;
-                //    }
-                //} else if (!last && rol_word == 0) {
-                //    // Fast path: all literals.
-                //    // The bitset is filled with 1s by default, so just skip over the word.
-                //    var wb: usize = 0;
-                //    while (wb < 64) : (wb += 1) {
-                //        set.blocks.masks[blocks_index] = slices.literals[literals_index];
-                //        blocks_index += 1;
-                //        //var lb: usize = 0;
-                //        //while (lb < 64) : (lb += 1) {
-                //        //    getBit(slices.literals[literals_index]
-                //        //    set.blocks.
-                //        //}
-                //        literals_index += 1;
-                //    }
-                //} else { // Mixed runs and literals.
+                if (!last and rol_word == ~@as(u64, 0)) {
+                    // Fast path: all runs.
+                    var bit: usize = 0;
+                    while (bit < 64) : (bit += 1) {
+                        const run_len = @as(usize, slices.run_lengths[run_index]) + 1;
+                        if (!getBit(slices.run_of_zeroes_or_ones, run_index)) {
+                            std.mem.set(usize, bitset.masks[blocks_index .. blocks_index + run_len], 0);
+                        }
+                        blocks_index += run_len;
+                        run_index += 1;
+                    }
+                } else if (!last and rol_word == 0) {
+                    // Fast path: all literals.
+                    // The bitset is filled with 1s by default, so just skip over the word.
+                    var wb: usize = 0;
+                    while (wb < 64) : (wb += 1) {
+                        bitset.masks[blocks_index] = slices.literals[literals_index];
+                        blocks_index += 1;
+                        literals_index += 1;
+                    }
+                } else {
+                    // Mixed runs and literals.
                     const max_bit = if (last) (run_or_literal_count - 1) % 64 + 1 else 64;
                     var bit: usize = 0;
                     while (bit < max_bit) : (bit += 1) {
@@ -314,8 +311,7 @@ fn BitsetEncoder(comptime mut: Mutable) type {
                         if (is_run) {
                             const run_len = @as(usize, slices.run_lengths[run_index]) + 1;
                             if (!getBit(slices.run_of_zeroes_or_ones, run_index)) {
-                                var w: usize = 0;
-                                while (w < run_len) : (w += 1) bitset.masks[blocks_index + w] = 0;
+                                std.mem.set(usize, bitset.masks[blocks_index .. blocks_index + run_len], 0);
                             }
                             blocks_index += run_len;
                             run_index += 1;
@@ -325,7 +321,7 @@ fn BitsetEncoder(comptime mut: Mutable) type {
                             literals_index += 1;
                         }
                     }
-                //}
+                }
             }
             assert(blocks_index == bitsetMasksLen(bitset));
             assert(literals_index == decoder.literals);
@@ -333,6 +329,38 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             return bitset;
         }
     };
+}
+
+fn bitsetMasksLen(bitset: DynamicBitSetUnmanaged) usize {
+    return divCeil(usize, bitset.bit_length, 64);
+}
+
+fn bitsetRunLength(bitset: DynamicBitSetUnmanaged, offset: usize, len: usize, word: u64) usize {
+    const max = std.math.min(len, offset + 255);
+    var end: usize = offset;
+    while (end < max and bitset.masks[end] == word) : (end += 1) {}
+    return end - offset;
+}
+
+fn getBit(b: []const u8, i: usize) bool {
+    return b[@divTrunc(i, 8)] & (@as(u8, 1) << @truncate(u3, i % 8)) != 0;
+}
+
+test "getBit" {
+    try std.testing.expectEqual(false, getBit(&[_]u8{0b0000_0010}, 0));
+    try std.testing.expectEqual(true, getBit(&[_]u8{0b0000_0010}, 1));
+    try std.testing.expectEqual(true, getBit(&[_]u8{0, 0b0000_0010}, 8 + 1));
+}
+
+fn setBit(b: []u8, i: usize) void {
+    b[@divTrunc(i, 8)] |= @as(u8, 1) << @truncate(u3, i % 8);
+}
+
+test "setBit" {
+    var b = [_]u8{0, 0};
+    try std.testing.expectEqual(false, getBit(&b, 9));
+    setBit(&b, 9);
+    try std.testing.expectEqual(true, getBit(&b, 9));
 }
 
 fn divCeil(comptime T: type, a: T, b: T) T {
@@ -364,17 +392,6 @@ fn findFirstSetBit(bitset: DynamicBitSetUnmanaged, start: usize, end: usize) ?us
 
     const b = start - word_offset + (iter.next() orelse return null);
     return if (b < end) b else null;
-}
-
-fn bitsetMasksLen(bitset: DynamicBitSetUnmanaged) usize {
-    return divCeil(usize, bitset.bit_length, 64);
-}
-
-fn bitsetRunLength(bitset: DynamicBitSetUnmanaged, offset: usize, len: usize, word: u64) usize {
-    const max = std.math.min(len, offset + 255);
-    var end: usize = offset;
-    while (end < max and bitset.masks[end] == word) : (end += 1) {}
-    return end - offset;
 }
 
 test "findFirstSetBit" {
@@ -456,16 +473,52 @@ fn testBlockIndexSize(expect_index_size: usize, total_blocks: usize) !void {
     try std.testing.expectEqual(expect_index_size, set.index.bit_length);
 }
 
+test "BlockFreeSet.grow" {
+    var set = try BlockFreeSet.init(std.testing.allocator, 63);
+    defer set.deinit(std.testing.allocator);
+    var i: usize = 0;
+    while (i < 63) : (i += 1) _ = set.acquire();
+
+    // Increase the size by 1 bit, and ensure that the index is updated (but not resized).
+    try std.testing.expectEqual(false, set.index.isSet(0));
+    try set.grow(@as(usize, 64), std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 64), set.blocks.bit_length);
+    try std.testing.expectEqual(@as(usize, 1), set.index.bit_length);
+    try std.testing.expectEqual(true, set.blocks.isSet(63));
+    try std.testing.expectEqual(true, set.index.isSet(0));
+
+    try std.testing.expectEqual(@as(?u64, 63 + 1), set.try_acquire());
+    try std.testing.expectEqual(@as(?u64, null), set.try_acquire());
+
+    // Not resized.
+    try set.grow(@as(usize, 64), std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 64), set.blocks.bit_length);
+    try std.testing.expectEqual(@as(usize, 1), set.index.bit_length);
+
+    // Can't shrink.
+    try std.testing.expectEqual(set.grow(63, std.testing.allocator), error.CannotShrinkBitset);
+
+    // Grow again, this time the index too.
+    const two_shards = BlockFreeSet.shard_size + 1;
+    try set.grow(@as(usize, two_shards), std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, two_shards), set.blocks.bit_length);
+    try std.testing.expectEqual(@as(usize, 2), set.index.bit_length);
+    try std.testing.expectEqual(true, set.blocks.isSet(64));
+    try std.testing.expectEqual(true, set.index.isSet(1));
+}
+
 test "BlockFreeSet encode/decode" {
     try testBlockFreeSetEncode(64 * 64, 0); // fully free
     try testBlockFreeSetEncode(64 * 64, 64 * 64); // fully allocated
 
-    const big = 64 * 64 * 64;
+    // 256 (max run length) * 65 runs/word (to ensure fast path) * 64 blocks/word
+    const big = 256 * 65 * 64;
     try testBlockFreeSetEncode(big, 0);
     try testBlockFreeSetEncode(big, big);
     try testBlockFreeSetEncode(big, big / 16); // mostly free
     try testBlockFreeSetEncode(big, big / 16 * 15); // mostly full
-    // Bitsets that aren't a multiple of the word size.
+    //// Bitsets that aren't a multiple of the word size.
     try testBlockFreeSetEncode(big + 1, big / 16);
     try testBlockFreeSetEncode(big - 1, big / 16);
 }
