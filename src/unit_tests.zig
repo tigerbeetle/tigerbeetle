@@ -11,4 +11,6 @@ test {
     _ = @import("ring_buffer.zig");
 
     _ = @import("io.zig");
+
+    _ = @import("lsm/block_free_set.zig");
 }
