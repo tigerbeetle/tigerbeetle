@@ -148,17 +148,17 @@ pub const BlockFreeSet = struct {
 };
 
 const Mutable = enum { mutable, immutable };
-/// RLE compression of the BlockFreeSet.
+/// RLE compression of the `BlockFreeSet`.
 ///
 /// This encoding assumes that the architecture is little-endian with 64-bit words.
 ///
 /// Encoding:
-/// - total_bits: u32: equivalent to total_blocks/BlockFreeSet.blocks.bit_length
-/// - run_or_literal_count: u32: runs + literals
-/// - run_or_literal: [run_or_literal_count]u1: 0=literal, 1=run (padded to word size)
-/// - run_of_zeroes_or_ones: [runs]u1: specify run type (padded to word size)
-/// - run_of_zeroes_or_ones: [runs]u8: one less than the run length (padded to word size)
-/// - literals: [number of literals]u64: 64-bit literals
+/// - `total_bits`: `u32`(LE): equivalent to total_blocks/`BlockFreeSet.blocks.bit_length`
+/// - `run_or_literal_count`: `u32`(LE): runs + literals
+/// - `run_or_literal`: `[run_or_literal_count]u1`: 0=literal, 1=run (padded to word size)
+/// - `run_of_zeroes_or_ones`: `[runs]u1`: specify run type (padded to word size)
+/// - `run_lengths`: `[runs]u8`: one less than the run length, in words (padded to word size)
+/// - `literals`: `[number of literals]u64`: 64-bit literals
 fn BitsetEncoder(comptime mut: Mutable) type {
     const Bytes = if (mut == .mutable) []u8 else []const u8;
     const U32 = if (mut == .mutable) *u32 else *const u32;
@@ -437,6 +437,9 @@ test "BlockFreeSet" {
     const block_bytes = 64 * 1024;
     const blocks_in_tb = (1 << 40) / block_bytes;
     try testBlockIndexSize(4096 * 8, 10 * blocks_in_tb);
+    try testBlockIndexSize(4096 * 8, 10 * blocks_in_tb - 1);
+    try testBlockIndexSize(4096 * 8, 10 * blocks_in_tb - BlockFreeSet.shard_size + 1);
+    try testBlockIndexSize(4096 * 8 - 1, 10 * blocks_in_tb - BlockFreeSet.shard_size);
     try testBlockIndexSize(1, 1); // At least one index bit is required.
     // Block counts are not necessarily a multiple of the word size.
     try testBlockFreeSet(64 * 64);
@@ -499,7 +502,7 @@ test "BlockFreeSet.grow" {
     // Can't shrink.
     try std.testing.expectEqual(set.grow(63, std.testing.allocator), error.CannotShrinkBitset);
 
-    // Grow again, this time the index too.
+    // Grow again, this time the index grows too.
     const two_shards = BlockFreeSet.shard_size + 1;
     try set.grow(@as(usize, two_shards), std.testing.allocator);
     try std.testing.expectEqual(@as(usize, two_shards), set.blocks.bit_length);
@@ -518,7 +521,7 @@ test "BlockFreeSet encode/decode" {
     try testBlockFreeSetEncode(big, big);
     try testBlockFreeSetEncode(big, big / 16); // mostly free
     try testBlockFreeSetEncode(big, big / 16 * 15); // mostly full
-    //// Bitsets that aren't a multiple of the word size.
+    // Bitsets that aren't a multiple of the word size.
     try testBlockFreeSetEncode(big + 1, big / 16);
     try testBlockFreeSetEncode(big - 1, big / 16);
 }
@@ -550,6 +553,7 @@ fn testBlockFreeSetEncode(total_blocks: usize, unset_bits: usize) !void {
     var buf = try std.testing.allocator.alloc(u8, set.encodeSize());
     defer std.testing.allocator.free(buf);
 
+    try std.testing.expectEqual(buf.len % 8, 0);
     set.encode(buf);
     var set2 = try BlockFreeSet.decode(buf, std.testing.allocator);
     defer set2.deinit(std.testing.allocator);
