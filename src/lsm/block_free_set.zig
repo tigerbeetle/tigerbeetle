@@ -2,6 +2,11 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 const DynamicBitSetUnmanaged = std.bit_set.DynamicBitSetUnmanaged;
+const RingBuffer = @import("../ring_buffer.zig").RingBuffer(
+    usize,
+    64 / @sizeOf(usize), // 1 cache line of recently-freed blocks
+    .array,
+);
 
 /// The 0 address is reserved for usage as a sentinel and will never be returned
 /// by acquire().
@@ -12,6 +17,8 @@ pub const BlockFreeSet = struct {
     // That is, if a shard has any free blocks, the corresponding index bit is set.
     index: DynamicBitSetUnmanaged,
     blocks: DynamicBitSetUnmanaged,
+    // Track recently freed blocks. Stores 0-index bits, not 1-indexed block addresses.
+    recent: RingBuffer = .{},
 
     // Fixing the shard size to a constant rather than varying the shard size (but
     // guaranteeing the index always a multiple of 64B) means that the top-level index
@@ -64,6 +71,8 @@ pub const BlockFreeSet = struct {
     }
 
     fn try_acquire(set: *BlockFreeSet) ?u64 {
+        if (set.try_acquire_recent()) |recent| return recent;
+
         const index_bit = set.index.findFirstSet() orelse return null;
         const shard_start = index_bit * shard_size;
         const shard_end = std.math.min(shard_start + shard_size, set.blocks.bit_length);
@@ -82,6 +91,17 @@ pub const BlockFreeSet = struct {
         return @intCast(u64, address);
     }
 
+    fn try_acquire_recent(set: *BlockFreeSet) ?u64 {
+        const bit = set.recent.pop() orelse return null;
+        assert(set.blocks.isSet(bit));
+        set.blocks.unset(bit);
+        const shard = @divTrunc(bit, shard_size);
+        const shard_start = shard * shard_size;
+        const shard_end = std.math.min(shard_start + shard_size, set.blocks.bit_length);
+        if (findFirstSetBit(set.blocks, shard_start, shard_end) == null) set.index.unset(shard);
+        return @intCast(u64, bit + 1);
+    }
+
     fn isFree(set: *BlockFreeSet, address: u64) bool {
         return set.blocks.isSet(address - 1);
     }
@@ -93,6 +113,7 @@ pub const BlockFreeSet = struct {
 
         set.blocks.set(bit);
         set.index.set(@divTrunc(bit, shard_size));
+        set.recent.push(bit) catch {};
     }
 
     pub fn decode(data: []const u8, allocator: *mem.Allocator) !BlockFreeSet {
@@ -116,7 +137,7 @@ pub const BlockFreeSet = struct {
         };
     }
 
-    // Returns the number of bytes that the BlockFreeSet needs to encode to.
+    // Returns the number of bytes that the `BlockFreeSet` needs to encode to.
     pub fn encodeSize(set: BlockFreeSet) usize {
         return set.makeEncoder(.immutable).offsets.end;
     }
@@ -426,7 +447,7 @@ test "findFirstSetBit" {
     }
 
     {
-        // Don't return a bit outside of the bitset's interval, even with initFull.
+        // Don't return a bit outside of the bitset's interval, even with `initFull`.
         var set = try BitSet.initFull(56, std.testing.allocator);
         defer set.deinit(std.testing.allocator);
         try std.testing.expectEqual(@as(?usize, null), findFirstSetBit(set, 56, 56));
@@ -466,6 +487,13 @@ fn testBlockFreeSet(total_blocks: usize) !void {
 
     i = 0;
     while (i < total_blocks) : (i += 1) try expectEqual(@as(?u64, i + 1), set.try_acquire());
+    try expectEqual(@as(?u64, null), set.try_acquire());
+
+    // Exercise the try_acquire_recent index sync by de/re-allocating the last bit of a shard.
+    set.release(i);
+    try expectEqual(@as(usize, 1), set.recent.count);
+    try expectEqual(@as(?u64, i), set.try_acquire());
+    try expectEqual(@as(usize, 0), set.recent.count);
     try expectEqual(@as(?u64, null), set.try_acquire());
 }
 
