@@ -24,20 +24,17 @@ pub fn main() !void {
     defer allocator.free(buffer);
     std.mem.set(u8, buffer, 0);
 
-    var timer = Time{};
-    const started = timer.monotonic();
     var self = Context{
         .io = try IO.init(32, 0),
-        .timer = &timer,
-        .started = started,
-        .current = started,
         .tx = .{ .buffer = buffer[0 * buffer_size ..][0..buffer_size] },
         .rx = .{ .buffer = buffer[1 * buffer_size ..][0..buffer_size] },
     };
-
+    defer self.io.deinit();
+    
+    var timer = Time{};
+    const started = timer.monotonic();
     defer {
-        self.io.deinit();
-        const elapsed_ns = self.current - started;
+        const elapsed_ns = timer.monotonic() - started;
         const transferred_mb = @intToFloat(f64, self.transferred) / 1024 / 1024;
 
         std.debug.print("IO throughput test: took {}ms @ {d:.2} MB/s\n", .{
@@ -82,17 +79,8 @@ pub fn main() !void {
         address,
     );
 
-    // Run the IO loop, calling either tick() or run_for_ns() at "pseudo-random"
-    // to benchmark each io-driving execution path
-    var tick: usize = 0xdeadbeef;
-    while (self.is_running()) : (tick +%= 1) {
-        if (tick % 61 == 0) {
-            const timeout_ns = tick % (10 * std.time.ns_per_ms);
-            try self.io.run_for_ns(@intCast(u63, timeout_ns));
-        } else {
-            try self.io.tick();
-        }
-    }
+    // Run the IO loop for the duration of the benchmark
+    try self.io.run_for_ns(run_duration);
 
     // Assert that everything is connected
     assert(self.server.fd != IO.INVALID_SOCKET);
@@ -108,9 +96,6 @@ const Context = struct {
     io: IO,
     tx: Pipe,
     rx: Pipe,
-    timer: *Time,
-    started: u64,
-    current: u64,
     server: Socket = .{},
     transferred: u64 = 0,
 
@@ -123,15 +108,6 @@ const Context = struct {
         buffer: []u8,
         transferred: usize = 0,
     };
-
-    fn is_running(self: Context) bool {
-        // Make sure that we're connected
-        if (self.rx.socket.fd == IO.INVALID_SOCKET) return true;
-
-        // Make sure that we haven't run too long as configured
-        const elapsed = self.current - self.started;
-        return elapsed < run_duration;
-    }
 
     fn on_accept(
         self: *Context,
@@ -187,11 +163,6 @@ const Context = struct {
 
         assert(bytes <= buffer_size);
         self.transferred += bytes;
-
-        // Check in with the benchmark timer to stop sending/receiving data
-        self.current = self.timer.monotonic();
-        if (!self.is_running())
-            return;
 
         // Select which connection (tx or rx) depending on the type of transfer
         const pipe = &@field(self, pipe_name);
