@@ -95,9 +95,9 @@ pub fn main() !void {
     }
 
     // Assert that everything is connected
-    assert(self.server.fd != -1);
-    assert(self.tx.socket.fd != -1);
-    assert(self.rx.socket.fd != -1);
+    assert(self.server.fd != IO.INVALID_SOCKET);
+    assert(self.tx.socket.fd != IO.INVALID_SOCKET);
+    assert(self.rx.socket.fd != IO.INVALID_SOCKET);
 
     // Close the accepted client socket.
     // The actual client socket + server socket are closed by defer
@@ -115,7 +115,7 @@ const Context = struct {
     transferred: u64 = 0,
 
     const Socket = struct {
-        fd: os.socket_t = -1,
+        fd: os.socket_t = IO.INVALID_SOCKET,
         completion: IO.Completion = undefined,
     };
     const Pipe = struct {
@@ -126,7 +126,7 @@ const Context = struct {
 
     fn is_running(self: Context) bool {
         // Make sure that we're connected
-        if (self.rx.socket.fd == -1) return true;
+        if (self.rx.socket.fd == IO.INVALID_SOCKET) return true;
 
         // Make sure that we haven't run too long as configured
         const elapsed = self.current - self.started;
@@ -138,7 +138,7 @@ const Context = struct {
         completion: *IO.Completion,
         result: IO.AcceptError!os.socket_t,
     ) void {
-        assert(self.rx.socket.fd == -1);
+        assert(self.rx.socket.fd == IO.INVALID_SOCKET);
         assert(&self.server.completion == completion);
         self.rx.socket.fd = result catch |err| std.debug.panic("accept error {}", .{err});
 
@@ -152,7 +152,7 @@ const Context = struct {
         completion: *IO.Completion,
         result: IO.ConnectError!void,
     ) void {
-        assert(self.tx.socket.fd != -1);
+        assert(self.tx.socket.fd != IO.INVALID_SOCKET);
         assert(&self.tx.socket.completion == completion);
 
         // Start sending data to the server's accepted client
