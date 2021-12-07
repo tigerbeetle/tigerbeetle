@@ -2,9 +2,11 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 const DynamicBitSetUnmanaged = std.bit_set.DynamicBitSetUnmanaged;
+const MaskInt = DynamicBitSetUnmanaged.MaskInt;
+const config = @import("../config.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer(
     usize,
-    64 / @sizeOf(usize), // 1 cache line of recently-freed blocks
+    config.cache_line_size / @sizeOf(usize), // 1 cache line of recently-freed blocks
     .array,
 );
 
@@ -17,7 +19,7 @@ pub const BlockFreeSet = struct {
     // That is, if a shard has any free blocks, the corresponding index bit is set.
     index: DynamicBitSetUnmanaged,
     blocks: DynamicBitSetUnmanaged,
-    // Track recently freed blocks. Stores 0-index bits, not 1-indexed block addresses.
+    // A fast cache of the 0-indexed bits (not 1-indexed addresses) of recently freed blocks.
     recent: RingBuffer = .{},
 
     // Fixing the shard size to a constant rather than varying the shard size (but
@@ -26,16 +28,24 @@ pub const BlockFreeSet = struct {
     // the word size. In practice the tail end of the index will be accessed less
     // frequently than the head/middle anyway.
     //
-    // 10TiB disk / 64KiB block size / 640B shard size = 4096B index
-    const shard_size = 10 * (64 * 8); // 10 cache lines per shard
+    // Each shard is 10 cache lines because the CPU line fill buffer can fetch 10 lines in parallel.
+    // Since the shard is scanned sequentially, the prefetching amortizes the cost of the single
+    // cache miss. It also reduces the size of the index.
+    //
+    // e.g. 10TiB disk / 64KiB block size / 640B shard size = 4096B index
+    const shard_size = 10 * (config.cache_line_size * 8); // 10 cache lines per shard
 
-    pub fn init(allocator: *mem.Allocator, total_blocks: usize) !BlockFreeSet {
+    pub fn init(allocator: *mem.Allocator, blocks_count: usize) !BlockFreeSet {
+        assert(shard_size <= blocks_count);
+        assert(blocks_count % shard_size == 0);
         // Round up to ensure that every block bit is covered by the index.
-        const index_size = divCeil(usize, total_blocks, shard_size);
-        var index = try DynamicBitSetUnmanaged.initFull(index_size, allocator);
+        const shards_count = div_ceil(usize, blocks_count, shard_size);
+        var index = try DynamicBitSetUnmanaged.initFull(shards_count, allocator);
         errdefer index.deinit(allocator);
 
-        const blocks = try DynamicBitSetUnmanaged.initFull(total_blocks, allocator);
+        const blocks = try DynamicBitSetUnmanaged.initFull(blocks_count, allocator);
+        errdefer blocks.deinit(allocator);
+
         return BlockFreeSet{
             .index = index,
             .blocks = blocks,
@@ -47,107 +57,74 @@ pub const BlockFreeSet = struct {
         set.blocks.deinit(allocator);
     }
 
-    pub fn grow(set: *BlockFreeSet, new_total_blocks: usize, allocator: *mem.Allocator) !void {
-        if (new_total_blocks < set.blocks.bit_length) return error.CannotShrinkBitset;
-        const old_total_blocks = set.blocks.bit_length;
-        if (new_total_blocks == old_total_blocks) return;
-        const new_index_size = divCeil(usize, new_total_blocks, shard_size);
-        assert(new_index_size >= set.index.bit_length);
-
-        if (set.blocks.bit_length % shard_size != 0) {
-            // The last shard now includes one or more new (unallocated) blocks.
-            set.index.set(set.index.bit_length - 1);
-        }
-        try set.blocks.resize(new_total_blocks, true, allocator);
-        try set.index.resize(new_index_size, true, allocator);
-    }
-
-    // Marks a free block as allocated, and return the address. Panic if no blocks are available.
+    /// Marks a free block as allocated, and returns the address. Panics if no blocks are available.
     // TODO consider "caching" the first set bit to speed up subsequent acquire() calls
-    pub fn acquire(set: *BlockFreeSet) u64 {
-        // TODO: To ensure this "unreachable" is never reached, the leader must reject
-        // new requests when storage space is too low to fulfill them.
-        return set.try_acquire() orelse unreachable;
-    }
+    pub fn acquire(set: *BlockFreeSet) ?u64 {
+        const block = blk: {
+            if (set.recent.pop()) |block| {
+                break :blk block;
+            } else if (set.index.findFirstSet()) |shard| {
+                break :blk set.find_free_block_in_shard(shard) orelse unreachable;
+            } else return null;
+        };
+        const shard = block / shard_size;
+        assert(set.blocks.isSet(block));
+        assert(set.index.isSet(shard));
 
-    fn try_acquire(set: *BlockFreeSet) ?u64 {
-        if (set.try_acquire_recent()) |recent| return recent;
-
-        const index_bit = set.index.findFirstSet() orelse return null;
-        const shard_start = index_bit * shard_size;
-        const shard_end = std.math.min(shard_start + shard_size, set.blocks.bit_length);
-        assert(shard_start < set.blocks.bit_length);
-
-        const bit = findFirstSetBit(set.blocks, shard_start, shard_end) orelse return null;
-        assert(set.blocks.isSet(bit));
-
-        set.blocks.unset(bit);
+        set.blocks.unset(block);
         // Update the index when every block in the shard is allocated.
-        if (findFirstSetBit(set.blocks, shard_start, shard_end) == null) {
-            set.index.unset(index_bit);
-        }
+        if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
 
-        const address = bit + 1;
+        const address = block + 1;
         return @intCast(u64, address);
     }
 
-    fn try_acquire_recent(set: *BlockFreeSet) ?u64 {
-        const bit = set.recent.pop() orelse return null;
-        assert(set.blocks.isSet(bit));
-        set.blocks.unset(bit);
-        const shard = @divTrunc(bit, shard_size);
+    fn find_free_block_in_shard(set: *BlockFreeSet, shard: usize) ?usize {
         const shard_start = shard * shard_size;
-        const shard_end = std.math.min(shard_start + shard_size, set.blocks.bit_length);
-        if (findFirstSetBit(set.blocks, shard_start, shard_end) == null) set.index.unset(shard);
-        return @intCast(u64, bit + 1);
+        const shard_end = shard_start + shard_size;
+        assert(shard_start < set.blocks.bit_length);
+
+        return find_first_set_bit(set.blocks, shard_start, shard_end);
     }
 
-    fn isFree(set: *BlockFreeSet, address: u64) bool {
-        return set.blocks.isSet(address - 1);
+    fn is_free(set: *BlockFreeSet, address: u64) bool {
+        const block = address - 1;
+        return set.blocks.isSet(block);
     }
 
-    // Mark the specified block as free.
+    /// Marks the specified block as free.
     pub fn release(set: *BlockFreeSet, address: u64) void {
         const bit = address - 1;
         assert(!set.blocks.isSet(bit));
 
+        set.index.set(bit / shard_size);
         set.blocks.set(bit);
-        set.index.set(@divTrunc(bit, shard_size));
         set.recent.push(bit) catch {};
     }
 
-    pub fn decode(data: []const u8, allocator: *mem.Allocator) !BlockFreeSet {
-        var blocks = try BitsetEncoder(.immutable).decode(data, allocator);
-        errdefer blocks.deinit(allocator);
+    pub fn decode(set: *BlockFreeSet, data: []const u8) !void {
+        assert(set.index.count() == set.index.bit_length);
 
-        const index_size = divCeil(usize, blocks.bit_length, shard_size);
-        var index = try DynamicBitSetUnmanaged.initFull(index_size, allocator);
-        errdefer index.deinit(allocator);
+        var blocks = try BitsetEncoder(.immutable).decode(data, &set.blocks);
+        errdefer { for (set.blocks) |*blocks| blocks.* = ~0; }
 
-        var i: usize = 0;
-        while (i < index_size) : (i += 1) {
-            const shard_start = i * shard_size;
-            const shard_end = std.math.min(shard_start + shard_size, blocks.bit_length);
-            if (findFirstSetBit(blocks, shard_start, shard_end) == null) index.unset(i);
+        var shard: usize = 0;
+        while (shard < set.index.bit_length) : (shard += 1) {
+            if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
         }
-
-        return BlockFreeSet{
-            .index = index,
-            .blocks = blocks,
-        };
     }
 
     // Returns the number of bytes that the `BlockFreeSet` needs to encode to.
-    pub fn encodeSize(set: BlockFreeSet) usize {
-        return set.makeEncoder(.immutable).offsets.end;
+    pub fn encode_size(set: BlockFreeSet) usize {
+        return set.make_encoder(.immutable).offsets.end;
     }
 
-    pub fn encode(set: BlockFreeSet, dst: []u8) void {
-        set.makeEncoder(.mutable).encode(dst, set.blocks);
+    pub fn encode(set: BlockFreeSet, target: []u8) void {
+        set.make_encoder(.mutable).encode(target, set.blocks);
     }
 
-    fn makeEncoder(set: BlockFreeSet, comptime M: Mutable) BitsetEncoder(M) {
-        const words = bitsetMasksLen(set.blocks);
+    fn make_encoder(set: BlockFreeSet, comptime M: Mutable) BitsetEncoder(M) {
+        const words = bitset_masks_length(set.blocks);
         var runs: usize = 0;
         var literals: usize = 0;
         var i: usize = 0;
@@ -155,7 +132,7 @@ pub const BlockFreeSet = struct {
             const word = set.blocks.masks[i];
             if (word == 0 or word == ~@as(usize, 0)) {
                 runs += 1;
-                i += 1 + bitsetRunLength(set.blocks, i + 1, words, word);
+                i += 1 + bitset_run_length(set.blocks, i + 1, words, word);
             } else {
                 literals += 1;
                 i += 1;
@@ -171,10 +148,10 @@ pub const BlockFreeSet = struct {
 const Mutable = enum { mutable, immutable };
 /// RLE compression of the `BlockFreeSet`.
 ///
-/// This encoding assumes that the architecture is little-endian with 64-bit words.
+/// This encoding requires that the architecture is little-endian with 64-bit words.
 ///
 /// Encoding:
-/// - `total_bits`: `u32`(LE): equivalent to total_blocks/`BlockFreeSet.blocks.bit_length`
+/// - `blocks_count`: `u32`(LE): equivalent to blocks_count/`BlockFreeSet.blocks.bit_length`
 /// - `run_or_literal_count`: `u32`(LE): runs + literals
 /// - `run_or_literal`: `[run_or_literal_count]u1`: 0=literal, 1=run (padded to word size)
 /// - `run_of_zeroes_or_ones`: `[runs]u1`: specify run type (padded to word size)
@@ -184,6 +161,18 @@ fn BitsetEncoder(comptime mut: Mutable) type {
     const Bytes = if (mut == .mutable) []u8 else []const u8;
     const U32 = if (mut == .mutable) *u32 else *const u32;
     const U64s = if (mut == .mutable) []u64 else []const u64;
+
+    const BlocksCount = u32;
+    const blocks_count_size = @sizeOf(BlocksCount);
+    const blocks_count_offset = 0;
+
+    const RunOrLiteralCount = u32;
+    const run_or_literal_count_size = @sizeOf(RunOrLiteralCount);
+    const run_or_literal_count_offset = blocks_count_offset + blocks_count_size;
+    const run_or_literal_offset = run_or_literal_count_offset + run_or_literal_count_size;
+
+    comptime assert(std.Target.current.cpu.arch.endian() == std.builtin.Endian.Little);
+    comptime assert(@bitSizeOf(MaskInt) == 64);
 
     return struct {
         const Self = @This();
@@ -204,9 +193,9 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             literals: usize,
         }) Self {
             const rol_offset = @sizeOf(u64);
-            const rozoo_offset = rol_offset + divCeil(usize, params.runs + params.literals, 64) * 8;
-            const rl_offset = rozoo_offset + divCeil(usize, params.runs, 64) * 8;
-            const lit_offset = rl_offset + divCeil(usize, params.runs, 8) * 8;
+            const rozoo_offset = rol_offset + div_ceil(usize, params.runs + params.literals, 64) * 8;
+            const rl_offset = rozoo_offset + div_ceil(usize, params.runs, 64) * 8;
+            const lit_offset = rl_offset + div_ceil(usize, params.runs, 8) * 8;
             const end_offset = lit_offset + params.literals * 8;
             assert(end_offset % 8 == 0); // each section is a multiple of word size
 
@@ -223,8 +212,8 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             };
         }
 
-        fn parse(self: Self, buf: Bytes) struct {
-            total_blocks: U32,
+        fn parse(self: Self, data: Bytes) struct {
+            blocks_count: U32,
             run_or_literal_count: U32,
             run_or_literal: Bytes,
             run_of_zeroes_or_ones: Bytes,
@@ -232,28 +221,30 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             literals: U64s,
         } {
             const offsets = &self.offsets;
-            assert(buf.len == offsets.end);
+            assert(data.len == offsets.end);
 
             return .{
-                .total_blocks = @ptrCast(U32, @alignCast(4, buf[0..4])),
-                .run_or_literal_count = @ptrCast(U32, @alignCast(4, buf[4..8])),
+                .blocks_count = @ptrCast(U32, @alignCast(@alignOf(BlocksCount),
+                    data[blocks_count_offset..][0..blocks_count_size])),
+                .run_or_literal_count = @ptrCast(U32, @alignCast(@alignOf(RunOrLiteralCount),
+                    data[run_or_literal_count_offset..][0..run_or_literal_count_size])),
                 // `run_or_literal` and `run_of_zeroes_or_ones` slices include padding.
-                .run_or_literal = buf[offsets.run_or_literal..offsets.run_of_zeroes_or_ones],
-                .run_of_zeroes_or_ones = buf[offsets.run_of_zeroes_or_ones..offsets.run_lengths],
+                .run_or_literal = data[offsets.run_or_literal..offsets.run_of_zeroes_or_ones],
+                .run_of_zeroes_or_ones = data[offsets.run_of_zeroes_or_ones..offsets.run_lengths],
                 // `run_lengths`'s slice excludes the padding.
-                .run_lengths = buf[offsets.run_lengths..(offsets.run_lengths + self.runs)],
-                .literals = @alignCast(8,
-                    mem.bytesAsSlice(u64, buf[offsets.literals..offsets.end])),
+                .run_lengths = data[offsets.run_lengths..(offsets.run_lengths + self.runs)],
+                .literals = @alignCast(@alignOf(u64),
+                    mem.bytesAsSlice(u64, data[offsets.literals..offsets.end])),
             };
         }
 
-        fn encode(self: Self, dst: []u8, bitset: DynamicBitSetUnmanaged) void {
-            for (dst) |*b| b.* = 0;
+        fn encode(self: Self, target: []u8, bitset: DynamicBitSetUnmanaged) void {
+            for (target) |*b| b.* = 0;
 
-            const slices = self.parse(dst);
-            slices.total_blocks.* = @intCast(u32, bitset.bit_length);
-            slices.run_or_literal_count.* = @intCast(u32, self.runs + self.literals);
-            const word_count = bitsetMasksLen(bitset);
+            const slices = self.parse(target);
+            slices.blocks_count.* = @intCast(BlocksCount, bitset.bit_length);
+            slices.run_or_literal_count.* = @intCast(RunOrLiteralCount, self.runs + self.literals);
+            const word_count = bitset_masks_length(bitset);
 
             var run_or_literal_bit: usize = 0;
             var run_index: usize = 0;
@@ -262,12 +253,12 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             while (word_index < word_count) {
                 const word = bitset.masks[word_index];
                 if (word == 0 or word == ~@as(usize, 0)) {
-                    const run_len = 1 + bitsetRunLength(bitset, word_index + 1, word_count, word);
-                    slices.run_lengths[run_index] = @intCast(u8, run_len - 1);
-                    if (word != 0) setBit(slices.run_of_zeroes_or_ones, run_index);
-                    setBit(slices.run_or_literal, run_or_literal_bit);
+                    const run_length = 1 + bitset_run_length(bitset, word_index + 1, word_count, word);
+                    slices.run_lengths[run_index] = @intCast(u8, run_length - 1);
+                    if (word != 0) set_bit(slices.run_of_zeroes_or_ones, run_index);
+                    set_bit(slices.run_or_literal, run_or_literal_bit);
                     run_index += 1;
-                    word_index += run_len;
+                    word_index += run_length;
                 } else {
                     slices.literals[literals_index] = word;
                     literals_index += 1;
@@ -282,10 +273,11 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             assert(slices.literals.len == literals_index);
         }
 
-        fn decode(data: []const u8, allocator: *mem.Allocator) !DynamicBitSetUnmanaged {
-            const run_or_literal_count = mem.readIntSliceLittle(u32, data[4..8]);
-            const run_or_literal_words = divCeil(usize, run_or_literal_count, 64);
-            const run_or_literal = mem.bytesAsSlice(u64, data[8 .. 8 + 8 * run_or_literal_words]);
+        fn decode(data: []const u8, bitset: *DynamicBitSetUnmanaged) !void {
+            const run_or_literal_count_bytes = data[run_or_literal_count_offset..][0..run_or_literal_count_size];
+            const run_or_literal_count = mem.readIntSliceLittle(u32, run_or_literal_count_bytes);
+            const run_or_literal_words = div_ceil(usize, run_or_literal_count, @bitSizeOf(usize));
+            const run_or_literal = mem.bytesAsSlice(u64, data[run_or_literal_offset..][0..@sizeOf(usize) * run_or_literal_words]);
             var runs: usize = 0;
             for (run_or_literal) |rol| runs += @popCount(u64, rol);
             const decoder = BitsetEncoder(.immutable).init(.{
@@ -294,9 +286,7 @@ fn BitsetEncoder(comptime mut: Mutable) type {
             });
             const slices = decoder.parse(data);
             assert(slices.run_or_literal_count.* == run_or_literal_count);
-
-            var bitset = try DynamicBitSetUnmanaged.initFull(slices.total_blocks.*, allocator);
-            errdefer bitset.deinit(allocator);
+            assert(bitset.bit_length >= slices.blocks_count.*);
 
             var run_index: usize = 0;
             var literals_index: usize = 0;
@@ -307,34 +297,31 @@ fn BitsetEncoder(comptime mut: Mutable) type {
                     // Fast path: all runs.
                     var bit: usize = 0;
                     while (bit < 64) : (bit += 1) {
-                        const run_len = @as(usize, slices.run_lengths[run_index]) + 1;
-                        if (!getBit(slices.run_of_zeroes_or_ones, run_index)) {
-                            std.mem.set(usize, bitset.masks[blocks_index .. blocks_index + run_len], 0);
+                        const run_length = @as(usize, slices.run_lengths[run_index]) + 1;
+                        if (!get_bit(slices.run_of_zeroes_or_ones, run_index)) {
+                            std.mem.set(usize, bitset.masks[blocks_index .. blocks_index + run_length], 0);
                         }
-                        blocks_index += run_len;
+                        blocks_index += run_length;
                         run_index += 1;
                     }
                 } else if (!last and rol_word == 0) {
                     // Fast path: all literals.
                     // The bitset is filled with 1s by default, so just skip over the word.
-                    var wb: usize = 0;
-                    while (wb < 64) : (wb += 1) {
-                        bitset.masks[blocks_index] = slices.literals[literals_index];
-                        blocks_index += 1;
-                        literals_index += 1;
-                    }
+                    mem.copy(MaskInt, bitset.masks[blocks_index .. blocks_index + 64], slices.literals[literals_index..][0..64]);
+                    blocks_index += 64;
+                    literals_index += 64;
                 } else {
                     // Mixed runs and literals.
                     const max_bit = if (last) (run_or_literal_count - 1) % 64 + 1 else 64;
                     var bit: usize = 0;
                     while (bit < max_bit) : (bit += 1) {
-                        const is_run = rol_word & (@as(u64, 1) << @truncate(u6, bit)) != 0;
+                        const is_run = rol_word & (@as(u64, 1) << @intCast(u6, bit)) != 0;
                         if (is_run) {
-                            const run_len = @as(usize, slices.run_lengths[run_index]) + 1;
-                            if (!getBit(slices.run_of_zeroes_or_ones, run_index)) {
-                                std.mem.set(usize, bitset.masks[blocks_index .. blocks_index + run_len], 0);
+                            const run_length = @as(usize, slices.run_lengths[run_index]) + 1;
+                            if (!get_bit(slices.run_of_zeroes_or_ones, run_index)) {
+                                std.mem.set(usize, bitset.masks[blocks_index .. blocks_index + run_length], 0);
                             }
-                            blocks_index += run_len;
+                            blocks_index += run_length;
                             run_index += 1;
                         } else {
                             bitset.masks[blocks_index] = slices.literals[literals_index];
@@ -344,65 +331,63 @@ fn BitsetEncoder(comptime mut: Mutable) type {
                     }
                 }
             }
-            assert(blocks_index == bitsetMasksLen(bitset));
+            assert(blocks_index * @bitSizeOf(MaskInt) == slices.blocks_count.*);
             assert(literals_index == decoder.literals);
             assert(run_index == decoder.runs);
-            return bitset;
         }
     };
 }
 
-fn bitsetMasksLen(bitset: DynamicBitSetUnmanaged) usize {
-    return divCeil(usize, bitset.bit_length, 64);
+fn bitset_masks_length(bitset: DynamicBitSetUnmanaged) usize {
+    return div_ceil(MaskInt, bitset.bit_length, @bitSizeOf(MaskInt));
 }
 
-fn bitsetRunLength(bitset: DynamicBitSetUnmanaged, offset: usize, len: usize, word: u64) usize {
-    const max = std.math.min(len, offset + 255);
+fn bitset_run_length(bitset: DynamicBitSetUnmanaged, offset: usize, len: usize, word: u64) usize {
+    const max_run_length = std.math.maxInt(u8);
+    const max = std.math.min(len, offset + max_run_length);
     var end: usize = offset;
     while (end < max and bitset.masks[end] == word) : (end += 1) {}
     return end - offset;
 }
 
-fn getBit(b: []const u8, i: usize) bool {
-    return b[@divTrunc(i, 8)] & (@as(u8, 1) << @truncate(u3, i % 8)) != 0;
+inline fn get_bit(b: []const u8, i: usize) bool {
+    const mask = @as(u8, 1) << @intCast(u3, i % @bitSizeOf(u8));
+    return (b[i / @bitSizeOf(u8)] & mask) != 0;
 }
 
-test "getBit" {
-    try std.testing.expectEqual(false, getBit(&[_]u8{0b0000_0010}, 0));
-    try std.testing.expectEqual(true, getBit(&[_]u8{0b0000_0010}, 1));
-    try std.testing.expectEqual(true, getBit(&[_]u8{0, 0b0000_0010}, 8 + 1));
+test "get_bit" {
+    try std.testing.expect(!get_bit(&[_]u8{0b0000_0010}, 0));
+    try std.testing.expect(get_bit(&[_]u8{0b0000_0010}, 1));
+    try std.testing.expect(get_bit(&[_]u8{0, 0b0000_0010}, 8 + 1));
 }
 
-fn setBit(b: []u8, i: usize) void {
-    b[@divTrunc(i, 8)] |= @as(u8, 1) << @truncate(u3, i % 8);
+inline fn set_bit(b: []u8, i: usize) void {
+    b[i / @bitSizeOf(u8)] |= @as(u8, 1) << @intCast(u3, i % @bitSizeOf(u8));
 }
 
-test "setBit" {
+test "set_bit" {
     var b = [_]u8{0, 0};
-    try std.testing.expectEqual(false, getBit(&b, 9));
-    setBit(&b, 9);
-    try std.testing.expectEqual(true, getBit(&b, 9));
+    try std.testing.expect(!get_bit(&b, 9));
+    set_bit(&b, 9);
+    try std.testing.expect(get_bit(&b, 9));
 }
 
-fn divCeil(comptime T: type, a: T, b: T) T {
-    return @divTrunc(a + b - 1, b);
+fn div_ceil(comptime T: type, a: T, b: T) T {
+    return (a + b - 1) / b;
 }
 
-test "divCeil" {
-    try std.testing.expectEqual(divCeil(usize, 1, 8), 1);
-    try std.testing.expectEqual(divCeil(usize, 8, 8), 1);
-    try std.testing.expectEqual(divCeil(usize, 9, 8), 2);
+test "div_ceil" {
+    try std.testing.expectEqual(div_ceil(usize, 1, 8), 1);
+    try std.testing.expectEqual(div_ceil(usize, 8, 8), 1);
+    try std.testing.expectEqual(div_ceil(usize, 9, 8), 2);
 }
 
 // Returns the index of a set bit (relative to the start of the bitset) within start…end (inclusive…exclusive).
-fn findFirstSetBit(bitset: DynamicBitSetUnmanaged, start: usize, end: usize) ?usize {
-    const MaskInt = DynamicBitSetUnmanaged.MaskInt;
-    comptime assert(@bitSizeOf(MaskInt) == 64);
-
+fn find_first_set_bit(bitset: DynamicBitSetUnmanaged, start: usize, end: usize) ?usize {
     assert(end <= bitset.bit_length);
-    const word_start = @divTrunc(start, @bitSizeOf(MaskInt));
+    const word_start = start / @bitSizeOf(MaskInt);
     const word_offset = @mod(start, @bitSizeOf(MaskInt));
-    const word_end = divCeil(usize, end, @bitSizeOf(MaskInt));
+    const word_end = div_ceil(usize, end, @bitSizeOf(MaskInt));
     assert(word_start < word_end);
 
     // Only iterate over the subset of bits that were requested.
@@ -415,7 +400,7 @@ fn findFirstSetBit(bitset: DynamicBitSetUnmanaged, start: usize, end: usize) ?us
     return if (b < end) b else null;
 }
 
-test "findFirstSetBit" {
+test "find_first_set_bit" {
     const BitSet = DynamicBitSetUnmanaged;
     const window = 8;
 
@@ -431,7 +416,7 @@ test "findFirstSetBit" {
             while (b < size) : (b += 1) {
                 set.set(b);
                 const expect = if (s <= b and b < s + window) b else null;
-                try std.testing.expectEqual(expect, findFirstSetBit(set, s, s + window));
+                try std.testing.expectEqual(expect, find_first_set_bit(set, s, s + window));
                 set.unset(b);
             }
         }
@@ -443,170 +428,160 @@ test "findFirstSetBit" {
         defer set.deinit(std.testing.allocator);
         set.set(2);
         set.set(5);
-        try std.testing.expectEqual(@as(?usize, 2), findFirstSetBit(set, 1, 9));
+        try std.testing.expectEqual(@as(?usize, 2), find_first_set_bit(set, 1, 9));
     }
 
     {
         // Don't return a bit outside of the bitset's interval, even with `initFull`.
         var set = try BitSet.initFull(56, std.testing.allocator);
         defer set.deinit(std.testing.allocator);
-        try std.testing.expectEqual(@as(?usize, null), findFirstSetBit(set, 56, 56));
+        try std.testing.expectEqual(@as(?usize, null), find_first_set_bit(set, 56, 56));
     }
 }
 
 test "BlockFreeSet" {
     const block_bytes = 64 * 1024;
     const blocks_in_tb = (1 << 40) / block_bytes;
-    try testBlockIndexSize(4096 * 8, 10 * blocks_in_tb);
-    try testBlockIndexSize(4096 * 8, 10 * blocks_in_tb - 1);
-    try testBlockIndexSize(4096 * 8, 10 * blocks_in_tb - BlockFreeSet.shard_size + 1);
-    try testBlockIndexSize(4096 * 8 - 1, 10 * blocks_in_tb - BlockFreeSet.shard_size);
-    try testBlockIndexSize(1, 1); // At least one index bit is required.
+    try test_block_index_size(4096 * 8, 10 * blocks_in_tb);
+    try test_block_index_size(4096 * 8 - 1, 10 * blocks_in_tb - BlockFreeSet.shard_size);
+    try test_block_index_size(1, BlockFreeSet.shard_size); // At least one index bit is required.
     // Block counts are not necessarily a multiple of the word size.
-    try testBlockFreeSet(64 * 64);
-    var i: usize = 1;
-    while (i < 128) : (i += 1) try testBlockFreeSet(64 * 8 + i);
+    try test_block_free_set(BlockFreeSet.shard_size);
+    try test_block_free_set(2 * BlockFreeSet.shard_size);
+    try test_block_free_set(63 * BlockFreeSet.shard_size);
+    try test_block_free_set(64 * BlockFreeSet.shard_size);
+    try test_block_free_set(65 * BlockFreeSet.shard_size);
 }
 
-fn testBlockFreeSet(total_blocks: usize) !void {
+fn test_block_free_set(blocks_count: usize) !void {
     const expectEqual = std.testing.expectEqual;
     // Acquire everything, then release, then acquire again.
-    var set = try BlockFreeSet.init(std.testing.allocator, total_blocks);
+    var set = try BlockFreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
-    var empty = try BlockFreeSet.init(std.testing.allocator, total_blocks);
+    var empty = try BlockFreeSet.init(std.testing.allocator, blocks_count);
     defer empty.deinit(std.testing.allocator);
 
     var i: usize = 0;
-    while (i < total_blocks) : (i += 1) try expectEqual(@as(?u64, i + 1), set.try_acquire());
-    try expectEqual(@as(?u64, null), set.try_acquire());
+    while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire());
+    try expectEqual(@as(?u64, null), set.acquire());
 
     i = 0;
-    while (i < total_blocks) : (i += 1) set.release(@as(u64, i + 1));
-    try expectBlockFreeSetEqual(empty, set);
+    while (i < blocks_count) : (i += 1) set.release(@as(u64, i + 1));
+    try expect_block_free_set_equal(empty, set);
 
     i = 0;
-    while (i < total_blocks) : (i += 1) try expectEqual(@as(?u64, i + 1), set.try_acquire());
-    try expectEqual(@as(?u64, null), set.try_acquire());
+    while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire());
+    try expectEqual(@as(?u64, null), set.acquire());
 
     // Exercise the try_acquire_recent index sync by de/re-allocating the last bit of a shard.
     set.release(i);
     try expectEqual(@as(usize, 1), set.recent.count);
-    try expectEqual(@as(?u64, i), set.try_acquire());
+    try expectEqual(@as(?u64, i), set.acquire());
     try expectEqual(@as(usize, 0), set.recent.count);
-    try expectEqual(@as(?u64, null), set.try_acquire());
+    try expectEqual(@as(?u64, null), set.acquire());
 }
 
-fn testBlockIndexSize(expect_index_size: usize, total_blocks: usize) !void {
-    var set = try BlockFreeSet.init(std.testing.allocator, total_blocks);
+fn test_block_index_size(expect_shards_count: usize, blocks_count: usize) !void {
+    var set = try BlockFreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(expect_index_size, set.index.bit_length);
-}
-
-test "BlockFreeSet.grow" {
-    var set = try BlockFreeSet.init(std.testing.allocator, 63);
-    defer set.deinit(std.testing.allocator);
-    var i: usize = 0;
-    while (i < 63) : (i += 1) _ = set.acquire();
-
-    // Increase the size by 1 bit, and ensure that the index is updated (but not resized).
-    try std.testing.expectEqual(false, set.index.isSet(0));
-    try set.grow(@as(usize, 64), std.testing.allocator);
-
-    try std.testing.expectEqual(@as(usize, 64), set.blocks.bit_length);
-    try std.testing.expectEqual(@as(usize, 1), set.index.bit_length);
-    try std.testing.expectEqual(true, set.blocks.isSet(63));
-    try std.testing.expectEqual(true, set.index.isSet(0));
-
-    try std.testing.expectEqual(@as(?u64, 63 + 1), set.try_acquire());
-    try std.testing.expectEqual(@as(?u64, null), set.try_acquire());
-
-    // Not resized.
-    try set.grow(@as(usize, 64), std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, 64), set.blocks.bit_length);
-    try std.testing.expectEqual(@as(usize, 1), set.index.bit_length);
-
-    // Can't shrink.
-    try std.testing.expectEqual(set.grow(63, std.testing.allocator), error.CannotShrinkBitset);
-
-    // Grow again, this time the index grows too.
-    const two_shards = BlockFreeSet.shard_size + 1;
-    try set.grow(@as(usize, two_shards), std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, two_shards), set.blocks.bit_length);
-    try std.testing.expectEqual(@as(usize, 2), set.index.bit_length);
-    try std.testing.expectEqual(true, set.blocks.isSet(64));
-    try std.testing.expectEqual(true, set.index.isSet(1));
+    try std.testing.expectEqual(expect_shards_count, set.index.bit_length);
 }
 
 test "BlockFreeSet encode/decode" {
-    try testBlockFreeSetEncode(64 * 64, 0); // fully free
-    try testBlockFreeSetEncode(64 * 64, 64 * 64); // fully allocated
+    try test_block_free_set_encode(BlockFreeSet.shard_size, 0); // fully free
+    try test_block_free_set_encode(BlockFreeSet.shard_size, BlockFreeSet.shard_size); // fully allocated
 
     // 256 (max run length) * 65 runs/word (to ensure fast path) * 64 blocks/word
     const big = 256 * 65 * 64;
-    try testBlockFreeSetEncode(big, 0);
-    try testBlockFreeSetEncode(big, big);
-    try testBlockFreeSetEncode(big, big / 16); // mostly free
-    try testBlockFreeSetEncode(big, big / 16 * 15); // mostly full
-    // Bitsets that aren't a multiple of the word size.
-    try testBlockFreeSetEncode(big + 1, big / 16);
-    try testBlockFreeSetEncode(big - 1, big / 16);
+    try test_block_free_set_encode(big, 0);
+    try test_block_free_set_encode(big, big);
+    try test_block_free_set_encode(big, big / 16); // mostly free
+    try test_block_free_set_encode(big, big / 16 * 15); // mostly full
+
+    // Decode a small bitset into a larger buffer.
+    {
+        const shard_size = BlockFreeSet.shard_size;
+
+        var small_set = try BlockFreeSet.init(std.testing.allocator, shard_size);
+        defer small_set.deinit(std.testing.allocator);
+        var i: usize = 0;
+        while (i < small_set.blocks.bit_length) : (i += 1) _ = small_set.acquire();
+
+        var small_buffer = try std.testing.allocator.alloc(u8, small_set.encode_size());
+        defer std.testing.allocator.free(small_buffer);
+
+        try std.testing.expectEqual(small_buffer.len % 8, 0);
+        small_set.encode(small_buffer);
+
+        var big_set = try BlockFreeSet.init(std.testing.allocator, 2 * shard_size);
+        defer big_set.deinit(std.testing.allocator);
+
+        try big_set.decode(small_buffer);
+
+        var block: usize = 0;
+        while (block < 2 * shard_size) : (block += 1) {
+            const address = block + 1;
+            try std.testing.expectEqual(shard_size <= block, big_set.is_free(address));
+        }
+    }
 }
 
-fn testBlockFreeSetEncode(total_blocks: usize, unset_bits: usize) !void {
-    assert(unset_bits <= total_blocks);
+fn test_block_free_set_encode(blocks_count: usize, unset_bits: usize) !void {
+    assert(unset_bits <= blocks_count);
     var seed: u64 = undefined;
     try std.os.getrandom(mem.asBytes(&seed));
     var prng = std.rand.DefaultPrng.init(seed);
 
-    var set = try BlockFreeSet.init(std.testing.allocator, total_blocks);
+    var set = try BlockFreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
     // To set up a BlockFreeSet for testing, first allocate everything, then free selected blocks.
     // This ensures that the index and block bitsets are synced.
-    if (unset_bits < total_blocks) {
+    if (unset_bits < blocks_count) {
         var i: usize = 0;
-        while (i < total_blocks) : (i += 1) {
-            try std.testing.expectEqual(@as(?u64, i + 1), set.try_acquire());
+        while (i < blocks_count) : (i += 1) {
+            try std.testing.expectEqual(@as(?u64, i + 1), set.acquire());
         }
 
         var j: usize = 0;
         while (j < unset_bits) : (j += 1) {
-            const block = prng.random.uintLessThan(usize, total_blocks) + 1;
-            if (!set.isFree(block)) set.release(block);
+            const address = prng.random.uintLessThan(usize, blocks_count) + 1;
+            if (!set.is_free(address)) set.release(address);
         }
     }
 
-    var buf = try std.testing.allocator.alloc(u8, set.encodeSize());
-    defer std.testing.allocator.free(buf);
+    var buffer = try std.testing.allocator.alloc(u8, set.encode_size());
+    defer std.testing.allocator.free(buffer);
 
-    try std.testing.expectEqual(buf.len % 8, 0);
-    set.encode(buf);
-    var set2 = try BlockFreeSet.decode(buf, std.testing.allocator);
+    try std.testing.expectEqual(buffer.len % 8, 0);
+    set.encode(buffer);
+    var set2 = try BlockFreeSet.init(std.testing.allocator, blocks_count);
     defer set2.deinit(std.testing.allocator);
 
-    try expectBlockFreeSetEqual(set, set2);
+    try set2.decode(buffer);
+    try expect_block_free_set_equal(set, set2);
 }
 
-fn expectBlockFreeSetEqual(a: BlockFreeSet, b: BlockFreeSet) !void {
-    try expectBitsetEqual(a.blocks, b.blocks);
-    try expectBitsetEqual(a.index, b.index);
+fn expect_block_free_set_equal(a: BlockFreeSet, b: BlockFreeSet) !void {
+    try expect_bitset_equal(a.blocks, b.blocks);
+    try expect_bitset_equal(a.index, b.index);
 }
 
-fn expectBitsetEqual(a: DynamicBitSetUnmanaged, b: DynamicBitSetUnmanaged) !void {
+fn expect_bitset_equal(a: DynamicBitSetUnmanaged, b: DynamicBitSetUnmanaged) !void {
     try std.testing.expectEqual(a.bit_length, b.bit_length);
     var i: usize = 0;
-    while (i < bitsetMasksLen(a)) : (i += 1) try std.testing.expectEqual(a.masks[i], b.masks[i]);
+    while (i < bitset_masks_length(a)) : (i += 1) try std.testing.expectEqual(a.masks[i], b.masks[i]);
 }
 
 test "BitsetEncoder" {
     const literals = 2;
     const runs = 2;
     const run_lengths = [_]usize{5, 3};
-    const total_blocks = 64 * (literals + run_lengths[0] + run_lengths[1]);
-    const encoded = mem.sliceAsBytes(&[_]u64{
-        total_blocks |
+    const blocks_count = 64 * (literals + run_lengths[0] + run_lengths[1]);
+    const encoded_expect = mem.sliceAsBytes(&[_]u64{
+        blocks_count |
         (runs + literals) << 32,
         // run, literal, run, literal
         0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000101,
@@ -620,7 +595,7 @@ test "BitsetEncoder" {
         0b01010101_01010101_01010101_01010101_01010101_01010101_01010101_01010101,
     });
 
-    const decoded = [_]u64{
+    const decoded_expect = [_]u64{
         0b11111111_11111111_11111111_11111111_11111111_11111111_11111111_11111111, // run 1
         0b11111111_11111111_11111111_11111111_11111111_11111111_11111111_11111111,
         0b11111111_11111111_11111111_11111111_11111111_11111111_11111111_11111111,
@@ -633,10 +608,11 @@ test "BitsetEncoder" {
         0b01010101_01010101_01010101_01010101_01010101_01010101_01010101_01010101, // literal 2
     };
 
-    var got_decoded = try BitsetEncoder(.immutable).decode(encoded, std.testing.allocator);
-    defer got_decoded.deinit(std.testing.allocator);
+    var decoded_actual = try DynamicBitSetUnmanaged.initFull(blocks_count, std.testing.allocator);
+    defer decoded_actual.deinit(std.testing.allocator);
+    try BitsetEncoder(.immutable).decode(encoded_expect, &decoded_actual);
 
-    try std.testing.expectEqual(total_blocks, got_decoded.bit_length);
-    try std.testing.expectEqual(decoded.len, bitsetMasksLen(got_decoded));
-    try std.testing.expectEqualSlices(u64, &decoded, got_decoded.masks[0..decoded.len]);
+    try std.testing.expectEqual(blocks_count, decoded_actual.bit_length);
+    try std.testing.expectEqual(decoded_expect.len, bitset_masks_length(decoded_actual));
+    try std.testing.expectEqualSlices(u64, &decoded_expect, decoded_actual.masks[0..decoded_expect.len]);
 }
