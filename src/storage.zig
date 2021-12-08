@@ -101,6 +101,7 @@ pub const Storage = struct {
         };
 
         self.start_read(read, 0);
+        assert(read.target().len > 0);
     }
 
     fn start_read(self: *Storage, read: *Storage.Read, bytes_read: usize) void {
@@ -239,6 +240,8 @@ pub const Storage = struct {
         };
 
         self.start_write(write);
+        // Assert that the callback is called asynchronously.
+        assert(self.buffer.len > 0);
     }
 
     fn start_write(self: *Storage, write: *Storage.Write) void {
