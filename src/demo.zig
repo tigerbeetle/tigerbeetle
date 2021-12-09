@@ -81,6 +81,14 @@ pub const Demo = struct {
         print_results(Account, results);
     }
 
+    pub fn on_lookup_transfers(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
+        print_results(Account, results);
+    }
+
     pub fn on_create_transfers(
         user_data: u128,
         operation: StateMachine.Operation,
