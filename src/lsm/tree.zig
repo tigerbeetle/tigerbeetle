@@ -71,6 +71,37 @@ pub const ClientTableEntry = packed struct {
     session: u64,
 };
 
+const block_size = config.lsm_table_block_size;
+const BlockPtr = *align(config.sector_size) [block_size]u8;
+const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
+
+// TODO Split a Partition type out of the current Storage.zig, the partition type will be what
+// is shimmed for testing. Then we can put the free set and block writing methods in Storage.
+pub fn BlockStorage(comptime Storage: type) type {
+    return struct {
+        cluster: u32,
+        storage: *Storage,
+        free_set: *BlockFreeSet,
+
+        pub fn write_block(
+            callback: fn (Storage.Write) void,
+            write: *Storage.Write,
+            block: BlockPtrConst,
+            address: u64,
+        ) void {
+            // TODO
+        }
+
+        pub fn read_block(
+            callback: fn (Storage.Read) void,
+            read: *Storage.Read,
+            block: BlockPtr,
+            address: u64,
+        ) void {
+            // TODO
+        }
+    };
+}
 
 pub fn LsmTree(
     /// Key sizes of 8, 16, 32, etc. are supported with alignment 8 or 16.
@@ -82,7 +113,6 @@ pub fn LsmTree(
     comptime sentinel_key: Key,
     comptime tombstone: fn (Value) bool,
     comptime tombstone_from_key: fn (Key) Value,
-    comptime Storage: type,
 ) type {
     assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
     // There must be no padding in the Key type. This avoids buffer bleeds.
@@ -90,8 +120,6 @@ pub fn LsmTree(
 
     const value_size = @sizeOf(Value);
     const key_size = @sizeOf(Key);
-
-    const BlockPtr = *align(config.sector_size) [block_size]u8;
 
     return struct {
         const Self = @This();
@@ -216,7 +244,6 @@ pub fn LsmTree(
             const checksum_size = @sizeOf(u128);
             const table_size_max = config.lsm_table_size_max;
             const table_block_count_max = @divExact(table_size_max, block_size);
-            const block_size = config.lsm_table_block_size;
             const block_body_size = block_size - @sizeOf(vsr.Header);
 
             const layout = blk: {
@@ -643,7 +670,7 @@ pub fn LsmTree(
             const Builder = struct {
                 const Self = @This();
 
-                forest: *Forest,
+                storage: *BlockStorage(Storage),
                 key_min: Key,
                 key_max: Key,
 
@@ -720,10 +747,10 @@ pub fn LsmTree(
                     const header_bytes = block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = forest.block_free_set.acquire();
+                    const address = builder.storage.free_set.acquire();
 
                     header.* = .{
-                        .cluster = forest.cluster,
+                        .cluster = builder.storage.cluster,
                         .op = address,
                         .request = values.len,
                         .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
@@ -788,10 +815,10 @@ pub fn LsmTree(
                     const header_bytes = index_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.forest.block_free_set.acquire();
+                    const address = builder.storage.free_set.acquire();
 
                     header.* = .{
-                        .cluster = builder.forest.cluster,
+                        .cluster = builder.storage.cluster,
                         .op = address,
                         .commit = filter_blocks_used,
                         .request = builder.block,
@@ -812,7 +839,7 @@ pub fn LsmTree(
 
                     // Reset the builder to its initial state, leaving the buffers untouched.
                     builder.* = .{
-                        .forest = builder.forest,
+                        .storage = builder.storage,
                         .key_min = undefined,
                         .key_max = undefined,
                         .index_block = builder.index_block,
@@ -930,8 +957,7 @@ pub fn LsmTree(
                     const block_buffer = table.buffer[it.block * block_size ..][0..block_size];
                     const header = mem.bytesAsValue(block_buffer[0..@sizeOf(vsr.Header)]);
                     const address = header.op;
-                    // This needs to go through the block cache, which is owned by the forest.
-                    forest.write_block(on_flush, &it.write, block_buffer, address);
+                    storage.write_block(on_flush, &it.write, block_buffer, address);
                 }
 
                 fn flush_complete(it: *FlushIterator) void {
@@ -1135,7 +1161,7 @@ pub fn LsmTree(
                     block_write.submit = false;
                     compaction.io_pending += 1;
                     const address = Table.block_address(block_write.block);
-                    forest.write_block(callback, &block_write.write, block_write.block, address);
+                    storage.write_block(callback, &block_write.write, block_write.block, address);
                 }
             }
 
@@ -1455,7 +1481,7 @@ pub fn LsmTree(
                     if (it.read_table_index) {
                         assert(!it.read_pending);
                         it.read_pending = true;
-                        forest.read_block(on_read_table_index, &it.read, it.index, address);
+                        storage.read_block(on_read_table_index, &it.read, it.index, address);
                         return true;
                     }
 
@@ -1486,7 +1512,7 @@ pub fn LsmTree(
 
                     assert(!it.read_pending);
                     it.read_pending = true;
-                    forest.read_block(on_read, &it.read, block, address, checksum);
+                    storage.read_block(on_read, &it.read, block, address, checksum);
                 }
 
                 fn on_read_table_index(read: *Storage.Read) void {
@@ -1586,8 +1612,7 @@ pub fn LsmTree(
             };
         }
 
-        block_free_set: *BlockFreeSet,
-        storage: *Storage,
+        storage: *BlockStorage(Storage),
 
         /// We size and allocate this buffer as a function of MutableTable.value_count_max,
         /// leaving off unneeded data blocks at the end. This saves memory for each LSM tree,
@@ -1598,8 +1623,7 @@ pub fn LsmTree(
 
         pub fn init(
             allocator: *std.mem.Allocator,
-            block_free_set: *BlockFreeSet,
-            storage: *Storage,
+            storage: *BlockStorage(Storage),
         ) !Self {}
 
         pub const Error = error{
