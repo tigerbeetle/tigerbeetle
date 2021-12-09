@@ -71,29 +71,6 @@ pub const ClientTableEntry = packed struct {
     session: u64,
 };
 
-/// The size of the index is determined only by the number of blocks in the
-/// table, not by the number of objects per block.
-pub const Table = packed struct {
-    // Contains the maximum size of the table including the header
-    // Use one of the header fields for the table id
-    header: vr.Header,
-    // filter (fixed size)
-    // index (fixed size)
-    // data (append up to maximum size)
-};
-
-pub const LsmForest = struct {
-    block_free_set: BlockFreeSet,
-    mutable_table_iterator_buffer: [config.lsm_mutable_table_size_max]u8,
-};
-
-const LsmTreeOptions = struct {
-    tables_max: u32,
-    cluster: u32,
-};
-
-// const TransfersLsm = LsmTree(u64, Transfer, compare, key_from_value, storage);
-// const TransfersIndexesLsm = LsmTree(TransferCompositeKey, TransferCompositeKey, compare, key_from_value, storage);
 
 pub fn LsmTree(
     /// Key sizes of 8, 16, 32, etc. are supported with alignment 8 or 16.
@@ -1611,7 +1588,6 @@ pub fn LsmTree(
 
         block_free_set: *BlockFreeSet,
         storage: *Storage,
-        options: LsmTreeOptions,
 
         /// We size and allocate this buffer as a function of MutableTable.value_count_max,
         /// leaving off unneeded data blocks at the end. This saves memory for each LSM tree,
@@ -1624,7 +1600,6 @@ pub fn LsmTree(
             allocator: *std.mem.Allocator,
             block_free_set: *BlockFreeSet,
             storage: *Storage,
-            options: LsmTreeOptions,
         ) !Self {}
 
         pub const Error = error{
