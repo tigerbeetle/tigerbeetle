@@ -20,6 +20,7 @@ pub const StateMachine = struct {
         create_transfers,
         commit_transfers,
         lookup_accounts,
+        lookup_transfers,
 
         pub fn jsonStringify(self: Command, options: StringifyOptions, writer: anytype) !void {
             try std.fmt.format(writer, "\"{}\"", .{@tagName(self)});
@@ -76,6 +77,7 @@ pub const StateMachine = struct {
             .create_transfers => Transfer,
             .commit_transfers => Commit,
             .lookup_accounts => u128,
+            .lookup_transfers => u128,
             else => unreachable,
         };
     }
@@ -86,6 +88,7 @@ pub const StateMachine = struct {
             .create_transfers => CreateTransfersResult,
             .commit_transfers => CommitTransfersResult,
             .lookup_accounts => Account,
+            .lookup_transfers => Transfer,
             else => unreachable,
         };
     }
@@ -98,6 +101,7 @@ pub const StateMachine = struct {
             .create_transfers => self.prepare_timestamps(realtime, .create_transfers, input),
             .commit_transfers => self.prepare_timestamps(realtime, .commit_transfers, input),
             .lookup_accounts => {},
+            .lookup_transfers => {},
             else => unreachable,
         }
     }
@@ -143,6 +147,7 @@ pub const StateMachine = struct {
             .create_transfers => self.execute(.create_transfers, input, output),
             .commit_transfers => self.execute(.commit_transfers, input, output),
             .lookup_accounts => self.execute_lookup_accounts(input, output),
+            .lookup_transfers => self.execute_lookup_transfers(input, output),
             else => unreachable,
         };
     }
@@ -153,7 +158,7 @@ pub const StateMachine = struct {
         input: []const u8,
         output: []u8,
     ) usize {
-        comptime assert(operation != .lookup_accounts);
+        comptime assert(operation != .lookup_accounts and operation != .lookup_transfers);
 
         const events = std.mem.bytesAsSlice(Event(operation), input);
         var results = std.mem.bytesAsSlice(Result(operation), output);
@@ -265,6 +270,20 @@ pub const StateMachine = struct {
             }
         }
         return results_count * @sizeOf(Account);
+    }
+
+    fn execute_lookup_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
+        const batch = std.mem.bytesAsSlice(u128, input);
+        var output_len = @divFloor(output.len, @sizeOf(Transfer)) * @sizeOf(Transfer);
+        var results = std.mem.bytesAsSlice(Transfer, output[0..output_len]);
+        var results_count: usize = 0;
+        for (batch) |id, index| {
+            if (self.get_transfer(id)) |result| {
+                results[results_count] = result.*;
+                results_count += 1;
+            }
+        }
+        return results_count * @sizeOf(Transfer);
     }
 
     fn create_account(self: *StateMachine, a: Account) CreateAccountResult {
