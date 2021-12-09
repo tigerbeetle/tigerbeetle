@@ -213,7 +213,7 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
             .credits_accepted = try translate.u64_from_object(env, object, "credits_accepted"),
             .timestamp = try validate_timestamp(env, object),
         },
-        u128 => try translate.u128_from_value(env, object, "Account lookup"),
+        u128 => try translate.u128_from_value(env, object, "Account or Transfer lookup"),
         else => unreachable,
     };
 }
@@ -229,6 +229,7 @@ pub fn decode_events(
         .create_transfers => try decode_events_from_array(env, array, Transfer, output),
         .commit_transfers => try decode_events_from_array(env, array, Commit, output),
         .lookup_accounts => try decode_events_from_array(env, array, u128, output),
+        .lookup_transfers => try decode_events_from_array(env, array, u128, output),
         else => unreachable,
     };
 }
@@ -610,6 +611,7 @@ fn on_result(user_data: u128, operation: Operation, results: Client.Error![]cons
                 value,
             ) catch return,
             .lookup_accounts => encode_napi_results_array(Account, env, value) catch return,
+            .lookup_transfers => encode_napi_results_array(Account, env, value) catch return,
         };
 
         argv[0] = globals.napi_undefined;
