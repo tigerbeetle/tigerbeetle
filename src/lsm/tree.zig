@@ -203,20 +203,13 @@ pub fn LsmTree(
                 return table.values.get(tombstone_from_key(key));
             }
 
-            pub const Iterator = struct {
-                values_sorted: []Value,
-
-                /// Returns the number of values copied, 0 if there are no values left.
-                pub fn copy_values(it: *Iterator, target: []Value) usize {
-                    const count = math.min(it.values_sorted.len, target.len);
-                    mem.copy(Value, target, it.values_sorted[0..count]);
-                    it.values_sorted = it.values_sorted[count..];
-                    return count;
-                }
-            };
-
-            pub fn iterator(table: *MutableTable, sort_buffer: []align(@alignOf(Value)) u8) Iterator {
+            pub fn sort_values(
+                table: *MutableTable,
+                sort_buffer: []align(@alignOf(Value)) u8,
+            ) []const Value {
+                assert(table.values.count() > 0);
                 assert(sort_buffer.len == config.lsm_mutable_table_size_max);
+
                 const values_buffer = mem.bytesAsSlice(Value, sort_buffer[0..value_count_max]);
 
                 var i: usize = 0;
@@ -233,9 +226,9 @@ pub fn LsmTree(
                         return compare_keys(key_from_value(a), key_from_value(b)) == .lt;
                     }
                 }.less_than;
-                std.sort.insertionSort(Value, values, {}, less_than);
+                std.sort.sort(Value, values, {}, less_than);
 
-                return Iterator{ .values_sorted = values };
+                return values;
             }
         };
 
@@ -537,132 +530,64 @@ pub fn LsmTree(
             table_info: Manifest.TableInfo,
             flush_iterator: FlushIterator,
 
-            pub fn create(
-                cluster: u32,
-                block_free_set: *BlockFreeSet,
+            pub fn create_from_sorted_values(
+                table: *Table,
+                storage: *BlockStorage(Storage),
                 timestamp: u64,
-                iterator: *MutableTable.Iterator,
-                buffer: []align(config.sector_size) u8,
-            ) Table {
+                sorted_values: []const Value,
+            ) void {
+                assert(timestamp > 0);
+                assert(sorted_values.len > 0);
+                assert(sorted_values.len <= data.value_count_max * data_block_count_max);
+
+                const buffer = table.buffer;
                 const blocks = mem.bytesAsSlice([block_size]u8, buffer);
 
-                const index_block = &blocks[0];
+                var filter_blocks_index: u32 = 0;
                 const filter_blocks = blocks[index_block_count..][0..filter_block_count];
+
+                var builder: Builder = .{
+                    .storage = storage,
+                    .index_block = &blocks[0],
+                    .filter_block = &filter_blocks[0],
+                    .data_block = undefined,
+                };
+                filter_blocks_index += 1;
+
                 const data_blocks =
                     blocks[index_block_count + filter_block_count ..][0..data_block_count_max];
 
-                var key_min: Key = undefined;
+                var stream = sorted_values;
+                for (data_blocks) |*data_block| {
+                    builder.data_block = data_block;
 
-                const data_blocks_used = for (data_blocks) |*block, i| {
-                    // For each block we write the sorted values, initialize the Eytzinger layout,
-                    // complete the block header, and add the block's max key to the table index.
+                    const slice = stream[0..math.min(data.value_count_max, stream.len)];
+                    stream = stream[slice.len..];
 
-                    const values_max = data_block_values(block);
-                    assert(values_max.len == data.value_count_max);
+                    builder.data_block_append_slice(slice);
+                    builder.data_block_finish();
 
-                    const value_count = iterator.copy_values(values_max);
-                    assert(value_count <= data.value_count_max);
-
-                    // The block is empty:
-                    if (value_count == 0) break i;
-
-                    const values = values_max[0..value_count];
-
-                    if (i == 0) key_min = key_from_value(values[0]);
-
-                    if (builtin.mode == .Debug) {
-                        var a = values[0];
-                        for (values[1..]) |b| {
-                            assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
-                            a = b;
-                        }
+                    if (builder.filter_block_full() or stream.len == 0) {
+                        builder.filter_block_finish();
+                        builder.filter_block = filter_blocks[filter_blocks_index];
+                        filter_blocks_index += 1;
                     }
 
-                    assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
-                    const key_layout_bytes = @alignCast(
-                        @alignOf(Key),
-                        block[data.key_layout_offset..][0..data.key_layout_size],
-                    );
-                    const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
+                    if (stream.len == 0) break;
 
-                    const e = eytzinger(data.key_count, data.value_count_max);
-                    e.layout_from_keys_or_values(
-                        Key,
-                        Value,
-                        key_from_value,
-                        sentinel_key,
-                        values,
-                        key_layout,
-                    );
-
-                    const values_padding = mem.sliceAsBytes(values_max[value_count..]);
-                    const block_padding = block[data.padding_offset..][0..data.padding_size];
-                    mem.set(u8, values_padding, 0);
-                    mem.set(u8, block_padding, 0);
-
-                    const header_bytes = block[0..@sizeOf(vsr.Header)];
-                    const header = mem.bytesAsValue(vsr.Header, header_bytes);
-
-                    header.* = .{
-                        .cluster = cluster,
-                        .op = block_free_set.acquire(),
-                        .request = values.len,
-                        .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
-                        .command = .block,
-                    };
-
-                    header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
-                    header.set_checksum();
-
-                    index_keys(index_block)[i] = key_from_value(values[values.len - 1]);
-                    index_data_addresses(index_block)[i] = header.op;
-                    index_data_checksums(index_block)[i] = header.checksum;
-                } else data_block_count_max;
-
-                assert(data_blocks_used > 0);
-
-                const index_keys_padding = index_keys(index_block)[data_blocks_used..];
-                const index_keys_padding_bytes = mem.sliceAsBytes(index_keys_padding);
-                mem.set(u8, index_keys_padding_bytes, 0);
-                mem.set(u64, index_data_addresses(index_block)[data_blocks_used..], 0);
-                mem.set(u128, index_data_checksums(index_block)[data_blocks_used..], 0);
-
-                // TODO implement filters
-                const filter_blocks_used = 0;
-                for (filter_blocks) |*block| {
-                    mem.set(u8, block[0..@sizeOf(vsr.Header)], 0);
-                    comptime assert(filter.padding_offset == @sizeOf(vsr.Header));
-                    mem.set(u8, block[filter.padding_offset..][0..filter.padding_size], 0);
+                    assert(data_block_values_used(data_block).len == data.value_count_max);
+                } else {
+                    // We must always copy *all* values from sorted_values into the table,
+                    // which will result in breaking from the loop as `stream.len` is 0.
+                    // This is the case even when all data blocks are completely filled.
+                    unreachable;
                 }
-                mem.set(u64, index_filter_addresses(index_block), 0);
-                mem.set(u128, index_filter_checksums(index_block), 0);
+                assert(stream.len == 0);
+                assert(filter_blocks_index <= filter_block_count);
 
-                mem.set(u8, index_block[index.padding_offset..][0..index.padding_size], 0);
-
-                const header_bytes = index_block[0..@sizeOf(vsr.Header)];
-                const header = mem.bytesAsValue(vsr.Header, header_bytes);
-
-                header.* = .{
-                    .cluster = cluster,
-                    .op = block_free_set.acquire(),
-                    .commit = filter_blocks_used,
-                    .request = data_blocks_used,
-                    .offset = timestamp,
-                    .size = index.size,
-                    .command = .block,
-                };
-                header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
-                header.set_checksum();
-
-                return .{
+                table.* = .{
                     .buffer = buffer,
-                    .table_info = .{
-                        .checksum = header.checksum,
-                        .address = header.op,
-                        .timestamp = timestamp,
-                        .key_min = key_min,
-                        .key_max = index_keys(index_block)[data_blocks_used - 1],
-                    },
+                    .table_info = builder.index_block_finish(),
                     .flush_iterator = .{},
                 };
             }
@@ -671,12 +596,12 @@ pub fn LsmTree(
                 const Self = @This();
 
                 storage: *BlockStorage(Storage),
-                key_min: Key,
-                key_max: Key,
+                key_min: Key = undefined,
+                key_max: Key = undefined,
 
                 index_block: BlockPtr,
-                data_block: BlockPtr,
                 filter_block: BlockPtr,
+                data_block: BlockPtr,
 
                 block: u32 = 0,
                 value: u32 = 0,
@@ -695,6 +620,18 @@ pub fn LsmTree(
 
                     values_max[builder.value] = value;
                     builder.value += 1;
+                    // TODO add this value's key to the correct filter block.
+                }
+
+                pub fn data_block_append_slice(builder: *Builder, values: []const Value) void {
+                    assert(values.len > 0);
+                    assert(builder.value + values.len <= data.value_count_max);
+
+                    const values_max = data_block_values(builder.data_block);
+                    assert(values_max.len == data.value_count_max);
+
+                    mem.copy(Value, values_max[builder.value..], values);
+                    builder.value += values.len;
                     // TODO add this value's key to the correct filter block.
                 }
 
