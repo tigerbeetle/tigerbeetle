@@ -200,8 +200,8 @@ pub const BlockFreeSet = struct {
                 if (!is_literal(word)) break i;
             } else literals_max;
 
-            assert(run_length <= marker_run_length_max);
-            assert(literal_count <= marker_literals_max);
+            assert(run_length <= marker_run_length_max); // TODO remove
+            assert(literal_count <= marker_literals_max); // TODO remove
             target_words[target_index] = (word_next & 1)
                 | (literal_count << 1)
                 | (run_length << 32);
@@ -220,6 +220,128 @@ pub const BlockFreeSet = struct {
         return word != 0 and word != ~@as(u64, 0);
     }
 };
+
+fn BitSetEncoder(comptime Word: type) type {
+    const word_bits = @bitSizeOf(Word);
+
+    // TODO remove 2
+    const marker_run_length_max2 = (1 << (word_bits / 2)) - 1;
+    const marker_literals_max2 = (1 << (word_bits / 2 - 1)) - 1;
+
+    const MarkerRunLength2 = std.math.IntFittingRange(0, marker_run_length_max2); // Word=usize → u32
+    const MarkerLiterals2 = std.math.IntFittingRange(0, marker_literals_max2); // Word=usize → u31
+
+    const Marker = packed struct { // TODO use this in encoding/decoding
+        run_bit: u1,
+        literals: MarkerLiterals2,
+        run_length: MarkerRunLength2,
+    };
+
+    comptime {
+        assert(std.Target.current.cpu.arch.endian() == std.builtin.Endian.Little);
+        assert(@typeInfo(Word).Int.signedness == .unsigned);
+        assert(word_bits % 8 == 0); // byte multiple, so bytes can be cast to words
+        assert(@bitSizeOf(Marker) == word_bits);
+
+        assert(@bitSizeOf(MarkerRunLength2) % 2 == 0);
+        assert(std.math.maxInt(MarkerRunLength2) == marker_run_length_max2);
+
+        assert(@bitSizeOf(MarkerLiterals2) % 2 == 1);
+        assert(std.math.maxInt(MarkerLiterals2) == marker_literals_max2);
+    }
+
+    return struct {
+        const Self = @This();
+
+        inline fn marker(mark: Marker) Word { // TODO maybe inline Marker definition
+            return @bitCast(Word, mark);
+        }
+
+        /// Decodes the compressed bitset in `source` into `set`. Panics if `source`'s encoding is invalid.
+        /// Returns the number of *words* written to `target`.
+        fn decode(source: []const u8, target: []Word) usize {
+            // Verify that this BlockFreeSet is entirely unallocated.
+            //assert(set.index.count() == set.index.bit_length);
+
+            const source_words = @alignCast(@alignOf(Word), mem.bytesAsSlice(Word, source));
+            var source_index: usize = 0;
+            //const blocks = bitset_masks(set.blocks);
+            const blocks = target; // TODO XXX
+            var block_index: usize = 0;
+            while (source_index < source_words.len) {
+                const source_word = source_words[source_index];
+                const run_length = source_word >> (word_bits / 2);
+                const run_word: Word = if (source_word & 1 == 1) ~@as(Word, 0) else 0;
+                const literals_count = (source_word & (marker_literals_max2 << 1)) >> 1;
+                std.mem.set(Word, blocks[block_index..][0..run_length], run_word);
+                std.mem.copy(Word, blocks[block_index + run_length..][0..literals_count],
+                    source_words[source_index + 1..][0..literals_count]);
+                block_index += run_length + literals_count;
+                source_index += 1 + literals_count;
+            }
+            assert(block_index <= blocks.len);
+            assert(source_index == source_words.len);
+            return block_index;
+        }
+
+        // Returns the maximum number of bytes that the `BlockFreeSet` needs to encode to.
+        fn encode_size_max(source: []const Word) usize {
+            // Assume (pessimistically) that every word will be encoded as a literal.
+            const literals_count = source.len;
+            const markers = div_ceil(usize, literals_count, marker_literals_max2);
+            return (literals_count + markers) * @sizeOf(Word);
+        }
+
+        // Returns the number of bytes written to `target`.
+        fn encode(source: []const Word, target: []u8) usize {
+            assert(target.len == encode_size_max(source));
+
+            const target_words = @alignCast(@alignOf(Word), mem.bytesAsSlice(Word, target));
+            std.mem.set(Word, target_words, 0);
+            var target_index: usize = 0;
+            const blocks = source;//bitset_masks(set.blocks); // TODO
+            var blocks_index: usize = 0;
+            while (blocks_index < blocks.len) {
+                const word_next = blocks[blocks_index];
+                const run_length = rl: {
+                    if (is_literal(word_next)) break :rl 0;
+                    // Measure run length.
+                    const run_max = std.math.min(blocks.len, blocks_index + marker_run_length_max2);
+                    var run_end: usize = blocks_index + 1;
+                    while (run_end < run_max and blocks[run_end] == word_next) : (run_end += 1) {}
+                    const run = run_end - blocks_index;
+                    blocks_index += run;
+                    break :rl run;
+                };
+                // For consistent encoding, set the run bit to 0 when there is no run.
+                const run_bit = if (run_length == 0) 0 else word_next & 1;
+                // Count sequential literals that immediately follow the run.
+                const literals_max = std.math.min(blocks.len - blocks_index, marker_literals_max2);
+                const literal_count = for (blocks[blocks_index..][0..literals_max]) |word, i| {
+                    if (!is_literal(word)) break i;
+                } else literals_max;
+
+                assert(run_length <= marker_run_length_max2); // TODO remove
+                assert(literal_count <= marker_literals_max2); // TODO remove
+                target_words[target_index] = run_bit
+                    | @intCast(Word, literal_count << 1)
+                    | @intCast(Word, run_length << (word_bits / 2));
+
+                std.mem.copy(Word, target_words[target_index + 1..][0..literal_count],
+                    blocks[blocks_index..][0..literal_count]);
+                target_index += 1 + literal_count; // +1 for the marker word
+                blocks_index += literal_count;
+            }
+            assert(blocks_index == blocks.len);
+
+            return target_index * @sizeOf(Word);
+        }
+
+        inline fn is_literal(word: Word) bool {
+            return word != 0 and word != ~@as(Word, 0);
+        }
+    };
+}
 
 fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
     const len = div_ceil(MaskInt, bitset.bit_length, @bitSizeOf(MaskInt));
@@ -441,6 +563,83 @@ fn test_encode_decode(patterns: []const BitSetPattern) !void {
 
     decoded_actual.decode(encoded[0..encoded_length]);
     try expect_block_free_set_equal(decoded_expect, decoded_actual);
+}
+
+test "BitSetEncoder decode, encode, decode" {
+    const Encoder = BitSetEncoder(u8);
+
+    var seed: u64 = undefined;
+    try std.os.getrandom(mem.asBytes(&seed));
+    var prng = std.rand.DefaultPrng.init(seed);
+
+    var encoding = std.ArrayList(u8).init(std.testing.allocator);
+    defer encoding.deinit();
+
+    //try std.testing.expectEqual( // TODO XXX
+    //    Encoder.marker(.{
+    //        .run_bit=0,
+    //        .run_length=2,
+    //        .literals=0,
+    //    }),
+    //    0b0010_0000
+    //);
+
+    // Alternating runs, no literals.
+    try test_decode(&.{
+        Encoder.marker(.{ .run_bit = 0, .run_length = 2, .literals = 0 }),
+        Encoder.marker(.{ .run_bit = 1, .run_length = 3, .literals = 0 }),
+        Encoder.marker(.{ .run_bit = 0, .run_length = 4, .literals = 0 }),
+    });
+    // Alternating runs, with literals.
+    try test_decode(&.{
+        Encoder.marker(.{ .run_bit = 0, .run_length = 2, .literals = 1 }), 12,
+        Encoder.marker(.{ .run_bit = 1, .run_length = 3, .literals = 1 }), 34,
+        Encoder.marker(.{ .run_bit = 0, .run_length = 4, .literals = 1 }), 56,
+    });
+
+    {
+        var run_length: usize = 0;
+        while (run_length <= std.math.maxInt(u4)) : (run_length += 1) {
+            try test_decode(&.{
+                Encoder.marker(.{
+                    .run_bit = 0,
+                    .run_length = @intCast(u4, run_length),
+                    .literals = 3,
+                }),
+                12, 34, 56,
+            });
+        }
+    }
+
+    {
+        var literals: usize = 0;
+        while (literals <= std.math.maxInt(u3)) : (literals += 1) {
+            try encoding.append(Encoder.marker(.{
+                .run_bit = 0,
+                .run_length = 4,
+                .literals = @intCast(u3, literals),
+            }));
+            var i: usize = 0;
+            while (i < literals) : (i += 1) try encoding.append(prng.random.int(u8));
+            try test_decode(encoding.items);
+            encoding.items.len = 0;
+        }
+    }
+}
+
+fn test_decode(encoded_expect: []u8) !void {
+    const Encoder = BitSetEncoder(u8);
+    const decoded_actual = try std.testing.allocator.alloc(u8, 1024);
+    defer std.testing.allocator.free(decoded_actual);
+
+    const decoded_actual_length = Encoder.decode(encoded_expect, decoded_actual);
+    const encoded_actual = try std.testing.allocator.alloc(u8, Encoder.encode_size_max(decoded_actual[0..decoded_actual_length]));
+    defer std.testing.allocator.free(encoded_actual);
+
+    const encoded_actual_length = Encoder.encode(decoded_actual[0..decoded_actual_length], encoded_actual);
+    std.debug.print("{any} != {any}\n", .{encoded_expect, encoded_actual[0..encoded_actual_length]});
+    try std.testing.expectEqual(encoded_expect.len, encoded_actual_length);
+    try std.testing.expectEqualSlices(u8, encoded_expect, encoded_actual[0..encoded_actual_length]);
 }
 
 fn expect_block_free_set_equal(a: BlockFreeSet, b: BlockFreeSet) !void {
