@@ -10,46 +10,18 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer(
     .array,
 );
 
-const MarkerLiterals = u31;
-const MarkerRunLength = u32;
-const marker_run_length_max = std.math.maxInt(MarkerRunLength);
-const marker_literals_max = std.math.maxInt(MarkerLiterals);
-
-comptime {
-    assert(std.Target.current.cpu.arch.endian() == std.builtin.Endian.Little);
-    assert(@bitSizeOf(MaskInt) == 64);
-    assert(@bitSizeOf(usize) == 64);
-}
-
 /// The 0 address is reserved for usage as a sentinel and will never be returned by acquire().
 ///
 /// Set bits indicate free blocks, unset bits are allocated.
-///
-/// `encode`/`decode` compress the bitset using EWAH.
-///
-/// "Histogram-Aware Sorting for Enhanced Word-Aligned Compression in Bitmap Indexes":
-///
-/// > [EWAH] also uses only two types of words, where the first type is a 64-bit verbatim word.
-/// > The second type of word is a marker word: the first bit indicates which clean word will follow,
-/// > half the bits (32 bits) are used to store the number of clean words, and the rest of the bits
-/// > (31 bits) are used to store the number of dirty words following the clean words. EWAH bitmaps
-/// > begin with a marker word.
-///
-/// A 'marker' looks like:
-///
-///     [run_bit:u1][run_length:u31(LE)][literals_count:u32(LE)]
-///
-/// and is immediately followed by `literals_count` 64-bit literals.
-/// `run_length` measures words, not bits.
-///
-/// This encoding requires that the architecture is little-endian with 64-bit words.
 pub const BlockFreeSet = struct {
+    const Encoder = BitSetEncoder(usize);
+
     // Each bit of `index` is the OR of `shard_size` bits of `blocks`.
     // That is, if a shard has any free blocks, the corresponding index bit is set.
     index: DynamicBitSetUnmanaged,
     blocks: DynamicBitSetUnmanaged,
     // A fast cache of the 0-indexed bits (not 1-indexed addresses) of recently freed blocks.
-    recent: RingBuffer = .{},
+    recent: RingBuffer,
 
     // Fixing the shard size to a constant rather than varying the shard size (but
     // guaranteeing the index always a multiple of 64B) means that the top-level index
@@ -66,11 +38,13 @@ pub const BlockFreeSet = struct {
     const shard_size = shard_cache_lines * config.cache_line_size * @bitSizeOf(u8);
     comptime {
         assert(shard_size == 4096);
+        assert(@bitSizeOf(MaskInt) == 64);
     }
 
     pub fn init(allocator: *mem.Allocator, blocks_count: usize) !BlockFreeSet {
         assert(shard_size <= blocks_count);
         assert(blocks_count % shard_size == 0);
+        assert(blocks_count % @bitSizeOf(usize) == 0);
 
         // Round up to ensure that every block bit is covered by the index.
         const shards_count = div_ceil(usize, blocks_count, shard_size);
@@ -83,6 +57,7 @@ pub const BlockFreeSet = struct {
         return BlockFreeSet{
             .index = index,
             .blocks = blocks,
+            .recent = .{},
         };
     }
 
@@ -140,24 +115,7 @@ pub const BlockFreeSet = struct {
         // Verify that this BlockFreeSet is entirely unallocated.
         assert(set.index.count() == set.index.bit_length);
 
-        const source_words = @alignCast(@alignOf(usize), mem.bytesAsSlice(usize, source));
-        var source_index: usize = 0;
-        const blocks = bitset_masks(set.blocks);
-        var block_index: usize = 0;
-        while (source_index < source_words.len) {
-            const source_word = source_words[source_index];
-            const run_length = source_word >> 32;
-            const run_word: usize = if (source_word & 1 == 1) ~@as(u64, 0) else 0;
-            const literals_count = (source_word & marker_literals_max) >> 1;
-            std.mem.set(usize, blocks[block_index..][0..run_length], run_word);
-            std.mem.copy(usize, blocks[block_index + run_length..][0..literals_count],
-                source_words[source_index + 1..][0..literals_count]);
-            block_index += run_length + literals_count;
-            source_index += 1 + literals_count;
-        }
-        assert(block_index <= blocks.len);
-        assert(source_index == source_words.len);
-
+        _ = Encoder.decode(source, bitset_masks(set.blocks));
         var shard: usize = 0;
         while (shard < set.index.bit_length) : (shard += 1) {
             if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
@@ -166,75 +124,48 @@ pub const BlockFreeSet = struct {
 
     // Returns the maximum number of bytes that the `BlockFreeSet` needs to encode to.
     pub fn encode_size_max(set: BlockFreeSet) usize {
-        assert(set.blocks.bit_length % @bitSizeOf(usize) == 0);
-        // Assume (pessimistically) that every word will be encoded as a literal.
-        const literals_count = bitset_masks(set.blocks).len;
-        const markers = div_ceil(usize, literals_count, marker_literals_max);
-        return (literals_count + markers) * @sizeOf(usize);
+        return Encoder.encode_size_max(bitset_masks(set.blocks));
     }
 
     // Returns the number of bytes written to `target`.
     pub fn encode(set: BlockFreeSet, target: []u8) usize {
         assert(target.len == set.encode_size_max());
 
-        const target_words = @alignCast(@alignOf(usize), mem.bytesAsSlice(usize, target));
-        std.mem.set(usize, target_words, 0);
-        var target_index: usize = 0;
-        const blocks = bitset_masks(set.blocks);
-        var blocks_index: usize = 0;
-        while (blocks_index < blocks.len) {
-            const word_next = blocks[blocks_index];
-            const run_length = rl: {
-                if (is_literal(word_next)) break :rl 0;
-                // Measure run length.
-                const run_max = std.math.min(blocks.len, blocks_index + marker_run_length_max);
-                var run_end: usize = blocks_index + 1;
-                while (run_end < run_max and blocks[run_end] == word_next) : (run_end += 1) {}
-                const run = run_end - blocks_index;
-                blocks_index += run;
-                break :rl run;
-            };
-            // Count sequential literals that immediately follow the run.
-            const literals_max = std.math.min(blocks.len - blocks_index, marker_literals_max);
-            const literal_count = for (blocks[blocks_index..][0..literals_max]) |word, i| {
-                if (!is_literal(word)) break i;
-            } else literals_max;
-
-            assert(run_length <= marker_run_length_max); // TODO remove
-            assert(literal_count <= marker_literals_max); // TODO remove
-            target_words[target_index] = (word_next & 1)
-                | (literal_count << 1)
-                | (run_length << 32);
-
-            std.mem.copy(usize, target_words[target_index + 1..][0..literal_count],
-                blocks[blocks_index..][0..literal_count]);
-            target_index += 1 + literal_count; // +1 for the marker word
-            blocks_index += literal_count;
-        }
-        assert(blocks_index == blocks.len);
-
-        return target_index * @sizeOf(usize);
-    }
-
-    inline fn is_literal(word: u64) bool {
-        return word != 0 and word != ~@as(u64, 0);
+        return Encoder.encode(bitset_masks(set.blocks), target);
     }
 };
 
+/// `encode`/`decode` compress the bitset using EWAH.
+///
+/// "Histogram-Aware Sorting for Enhanced Word-Aligned Compression in Bitmap Indexes":
+///
+/// > [EWAH] also uses only two types of words, where the first type is a 64-bit verbatim word.
+/// > The second type of word is a marker word: the first bit indicates which clean word will follow,
+/// > half the bits (32 bits) are used to store the number of clean words, and the rest of the bits
+/// > (31 bits) are used to store the number of dirty words following the clean words. EWAH bitmaps
+/// > begin with a marker word.
+///
+/// A 'marker' looks like:
+///
+///     [run_bit:u1][run_length:u31(LE)][literals_count:u32(LE)]
+///
+/// and is immediately followed by `literals_count` 64-bit literals.
+/// When decoding a marker, the run precedes the literals.
+///
+/// This encoding requires that the architecture is little-endian with 64-bit words.
 fn BitSetEncoder(comptime Word: type) type {
     const word_bits = @bitSizeOf(Word);
 
-    // TODO remove 2
-    const marker_run_length_max2 = (1 << (word_bits / 2)) - 1;
-    const marker_literals_max2 = (1 << (word_bits / 2 - 1)) - 1;
+    const marker_run_length_max = (1 << (word_bits / 2)) - 1;
+    const marker_literals_max = (1 << (word_bits / 2 - 1)) - 1;
 
-    const MarkerRunLength2 = std.math.IntFittingRange(0, marker_run_length_max2); // Word=usize → u32
-    const MarkerLiterals2 = std.math.IntFittingRange(0, marker_literals_max2); // Word=usize → u31
+    const MarkerRunLength = std.math.IntFittingRange(0, marker_run_length_max); // Word=usize → u32
+    const MarkerLiterals = std.math.IntFittingRange(0, marker_literals_max); // Word=usize → u31
 
-    const Marker = packed struct { // TODO use this in encoding/decoding
-        run_bit: u1,
-        literals: MarkerLiterals2,
-        run_length: MarkerRunLength2,
+    const Marker = packed struct {
+        run_bit: u1, // run of 0s or 1s
+        literals: MarkerLiterals, // number of literal words immediately following marker
+        run_length: MarkerRunLength, // length of run (in words)
     };
 
     comptime {
@@ -243,52 +174,47 @@ fn BitSetEncoder(comptime Word: type) type {
         assert(word_bits % 8 == 0); // byte multiple, so bytes can be cast to words
         assert(@bitSizeOf(Marker) == word_bits);
 
-        assert(@bitSizeOf(MarkerRunLength2) % 2 == 0);
-        assert(std.math.maxInt(MarkerRunLength2) == marker_run_length_max2);
+        assert(@bitSizeOf(MarkerRunLength) % 2 == 0);
+        assert(std.math.maxInt(MarkerRunLength) == marker_run_length_max);
 
-        assert(@bitSizeOf(MarkerLiterals2) % 2 == 1);
-        assert(std.math.maxInt(MarkerLiterals2) == marker_literals_max2);
+        assert(@bitSizeOf(MarkerLiterals) % 2 == 1);
+        assert(std.math.maxInt(MarkerLiterals) == marker_literals_max);
     }
 
     return struct {
         const Self = @This();
 
-        inline fn marker(mark: Marker) Word { // TODO maybe inline Marker definition
+        inline fn marker(mark: Marker) Word {
             return @bitCast(Word, mark);
         }
 
         /// Decodes the compressed bitset in `source` into `set`. Panics if `source`'s encoding is invalid.
         /// Returns the number of *words* written to `target`.
         fn decode(source: []const u8, target: []Word) usize {
-            // Verify that this BlockFreeSet is entirely unallocated.
-            //assert(set.index.count() == set.index.bit_length);
-
             const source_words = @alignCast(@alignOf(Word), mem.bytesAsSlice(Word, source));
             var source_index: usize = 0;
-            //const blocks = bitset_masks(set.blocks);
-            const blocks = target; // TODO XXX
-            var block_index: usize = 0;
+            var target_index: usize = 0;
             while (source_index < source_words.len) {
-                const source_word = source_words[source_index];
-                const run_length = source_word >> (word_bits / 2);
-                const run_word: Word = if (source_word & 1 == 1) ~@as(Word, 0) else 0;
-                const literals_count = (source_word & (marker_literals_max2 << 1)) >> 1;
-                std.mem.set(Word, blocks[block_index..][0..run_length], run_word);
-                std.mem.copy(Word, blocks[block_index + run_length..][0..literals_count],
+                const source_marker = @bitCast(Marker, source_words[source_index]);
+                const run_length: usize = source_marker.run_length;
+                const run_word: Word = if (source_marker.run_bit == 1) ~@as(Word, 0) else 0;
+                const literals_count: usize = source_marker.literals;
+                std.mem.set(Word, target[target_index..][0..run_length], run_word);
+                std.mem.copy(Word, target[target_index + run_length..][0..literals_count],
                     source_words[source_index + 1..][0..literals_count]);
-                block_index += run_length + literals_count;
+                target_index += run_length + literals_count;
                 source_index += 1 + literals_count;
             }
-            assert(block_index <= blocks.len);
+            assert(target_index <= target.len);
             assert(source_index == source_words.len);
-            return block_index;
+            return target_index;
         }
 
-        // Returns the maximum number of bytes that the `BlockFreeSet` needs to encode to.
+        // Returns the maximum number of bytes that `source` needs to encode to.
         fn encode_size_max(source: []const Word) usize {
             // Assume (pessimistically) that every word will be encoded as a literal.
             const literals_count = source.len;
-            const markers = div_ceil(usize, literals_count, marker_literals_max2);
+            const markers = div_ceil(usize, literals_count, marker_literals_max);
             return (literals_count + markers) * @sizeOf(Word);
         }
 
@@ -299,40 +225,38 @@ fn BitSetEncoder(comptime Word: type) type {
             const target_words = @alignCast(@alignOf(Word), mem.bytesAsSlice(Word, target));
             std.mem.set(Word, target_words, 0);
             var target_index: usize = 0;
-            const blocks = source;//bitset_masks(set.blocks); // TODO
-            var blocks_index: usize = 0;
-            while (blocks_index < blocks.len) {
-                const word_next = blocks[blocks_index];
+            var source_index: usize = 0;
+            while (source_index < source.len) {
+                const word_next = source[source_index];
                 const run_length = rl: {
                     if (is_literal(word_next)) break :rl 0;
                     // Measure run length.
-                    const run_max = std.math.min(blocks.len, blocks_index + marker_run_length_max2);
-                    var run_end: usize = blocks_index + 1;
-                    while (run_end < run_max and blocks[run_end] == word_next) : (run_end += 1) {}
-                    const run = run_end - blocks_index;
-                    blocks_index += run;
+                    const run_max = std.math.min(source.len, source_index + marker_run_length_max);
+                    var run_end: usize = source_index + 1;
+                    while (run_end < run_max and source[run_end] == word_next) : (run_end += 1) {}
+                    const run = run_end - source_index;
+                    source_index += run;
                     break :rl run;
                 };
                 // For consistent encoding, set the run bit to 0 when there is no run.
                 const run_bit = if (run_length == 0) 0 else word_next & 1;
                 // Count sequential literals that immediately follow the run.
-                const literals_max = std.math.min(blocks.len - blocks_index, marker_literals_max2);
-                const literal_count = for (blocks[blocks_index..][0..literals_max]) |word, i| {
+                const literals_max = std.math.min(source.len - source_index, marker_literals_max);
+                const literal_count = for (source[source_index..][0..literals_max]) |word, i| {
                     if (!is_literal(word)) break i;
                 } else literals_max;
 
-                assert(run_length <= marker_run_length_max2); // TODO remove
-                assert(literal_count <= marker_literals_max2); // TODO remove
-                target_words[target_index] = run_bit
-                    | @intCast(Word, literal_count << 1)
-                    | @intCast(Word, run_length << (word_bits / 2));
-
+                target_words[target_index] = marker(.{
+                    .run_bit = @intCast(u1, run_bit),
+                    .run_length = @intCast(MarkerRunLength, run_length),
+                    .literals = @intCast(MarkerLiterals, literal_count),
+                });
                 std.mem.copy(Word, target_words[target_index + 1..][0..literal_count],
-                    blocks[blocks_index..][0..literal_count]);
+                    source[source_index..][0..literal_count]);
                 target_index += 1 + literal_count; // +1 for the marker word
-                blocks_index += literal_count;
+                source_index += literal_count;
             }
-            assert(blocks_index == blocks.len);
+            assert(source_index == source.len);
 
             return target_index * @sizeOf(Word);
         }
@@ -348,7 +272,7 @@ fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
     return bitset.masks[0..len];
 }
 
-fn div_ceil(comptime T: type, a: T, b: T) T {
+inline fn div_ceil(comptime T: type, a: T, b: T) T {
     return (a + b - 1) / b;
 }
 
@@ -469,21 +393,13 @@ fn test_block_shards_count(expect_shards_count: usize, blocks_count: usize) !voi
 test "BlockFreeSet encode, decode, encode" {
     const shard_size = BlockFreeSet.shard_size / @bitSizeOf(usize);
     // Uniform.
-    try test_encode_decode(&.{
-        .{.fill = .run_one, .words = shard_size},
-    });
-    try test_encode_decode(&.{
-        .{.fill = .run_zero, .words = shard_size},
-    });
-    try test_encode_decode(&.{
-        .{.fill = .literal, .words = shard_size},
-    });
-    try test_encode_decode(&.{
-        .{.fill = .run_one, .words = std.math.maxInt(u16) + 1},
-    });
+    try test_encode(&.{.{.fill = .run_one, .words = shard_size}});
+    try test_encode(&.{.{.fill = .run_zero, .words = shard_size}});
+    try test_encode(&.{.{.fill = .literal, .words = shard_size}});
+    try test_encode(&.{.{.fill = .run_one, .words = std.math.maxInt(u16) + 1}});
 
     // Mixed.
-    try test_encode_decode(&.{
+    try test_encode(&.{
         .{.fill = .run_one, .words = shard_size / 4},
         .{.fill = .run_zero, .words = shard_size / 4},
         .{.fill = .literal, .words = shard_size / 4},
@@ -507,7 +423,7 @@ test "BlockFreeSet encode, decode, encode" {
                 .words = 1,
             });
         }
-        try test_encode_decode(patterns.items);
+        try test_encode(patterns.items);
     }
 }
 
@@ -518,7 +434,7 @@ const BitSetPattern = struct {
 
 const BitSetPatternFill = enum { run_one, run_zero, literal };
 
-fn test_encode_decode(patterns: []const BitSetPattern) !void {
+fn test_encode(patterns: []const BitSetPattern) !void {
     var seed: u64 = undefined;
     try std.os.getrandom(mem.asBytes(&seed));
     var prng = std.rand.DefaultPrng.init(seed);
@@ -565,8 +481,21 @@ fn test_encode_decode(patterns: []const BitSetPattern) !void {
     try expect_block_free_set_equal(decoded_expect, decoded_actual);
 }
 
+fn expect_block_free_set_equal(a: BlockFreeSet, b: BlockFreeSet) !void {
+    try expect_bitset_equal(a.blocks, b.blocks);
+    try expect_bitset_equal(a.index, b.index);
+}
+
+fn expect_bitset_equal(a: DynamicBitSetUnmanaged, b: DynamicBitSetUnmanaged) !void {
+    try std.testing.expectEqual(a.bit_length, b.bit_length);
+    const a_masks = bitset_masks(a);
+    const b_masks = bitset_masks(b);
+    for (a_masks) |aw, i| try std.testing.expectEqual(aw, b_masks[i]);
+}
+
 test "BitSetEncoder decode, encode, decode" {
     const Encoder = BitSetEncoder(u8);
+    const maxInt = std.math.maxInt;
 
     var seed: u64 = undefined;
     try std.os.getrandom(mem.asBytes(&seed));
@@ -574,15 +503,6 @@ test "BitSetEncoder decode, encode, decode" {
 
     var encoding = std.ArrayList(u8).init(std.testing.allocator);
     defer encoding.deinit();
-
-    //try std.testing.expectEqual( // TODO XXX
-    //    Encoder.marker(.{
-    //        .run_bit=0,
-    //        .run_length=2,
-    //        .literals=0,
-    //    }),
-    //    0b0010_0000
-    //);
 
     // Alternating runs, no literals.
     try test_decode(&.{
@@ -596,10 +516,22 @@ test "BitSetEncoder decode, encode, decode" {
         Encoder.marker(.{ .run_bit = 1, .run_length = 3, .literals = 1 }), 34,
         Encoder.marker(.{ .run_bit = 0, .run_length = 4, .literals = 1 }), 56,
     });
+    // Consecutive run marker overflow.
+    try test_decode(&.{
+        Encoder.marker(.{ .run_bit = 0, .run_length = maxInt(u4), .literals = 0 }),
+        Encoder.marker(.{ .run_bit = 0, .run_length = 2, .literals = 0 }),
+    });
+    // Consecutive literal marker overflow.
+    try test_decode(&.{
+        Encoder.marker(.{ .run_bit = 0, .run_length = 0, .literals = maxInt(u3) }),
+        1, 2, 3, 4, 5, 6, 7,
+        Encoder.marker(.{ .run_bit = 0, .run_length = 0, .literals = 2 }),
+        8, 9,
+    });
 
     {
         var run_length: usize = 0;
-        while (run_length <= std.math.maxInt(u4)) : (run_length += 1) {
+        while (run_length <= maxInt(u4)) : (run_length += 1) {
             try test_decode(&.{
                 Encoder.marker(.{
                     .run_bit = 0,
@@ -613,14 +545,16 @@ test "BitSetEncoder decode, encode, decode" {
 
     {
         var literals: usize = 0;
-        while (literals <= std.math.maxInt(u3)) : (literals += 1) {
+        while (literals <= maxInt(u3)) : (literals += 1) {
             try encoding.append(Encoder.marker(.{
                 .run_bit = 0,
                 .run_length = 4,
                 .literals = @intCast(u3, literals),
             }));
             var i: usize = 0;
-            while (i < literals) : (i += 1) try encoding.append(prng.random.int(u8));
+            while (i < literals) : (i += 1) {
+                try encoding.append(prng.random.intRangeLessThan(u8, 1, maxInt(u8)));
+            }
             try test_decode(encoding.items);
             encoding.items.len = 0;
         }
@@ -629,32 +563,29 @@ test "BitSetEncoder decode, encode, decode" {
 
 fn test_decode(encoded_expect: []u8) !void {
     const Encoder = BitSetEncoder(u8);
-    const decoded_actual = try std.testing.allocator.alloc(u8, 1024);
-    defer std.testing.allocator.free(decoded_actual);
+    const decoded_expect = try std.testing.allocator.alloc(u8, 1024);
+    defer std.testing.allocator.free(decoded_expect);
 
-    const decoded_actual_length = Encoder.decode(encoded_expect, decoded_actual);
-    const encoded_actual = try std.testing.allocator.alloc(u8, Encoder.encode_size_max(decoded_actual[0..decoded_actual_length]));
+    const decoded_expect_length = Encoder.decode(encoded_expect, decoded_expect);
+    const encoded_actual = try std.testing.allocator.alloc(u8, Encoder.encode_size_max(decoded_expect[0..decoded_expect_length]));
     defer std.testing.allocator.free(encoded_actual);
 
-    const encoded_actual_length = Encoder.encode(decoded_actual[0..decoded_actual_length], encoded_actual);
-    std.debug.print("{any} != {any}\n", .{encoded_expect, encoded_actual[0..encoded_actual_length]});
+    const encoded_actual_length = Encoder.encode(decoded_expect[0..decoded_expect_length], encoded_actual);
     try std.testing.expectEqual(encoded_expect.len, encoded_actual_length);
     try std.testing.expectEqualSlices(u8, encoded_expect, encoded_actual[0..encoded_actual_length]);
+
+    const encoded_size_max = Encoder.encode_size_max(decoded_expect[0..decoded_expect_length]);
+    try std.testing.expect(encoded_expect.len <= encoded_size_max);
+
+    const decoded_actual = try std.testing.allocator.alloc(u8, decoded_expect_length);
+    defer std.testing.allocator.free(decoded_actual);
+
+    const decoded_actual_length = Encoder.decode(encoded_actual, decoded_actual);
+    try std.testing.expectEqual(decoded_expect_length, decoded_actual_length);
+    try std.testing.expectEqualSlices(u8, decoded_expect[0..decoded_expect_length], decoded_actual);
 }
 
-fn expect_block_free_set_equal(a: BlockFreeSet, b: BlockFreeSet) !void {
-    try expect_bitset_equal(a.blocks, b.blocks);
-    try expect_bitset_equal(a.index, b.index);
-}
-
-fn expect_bitset_equal(a: DynamicBitSetUnmanaged, b: DynamicBitSetUnmanaged) !void {
-    try std.testing.expectEqual(a.bit_length, b.bit_length);
-    const a_masks = bitset_masks(a);
-    const b_masks = bitset_masks(b);
-    for (a_masks) |aw, i| try std.testing.expectEqual(aw, b_masks[i]);
-}
-
-test "BlockFreeSet decode small bitset into large biset" {
+test "BlockFreeSet decode small bitset into large bitset" {
     const shard_size = BlockFreeSet.shard_size;
     var small_set = try BlockFreeSet.init(std.testing.allocator, shard_size);
     defer small_set.deinit(std.testing.allocator);
