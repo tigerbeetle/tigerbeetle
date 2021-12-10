@@ -40,6 +40,8 @@ comptime {
 ///     [run_bit:u1][run_length:u31(LE)][literals_count:u32(LE)]
 ///
 /// and is immediately followed by `literals_count` 64-bit literals.
+/// `run_length` measures words, not bits.
+///
 /// This encoding requires that the architecture is little-endian with 64-bit words.
 pub const BlockFreeSet = struct {
     // Each bit of `index` is the OR of `shard_size` bits of `blocks`.
@@ -130,7 +132,7 @@ pub const BlockFreeSet = struct {
 
         set.index.set(block / shard_size);
         set.blocks.set(block);
-        set.recent.push(block) catch {};
+        set.recent.push(block) catch {}; // ignore error.NoSpaceLeft
     }
 
     /// Decodes the compressed bitset in `source` into `set`. Panics if `source`'s encoding is invalid.
@@ -161,7 +163,6 @@ pub const BlockFreeSet = struct {
             if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
         }
     }
-
 
     // Returns the maximum number of bytes that the `BlockFreeSet` needs to encode to.
     pub fn encode_size_max(set: BlockFreeSet) usize {
@@ -235,7 +236,8 @@ test "div_ceil" {
     try std.testing.expectEqual(div_ceil(usize, 9, 8), 2);
 }
 
-// Returns the index of a set bit (relative to the start of the bitset) within start…end (inclusive…exclusive).
+// Returns the index of a set bit (relative to the start of the bitset)
+// within start…end (inclusive…exclusive).
 fn find_first_set_bit(bitset: DynamicBitSetUnmanaged, start: usize, end: usize) ?usize {
     assert(end <= bitset.bit_length);
     const word_start = start / @bitSizeOf(MaskInt);
@@ -299,14 +301,14 @@ test "BlockFreeSet acquire/release" {
     try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - BlockFreeSet.shard_size);
     try test_block_shards_count(1, BlockFreeSet.shard_size); // At least one index bit is required.
     // Block counts are not necessarily a multiple of the word size.
-    try test_block_free_set(BlockFreeSet.shard_size);
-    try test_block_free_set(2 * BlockFreeSet.shard_size);
-    try test_block_free_set(63 * BlockFreeSet.shard_size);
-    try test_block_free_set(64 * BlockFreeSet.shard_size);
-    try test_block_free_set(65 * BlockFreeSet.shard_size);
+    try test_acquire_release(BlockFreeSet.shard_size);
+    try test_acquire_release(2 * BlockFreeSet.shard_size);
+    try test_acquire_release(63 * BlockFreeSet.shard_size);
+    try test_acquire_release(64 * BlockFreeSet.shard_size);
+    try test_acquire_release(65 * BlockFreeSet.shard_size);
 }
 
-fn test_block_free_set(blocks_count: usize) !void {
+fn test_acquire_release(blocks_count: usize) !void {
     const expectEqual = std.testing.expectEqual;
     // Acquire everything, then release, then acquire again.
     var set = try BlockFreeSet.init(std.testing.allocator, blocks_count);
@@ -342,54 +344,103 @@ fn test_block_shards_count(expect_shards_count: usize, blocks_count: usize) !voi
     try std.testing.expectEqual(expect_shards_count, set.index.bit_length);
 }
 
-test "BlockFreeSet encode/decode" {
-    try test_block_free_set_encode(BlockFreeSet.shard_size, 0); // fully allocated
-    try test_block_free_set_encode(BlockFreeSet.shard_size, BlockFreeSet.shard_size); // fully free
+test "BlockFreeSet encode, decode, encode" {
+    const shard_size = BlockFreeSet.shard_size / @bitSizeOf(usize);
+    // Uniform.
+    try test_encode_decode(&.{
+        .{.fill = .run_one, .words = shard_size},
+    });
+    try test_encode_decode(&.{
+        .{.fill = .run_zero, .words = shard_size},
+    });
+    try test_encode_decode(&.{
+        .{.fill = .literal, .words = shard_size},
+    });
+    try test_encode_decode(&.{
+        .{.fill = .run_one, .words = std.math.maxInt(u16) + 1},
+    });
 
-    // TODO update old comment
-    // 256 (max run length) * 65 runs/word (to ensure fast path) * 64 blocks/word
-    const big = 256 * 65 * 64;
-    try test_block_free_set_encode(big, 0);
-    try test_block_free_set_encode(big, big);
-    try test_block_free_set_encode(big, big / 16); // mostly free
-    try test_block_free_set_encode(big, big / 16 * 15); // mostly full
-}
+    // Mixed.
+    try test_encode_decode(&.{
+        .{.fill = .run_one, .words = shard_size / 4},
+        .{.fill = .run_zero, .words = shard_size / 4},
+        .{.fill = .literal, .words = shard_size / 4},
+        .{.fill = .run_one, .words = shard_size / 4},
+    });
 
-fn test_block_free_set_encode(blocks_count: usize, unset_bits: usize) !void {
-    assert(unset_bits <= blocks_count);
+    // Random.
     var seed: u64 = undefined;
     try std.os.getrandom(mem.asBytes(&seed));
     var prng = std.rand.DefaultPrng.init(seed);
 
-    var set = try BlockFreeSet.init(std.testing.allocator, blocks_count);
-    defer set.deinit(std.testing.allocator);
-
-    // To set up a BlockFreeSet for testing, first allocate everything, then free selected blocks.
-    // This ensures that the index and block bitsets are synced.
-    if (unset_bits < blocks_count) {
+    const fills = [_]BitSetPatternFill{.run_one, .run_zero, .literal};
+    var t: usize = 0;
+    while (t < 10) : (t += 1) {
+        var patterns = std.ArrayList(BitSetPattern).init(std.testing.allocator);
+        defer patterns.deinit();
         var i: usize = 0;
-        while (i < blocks_count) : (i += 1) {
-            const address = i + 1;
-            try std.testing.expectEqual(@as(?u64, address), set.acquire());
+        while (i < shard_size) : (i += 1) {
+            try patterns.append(.{
+                .fill = fills[prng.random.uintLessThan(usize, fills.len)],
+                .words = 1,
+            });
         }
+        try test_encode_decode(patterns.items);
+    }
+}
 
-        var j: usize = 0;
-        while (j < unset_bits) : (j += 1) {
-            const address = prng.random.uintLessThan(usize, blocks_count) + 1;
-            if (!set.is_free(address)) set.release(address);
+const BitSetPattern = struct {
+    fill: BitSetPatternFill,
+    words: usize,
+};
+
+const BitSetPatternFill = enum { run_one, run_zero, literal };
+
+fn test_encode_decode(patterns: []const BitSetPattern) !void {
+    var seed: u64 = undefined;
+    try std.os.getrandom(mem.asBytes(&seed));
+    var prng = std.rand.DefaultPrng.init(seed);
+
+    var blocks_count: usize = 0;
+    for (patterns) |pattern| blocks_count += pattern.words * @bitSizeOf(usize);
+    var decoded_expect = try BlockFreeSet.init(std.testing.allocator, blocks_count);
+    defer decoded_expect.deinit(std.testing.allocator);
+
+    {
+        // The `index` will start out zero-filled. Every non-zero pattern will update the
+        // corresponding index bit with a one (probably many times) to ensure it ends up synced
+        // with `blocks`.
+        std.mem.set(usize, bitset_masks(decoded_expect.index), 0);
+
+        // Fill the bitset according to the patterns.
+        var blocks = bitset_masks(decoded_expect.blocks);
+        var blocks_offset: usize = 0;
+        for (patterns) |pattern| {
+            var i: usize = 0;
+            while (i < pattern.words) : (i += 1) {
+                blocks[blocks_offset] = switch (pattern.fill) {
+                    .run_one => ~@as(usize, 0),
+                    .run_zero => 0,
+                    .literal => prng.random.intRangeLessThan(usize, 1, std.math.maxInt(usize)),
+                };
+                const index_bit = blocks_offset * @bitSizeOf(usize) / BlockFreeSet.shard_size;
+                if (pattern.fill != .run_zero) decoded_expect.index.set(index_bit);
+                blocks_offset += 1;
+            }
         }
+        assert(blocks_offset == blocks.len);
     }
 
-    var buffer = try std.testing.allocator.alloc(u8, set.encode_size_max());
-    defer std.testing.allocator.free(buffer);
+    var encoded = try std.testing.allocator.alloc(u8, decoded_expect.encode_size_max());
+    defer std.testing.allocator.free(encoded);
 
-    try std.testing.expectEqual(buffer.len % 8, 0);
-    const buffer_wrote = set.encode(buffer);
-    var set2 = try BlockFreeSet.init(std.testing.allocator, blocks_count);
-    defer set2.deinit(std.testing.allocator);
+    try std.testing.expectEqual(encoded.len % 8, 0);
+    const encoded_length = decoded_expect.encode(encoded);
+    var decoded_actual = try BlockFreeSet.init(std.testing.allocator, blocks_count);
+    defer decoded_actual.deinit(std.testing.allocator);
 
-    set2.decode(buffer[0..buffer_wrote]);
-    try expect_block_free_set_equal(set, set2);
+    decoded_actual.decode(encoded[0..encoded_length]);
+    try expect_block_free_set_equal(decoded_expect, decoded_actual);
 }
 
 fn expect_block_free_set_equal(a: BlockFreeSet, b: BlockFreeSet) !void {
