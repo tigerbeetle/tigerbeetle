@@ -184,6 +184,7 @@ test('can create a two-phase transfer', async (): Promise<void> => {
   assert.strictEqual(transfers[0].credit_account_id, accountA.id)
   assert.strictEqual(transfers[0].debit_account_id, accountB.id)
   assert.strictEqual(transfers[0].user_data, 0n)
+  assert.strictEqual(transfers[0].code, 1)
 })
 
 test('can commit a two-phase transfer', async (): Promise<void> => {
