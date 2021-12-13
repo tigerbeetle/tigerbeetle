@@ -611,7 +611,7 @@ fn on_result(user_data: u128, operation: Operation, results: Client.Error![]cons
                 value,
             ) catch return,
             .lookup_accounts => encode_napi_results_array(Account, env, value) catch return,
-            .lookup_transfers => encode_napi_results_array(Account, env, value) catch return,
+            .lookup_transfers => encode_napi_results_array(Transfer, env, value) catch return,
         };
 
         argv[0] = globals.napi_undefined;
