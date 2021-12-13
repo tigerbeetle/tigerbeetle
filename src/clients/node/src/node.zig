@@ -394,7 +394,7 @@ fn encode_napi_results_array(
                     napi_object,
                     "timestamp",
                     result.timestamp,
-                    "Failed to set property \"timestamp\" of account lookup result.",
+                    "Failed to set property \"timestamp\" of transfer lookup result.",
                 );
 
                 try translate.set_array_element(
