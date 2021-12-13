@@ -86,7 +86,7 @@ pub const Demo = struct {
         operation: StateMachine.Operation,
         results: Client.Error![]const u8,
     ) void {
-        print_results(Account, results);
+        print_results(Transfer, results);
     }
 
     pub fn on_create_transfers(
