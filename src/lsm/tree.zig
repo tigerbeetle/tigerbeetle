@@ -37,31 +37,50 @@ const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
 // vsr.zig
 pub const SuperBlock = packed struct {
     checksum: u128,
+    cluster: u32,
+    local_storage_size: u32,
+
+    /// Reserved for future use (e.g. changing compression algorithm of trailer)
+    flags: u64,
 
     // Monotonically increasing counter of superblock generations. This enables us to find the
     // latest SuperBlock at startup, which we cross-check using the parent hash chain.
     version: u64,
     parent: u128,
 
+    // TODO remove this?
+    replica: u8,
     vsr_committed_log_offset: u64,
     client_table: [config.clients_max]ClientTableEntry,
 
-    // The block free set is stored separately from the SuperBlock in a pair of copy on write buffers.
-    // The active buffer is determined by (SuperBlock.version % 2)
+    /// The size and checksum of the block free set stored in the SuperBlock trailer.
     block_free_set_size: u32,
     block_free_set_checksum: u128,
 
-    /// The manifest addresses must be listed here in order:
+    /// The number of manifest block addresses and block checksums stored in the
+    /// SuperBlock trailer and the checksum of this data.
+    ///
+    /// The block addresses and block checksums in the trailer are laid out as follows:
+    /// [manifest_blocks_count]u64 address
+    /// [manifest_blocks_count]u128 checksum
+    ///
+    /// A manifest_blocks_count of 4096 is more than enough to address 100 TiB of 64 MiB tables.
+    /// Since we only write the bytes that we actually use however, we can be quite generous
+    /// with the fixed size disk allocation for this trailer.
+    ///
+    /// TODO One possible layout
     /// 1. all positive manifest blocks of LSM 1, in order of their appearance in the manifest.
     /// 2. all negative manifest blocks of LSM 1, in order of their appearance in the manifest.
     /// 3. all positive manifest blocks of LSM 2, ...
     /// 4. ...
-    manifest_addresses: [2048]u64,
-    manifest_checksums: [2048]u128,
+    manifest_blocks_count: u32,
+    manifest_blocks_checksum: u128,
 
     /// Timestamp of 0 indicates that the snapshot slot is free
     snapshot_timestamps: [config.lsm_snapshots_max]u64,
     snapshot_last_used: [config.lsm_snapshots_max]u64,
+
+    _reserved: [1024]u8,
 };
 
 // vsr.zig
@@ -92,6 +111,10 @@ pub fn BlockStorage(comptime Storage: type) type {
             // TODO
         }
 
+        /// This function transparently handles recovery if the checksum fails.
+        /// If necessary, this read will be added to a linked list in Storage,
+        /// which Replica can then interrogate each tick(). The callback passed
+        /// to this function won't be called until the block has been recovered.
         pub fn read_block(
             callback: fn (Storage.Read) void,
             read: *Storage.Read,
