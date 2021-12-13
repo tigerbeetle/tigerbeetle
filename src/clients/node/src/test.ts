@@ -176,6 +176,14 @@ test('can create a two-phase transfer', async (): Promise<void> => {
   assert.strictEqual(accounts[1].credits_reserved, 0n)
   assert.strictEqual(accounts[1].debits_accepted, 100n)
   assert.strictEqual(accounts[1].debits_reserved, 50n)
+
+  //Lookup the transfer
+  const transfers = await client.lookupTransfers([transfer.id])
+  assert.strictEqual(transfers.length, 1)
+  assert.strictEqual(transfers[0].amount, 50n)
+  assert.strictEqual(transfers[0].credit_account_id, accountA.id)
+  assert.strictEqual(transfers[0].debit_account_id, accountB.id)
+  assert.strictEqual(transfers[0].user_data, 0n)
 })
 
 test('can commit a two-phase transfer', async (): Promise<void> => {
