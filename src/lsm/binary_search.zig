@@ -9,8 +9,8 @@ const math = std.math;
 pub fn binary_search(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) callconv(.Inline) Key,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    comptime key_from_value: fn (Value) Key,
+    comptime compare_keys: fn (Key, Key) math.Order,
     values: []const Value,
     key: Key,
 ) usize {
@@ -117,6 +117,7 @@ const test_binary_search = struct {
     }
 };
 
+// TODO test search on empty slice
 test "binary search: exhaustive" {
     if (test_binary_search.log) std.debug.print("\n", .{});
     var i: u32 = 1;

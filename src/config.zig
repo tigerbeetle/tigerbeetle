@@ -181,13 +181,14 @@ pub const io_depth_read = 8;
 pub const io_depth_write = 8;
 
 // TODO docs
-pub const lsm_trees = 6;
+// TODO We probably don't need quite this many.
+// This should be fine up to 100 though.
+pub const lsm_trees = 30;
 
 /// Number of levels in an LSM tree.
-/// TODO tune this.
-pub const lsm_levels = 7;
+pub const lsm_levels = 6;
 
-pub const lsm_growth_factor = 10;
+pub const lsm_growth_factor = 8;
 
 /// Max key size for the LSM Trees in bytes
 pub const lsm_key_size_max = 32;
@@ -197,6 +198,9 @@ pub const lsm_table_size_max = 64 * 1024 * 1024;
 /// Size of blocks used by the LSM tree implementation. These blocks are passed
 /// through an LRU block cache.
 pub const lsm_table_block_size = 64 * 1024;
+
+/// Size of nodes used by the LSM tree manifest implementation.
+pub const lsm_manifest_node_size = 16 * 1024;
 
 pub const lsm_mutable_table_size_max = 4 * message_size_max;
 
@@ -246,3 +250,5 @@ pub const clock_synchronization_window_min_ms = 2000;
 /// This eliminates the impact of gradual clock drift on our clock offset (clock skew) measurements.
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = 20000;
+
+pub const is_32_bit = @sizeOf(usize) == 4;
