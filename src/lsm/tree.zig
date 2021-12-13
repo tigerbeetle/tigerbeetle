@@ -126,6 +126,11 @@ pub fn BlockStorage(comptime Storage: type) type {
     };
 }
 
+pub const Direction = enum {
+    ascending,
+    descending,
+};
+
 pub fn LsmTree(
     /// Key sizes of 8, 16, 32, etc. are supported with alignment 8 or 16.
     comptime Key: type,
@@ -148,12 +153,6 @@ pub fn LsmTree(
         const Self = @This();
 
         pub const Manifest = struct {
-            /// 4MiB table
-            ///
-            /// 32_768 bytes transfers
-            /// 65_536 bytes bloom filter
-            /// 16_384 bytes index
-            ///
             /// First 128 bytes of the table are a VSR protocol header for a repair message.
             /// This data is filled in on writing the table so that we don't
             /// need to do any extra work before sending the message on repair.
@@ -161,6 +160,7 @@ pub fn LsmTree(
                 checksum: u128,
                 address: u64,
                 timestamp: u64,
+
                 key_min: Key,
                 key_max: Key,
 
@@ -170,9 +170,74 @@ pub fn LsmTree(
                 }
             };
 
-            levels: [config.lsm_levels][]TableInfo,
+            pub const Level = struct {
+                key_mins: []Key,
+                key_mins: []Key,
+            };
 
-            pub fn level_tables(manifest: *Manifest, level: u32, timestamp_max: u64) []TableInfo {}
+            levels: [config.lsm_levels]Level,
+
+            pub fn table(
+                manifest: *Manifest,
+                /// May pass math.maxInt(u64) if there is no snapshot.
+                snapshot: u64,
+                level: u8,
+                key: Key,
+            ) ?TableInfo {
+                const info = manifest.levels[level].get(key, snapshot) orelse return null;
+
+                assert(compare_keys(key, info.key_max) != .gt);
+                if (compare_keys(key, info.key_min) != .lt) return info;
+
+                return null;
+            }
+
+            fn table_index(
+                manifest: *Manifest,
+                /// May pass math.maxInt(u64) if there is no snapshot.
+                snapshot: u64,
+                level: u8,
+                key: Key,
+                direction: Direction,
+            ) ?Index {
+                // TODO
+            }
+
+            fn table_index(manifest: *Manifest, index: Index) void {}
+
+            pub const Iterator = struct {
+                manifest: *Manifest,
+                snapshot: u64,
+                level: u8,
+                index: u32,
+                end: Key,
+                direction: Direction,
+
+                pub fn next(it: *Iterator) ?TableInfo {
+                    // assume direction is ascending
+                    // search for the current key_min in the manifest, given level and snapshot
+                    //
+                }
+            };
+
+            pub fn get_tables(
+                manifest: *Manifest,
+                /// May pass math.maxInt(u64) if there is no snapshot.
+                snapshot: u64,
+                level: u8,
+                key_min: Key,
+                key_max: Key,
+                direction: Direction,
+            ) Iterator {
+                return .{
+                    .manifest = manifest,
+                    .snapshot = snapshot,
+                    .level = level,
+                    .key_min = key_min,
+                    .key_max = key_max,
+                    .direction = direction,
+                };
+            }
         };
 
         /// Point queries go through the object cache instead of directly accessing this table.
