@@ -60,7 +60,11 @@ Let's turn up the log level some more (and your favorite album) so you can see e
 
 * Open `src/config.zig` in your editor and change `log_level` to `7` (debug).
 
-* Start a single replica cluster: `./tigerbeetle --cluster=1 --addresses=3001 --replica=0`
+* Start a single replica cluster:
+Init:
+`./tigerbeetle init --cluster=0 --replica=0 --directory=.`
+Run:
+`./tigerbeetle start --cluster=0 --replica=0 --addresses=3001 --directory=. &`
 
 ### Demo 1, 2: Create and lookup accounts
 
@@ -84,6 +88,7 @@ Let's create some simple double-entry accounting journal entries:
 ```
 zig run src/demo_03_create_transfers.zig
 zig run src/demo_02_lookup_accounts.zig
+zig run src/demo_07_lookup_transfers.zig
 ```
 
 ### Demo 4, 5, 6: Two-phase commit journal entries
