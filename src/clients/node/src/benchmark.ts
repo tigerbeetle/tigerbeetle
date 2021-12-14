@@ -185,7 +185,7 @@ const runBenchmarkRawReqeust = async () => {
   let maxCommitTransfersLatency = 0
   const start = Date.now()
 
-  for(let i = 0; i < transfers.length; i++) {
+  for (let i = 0; i < transfers.length; i++) {
     const ms1 = Date.now()
 
     const transferResults = await rawCreateTransfers(transfers[i])
@@ -265,7 +265,7 @@ const runBenchmark = async () => {
   let maxCommitTransfersLatency = 0
   const start = Date.now()
 
-  for(let i = 0; i < transfers.length; i++) {
+  for (let i = 0; i < transfers.length; i++) {
     const ms1 = Date.now()
 
     const transferResults = await client.createTransfers(transfers[i])
