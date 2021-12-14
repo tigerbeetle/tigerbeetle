@@ -184,7 +184,7 @@ test('can create a two-phase transfer', async (): Promise<void> => {
   assert.strictEqual(transfers[0].debit_account_id, accountB.id)
   assert.strictEqual(transfers[0].credit_account_id, accountA.id)
   assert.strictEqual(transfers[0].user_data, 0n)
-  assert.strictEqual(transfers[0].reserved, Zeroed32Bytes)
+  assert.notStrictEqual(transfers[0].reserved, Zeroed32Bytes)
   assert.strictEqual(transfers[0].timeout > 0, true)
   assert.strictEqual(transfers[0].code, 1)
   assert.strictEqual(transfers[0].flags, 2)
