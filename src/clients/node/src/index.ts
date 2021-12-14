@@ -150,16 +150,18 @@ export type CommitTransfersError = {
 }
 
 export type AccountID = bigint // u128
+export type TransferID = bigint // u128
 
-export type Event = Account | Transfer | Commit | AccountID
-export type Result = CreateAccountsError | CreateTransfersError | CommitTransfersError | Account
+export type Event = Account | Transfer | Commit | AccountID | TransferID
+export type Result = CreateAccountsError | CreateTransfersError | CommitTransfersError | Account | Transfer
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export enum Operation {
   CREATE_ACCOUNT = 3,
   CREATE_TRANSFER,
   COMMIT_TRANSFER,
-  ACCOUNT_LOOKUP
+  ACCOUNT_LOOKUP,
+  TRANSFER_LOOKUP
 }
 
 export interface Client {
@@ -167,6 +169,7 @@ export interface Client {
   createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
   commitTransfers: (batch: Commit[]) => Promise<CommitTransfersError[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
+  lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
   request: (operation: Operation, batch: Event[], callback: ResultCallback) => void
   rawRequest: (operation: Operation, rawBatch: Buffer, callback: ResultCallback) => void
   destroy: () => void
@@ -236,6 +239,7 @@ export function createClient (args: InitArgs): Client {
       const callback = (error: undefined | Error, results: CreateAccountsError[]) => {
         if (error) {
           reject(error)
+          return
         }
         resolve(results)
       }
@@ -262,6 +266,7 @@ export function createClient (args: InitArgs): Client {
       const callback = (error: undefined | Error, results: CreateTransfersError[]) => {
         if (error) {
           reject(error)
+          return
         }
         resolve(results)
       }
@@ -288,6 +293,7 @@ export function createClient (args: InitArgs): Client {
       const callback = (error: undefined | Error, results: CommitTransfersError[]) => {
         if (error) {
           reject(error)
+          return
         }
         resolve(results)
       }
@@ -305,12 +311,31 @@ export function createClient (args: InitArgs): Client {
       const callback = (error: undefined | Error, results: Account[]) => {
         if (error) {
           reject(error)
+          return
         }
         resolve(results)
       }
 
       try {
         binding.request(context, Operation.ACCOUNT_LOOKUP, batch, callback)
+      } catch (error) {
+        reject(error)
+      }
+    })
+  }
+
+  const lookupTransfers = async (batch: TransferID[]): Promise<Transfer[]> => {
+    return new Promise((resolve, reject) => {
+      const callback = (error: undefined | Error, results: Transfer[]) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve(results)
+      }
+
+      try {
+        binding.request(context, Operation.TRANSFER_LOOKUP, batch, callback)
       } catch (error) {
         reject(error)
       }
@@ -330,6 +355,7 @@ export function createClient (args: InitArgs): Client {
     createTransfers,
     commitTransfers,
     lookupAccounts,
+    lookupTransfers,
     request,
     rawRequest,
     destroy
