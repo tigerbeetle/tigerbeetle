@@ -239,6 +239,7 @@ export function createClient (args: InitArgs): Client {
       const callback = (error: undefined | Error, results: CreateAccountsError[]) => {
         if (error) {
           reject(error)
+          return
         }
         resolve(results)
       }
@@ -265,6 +266,7 @@ export function createClient (args: InitArgs): Client {
       const callback = (error: undefined | Error, results: CreateTransfersError[]) => {
         if (error) {
           reject(error)
+          return
         }
         resolve(results)
       }
@@ -291,6 +293,7 @@ export function createClient (args: InitArgs): Client {
       const callback = (error: undefined | Error, results: CommitTransfersError[]) => {
         if (error) {
           reject(error)
+          return
         }
         resolve(results)
       }
@@ -308,6 +311,7 @@ export function createClient (args: InitArgs): Client {
       const callback = (error: undefined | Error, results: Account[]) => {
         if (error) {
           reject(error)
+          return
         }
         resolve(results)
       }
@@ -325,6 +329,7 @@ export function createClient (args: InitArgs): Client {
       const callback = (error: undefined | Error, results: Transfer[]) => {
         if (error) {
           reject(error)
+          return
         }
         resolve(results)
       }
