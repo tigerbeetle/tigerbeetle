@@ -213,7 +213,7 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
             .credits_accepted = try translate.u64_from_object(env, object, "credits_accepted"),
             .timestamp = try validate_timestamp(env, object),
         },
-        u128 => try translate.u128_from_value(env, object, "Account or Transfer lookup"),
+        u128 => try translate.u128_from_value(env, object, "lookup"),
         else => unreachable,
     };
 }
@@ -297,104 +297,6 @@ fn encode_napi_results_array(
                     "code",
                     @enumToInt(result.result),
                     "Failed to set property \"code\" of result.",
-                );
-
-                try translate.set_array_element(
-                    env,
-                    napi_array,
-                    i,
-                    napi_object,
-                    "Failed to set element in results array.",
-                );
-            }
-        },
-        Transfer => {
-            var i: u32 = 0;
-            while (i < results.len) : (i += 1) {
-                const result = results[i];
-                const napi_object = try translate.create_object(
-                    env,
-                    "Failed to create transfer lookup result object.",
-                );
-
-                try translate.u128_into_object(
-                    env,
-                    napi_object,
-                    "id",
-                    result.id,
-                    "Failed to set property \"id\" of transfer lookup result.",
-                );
-
-                try translate.u128_into_object(
-                    env,
-                    napi_object,
-                    "debit_account_id",
-                    result.debit_account_id,
-                    "Failed to set property \"debit_account_id\" of transfer lookup result.",
-                );
-
-                try translate.u128_into_object(
-                    env,
-                    napi_object,
-                    "credit_account_id",
-                    result.credit_account_id,
-                    "Failed to set property \"credit_account_id\" of transfer lookup result.",
-                );
-
-                try translate.u128_into_object(
-                    env,
-                    napi_object,
-                    "user_data",
-                    result.user_data,
-                    "Failed to set property \"user_data\" of transfer lookup result.",
-                );
-
-                try translate.byte_slice_into_object(
-                    env,
-                    napi_object,
-                    "reserved",
-                    &result.reserved,
-                    "Failed to set property \"reserved\" of transfer lookup result.",
-                );
-
-                try translate.u64_into_object(
-                    env,
-                    napi_object,
-                    "timeout",
-                    result.timeout,
-                    "Failed to set property \"timeout\" of transfer lookup result.",
-                );
-
-                try translate.u32_into_object(
-                    env,
-                    napi_object,
-                    "code",
-                    @intCast(u32, result.code),
-                    "Failed to set property \"code\" of transfer lookup result.",
-                );
-
-                try translate.u32_into_object(
-                    env,
-                    napi_object,
-                    "flags",
-                    @bitCast(u32, result.flags),
-                    "Failed to set property \"flags\" of transfer lookup result.",
-                );
-
-                try translate.u64_into_object(
-                    env,
-                    napi_object,
-                    "amount",
-                    result.amount,
-                    "Failed to set property \"amount\" of transfer lookup result.",
-                );
-
-                try translate.u64_into_object(
-                    env,
-                    napi_object,
-                    "timestamp",
-                    result.timestamp,
-                    "Failed to set property \"timestamp\" of transfer lookup result.",
                 );
 
                 try translate.set_array_element(
@@ -501,6 +403,104 @@ fn encode_napi_results_array(
                     "timestamp",
                     result.timestamp,
                     "Failed to set property \"timestamp\" of account lookup result.",
+                );
+
+                try translate.set_array_element(
+                    env,
+                    napi_array,
+                    i,
+                    napi_object,
+                    "Failed to set element in results array.",
+                );
+            }
+        },
+        Transfer => {
+            var i: u32 = 0;
+            while (i < results.len) : (i += 1) {
+                const result = results[i];
+                const napi_object = try translate.create_object(
+                    env,
+                    "Failed to create transfer lookup result object.",
+                );
+
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "id",
+                    result.id,
+                    "Failed to set property \"id\" of transfer lookup result.",
+                );
+
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "debit_account_id",
+                    result.debit_account_id,
+                    "Failed to set property \"debit_account_id\" of transfer lookup result.",
+                );
+
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "credit_account_id",
+                    result.credit_account_id,
+                    "Failed to set property \"credit_account_id\" of transfer lookup result.",
+                );
+
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "user_data",
+                    result.user_data,
+                    "Failed to set property \"user_data\" of transfer lookup result.",
+                );
+
+                try translate.byte_slice_into_object(
+                    env,
+                    napi_object,
+                    "reserved",
+                    &result.reserved,
+                    "Failed to set property \"reserved\" of transfer lookup result.",
+                );
+
+                try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "timeout",
+                    result.timeout,
+                    "Failed to set property \"timeout\" of transfer lookup result.",
+                );
+
+                try translate.u32_into_object(
+                    env,
+                    napi_object,
+                    "code",
+                    @intCast(u32, result.code),
+                    "Failed to set property \"code\" of transfer lookup result.",
+                );
+
+                try translate.u32_into_object(
+                    env,
+                    napi_object,
+                    "flags",
+                    @bitCast(u32, result.flags),
+                    "Failed to set property \"flags\" of transfer lookup result.",
+                );
+
+                try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "amount",
+                    result.amount,
+                    "Failed to set property \"amount\" of transfer lookup result.",
+                );
+
+                try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "timestamp",
+                    result.timestamp,
+                    "Failed to set property \"timestamp\" of transfer lookup result.",
                 );
 
                 try translate.set_array_element(
