@@ -260,8 +260,8 @@ pub const StateMachine = struct {
 
     fn execute_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = std.mem.bytesAsSlice(u128, input);
-        var output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
-        var results = std.mem.bytesAsSlice(Account, output[0..output_len]);
+        const output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
+        const results = std.mem.bytesAsSlice(Account, output[0..output_len]);
         var results_count: usize = 0;
         for (batch) |id, index| {
             if (self.get_account(id)) |result| {
@@ -274,8 +274,8 @@ pub const StateMachine = struct {
 
     fn execute_lookup_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
         const batch = std.mem.bytesAsSlice(u128, input);
-        var output_len = @divFloor(output.len, @sizeOf(Transfer)) * @sizeOf(Transfer);
-        var results = std.mem.bytesAsSlice(Transfer, output[0..output_len]);
+        const output_len = @divFloor(output.len, @sizeOf(Transfer)) * @sizeOf(Transfer);
+        const results = std.mem.bytesAsSlice(Transfer, output[0..output_len]);
         var results_count: usize = 0;
         for (batch) |id, index| {
             if (self.get_transfer(id)) |result| {
