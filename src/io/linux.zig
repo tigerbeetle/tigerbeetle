@@ -932,4 +932,51 @@ pub const IO = struct {
     pub fn open_socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         return os.socket(family, sock_type, protocol);
     }
+
+    pub const open_file = IO.open_file_posix(struct {
+        pub const O_DIRECT: ?i32 = os.O_DIRECT;
+
+        pub fn fs_supports_direct_io(dir_fd: os.fd_t) !bool {
+            const path = "fs_supports_direct_io";
+            const dir = std.fs.Dir{ .fd = dir_fd };
+            const fd = try os.openatZ(dir_fd, path, os.O_CLOEXEC | os.O_CREAT | os.O_TRUNC, 0o666);
+            defer os.close(fd);
+            defer dir.deleteFile(path) catch {};
+
+            while (true) {
+                const res = os.system.openat(dir_fd, path, os.O_CLOEXEC | os.O_RDONLY | os.O_DIRECT, 0);
+                switch (os.linux.getErrno(res)) {
+                    0 => {
+                        os.close(@intCast(os.fd_t, res));
+                        return true;
+                    },
+                    os.linux.EINTR => continue,
+                    os.linux.EINVAL => return false,
+                    else => |err| return os.unexpectedErrno(err),
+                }
+            }
+        }
+
+        pub fn fallocate(fd: os.fd_t, mode: i32, offset: i64, length: i64) !void {
+            while (true) {
+                const rc = os.linux.fallocate(fd, mode, offset, length);
+                switch (os.linux.getErrno(rc)) {
+                    0 => return,
+                    os.linux.EBADF => return error.FileDescriptorInvalid,
+                    os.linux.EFBIG => return error.FileTooBig,
+                    os.linux.EINTR => continue,
+                    os.linux.EINVAL => return error.ArgumentsInvalid,
+                    os.linux.EIO => return error.InputOutput,
+                    os.linux.ENODEV => return error.NoDevice,
+                    os.linux.ENOSPC => return error.NoSpaceLeft,
+                    os.linux.ENOSYS => return error.SystemOutdated,
+                    os.linux.EOPNOTSUPP => return error.OperationNotSupported,
+                    os.linux.EPERM => return error.PermissionDenied,
+                    os.linux.ESPIPE => return error.Unseekable,
+                    os.linux.ETXTBSY => return error.FileBusy,
+                    else => |errno| return os.unexpectedErrno(errno),
+                }
+            }
+        }
+    });
 };
