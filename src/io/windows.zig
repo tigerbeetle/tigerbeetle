@@ -218,7 +218,7 @@ pub const IO = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
                 // Perform the operation and get the result
                 const _op_data = &@field(_completion.operation, @tagName(op_tag));
-                const result = OperationImpl.doOperation(_op_data);
+                const result = OperationImpl.do_operation(_op_data);
 
                 // Schedule the socket and completion onto windows AFD when WouldBlock is detected
                 if (switch (op_tag) {
@@ -290,7 +290,7 @@ pub const IO = struct {
             .accept,
             .{ .socket = socket },
             struct {
-                fn doOperation(op: anytype) AcceptError!os.socket_t {
+                fn do_operation(op: anytype) AcceptError!os.socket_t {
                     return os.accept(op.socket, null, null, 0);
                 }
             },
@@ -323,7 +323,7 @@ pub const IO = struct {
             .close,
             .{ .fd = fd },
             struct {
-                fn doOperation(op: anytype) CloseError!void {
+                fn do_operation(op: anytype) CloseError!void {
                     // Check if the fd is a SOCKET by seeing if getsockopt() returns ENOTSOCK
                     // https://stackoverflow.com/a/50981652
                     const socket = @ptrCast(os.socket_t, op.fd);
@@ -363,7 +363,7 @@ pub const IO = struct {
                 .initiated = false,
             },
             struct {
-                fn doOperation(op: anytype) ConnectError!void {
+                fn do_operation(op: anytype) ConnectError!void {
                     // Don't call connect after being rescheduled by io_pending as it gives EISCONN.
                     // Instead, check the socket error to see if has been connected successfully.
                     if (op.initiated)
@@ -423,7 +423,7 @@ pub const IO = struct {
             .fsync,
             .{ .fd = fd },
             struct {
-                fn doOperation(op: anytype) FsyncError!void {
+                fn do_operation(op: anytype) FsyncError!void {
                     return os.fsync(op.fd);
                 }
             },
@@ -467,7 +467,7 @@ pub const IO = struct {
                 .offset = offset,
             },
             struct {
-                fn doOperation(op: anytype) ReadError!usize {
+                fn do_operation(op: anytype) ReadError!usize {
                     return os.pread(op.fd, op.buf[0..op.len], op.offset) catch |err| switch (err) {
                         error.OperationAborted => unreachable,
                         error.BrokenPipe => unreachable,
@@ -506,7 +506,7 @@ pub const IO = struct {
                 .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn doOperation(op: anytype) RecvError!usize {
+                fn do_operation(op: anytype) RecvError!usize {
                     return os.recv(op.socket, op.buf[0..op.len], 0);
                 }
             },
@@ -539,7 +539,7 @@ pub const IO = struct {
                 .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn doOperation(op: anytype) SendError!usize {
+                fn do_operation(op: anytype) SendError!usize {
                     return os.send(op.socket, op.buf[0..op.len], 0);
                 }
             },
@@ -567,7 +567,7 @@ pub const IO = struct {
             .timeout,
             .{ .deadline = self.timer.monotonic() + nanoseconds },
             struct {
-                fn doOperation(op: anytype) TimeoutError!void {
+                fn do_operation(op: anytype) TimeoutError!void {
                     _ = op;
                     return;
                 }
@@ -603,7 +603,7 @@ pub const IO = struct {
                 .offset = offset,
             },
             struct {
-                fn doOperation(op: anytype) WriteError!usize {
+                fn do_operation(op: anytype) WriteError!usize {
                     return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
                 }
             },
