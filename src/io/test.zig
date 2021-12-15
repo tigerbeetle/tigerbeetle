@@ -113,10 +113,10 @@ test "accept/connect/send/receive" {
         fn run_test() !void {
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
-            const server = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const server = try IO.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
 
-            const client = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const client = try IO.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             try os.setsockopt(
@@ -331,7 +331,7 @@ test "tick to wait" {
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
 
-            const server = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const server = try IO.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
 
             try os.setsockopt(
@@ -343,7 +343,7 @@ test "tick to wait" {
             try os.bind(server, &address.any, address.getOsSockLen());
             try os.listen(server, kernel_backlog);
 
-            const client = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const client = try IO.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             // Start the accept
@@ -481,7 +481,7 @@ test "pipe data over socket" {
             };
             defer self.io.deinit();
 
-            self.server.fd = try IO.openSocket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
+            self.server.fd = try IO.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(self.server.fd);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
@@ -503,7 +503,7 @@ test "pipe data over socket" {
                 self.server.fd,
             );
 
-            self.tx.socket.fd = try IO.openSocket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
+            self.tx.socket.fd = try IO.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(self.tx.socket.fd);
 
             self.io.connect(

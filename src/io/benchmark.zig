@@ -44,7 +44,7 @@ pub fn main() !void {
     }
 
     // Setup the server socket
-    self.server.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+    self.server.fd = try IO.open_socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
     defer os.closeSocket(self.server.fd);
 
     const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
@@ -67,7 +67,7 @@ pub fn main() !void {
     );
 
     // Setup the client connection
-    self.tx.socket.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+    self.tx.socket.fd = try IO.open_socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
     defer os.closeSocket(self.tx.socket.fd);
 
     self.io.connect(

@@ -612,7 +612,7 @@ pub const IO = struct {
 
     pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;
 
-    pub fn openSocket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+    pub fn open_socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         return os.socket(family, sock_type | os.SOCK_NONBLOCK | os.SOCK_CLOEXEC, protocol);
     }
 };
