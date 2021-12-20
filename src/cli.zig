@@ -118,8 +118,10 @@ pub fn parse_args(allocator: *std.mem.Allocator) Command {
         } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
             os.exit(0);
-        } else {
+        } else if (mem.startsWith(u8, arg, "--")) {
             fatal("unexpected argument: '{s}'", .{arg});
+        } else {
+            fatal("unexpected argument: '{s}' (must start with '--')", .{arg});
         }
     }
 
