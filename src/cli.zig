@@ -93,12 +93,27 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     var maybe_addresses: ?[]const u8 = null;
     var maybe_directory: ?[:0]const u8 = null;
 
-    var args = std.process.args();
-    // Skip argv[0] which is the name of this executable
-    _ = args.nextPosix();
+    const Args = struct {
+        args: std.process.ArgIterator,
+        alloc: *std.mem.Allocator,
 
-    const raw_command = args.nextPosix() orelse
+        fn next(self: *@This()) ?[:0]const u8 {
+            const arg = self.args.next(self.alloc) orelse return null;
+            return (arg catch return null);
+        }
+    };
+
+    var args = Args{
+        .args = std.process.args(),
+        .alloc = allocator,
+    };
+
+    // Skip argv[0] which is the name of this executable
+    _ = args.next();
+
+    const raw_command = args.next() orelse
         fatal("no command provided, expected 'start' or 'init'", .{});
+
     if (mem.eql(u8, raw_command, "-h") or mem.eql(u8, raw_command, "--help")) {
         std.io.getStdOut().writeAll(usage) catch os.exit(1);
         os.exit(0);
@@ -106,7 +121,7 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     const command = meta.stringToEnum(meta.Tag(Command), raw_command) orelse
         fatal("unknown command '{s}', expected 'start' or 'init'", .{raw_command});
 
-    while (args.nextPosix()) |arg| {
+    while (args.next()) |arg| {
         if (mem.startsWith(u8, arg, "--cluster")) {
             maybe_cluster = parse_flag("--cluster", arg);
         } else if (mem.startsWith(u8, arg, "--replica")) {
