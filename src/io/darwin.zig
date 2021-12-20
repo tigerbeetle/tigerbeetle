@@ -2,7 +2,9 @@ const std = @import("std");
 const os = std.os;
 const mem = std.mem;
 const assert = std.debug.assert;
+const log = std.log.scoped(.io);
 
+const config = @import("../config.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
@@ -446,7 +448,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) FsyncError!void {
-                    _ = os.fcntl(op.fd, os.F.FULLFSYNC, 1) catch return os.fsync(op.fd);
+                    return fs_sync(op.fd);
                 }
             },
         );
@@ -660,5 +662,141 @@ pub const IO = struct {
         // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
         try os.setsockopt(fd, os.SOL.SOCKET, os.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
         return fd;
+    }
+
+    pub const INVALID_FILE = -1;
+
+    pub fn open_file(
+        dir_fd: os.fd_t,
+        relative_path: [:0]const u8,
+        size: u64,
+        must_create: bool,
+    ) !os.fd_t {
+        // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
+        // This is much stronger than an advisory exclusive lock, and is required on some platforms.
+
+        var flags: u32 = os.O_CLOEXEC | os.O_RDWR | os.O_DSYNC;
+        var mode: os.mode_t = 0;
+
+        // TODO Document this and investigate whether this is in fact correct to set here.
+        if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O_LARGEFILE;
+
+        if (must_create) {
+            log.info("creating \"{s}\"...", .{relative_path});
+            flags |= os.O_CREAT;
+            flags |= os.O_EXCL;
+            mode = 0o666;
+        } else {
+            log.info("opening \"{s}\"...", .{relative_path});
+        }
+
+        // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
+        assert((flags & os.O_DSYNC) > 0);
+
+        // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
+        assert(!std.fs.path.isAbsolute(relative_path));
+        const fd = try os.openatZ(dir_fd, relative_path, flags, mode);
+        // TODO Return a proper error message when the path exists or does not exist (init/start).
+        errdefer os.close(fd);
+
+        // TODO Check that the file is actually a file.
+
+        // On darwin assume that direct_io is always supported.
+        // Use F_NOCACHE to disable the page cache as O_DIRECT doesn't exit.
+        if (config.direct_io) {
+            _ = try os.fcntl(fd, os.F.NOCACHE, 1);
+        }
+
+        // Obtain an advisory exclusive lock that works only if all processes actually use flock().
+        // LOCK_NB means that we want to fail the lock without waiting if another process has it.
+        os.flock(fd, os.LOCK_EX | os.LOCK_NB) catch |err| switch (err) {
+            error.WouldBlock => @panic("another process holds the data file lock"),
+            else => return err,
+        };
+
+        // Ask the file system to allocate contiguous sectors for the file (if possible):
+        // If the file system does not support `fallocate()`, then this could mean more seeks or a
+        // panic if we run out of disk space (ENOSPC).
+        if (must_create) try fs_allocate(fd, size);
+
+        // The best fsync strategy is always to fsync before reading because this prevents us from
+        // making decisions on data that was never durably written by a previously crashed process.
+        // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
+        // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
+        try fs_sync(fd);
+
+        // We fsync the parent directory to ensure that the file inode is durably written.
+        // The caller is responsible for the parent directory inode stored under the grandparent.
+        // We always do this when opening because we don't know if this was done before crashing.
+        try fs_sync(dir_fd);
+
+        const stat = try os.fstat(fd);
+        if (stat.size != size) @panic("data file inode size was truncated or corrupted");
+
+        return fd;
+    }
+
+    /// Darwin's version of fsync() assuming O_DSYNC
+    fn fs_sync(fd: os.fd_t) !void {
+        _ = os.fcntl(fd, os.F.FULLFSYNC, 1) catch return os.fsync(fd);
+    }
+
+    /// Allocates a file contiguously using fallocate() if supported.
+    /// Alternatively, writes to the last sector so that at least the file size is correct.
+    fn fs_allocate(fd: os.fd_t, size: u64) !void {
+        log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
+
+        // darwin doesn't have fallocate() but we can simulate it using fcntl()s
+        //
+        // https://stackoverflow.com/a/11497568
+        // https://api.kde.org/frameworks/kcoreaddons/html/posix__fallocate__mac_8h_source.html
+        // http://hg.mozilla.org/mozilla-central/file/3d846420a907/xpcom/glue/FileUtils.cpp#l61
+        
+        const F_ALLOCATECONTIG = 0x2; // allocate contiguous space
+        const F_ALLOCATEALL = 0x4; // allocate all or nothing
+        const F_PEOFPOSMODE = 3; // use relative offset from the seek pos mode
+        const F_VOLPOSMODE = 4; // use the specified volume offset
+        const fstore_t = extern struct {
+            fst_flags: c_uint,
+            fst_posmode: c_int,
+            fst_offset: os.off_t,
+            fst_length: os.off_t,
+            fst_bytesalloc: os.off_t,
+        };
+
+        var store = fstore_t{
+            .fst_flags = F_ALLOCATECONTIG | F_ALLOCATEALL,
+            .fst_posmode = F_PEOFPOSMODE,
+            .fst_offset = 0,
+            .fst_length = offset + length,
+            .fst_bytesalloc = 0,
+        };
+
+        // try to pre-allocate contiguous space and fall back to default non-continugous
+        var res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
+        if (os.errno(res) != 0) {
+            store.fst_flags = F_ALLOCATEALL;
+            res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
+        }
+
+        switch (os.errno(res)) {
+            0 => {},
+            os.EACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
+            os.EBADF => return error.FileDescriptorInvalid,
+            os.EDEADLK => unreachable, // F_SETLKW
+            os.EINTR => unreachable, // F_SETLKW
+            os.EINVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
+            os.EMFILE => unreachable, // F_DUPFD or F_DUPED
+            os.ENOLCK => unreachable, // F_SETLK or F_SETLKW
+            os.EOVERFLOW => return error.FileTooBig,
+            os.ESRCH => unreachable, // F_SETOWN
+            else => |errno| return os.unexpectedErrno(errno),
+        }
+
+        // now actually perform the allocation
+        os.ftruncate(fd, @intCast(u64, length)) catch |err| switch (err) {
+            error.AccessDenied => error.PermissionDenied,
+            else => |e| e,
+        };
     }
 };
