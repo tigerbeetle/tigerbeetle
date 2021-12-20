@@ -768,7 +768,7 @@ pub const IO = struct {
             .fst_flags = F_ALLOCATECONTIG | F_ALLOCATEALL,
             .fst_posmode = F_PEOFPOSMODE,
             .fst_offset = 0,
-            .fst_length = offset + length,
+            .fst_length = @intCast(os.off_t, size),
             .fst_bytesalloc = 0,
         };
 
@@ -794,7 +794,7 @@ pub const IO = struct {
         }
 
         // now actually perform the allocation
-        os.ftruncate(fd, @intCast(u64, length)) catch |err| switch (err) {
+        return os.ftruncate(fd, size) catch |err| switch (err) {
             error.AccessDenied => error.PermissionDenied,
             else => |e| e,
         };
