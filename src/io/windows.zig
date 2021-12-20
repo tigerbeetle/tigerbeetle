@@ -615,6 +615,27 @@ pub const IO = struct {
     pub fn open_socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         return os.socket(family, sock_type | os.SOCK_NONBLOCK | os.SOCK_CLOEXEC, protocol);
     }
+
+    pub fn open_file(
+        dir_fd: os.fd_t,
+        relative_path: [:0]const u8,
+        size: u64,
+        must_create: bool,
+    ) !os.fd_t {
+        // CreateFile:
+        // O_RDWR = FILE_SHARE_READ | FILE_SHARE_RWITE
+        // O_CREAT | O_EXCL = FILE_CREATE
+        // O_DIRECT = FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH
+        // O_NONBLOCK = FILE_FLAG_OVERLAPPED
+
+        // LockFileEx:
+        // LOCK_EX = LOCKFILE_EXCLUSIVE_LOCK
+        // LOCK_NB = LOCKFILE_FAIL_IMMEDIATELY
+        // Overlapped.offset = beginning range + hEvent=0
+
+        // fsync() = FlushFileBuffers
+        // fstat() = GetFileSizeEx
+    }
 };
 
 // TODO: use os.getsockoptError when fixed in stdlib
