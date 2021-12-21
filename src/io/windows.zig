@@ -806,26 +806,30 @@ fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
     }
     
     assert(size == 4);
-    switch (err_code) {
-        0 => return,
-        os.EACCES => return error.PermissionDenied,
-        os.EPERM => return error.PermissionDenied,
-        os.EADDRINUSE => return error.AddressInUse,
-        os.EADDRNOTAVAIL => return error.AddressNotAvailable,
-        os.EAFNOSUPPORT => return error.AddressFamilyNotSupported,
-        os.EAGAIN => return error.SystemResources,
-        os.EALREADY => return error.ConnectionPending,
-        os.EBADF => unreachable, // sockfd is not a valid open file descriptor.
-        os.ECONNREFUSED => return error.ConnectionRefused,
-        os.EFAULT => unreachable, // The socket structure address is outside the user's address space.
-        os.EISCONN => unreachable, // The socket is already connected.
-        os.ENETUNREACH => return error.NetworkUnreachable,
-        os.ENOTSOCK => unreachable, // The file descriptor sockfd does not refer to a socket.
-        os.EPROTOTYPE => unreachable, // The socket type does not support the requested communications protocol.
-        os.ETIMEDOUT => return error.ConnectionTimedOut,
-        os.ECONNRESET => return error.ConnectionResetByPeer,
-        else => |err| return os.unexpectedErrno(err),
-    }
+    if (err_code == 0)
+        return;
+
+    const ws_err = @intToEnum(os.windows.ws2_32.WinsockError, @intCast(u16, err_code));
+    return switch (ws_err) {
+        .WSAEACCES => error.PermissionDenied,
+        .WSAEADDRINUSE => error.AddressInUse,
+        .WSAEADDRNOTAVAIL => error.AddressNotAvailable,
+        .WSAEAFNOSUPPORT => error.AddressFamilyNotSupported,
+        .WSAEALREADY => error.ConnectionPending,
+        .WSAEBADF => unreachable,
+        .WSAECONNREFUSED => error.ConnectionRefused,
+        .WSAEFAULT => unreachable,
+        .WSAEISCONN => unreachable, // error.AlreadyConnected,
+        .WSAENETUNREACH => error.NetworkUnreachable,
+        .WSAENOTSOCK => error.FileDescriptorNotASocket,
+        .WSAEPROTOTYPE => unreachable,
+        .WSAETIMEDOUT => error.ConnectionTimedOut,
+        .WSAECONNRESET => error.ConnectionResetByPeer,
+        else => |e| blk: {
+            std.debug.print("winsock error: {}", .{e});
+            break :blk error.Unexpected;
+        },
+    };
 }
 
 /// Windows AFD is an internal system not exposed by kernel32
