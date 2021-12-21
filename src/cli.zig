@@ -147,8 +147,9 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     const replica = parse_replica(raw_replica);
 
     const dir_path = maybe_directory orelse config.directory;
-    const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err|
+    const dir = std.fs.cwd().openDirZ(dir_path, .{}) catch |err|
         fatal("failed to open directory '{s}': {}", .{ dir_path, err });
+    const dir_fd = dir.fd;
 
     switch (command) {
         .init => {
