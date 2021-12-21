@@ -618,12 +618,8 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                         //
                         // TODO: Investigate differences between shutdown() on Linux vs Darwin.
                         // Especially how this interacts with our assumptions around pending I/O.
-                        const rc = os.system.shutdown(connection.fd, os.SHUT.RDWR);
-                        switch (os.errno(rc)) {
-                            .SUCCESS => {},
-                            .BADF => unreachable,
-                            .INVAL => unreachable,
-                            .NOTCONN => {
+                        os.shutdown(connection.fd, .both) catch |err| switch (err) {
+                            error.SocketNotConnected => {
                                 // This should only happen if we for some reason decide to terminate
                                 // a connection while a connect operation is in progress.
                                 // This is fine though, we simply continue with the logic below and
@@ -638,9 +634,8 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                                 //assert(connection.recv_submitted);
                                 //assert(!connection.send_submitted);
                             },
-                            .NOTSOCK => unreachable,
-                            else => |err| os.unexpectedErrno(err) catch {},
-                        }
+                            else => {},
+                        };
                     },
                     .close => {},
                 }
