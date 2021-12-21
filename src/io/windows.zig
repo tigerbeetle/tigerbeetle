@@ -1,6 +1,8 @@
 const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
+const log = std.log.scoped(.io);
+const config = @import("../config.zig");
 
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;
@@ -617,24 +619,165 @@ pub const IO = struct {
     }
 
     pub fn open_file(
-        dir_fd: os.fd_t,
+        dir_handle: os.fd_t,
         relative_path: [:0]const u8,
         size: u64,
         must_create: bool,
     ) !os.fd_t {
-        // CreateFile:
-        // O_RDWR = FILE_SHARE_READ | FILE_SHARE_RWITE
-        // O_CREAT | O_EXCL = FILE_CREATE
-        // O_DIRECT = FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH
-        // O_NONBLOCK = FILE_FLAG_OVERLAPPED
+        const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
 
-        // LockFileEx:
-        // LOCK_EX = LOCKFILE_EXCLUSIVE_LOCK
-        // LOCK_NB = LOCKFILE_FAIL_IMMEDIATELY
-        // Overlapped.offset = beginning range + hEvent=0
+        // FILE_CREATE = O_CREAT | O_EXCL
+        var creation_disposition: os.windows.DWORD = 0;
+        if (must_create) {
+            log.info("creating \"{s}\"...", .{relative_path});
+            creation_disposition = os.windows.FILE_CREATE;
+        } else {
+            log.info("opening \"{s}\"...", .{relative_path});
+            creation_disposition = os.windows.OPEN_EXISTING;
+        }
 
-        // fsync() = FlushFileBuffers
-        // fstat() = GetFileSizeEx
+        // O_EXCL
+        var shared_mode: os.windows.DWORD = 0;
+
+        // O_RDWR
+        var access_mask: os.windows.DWORD = 0;
+        access_mask |= os.windows.GENERIC_READ;
+        access_mask |= os.windows.GENERIC_WRITE;
+
+        // O_DIRECT
+        var attributes: os.windows.DWORD = 0;
+        attributes |= os.windows.FILE_FLAG_NO_BUFFERING;
+        attributes |= os.windows.FILE_FLAG_WRITE_THROUGH;
+
+        const handle = os.windows.kernel32.CreateFileW(
+            path_w.span(),
+            access_mask,
+            shared_mode,
+            null, // no security attributes required
+            creation_disposition,
+            attributes,
+            null, // no existing template file
+        );
+
+        if (handle == os.windows.INVALID_HANDLE_VALUE) {
+            return switch (os.windows.kernel32.GetLastError()) {
+                .ACCESS_DENIED => error.AccessDenied,
+                else => |err| os.windows.unexpectedError(err),
+            };
+        }
+
+        errdefer os.windows.CloseHandle(handle);
+
+        // Obtain an advisory exclusive lock
+        // even when we haven't given shared access to other processes.
+        try fs_lock(handle, size);
+
+        // Ask the file system to allocate contiguous sectors for the file (if possible):
+        if (must_create) {
+            log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
+            fs_allocate(handle, size) catch {
+                log.warn("file system failed to preallocate the file memory", .{});
+                log.notice("allocating by writing to the last sector of the file instead...", .{});
+
+                const sector_size = config.sector_size;
+                const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
+
+                // Handle partial writes where the physical sector is less than a logical sector:
+                const write_offset = size - sector.len;
+                var written: usize = 0;
+                while (written < sector.len) {
+                    written += try os.pwrite(handle, sector[written..], write_offset + written);
+                }
+            };
+        }
+
+        // The best fsync strategy is always to fsync before reading because this prevents us from
+        // making decisions on data that was never durably written by a previously crashed process.
+        // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
+        // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
+        try os.fsync(handle);
+
+        // We fsync the parent directory to ensure that the file inode is durably written.
+        // The caller is responsible for the parent directory inode stored under the grandparent.
+        // We always do this when opening because we don't know if this was done before crashing.
+        try os.fsync(dir_handle);
+
+        const file_size = try os.windows.GetFileSizeEx(handle);
+        if (file_size != size) @panic("data file inode size was truncated or corrupted");
+
+        return handle;
+    }
+
+    fn fs_lock(handle: os.fd_t, size: u64) !void {
+        // TODO: Look into using SetFileIoOverlappedRange() for better unbuffered async IO perf
+        // NOTE: Requires SeLockMemoryPrivilege.
+
+        const kernel32 = struct {
+            const LOCKFILE_EXCLUSIVE_LOCK = 0x2;
+            const LOCKFILE_FAIL_IMMEDIATELY = 01;
+
+            extern "kernel32" fn LockFileEx(
+                hFile: os.windows.HANDLE,
+                dwFlags: os.windows.DWORD,
+                dwReserved: os.windows.DWORD,
+                nNumberOfBytesToLockLow: os.windows.DWORD,
+                nNumberOfBytesToLockHigh: os.windows.DWORD,
+                lpOverlapped: ?*os.windows.OVERLAPPED,
+            ) callconv(os.windows.WINAPI) os.windows.BOOL;
+        };
+
+        // hEvent = null 
+        // Offset & OffsetHigh = 0
+        var lock_overlapped = std.mem.zeroes(os.windows.OVERLAPPED);
+
+        // LOCK_EX | LOCK_NB
+        var lock_flags: os.windows.DWORD = 0;
+        lock_flags |= kernel32.LOCKFILE_EXCLUSIVE_LOCK;
+        lock_flags |= kernel32.LOCKFILE_FAIL_IMMEDIATELY;        
+
+        const locked = kernel32.LockFileEx(
+            handle,
+            lock_flags,
+            0, // reserved param is always zero
+            @truncate(u32, size), // low bits of size
+            @truncate(u32, size >> 32), // high bits of size
+            &lock_overlapped,
+        );
+
+        if (locked == os.windows.FALSE) {
+            return switch (os.windows.kernel32.GetLastError()) {
+                .IO_PENDING => error.WouldBlock,
+                else => |err| os.windows.unexpectedError(err),
+            };
+        }
+    }
+
+    fn fs_allocate(handle: os.fd_t, size: u64) !void {
+        // TODO: Look into using SetFileValidData() instead
+        // NOTE: Requires SE_MANAGE_VOLUME_NAME privilege
+
+        // Move the file pointer to the start + size
+        const seeked = os.windows.kernel32.SetFilePointerEx(
+            handle, 
+            @intCast(i64, size), 
+            null, // no reference to new file pointer
+            os.windows.FILE_BEGIN,
+        );
+        
+        if (seeked == os.windows.FALSE) {
+            return switch (os.windows.kernel32.GetLastError()) {
+                .INVALID_HANDLE => unreachable,
+                .INVALID_PARAMETER => unreachable,
+                else => |err| os.windows.unexpectedError(err),
+            };
+        }
+
+        // Mark the moved file pointer (start + size) as the physical EOF.
+        const allocated = os.windows.kernel32.SetEndOfFile(handle);
+        if (allocated == os.windows.FALSE) {
+            const err = os.windows.kernel32.GetLastError();
+            return os.windows.unexpectedError(err);
+        }
     }
 };
 
