@@ -697,10 +697,8 @@ pub const IO = struct {
         // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
         try os.fsync(handle);
 
-        // We fsync the parent directory to ensure that the file inode is durably written.
-        // The caller is responsible for the parent directory inode stored under the grandparent.
-        // We always do this when opening because we don't know if this was done before crashing.
-        try os.fsync(dir_handle);
+        // Don't fsync the directory handle as it's not open with write access
+        // try os.fsync(dir_handle);
 
         const file_size = try os.windows.GetFileSizeEx(handle);
         if (file_size != size) @panic("data file inode size was truncated or corrupted");
