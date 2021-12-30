@@ -105,8 +105,8 @@ pub const IO = struct {
                 self.io_pending -= num_events;
 
                 for (events[0..num_events]) |event| {
-                    const afd_completion = event.as_completion() orelse unreachable;
-                    const completion = @fieldParentPtr(Completion, "afd_completion", afd_completion);
+                    const afd_overlapped = event.as_afd_overlapped() orelse unreachable;
+                    const completion = @fieldParentPtr(Completion, "afd_overlapped", afd_overlapped);
                     completion.next = null;
                     self.completed.push(completion);
                 }
@@ -158,7 +158,7 @@ pub const IO = struct {
     /// This struct holds the data needed for a single IO operation
     pub const Completion = struct {
         next: ?*Completion,
-        afd_completion: Afd.Completion,
+        afd_overlapped: Afd.Overlapped,
         context: ?*c_void,
         callback: fn (*IO, *Completion) void,
         operation: Operation,
@@ -230,8 +230,11 @@ pub const IO = struct {
                 }) |afd_op| {
                     _ = result catch |err| switch (err) {
                         error.WouldBlock => {
-                            const afd_completion = &_completion.afd_completion;
-                            io.afd.schedule(_op_data.socket, afd_op, afd_completion) catch {
+                            io.afd.schedule(
+                                _op_data.socket, 
+                                afd_op, 
+                                &_completion.afd_overlapped,
+                            ) catch {
                                 // On AFD schedulue failure try to perform the op again next tick
                                 _completion.next = null;
                                 io.completed.push(_completion);
@@ -258,7 +261,7 @@ pub const IO = struct {
         // Setup the completion with the callback wrapper above
         completion.* = .{
             .next = null,
-            .afd_completion = undefined, 
+            .afd_overlapped = undefined, 
             .context = @ptrCast(?*c_void, context),
             .callback = Callback.onComplete,
             .operation = @unionInit(Operation, @tagName(op_tag), op_data),
@@ -917,27 +920,27 @@ const Afd = struct {
     }
 
     const Operation = enum { read, write };
-    const Completion = struct {
-        next: ?*Completion = null,
+    const Overlapped = struct {
+        next: ?*Overlapped = null,
         afd_poll_info: AFD_POLL_INFO,
         io_status_block: os.windows.IO_STATUS_BLOCK,
     };
 
-    // Schedule a Completion event to be reported by poll()
+    // Schedule a Overlapped event to be reported by poll()
     // once the Operation is observed to be ready on the socket.
     // This is similar to EPOLL_CTL_MOD with EPOLLONESHOT.
     fn schedule(
         self: Afd,
         socket: os.socket_t,
         operation: Operation,
-        completion: *Completion,
+        overlapped: *Overlapped,
     ) !void {
         const afd_events: os.windows.ULONG = switch (operation) {
             .read => AFD_POLL_RECEIVE | AFD_POLL_ACCEPT | AFD_POLL_DISCONNECT,
             .write => AFD_POLL_SEND,
         };
 
-        completion.afd_poll_info = .{
+        overlapped.afd_poll_info = .{
             .Timeout = std.math.maxInt(os.windows.LARGE_INTEGER),
             .NumberOfHandles = 1,
             .Exclusive = os.windows.FALSE,
@@ -948,7 +951,7 @@ const Afd = struct {
             }},
         };
 
-        completion.io_status_block = .{
+        overlapped.io_status_block = .{
             .u = .{ .Status = .PENDING },
             .Information = 0,
         };
@@ -957,12 +960,12 @@ const Afd = struct {
             self.handle,
             null,
             null,
-            &completion.io_status_block,
-            &completion.io_status_block,
+            &overlapped.io_status_block,
+            &overlapped.io_status_block,
             IOCTL_AFD_POLL,
-            &completion.afd_poll_info,
+            &overlapped.afd_poll_info,
             @sizeOf(AFD_POLL_INFO),
-            &completion.afd_poll_info,
+            &overlapped.afd_poll_info,
             @sizeOf(AFD_POLL_INFO),
         );
 
@@ -977,10 +980,10 @@ const Afd = struct {
     const Event = extern struct {
         overlapped_entry: os.windows.OVERLAPPED_ENTRY,
 
-        fn as_completion(self: Event) ?*Completion {
+        fn as_afd_overlapped(self: Event) ?*Overlapped {
             const overlapped = self.overlapped_entry.lpOverlapped;
             const io_status_block = @ptrCast(*os.windows.IO_STATUS_BLOCK, overlapped);
-            return @fieldParentPtr(Completion, "io_status_block", io_status_block);
+            return @fieldParentPtr(Overlapped, "io_status_block", io_status_block);
         }
     };
     
