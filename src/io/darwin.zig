@@ -1,14 +1,16 @@
 const std = @import("std");
 const os = std.os;
+const mem = std.mem;
 const assert = std.debug.assert;
 
-const FIFO = @import("fifo.zig").FIFO;
-const Time = @import("time.zig").Time;
-const buffer_limit = @import("io.zig").buffer_limit;
+const FIFO = @import("../fifo.zig").FIFO;
+const Time = @import("../time.zig").Time;
+const buffer_limit = @import("../io.zig").buffer_limit;
 
 pub const IO = struct {
     kq: os.fd_t,
     time: Time = .{},
+    io_inflight: usize = 0,
     timeouts: FIFO(Completion) = .{},
     completed: FIFO(Completion) = .{},
     io_pending: FIFO(Completion) = .{},
@@ -27,9 +29,7 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn tick(self: *IO) !void {
-        // TODO This is a hack to block 1ms every 10ms tick on macOS while we fix `flush(false)`:
-        // What we're seeing for the tigerbeetle-node client is that recv() syscalls never complete.
-        return self.run_for_ns(std.time.ns_per_ms);
+        return self.flush(false);
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
@@ -84,10 +84,13 @@ pub const IO = struct {
             // - tick() is non-blocking (wait_for_completions = false)
             // - run_for_ns() always submits a timeout
             if (change_events == 0 and self.completed.peek() == null) {
-                if (!wait_for_completions) return;
-                const timeout_ns = next_timeout orelse @panic("kevent() blocking forever");
-                ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
-                ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
+                if (wait_for_completions) {
+                    const timeout_ns = next_timeout orelse @panic("kevent() blocking forever");
+                    ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
+                    ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
+                } else if (self.io_inflight == 0) {
+                    return;
+                }
             }
 
             const new_events = try os.kevent(
@@ -102,6 +105,9 @@ pub const IO = struct {
             if (io_pending == null) {
                 self.io_pending.in = null;
             }
+
+            self.io_inflight += change_events;
+            self.io_inflight -= new_events;
 
             for (events[0..new_events]) |event| {
                 const completion = @intToPtr(*Completion, event.udata);
@@ -183,7 +189,6 @@ pub const IO = struct {
     const Operation = union(enum) {
         accept: struct {
             socket: os.socket_t,
-            flags: u32,
         },
         close: struct {
             fd: os.fd_t,
@@ -195,13 +200,6 @@ pub const IO = struct {
         },
         fsync: struct {
             fd: os.fd_t,
-            flags: u32,
-        },
-        openat: struct {
-            fd: os.fd_t,
-            path: [*:0]const u8,
-            flags: u32,
-            mode: os.mode_t,
         },
         read: struct {
             fd: os.fd_t,
@@ -213,13 +211,11 @@ pub const IO = struct {
             socket: os.socket_t,
             buf: [*]u8,
             len: u32,
-            flags: u32,
         },
         send: struct {
             socket: os.socket_t,
             buf: [*]const u8,
             len: u32,
-            flags: u32,
         },
         timeout: struct {
             expires: u64,
@@ -285,7 +281,7 @@ pub const IO = struct {
         }
     }
 
-    pub const AcceptError = os.AcceptError;
+    pub const AcceptError = os.AcceptError || os.SetSockOptError;
 
     pub fn accept(
         self: *IO,
@@ -298,7 +294,6 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         socket: os.socket_t,
-        flags: u32,
     ) void {
         self.submit(
             context,
@@ -307,11 +302,33 @@ pub const IO = struct {
             .accept,
             .{
                 .socket = socket,
-                .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) AcceptError!os.socket_t {
-                    return os.accept(op.socket, null, null, op.flags);
+                    const fd = try os.accept(
+                        op.socket,
+                        null,
+                        null,
+                        os.SOCK_NONBLOCK | os.SOCK_CLOEXEC,
+                    );
+                    errdefer os.close(fd);
+
+                    // Darwin doesn't support os.MSG_NOSIGNAL to avoid getting SIGPIPE on socket send().
+                    // Instead, it uses the SO_NOSIGPIPE socket option which does the same for all send()s.
+                    os.setsockopt(
+                        fd,
+                        os.SOL_SOCKET,
+                        os.SO_NOSIGPIPE,
+                        &mem.toBytes(@as(c_int, 1)),
+                    ) catch |err| return switch (err) {
+                        error.TimeoutTooBig => unreachable,
+                        error.PermissionDenied => error.NetworkSubsystemFailed,
+                        error.AlreadyConnected => error.NetworkSubsystemFailed,
+                        error.InvalidProtocolOption => error.ProtocolFailure,
+                        else => |e| e,
+                    };
+
+                    return fd;
                 }
             },
         );
@@ -399,15 +416,7 @@ pub const IO = struct {
         );
     }
 
-    pub const FsyncError = error{
-        FileDescriptorInvalid,
-        DiskQuota,
-        ArgumentsInvalid,
-        InputOutput,
-        NoSpaceLeft,
-        ReadOnlyFileSystem,
-        AccessDenied,
-    } || os.UnexpectedError;
+    pub const FsyncError = os.SyncError;
 
     pub fn fsync(
         self: *IO,
@@ -420,7 +429,6 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         fd: os.fd_t,
-        flags: u32,
     ) void {
         self.submit(
             context,
@@ -429,68 +437,10 @@ pub const IO = struct {
             .fsync,
             .{
                 .fd = fd,
-                .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) FsyncError!void {
                     _ = os.fcntl(op.fd, os.F_FULLFSYNC, 1) catch return os.fsync(op.fd);
-                }
-            },
-        );
-    }
-
-    pub const OpenatError = error{
-        AccessDenied,
-        FileDescriptorInvalid,
-        DeviceBusy,
-        PathAlreadyExists,
-        FileTooBig,
-        ArgumentsInvalid,
-        IsDir,
-        SymLinkLoop,
-        ProcessFdQuotaExceeded,
-        NameTooLong,
-        SystemFdQuotaExceeded,
-        NoDevice,
-        FileNotFound,
-        SystemResources,
-        NoSpaceLeft,
-        NotDir,
-        FileLocksNotSupported,
-        BadPathName,
-        InvalidUtf8,
-        WouldBlock,
-    } || os.UnexpectedError;
-
-    pub fn openat(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: OpenatError!os.fd_t,
-        ) void,
-        completion: *Completion,
-        fd: os.fd_t,
-        path: [*:0]const u8,
-        flags: u32,
-        mode: os.mode_t,
-    ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .openat,
-            .{
-                .fd = fd,
-                .path = path,
-                .mode = mode,
-                .flags = flags,
-            },
-            struct {
-                fn doOperation(op: anytype) OpenatError!os.fd_t {
-                    return os.openatZ(op.fd, op.path, op.flags, op.mode);
                 }
             },
         );
@@ -578,7 +528,6 @@ pub const IO = struct {
         completion: *Completion,
         socket: os.socket_t,
         buffer: []u8,
-        flags: u32,
     ) void {
         self.submit(
             context,
@@ -589,11 +538,10 @@ pub const IO = struct {
                 .socket = socket,
                 .buf = buffer.ptr,
                 .len = @intCast(u32, buffer_limit(buffer.len)),
-                .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) RecvError!usize {
-                    return os.recv(op.socket, op.buf[0..op.len], op.flags);
+                    return os.recv(op.socket, op.buf[0..op.len], 0);
                 }
             },
         );
@@ -613,7 +561,6 @@ pub const IO = struct {
         completion: *Completion,
         socket: os.socket_t,
         buffer: []const u8,
-        flags: u32,
     ) void {
         self.submit(
             context,
@@ -624,11 +571,10 @@ pub const IO = struct {
                 .socket = socket,
                 .buf = buffer.ptr,
                 .len = @intCast(u32, buffer_limit(buffer.len)),
-                .flags = flags,
             },
             struct {
                 fn doOperation(op: anytype) SendError!usize {
-                    return os.send(op.socket, op.buf[0..op.len], op.flags);
+                    return os.send(op.socket, op.buf[0..op.len], 0);
                 }
             },
         );
@@ -697,5 +643,14 @@ pub const IO = struct {
                 }
             },
         );
+    }
+
+    pub fn openSocket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+        const fd = try os.socket(family, sock_type | os.SOCK_NONBLOCK, protocol);
+        errdefer os.close(fd);
+
+        // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
+        try os.setsockopt(fd, os.SOL_SOCKET, os.SO_NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
+        return fd;
     }
 };
