@@ -206,9 +206,6 @@ pub const IO = struct {
             address: std.net.Address,
             initiated: bool,
         },
-        fsync: struct {
-            fd: os.fd_t,
-        },
         read: struct {
             fd: os.fd_t,
             buf: [*]u8,
@@ -419,36 +416,6 @@ pub const IO = struct {
 
                     op.initiated = true;
                     return result;
-                }
-            },
-        );
-    }
-
-    pub const FsyncError = os.SyncError;
-
-    pub fn fsync(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: FsyncError!void,
-        ) void,
-        completion: *Completion,
-        fd: os.fd_t,
-    ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .fsync,
-            .{
-                .fd = fd,
-            },
-            struct {
-                fn do_operation(op: anytype) FsyncError!void {
-                    return fs_sync(op.fd);
                 }
             },
         );

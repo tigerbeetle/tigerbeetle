@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 const Time = @import("../time.zig").Time;
 const IO = @import("../io.zig").IO;
 
-test "write/fsync/read/close" {
+test "write/read/close" {
     try struct {
         const Context = @This();
 
@@ -18,11 +18,10 @@ test "write/fsync/read/close" {
         read_buf: [20]u8 = [_]u8{98} ** 20,
 
         written: usize = 0,
-        fsynced: bool = false,
         read: usize = 0,
 
         fn run_test() !void {
-            const path = "test_io_write_fsync_read";
+            const path = "test_io_write_read_close";
             const file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = true });
             defer std.fs.cwd().deleteFile(path) catch {};
 
@@ -46,7 +45,6 @@ test "write/fsync/read/close" {
             while (!self.done) try self.io.tick();
 
             try testing.expectEqual(self.write_buf.len, self.written);
-            try testing.expect(self.fsynced);
             try testing.expectEqual(self.read_buf.len, self.read);
             try testing.expectEqualSlices(u8, &self.write_buf, &self.read_buf);
         }
@@ -57,17 +55,6 @@ test "write/fsync/read/close" {
             result: IO.WriteError!usize,
         ) void {
             self.written = result catch @panic("write error");
-            self.io.fsync(*Context, self, fsync_callback, completion, self.fd);
-        }
-
-        fn fsync_callback(
-            self: *Context,
-            completion: *IO.Completion,
-            result: IO.FsyncError!void,
-        ) void {
-            _ = result catch @panic("fsync error");
-
-            self.fsynced = true;
             self.io.read(*Context, self, read_callback, completion, self.fd, &self.read_buf, 10);
         }
 

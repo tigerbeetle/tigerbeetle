@@ -415,34 +415,6 @@ pub const IO = struct {
         );
     }
 
-    pub const FsyncError = os.SyncError;
-
-    pub fn fsync(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: FsyncError!void,
-        ) void,
-        completion: *Completion,
-        fd: os.fd_t,
-    ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .fsync,
-            .{ .fd = fd },
-            struct {
-                fn do_operation(op: anytype) FsyncError!void {
-                    return os.fsync(op.fd);
-                }
-            },
-        );
-    }
-
     pub const ReadError = error{
         WouldBlock,
         NotOpenForReading,
