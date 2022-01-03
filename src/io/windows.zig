@@ -220,25 +220,33 @@ pub const IO = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
                 // Perform the operation and get the result
                 const _op_data = &@field(_completion.operation, @tagName(op_tag));
-                const result = OperationImpl.do_operation(_op_data);
+                var result = OperationImpl.do_operation(_op_data);
 
-                // Schedule the socket and completion onto windows AFD when WouldBlock is detected
+                // Check if this is an AFD operation
                 if (switch (op_tag) {
                     .accept, .recv => @as(?Afd.Operation, .read),
                     .connect, .send => @as(?Afd.Operation, .write),
                     else => null,
-                }) |afd_op| {
+                }) |afd_op| afd_retry: {
                     _ = result catch |err| switch (err) {
                         error.WouldBlock => {
+                            // Schedule the socket and completion onto windows AFD when WouldBlock is detected
                             io.afd.schedule(
                                 _op_data.socket, 
                                 afd_op, 
                                 &_completion.afd_overlapped,
-                            ) catch {
+                            ) catch |schedule_err| switch (schedule_err) {
+                                // Resolve error.Unexpected errors to the callback
+                                error.Unexpected => |e| {
+                                    result = e;
+                                    break :afd_retry;
+                                },
                                 // On AFD schedulue failure try to perform the op again next tick
-                                _completion.next = null;
-                                io.completed.push(_completion);
-                                return;
+                                else => {
+                                    _completion.next = null;
+                                    io.completed.push(_completion);
+                                    return;
+                                },
                             };
 
                             // We've scheduled the completion to be received when polling on IO
@@ -926,6 +934,35 @@ const Afd = struct {
         io_status_block: os.windows.IO_STATUS_BLOCK,
     };
 
+    fn get_base_socket(socket: os.socket_t, ioctl: os.windows.DWORD) !os.socket_t {
+        var bytes: os.windows.DWORD = undefined;
+        var base_socket: os.socket_t = undefined;
+        const rc = os.windows.ws2_32.WSAIoctl(
+            socket,
+            ioctl,
+            null, // no input buffer
+            0, // no input buffer len
+            @ptrCast([*]u8, &base_socket),
+            @sizeOf(os.socket_t),
+            &bytes,
+            null,
+            null,
+        );
+
+        if (rc == 0) {
+            return base_socket;
+        }
+
+        assert(rc == os.windows.ws2_32.SOCKET_ERROR);
+        switch (os.windows.ws2_32.WSAGetLastError()) {
+            .WSAENOTSOCK => return error.FileDescriptorNotASocket,
+            else => |wsa_err| {
+                const w32_err = @intToEnum(os.windows.Win32Error, @enumToInt(wsa_err));
+                return os.windows.unexpectedError(w32_err);
+            }
+        }
+    }
+
     // Schedule a Overlapped event to be reported by poll()
     // once the Operation is observed to be ready on the socket.
     // This is similar to EPOLL_CTL_MOD with EPOLLONESHOT.
@@ -935,6 +972,13 @@ const Afd = struct {
         operation: Operation,
         overlapped: *Overlapped,
     ) !void {
+        const SIO_BASE_HANDLE = 0x48000022;
+        const SIO_BSP_HANDLE_POLL = 0x4800001D;
+
+        const base_socket = get_base_socket(socket, SIO_BASE_HANDLE) catch blk: {
+            break :blk try get_base_socket(socket, SIO_BSP_HANDLE_POLL);
+        };
+
         const afd_events: os.windows.ULONG = switch (operation) {
             .read => AFD_POLL_RECEIVE | AFD_POLL_ACCEPT | AFD_POLL_DISCONNECT,
             .write => AFD_POLL_SEND,
@@ -945,7 +989,7 @@ const Afd = struct {
             .NumberOfHandles = 1,
             .Exclusive = os.windows.FALSE,
             .Handles = [_]AFD_POLL_HANDLE_INFO{.{
-                .Handle = @ptrCast(os.windows.HANDLE, socket),
+                .Handle = base_socket,
                 .Status = .SUCCESS,
                 .Events = afd_events | AFD_POLL_ABORT | AFD_POLL_LOCAL_CLOSE | AFD_POLL_CONNECT_FAIL,
             }},
