@@ -12,5 +12,6 @@ test {
 
     _ = @import("io.zig");
 
+    _ = @import("ewah/bitset_encoder.zig");
     _ = @import("lsm/block_free_set.zig");
 }
