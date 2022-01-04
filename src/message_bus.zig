@@ -112,7 +112,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 .process = switch (process_type) {
                     .replica => .{
                         .replica = process,
-                        .accept_fd = try init_tcp(configuration[process]),
+                        .accept_fd = try init_tcp(io, configuration[process]),
                     },
                     .client => {},
                 },
@@ -150,13 +150,13 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
         /// TODO This is required by the Client.
         pub fn deinit(_: *Self) void {}
 
-        fn init_tcp(address: std.net.Address) !os.socket_t {
-            const fd = try IO.open_socket(
+        fn init_tcp(io: *IO, address: std.net.Address) !os.socket_t {
+            const fd = try io.open_socket(
                 address.any.family,
                 os.SOCK.STREAM,
                 os.IPPROTO.TCP,
             );
-            errdefer os.close(fd);
+            errdefer os.closeSocket(fd);
 
             const set = struct {
                 fn set(_fd: os.socket_t, level: u32, option: u32, value: c_int) !void {
@@ -444,7 +444,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 // The first replica's network address family determines the
                 // family for all other replicas:
                 const family = bus.configuration[0].any.family;
-                connection.fd = IO.open_socket(family, os.SOCK.STREAM, os.IPPROTO.TCP) catch return;
+                connection.fd = bus.io.open_socket(family, os.SOCK.STREAM, os.IPPROTO.TCP) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;

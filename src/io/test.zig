@@ -84,7 +84,7 @@ test "accept/connect/send/receive" {
     try struct {
         const Context = @This();
 
-        io: IO,
+        io: *IO,
         done: bool = false,
         server: os.socket_t,
         client: os.socket_t,
@@ -98,12 +98,15 @@ test "accept/connect/send/receive" {
         received: usize = 0,
 
         fn run_test() !void {
+            var io = try IO.init(32, 0);
+            defer io.deinit();
+
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
-            const server = try IO.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const server = try io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
 
-            const client = try IO.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const client = try io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             try os.setsockopt(
@@ -116,11 +119,10 @@ test "accept/connect/send/receive" {
             try os.listen(server, kernel_backlog);
 
             var self: Context = .{
-                .io = try IO.init(32, 0),
+                .io = &io,
                 .server = server,
                 .client = client,
             };
-            defer self.io.deinit();
 
             var client_completion: IO.Completion = undefined;
             self.io.connect(
@@ -318,7 +320,7 @@ test "tick to wait" {
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
 
-            const server = try IO.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const server = try self.io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
 
             try os.setsockopt(
@@ -330,7 +332,7 @@ test "tick to wait" {
             try os.bind(server, &address.any, address.getOsSockLen());
             try os.listen(server, kernel_backlog);
 
-            const client = try IO.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const client = try self.io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             // Start the accept
@@ -468,7 +470,7 @@ test "pipe data over socket" {
             };
             defer self.io.deinit();
 
-            self.server.fd = try IO.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
+            self.server.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(self.server.fd);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
@@ -490,7 +492,7 @@ test "pipe data over socket" {
                 self.server.fd,
             );
 
-            self.tx.socket.fd = try IO.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
+            self.tx.socket.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(self.tx.socket.fd);
 
             self.io.connect(

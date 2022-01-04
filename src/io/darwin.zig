@@ -622,9 +622,9 @@ pub const IO = struct {
 
     pub const INVALID_SOCKET = -1;
 
-    pub fn open_socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         const fd = try os.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
-        errdefer os.close(fd);
+        errdefer os.closeSocket(fd);
 
         // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
         try os.setsockopt(fd, os.SOL.SOCKET, os.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));

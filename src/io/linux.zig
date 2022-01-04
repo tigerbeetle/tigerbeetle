@@ -860,7 +860,7 @@ pub const IO = struct {
 
     pub const INVALID_SOCKET = -1;
 
-    pub fn open_socket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         return os.socket(family, sock_type, protocol);
     }
 
