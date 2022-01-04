@@ -317,6 +317,7 @@ pub const Storage = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open(
+        io: *IO,
         dir_fd: os.fd_t,
         relative_path: [:0]const u8,
         size: u64,
@@ -326,7 +327,7 @@ pub const Storage = struct {
         assert(size >= config.sector_size);
         assert(size % config.sector_size == 0);
 
-        return IO.open_file(
+        return io.open_file(
             dir_fd,
             relative_path,
             size,

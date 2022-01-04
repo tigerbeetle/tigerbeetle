@@ -601,7 +601,13 @@ pub const IO = struct {
         return os.socket(family, sock_type | os.SOCK_NONBLOCK | os.SOCK_CLOEXEC, protocol);
     }
 
+    pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
+        const dir = try std.fs.cwd().openDirZ(dir_path, .{});
+        return dir.fd;
+    }
+
     pub fn open_file(
+        self: *IO,
         dir_handle: os.fd_t,
         relative_path: [:0]const u8,
         size: u64,

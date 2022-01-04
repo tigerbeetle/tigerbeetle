@@ -8,6 +8,7 @@ const os = std.os;
 
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
+const IO = @import("io.zig").IO;
 
 const usage = fmt.comptimePrint(
     \\Usage:
@@ -147,9 +148,8 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     const replica = parse_replica(raw_replica);
 
     const dir_path = maybe_directory orelse config.directory;
-    const dir = std.fs.cwd().openDirZ(dir_path, .{}) catch |err|
+    const dir_fd = IO.open_dir(dir_path) catch |err|
         fatal("failed to open directory '{s}': {}", .{ dir_path, err });
-    const dir_fd = dir.fd;
 
     switch (command) {
         .init => {

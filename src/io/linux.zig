@@ -864,9 +864,12 @@ pub const IO = struct {
         return os.socket(family, sock_type, protocol);
     }
 
-    pub const INVALID_FILE = -1;
+    pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
+        return os.openZ(dir_path, os.O_CLOEXEC | os.O_RDONLY, 0);
+    }
 
     pub fn open_file(
+        self: *IO,
         dir_fd: os.fd_t,
         relative_path: [:0]const u8,
         size: u64,
