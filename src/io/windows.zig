@@ -9,7 +9,6 @@ const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 
 pub const IO = struct {
-    afd: Afd,
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
@@ -26,9 +25,6 @@ pub const IO = struct {
         const iocp = try os.windows.CreateIoCompletionPort(os.windows.INVALID_HANDLE_VALUE, null, 0, 0);
         errdefer os.windows.CloseHandle(iocp);
 
-        const afd = try Afd.init(iocp);
-        errdefer afd.deinit();
-
         return IO{
             .afd = afd,
             .iocp = iocp,
@@ -36,9 +32,6 @@ pub const IO = struct {
     }
 
     pub fn deinit(self: *IO) void {
-        self.afd.deinit();
-        self.afd = undefined;
-
         assert(self.iocp != os.windows.INVALID_HANDLE_VALUE);
         os.windows.CloseHandle(self.iocp);
         self.iocp = os.windows.INVALID_HANDLE_VALUE;
@@ -158,7 +151,6 @@ pub const IO = struct {
     /// This struct holds the data needed for a single IO operation
     pub const Completion = struct {
         next: ?*Completion,
-        afd_overlapped: Afd.Overlapped,
         context: ?*c_void,
         callback: fn (*IO, *Completion) void,
         operation: Operation,
@@ -166,7 +158,10 @@ pub const IO = struct {
 
     const Operation = union(enum) {
         accept: struct {
-            socket: os.socket_t,
+            listen_socket: os.socket_t,
+            client_socket: os.socket_t,
+            overlapped: os.windows.OVERLAPPED,
+            addr_buffer: [(@sizEOf(std.net.Address) + 16) * 2]u8 align(4),
         },
         close: struct {
             fd: os.fd_t,
@@ -220,41 +215,17 @@ pub const IO = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
                 // Perform the operation and get the result
                 const _op_data = &@field(_completion.operation, @tagName(op_tag));
-                var result = OperationImpl.do_operation(_op_data);
+                var result = OperationImpl.do_operation(io, _op_data);
 
-                // Check if this is an AFD operation
-                if (switch (op_tag) {
-                    .accept, .recv => @as(?Afd.Operation, .read),
-                    .connect, .send => @as(?Afd.Operation, .write),
-                    else => null,
-                }) |afd_op| afd_retry: {
-                    _ = result catch |err| switch (err) {
-                        error.WouldBlock => {
-                            // Schedule the socket and completion onto windows AFD when WouldBlock is detected
-                            io.afd.schedule(
-                                _op_data.socket, 
-                                afd_op, 
-                                &_completion.afd_overlapped,
-                            ) catch |schedule_err| switch (schedule_err) {
-                                // Resolve error.Unexpected errors to the callback
-                                error.Unexpected => |e| {
-                                    result = e;
-                                    break :afd_retry;
-                                },
-                                // On AFD schedulue failure try to perform the op again next tick
-                                else => {
-                                    _completion.next = null;
-                                    io.completed.push(_completion);
-                                    return;
-                                },
-                            };
-
-                            // We've scheduled the completion to be received when polling on IO
-                            io.io_pending += 1;
-                            return;
-                        },
-                        else => {},
-                    };
+                // For OVERLAPPED IO, error.WouldBlock assumes that it will be completed by IOCP.
+                switch (op_data) {
+                    .accept, .read, .recv, .connect, .write, .send => {
+                        _ = result catch |err| switch (err) {
+                            error.WouldBlock => return,
+                            else => {},
+                        };
+                    },
+                    else => {}
                 }
                 
                 // The completion is finally ready to invoke the callback
@@ -269,7 +240,6 @@ pub const IO = struct {
         // Setup the completion with the callback wrapper above
         completion.* = .{
             .next = null,
-            .afd_overlapped = undefined, 
             .context = @ptrCast(?*c_void, context),
             .callback = Callback.onComplete,
             .operation = @unionInit(Operation, @tagName(op_tag), op_data),
@@ -301,10 +271,85 @@ pub const IO = struct {
             callback,
             completion,
             .accept,
-            .{ .socket = socket },
+            .{ 
+                .listen_socket = socket,
+                .client_socket = INVALID_SOCKET,
+                .overlapped = undefined,
+                .addr_buffer = undefined,
+            },
             struct {
-                fn do_operation(op: anytype) AcceptError!os.socket_t {
-                    return os.accept(op.socket, null, null, 0);
+                fn do_operation(io: *IO, op: anytype) AcceptError!os.socket_t {
+                    var flags: os.windows.DWORD = undefined;
+                    var transferred: os.windows.DWORD = undefined;
+
+                    const rc = switch (op.client_socket) {
+                        INVALID_SOCKET => blk: {
+                            op.client_socket = io.open_socket(
+                                os.AF_INET, 
+                                os.SOCK_STREAM, 
+                                os.IPPROTO_TCP,
+                            ) catch |err| switch (err) {
+                                else => return err,
+                            };
+                            
+                            var sync_bytes_read: os.windows.DWORD = undefined;
+                            op.overlapped = std.mem.zeroes(@TypeOf(op.overlapped));
+
+                            break :blk AcceptEx(
+                                op.listen_socket,
+                                op.client_socket,
+                                &op.addr_buffer,
+                                0,
+                                @sizeOf(std.net.Address) + 16,
+                                @sizeOf(std.net.Address) + 16,
+                                &sync_bytes_read,
+                                &op.overlapped,
+                            );
+                        },
+                        else => os.windows.ws2_32.WSAGetOverlappedResult(
+                            op.listen_socket,
+                            &op.overlapped,
+                            &transferred,
+                            os.windows.FALSE, // dont wait
+                            &flags,
+                        ),
+                    };
+
+                    // return the socket if we succeed in accepting
+                    if (rc != os.windows.FALSE) {
+                        // enables getsockopt, setsockopt, getsockname, getpeername
+                        _ = os.windows.ws2_32.setsockopt(
+                            op.client_socket,
+                            os.windows.ws2_32.SOL_SOCKET,
+                            os.windows.ws2_32.SO_UPDATE_ACCEPT_CONTEXT,
+                            null,
+                            0,
+                        );
+
+                        return op.client_socket;
+                    }
+
+                    // destroy the client socket we made if we get a non EAGAIN error code
+                    errdefer |err| switch (err) {
+                        error.WouldBlock => {},
+                        else => os.closeSocket(op.client_socket),
+                    }
+
+                    return switch (os.windows.ws2_32.WSAGetLastError()) {
+                        .WSA_IO_INCOMPLETE => unreachable, // GetOverlappedResult() called on IOCP
+                        .WSA_IO_PENDING, .WSAEWOULDBLOCK => error.WouldBlock,
+                        .WSANOTINITIALISED => unreachable, // WSAStartup() was called
+                        .WSAENETDOWN => unreachable, // WinSock error
+                        .WSAENOTSOCK => error.FileDescriptorNotASocket,
+                        .WSAEOPNOTSUPP => error.OperationNotSupported,
+                        .WSA_INVALID_HANDLE => error.FileDescriptorInvalid,
+                        .WSAEFAULT, WSA_INVALID_PARAMETER => unreachable, // params should be ok
+                        .WSAECONNRESET => error.ConnectionAborted,
+                        .WSAEMFILE => unreachable, // we create our own descriptor so its available
+                        .WSAENOBUFS => error.SystemResources,
+                        .WSAEINTR, .WSAEINPROGRESS => unreachable, // no blocking calls
+                        else => os.
+                    };
                 }
             },
         );
@@ -336,7 +381,7 @@ pub const IO = struct {
             .close,
             .{ .fd = fd },
             struct {
-                fn do_operation(op: anytype) CloseError!void {
+                fn do_operation(io: *IO, op: anytype) CloseError!void {
                     // Check if the fd is a SOCKET by seeing if getsockopt() returns ENOTSOCK
                     // https://stackoverflow.com/a/50981652
                     const socket = @ptrCast(os.socket_t, op.fd);
@@ -376,7 +421,9 @@ pub const IO = struct {
                 .initiated = false,
             },
             struct {
-                fn do_operation(op: anytype) ConnectError!void {
+                fn do_operation(io: *IO, op: anytype) ConnectError!void {
+                    @compileError("TODO: Use ConnectEx");
+
                     // Don't call connect after being rescheduled by io_pending as it gives EISCONN.
                     // Instead, check the socket error to see if has been connected successfully.
                     if (op.initiated)
@@ -452,7 +499,9 @@ pub const IO = struct {
                 .offset = offset,
             },
             struct {
-                fn do_operation(op: anytype) ReadError!usize {
+                fn do_operation(io: *IO, op: anytype) ReadError!usize {
+                    @compileError("TODO: use ReadFileEx");
+
                     return os.pread(op.fd, op.buf[0..op.len], op.offset) catch |err| switch (err) {
                         error.OperationAborted => unreachable,
                         error.BrokenPipe => unreachable,
@@ -491,7 +540,9 @@ pub const IO = struct {
                 .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn do_operation(op: anytype) RecvError!usize {
+                fn do_operation(io: *IO, op: anytype) RecvError!usize {
+                    @compileError("TODO: use WSARecv");
+
                     return os.recv(op.socket, op.buf[0..op.len], 0);
                 }
             },
@@ -524,7 +575,9 @@ pub const IO = struct {
                 .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn do_operation(op: anytype) SendError!usize {
+                fn do_operation(io: *IO, op: anytype) SendError!usize {
+                    @compileError("TODO: use WSASend");
+
                     return os.send(op.socket, op.buf[0..op.len], 0);
                 }
             },
@@ -552,7 +605,7 @@ pub const IO = struct {
             .timeout,
             .{ .deadline = self.timer.monotonic() + nanoseconds },
             struct {
-                fn do_operation(op: anytype) TimeoutError!void {
+                fn do_operation(io: *IO, op: anytype) TimeoutError!void {
                     _ = op;
                     return;
                 }
@@ -588,7 +641,9 @@ pub const IO = struct {
                 .offset = offset,
             },
             struct {
-                fn do_operation(op: anytype) WriteError!usize {
+                fn do_operation(io: *IO, op: anytype) WriteError!usize {
+                    @compileError("TODO: use WriteFileEx");
+
                     return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
                 }
             },
@@ -598,7 +653,21 @@ pub const IO = struct {
     pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;
 
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
-        return os.socket(family, sock_type | os.SOCK_NONBLOCK | os.SOCK_CLOEXEC, protocol);
+        const flags = sock_type | os.SOCK_NONBLOCK | os.SOCK_CLOEXEC;
+        const socket = try os.socket(family, flags, protocol);
+        errdefer os.closeSocket(socket);
+
+        const socket_iocp = try os.windows.CreateIoCompletionPort(socket, self.iocp, 0, 0);
+        assert(socket_iocp == self.iocp);
+
+        // Ensure that synchronous IO completion doesn't queue an unneeded overlapped
+        // and that the event for the socket (WaitForSingleObject) doesn't need to be set.
+        var flags: os.windows.DWORD = 0;
+        flags |= os.windows.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
+        flags |= os.windows.FILE_SKIP_SET_EVENT_ON_HANDLE; 
+
+        const handle = @ptrCast(os.windows.HANDLE, socket);
+        try os.windows.SetFileCompletionNotificationModes(handle, flags);
     }
 
     pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
@@ -637,6 +706,7 @@ pub const IO = struct {
         var attributes: os.windows.DWORD = 0;
         attributes |= os.windows.FILE_FLAG_NO_BUFFERING;
         attributes |= os.windows.FILE_FLAG_WRITE_THROUGH;
+        attributes |= os.windows.FILE_FLAG_OVERLAPPED;
 
         const handle = os.windows.kernel32.CreateFileW(
             path_w.span(),
@@ -659,7 +729,10 @@ pub const IO = struct {
 
         // Obtain an advisory exclusive lock
         // even when we haven't given shared access to other processes.
-        try fs_lock(handle, size);
+        fs_lock(handle, size) catch |err| switch (err) {
+            error.WouldBlock => @panic("another process holds the data file lock"),
+            else => return err,
+        };
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         if (must_create) {
@@ -768,6 +841,18 @@ pub const IO = struct {
     }
 };
 
+/// Introduced in Windows 8.1+ (min supported by zig stdlib)
+pub extern "mswsock" fn AcceptEx(
+    sListenSocket: SOCKET,
+    sAcceptSocket: SOCKET,
+    lpOutputBuffer: *c_void,
+    dwReceiveDataLength: u32,
+    dwLocalAddressLength: u32,
+    dwRemoteAddressLength: u32,
+    lpdwBytesReceived: *u32,
+    lpOverlapped: *OVERLAPPED,
+) callconv(WINAPI) BOOL;
+
 // TODO: use os.getsockoptError when fixed in stdlib
 fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
     var err_code: u32 = undefined;
@@ -818,213 +903,3 @@ fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
         },
     };
 }
-
-/// Windows AFD is an internal system not exposed by kernel32
-/// which is used to monitor sockets and pipes for IO readiness.
-/// It's an alternative to stable IOCP calls and is used in other projects:
-/// - https://github.com/piscisaureus/wepoll
-/// - https://github.com/tokio-rs/mio/blob/e55ec59cf287dd4bdc06c70bfadea74f85c8bf09/src/sys/windows/afd.rs
-/// - https://github.com/libuv/libuv/blob/47e0c5c575e92a25e0da10fc25b2732942c929f3/src/win/winsock.c#L461
-const Afd = struct {
-    const AFD_POLL_HANDLE_INFO = extern struct {
-        Handle: os.windows.HANDLE,
-        Events: os.windows.ULONG,
-        Status: os.windows.NTSTATUS,
-    };
-
-    const AFD_POLL_INFO = extern struct {
-        Timeout: os.windows.LARGE_INTEGER,
-        NumberOfHandles: os.windows.ULONG,
-        Exclusive: os.windows.ULONG,
-        Handles: [1]AFD_POLL_HANDLE_INFO,
-    };
-
-    const IOCTL_AFD_POLL = 0x00012024;
-    const AFD_POLL_RECEIVE = 0x0001;
-    const AFD_POLL_SEND = 0x0004;
-    const AFD_POLL_DISCONNECT = 0x0008;
-    const AFD_POLL_ABORT = 0b0010;
-    const AFD_POLL_LOCAL_CLOSE = 0x020;
-    const AFD_POLL_ACCEPT = 0x0080;
-    const AFD_POLL_CONNECT_FAIL = 0x0100;
-
-    handle: os.windows.HANDLE,
-
-    fn init(iocp_handle: os.windows.HANDLE) !Afd {
-        const name = "\\Device\\Afd\\tigerbeetle";
-        var buf: [name.len]os.windows.WCHAR = undefined;
-        const len = try std.unicode.utf8ToUtf16Le(&buf, name);
-
-        const bytes_len = try std.math.cast(c_ushort, len * @sizeOf(os.windows.WCHAR));
-        var afd_name = os.windows.UNICODE_STRING{
-            .Buffer = &buf,
-            .Length = bytes_len,
-            .MaximumLength = bytes_len,
-        };
-
-        var afd_attr = os.windows.OBJECT_ATTRIBUTES{
-            .Length = @sizeOf(os.windows.OBJECT_ATTRIBUTES),
-            .RootDirectory = null,
-            .ObjectName = &afd_name,
-            .Attributes = 0,
-            .SecurityDescriptor = null,
-            .SecurityQualityOfService = null,
-        };
-
-        var afd_handle: os.windows.HANDLE = undefined;
-        var io_status_block: os.windows.IO_STATUS_BLOCK = undefined;
-        switch (os.windows.ntdll.NtCreateFile(
-            &afd_handle,
-            os.windows.SYNCHRONIZE,
-            &afd_attr,
-            &io_status_block,
-            null,
-            0,
-            os.windows.FILE_SHARE_READ | os.windows.FILE_SHARE_WRITE,
-            os.windows.FILE_OPEN,
-            0,
-            null,
-            0,
-        )) {
-            .SUCCESS => {},
-            .OBJECT_NAME_INVALID => unreachable,
-            else => |status| return os.windows.unexpectedStatus(status),
-        }
-        errdefer os.windows.CloseHandle(afd_handle);
-
-        const registered_handle = try os.windows.CreateIoCompletionPort(afd_handle, iocp_handle, 1, 0);
-        assert(registered_handle == iocp_handle);
-
-        const notify_mode = os.windows.FILE_SKIP_SET_EVENT_ON_HANDLE;
-        try os.windows.SetFileCompletionNotificationModes(afd_handle, notify_mode);
-
-        return Afd{ .handle = afd_handle };
-    }
-
-    fn deinit(self: Afd) void {
-        os.windows.CloseHandle(self.handle);
-    }
-
-    const Operation = enum { read, write };
-    const Overlapped = struct {
-        next: ?*Overlapped = null,
-        afd_poll_info: AFD_POLL_INFO,
-        io_status_block: os.windows.IO_STATUS_BLOCK,
-    };
-
-    fn get_base_socket(socket: os.socket_t, ioctl: os.windows.DWORD) !os.socket_t {
-        var bytes: os.windows.DWORD = undefined;
-        var base_socket: os.socket_t = undefined;
-        const rc = os.windows.ws2_32.WSAIoctl(
-            socket,
-            ioctl,
-            null, // no input buffer
-            0, // no input buffer len
-            @ptrCast([*]u8, &base_socket),
-            @sizeOf(os.socket_t),
-            &bytes,
-            null,
-            null,
-        );
-
-        if (rc == 0) {
-            return base_socket;
-        }
-
-        assert(rc == os.windows.ws2_32.SOCKET_ERROR);
-        switch (os.windows.ws2_32.WSAGetLastError()) {
-            .WSAENOTSOCK => return error.FileDescriptorNotASocket,
-            else => |wsa_err| {
-                const w32_err = @intToEnum(os.windows.Win32Error, @enumToInt(wsa_err));
-                return os.windows.unexpectedError(w32_err);
-            }
-        }
-    }
-
-    // Schedule a Overlapped event to be reported by poll()
-    // once the Operation is observed to be ready on the socket.
-    // This is similar to EPOLL_CTL_MOD with EPOLLONESHOT.
-    fn schedule(
-        self: Afd,
-        socket: os.socket_t,
-        operation: Operation,
-        overlapped: *Overlapped,
-    ) !void {
-        const SIO_BASE_HANDLE = 0x48000022;
-        const SIO_BSP_HANDLE_POLL = 0x4800001D;
-
-        const base_socket = get_base_socket(socket, SIO_BASE_HANDLE) catch blk: {
-            break :blk try get_base_socket(socket, SIO_BSP_HANDLE_POLL);
-        };
-
-        const afd_events: os.windows.ULONG = switch (operation) {
-            .read => AFD_POLL_RECEIVE | AFD_POLL_ACCEPT | AFD_POLL_DISCONNECT,
-            .write => AFD_POLL_SEND,
-        };
-
-        overlapped.afd_poll_info = .{
-            .Timeout = std.math.maxInt(os.windows.LARGE_INTEGER),
-            .NumberOfHandles = 1,
-            .Exclusive = os.windows.FALSE,
-            .Handles = [_]AFD_POLL_HANDLE_INFO{.{
-                .Handle = base_socket,
-                .Status = .SUCCESS,
-                .Events = afd_events | AFD_POLL_ABORT | AFD_POLL_LOCAL_CLOSE | AFD_POLL_CONNECT_FAIL,
-            }},
-        };
-
-        overlapped.io_status_block = .{
-            .u = .{ .Status = .PENDING },
-            .Information = 0,
-        };
-
-        const status = os.windows.ntdll.NtDeviceIoControlFile(
-            self.handle,
-            null,
-            null,
-            &overlapped.io_status_block,
-            &overlapped.io_status_block,
-            IOCTL_AFD_POLL,
-            &overlapped.afd_poll_info,
-            @sizeOf(AFD_POLL_INFO),
-            &overlapped.afd_poll_info,
-            @sizeOf(AFD_POLL_INFO),
-        );
-
-        switch (status) {
-            .SUCCESS => {},
-            .PENDING => {},
-            .INVALID_HANDLE => unreachable,
-            else => return os.windows.unexpectedStatus(status),
-        }
-    }
-
-    const Event = extern struct {
-        overlapped_entry: os.windows.OVERLAPPED_ENTRY,
-
-        fn as_afd_overlapped(self: Event) ?*Overlapped {
-            const overlapped = self.overlapped_entry.lpOverlapped;
-            const io_status_block = @ptrCast(*os.windows.IO_STATUS_BLOCK, overlapped);
-            return @fieldParentPtr(Overlapped, "io_status_block", io_status_block);
-        }
-    };
-    
-    fn poll(
-        self: Afd,
-        iocp_handle: os.windows.HANDLE,
-        events: []Event,
-        timeout_ms: os.windows.DWORD,
-    ) !usize {
-        return os.windows.GetQueuedCompletionStatusEx(
-            iocp_handle, 
-            @ptrCast([*]os.windows.OVERLAPPED_ENTRY, events.ptr)[0..events.len],
-            timeout_ms,
-            true, // alertable wait
-        ) catch |err| switch (err) {
-            error.Timeout,
-            error.Aborted,
-            error.Cancelled => @as(usize, 0),
-            else => |e| return e,
-        };
-    }
-};
