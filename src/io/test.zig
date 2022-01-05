@@ -383,7 +383,7 @@ test "tick to wait" {
             // Other tests already check .tick() with IO based completions.
             // This simulates IO being completed by an external system
             var send_buf = std.mem.zeroes([64]u8);
-            const wrote = try os.write(self.accepted, &send_buf);
+            const wrote = try os.send(self.accepted, &send_buf, 0);
             try testing.expectEqual(wrote, send_buf.len);
 
             // Wait for the recv() to complete using only IO.tick().
