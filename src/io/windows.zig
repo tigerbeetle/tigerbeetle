@@ -186,7 +186,8 @@ pub const IO = struct {
             connect: struct {
                 socket: os.socket_t,
                 address: std.net.Address,
-                initiated: bool,
+                overlapped: Overlapped,
+                pending: bool,
             },
             read: struct {
                 fd: os.fd_t,
@@ -364,14 +365,13 @@ pub const IO = struct {
                         };
                     }
 
-                    return switch (os.windows.ws2_32.WSAGetLastError()) {
-                        .WSA_IO_INCOMPLETE => unreachable, // GetOverlappedResult() called on IOCP
-                        .WSA_IO_PENDING, .WSAEWOULDBLOCK => error.WouldBlock,
+                    return switch (os.windows.ws2_32.WSAGetLastError()) { 
+                        .WSA_IO_PENDING, .WSAEWOULDBLOCK, .WSA_IO_INCOMPLETE => error.WouldBlock,
                         .WSANOTINITIALISED => unreachable, // WSAStartup() was called
                         .WSAENETDOWN => unreachable, // WinSock error
                         .WSAENOTSOCK => error.FileDescriptorNotASocket,
                         .WSAEOPNOTSUPP => error.OperationNotSupported,
-                        .WSA_INVALID_HANDLE => unreachable, // invalid socket handle
+                        .WSA_INVALID_HANDLE => unreachable, // we dont use hEvent in OVERLAPPED
                         .WSAEFAULT, .WSA_INVALID_PARAMETER => unreachable, // params should be ok
                         .WSAECONNRESET => error.ConnectionAborted,
                         .WSAEMFILE => unreachable, // we create our own descriptor so its available
@@ -448,45 +448,95 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .address = address,
-                .initiated = false,
+                .overlapped = undefined,
+                .pending = false,
             },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) ConnectError!void {
-                    @compileError("TODO: Use ConnectEx");
+                    var flags: os.windows.DWORD = undefined;
+                    var transferred: os.windows.DWORD = undefined;
 
-                    // Don't call connect after being rescheduled by io_pending as it gives EISCONN.
-                    // Instead, check the socket error to see if has been connected successfully.
-                    if (op.initiated)
-                        return getsockoptError(op.socket);
+                    const rc = blk: {
+                        if (op.pending) {
+                            break :blk os.windows.ws2_32.WSAGetOverlappedResult(
+                                op.socket,
+                                &op.overlapped.raw,
+                                &transferred,
+                                os.windows.FALSE, // dont wait
+                                &flags,
+                            );
+                        }
 
-                    op.initiated = true;
-                    const rc = os.windows.ws2_32.connect(
-                        op.socket, 
-                        &op.address.any, 
-                        @intCast(i32, op.address.getOsSockLen()),
-                    );
+                        const LPFN_CONNECTEX = fn (
+                            Socket: os.windows.ws2_32.SOCKET,
+                            SockAddr: *const os.windows.ws2_32.sockaddr,
+                            SockLen: os.socklen_t,
+                            SendBuf: ?*const c_void,
+                            SendBufLen: os.windows.DWORD,
+                            BytesSent: *os.windows.DWORD,
+                            Overlapped: *os.windows.OVERLAPPED,
+                        ) callconv(os.windows.WINAPI) os.windows.BOOL;
 
-                    // Need to hardcode as os.connect has unreachable on .WSAEWOULDBLOCK
-                    if (rc == 0) return;                    
-                    switch (os.windows.ws2_32.WSAGetLastError()) {
-                        .WSAEADDRINUSE => return error.AddressInUse,
-                        .WSAEADDRNOTAVAIL => return error.AddressNotAvailable,
-                        .WSAECONNREFUSED => return error.ConnectionRefused,
-                        .WSAECONNRESET => return error.ConnectionResetByPeer,
-                        .WSAETIMEDOUT => return error.ConnectionTimedOut,
-                        .WSAEHOSTUNREACH,
-                        .WSAENETUNREACH,
-                        => return error.NetworkUnreachable,
-                        .WSAEFAULT => unreachable,
-                        .WSAEINVAL => unreachable,
-                        .WSAEISCONN => unreachable,
-                        .WSAENOTSOCK => unreachable,
-                        .WSAEWOULDBLOCK => return error.WouldBlock,
-                        .WSAEACCES => unreachable,
-                        .WSAENOBUFS => return error.SystemResources,
-                        .WSAEAFNOSUPPORT => return error.AddressFamilyNotSupported,
-                        else => |err| return os.windows.unexpectedWSAError(err),
+                        const connect_ex = os.windows.loadWinsockExtensionFunction(
+                            LPFN_CONNECTEX,
+                            op.socket,
+                            os.windows.ws2_32.WSAID_CONNECTEX,
+                        ) catch |err| switch (err) {
+                            error.OperationNotSupported => unreachable,
+                            error.ShortRead => unreachable,
+                            else => |e| return e,
+                        };
+
+                        op.pending = true;
+                        op.overlapped = .{
+                            .raw = std.mem.zeroes(os.windows.OVERLAPPED),
+                            .completion = ctx.completion,
+                        };
+
+                        break :blk (connect_ex)(
+                            op.socket,
+                            &op.address.any,
+                            op.address.getOsSockLen(),
+                            null,
+                            0,
+                            &transferred,
+                            &op.overlapped.raw,
+                        );
+                    };
+
+                    // return if we succeeded in connecting
+                    if (rc != os.windows.FALSE) {
+                        // enables getsockopt, setsockopt, getsockname, getpeername
+                        _ = os.windows.ws2_32.setsockopt(
+                            op.socket,
+                            os.windows.ws2_32.SOL_SOCKET,
+                            os.windows.ws2_32.SO_UPDATE_CONNECT_CONTEXT,
+                            null,
+                            0,
+                        );
+
+                        return;
                     }
+
+                    return switch (os.windows.ws2_32.WSAGetLastError()) {
+                        .WSA_IO_PENDING, 
+                        .WSAEWOULDBLOCK, 
+                        .WSA_IO_INCOMPLETE,
+                        .WSAEALREADY => error.WouldBlock,
+                        .WSANOTINITIALISED => unreachable, // WSAStartup() was called
+                        .WSAENETDOWN => unreachable, // network subsystem is down
+                        .WSAEADDRNOTAVAIL => error.AddressNotAvailable,
+                        .WSAEAFNOSUPPORT => error.AddressFamilyNotSupported,
+                        .WSAECONNREFUSED => error.ConnectionRefused,
+                        .WSAEFAULT => unreachable, // all addresses should be valid
+                        .WSAEINVAL => unreachable, // invalid socket type
+                        .WSAEHOSTUNREACH, .WSAENETUNREACH => error.NetworkUnreachable,
+                        .WSAENOBUFS => error.SystemResources,
+                        .WSAENOTSOCK => unreachable, // invalid socket
+                        .WSAETIMEDOUT => error.ConnectionTimedOut,
+                        .WSA_INVALID_HANDLE => unreachable, // we dont use hEvent in OVERLAPPED
+                        else => |err| os.windows.unexpectedWSAError(err),
+                    };
                 }
             },
         );
@@ -873,6 +923,8 @@ pub const IO = struct {
         }
     }
 };
+
+
 
 // TODO: use os.getsockoptError when fixed in stdlib
 fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
