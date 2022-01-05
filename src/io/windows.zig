@@ -200,16 +200,12 @@ pub const IO = struct {
                 buf: [*]u8,
                 len: u32,
                 offset: u64,
-                overlapped: Overlapped,
-                pending: bool,
             },
             write: struct {
                 fd: os.fd_t,
                 buf: [*]const u8,
                 len: u32,
                 offset: u64,
-                overlapped: Overlapped,
-                pending: bool,
             },
             close: struct {
                 fd: os.fd_t,
@@ -947,7 +943,10 @@ pub const IO = struct {
         var attributes: os.windows.DWORD = 0;
         attributes |= os.windows.FILE_FLAG_NO_BUFFERING;
         attributes |= os.windows.FILE_FLAG_WRITE_THROUGH;
-        attributes |= os.windows.FILE_FLAG_OVERLAPPED;
+        
+        // TODO: Add ReadFileEx/WriteFileEx support.
+        // Not currently needed for O_DIRECT disk IO.
+        // attributes |= os.windows.FILE_FLAG_OVERLAPPED;
 
         const handle = os.windows.kernel32.CreateFileW(
             path_w.span(),
