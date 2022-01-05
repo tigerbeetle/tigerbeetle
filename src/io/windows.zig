@@ -23,12 +23,7 @@ pub const IO = struct {
         errdefer os.windows.WSACleanup() catch unreachable;
 
         const iocp = try os.windows.CreateIoCompletionPort(os.windows.INVALID_HANDLE_VALUE, null, 0, 0);
-        errdefer os.windows.CloseHandle(iocp);
-
-        return IO{
-            .afd = afd,
-            .iocp = iocp,
-        };
+        return IO{ .iocp = iocp };
     }
 
     pub fn deinit(self: *IO) void {
@@ -91,15 +86,25 @@ pub const IO = struct {
                     .non_blocking => 0,
                 };
 
-                var events: [64]Afd.Event = undefined;
-                const num_events = try self.afd.poll(self.iocp, &events, io_timeout);
+                var events: [64]os.windows.OVERLAPPED_ENTRY = undefined;
+                const num_events = os.windows.GetQueuedCompletionStatusEx(
+                    self.iocp,
+                    &events,
+                    io_timeout,
+                    false, // non-alertable wait
+                ) catch |err| switch (err) {
+                    error.Timeout => 0,
+                    error.Aborted => unreachable,
+                    else => |e| return e,
+                };
                 
                 assert(self.io_pending >= num_events);
                 self.io_pending -= num_events;
 
                 for (events[0..num_events]) |event| {
-                    const afd_overlapped = event.as_afd_overlapped() orelse unreachable;
-                    const completion = @fieldParentPtr(Completion, "afd_overlapped", afd_overlapped);
+                    const raw_overlapped = event.lpOverlapped;
+                    const overlapped = @fieldParentPtr(Completion.Overlapped, "raw", raw_overlapped);
+                    const completion = overlapped.completion;
                     completion.next = null;
                     self.completed.push(completion);
                 }
@@ -112,7 +117,10 @@ pub const IO = struct {
         var completed = self.completed;
         self.completed = .{};
         while (completed.pop()) |completion| {
-            (completion.callback)(self, completion);
+            (completion.callback)(Completion.Context{
+                .io = self, 
+                .completion = completion,
+            });
         }
     }
 
@@ -152,53 +160,60 @@ pub const IO = struct {
     pub const Completion = struct {
         next: ?*Completion,
         context: ?*c_void,
-        callback: fn (*IO, *Completion) void,
+        callback: fn (Context) void,
         operation: Operation,
-    };
 
-    const Operation = union(enum) {
-        accept: struct {
-            listen_socket: os.socket_t,
-            client_socket: os.socket_t,
-            overlapped: os.windows.OVERLAPPED,
-            addr_buffer: [(@sizEOf(std.net.Address) + 16) * 2]u8 align(4),
-        },
-        close: struct {
-            fd: os.fd_t,
-        },
-        connect: struct {
-            socket: os.socket_t,
-            address: std.net.Address,
-            initiated: bool,
-        },
-        fsync: struct {
-            fd: os.fd_t,
-        },
-        read: struct {
-            fd: os.fd_t,
-            buf: [*]u8,
-            len: u32,
-            offset: u64,
-        },
-        recv: struct {
-            socket: os.socket_t,
-            buf: [*]u8,
-            len: u32,
-        },
-        send: struct {
-            socket: os.socket_t,
-            buf: [*]const u8,
-            len: u32,
-        },
-        timeout: struct {
-            deadline: u64,
-        },
-        write: struct {
-            fd: os.fd_t,
-            buf: [*]const u8,
-            len: u32,
-            offset: u64,
-        },
+        const Context = struct {
+            io: *IO,
+            completion: *Completion,
+        };
+
+        const Overlapped = struct {
+            raw: os.windows.OVERLAPPED,
+            completion: *Completion,
+        };
+
+        const Operation = union(enum) {
+            accept: struct {
+                overlapped: Overlapped,
+                listen_socket: os.socket_t,
+                client_socket: os.socket_t,
+                addr_buffer: [(@sizeOf(std.net.Address) + 16) * 2]u8 align(4),
+            },
+            close: struct {
+                fd: os.fd_t,
+            },
+            connect: struct {
+                socket: os.socket_t,
+                address: std.net.Address,
+                initiated: bool,
+            },
+            read: struct {
+                fd: os.fd_t,
+                buf: [*]u8,
+                len: u32,
+                offset: u64,
+            },
+            recv: struct {
+                socket: os.socket_t,
+                buf: [*]u8,
+                len: u32,
+            },
+            send: struct {
+                socket: os.socket_t,
+                buf: [*]const u8,
+                len: u32,
+            },
+            timeout: struct {
+                deadline: u64,
+            },
+            write: struct {
+                fd: os.fd_t,
+                buf: [*]const u8,
+                len: u32,
+                offset: u64,
+            },
+        };
     };
 
     fn submit(
@@ -206,19 +221,19 @@ pub const IO = struct {
         context: anytype,
         comptime callback: anytype,
         completion: *Completion,
-        comptime op_tag: std.meta.Tag(Operation),
+        comptime op_tag: std.meta.Tag(Completion.Operation),
         op_data: anytype,
         comptime OperationImpl: type,
     ) void {
         const Context = @TypeOf(context);
         const Callback = struct {
-            fn onComplete(io: *IO, _completion: *Completion) void {
+            fn onComplete(ctx: Completion.Context) void {
                 // Perform the operation and get the result
-                const _op_data = &@field(_completion.operation, @tagName(op_tag));
-                var result = OperationImpl.do_operation(io, _op_data);
+                const data = &@field(ctx.completion.operation, @tagName(op_tag));
+                const result = OperationImpl.do_operation(ctx, data);
 
                 // For OVERLAPPED IO, error.WouldBlock assumes that it will be completed by IOCP.
-                switch (op_data) {
+                switch (op_tag) {
                     .accept, .read, .recv, .connect, .write, .send => {
                         _ = result catch |err| switch (err) {
                             error.WouldBlock => return,
@@ -230,8 +245,8 @@ pub const IO = struct {
                 
                 // The completion is finally ready to invoke the callback
                 callback(
-                    @intToPtr(Context, @ptrToInt(_completion.context)),
-                    _completion,
+                    @intToPtr(Context, @ptrToInt(ctx.completion.context)),
+                    ctx.completion,
                     result,
                 );
             }
@@ -242,7 +257,7 @@ pub const IO = struct {
             .next = null,
             .context = @ptrCast(?*c_void, context),
             .callback = Callback.onComplete,
-            .operation = @unionInit(Operation, @tagName(op_tag), op_data),
+            .operation = @unionInit(Completion.Operation, @tagName(op_tag), op_data),
         };
 
         // Submit the completion onto the right queue
@@ -272,30 +287,39 @@ pub const IO = struct {
             completion,
             .accept,
             .{ 
+                .overlapped = undefined,
                 .listen_socket = socket,
                 .client_socket = INVALID_SOCKET,
-                .overlapped = undefined,
                 .addr_buffer = undefined,
             },
             struct {
-                fn do_operation(io: *IO, op: anytype) AcceptError!os.socket_t {
+                fn do_operation(ctx: Completion.Context, op: anytype) AcceptError!os.socket_t {
                     var flags: os.windows.DWORD = undefined;
                     var transferred: os.windows.DWORD = undefined;
 
                     const rc = switch (op.client_socket) {
                         INVALID_SOCKET => blk: {
-                            op.client_socket = io.open_socket(
+                            // Create the socket that will be used for accept
+                            op.client_socket = ctx.io.open_socket(
                                 os.AF_INET, 
                                 os.SOCK_STREAM, 
                                 os.IPPROTO_TCP,
                             ) catch |err| switch (err) {
-                                else => return err,
+                                error.AddressFamilyNotSupported,
+                                error.ProtocolNotSupported,
+                                error.ProtocolFamilyNotAvailable,
+                                error.SocketTypeNotSupported => unreachable,
+                                else => |e| return e,
                             };
                             
                             var sync_bytes_read: os.windows.DWORD = undefined;
-                            op.overlapped = std.mem.zeroes(@TypeOf(op.overlapped));
+                            op.overlapped = .{
+                                .raw = std.mem.zeroes(os.windows.OVERLAPPED),
+                                .completion = ctx.completion,
+                            };
 
-                            break :blk AcceptEx(
+                            // Start the asynchronous accept with the created socket
+                            break :blk os.windows.ws2_32.AcceptEx(
                                 op.listen_socket,
                                 op.client_socket,
                                 &op.addr_buffer,
@@ -303,19 +327,19 @@ pub const IO = struct {
                                 @sizeOf(std.net.Address) + 16,
                                 @sizeOf(std.net.Address) + 16,
                                 &sync_bytes_read,
-                                &op.overlapped,
+                                &op.overlapped.raw,
                             );
                         },
                         else => os.windows.ws2_32.WSAGetOverlappedResult(
                             op.listen_socket,
-                            &op.overlapped,
+                            &op.overlapped.raw,
                             &transferred,
                             os.windows.FALSE, // dont wait
                             &flags,
                         ),
                     };
 
-                    // return the socket if we succeed in accepting
+                    // return the socket if we succeed in accepting.
                     if (rc != os.windows.FALSE) {
                         // enables getsockopt, setsockopt, getsockname, getpeername
                         _ = os.windows.ws2_32.setsockopt(
@@ -330,9 +354,14 @@ pub const IO = struct {
                     }
 
                     // destroy the client socket we made if we get a non EAGAIN error code
-                    errdefer |err| switch (err) {
-                        error.WouldBlock => {},
-                        else => os.closeSocket(op.client_socket),
+                    errdefer |result| {
+                        _ = result catch |err| switch (err) {
+                            error.WouldBlock => {},
+                            else => {
+                                os.closeSocket(op.client_socket);
+                                op.client_socket = INVALID_SOCKET;
+                            },
+                        };
                     }
 
                     return switch (os.windows.ws2_32.WSAGetLastError()) {
@@ -342,13 +371,13 @@ pub const IO = struct {
                         .WSAENETDOWN => unreachable, // WinSock error
                         .WSAENOTSOCK => error.FileDescriptorNotASocket,
                         .WSAEOPNOTSUPP => error.OperationNotSupported,
-                        .WSA_INVALID_HANDLE => error.FileDescriptorInvalid,
-                        .WSAEFAULT, WSA_INVALID_PARAMETER => unreachable, // params should be ok
+                        .WSA_INVALID_HANDLE => unreachable, // invalid socket handle
+                        .WSAEFAULT, .WSA_INVALID_PARAMETER => unreachable, // params should be ok
                         .WSAECONNRESET => error.ConnectionAborted,
                         .WSAEMFILE => unreachable, // we create our own descriptor so its available
                         .WSAENOBUFS => error.SystemResources,
                         .WSAEINTR, .WSAEINPROGRESS => unreachable, // no blocking calls
-                        else => os.
+                        else => |err| os.windows.unexpectedWSAError(err),
                     };
                 }
             },
@@ -381,7 +410,7 @@ pub const IO = struct {
             .close,
             .{ .fd = fd },
             struct {
-                fn do_operation(io: *IO, op: anytype) CloseError!void {
+                fn do_operation(ctx: Completion.Context, op: anytype) CloseError!void {
                     // Check if the fd is a SOCKET by seeing if getsockopt() returns ENOTSOCK
                     // https://stackoverflow.com/a/50981652
                     const socket = @ptrCast(os.socket_t, op.fd);
@@ -389,6 +418,7 @@ pub const IO = struct {
                         error.FileDescriptorNotASocket => return os.windows.CloseHandle(op.fd),
                         else => {},
                     };
+
                     os.closeSocket(socket);
                 }
             },
@@ -421,7 +451,7 @@ pub const IO = struct {
                 .initiated = false,
             },
             struct {
-                fn do_operation(io: *IO, op: anytype) ConnectError!void {
+                fn do_operation(ctx: Completion.Context, op: anytype) ConnectError!void {
                     @compileError("TODO: Use ConnectEx");
 
                     // Don't call connect after being rescheduled by io_pending as it gives EISCONN.
@@ -499,7 +529,7 @@ pub const IO = struct {
                 .offset = offset,
             },
             struct {
-                fn do_operation(io: *IO, op: anytype) ReadError!usize {
+                fn do_operation(ctx: Completion.Context, op: anytype) ReadError!usize {
                     @compileError("TODO: use ReadFileEx");
 
                     return os.pread(op.fd, op.buf[0..op.len], op.offset) catch |err| switch (err) {
@@ -540,7 +570,7 @@ pub const IO = struct {
                 .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn do_operation(io: *IO, op: anytype) RecvError!usize {
+                fn do_operation(ctx: Completion.Context, op: anytype) RecvError!usize {
                     @compileError("TODO: use WSARecv");
 
                     return os.recv(op.socket, op.buf[0..op.len], 0);
@@ -575,7 +605,7 @@ pub const IO = struct {
                 .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn do_operation(io: *IO, op: anytype) SendError!usize {
+                fn do_operation(ctx: Completion.Context, op: anytype) SendError!usize {
                     @compileError("TODO: use WSASend");
 
                     return os.send(op.socket, op.buf[0..op.len], 0);
@@ -605,7 +635,8 @@ pub const IO = struct {
             .timeout,
             .{ .deadline = self.timer.monotonic() + nanoseconds },
             struct {
-                fn do_operation(io: *IO, op: anytype) TimeoutError!void {
+                fn do_operation(ctx: Completion.Context, op: anytype) TimeoutError!void {
+                    _ = ctx;
                     _ = op;
                     return;
                 }
@@ -641,7 +672,7 @@ pub const IO = struct {
                 .offset = offset,
             },
             struct {
-                fn do_operation(io: *IO, op: anytype) WriteError!usize {
+                fn do_operation(ctx: Completion.Context, op: anytype) WriteError!usize {
                     @compileError("TODO: use WriteFileEx");
 
                     return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
@@ -662,12 +693,14 @@ pub const IO = struct {
 
         // Ensure that synchronous IO completion doesn't queue an unneeded overlapped
         // and that the event for the socket (WaitForSingleObject) doesn't need to be set.
-        var flags: os.windows.DWORD = 0;
-        flags |= os.windows.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
-        flags |= os.windows.FILE_SKIP_SET_EVENT_ON_HANDLE; 
+        var mode: os.windows.BYTE = 0;
+        mode |= os.windows.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
+        mode |= os.windows.FILE_SKIP_SET_EVENT_ON_HANDLE; 
 
         const handle = @ptrCast(os.windows.HANDLE, socket);
-        try os.windows.SetFileCompletionNotificationModes(handle, flags);
+        try os.windows.SetFileCompletionNotificationModes(handle, mode);
+
+        return socket;
     }
 
     pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
@@ -841,18 +874,6 @@ pub const IO = struct {
     }
 };
 
-/// Introduced in Windows 8.1+ (min supported by zig stdlib)
-pub extern "mswsock" fn AcceptEx(
-    sListenSocket: SOCKET,
-    sAcceptSocket: SOCKET,
-    lpOutputBuffer: *c_void,
-    dwReceiveDataLength: u32,
-    dwLocalAddressLength: u32,
-    dwRemoteAddressLength: u32,
-    lpdwBytesReceived: *u32,
-    lpOverlapped: *OVERLAPPED,
-) callconv(WINAPI) BOOL;
-
 // TODO: use os.getsockoptError when fixed in stdlib
 fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
     var err_code: u32 = undefined;
@@ -897,9 +918,6 @@ fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
         .WSAEPROTOTYPE => unreachable,
         .WSAETIMEDOUT => error.ConnectionTimedOut,
         .WSAECONNRESET => error.ConnectionResetByPeer,
-        else => |e| blk: {
-            std.debug.print("winsock error: {}", .{e});
-            break :blk error.Unexpected;
-        },
+        else => |e| os.windows.unexpectedWSAError(e),
     };
 }
