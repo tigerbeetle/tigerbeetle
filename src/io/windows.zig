@@ -241,7 +241,10 @@ pub const IO = struct {
                 switch (op_tag) {
                     .accept, .read, .recv, .connect, .write, .send => {
                         _ = result catch |err| switch (err) {
-                            error.WouldBlock => return,
+                            error.WouldBlock => {
+                                ctx.io.io_pending += 1;
+                                return;
+                            },
                             else => {},
                         };
                     },
@@ -660,7 +663,7 @@ pub const IO = struct {
             transfer,
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) RecvError!usize {
-                    var flags: os.windows.DWORD = undefined;
+                    var flags: os.windows.DWORD = 0; // used both as input and output 
                     var transferred: os.windows.DWORD = undefined;
 
                     const rc = blk: {
