@@ -43,6 +43,16 @@ pub fn build(b: *std.build.Builder) void {
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
     }
+
+    {
+        const benchmark = b.addExecutable("bitset_encoder_benchmark", "src/ewah/bitset_encoder_benchmark.zig");
+        benchmark.setTarget(target);
+        benchmark.setBuildMode(.ReleaseSafe);
+        const run_cmd = benchmark.run();
+
+        const step = b.step("bitset_encoder_benchmark", "Benchmark BitSetEncoder search");
+        step.dependOn(&run_cmd.step);
+    }
 }
 
 // A patched version of std.build.Builder.standardTargetOptions() to backport the fix
