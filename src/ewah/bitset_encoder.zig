@@ -144,94 +144,91 @@ test "div_ceil" {
     try std.testing.expectEqual(div_ceil(9, 8), 2);
 }
 
-test "BitSetEncoder decode, encode, decode" {
+test "BitSetEncoder Word=u8" {
+    try test_decode_with_word(u8);
+
     const Encoder = BitSetEncoder(u8);
     const maxInt = std.math.maxInt;
+    var run_length: usize = 0;
+    while (run_length <= maxInt(u4)) : (run_length += 1) {
+        try test_decode(u8, &.{
+            Encoder.marker(.{
+                .run_bit = 0,
+                .run_length = @intCast(u4, run_length),
+                .literals = 3,
+            }),
+            12, 34, 56,
+        });
+    }
+}
 
-    var seed: u64 = undefined;
-    try std.os.getrandom(mem.asBytes(&seed));
-    var prng = std.rand.DefaultPrng.init(seed);
+test "BitSetEncoder Word=u16" {
+    try test_decode_with_word(u16);
+}
 
-    var encoding = std.ArrayList(u8).init(std.testing.allocator);
-    defer encoding.deinit();
+fn test_decode_with_word(comptime Word: type) !void {
+    const Encoder = BitSetEncoder(Word);
+    const maxInt = std.math.maxInt;
+    const max_run = maxInt(Word) >> (@bitSizeOf(Word) / 2);
+    const max_literals = maxInt(Word) >> (@bitSizeOf(Word) / 2 + 1);
 
     // Alternating runs, no literals.
-    try test_decode(&.{
+    try test_decode(Word, &.{
         Encoder.marker(.{ .run_bit = 0, .run_length = 2, .literals = 0 }),
         Encoder.marker(.{ .run_bit = 1, .run_length = 3, .literals = 0 }),
         Encoder.marker(.{ .run_bit = 0, .run_length = 4, .literals = 0 }),
     });
     // Alternating runs, with literals.
-    try test_decode(&.{
+    try test_decode(Word, &.{
         Encoder.marker(.{ .run_bit = 0, .run_length = 2, .literals = 1 }), 12,
         Encoder.marker(.{ .run_bit = 1, .run_length = 3, .literals = 1 }), 34,
         Encoder.marker(.{ .run_bit = 0, .run_length = 4, .literals = 1 }), 56,
     });
     // Consecutive run marker overflow.
-    try test_decode(&.{
-        Encoder.marker(.{ .run_bit = 0, .run_length = maxInt(u4), .literals = 0 }),
+    try test_decode(Word, &.{
+        Encoder.marker(.{ .run_bit = 0, .run_length = max_run, .literals = 0 }),
         Encoder.marker(.{ .run_bit = 0, .run_length = 2, .literals = 0 }),
     });
-    // Consecutive literal marker overflow.
-    try test_decode(&.{
-        Encoder.marker(.{ .run_bit = 0, .run_length = 0, .literals = maxInt(u3) }),
-        1, 2, 3, 4, 5, 6, 7,
-        Encoder.marker(.{ .run_bit = 0, .run_length = 0, .literals = 2 }),
-        8, 9,
-    });
+
+    var encoding = std.ArrayList(Word).init(std.testing.allocator);
+    defer encoding.deinit();
 
     {
-        var run_length: usize = 0;
-        while (run_length <= maxInt(u4)) : (run_length += 1) {
-            try test_decode(&.{
-                Encoder.marker(.{
-                    .run_bit = 0,
-                    .run_length = @intCast(u4, run_length),
-                    .literals = 3,
-                }),
-                12, 34, 56,
-            });
-        }
-    }
-
-    {
-        var literals: usize = 0;
-        while (literals <= maxInt(u3)) : (literals += 1) {
-            try encoding.append(Encoder.marker(.{
-                .run_bit = 0,
-                .run_length = 4,
-                .literals = @intCast(u3, literals),
-            }));
-            var i: usize = 0;
-            while (i < literals) : (i += 1) {
-                try encoding.append(prng.random.intRangeLessThan(u8, 1, maxInt(u8)));
-            }
-            try test_decode(encoding.items);
-            encoding.items.len = 0;
-        }
+        // Consecutive literal marker overflow.
+        try encoding.append(Encoder.marker(.{ .run_bit = 0, .run_length = 0, .literals = max_literals }));
+        var i: Word = 0;
+        while (i < max_literals) : (i += 1) try encoding.append(i + 1);
+        try encoding.append(Encoder.marker(.{ .run_bit = 0, .run_length = 0, .literals = 2 }));
+        try encoding.append(i + 2);
+        try encoding.append(i + 3);
+        try test_decode(Word, encoding.items);
+        encoding.items.len = 0;
     }
 }
 
-fn test_decode(encoded_expect: []u8) !void {
-    const Encoder = BitSetEncoder(u8);
-    const decoded_expect = try std.testing.allocator.alloc(u8, 1024);
-    defer std.testing.allocator.free(decoded_expect);
+fn test_decode(comptime Word: type, encoded_expect_words: []Word) !void {
+    const encoded_expect = mem.sliceAsBytes(encoded_expect_words);
+    const Encoder = BitSetEncoder(Word);
+    const decoded_expect_data = try std.testing.allocator.alloc(Word, 4 * std.math.maxInt(Word));
+    defer std.testing.allocator.free(decoded_expect_data);
 
-    const decoded_expect_length = Encoder.decode(encoded_expect, decoded_expect);
-    const encoded_actual = try std.testing.allocator.alloc(u8, Encoder.encode_size_max(decoded_expect[0..decoded_expect_length]));
+    const decoded_expect_length = Encoder.decode(encoded_expect, decoded_expect_data);
+    const decoded_expect = decoded_expect_data[0..decoded_expect_length];
+    const encoded_actual = try std.testing.allocator.alloc(u8,
+        Encoder.encode_size_max(decoded_expect));
     defer std.testing.allocator.free(encoded_actual);
 
-    const encoded_actual_length = Encoder.encode(decoded_expect[0..decoded_expect_length], encoded_actual);
+    const encoded_actual_length = Encoder.encode(decoded_expect, encoded_actual);
     try std.testing.expectEqual(encoded_expect.len, encoded_actual_length);
     try std.testing.expectEqualSlices(u8, encoded_expect, encoded_actual[0..encoded_actual_length]);
 
-    const encoded_size_max = Encoder.encode_size_max(decoded_expect[0..decoded_expect_length]);
+    const encoded_size_max = Encoder.encode_size_max(decoded_expect);
     try std.testing.expect(encoded_expect.len <= encoded_size_max);
 
-    const decoded_actual = try std.testing.allocator.alloc(u8, decoded_expect_length);
+    const decoded_actual = try std.testing.allocator.alloc(Word, decoded_expect.len);
     defer std.testing.allocator.free(decoded_actual);
 
     const decoded_actual_length = Encoder.decode(encoded_actual, decoded_actual);
-    try std.testing.expectEqual(decoded_expect_length, decoded_actual_length);
-    try std.testing.expectEqualSlices(u8, decoded_expect[0..decoded_expect_length], decoded_actual);
+    try std.testing.expectEqual(decoded_expect.len, decoded_actual_length);
+    try std.testing.expectEqualSlices(Word, decoded_expect, decoded_actual);
 }
