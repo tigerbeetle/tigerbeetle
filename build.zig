@@ -45,12 +45,12 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
-        const benchmark = b.addExecutable("bitset_encoder_benchmark", "src/ewah/bitset_encoder_benchmark.zig");
+        const benchmark = b.addExecutable("benchmark_ewah", "src/ewah/benchmark.zig");
         benchmark.setTarget(target);
         benchmark.setBuildMode(.ReleaseSafe);
         const run_cmd = benchmark.run();
 
-        const step = b.step("bitset_encoder_benchmark", "Benchmark BitSetEncoder search");
+        const step = b.step("benchmark_ewah", "Benchmark EWAH codec");
         step.dependOn(&run_cmd.step);
     }
 }

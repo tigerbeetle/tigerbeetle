@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const BitSetEncoder = @import("./bitset_encoder.zig").BitSetEncoder(usize);
+const EWAH = @import("../ewah.zig").EWAH(usize);
 
 const BitSetConfig = struct {
     words: usize,
@@ -42,7 +42,7 @@ pub fn main() !void {
         var bitset_lengths: [samples]usize = undefined;
         while (i < samples) : (i += 1) {
             bitsets[i] = try make_bitset(&arena.allocator, config);
-            bitsets_encoded[i] = try arena.allocator.alloc(u8, BitSetEncoder.encode_size_max(bitsets[0]));
+            bitsets_encoded[i] = try arena.allocator.alloc(u8, EWAH.encode_size_max(bitsets[0]));
             bitsets_decoded[i] = try arena.allocator.alloc(usize, config.words);
         }
 
@@ -53,7 +53,7 @@ pub fn main() !void {
             var j: usize = 0;
             var size: usize = undefined;
             while (j < repeats) : (j += 1) {
-                size = BitSetEncoder.encode(bitsets[i], bitsets_encoded[i]);
+                size = EWAH.encode(bitsets[i], bitsets_encoded[i]);
             }
             bitset_lengths[i] = size;
         }
@@ -66,7 +66,7 @@ pub fn main() !void {
             const bitset_encoded = bitsets_encoded[i][0..bitset_lengths[i]];
             var j: usize = 0;
             while (j < repeats) : (j += 1) {
-                _ = BitSetEncoder.decode(bitset_encoded, bitsets_decoded[i]);
+                _ = EWAH.decode(bitset_encoded, bitsets_decoded[i]);
             }
         }
         const decode_time = decode_timer.read() / samples / repeats;
