@@ -9,7 +9,7 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer(
     config.cache_line_size / @sizeOf(usize), // 1 cache line of recently-freed blocks
     .array,
 );
-const BitSetEncoder = @import("../ewah/bitset_encoder.zig").BitSetEncoder(usize);
+const EWAH = @import("../ewah.zig").EWAH(usize);
 
 /// The 0 address is reserved for usage as a sentinel and will never be returned by acquire().
 ///
@@ -114,7 +114,7 @@ pub const BlockFreeSet = struct {
         // Verify that this BlockFreeSet is entirely unallocated.
         assert(set.index.count() == set.index.bit_length);
 
-        _ = BitSetEncoder.decode(source, bitset_masks(set.blocks));
+        _ = EWAH.decode(source, bitset_masks(set.blocks));
         var shard: usize = 0;
         while (shard < set.index.bit_length) : (shard += 1) {
             if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
@@ -123,14 +123,14 @@ pub const BlockFreeSet = struct {
 
     // Returns the maximum number of bytes that the `BlockFreeSet` needs to encode to.
     pub fn encode_size_max(set: BlockFreeSet) usize {
-        return BitSetEncoder.encode_size_max(bitset_masks(set.blocks));
+        return EWAH.encode_size_max(bitset_masks(set.blocks));
     }
 
     // Returns the number of bytes written to `target`.
     pub fn encode(set: BlockFreeSet, target: []u8) usize {
         assert(target.len == set.encode_size_max());
 
-        return BitSetEncoder.encode(bitset_masks(set.blocks), target);
+        return EWAH.encode(bitset_masks(set.blocks), target);
     }
 };
 
