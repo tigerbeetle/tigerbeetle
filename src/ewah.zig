@@ -56,9 +56,9 @@ pub fn EWAH(comptime Word: type) type {
 
         /// Decodes the compressed bitset in `source` into `set`. Panics if `source`'s encoding is invalid.
         /// Returns the number of *words* written to `target_words`.
-        pub fn decode(source: []const u8, target_words: []Word) usize {
+        pub fn decode(source: []align(@alignOf(Word)) const u8, target_words: []Word) usize {
             assert(source.len % @sizeOf(Word) == 0);
-            const source_words = @alignCast(@alignOf(Word), mem.bytesAsSlice(Word, source));
+            const source_words = mem.bytesAsSlice(Word, source);
             var source_index: usize = 0;
             var target_index: usize = 0;
             while (source_index < source_words.len) {
@@ -78,11 +78,11 @@ pub fn EWAH(comptime Word: type) type {
         }
 
         // Returns the number of bytes written to `target`.
-        pub fn encode(source_words: []const Word, target: []u8) usize {
+        pub fn encode(source_words: []const Word, target: []align(@alignOf(Word)) u8) usize {
             assert(target.len >= @sizeOf(Marker));
             assert(target.len == encode_size_max(source_words));
 
-            const target_words = @alignCast(@alignOf(Word), mem.bytesAsSlice(Word, target));
+            const target_words = mem.bytesAsSlice(Word, target);
             std.mem.set(Word, target_words, 0);
 
             var target_index: usize = 0;
@@ -231,7 +231,7 @@ fn test_decode(comptime Word: type, encoded_expect_words: []Word) !void {
 
     const decoded_expect_length = Encoder.decode(encoded_expect, decoded_expect_data);
     const decoded_expect = decoded_expect_data[0..decoded_expect_length];
-    const encoded_actual = try std.testing.allocator.alloc(u8,
+    const encoded_actual = try std.testing.allocator.alignedAlloc(u8, @alignOf(Word),
         Encoder.encode_size_max(decoded_expect));
     defer std.testing.allocator.free(encoded_actual);
 
