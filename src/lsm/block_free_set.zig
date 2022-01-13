@@ -110,7 +110,7 @@ pub const BlockFreeSet = struct {
     }
 
     /// Decodes the compressed bitset in `source` into `set`. Panics if `source`'s encoding is invalid.
-    pub fn decode(set: *BlockFreeSet, source: []const u8) void {
+    pub fn decode(set: *BlockFreeSet, source: []align(@alignOf(usize)) const u8) void {
         // Verify that this BlockFreeSet is entirely unallocated.
         assert(set.index.count() == set.index.bit_length);
 
@@ -127,7 +127,7 @@ pub const BlockFreeSet = struct {
     }
 
     // Returns the number of bytes written to `target`.
-    pub fn encode(set: BlockFreeSet, target: []u8) usize {
+    pub fn encode(set: BlockFreeSet, target: []align(@alignOf(usize)) u8) usize {
         assert(target.len == set.encode_size_max());
 
         return EWAH.encode(bitset_masks(set.blocks), target);
@@ -263,7 +263,8 @@ fn test_encode(patterns: []const BitSetPattern) !void {
         assert(blocks_offset == blocks.len);
     }
 
-    var encoded = try std.testing.allocator.alloc(u8, decoded_expect.encode_size_max());
+    var encoded = try std.testing.allocator.alignedAlloc(u8, @alignOf(usize),
+        decoded_expect.encode_size_max());
     defer std.testing.allocator.free(encoded);
 
     try std.testing.expectEqual(encoded.len % 8, 0);
@@ -304,7 +305,8 @@ test "BlockFreeSet decode small bitset into large bitset" {
     // Set up a small bitset (with blocks_count==shard_size) with no free blocks.
     var i: usize = 0;
     while (i < small_set.blocks.bit_length) : (i += 1) _ = small_set.acquire();
-    var small_buffer = try std.testing.allocator.alloc(u8, small_set.encode_size_max());
+    var small_buffer = try std.testing.allocator.alignedAlloc(u8, @alignOf(usize),
+        small_set.encode_size_max());
     defer std.testing.allocator.free(small_buffer);
 
     const small_buffer_written = small_set.encode(small_buffer);
@@ -352,7 +354,8 @@ test "BlockFreeSet encode/decode manual" {
     try std.testing.expectEqualSlices(usize, &decoded_expect, bitset_masks(decoded_actual.blocks));
 
     // Test encode.
-    var encoded_actual = try std.testing.allocator.alloc(u8, decoded_actual.encode_size_max());
+    var encoded_actual = try std.testing.allocator.alignedAlloc(u8, @alignOf(usize),
+        decoded_actual.encode_size_max());
     defer std.testing.allocator.free(encoded_actual);
 
     const encoded_actual_length = decoded_actual.encode(encoded_actual);
