@@ -187,17 +187,17 @@ fn test_block_shards_count(expect_shards_count: usize, blocks_count: usize) !voi
 test "BlockFreeSet encode, decode, encode" {
     const shard_size = BlockFreeSet.shard_size / @bitSizeOf(usize);
     // Uniform.
-    try test_encode(&.{.{.fill = .run_one, .words = shard_size}});
-    try test_encode(&.{.{.fill = .run_zero, .words = shard_size}});
+    try test_encode(&.{.{.fill = .uniform_ones, .words = shard_size}});
+    try test_encode(&.{.{.fill = .uniform_zeros, .words = shard_size}});
     try test_encode(&.{.{.fill = .literal, .words = shard_size}});
-    try test_encode(&.{.{.fill = .run_one, .words = std.math.maxInt(u16) + 1}});
+    try test_encode(&.{.{.fill = .uniform_ones, .words = std.math.maxInt(u16) + 1}});
 
     // Mixed.
     try test_encode(&.{
-        .{.fill = .run_one, .words = shard_size / 4},
-        .{.fill = .run_zero, .words = shard_size / 4},
+        .{.fill = .uniform_ones, .words = shard_size / 4},
+        .{.fill = .uniform_zeros, .words = shard_size / 4},
         .{.fill = .literal, .words = shard_size / 4},
-        .{.fill = .run_one, .words = shard_size / 4},
+        .{.fill = .uniform_ones, .words = shard_size / 4},
     });
 
     // Random.
@@ -205,7 +205,7 @@ test "BlockFreeSet encode, decode, encode" {
     try std.os.getrandom(mem.asBytes(&seed));
     var prng = std.rand.DefaultPrng.init(seed);
 
-    const fills = [_]BitSetPatternFill{.run_one, .run_zero, .literal};
+    const fills = [_]BitSetPatternFill{.uniform_ones, .uniform_zeros, .literal};
     var t: usize = 0;
     while (t < 10) : (t += 1) {
         var patterns = std.ArrayList(BitSetPattern).init(std.testing.allocator);
@@ -226,7 +226,7 @@ const BitSetPattern = struct {
     words: usize,
 };
 
-const BitSetPatternFill = enum { run_one, run_zero, literal };
+const BitSetPatternFill = enum { uniform_ones, uniform_zeros, literal };
 
 fn test_encode(patterns: []const BitSetPattern) !void {
     var seed: u64 = undefined;
@@ -251,12 +251,12 @@ fn test_encode(patterns: []const BitSetPattern) !void {
             var i: usize = 0;
             while (i < pattern.words) : (i += 1) {
                 blocks[blocks_offset] = switch (pattern.fill) {
-                    .run_one => ~@as(usize, 0),
-                    .run_zero => 0,
+                    .uniform_ones => ~@as(usize, 0),
+                    .uniform_zeros => 0,
                     .literal => prng.random.intRangeLessThan(usize, 1, std.math.maxInt(usize)),
                 };
                 const index_bit = blocks_offset * @bitSizeOf(usize) / BlockFreeSet.shard_size;
-                if (pattern.fill != .run_zero) decoded_expect.index.set(index_bit);
+                if (pattern.fill != .uniform_zeros) decoded_expect.index.set(index_bit);
                 blocks_offset += 1;
             }
         }
@@ -324,7 +324,7 @@ test "BlockFreeSet decode small bitset into large bitset" {
 test "BlockFreeSet encode/decode manual" {
     const encoded_expect = mem.sliceAsBytes(&[_]usize{
         // Mask 1: run of 2 words of 0s, then 3 literals
-        0 | (2 << 32) | (3 << 1),
+        0 | (2 << 1) | (3 << 32),
         0b10101010_10101010_10101010_10101010_10101010_10101010_10101010_10101010, // literal 1
         0b01010101_01010101_01010101_01010101_01010101_01010101_01010101_01010101, // literal 2
         0b10101010_10101010_10101010_10101010_10101010_10101010_10101010_10101010, // literal 3
@@ -332,7 +332,7 @@ test "BlockFreeSet encode/decode manual" {
         //
         // 59 is chosen so that because the blocks_count must be a multiple of the shard size:
         // shard_size = 4096 bits = 64 words × 64 bits/word = (2+3+59)*64
-        1 | ((64 - 5) << 32),
+        1 | ((64 - 5) << 1),
     });
     const decoded_expect = [_]usize{
         0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000, // run 1

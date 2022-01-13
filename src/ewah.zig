@@ -92,15 +92,14 @@ pub fn EWAH(comptime Word: type) type {
                 const uniform_word_count = count: {
                     if (is_literal(word)) break :count 0;
                     // Measure run length.
-                    const uniform_max = std.math.min(source_words.len, source_index + marker_uniform_word_count_max);
-                    var i: usize = source_index + 1;
-                    while (i < uniform_max and source_words[i] == word) : (i += 1) {}
-                    const uniform = i - source_index;
+                    const uniform_max = std.math.min(source_words.len - source_index, marker_uniform_word_count_max);
+                    var uniform: usize = 1;
+                    while (uniform < uniform_max and source_words[source_index + uniform] == word) uniform += 1;
                     break :count uniform;
                 };
                 source_index += uniform_word_count;
                 // For consistent encoding, set the run bit to 0 when there is no run.
-                const uniform_bit = if (uniform_word_count == 0) 0 else word & 1;
+                const uniform_bit = if (uniform_word_count == 0) 0 else @intCast(u1, word & 1);
                 // Count sequential literals that immediately follow the run.
                 const literals_max = std.math.min(source_words.len - source_index, marker_literal_word_count_max);
                 const literal_word_count = for (source_words[source_index..][0..literals_max]) |w, i| {
@@ -108,7 +107,7 @@ pub fn EWAH(comptime Word: type) type {
                 } else literals_max;
 
                 target_words[target_index] = marker_word(.{
-                    .uniform_bit = @intCast(u1, uniform_bit),
+                    .uniform_bit = uniform_bit,
                     .uniform_word_count = @intCast(MarkerUniformCount, uniform_word_count),
                     .literal_word_count = @intCast(MarkerLiteralCount, literal_word_count),
                 });
