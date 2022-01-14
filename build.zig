@@ -45,7 +45,7 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
-        const benchmark = b.addExecutable("benchmark_ewah", "src/ewah/benchmark.zig");
+        const benchmark = b.addExecutable("benchmark_ewah", "src/ewah_benchmark.zig");
         benchmark.setTarget(target);
         benchmark.setBuildMode(.ReleaseSafe);
         const run_cmd = benchmark.run();

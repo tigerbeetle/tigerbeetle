@@ -9,7 +9,8 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer(
     config.cache_line_size / @sizeOf(usize), // 1 cache line of recently-freed blocks
     .array,
 );
-const EWAH = @import("../ewah.zig").EWAH(usize);
+const ewah = @import("../ewah.zig").ewah(usize);
+const div_ceil = @import("../utils.zig").div_ceil;
 
 /// The 0 address is reserved for usage as a sentinel and will never be returned by acquire().
 ///
@@ -28,7 +29,8 @@ pub const BlockFreeSet = struct {
     // the word size. In practice the tail end of the index will be accessed less
     // frequently than the head/middle anyway.
     //
-    // Each shard is 8 cache lines because the CPU line fill buffer can fetch 10 lines in parallel. And 8 is fast for division when computing the shard of a block.
+    // Each shard is 8 cache lines because the CPU line fill buffer can fetch 10 lines in parallel.
+    // And 8 is fast for division when computing the shard of a block.
     // Since the shard is scanned sequentially, the prefetching amortizes the cost of the single
     // cache miss. It also reduces the size of the index.
     //
@@ -46,7 +48,7 @@ pub const BlockFreeSet = struct {
         assert(blocks_count % @bitSizeOf(usize) == 0);
 
         // Round up to ensure that every block bit is covered by the index.
-        const shards_count = div_ceil(blocks_count, shard_size);
+        const shards_count = @divExact(blocks_count, shard_size);
         var index = try DynamicBitSetUnmanaged.initFull(shards_count, allocator);
         errdefer index.deinit(allocator);
 
@@ -75,8 +77,8 @@ pub const BlockFreeSet = struct {
             } else return null;
         };
         const shard = block / shard_size;
-        assert(set.blocks.isSet(block));
         assert(set.index.isSet(shard));
+        assert(set.blocks.isSet(block));
 
         set.blocks.unset(block);
         // Update the index when every block in the shard is allocated.
@@ -99,14 +101,14 @@ pub const BlockFreeSet = struct {
         return set.blocks.isSet(block);
     }
 
-    /// Marks the specified block as free.
+    /// Given the address, marks an allocated block as free.
     pub fn release(set: *BlockFreeSet, address: u64) void {
         const block = address - 1;
         assert(!set.blocks.isSet(block));
 
         set.index.set(block / shard_size);
         set.blocks.set(block);
-        set.recent.push(block) catch {}; // ignore error.NoSpaceLeft
+        set.recent.push(block) catch {}; // Ignore error.NoSpaceLeft if full.
     }
 
     /// Decodes the compressed bitset in `source` into `set`. Panics if `source`'s encoding is invalid.
@@ -114,7 +116,9 @@ pub const BlockFreeSet = struct {
         // Verify that this BlockFreeSet is entirely unallocated.
         assert(set.index.count() == set.index.bit_length);
 
-        _ = EWAH.decode(source, bitset_masks(set.blocks));
+        const words_decoded = ewah.decode(source, bitset_masks(set.blocks));
+        assert(words_decoded * @bitSizeOf(MaskInt) <= set.blocks.bit_length);
+
         var shard: usize = 0;
         while (shard < set.index.bit_length) : (shard += 1) {
             if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
@@ -123,16 +127,21 @@ pub const BlockFreeSet = struct {
 
     // Returns the maximum number of bytes that the `BlockFreeSet` needs to encode to.
     pub fn encode_size_max(set: BlockFreeSet) usize {
-        return EWAH.encode_size_max(bitset_masks(set.blocks));
+        return ewah.encode_size_max(bitset_masks(set.blocks));
     }
 
     // Returns the number of bytes written to `target`.
     pub fn encode(set: BlockFreeSet, target: []align(@alignOf(usize)) u8) usize {
         assert(target.len == set.encode_size_max());
 
-        return EWAH.encode(bitset_masks(set.blocks), target);
+        return ewah.encode(bitset_masks(set.blocks), target);
     }
 };
+
+fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
+    const len = div_ceil(bitset.bit_length, @bitSizeOf(MaskInt));
+    return bitset.masks[0..len];
+}
 
 test "BlockFreeSet acquire/release" {
     const block_size = config.lsm_table_block_size;
@@ -205,10 +214,10 @@ test "BlockFreeSet encode, decode, encode" {
     try std.os.getrandom(mem.asBytes(&seed));
     var prng = std.rand.DefaultPrng.init(seed);
 
-    const fills = [_]BitSetPatternFill{.uniform_ones, .uniform_zeros, .literal};
+    const fills = [_]TestPatternFill{.uniform_ones, .uniform_zeros, .literal};
     var t: usize = 0;
     while (t < 10) : (t += 1) {
-        var patterns = std.ArrayList(BitSetPattern).init(std.testing.allocator);
+        var patterns = std.ArrayList(TestPattern).init(std.testing.allocator);
         defer patterns.deinit();
         var i: usize = 0;
         while (i < shard_size) : (i += 1) {
@@ -221,14 +230,14 @@ test "BlockFreeSet encode, decode, encode" {
     }
 }
 
-const BitSetPattern = struct {
-    fill: BitSetPatternFill,
+const TestPattern = struct {
+    fill: TestPatternFill,
     words: usize,
 };
 
-const BitSetPatternFill = enum { uniform_ones, uniform_zeros, literal };
+const TestPatternFill = enum { uniform_ones, uniform_zeros, literal };
 
-fn test_encode(patterns: []const BitSetPattern) !void {
+fn test_encode(patterns: []const TestPattern) !void {
     var seed: u64 = undefined;
     try std.os.getrandom(mem.asBytes(&seed));
     var prng = std.rand.DefaultPrng.init(seed);
@@ -274,15 +283,6 @@ fn test_encode(patterns: []const BitSetPattern) !void {
 
     decoded_actual.decode(encoded[0..encoded_length]);
     try expect_block_free_set_equal(decoded_expect, decoded_actual);
-}
-
-fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
-    const len = div_ceil(bitset.bit_length, @bitSizeOf(MaskInt));
-    return bitset.masks[0..len];
-}
-
-inline fn div_ceil(a: anytype, b: @TypeOf(a)) @TypeOf(a) {
-    return (a + b - 1) / b;
 }
 
 fn expect_block_free_set_equal(a: BlockFreeSet, b: BlockFreeSet) !void {
