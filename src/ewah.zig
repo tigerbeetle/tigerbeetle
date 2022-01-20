@@ -158,6 +158,28 @@ fn is_disjoint(comptime A: type, comptime B: type, a: []const A, b: []const B) b
         @ptrToInt(b.ptr) + b.len * @sizeOf(B) <= @ptrToInt(a.ptr);
 }
 
+test "is_disjoint" {
+    const a = try std.testing.allocator.alignedAlloc(u8, @sizeOf(u32), 8 * @sizeOf(u32));
+    defer std.testing.allocator.free(a);
+    const b = try std.testing.allocator.alloc(u32, 8);
+    defer std.testing.allocator.free(b);
+
+    try std.testing.expectEqual(true, is_disjoint(u8, u32, a, b));
+    try std.testing.expectEqual(true, is_disjoint(u32, u8, b, a));
+
+    try std.testing.expectEqual(true, is_disjoint(u8, u8, a, a[0..0]));
+    try std.testing.expectEqual(true, is_disjoint(u32, u32, b, b[0..0]));
+
+    try std.testing.expectEqual(false, is_disjoint(u8, u8, a, a[0..1]));
+    try std.testing.expectEqual(false, is_disjoint(u8, u8, a, a[a.len - 1 .. a.len]));
+
+    try std.testing.expectEqual(false, is_disjoint(u32, u32, b, b[0..1]));
+    try std.testing.expectEqual(false, is_disjoint(u32, u32, b, b[b.len - 1 .. b.len]));
+
+    try std.testing.expectEqual(false, is_disjoint(u8, u32, a, std.mem.bytesAsSlice(u32, a)));
+    try std.testing.expectEqual(false, is_disjoint(u32, u8, b, std.mem.sliceAsBytes(b)));
+}
+
 test "ewah Word=u8" {
     try test_decode_with_word(u8);
 
