@@ -126,6 +126,20 @@ pub fn BlockStorage(comptime Storage: type) type {
     };
 }
 
+pub const Direction = enum {
+    ascending,
+    descending,
+
+    pub fn reverse(d: Direction) Direction {
+        return switch (d) {
+            .ascending => .descending,
+            .descending => .ascending,
+        };
+    }
+};
+
+pub const table_count_max = compute_table_count_max(config.lsm_growth_factor, config.levels);
+
 pub fn LsmTree(
     /// Key sizes of 8, 16, 32, etc. are supported with alignment 8 or 16.
     comptime Key: type,
@@ -148,19 +162,19 @@ pub fn LsmTree(
         const Self = @This();
 
         pub const Manifest = struct {
-            /// 4MiB table
-            ///
-            /// 32_768 bytes transfers
-            /// 65_536 bytes bloom filter
-            /// 16_384 bytes index
-            ///
             /// First 128 bytes of the table are a VSR protocol header for a repair message.
             /// This data is filled in on writing the table so that we don't
             /// need to do any extra work before sending the message on repair.
             pub const TableInfo = extern struct {
                 checksum: u128,
                 address: u64,
-                timestamp: u64,
+
+                /// Set to the current snapshot tick on creation.
+                snapshot_min: u64,
+                /// Initially math.maxInt(u64) on creation, set to the current
+                /// snapshot tick on deletion.
+                snapshot_max: u64,
+
                 key_min: Key,
                 key_max: Key,
 
@@ -170,9 +184,74 @@ pub fn LsmTree(
                 }
             };
 
-            levels: [config.lsm_levels][]TableInfo,
+            pub const Level = struct {
+                key_mins: []Key,
+                key_mins: []Key,
+            };
 
-            pub fn level_tables(manifest: *Manifest, level: u32, timestamp_max: u64) []TableInfo {}
+            levels: [config.lsm_levels]Level,
+
+            pub fn table(
+                manifest: *Manifest,
+                /// May pass math.maxInt(u64) if there is no snapshot.
+                snapshot: u64,
+                level: u8,
+                key: Key,
+            ) ?TableInfo {
+                const info = manifest.levels[level].get(key, snapshot) orelse return null;
+
+                assert(compare_keys(key, info.key_max) != .gt);
+                if (compare_keys(key, info.key_min) != .lt) return info;
+
+                return null;
+            }
+
+            fn table_index(
+                manifest: *Manifest,
+                /// May pass math.maxInt(u64) if there is no snapshot.
+                snapshot: u64,
+                level: u8,
+                key: Key,
+                direction: Direction,
+            ) ?Index {
+                // TODO
+            }
+
+            fn table_index(manifest: *Manifest, index: Index) void {}
+
+            pub const Iterator = struct {
+                manifest: *Manifest,
+                snapshot: u64,
+                level: u8,
+                index: u32,
+                end: Key,
+                direction: Direction,
+
+                pub fn next(it: *Iterator) ?TableInfo {
+                    // assume direction is ascending
+                    // search for the current key_min in the manifest, given level and snapshot
+                    //
+                }
+            };
+
+            pub fn get_tables(
+                manifest: *Manifest,
+                /// May pass math.maxInt(u64) if there is no snapshot.
+                snapshot: u64,
+                level: u8,
+                key_min: Key,
+                key_max: Key,
+                direction: Direction,
+            ) Iterator {
+                return .{
+                    .manifest = manifest,
+                    .snapshot = snapshot,
+                    .level = level,
+                    .key_min = key_min,
+                    .key_max = key_max,
+                    .direction = direction,
+                };
+            }
         };
 
         /// Point queries go through the object cache instead of directly accessing this table.
@@ -1637,6 +1716,21 @@ pub fn LsmTree(
             query: RangeQuery,
         ) RangeQueryIterator {}
     };
+}
+
+// TODO double check how this interacts with dynamic tables sizes across levels.
+pub fn compute_table_count_max(growth_factor: u32, levels: u32) u32 {
+    var table_count: u32 = 0;
+    var level: u32 = 0;
+    while (level < levels) : (level += 1) {
+        table_count += math.pow(u32, growth_factor, level + 1);
+    }
+    return table_count;
+}
+
+test "table count max" {
+    try std.testing.expectEqual(@as(u32, 8), compute_table_count_max(8, 1));
+    try std.testing.expectEqual(@as(u32, 2396744), compute_table_count_max(8, 6));
 }
 
 test {
