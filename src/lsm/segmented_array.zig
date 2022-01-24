@@ -4,7 +4,7 @@ const mem = std.mem;
 
 const Direction = @import("tree.zig").Direction;
 
-pub const SegmentedArrayCursor = struct {
+pub const Cursor = struct {
     node: u32,
     relative_index: u32,
 };
@@ -42,45 +42,177 @@ pub fn SegmentedArray(
         pub fn init(allocator: mem.Allocator) !Self {}
         pub fn deinit(allocator: mem.Allocator) void {}
 
+        pub fn insert_elements(
+            array: *Self,
+            node_pool: *NodePool,
+            absolute_index: u32,
+            elements: []T,
+        ) void {
+            for (elements) |element, i| {
+                array.insert(node_pool, absolute_index + i, element);
+            }
+        }
+
+        pub fn insert_element(
+            array: *Self,
+            node_pool: *NodePool,
+            absolute_index: u32,
+            element: T,
+        ) void {
+            if (array.node_count == 0) {
+                assert(absolute_index == 0);
+
+                array.node_count = 1;
+                array.node[0] = node_pool.get_node();
+                array.counts[0] = 0;
+                array.absolute_index_of_first_element[0] = 0;
+            }
+
+            const cursor = array.split_node_if_full(node_pool, absolute_index);
+            assert(array.counts[cursor.node] < node_capacity);
+
+            const pointer = array.nodes[cursor.node].?;
+            mem.copy(
+                T,
+                pointer[cursor.relative_index + 1 .. array.counts[cursor.node] + 1],
+                pointer[cursor.relative_index..array.counts[cursor.node]],
+            );
+            pointer[cursor.relative_index] = element;
+            array.counts[cursor.node] += 1;
+            for (array.absolute_index_of_first_element[cursor.node + 1 .. array.node_count]) |*i| {
+                i.* += 1;
+            }
+        }
+
+        fn split_node_if_full(array: *Self, node_pool: *NodePool, absolute_index: u32) Cursor {
+            const cursor = array.cursor_for_absolute_index(absolute_index);
+
+            if (array.counts[cursor.node] < node_capacity) return cursor;
+            assert(array.counts[cursor.node] == node_capacity);
+
+            array.split_node(node_pool, cursor.node);
+
+            // Splitting the node invalidates the cursor. We could avoid calling
+            // cursor_for_absolute_index() here and instead use our knowledge of how splitting
+            // is implemented to calculate the new cursor in constant time, but that would be
+            // much more error prone.
+            // TODO We think that such an optimiztion wouldn't be worthwhile as it doesn't affect
+            // the data plane enough.
+            return array.cursor_for_absolute_index(absolute_index);
+        }
+
+        /// Split the node at index `node` into two nodes, inserting the new node directly after
+        /// `node`. This invalidates all cursors into the SegmentedArray but does not affect
+        /// absolute indexes.
+        fn split_node(array: *Self, node_pool: *NodePool, node: u32) void {
+            assert(node < array.node_count);
+            assert(array.counts[node] == node_capacity);
+
+            // Insert a new node after the node being split.
+            const new_node = node + 1;
+            array.insert_empty_node_at(node_pool, new_node);
+
+            const half = node_capacity / 2;
+            comptime assert(node_capacity % 2 == 0);
+
+            const pointer = array.nodes[node].?;
+            const new_pointer = array.nodes[new_node].?;
+
+            // We can do new_pointer[0..half] here because we assert node_capacity is even.
+            // If it was odd, this redundant bounds check would fail.
+            mem.copy(T, new_pointer[0..half], pointer[half..]);
+
+            array.counts[node] = half;
+            array.counts[new_node] = node_capacity - half;
+
+            array.absolute_index_of_first_element[new_node] =
+                array.absolute_index_of_first_element[node] + half;
+        }
+
+        /// Insert an empty node at index `node`.
+        fn insert_empty_node_at(array: Self, node_pool: *NodePool, node: u32) void {
+            assert(array.node_count > 0);
+            assert(node < array.node_count);
+
+            mem.copy(
+                ?*[node_capacity]T,
+                array.nodes[node + 1 .. array.node_count + 1],
+                array.nodes[node..array.node_count],
+            );
+            mem.copy(
+                u32,
+                array.counts[node + 1 .. array.node_count + 1],
+                array.counts[node..array.node_count],
+            );
+            mem.copy(
+                u32,
+                array.absolute_index_of_first_element[node + 1 .. array.node_count + 1],
+                array.absolute_index_of_first_element[node..array.node_count],
+            );
+
+            array.node_count += 1;
+            array.nodes[node] = node_pool.get_node();
+            array.counts[node] = 0;
+            assert(array.absolute_index_of_first_element[node] ==
+                array.absolute_index_of_first_element[node + 1]);
+        }
+
         pub fn node_elements(array: Self, node: u32) []T {
             assert(node < array.node_count);
             return array.nodes[node].?[0..array.counts[node]];
         }
 
-        pub fn element(array: Self, cursor: SegmentedArrayCursor) T {
+        pub fn element(array: Self, cursor: Cursor) T {
             return array.node_elements(cursor.node)[cursor.relative_index];
         }
 
-        pub fn last_node(array: Self) u32 {
-            return array.node_count - 1;
-        }
-
-        pub fn first(_: Self) SegmentedArrayCursor {
+        pub fn first(_: Self) Cursor {
             return .{
                 .node = 0,
                 .relative_index = 0,
             };
         }
 
-        pub fn last(array: Self) SegmentedArrayCursor {
+        pub fn last(array: Self) Cursor {
+            const last_node = array.node_count - 1;
             return .{
-                .node = array.node_count - 1,
-                .relative_index = array.node_elements(array.node_count - 1).len - 1,
+                .node = last_node,
+                .relative_index = array.counts[last_node] - 1,
             };
         }
 
         // TODO consider enabling ReleaseFast for this once tested
-        pub fn absolute_index_for_cursor(array: Self, cursor: SegmentedArrayCursor) u32 {
+        pub fn absolute_index_for_cursor(array: Self, cursor: Cursor) u32 {
             assert(node < array.node_count);
             assert(relative_index < array.counts[node]);
             return array.first_absolute_index(node) + relative_index;
+        }
+
+        pub fn cursor_for_absolute_index(array: Self, absolute_index: u32) Cursor {
+            assert(absolute_index <= array.last_absolute_index(array.last().node));
+
+            var node: u32 = 0;
+            while (node + 1 < array.node_count and
+                absolute_index >= array.first_absolute_index(node + 1))
+            {
+                node += 1;
+            }
+            assert(node < array.node_count);
+
+            assert(relative_index < array.counts[node]);
+            const relative_index = absolute_index - array.first_absolute_index(node);
+
+            return .{
+                .node = node,
+                .relative_index = relative_index,
+            };
         }
 
         pub const Iterator = struct {
             array: *const Self,
             direction: Direction,
 
-            cursor: SegmentedArrayCursor,
+            cursor: Cursor,
 
             /// The user may set this early to stop iteration. For example,
             /// if the returned table info is outside the key range.
@@ -140,7 +272,7 @@ pub fn SegmentedArray(
             // the iterator will not be initialized in the `done` state and will yield at least
             // one element.
             assert(start_node < array.node_count);
-            assert(absolute_index <= array.last_absolute_index(array.node_count - 1));
+            assert(absolute_index <= array.last_absolute_index(array.last().node));
             switch (direction) {
                 .ascending => {
                     assert(absolute_index >= array.first_absolute_index(start_node));
@@ -155,10 +287,6 @@ pub fn SegmentedArray(
 
                     const relative_index = absolute_index - array.first_absolute_index(node);
                     assert(relative_index < array.counts[node]);
-
-                    // TODO dead code:
-                    const done = relative_index >= array.counts[node];
-                    if (done) assert(node + 1 == array.node_count);
 
                     return .{
                         .array = array,
@@ -179,10 +307,6 @@ pub fn SegmentedArray(
 
                     const relative_index = absolute_index - array.first_absolute_index(node);
                     assert(relative_index < array.counts[node]);
-
-                    // TODO dead code:
-                    const done = relative_index >= array.counts[node];
-                    if (done) assert(node + 1 == array.node_count);
 
                     return .{
                         .array = array,

@@ -10,7 +10,7 @@ const binary_search = @import("binary_search").binary_search;
 
 const Direction = @import("tree.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
-const SegmentedArrayCursor = @import("segmented_array.zig").SegmentedArrayCursor;
+const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
 fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     const T = @TypeOf(numerator, denominator);
