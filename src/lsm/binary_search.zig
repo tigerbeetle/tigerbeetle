@@ -9,8 +9,8 @@ const math = std.math;
 pub fn binary_search(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) callconv(.Inline) Key,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    comptime key_from_value: fn (Value) Key,
+    comptime compare_keys: fn (Key, Key) math.Order,
     values: []const Value,
     key: Key,
 ) usize {
@@ -40,12 +40,12 @@ const test_binary_search = struct {
 
     const Value = struct {
         key: u32,
-        inline fn to_key(v: Value) u32 {
+        fn to_key(v: Value) u32 {
             return v.key;
         }
     };
 
-    inline fn compare_keys(a: u32, b: u32) math.Order {
+    fn compare_keys(a: u32, b: u32) math.Order {
         return math.order(a, b);
     }
 
@@ -117,6 +117,7 @@ const test_binary_search = struct {
     }
 };
 
+// TODO test search on empty slice
 test "binary search: exhaustive" {
     if (test_binary_search.log) std.debug.print("\n", .{});
     var i: u32 = 1;
@@ -131,5 +132,16 @@ test "binary search: explicit" {
         &[_]u32{ 0, 3, 5, 8, 9, 11 },
         &[_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 },
         &[_]usize{ 0, 1, 1, 1, 2, 2, 3, 3, 3, 4, 5, 5, 6, 6 },
+    );
+}
+
+// Our ManifestLevel implementation requires that if the target key is not found,
+// the index of the next greatest key is returned even in the presence of duplicates.
+test "binary search: duplicates" {
+    if (test_binary_search.log) std.debug.print("\n", .{});
+    try test_binary_search.explicit_search(
+        &[_]u32{ 0, 0, 3, 3, 3, 5, 5, 5, 5 },
+        &[_]u32{ 1, 2, 4, 6 },
+        &[_]usize{ 2, 2, 5, 9 },
     );
 }
