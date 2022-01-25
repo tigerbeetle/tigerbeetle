@@ -188,6 +188,11 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 @tagName(operation),
             });
 
+            if (self.request_queue.full()) {
+                callback(user_data, operation, error.TooManyOutstandingRequests);
+                return;
+            }
+
             const was_empty = self.request_queue.empty();
 
             self.request_queue.push(.{
@@ -195,10 +200,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 .callback = callback,
                 .message = message.ref(),
             }) catch |err| switch (err) {
-                error.NoSpaceLeft => {
-                    callback(user_data, operation, error.TooManyOutstandingRequests);
-                    return;
-                },
+                error.NoSpaceLeft => unreachable, // Already verified that there is room.
             };
 
             // If the queue was empty, then there is no request inflight and we must send this one:
