@@ -23,12 +23,6 @@ pub const BlockFreeSet = struct {
     // A fast cache of the 0-indexed bits (not 1-indexed addresses) of recently freed blocks.
     recent: RingBuffer,
 
-    // Fixing the shard size to a constant rather than varying the shard size (but
-    // guaranteeing the index always a multiple of 64B) means that the top-level index
-    // may have some unused bits. But the shards themselves are always a multiple of
-    // the word size. In practice the tail end of the index will be accessed less
-    // frequently than the head/middle anyway.
-    //
     // Each shard is 8 cache lines because the CPU line fill buffer can fetch 10 lines in parallel.
     // And 8 is fast for division when computing the shard of a block.
     // Since the shard is scanned sequentially, the prefetching amortizes the cost of the single
@@ -40,6 +34,8 @@ pub const BlockFreeSet = struct {
     comptime {
         assert(shard_size == 4096);
         assert(@bitSizeOf(MaskInt) == 64);
+        // Ensure there are no wasted padding bits at the end of the index.
+        assert(shard_size % @bitSizeOf(MaskInt) == 0);
     }
 
     pub fn init(allocator: *mem.Allocator, blocks_count: usize) !BlockFreeSet {
@@ -47,7 +43,7 @@ pub const BlockFreeSet = struct {
         assert(blocks_count % shard_size == 0);
         assert(blocks_count % @bitSizeOf(usize) == 0);
 
-        // Round up to ensure that every block bit is covered by the index.
+        // Every block bit is covered by exactly one index bit.
         const shards_count = @divExact(blocks_count, shard_size);
         var index = try DynamicBitSetUnmanaged.initFull(shards_count, allocator);
         errdefer index.deinit(allocator);
@@ -149,7 +145,7 @@ test "BlockFreeSet acquire/release" {
     try test_block_shards_count(5120 * 8, 10 * blocks_in_tb);
     try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - BlockFreeSet.shard_size);
     try test_block_shards_count(1, BlockFreeSet.shard_size); // At least one index bit is required.
-    // Block counts are not necessarily a multiple of the word size.
+
     try test_acquire_release(BlockFreeSet.shard_size);
     try test_acquire_release(2 * BlockFreeSet.shard_size);
     try test_acquire_release(63 * BlockFreeSet.shard_size);
@@ -219,6 +215,7 @@ test "BlockFreeSet encode, decode, encode" {
     while (t < 10) : (t += 1) {
         var patterns = std.ArrayList(TestPattern).init(std.testing.allocator);
         defer patterns.deinit();
+
         var i: usize = 0;
         while (i < shard_size) : (i += 1) {
             try patterns.append(.{
@@ -244,6 +241,7 @@ fn test_encode(patterns: []const TestPattern) !void {
 
     var blocks_count: usize = 0;
     for (patterns) |pattern| blocks_count += pattern.words * @bitSizeOf(usize);
+
     var decoded_expect = try BlockFreeSet.init(std.testing.allocator, blocks_count);
     defer decoded_expect.deinit(std.testing.allocator);
 

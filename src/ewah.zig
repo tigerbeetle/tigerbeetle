@@ -62,6 +62,7 @@ pub fn ewah(comptime Word: type) type {
             assert(source.len % @sizeOf(Word) == 0);
             assert(source.len >= @sizeOf(Marker));
             assert(is_disjoint(u8, Word, source, target_words));
+
             const source_words = mem.bytesAsSlice(Word, source);
             var source_index: usize = 0;
             var target_index: usize = 0;
@@ -161,6 +162,7 @@ fn is_disjoint(comptime A: type, comptime B: type, a: []const A, b: []const B) b
 test "is_disjoint" {
     const a = try std.testing.allocator.alignedAlloc(u8, @sizeOf(u32), 8 * @sizeOf(u32));
     defer std.testing.allocator.free(a);
+
     const b = try std.testing.allocator.alloc(u32, 8);
     defer std.testing.allocator.free(b);
 
@@ -180,7 +182,7 @@ test "is_disjoint" {
     try std.testing.expectEqual(false, is_disjoint(u32, u8, b, std.mem.sliceAsBytes(b)));
 }
 
-test "ewah Word=u8" {
+test "ewah Word=u8 decode→encode→decode" {
     try test_decode_with_word(u8);
 
     const codec = ewah(u8);
@@ -197,10 +199,34 @@ test "ewah Word=u8" {
     }
 }
 
+test "ewah Word=u8 encode→decode→encode" {
+    const codec = ewah(u8);
+
+    var seed: u64 = undefined;
+    try std.os.getrandom(mem.asBytes(&seed));
+    var prng = std.rand.DefaultPrng.init(seed);
+    var decoded_expect: [4096]u8 = undefined;
+    var decoded_actual: [4096]u8 = undefined;
+
+    const encoded_actual = try std.testing.allocator.alignedAlloc(u8, @alignOf(u8),
+        codec.encode_size_max(decoded_expect[0..]));
+    defer std.testing.allocator.free(encoded_actual);
+
+    var t: usize = 0;
+    while (t < 100) : (t += 1) {
+        prng.random.bytes(decoded_expect[0..]);
+        const encoded_actual_length = codec.encode(decoded_expect[0..], encoded_actual);
+        const decoded_actual_length = codec.decode(encoded_actual[0..], decoded_actual[0..]);
+        try std.testing.expectEqual(decoded_expect.len, decoded_actual_length);
+        try std.testing.expectEqual(decoded_expect, decoded_actual);
+    }
+}
+
 test "ewah Word=u16" {
     try test_decode_with_word(u16);
 }
 
+// decode → encode → decode
 fn test_decode_with_word(comptime Word: type) !void {
     const codec = ewah(Word);
 
