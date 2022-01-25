@@ -3,21 +3,23 @@ const assert = std.debug.assert;
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
-        const T = @TypeOf(numerator, denominator);
-        switch (@typeInfo(T)) {
+        const A = @TypeOf(numerator);
+        const B = @TypeOf(denominator);
+
+        switch (@typeInfo(@TypeOf(numerator))) {
             .Int => |int| assert(int.signedness == .unsigned),
-            .ComptimeInt => {
-                assert(numerator >= 0);
-                assert(denominator > 0);
-            },
-            else => @compileError("invalid type given to utils.div_ceil"),
+            .ComptimeInt => assert(numerator >= 0),
+            else => @compileError("utils.div_ceil: invalid numerator type"),
+        }
+
+        switch (@typeInfo(@TypeOf(denominator))) {
+            .Int => |int| assert(int.signedness == .unsigned),
+            .ComptimeInt => assert(denominator > 0),
+            else => @compileError("utils.div_ceil: invalid denominator type"),
         }
     }
 
-    // Only check the denominator at runtime when the it is *not* a comptime_int.
-    if (@as(std.builtin.TypeId, @typeInfo(@TypeOf(denominator))) == .Int) {
-        assert(denominator > 0);
-    }
+    assert(denominator > 0);
 
     if (numerator == 0) return 0;
     return @divFloor(numerator - 1, denominator) + 1;
