@@ -49,7 +49,7 @@ pub const MessagePool = struct {
 
     /// List of currently unused messages of message_size_max_padded
     free_list: ?*Message,
-    /// List of currently usused header-sized messages
+    /// List of currently unused header-sized messages
     header_only_free_list: ?*Message,
 
     pub fn init(allocator: mem.Allocator) error{OutOfMemory}!MessagePool {
