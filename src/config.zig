@@ -86,12 +86,6 @@ pub const connections_max = replicas_max + clients_max;
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const message_size_max = 1 * 1024 * 1024;
 
-/// The number of full-sized messages allocated at initialization by the message bus.
-pub const message_bus_messages_max = connections_max * 4;
-/// The number of header-sized messages allocated at initialization by the message bus.
-/// These are much smaller/cheaper and we can therefore have many of them.
-pub const message_bus_headers_max = connections_max * connection_send_queue_max * 2;
-
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
 /// possibly be uncommitted during a view change, and this must be constant for all replicas.
@@ -176,6 +170,22 @@ pub const direct_io = true;
 pub const io_depth_read = 8;
 /// The maximum number of concurrent write I/O operations to allow at once.
 pub const io_depth_write = 8;
+
+// There must be enough messages to ensure that the replica can always progress,
+// i.e. it never deadlocks because it doesn't have a free message.
+const client_table_messages_max = clients_max;
+const journal_messages_max = io_depth_read + io_depth_write;
+const loopback_queue_messages_max = 1;
+const pipelining_messages_max = pipelining_max * (1 + replicas_max);
+const quorum_messages_max = 3 * replicas_max;
+
+/// The number of full-sized messages allocated at initialization by the message bus.
+pub const message_bus_messages_max = pipelining_messages_max + quorum_messages_max +
+    loopback_queue_messages_max + client_table_messages_max + journal_messages_max;
+
+/// The number of header-sized messages allocated at initialization by the message bus.
+/// These are much smaller/cheaper and we can therefore have many of them.
+pub const message_bus_headers_max = connections_max * connection_send_queue_max * 2;
 
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
