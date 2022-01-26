@@ -7,7 +7,8 @@ const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const Message = @import("../message_pool.zig").MessagePool.Message;
+const message_pool = @import("../message_pool.zig");
+const Message = message_pool.MessagePool.Message;
 
 const log = std.log.scoped(.client);
 
@@ -67,7 +68,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         /// A client is allowed at most one inflight request at a time at the protocol layer.
         /// We therefore queue any further concurrent requests made by the application layer.
         /// We must leave one message free to receive with.
-        request_queue: RingBuffer(Request, config.message_bus_messages_max - 1) = .{},
+        request_queue: RingBuffer(Request, message_pool.messages_max - 1) = .{},
 
         /// The number of ticks without a reply before the client resends the inflight request.
         /// Dynamically adjusted as a function of recent request round-trip time.
