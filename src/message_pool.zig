@@ -17,9 +17,46 @@ comptime {
 /// message to be shifted to make space for 0 padding to vsr.sector_ceil.
 const message_size_max_padded = config.message_size_max + config.sector_size;
 
+/// The number of full-sized messages allocated at initialization by the message pool.
+/// There must be enough messages to ensure that the replica can always progress, to avoid deadlock.
+pub const messages_max = messages_max: {
+    const client_table_messages_max = config.clients_max;
+    const journal_messages_max = config.io_depth_read + config.io_depth_write;
+    const loopback_queue_messages_max = 1;
+    // +1 is the `prepare`, replicas_max is the corresponding `prepare_ok`.
+    const pipelining_messages_max = config.pipelining_max * (1 + config.replicas_max);
+    // There are 3 quorums:
+    // - start_view_change_from_other_replicas
+    // - do_view_change_from_all_replicas
+    // - nack_prepare_from_other_replicas
+    const quorum_messages_max = 3 * config.replicas_max;
+
+    // +1 to account for the Connection's `recv_message`.
+    const connection_messages_max = config.connection_send_queue_max + 1;
+    const message_bus_messages_max = config.connections_max * connection_messages_max;
+
+    break :messages_max pipelining_messages_max + quorum_messages_max +
+        loopback_queue_messages_max + client_table_messages_max + journal_messages_max +
+        message_bus_messages_max;
+};
+
+/// The number of header-sized messages allocated at initialization by the message bus.
+/// These are much smaller/cheaper and we can therefore have many of them.
+pub const headers_max = headers_max: {
+    const loopback_queue_messages_max = 1;
+    const message_bus_messages_max = config.connections_max * config.connection_send_queue_max;
+    break :headers_max loopback_queue_messages_max + message_bus_messages_max;
+}; //TODO connections_max * connection_send_queue_max * 2;
+
+comptime {
+    // These conditions are necessary (but not sufficient) to prevent deadlocks.
+    assert(messages_max > config.replicas_max);
+    assert(headers_max > config.replicas_max);
+}
+
 /// A pool of reference-counted Messages, memory for which is allocated only once
-/// during initialization and reused thereafter. The config.message_bus_messages_max
-/// and config.message_bus_headers_max values determine the size of this pool.
+/// during initialization and reused thereafter. The messages_max and headers_max
+/// values determine the size of this pool.
 pub const MessagePool = struct {
     pub const Message = struct {
         // TODO: replace this with a header() function to save memory
@@ -59,7 +96,7 @@ pub const MessagePool = struct {
         };
         {
             var i: usize = 0;
-            while (i < config.message_bus_messages_max) : (i += 1) {
+            while (i < messages_max) : (i += 1) {
                 const buffer = try allocator.allocAdvanced(
                     u8,
                     config.sector_size,
@@ -77,7 +114,7 @@ pub const MessagePool = struct {
         }
         {
             var i: usize = 0;
-            while (i < config.message_bus_headers_max) : (i += 1) {
+            while (i < headers_max) : (i += 1) {
                 const header = try allocator.create(Header);
                 const message = try allocator.create(Message);
                 message.* = .{

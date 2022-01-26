@@ -6,7 +6,8 @@ const config = @import("../config.zig");
 
 const StateChecker = @import("state_checker.zig").StateChecker;
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
+const message_pool = @import("../message_pool.zig");
+const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
 const Network = @import("network.zig").Network;
@@ -202,7 +203,7 @@ pub const Cluster = struct {
             while (it) |message| : (it = message.next) messages_in_pool += 1;
         }
 
-        const total_messages = config.message_bus_messages_max + config.message_bus_headers_max;
+        const total_messages = message_pool.messages_max + message_pool.headers_max;
         assert(messages_in_network + messages_in_pool == total_messages);
 
         replica.* = try Replica.init(
