@@ -23,8 +23,7 @@ pub const messages_max = messages_max: {
     const client_table_messages_max = config.clients_max;
     const journal_messages_max = config.io_depth_read + config.io_depth_write;
     const loopback_queue_messages_max = 1;
-    // +1 is the `prepare`, replicas_max is the corresponding `prepare_ok`.
-    const pipelining_messages_max = config.pipelining_max * (1 + config.replicas_max);
+    const pipelining_messages_max = config.pipelining_max;
     // There are 3 quorums:
     // - start_view_change_from_other_replicas
     // - do_view_change_from_all_replicas
@@ -46,7 +45,7 @@ pub const headers_max = headers_max: {
     const loopback_queue_messages_max = 1;
     const message_bus_messages_max = config.connections_max * config.connection_send_queue_max;
     break :headers_max loopback_queue_messages_max + message_bus_messages_max;
-}; //TODO connections_max * connection_send_queue_max * 2;
+};
 
 comptime {
     // These conditions are necessary (but not sufficient) to prevent deadlocks.
