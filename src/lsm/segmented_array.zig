@@ -9,6 +9,13 @@ pub const Cursor = struct {
     relative_index: u32,
 };
 
+// TODO:
+// 1 Implement remove()
+// 2 Merge nodes if they become half full (check during remove)
+// 3 Unit tests for SegmentedArray
+// - Special Level 0 ManifestLevel that allows overlapping tables.
+// - Go back to compaction and track tables during the compaction to be inserted/removed.
+
 pub fn SegmentedArray(
     comptime T: type,
     comptime node_size: u32,
@@ -37,7 +44,7 @@ pub fn SegmentedArray(
         /// Since nodes in a segmented array are usually not full, computing the absolute index
         /// of an element in the full array is O(N) over the number of nodes. To avoid this cost
         /// we precompute the absolute index of the first element of each node.
-        absolute_index_of_first_element: *[node_count_max]u32,
+        indexes: *[node_count_max]u32,
 
         pub fn init(allocator: mem.Allocator) !Self {}
         pub fn deinit(allocator: mem.Allocator) void {}
@@ -65,21 +72,21 @@ pub fn SegmentedArray(
                 array.node_count = 1;
                 array.node[0] = node_pool.get_node();
                 array.counts[0] = 0;
-                array.absolute_index_of_first_element[0] = 0;
+                array.indexes[0] = 0;
             }
 
             const cursor = array.split_node_if_full(node_pool, absolute_index);
             assert(array.counts[cursor.node] < node_capacity);
 
             const pointer = array.nodes[cursor.node].?;
-            mem.copy(
+            mem.copyBackwards(
                 T,
                 pointer[cursor.relative_index + 1 .. array.counts[cursor.node] + 1],
                 pointer[cursor.relative_index..array.counts[cursor.node]],
             );
             pointer[cursor.relative_index] = element;
             array.counts[cursor.node] += 1;
-            for (array.absolute_index_of_first_element[cursor.node + 1 .. array.node_count]) |*i| {
+            for (array.indexes[cursor.node + 1 .. array.node_count]) |*i| {
                 i.* += 1;
             }
         }
@@ -120,13 +127,12 @@ pub fn SegmentedArray(
 
             // We can do new_pointer[0..half] here because we assert node_capacity is even.
             // If it was odd, this redundant bounds check would fail.
-            mem.copy(T, new_pointer[0..half], pointer[half..]);
+            mem.copyBackwards(T, new_pointer[0..half], pointer[half..]);
 
             array.counts[node] = half;
             array.counts[new_node] = node_capacity - half;
 
-            array.absolute_index_of_first_element[new_node] =
-                array.absolute_index_of_first_element[node] + half;
+            array.indexes[new_node] = array.indexes[node] + half;
         }
 
         /// Insert an empty node at index `node`.
@@ -134,27 +140,155 @@ pub fn SegmentedArray(
             assert(array.node_count > 0);
             assert(node < array.node_count);
 
-            mem.copy(
+            mem.copyBackwards(
                 ?*[node_capacity]T,
                 array.nodes[node + 1 .. array.node_count + 1],
                 array.nodes[node..array.node_count],
             );
-            mem.copy(
+            mem.copyBackwards(
                 u32,
                 array.counts[node + 1 .. array.node_count + 1],
                 array.counts[node..array.node_count],
             );
-            mem.copy(
+            mem.copyBackwards(
                 u32,
-                array.absolute_index_of_first_element[node + 1 .. array.node_count + 1],
-                array.absolute_index_of_first_element[node..array.node_count],
+                array.indexes[node + 1 .. array.node_count + 1],
+                array.indexes[node..array.node_count],
             );
 
             array.node_count += 1;
             array.nodes[node] = node_pool.get_node();
             array.counts[node] = 0;
-            assert(array.absolute_index_of_first_element[node] ==
-                array.absolute_index_of_first_element[node + 1]);
+            assert(array.indexes[node] == array.indexes[node + 1]);
+        }
+
+        pub fn remove_elements(
+            array: *Self,
+            node_pool: *NodePool,
+            absolute_index: u32,
+            count: u32,
+        ) void {
+            var i: u32 = count;
+            while (i > 0) {
+                i -= 1;
+
+                array.remove_element(node_pool, absolute_index + i);
+            }
+        }
+
+        // To remove an element, we simply find the node it is in and delete it from
+        // the elements array, decrementing numElements. If this reduces the node to less
+        // than half-full, then we move elements from the next node to fill it back up
+        // above half. If this leaves the next node less than half full, then we move
+        // all its remaining elements into the current node, then bypass and delete it.
+        pub fn remove_element(
+            array: *Self,
+            node_pool: *NodePool,
+            absolute_index: u32,
+        ) void {
+            assert(array.node_count > 0);
+
+            const cursor = array.cursor_for_absolute_index(absolute_index);
+            const b = cursor.node;
+            const b_pointer = array.nodes[b].?;
+
+            for (array.indexes[b + 1 .. array.node_count]) |*i| {
+                i.* -= 1;
+            }
+            array.counts[b] -= 1;
+            mem.copy(
+                T,
+                b_pointer[cursor.relative_index..array.counts[b]],
+                b_pointer[cursor.relative_index + 1 .. array.counts[b] + 1],
+            );
+
+            // The last node is allowed to be less than half full.
+            if (b == array.last().node) return;
+
+            const c = b + 1;
+            const c_pointer = array.nodes[c].?;
+
+            const b_count = array.counts[b];
+            const c_count = array.counts[c];
+
+            const half = node_capacity / 2;
+            if (b_count < half) {
+                if (b_count + c_count <= node_capacity) {
+                    mem.copy(
+                        T,
+                        b_pointer[b_count..][0..c_count],
+                        c_pointer[0..c_count],
+                    );
+                    array.counts[b] += c_count;
+                    array.counts[c] = 0;
+                    array.remove_empty_node_at(node_pool, c);
+                } else {
+                    const to_copy = half - b_count;
+
+                    mem.copy(
+                        T,
+                        b_pointer[b_count..][0..to_copy],
+                        c_pointer[0..to_copy],
+                    );
+                    mem.copy(
+                        T,
+                        c_pointer[0 .. c_count - to_copy],
+                        c_pointer[to_copy..c_count],
+                    );
+                    array.counts[b] += to_copy;
+                    array.counts[c] -= to_copy;
+                    array.indexes[c] += to_copy;
+
+                    assert(array.counts[b] == half);
+                    assert(array.counts[c] > half);
+                }
+            }
+        }
+
+        /// Remove an empty node at index `node`.
+        fn remove_empty_node_at(array: Self, node_pool: *NodePool, node: u32) void {
+            assert(array.node_count > 0);
+            assert(node < array.node_count);
+            assert(array.counts[node] == 0);
+
+            node_pool.release(array.nodes[node].?);
+
+            mem.copy(
+                ?*[node_capacity]T,
+                array.nodes[node..array.node_count],
+                array.nodes[node + 1 .. array.node_count + 1],
+            );
+            mem.copy(
+                u32,
+                array.counts[node..array.node_count],
+                array.counts[node + 1 .. array.node_count + 1],
+            );
+            mem.copy(
+                u32,
+                array.indexes[node..array.node_count],
+                array.indexes[node + 1 .. array.node_count + 1],
+            );
+
+            array.node_count -= 1;
+            array.nodes[array.node_count] = null;
+            array.counts[array.node_count] = 0;
+            array.indexes[array.node_count] = blk: {
+                if (array.node_count > 0) {
+                    const previous = array.node_count - 1;
+                    break :blk array.indexes[previous] + array.counts[previous] - 1;
+                } else {
+                    break :blk 0;
+                }
+            };
+        }
+
+        fn compact(array: *Self, node_pool: *NodePool) void {
+            var node: u32 = 0;
+            // Skip over any leading already full nodes.
+            while (node < array.node_count and array.counts[node] == node_capacity) {
+                node += 1;
+            }
+            if (node == array.node_count) return;
         }
 
         pub fn node_elements(array: Self, node: u32) []T {
@@ -322,12 +456,12 @@ pub fn SegmentedArray(
 
         fn first_absolute_index(array: Self, node: u32) u32 {
             assert(node < array.node_count);
-            return array.absolute_index_of_first_element[node];
+            return array.indexes[node];
         }
 
         fn last_absolute_index(array: Self, node: u32) u32 {
             assert(node < array.node_count);
-            return array.absolute_index_of_first_element[node] + array.counts[node] - 1;
+            return array.indexes[node] + array.counts[node] - 1;
         }
     };
 }
