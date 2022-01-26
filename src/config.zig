@@ -171,17 +171,28 @@ pub const io_depth_read = 8;
 /// The maximum number of concurrent write I/O operations to allow at once.
 pub const io_depth_write = 8;
 
-// There must be enough messages to ensure that the replica can always progress,
-// i.e. it never deadlocks because it doesn't have a free message.
-const client_table_messages_max = clients_max;
-const journal_messages_max = io_depth_read + io_depth_write;
-const loopback_queue_messages_max = 1;
-const pipelining_messages_max = pipelining_max * (1 + replicas_max);
-const quorum_messages_max = 3 * replicas_max;
+/// The number of full-sized messages allocated at initialization by the message pool.
+/// There must be enough messages to ensure that the replica can always progress, to avoid deadlock.
+pub const message_bus_messages_max = messages_max: {
+    const client_table_messages_max = clients_max;
+    const journal_messages_max = io_depth_read + io_depth_write;
+    const loopback_queue_messages_max = 1;
+    // +1 is the `prepare`, replicas_max is the corresponding `prepare_ok`.
+    const pipelining_messages_max = pipelining_max * (1 + replicas_max);
+    // There are 3 quorums:
+    // - start_view_change_from_other_replicas
+    // - do_view_change_from_all_replicas
+    // - nack_prepare_from_other_replicas
+    const quorum_messages_max = 3 * replicas_max;
 
-/// The number of full-sized messages allocated at initialization by the message bus.
-pub const message_bus_messages_max = pipelining_messages_max + quorum_messages_max +
-    loopback_queue_messages_max + client_table_messages_max + journal_messages_max;
+    // +1 to account for the Connection's `recv_message`.
+    const connection_messages_max = connection_send_queue_max + 1;
+    const message_bus_messages_max = connections_max * connection_messages_max;
+
+    break :messages_max pipelining_messages_max + quorum_messages_max +
+        loopback_queue_messages_max + client_table_messages_max + journal_messages_max +
+        messages_bus_messages_max;
+};
 
 /// The number of header-sized messages allocated at initialization by the message bus.
 /// These are much smaller/cheaper and we can therefore have many of them.

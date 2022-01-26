@@ -265,7 +265,7 @@ fn send_request(random: std.rand.Random) bool {
     // While hashing the client ID with the request body prevents input collisions across clients,
     // it's still possible for the same client to generate the same body, and therefore input hash.
     const client_input = StateMachine.hash(client.id, body);
-    checker_request_queue.push(client_input) catch unreachable;
+    checker_request_queue.push_assume_capacity(client_input);
     std.log.scoped(.test_client).debug("client {} sending input={x}", .{
         client_index,
         client_input,
