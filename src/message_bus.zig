@@ -582,15 +582,13 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                     .terminating => return,
                     .free, .accepting => unreachable,
                 }
-                connection.send_queue.push(message.ref()) catch |err| switch (err) {
-                    error.NoSpaceLeft => {
-                        bus.unref(message);
-                        log.info("message queue for peer {} full, dropping message", .{
-                            connection.peer,
-                        });
-                        return;
-                    },
-                };
+                if (connection.send_queue.full()) {
+                    log.info("message queue for peer {} full, dropping message", .{
+                        connection.peer,
+                    });
+                    return;
+                }
+                connection.send_queue.push_assume_capacity(message.ref());
                 // If the connection has not yet been established we can't send yet.
                 // Instead on_connect() will call send().
                 if (connection.state == .connecting) {

@@ -608,7 +608,7 @@ pub fn Replica(
 
             log.debug("{}: on_request: prepare {}", .{ self.replica, message.header.checksum });
 
-            self.pipeline.push(.{ .message = message.ref() }) catch unreachable;
+            self.pipeline.push_assume_capacity(.{ .message = message.ref() });
             assert(self.pipeline.count >= 1);
 
             if (self.pipeline.count == 1) {
@@ -3206,7 +3206,7 @@ pub fn Replica(
                 prepare.?.header.checksum,
             });
 
-            self.pipeline.push(.{ .message = prepare.?.ref() }) catch unreachable;
+            self.pipeline.push_assume_capacity(.{ .message = prepare.?.ref() });
             assert(self.pipeline.count >= 1);
 
             self.repairing_pipeline = true;

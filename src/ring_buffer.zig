@@ -76,6 +76,13 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
             self.advance_tail();
         }
 
+        /// Add an element to a RingBuffer, and assert that the capacity is sufficient.
+        pub fn push_assume_capacity(self: *Self, item: T) void {
+            self.push(item) catch |err| switch (err) {
+                error.NoSpaceLeft => unreachable,
+            };
+        }
+
         /// Remove and return the next item, if any.
         pub fn pop(self: *Self) ?T {
             const result = self.head() orelse return null;

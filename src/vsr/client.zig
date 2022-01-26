@@ -195,13 +195,11 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
             const was_empty = self.request_queue.empty();
 
-            self.request_queue.push(.{
+            self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
                 .callback = callback,
                 .message = message.ref(),
-            }) catch |err| switch (err) {
-                error.NoSpaceLeft => unreachable, // Already verified that there is room.
-            };
+            });
 
             // If the queue was empty, then there is no request inflight and we must send this one:
             if (was_empty) self.send_request_for_the_first_time(message);
@@ -424,13 +422,11 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
             assert(self.request_queue.empty());
 
-            self.request_queue.push(.{
+            self.request_queue.push_assume_capacity(.{
                 .user_data = 0,
                 .callback = undefined,
                 .message = message.ref(),
-            }) catch |err| switch (err) {
-                error.NoSpaceLeft => unreachable, // This is the first request.
-            };
+            });
 
             self.send_request_for_the_first_time(message);
         }
