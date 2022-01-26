@@ -52,7 +52,7 @@ const Prepare = struct {
     message: *Message,
 
     /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas.
-    ok_from_all_replicas: QuorumMessages = QuorumMessagesNull,
+    ok_from_all_replicas: QuorumCounter = QuorumCounterNull,
 
     /// Whether a quorum of prepare_ok messages has been received for this prepare.
     ok_quorum_received: bool = false,
@@ -60,6 +60,9 @@ const Prepare = struct {
 
 const QuorumMessages = [config.replicas_max]?*Message;
 const QuorumMessagesNull = [_]?*Message{null} ** config.replicas_max;
+
+const QuorumCounter = std.StaticBitSet(config.replicas_max);
+const QuorumCounterNull = QuorumCounter.initEmpty();
 
 pub fn Replica(
     comptime StateMachine: type,
@@ -379,9 +382,6 @@ pub fn Replica(
                 var it = self.pipeline.iterator();
                 while (it.next()) |prepare| {
                     self.message_bus.unref(prepare.message);
-                    for (prepare.ok_from_all_replicas) |message| {
-                        if (message) |m| self.message_bus.unref(m);
-                    }
                 }
             }
 
@@ -735,8 +735,8 @@ pub fn Replica(
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
             const threshold = self.quorum_replication;
 
-            const count = self.add_message_and_receive_quorum_exactly_once(
-                &prepare.ok_from_all_replicas,
+            const count = self.add_prepare_ok_and_receive_quorum_exactly_once(
+                prepare,
                 message,
                 threshold,
             ) orelse return;
@@ -1487,8 +1487,12 @@ pub fn Replica(
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [config.replicas_max]u8 = undefined;
             var waiting_len: usize = 0;
-            for (prepare.ok_from_all_replicas[0..self.replica_count]) |received, replica| {
-                if (received == null and replica != self.replica) {
+            var ok_from_all_replicas_iter = prepare.ok_from_all_replicas.iterator(.{
+                .kind = .unset,
+            });
+            while (ok_from_all_replicas_iter.next()) |replica| {
+                if (replica == self.replica_count) break;
+                if (replica != self.replica) {
                     waiting[waiting_len] = @intCast(u8, replica);
                     waiting_len += 1;
                 }
@@ -1498,7 +1502,7 @@ pub fn Replica(
                 self.prepare_timeout.reset();
 
                 log.debug("{}: on_prepare_timeout: waiting for journal", .{self.replica});
-                assert(prepare.ok_from_all_replicas[self.replica] == null);
+                assert(!prepare.ok_from_all_replicas.isSet(self.replica));
 
                 // We may be slow and waiting for the write to complete.
                 //
@@ -1604,12 +1608,6 @@ pub fn Replica(
             assert(message.header.replica < self.replica_count);
             assert(message.header.view == self.view);
             switch (message.header.command) {
-                .prepare_ok => {
-                    if (self.replica_count <= 2) assert(threshold == self.replica_count);
-
-                    assert(self.status == .normal);
-                    assert(self.leader());
-                },
                 .start_view_change => {
                     assert(self.replica_count > 1);
                     if (self.replica_count == 2) assert(threshold == 1);
@@ -1655,6 +1653,57 @@ pub fn Replica(
 
             // Count the number of unique messages now received:
             const count = self.count_quorum(messages, message.header.command, message.header.context);
+            log.debug("{}: on_{s}: {} message(s)", .{ self.replica, command, count });
+
+            // Wait until we have exactly `threshold` messages for quorum:
+            if (count < threshold) {
+                log.debug("{}: on_{s}: waiting for quorum", .{ self.replica, command });
+                return null;
+            }
+
+            // This is not the first time we have had quorum, the state transition has already happened:
+            if (count > threshold) {
+                log.debug("{}: on_{s}: ignoring (quorum received already)", .{ self.replica, command });
+                return null;
+            }
+
+            assert(count == threshold);
+            return count;
+        }
+
+        fn add_prepare_ok_and_receive_quorum_exactly_once(
+            self: *Self,
+            prepare: *Prepare,
+            message: *Message,
+            threshold: u32,
+        ) ?usize {
+            assert(threshold >= 1);
+            assert(threshold <= self.replica_count);
+
+            assert(QuorumCounter.bit_length == config.replicas_max);
+            assert(message.header.cluster == self.cluster);
+            assert(message.header.replica < self.replica_count);
+            assert(message.header.view == self.view);
+            assert(message.header.command == .prepare_ok);
+            assert(message.header.context == prepare.message.header.checksum);
+
+            if (self.replica_count <= 2) assert(threshold == self.replica_count);
+
+            assert(self.status == .normal);
+            assert(self.leader());
+
+            const command: []const u8 = @tagName(message.header.command);
+
+            // Do not allow duplicate messages to trigger multiple passes through a state transition:
+            if (prepare.ok_from_all_replicas.isSet(message.header.replica)) {
+                log.debug("{}: on_{s}: ignoring (duplicate message)", .{ self.replica, command });
+                return null;
+            }
+
+            prepare.ok_from_all_replicas.set(message.header.replica);
+
+            // Count the number of unique messages now received:
+            const count = prepare.ok_from_all_replicas.count();
             log.debug("{}: on_{s}: {} message(s)", .{ self.replica, command, count });
 
             // Wait until we have exactly `threshold` messages for quorum:
@@ -1939,11 +1988,7 @@ pub fn Replica(
                     return;
                 }
 
-                const count = self.count_quorum(
-                    &prepare.ok_from_all_replicas,
-                    .prepare_ok,
-                    prepare.message.header.checksum,
-                );
+                const count = prepare.ok_from_all_replicas.count();
                 assert(count >= self.quorum_replication);
 
                 // TODO We can optimize this to commit into the client table reply if it exists.
@@ -1959,7 +2004,7 @@ pub fn Replica(
                 assert(self.commit_min == self.commit_max);
                 assert(self.commit_max == prepare.message.header.op);
 
-                self.unref_prepare_message_and_quorum_messages(prepare);
+                self.message_bus.unref(prepare.message);
                 assert(self.pipeline.pop() != null);
             }
 
@@ -1984,15 +2029,6 @@ pub fn Replica(
                     assert(m.header.context == context);
                     assert(m.header.replica == replica);
                     switch (command) {
-                        .prepare_ok => {
-                            if (self.status == .normal) {
-                                assert(self.leader());
-                                assert(m.header.view == self.view);
-                            } else {
-                                assert(self.status == .view_change);
-                                assert(m.header.view < self.view);
-                            }
-                        },
                         .start_view_change => {
                             assert(m.header.replica != self.replica);
                             assert(m.header.view == self.view);
@@ -3421,7 +3457,7 @@ pub fn Replica(
         /// Stops the prepare timeout and resets the timeouts counter.
         fn reset_pipeline(self: *Self) void {
             while (self.pipeline.pop()) |prepare| {
-                self.unref_prepare_message_and_quorum_messages(&prepare);
+                self.message_bus.unref(prepare.message);
             }
 
             self.prepare_timeout.stop();
@@ -4020,19 +4056,6 @@ pub fn Replica(
             assert(self.nack_prepare_op == null);
 
             self.send_start_view_change();
-        }
-
-        fn unref_prepare_message_and_quorum_messages(
-            self: *Self,
-            prepare: *const Prepare,
-        ) void {
-            self.message_bus.unref(prepare.message);
-            for (prepare.ok_from_all_replicas) |received, replica| {
-                if (received) |prepare_ok| {
-                    assert(replica < self.replica_count);
-                    self.message_bus.unref(prepare_ok);
-                }
-            }
         }
 
         fn update_client_table_entry(self: *Self, reply: *Message) void {
