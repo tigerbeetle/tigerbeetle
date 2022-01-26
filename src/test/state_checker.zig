@@ -8,12 +8,13 @@ const Cluster = @import("cluster.zig").Cluster;
 const Network = @import("network.zig").Network;
 const StateMachine = @import("state_machine.zig").StateMachine;
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
+const message_pool = @import("../message_pool.zig");
+const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
-const RequestQueue = RingBuffer(u128, config.message_bus_messages_max - 1);
+const RequestQueue = RingBuffer(u128, message_pool.messages_max - 1);
 const StateTransitions = std.AutoHashMap(u128, u64);
 
 const log = std.log.scoped(.state_checker);
