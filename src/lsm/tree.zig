@@ -179,7 +179,7 @@ pub fn LsmTree(
                 key_max: Key,
 
                 comptime {
-                    assert(@sizeOf(TableInfo) == 32 + key_size * 2);
+                    assert(@sizeOf(TableInfo) == 40 + key_size * 2);
                     assert(@alignOf(TableInfo) == 16);
                 }
             };

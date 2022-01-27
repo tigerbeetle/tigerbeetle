@@ -4,17 +4,20 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
-pub fn NodePool(comptime node_size: usize, comptime node_alignment: u12) type {
-    assert(node_size > 0);
-    assert(node_alignment > 0);
-    assert(math.isPowerOfTwo(node_size));
-    assert(math.isPowerOfTwo(node_alignment));
-    assert(node_size % node_alignment == 0);
-
+pub fn NodePool(comptime _node_size: u32, comptime node_alignment: u12) type {
     return struct {
         const Self = @This();
 
+        pub const node_size = _node_size;
         pub const Node = *align(node_alignment) [node_size]u8;
+
+        comptime {
+            assert(node_size > 0);
+            assert(node_alignment > 0);
+            assert(math.isPowerOfTwo(node_size));
+            assert(math.isPowerOfTwo(node_alignment));
+            assert(node_size % node_alignment == 0);
+        }
 
         buffer: []align(node_alignment) u8,
         free: std.bit_set.DynamicBitSetUnmanaged,
@@ -201,7 +204,7 @@ test "NodePool" {
     const random = prng.random();
 
     const Tuple = struct {
-        node_size: usize,
+        node_size: u32,
         node_alignment: u12,
     };
 

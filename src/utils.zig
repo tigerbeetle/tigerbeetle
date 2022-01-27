@@ -3,9 +3,6 @@ const assert = std.debug.assert;
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
-        const A = @TypeOf(numerator);
-        const B = @TypeOf(denominator);
-
         switch (@typeInfo(@TypeOf(numerator))) {
             .Int => |int| assert(int.signedness == .unsigned),
             .ComptimeInt => assert(numerator >= 0),
