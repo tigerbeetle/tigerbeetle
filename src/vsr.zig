@@ -223,10 +223,23 @@ pub const Header = packed struct {
         if (self.epoch != 0) return "epoch != 0";
         return switch (self.command) {
             .reserved => self.invalid_reserved(),
+            .ping => self.invalid_ping(),
+            .pong => self.invalid_pong(),
             .request => self.invalid_request(),
             .prepare => self.invalid_prepare(),
             .prepare_ok => self.invalid_prepare_ok(),
-            else => return null, // TODO Add validators for all commands.
+            .reply => self.invalid_reply(),
+            .commit => self.invalid_commit(),
+            .start_view_change => self.invalid_start_view_change(),
+            .do_view_change, .start_view => self.invalid_do_view_change(),
+            .recovery => self.invalid_recovery(),
+            .recovery_response => self.invalid_recovery_response(),
+            .request_start_view => self.invalid_request_start_view(),
+            .request_headers => self.invalid_request_headers(),
+            .request_prepare => self.invalid_request_prepare(),
+            .headers => self.invalid_headers(),
+            .nack_prepare => self.invalid_nack_prepare(),
+            .eviction => self.invalid_eviction(),
         };
     }
 
@@ -242,6 +255,28 @@ pub const Header = packed struct {
         if (self.commit != 0) return "commit != 0";
         if (self.offset != 0) return "offset != 0";
         if (self.replica != 0) return "replica != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_ping(self: *const Header) ?[]const u8 {
+        assert(self.command == .ping);
+        if (self.parent != 0) return "parent != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_pong(self: *const Header) ?[]const u8 {
+        assert(self.command == .pong);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.commit != 0) return "commit != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -333,6 +368,141 @@ pub const Header = packed struct {
                 }
             },
         }
+        return null;
+    }
+
+    fn invalid_reply(self: *const Header) ?[]const u8 {
+        assert(self.command == .reply);
+        if (self.client == 0) return "client == 0";
+        if (self.context != 0) return "context != 0";
+        if (self.op != self.commit) return "reserved: op != commit";
+        if (self.operation != .register) {
+            if (self.commit == 0) return "commit == 0";
+            if (self.request == 0) return "request == 0";
+        }
+        return null;
+    }
+
+    fn invalid_commit(self: *const Header) ?[]const u8 {
+        assert(self.command == .commit);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context == 0) return "context == 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_start_view_change(self: *const Header) ?[]const u8 {
+        assert(self.command == .start_view_change);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_do_view_change(self: *const Header) ?[]const u8 {
+        assert(self.command == .do_view_change or self.command == .start_view);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_recovery(self: *const Header) ?[]const u8 {
+        assert(self.command == .recovery);
+        // TODO implement validation once the message is actually used.
+        return null;
+    }
+
+    fn invalid_recovery_response(self: *const Header) ?[]const u8 {
+        assert(self.command == .recovery_response);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.op == 0) return "op == 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request_start_view(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_start_view);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request_headers(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_headers);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.op == 0) return "op == 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request_prepare(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_prepare);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_headers(self: *const Header) ?[]const u8 {
+        assert(self.command == .headers);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_nack_prepare(self: *const Header) ?[]const u8 {
+        assert(self.command == .nack_prepare);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_eviction(self: *const Header) ?[]const u8 {
+        assert(self.command == .eviction);
+        if (self.parent != 0) return "parent != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
 
