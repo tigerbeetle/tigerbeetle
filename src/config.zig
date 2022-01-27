@@ -252,4 +252,14 @@ pub const clock_synchronization_window_min_ms = 2000;
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = 20000;
 
-pub const is_32_bit = @sizeOf(usize) == 4;
+// TODO Move these into a separate `config_valid.zig` which we import here:
+
+comptime {
+    const std = @import("std");
+
+    // vsr.parse_address assumes that config.address/config.port are valid.
+    _ = std.net.Address.parseIp4(address, 0) catch unreachable;
+    _ = @as(u16, port);
+}
+
+pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.
