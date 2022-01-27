@@ -546,17 +546,20 @@ test "exponential_backoff_with_jitter" {
 /// * A replica's IP address may be changed without reconfiguration.
 /// This does require that the user specify the same order to all replicas.
 /// The caller owns the memory of the returned slice of addresses.
-/// TODO Unit tests.
 /// TODO Integrate into `src/cli.zig`.
 pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8) ![]std.net.Address {
-    var addresses = try allocator.alloc(std.net.Address, config.replicas_max);
+    return parse_addresses_limit(allocator, raw, config.replicas_max);
+}
+
+fn parse_addresses_limit(allocator: std.mem.Allocator, raw: []const u8, max: usize) ![]std.net.Address {
+    var addresses = try allocator.alloc(std.net.Address, max);
     errdefer allocator.free(addresses);
 
     var index: usize = 0;
     var comma_iterator = std.mem.split(u8, raw, ",");
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        if (index == config.replicas_max) return error.AddressLimitExceeded;
+        if (index == max) return error.AddressLimitExceeded;
 
         var colon_iterator = std.mem.split(u8, raw_address, ":");
         // The split iterator will always return non-null once, even if the delimiter is not found:
@@ -592,6 +595,76 @@ pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8) ![]std.net
         }
     }
     return addresses[0..index];
+}
+
+test "parse_addresses" {
+    const test_successes = &[_]struct{
+        raw: []const u8,
+        addresses: [3]std.net.Address,
+    }{
+        .{
+            // Test the minimum/maximum port.
+            .raw = "1.2.3.4:0,2.3.4.5:789,3.4.5.6:65535",
+            .addresses = [3]std.net.Address{
+                std.net.Address.initIp4([_]u8{1, 2, 3, 4}, 0),
+                std.net.Address.initIp4([_]u8{2, 3, 4, 5}, 789),
+                std.net.Address.initIp4([_]u8{3, 4, 5, 6}, 65535),
+            },
+        },
+        .{
+            // Addresses are not reordered.
+            .raw = "3.4.5.6:7777,200.3.4.5:6666,1.2.3.4:5555",
+            .addresses = [3]std.net.Address{
+                std.net.Address.initIp4([_]u8{3, 4, 5, 6}, 7777),
+                std.net.Address.initIp4([_]u8{200, 3, 4, 5}, 6666),
+                std.net.Address.initIp4([_]u8{1, 2, 3, 4}, 5555),
+            },
+        },
+        .{
+            // Test default address and port.
+            .raw = "1.2.3.4:5,4321,2.3.4.5",
+            .addresses = [3]std.net.Address{
+                std.net.Address.initIp4([_]u8{1, 2, 3, 4}, 5),
+                try std.net.Address.parseIp4(config.address, 4321),
+                std.net.Address.initIp4([_]u8{2, 3, 4, 5}, config.port),
+            },
+        },
+    };
+
+    const test_errors = &[_]struct{
+        raw: []const u8,
+        err: anyerror![]std.net.Address,
+    }{
+        .{ .raw = "", .err = error.AddressHasTrailingComma },
+        .{ .raw = "1.2.3.4:5,2.3.4.5:6,4.5.6.7:8", .err = error.AddressLimitExceeded },
+        .{ .raw = "1.2.3.4:7777,2.3.4.5:8888,", .err = error.AddressHasTrailingComma },
+        .{ .raw = "1.2.3.4:7777,2.3.4.5::8888", .err = error.AddressHasMoreThanOneColon },
+        .{ .raw = "1.2.3.4:5,A", .err = error.AddressInvalid }, // default port
+        .{ .raw = "1.2.3.4:5,2.a.4.5", .err = error.AddressInvalid }, // default port
+        .{ .raw = "1.2.3.4:5,2.a.4.5:6", .err = error.AddressInvalid }, // specified port
+        .{ .raw = "1.2.3.4:5,2.3.4.5:", .err = error.PortInvalid },
+        .{ .raw = "1.2.3.4:5,2.3.4.5:A", .err = error.PortInvalid },
+        .{ .raw = "1.2.3.4:5,65536", .err = error.PortOverflow }, // default address
+        .{ .raw = "1.2.3.4:5,2.3.4.5:65536", .err = error.PortOverflow },
+    };
+
+    for (test_successes) |t| {
+        const addresses_actual = try parse_addresses_limit(std.testing.allocator, t.raw, 3);
+        defer std.testing.allocator.free(addresses_actual);
+
+        try std.testing.expectEqual(addresses_actual.len, 3);
+        for (t.addresses) |address_expect, i| {
+            const address_actual = addresses_actual[i];
+            try std.testing.expectEqual(address_expect.in.sa.family, address_actual.in.sa.family);
+            try std.testing.expectEqual(address_expect.in.sa.port, address_actual.in.sa.port);
+            try std.testing.expectEqual(address_expect.in.sa.addr, address_actual.in.sa.addr);
+            try std.testing.expectEqual(address_expect.in.sa.zero, address_actual.in.sa.zero);
+        }
+    }
+
+    for (test_errors) |t| {
+        try std.testing.expectEqual(t.err, parse_addresses_limit(std.testing.allocator, t.raw, 2));
+    }
 }
 
 pub fn sector_floor(offset: u64) u64 {
