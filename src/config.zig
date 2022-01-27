@@ -218,3 +218,10 @@ pub const clock_synchronization_window_min_ms = 2000;
 /// This eliminates the impact of gradual clock drift on our clock offset (clock skew) measurements.
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = 20000;
+
+comptime {
+    const std = @import("std");
+
+    _ = std.net.Address.parseIp4(address, 0) catch unreachable;
+    _ = @as(u16, port);
+}
