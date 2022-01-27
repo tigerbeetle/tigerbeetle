@@ -119,10 +119,9 @@ pub fn ManifestLevel(
                     );
                 } else {
                     break :blk Tables.Iterator{
-                        .array = undefined,
-                        .direction = undefined,
-                        .node = undefined,
-                        .relative_index = undefined,
+                        .array = &level.tables,
+                        .direction = direction,
+                        .cursor = .{ .node = 0, .relative_index = 0 },
                         .done = true,
                     };
                 }
@@ -235,7 +234,7 @@ pub fn ManifestLevel(
             // This cursor will always point to a key equal to start_key.
             var adjusted = reverse.cursor;
             const start_key = reverse.next().?;
-            assert(compare_keys(start_key, level.keys.element(adjusted)) == .eq);
+            assert(compare_keys(start_key, level.keys.element_at_cursor(adjusted)) == .eq);
 
             var adjusted_next = reverse.cursor;
             while (reverse.next()) |k| {
@@ -248,7 +247,7 @@ pub fn ManifestLevel(
                     .descending => assert(meta.eql(adjusted, keys.first())),
                 }
             }
-            assert(compare_keys(start_key, level.keys.element(adjusted)) == .eq);
+            assert(compare_keys(start_key, level.keys.element_at_cursor(adjusted)) == .eq);
 
             return adjusted;
         }
