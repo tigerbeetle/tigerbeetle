@@ -87,7 +87,7 @@ pub const Command = union(enum) {
 
 /// Parse the command line arguments passed to the tigerbeetle binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args(allocator: *std.mem.Allocator) Command {
+pub fn parse_args(allocator: std.mem.Allocator) Command {
     var maybe_cluster: ?[]const u8 = null;
     var maybe_replica: ?[]const u8 = null;
     var maybe_addresses: ?[]const u8 = null;
@@ -132,7 +132,7 @@ pub fn parse_args(allocator: *std.mem.Allocator) Command {
     const replica = parse_replica(raw_replica);
 
     const dir_path = maybe_directory orelse config.directory;
-    const dir_fd = os.openZ(dir_path, os.O_CLOEXEC | os.O_RDONLY, 0) catch |err|
+    const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err|
         fatal("failed to open directory '{s}': {}", .{ dir_path, err });
 
     switch (command) {
@@ -195,7 +195,7 @@ fn parse_cluster(raw_cluster: []const u8) u32 {
 }
 
 /// Parse and allocate the addresses returning a slice into that array.
-fn parse_addresses(allocator: *std.mem.Allocator, raw_addresses: []const u8) []net.Address {
+fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []net.Address {
     return vsr.parse_addresses(allocator, raw_addresses) catch |err| switch (err) {
         error.AddressHasTrailingComma => fatal("--addresses: invalid trailing comma", .{}),
         error.AddressLimitExceeded => {

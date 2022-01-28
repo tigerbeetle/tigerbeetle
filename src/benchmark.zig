@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const config = @import("config.zig");
 
@@ -30,7 +31,7 @@ const BATCHES: f32 = MAX_TRANSFERS / BATCH_SIZE;
 const TOTAL_BATCHES = @ceil(BATCHES);
 
 const log = std.log;
-pub const log_level: std.log.Level = .notice;
+pub const log_level: std.log.Level = .info;
 
 var accounts = [_]Account{
     Account{
@@ -65,13 +66,14 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
-    if (std.builtin.mode != .ReleaseSafe and std.builtin.mode != .ReleaseFast) {
+    if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built as ReleaseSafe for minimum performance.\n", .{});
     }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+
+    const allocator = arena.allocator();
 
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
@@ -90,7 +92,7 @@ pub fn main() !void {
     message_bus.set_on_message(*Client, &client, Client.on_message);
 
     // Pre-allocate a million transfers:
-    var transfers = try arena.allocator.alloc(Transfer, MAX_TRANSFERS);
+    var transfers = try arena.allocator().alloc(Transfer, MAX_TRANSFERS);
     for (transfers) |*transfer, index| {
         transfer.* = .{
             .id = index,
@@ -106,7 +108,7 @@ pub fn main() !void {
     }
 
     // Pre-allocate a million commits:
-    var commits: ?[]Commit = if (IS_TWO_PHASE_COMMIT) try arena.allocator.alloc(Commit, MAX_TRANSFERS) else null;
+    var commits: ?[]Commit = if (IS_TWO_PHASE_COMMIT) try arena.allocator().alloc(Commit, MAX_TRANSFERS) else null;
     if (commits) |all_commits| {
         for (all_commits) |*commit, index| {
             commit.* = .{
@@ -257,7 +259,7 @@ const TimedQueue = struct {
     pub fn lap(user_data: u128, operation: Operation, results: Client.Error![]const u8) void {
         const now = std.time.milliTimestamp();
         const value = results catch |err| {
-            log.emerg("Client returned error={o}", .{@errorName(err)});
+            log.err("Client returned error={o}", .{@errorName(err)});
             @panic("Client returned error during benchmarking.");
         };
 

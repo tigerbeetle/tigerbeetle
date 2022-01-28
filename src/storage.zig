@@ -1,11 +1,12 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const os = std.os;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.storage);
 
 const IO = @import("io.zig").IO;
-const is_darwin = std.Target.current.isDarwin();
+const is_darwin = builtin.target.isDarwin();
 
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
@@ -192,7 +193,7 @@ pub const Storage = struct {
             error.Unseekable,
             error.Unexpected,
             => {
-                log.emerg(
+                log.err(
                     "impossible read: offset={} buffer.len={} error={s}",
                     .{ read.offset, read.buffer.len, @errorName(err) },
                 );
@@ -204,7 +205,7 @@ pub const Storage = struct {
             // We tried to read more than there really is available to read.
             // In other words, we thought we could read beyond the end of the file descriptor.
             // This can happen if the data file inode `size` was truncated or corrupted.
-            log.emerg(
+            log.err(
                 "short read: buffer.len={} offset={} bytes_read={}",
                 .{ read.offset, read.buffer.len, bytes_read },
             );
@@ -267,7 +268,7 @@ pub const Storage = struct {
             // TODO: It seems like it might be possible for some filesystems to return ETIMEDOUT
             // here. Consider handling this without panicking.
             else => {
-                log.emerg(
+                log.err(
                     "impossible write: offset={} buffer.len={} error={s}",
                     .{ write.offset, write.buffer.len, @errorName(err) },
                 );
@@ -302,7 +303,7 @@ pub const Storage = struct {
     /// If this is not the case, then the underlying syscall will return EINVAL.
     /// We check this only at the start of a read or write because the physical sector size may be
     /// less than our logical sector size so that partial IOs then leave us no longer aligned.
-    fn assert_alignment(self: *Storage, buffer: []const u8, offset: u64) void {
+    fn assert_alignment(_: *Storage, buffer: []const u8, offset: u64) void {
         assert(@ptrToInt(buffer.ptr) % config.sector_size == 0);
         assert(buffer.len % config.sector_size == 0);
         assert(offset % config.sector_size == 0);
@@ -337,17 +338,17 @@ pub const Storage = struct {
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
 
-        var flags: u32 = os.O_CLOEXEC | os.O_RDWR | os.O_DSYNC;
+        var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
         var mode: os.mode_t = 0;
 
         // TODO Document this and investigate whether this is in fact correct to set here.
-        if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O_LARGEFILE;
+        if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O.LARGEFILE;
 
         var direct_io_supported = false;
         if (config.direct_io) {
             direct_io_supported = try Storage.fs_supports_direct_io(dir_fd);
             if (direct_io_supported) {
-                if (!is_darwin) flags |= os.O_DIRECT;
+                if (!is_darwin) flags |= os.O.DIRECT;
             } else if (config.deployment_environment == .development) {
                 log.warn("file system does not support Direct I/O", .{});
             } else {
@@ -359,15 +360,15 @@ pub const Storage = struct {
 
         if (must_create) {
             log.info("creating \"{s}\"...", .{relative_path});
-            flags |= os.O_CREAT;
-            flags |= os.O_EXCL;
+            flags |= os.O.CREAT;
+            flags |= os.O.EXCL;
             mode = 0o666;
         } else {
             log.info("opening \"{s}\"...", .{relative_path});
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert((flags & os.O_DSYNC) > 0);
+        assert((flags & os.O.DSYNC) > 0);
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
@@ -379,12 +380,12 @@ pub const Storage = struct {
 
         // On darwin, use F_NOCACHE on direct_io to disable the page cache as O_DIRECT doesn't exit.
         if (is_darwin and config.direct_io and direct_io_supported) {
-            _ = try os.fcntl(fd, os.F_NOCACHE, 1);
+            _ = try os.fcntl(fd, os.F.NOCACHE, 1);
         }
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
-        os.flock(fd, os.LOCK_EX | os.LOCK_NB) catch |err| switch (err) {
+        os.flock(fd, os.LOCK.EX | os.LOCK.NB) catch |err| switch (err) {
             error.WouldBlock => @panic("another process holds the data file lock"),
             else => return err,
         };
@@ -418,7 +419,7 @@ pub const Storage = struct {
         Storage.fallocate(fd, 0, 0, @intCast(i64, size)) catch |err| switch (err) {
             error.OperationNotSupported => {
                 log.warn("file system does not support fallocate(), an ENOSPC will panic", .{});
-                log.notice("allocating by writing to the last sector of the file instead...", .{});
+                log.info("allocating by writing to the last sector of the file instead...", .{});
 
                 const sector_size = config.sector_size;
                 const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
@@ -443,6 +444,8 @@ pub const Storage = struct {
             const F_ALLOCATEALL = 0x4; // allocate all or nothing
             const F_PEOFPOSMODE = 3; // use relative offset from the seek pos mode
             const F_VOLPOSMODE = 4; // use the specified volume offset
+            _ = F_VOLPOSMODE;
+
             const fstore_t = extern struct {
                 fst_flags: c_uint,
                 fst_posmode: c_int,
@@ -460,24 +463,24 @@ pub const Storage = struct {
             };
 
             // try to pre-allocate contiguous space and fall back to default non-continugous
-            var res = os.system.fcntl(fd, os.F_PREALLOCATE, @ptrToInt(&store));
-            if (os.errno(res) != 0) {
+            var res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
+            if (os.errno(res) != os.E.SUCCESS) {
                 store.fst_flags = F_ALLOCATEALL;
-                res = os.system.fcntl(fd, os.F_PREALLOCATE, @ptrToInt(&store));
+                res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
             }
 
             switch (os.errno(res)) {
-                0 => {},
-                os.EACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
-                os.EBADF => return error.FileDescriptorInvalid,
-                os.EDEADLK => unreachable, // F_SETLKW
-                os.EINTR => unreachable, // F_SETLKW
-                os.EINVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
-                os.EMFILE => unreachable, // F_DUPFD or F_DUPED
-                os.ENOLCK => unreachable, // F_SETLK or F_SETLKW
-                os.EOVERFLOW => return error.FileTooBig,
-                os.ESRCH => unreachable, // F_SETOWN
-                os.EOPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
+                os.E.SUCCESS => {},
+                os.E.ACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
+                os.E.BADF => return error.FileDescriptorInvalid,
+                os.E.DEADLK => unreachable, // F_SETLKW
+                os.E.INTR => unreachable, // F_SETLKW
+                os.E.INVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
+                os.E.MFILE => unreachable, // F_DUPFD or F_DUPED
+                os.E.NOLCK => unreachable, // F_SETLK or F_SETLKW
+                os.E.OVERFLOW => return error.FileTooBig,
+                os.E.SRCH => unreachable, // F_SETOWN
+                os.E.OPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
                 else => |errno| return os.unexpectedErrno(errno),
             }
 
@@ -516,18 +519,18 @@ pub const Storage = struct {
 
         const path = "fs_supports_direct_io";
         const dir = std.fs.Dir{ .fd = dir_fd };
-        const fd = try os.openatZ(dir_fd, path, os.O_CLOEXEC | os.O_CREAT | os.O_TRUNC, 0o666);
+        const fd = try os.openatZ(dir_fd, path, os.O.CLOEXEC | os.O.CREAT | os.O.TRUNC, 0o666);
         defer os.close(fd);
         defer dir.deleteFile(path) catch {};
 
         // F_NOCACHE on darwin is the most similar option to O_DIRECT on linux.
         if (is_darwin) {
-            _ = os.fcntl(fd, os.F_NOCACHE, 1) catch return false;
+            _ = os.fcntl(fd, os.F.NOCACHE, 1) catch return false;
             return true;
         }
 
         while (true) {
-            const res = os.system.openat(dir_fd, path, os.O_CLOEXEC | os.O_RDONLY | os.O_DIRECT, 0);
+            const res = os.system.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
             switch (os.linux.getErrno(res)) {
                 0 => {
                     os.close(@intCast(os.fd_t, res));
