@@ -38,7 +38,7 @@ pub const Network = struct {
         target: Process,
     };
 
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
     options: NetworkOptions,
     packet_simulator: PacketSimulator(Packet),
@@ -47,7 +47,7 @@ pub const Network = struct {
     processes: std.ArrayListUnmanaged(u128),
 
     pub fn init(
-        allocator: *std.mem.Allocator,
+        allocator: std.mem.Allocator,
         replica_count: u8,
         client_count: u8,
         options: NetworkOptions,
@@ -136,7 +136,7 @@ pub const Network = struct {
 
     fn deliver_message(packet: Packet, path: PacketSimulatorPath) void {
         const network = packet.network;
-        const source_bus = &network.busses.items[path.source];
+
         const target_bus = &network.busses.items[path.target];
 
         const message = target_bus.get_message() orelse {

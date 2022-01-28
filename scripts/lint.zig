@@ -23,7 +23,7 @@ var file_stats = std.ArrayListUnmanaged(Stats){};
 var seen = std.AutoArrayHashMapUnmanaged(fs.File.INode, void){};
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-const gpa = &general_purpose_allocator.allocator;
+const gpa = general_purpose_allocator.allocator();
 
 pub fn main() !void {
     const argv = std.os.argv;
@@ -119,7 +119,13 @@ fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError
     // Add to set after no longer possible to get error.IsDir.
     if (try seen.fetchPut(gpa, stat.inode, {})) |_| return;
 
-    const source = try source_file.readToEndAlloc(gpa, math.maxInt(usize));
+    const source = try source_file.readToEndAllocOptions(
+        gpa,
+        math.maxInt(usize),
+        null,
+        @alignOf(u8),
+        0,
+    );
     try check_line_length(source, file_path);
 
     var tree = try std.zig.parse(gpa, source);

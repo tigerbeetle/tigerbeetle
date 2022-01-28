@@ -1,6 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
-const is_darwin = std.Target.current.isDarwin();
+const is_darwin = builtin.target.isDarwin();
 const config = @import("./config.zig");
 
 pub const Time = struct {
@@ -40,7 +41,7 @@ pub const Time = struct {
             // For more detail and why CLOCK_MONOTONIC_RAW is even worse than CLOCK_MONOTONIC,
             // see https://github.com/ziglang/zig/pull/933#discussion_r656021295.
             var ts: std.os.timespec = undefined;
-            std.os.clock_gettime(std.os.CLOCK_BOOTTIME, &ts) catch @panic("CLOCK_BOOTTIME required");
+            std.os.clock_gettime(std.os.CLOCK.BOOTTIME, &ts) catch @panic("CLOCK_BOOTTIME required");
             break :blk @intCast(u64, ts.tv_sec) * std.time.ns_per_s + @intCast(u64, ts.tv_nsec);
         };
 
@@ -52,14 +53,14 @@ pub const Time = struct {
 
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
     /// This clock is affected by discontinuous jumps in the system time.
-    pub fn realtime(self: *Self) i64 {
+    pub fn realtime(_: *Self) i64 {
         // macos has supported clock_gettime() since 10.12:
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
 
         var ts: std.os.timespec = undefined;
-        std.os.clock_gettime(std.os.CLOCK_REALTIME, &ts) catch unreachable;
+        std.os.clock_gettime(std.os.CLOCK.REALTIME, &ts) catch unreachable;
         return @as(i64, ts.tv_sec) * std.time.ns_per_s + ts.tv_nsec;
     }
 
-    pub fn tick(self: *Self) void {}
+    pub fn tick(_: *Self) void {}
 };

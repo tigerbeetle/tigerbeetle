@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 pub const config = @import("config.zig");
@@ -32,24 +33,6 @@ pub const Account = packed struct {
         return (self.flags.credits_must_not_exceed_debits and
             self.credits_reserved + self.credits_accepted + amount > self.debits_accepted);
     }
-
-    pub fn jsonStringify(self: Account, options: std.json.StringifyOptions, writer: anytype) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"id\":{},", .{self.id});
-        try std.fmt.format(writer, "\"user_data\":\"{x:0>32}\",", .{self.user_data});
-        try std.fmt.format(writer, "\"reserved\":\"{x:0>48}\",", .{self.reserved});
-        try std.fmt.format(writer, "\"unit\":{},", .{self.unit});
-        try std.fmt.format(writer, "\"code\":{},", .{self.code});
-        try writer.writeAll("\"flags\":");
-        try std.json.stringify(self.flags, .{}, writer);
-        try writer.writeAll(",");
-        try std.fmt.format(writer, "\"debits_reserved\":{},", .{self.debits_reserved});
-        try std.fmt.format(writer, "\"debits_accepted\":{},", .{self.debits_accepted});
-        try std.fmt.format(writer, "\"credits_reserved\":{},", .{self.credits_reserved});
-        try std.fmt.format(writer, "\"credits_accepted\":{},", .{self.credits_accepted});
-        try std.fmt.format(writer, "\"timestamp\":\"{}\"", .{self.timestamp});
-        try writer.writeAll("}");
-    }
 };
 
 pub const AccountFlags = packed struct {
@@ -71,14 +54,6 @@ pub const AccountFlags = packed struct {
     comptime {
         assert(@sizeOf(AccountFlags) == @sizeOf(u32));
     }
-
-    pub fn jsonStringify(
-        self: AccountFlags,
-        options: std.json.StringifyOptions,
-        writer: anytype,
-    ) !void {
-        try writer.writeAll("{}");
-    }
 };
 
 pub const Transfer = packed struct {
@@ -99,27 +74,6 @@ pub const Transfer = packed struct {
     comptime {
         assert(@sizeOf(Transfer) == 128);
     }
-
-    pub fn jsonStringify(
-        self: Transfer,
-        options: std.json.StringifyOptions,
-        writer: anytype,
-    ) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"id\":{},", .{self.id});
-        try std.fmt.format(writer, "\"debit_account_id\":{},", .{self.debit_account_id});
-        try std.fmt.format(writer, "\"credit_account_id\":{},", .{self.credit_account_id});
-        try std.fmt.format(writer, "\"user_data\":\"{x:0>32}\",", .{self.user_data});
-        try std.fmt.format(writer, "\"reserved\":\"{x:0>64}\",", .{self.reserved});
-        try std.fmt.format(writer, "\"code\":{},", .{self.code});
-        try writer.writeAll("\"flags\":");
-        try std.json.stringify(self.flags, .{}, writer);
-        try writer.writeAll(",");
-        try std.fmt.format(writer, "\"amount\":{},", .{self.amount});
-        try std.fmt.format(writer, "\"timeout\":{},", .{self.timeout});
-        try std.fmt.format(writer, "\"timestamp\":{}", .{self.timestamp});
-        try writer.writeAll("}");
-    }
 };
 
 pub const TransferFlags = packed struct {
@@ -130,19 +84,6 @@ pub const TransferFlags = packed struct {
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u32));
-    }
-
-    pub fn jsonStringify(
-        self: TransferFlags,
-        options: std.json.StringifyOptions,
-        writer: anytype,
-    ) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"accept\":{},", .{self.accept});
-        try std.fmt.format(writer, "\"reject\":{},", .{self.reject});
-        try std.fmt.format(writer, "\"auto_commit\":{},", .{self.auto_commit});
-        try std.fmt.format(writer, "\"condition\":{}", .{self.condition});
-        try writer.writeAll("}");
     }
 };
 
@@ -158,22 +99,6 @@ pub const Commit = packed struct {
     comptime {
         assert(@sizeOf(Commit) == 64);
     }
-
-    pub fn jsonStringify(
-        self: Commit,
-        options: std.json.StringifyOptions,
-        writer: anytype,
-    ) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"id\":{},", .{self.id});
-        try std.fmt.format(writer, "\"reserved\":\"{x:0>64}\",", .{self.reserved});
-        try std.fmt.format(writer, "\"code\":{},", .{self.code});
-        try writer.writeAll("\"flags\":");
-        try std.json.stringify(self.flags, .{}, writer);
-        try writer.writeAll(",");
-        try std.fmt.format(writer, "\"timestamp\":{}", .{self.timestamp});
-        try writer.writeAll("}");
-    }
 };
 
 pub const CommitFlags = packed struct {
@@ -185,21 +110,9 @@ pub const CommitFlags = packed struct {
     comptime {
         assert(@sizeOf(CommitFlags) == @sizeOf(u32));
     }
-
-    pub fn jsonStringify(
-        self: CommitFlags,
-        options: std.json.StringifyOptions,
-        writer: anytype,
-    ) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"accept\":{},", .{self.accept});
-        try std.fmt.format(writer, "\"reject\":{},", .{self.reject});
-        try std.fmt.format(writer, "\"preimage\":{}", .{self.preimage});
-        try writer.writeAll("}");
-    }
 };
 
-pub const CreateAccountResult = packed enum(u32) {
+pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
     exists,
@@ -214,7 +127,7 @@ pub const CreateAccountResult = packed enum(u32) {
     reserved_flag_padding,
 };
 
-pub const CreateTransferResult = packed enum(u32) {
+pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
     exists,
@@ -241,7 +154,7 @@ pub const CreateTransferResult = packed enum(u32) {
     timeout_reserved_for_two_phase_commit,
 };
 
-pub const CommitTransferResult = packed enum(u32) {
+pub const CommitTransferResult = enum(u32) {
     ok,
     linked_event_failed,
     reserved_field,
@@ -270,17 +183,6 @@ pub const CreateAccountsResult = packed struct {
     comptime {
         assert(@sizeOf(CreateAccountsResult) == 8);
     }
-
-    pub fn jsonStringify(
-        self: CreateAccountResults,
-        options: std.json.StringifyOptions,
-        writer: anytype,
-    ) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"index\":{},", .{self.index});
-        try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
-        try writer.writeAll("}");
-    }
 };
 
 pub const CreateTransfersResult = packed struct {
@@ -289,17 +191,6 @@ pub const CreateTransfersResult = packed struct {
 
     comptime {
         assert(@sizeOf(CreateTransfersResult) == 8);
-    }
-
-    pub fn jsonStringify(
-        self: CreateTransferResults,
-        options: std.json.StringifyOptions,
-        writer: anytype,
-    ) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"index\":{},", .{self.index});
-        try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
-        try writer.writeAll("}");
     }
 };
 
@@ -310,28 +201,15 @@ pub const CommitTransfersResult = packed struct {
     comptime {
         assert(@sizeOf(CommitTransfersResult) == 8);
     }
-
-    pub fn jsonStringify(
-        self: CommitTransferResults,
-        options: std.json.StringifyOptions,
-        writer: anytype,
-    ) !void {
-        try writer.writeAll("{");
-        try std.fmt.format(writer, "\"index\":{},", .{self.index});
-        try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
-        try writer.writeAll("}");
-    }
 };
 
 comptime {
-    const target = std.Target.current;
-
-    if (target.os.tag != .linux and !target.isDarwin()) {
+    if (builtin.target.os.tag != .linux and !builtin.target.isDarwin()) {
         @compileError("linux or macos required for io");
     }
 
     // We require little-endian architectures everywhere for efficient network deserialization:
-    if (target.cpu.arch.endian() != std.builtin.Endian.Little) {
+    if (builtin.target.cpu.arch.endian() != .Little) {
         @compileError("big-endian systems not supported");
     }
 }

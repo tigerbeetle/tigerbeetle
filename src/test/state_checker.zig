@@ -34,7 +34,7 @@ pub const StateChecker = struct {
     /// The number of times the cannonical state has been advanced.
     transitions: u64 = 0,
 
-    pub fn init(allocator: *mem.Allocator, cluster: *Cluster) !StateChecker {
+    pub fn init(allocator: mem.Allocator, cluster: *Cluster) !StateChecker {
         const state = cluster.state_machines[0].state;
 
         var state_machine_states: [config.replicas_max]u128 = undefined;

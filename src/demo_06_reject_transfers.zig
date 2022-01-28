@@ -1,5 +1,7 @@
-usingnamespace @import("tigerbeetle.zig");
-usingnamespace @import("demo.zig");
+const tb = @import("tigerbeetle.zig");
+const demo = @import("demo.zig");
+
+const Commit = tb.Commit;
 
 pub fn main() !void {
     const commits = [_]Commit{
@@ -11,5 +13,5 @@ pub fn main() !void {
         },
     };
 
-    try Demo.request(.commit_transfers, commits, Demo.on_commit_transfers);
+    try demo.request(.commit_transfers, commits, demo.on_commit_transfers);
 }
