@@ -197,7 +197,7 @@ pub fn Replica(
         on_change_state: ?fn (replica: *Self) void = null,
 
         pub fn init(
-            allocator: *Allocator,
+            allocator: Allocator,
             cluster: u32,
             replica_count: u8,
             replica: u8,
@@ -239,7 +239,7 @@ pub fn Replica(
 
             var client_table: ClientTable = .{};
             errdefer client_table.deinit(allocator);
-            try client_table.ensureCapacity(allocator, @intCast(u32, config.clients_max));
+            try client_table.ensureTotalCapacity(allocator, @intCast(u32, config.clients_max));
             assert(client_table.capacity() >= config.clients_max);
 
             var init_prepare = Header{
@@ -363,7 +363,7 @@ pub fn Replica(
 
         /// Free all memory and unref all messages held by the replica
         /// This does not deinitialize the StateMachine, MessageBus, Storage, or Time
-        pub fn deinit(self: *Self, allocator: *Allocator) void {
+        pub fn deinit(self: *Self, allocator: Allocator) void {
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
 
@@ -452,7 +452,7 @@ pub fn Replica(
             });
 
             if (message.header.invalid()) |reason| {
-                log.alert("{}: on_message: invalid ({s})", .{ self.replica, reason });
+                log.err("{}: on_message: invalid ({s})", .{ self.replica, reason });
                 return;
             }
 
@@ -506,7 +506,7 @@ pub fn Replica(
             }
 
             if (self.loopback_queue) |loopback_message| {
-                log.emerg("{}: on_message: on_{s}() queued a {s} loopback message with no flush", .{
+                log.err("{}: on_message: on_{s}() queued a {s} loopback message with no flush", .{
                     self.replica,
                     @tagName(message.header.command),
                     @tagName(loopback_message.header.command),
@@ -581,7 +581,7 @@ pub fn Replica(
             assert(message.header.view <= self.view); // The client's view may be behind ours.
 
             const realtime = self.clock.realtime_synchronized() orelse {
-                log.alert("{}: on_request: dropping (clock not synchronized)", .{self.replica});
+                log.err("{}: on_request: dropping (clock not synchronized)", .{self.replica});
                 return;
             };
 
@@ -885,7 +885,7 @@ pub fn Replica(
                 if (self.message_bus.get_message()) |available| {
                     self.message_bus.unref(available);
                 } else {
-                    log.alert("{}: on_start_view_change: waiting for message for do_view_change", .{
+                    log.err("{}: on_start_view_change: waiting for message for do_view_change", .{
                         self.replica,
                     });
                     return;
@@ -1098,7 +1098,7 @@ pub fn Replica(
             assert(self.leader());
 
             const start_view = self.create_view_change_message(.start_view) orelse {
-                log.alert("{}: on_request_start_view: dropping start_view, no message available", .{
+                log.err("{}: on_request_start_view: dropping start_view, no message available", .{
                     self.replica,
                 });
                 return;
@@ -1127,7 +1127,7 @@ pub fn Replica(
             }
 
             const response = self.message_bus.get_message() orelse {
-                log.alert("{}: on_recovery: ignoring (waiting for message)", .{self.replica});
+                log.err("{}: on_recovery: ignoring (waiting for message)", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(response);
@@ -1172,7 +1172,10 @@ pub fn Replica(
         }
 
         /// TODO This is a work in progress (out of scope for the bounty)
-        fn on_recovery_response(self: *Self, message: *Message) void {}
+        fn on_recovery_response(self: *Self, message: *Message) void {
+            _ = self;
+            _ = message;
+        }
 
         fn on_request_prepare(self: *Self, message: *const Message) void {
             if (self.ignore_repair_message(message)) return;
@@ -1274,7 +1277,7 @@ pub fn Replica(
             assert(message.header.replica != self.replica);
 
             const response = self.message_bus.get_message() orelse {
-                log.alert("{}: on_request_headers: ignoring (op={}..{}, no message available)", .{
+                log.err("{}: on_request_headers: ignoring (op={}..{}, no message available)", .{
                     self.replica,
                     message.header.commit,
                     message.header.op,
@@ -1513,7 +1516,7 @@ pub fn Replica(
                 return;
             }
 
-            self.prepare_timeout.backoff(&self.prng);
+            self.prepare_timeout.backoff(self.prng.random());
 
             assert(waiting_len <= self.replica_count);
             for (waiting[0..waiting_len]) |replica| {
@@ -1682,7 +1685,7 @@ pub fn Replica(
 
         /// Returns whether `b` succeeds `a` by having a newer view or same view and newer op.
         fn ascending_viewstamps(
-            self: *Self,
+            _: *Self,
             a: *const Header,
             b: *const Header,
         ) bool {
@@ -1834,7 +1837,7 @@ pub fn Replica(
 
             // TODO We can optimize this to commit into the client table reply if it exists.
             const reply = self.message_bus.get_message() orelse {
-                log.alert("{}: commit_ops_commit: waiting for message", .{self.replica});
+                log.err("{}: commit_ops_commit: waiting for message", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(reply);
@@ -1947,7 +1950,7 @@ pub fn Replica(
                 // TODO We can optimize this to commit into the client table reply if it exists.
                 const reply = self.message_bus.get_message() orelse {
                     // Eventually handled by on_prepare_timeout().
-                    log.alert("{}: commit_pipeline: waiting for message", .{self.replica});
+                    log.err("{}: commit_pipeline: waiting for message", .{self.replica});
                     return;
                 };
                 defer self.message_bus.unref(reply);
@@ -2028,13 +2031,14 @@ pub fn Replica(
             assert(request == 0);
 
             // For correctness, it's critical that all replicas evict deterministically:
-            // We cannot depend on `HashMap.capacity()` since `HashMap.ensureCapacity()` may change
-            // across different versions of the Zig std lib. We therefore rely on `config.clients_max`,
-            // which must be the same across all replicas, and must not change after initing a cluster.
-            // We also do not depend on `HashMap.valueIterator()` being deterministic here. However, we
-            // do require that all entries have different commit numbers and are at least iterated.
+            // We cannot depend on `HashMap.capacity()` since `HashMap.ensureTotalCapacity()` may
+            // change across versions of the Zig std lib. We therefore rely on `config.clients_max`,
+            // which must be the same across all replicas, and must not change after initializing a
+            // cluster.
+            // We also do not depend on `HashMap.valueIterator()` being deterministic here. However,
+            // we do require that all entries have different commit numbers and are iterated.
             // This ensures that we will always pick the entry with the oldest commit number.
-            // We also double-check that a client has only one entry in the hash map (or it's buggy).
+            // We also check that a client has only one entry in the hash map (or it's buggy).
             const clients = self.client_table.count();
             assert(clients <= config.clients_max);
             if (clients == config.clients_max) {
@@ -2059,7 +2063,7 @@ pub fn Replica(
                     }
                 }
                 assert(iterated == clients);
-                log.alert("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
+                log.err("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
                     self.replica,
                     clients,
                     config.clients_max,
@@ -2453,11 +2457,11 @@ pub fn Replica(
                     // Fall through below to check if we should resend the .register session reply.
                 } else if (entry.session > message.header.context) {
                     // The client must not reuse the ephemeral client ID when registering a new session.
-                    log.alert("{}: on_request: ignoring older session (client bug)", .{self.replica});
+                    log.err("{}: on_request: ignoring older session (client bug)", .{self.replica});
                     return true;
                 } else if (entry.session < message.header.context) {
                     // This cannot be because of a partition since we check the client's view number.
-                    log.alert("{}: on_request: ignoring newer session (client bug)", .{self.replica});
+                    log.err("{}: on_request: ignoring newer session (client bug)", .{self.replica});
                     return true;
                 }
 
@@ -2472,7 +2476,7 @@ pub fn Replica(
                         self.message_bus.send_message_to_client(message.header.client, entry.reply);
                         return true;
                     } else {
-                        log.alert("{}: on_request: request collision (client bug)", .{self.replica});
+                        log.err("{}: on_request: request collision (client bug)", .{self.replica});
                         return true;
                     }
                 } else if (entry.reply.header.request + 1 == message.header.request) {
@@ -2482,11 +2486,11 @@ pub fn Replica(
                         return false;
                     } else {
                         // The client may have only one request inflight at a time.
-                        log.alert("{}: on_request: ignoring new request (client bug)", .{self.replica});
+                        log.err("{}: on_request: ignoring new request (client bug)", .{self.replica});
                         return true;
                     }
                 } else {
-                    log.alert("{}: on_request: ignoring newer request (client bug)", .{self.replica});
+                    log.err("{}: on_request: ignoring newer request (client bug)", .{self.replica});
                     return true;
                 }
             } else if (message.header.operation == .register) {
@@ -2573,7 +2577,7 @@ pub fn Replica(
                     log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
                     return true;
                 } else {
-                    log.alert("{}: on_request: ignoring (client forked)", .{self.replica});
+                    log.err("{}: on_request: ignoring (client forked)", .{self.replica});
                     return true;
                 }
             }
@@ -2682,7 +2686,7 @@ pub fn Replica(
             assert(self.op + 1 == header.op);
         }
 
-        fn message_body_as_headers(self: *Self, message: *const Message) []Header {
+        fn message_body_as_headers(_: *Self, message: *const Message) []Header {
             // TODO Assert message commands that we expect this to be called for.
             assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
             return std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..message.header.size]);
@@ -2701,8 +2705,8 @@ pub fn Replica(
             if (a.view == b.view and a.op + 1 == b.op and a.checksum != b.parent) {
                 assert(a.valid_checksum());
                 assert(b.valid_checksum());
-                log.emerg("{}: panic_if_hash_chain_would_break: a: {}", .{ self.replica, a });
-                log.emerg("{}: panic_if_hash_chain_would_break: b: {}", .{ self.replica, b });
+                log.err("{}: panic_if_hash_chain_would_break: a: {}", .{ self.replica, a });
+                log.err("{}: panic_if_hash_chain_would_break: b: {}", .{ self.replica, b });
                 @panic("hash chain would break");
             }
         }
@@ -3581,7 +3585,7 @@ pub fn Replica(
             assert(count_start_view_change >= self.quorum_view_change - 1);
 
             const message = self.create_view_change_message(.do_view_change) orelse {
-                log.alert("{}: send_do_view_change: waiting for message", .{self.replica});
+                log.err("{}: send_do_view_change: waiting for message", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(message);
@@ -3600,7 +3604,7 @@ pub fn Replica(
             assert(self.status == .normal);
             assert(self.leader());
 
-            log.alert("{}: too many sessions, sending eviction message to client={}", .{
+            log.err("{}: too many sessions, sending eviction message to client={}", .{
                 self.replica,
                 client,
             });
@@ -3616,7 +3620,7 @@ pub fn Replica(
 
         fn send_header_to_client(self: *Self, client: u128, header: Header) void {
             const message = self.create_message_from_header(header) orelse {
-                log.alert("{}: no header-only message available, dropping message to client {}", .{
+                log.err("{}: no header-only message available, dropping message to client {}", .{
                     self.replica,
                     client,
                 });
@@ -3629,7 +3633,7 @@ pub fn Replica(
 
         fn send_header_to_other_replicas(self: *Self, header: Header) void {
             const message = self.create_message_from_header(header) orelse {
-                log.alert("{}: no header-only message available, dropping message to replicas", .{
+                log.err("{}: no header-only message available, dropping message to replicas", .{
                     self.replica,
                 });
                 return;
@@ -3646,7 +3650,7 @@ pub fn Replica(
 
         fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
             const message = self.create_message_from_header(header) orelse {
-                log.alert("{}: no header-only message available, dropping message to replica {}", .{
+                log.err("{}: no header-only message available, dropping message to replica {}", .{
                     self.replica,
                     replica,
                 });
@@ -3675,7 +3679,7 @@ pub fn Replica(
             });
 
             if (message.header.invalid()) |reason| {
-                log.emerg("{}: send_message_to_replica: invalid ({s})", .{ self.replica, reason });
+                log.err("{}: send_message_to_replica: invalid ({s})", .{ self.replica, reason });
                 @panic("send_message_to_replica: invalid message");
             }
 
@@ -3764,7 +3768,7 @@ pub fn Replica(
                     assert(replica == self.leader_index(self.view));
                 },
                 else => {
-                    log.notice("{}: send_message_to_replica: TODO {s}", .{
+                    log.info("{}: send_message_to_replica: TODO {s}", .{
                         self.replica,
                         @tagName(message.header.command),
                     });
@@ -3781,7 +3785,7 @@ pub fn Replica(
 
         /// Finds the header with the highest op number in a slice of headers from a replica.
         /// Searches only by op number to find the highest `self.op for the replica.
-        fn set_latest_op(self: *Self, headers: []Header, latest: *Header) void {
+        fn set_latest_op(_: *Self, headers: []Header, latest: *Header) void {
             switch (latest.command) {
                 .reserved, .prepare => assert(latest.valid_checksum()),
                 else => unreachable,
@@ -3910,7 +3914,7 @@ pub fn Replica(
             assert(self.nack_prepare_op == null);
 
             const start_view = self.create_view_change_message(.start_view) orelse {
-                log.alert("{}: start_view_as_the_new_leader: waiting for message", .{self.replica});
+                log.err("{}: start_view_as_the_new_leader: waiting for message", .{self.replica});
                 return;
             };
             defer self.message_bus.unref(start_view);

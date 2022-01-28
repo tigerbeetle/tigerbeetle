@@ -38,5 +38,5 @@ pub fn main() !void {
         offset += 128;
     }
     var ns = std.time.nanoTimestamp() - start;
-    std.debug.warn("zig: sum of transfer amounts={} ns={}\n", .{ sum, ns });
+    std.debug.print("zig: sum of transfer amounts={} ns={}\n", .{ sum, ns });
 }

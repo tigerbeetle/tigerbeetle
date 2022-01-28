@@ -3,14 +3,15 @@ const std = @import("std");
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    var allocator = &arena.allocator;
+
+    var allocator = arena.allocator();
 
     const runs: usize = 5;
     const insertions: usize = 1000000;
     const transfer: [128]u8 = [_]u8{0} ** 128;
 
     var transfers = std.AutoHashMap(u128, @TypeOf(transfer)).init(allocator);
-    try transfers.ensureCapacity(insertions * runs);
+    try transfers.ensureTotalCapacity(insertions * runs);
 
     var id: u128 = 0;
     var run: usize = 0;

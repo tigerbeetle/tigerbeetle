@@ -174,10 +174,8 @@ pub const IO = struct {
         result: i32 = undefined,
         next: ?*Completion = null,
         operation: Operation,
-        // This is one of the usecases for c_void outside of C code and as such c_void will
-        // be replaced with anyopaque eventually: https://github.com/ziglang/zig/issues/323
-        context: ?*c_void,
-        callback: fn (context: ?*c_void, completion: *Completion, result: *const c_void) void,
+        context: ?*anyopaque,
+        callback: fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
@@ -490,7 +488,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -532,7 +530,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -582,7 +580,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -625,7 +623,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -671,7 +669,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -716,7 +714,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -766,7 +764,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -802,7 +800,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -847,11 +845,13 @@ pub const IO = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
+        _ = callback;
+
         completion.* = .{
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
