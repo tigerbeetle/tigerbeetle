@@ -143,6 +143,9 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
             context: Context,
             comptime on_message: fn (context: Context, message: *Message) void,
         ) void {
+            // TODO This looks like a bug in the compiler, not seeing on_message as used?
+            _ = on_message;
+
             assert(bus.on_message_callback == null);
             assert(bus.on_message_context == null);
 
@@ -597,6 +600,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                     return;
                 }
                 connection.send_queue.push_assume_capacity(message.ref());
+
                 // If the connection has not yet been established we can't send yet.
                 // Instead on_connect() will call send().
                 if (connection.state == .connecting) {
@@ -641,7 +645,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                                 //assert(!connection.send_submitted);
                             },
                             // Ignore all the remaining errors for now
-                            error.ConnectionAborted, error.ConnectionResetByPeer, error.BlockingOperationInProgress, error.NetworkSubsystemFailed, error.SystemResources, error.Unexpected => {},
+                            error.ConnectionAborted, error.ConnectionResetByPeer, error.BlockingOperationInProgress, error.NetworkSubsystemFailed, error.SystemResources, error.Unexpected, => {},
                         };
                     },
                     .close => {},

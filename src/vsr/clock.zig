@@ -745,6 +745,7 @@ test "fuzz test" {
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
     const SystemTime = @import("../test/time.zig").Time;
+
     var system_time = SystemTime{};
     var seed = @intCast(u64, system_time.realtime());
     var min_sync_error: u64 = 1_000_000_000;

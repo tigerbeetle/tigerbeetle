@@ -20,18 +20,14 @@ const vsr = @import("vsr.zig");
 const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
 
 pub fn main() !void {
-    var io = try IO.init(128, 0);
-    defer io.deinit();
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
 
-    switch (try cli.parse_args(allocator)) {
-        .init => |args| try init(&io, args.cluster, args.replica, args.dir_fd),
+    switch (cli.parse_args(allocator)) {
+        .init => |args| try init(args.cluster, args.replica, args.dir_fd),
         .start => |args| try start(
-            &io,
             allocator,
             args.cluster,
             args.replica,
@@ -46,7 +42,7 @@ const filename_fmt = "cluster_{d:0>10}_replica_{d:0>3}.tigerbeetle";
 const filename_len = fmt.count(filename_fmt, .{ 0, 0 });
 
 /// Create a .tigerbeetle data file for the given args and exit
-fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
+fn init(cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
     // Add 1 for the terminating null byte
     var buffer: [filename_len + 1]u8 = undefined;
     const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica }) catch unreachable;
@@ -65,7 +61,6 @@ fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
 
 /// Run as a replica server defined by the given args
 fn start(
-    io: *IO,
     allocator: mem.Allocator,
     cluster: u32,
     replica_index: u8,

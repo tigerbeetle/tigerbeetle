@@ -1138,6 +1138,11 @@ test "linked accounts" {
 // 2. enums tested in the order that they are defined, for easier auditing of coverage, and that
 // 3. state machine logic cannot be reordered in any way, breaking determinism.
 test "create/lookup/rollback transfers" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    
+    const allocator = arena.allocator();
+
     var accounts = [_]Account{
         mem.zeroInit(Account, .{
             .id = 1,
