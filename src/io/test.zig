@@ -65,7 +65,8 @@ test "write/fsync/read/close" {
             completion: *IO.Completion,
             result: IO.FsyncError!void,
         ) void {
-            result catch @panic("fsync error");
+            _ = result catch @panic("fsync error");
+
             self.fsynced = true;
             self.io.read(*Context, self, read_callback, completion, self.fd, &self.read_buf, 10);
         }
@@ -84,7 +85,9 @@ test "write/fsync/read/close" {
             completion: *IO.Completion,
             result: IO.CloseError!void,
         ) void {
+            _ = completion;
             _ = result catch @panic("close error");
+
             self.done = true;
         }
     }.run_test();
@@ -110,16 +113,16 @@ test "accept/connect/send/receive" {
         fn run_test() !void {
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
-            const server = try IO.openSocket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            const server = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
 
-            const client = try IO.openSocket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            const client = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             try os.setsockopt(
                 server,
-                os.SOL_SOCKET,
-                os.SO_REUSEADDR,
+                os.SOL.SOCKET,
+                os.SO.REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
             try os.bind(server, &address.any, address.getOsSockLen());
@@ -158,7 +161,8 @@ test "accept/connect/send/receive" {
             completion: *IO.Completion,
             result: IO.ConnectError!void,
         ) void {
-            result catch @panic("connect error");
+            _ = result catch @panic("connect error");
+
             self.io.send(
                 *Context,
                 self,
@@ -174,6 +178,8 @@ test "accept/connect/send/receive" {
             completion: *IO.Completion,
             result: IO.SendError!usize,
         ) void {
+            _ = completion;
+
             self.sent = result catch @panic("send error");
         }
 
@@ -198,6 +204,8 @@ test "accept/connect/send/receive" {
             completion: *IO.Completion,
             result: IO.RecvError!usize,
         ) void {
+            _ = completion;
+
             self.received = result catch @panic("recv error");
             self.done = true;
         }
@@ -254,7 +262,9 @@ test "timeout" {
             completion: *IO.Completion,
             result: IO.TimeoutError!void,
         ) void {
-            result catch @panic("timeout error");
+            _ = completion;
+            _ = result catch @panic("timeout error");
+
             if (self.stop_time == 0) self.stop_time = self.timer.monotonic();
             self.count += 1;
         }
@@ -296,7 +306,9 @@ test "submission queue full" {
             completion: *IO.Completion,
             result: IO.TimeoutError!void,
         ) void {
-            result catch @panic("timeout error");
+            _ = completion;
+            _ = result catch @panic("timeout error");
+
             self.count += 1;
         }
     }.run_test();
@@ -320,19 +332,19 @@ test "tick to wait" {
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
 
-            const server = try IO.openSocket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            const server = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
 
             try os.setsockopt(
                 server,
-                os.SOL_SOCKET,
-                os.SO_REUSEADDR,
+                os.SOL.SOCKET,
+                os.SO.REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
             try os.bind(server, &address.any, address.getOsSockLen());
             try os.listen(server, kernel_backlog);
 
-            const client = try IO.openSocket(address.any.family, os.SOCK_STREAM, os.IPPROTO_TCP);
+            const client = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             // Start the accept
@@ -403,6 +415,8 @@ test "tick to wait" {
             completion: *IO.Completion,
             result: IO.AcceptError!os.socket_t,
         ) void {
+            _ = completion;
+
             assert(self.accepted == -1);
             self.accepted = result catch @panic("accept error");
         }
@@ -412,7 +426,9 @@ test "tick to wait" {
             completion: *IO.Completion,
             result: IO.ConnectError!void,
         ) void {
-            result catch @panic("connect error");
+            _ = completion;
+            _ = result catch @panic("connect error");
+
             assert(!self.connected);
             self.connected = true;
         }
@@ -422,7 +438,9 @@ test "tick to wait" {
             completion: *IO.Completion,
             result: IO.RecvError!usize,
         ) void {
+            _ = completion;
             _ = result catch |err| std.debug.panic("recv error: {}", .{err});
+
             assert(!self.received);
             self.received = true;
         }
@@ -466,14 +484,14 @@ test "pipe data over socket" {
             };
             defer self.io.deinit();
 
-            self.server.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+            self.server.fd = try IO.openSocket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(self.server.fd);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             try os.setsockopt(
                 self.server.fd,
-                os.SOL_SOCKET,
-                os.SO_REUSEADDR,
+                os.SOL.SOCKET,
+                os.SO.REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
 
@@ -488,7 +506,7 @@ test "pipe data over socket" {
                 self.server.fd,
             );
 
-            self.tx.socket.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+            self.tx.socket.fd = try IO.openSocket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(self.tx.socket.fd);
 
             self.io.connect(
@@ -538,6 +556,9 @@ test "pipe data over socket" {
             completion: *IO.Completion,
             result: IO.ConnectError!void,
         ) void {
+            _ = completion;
+            _ = result catch unreachable;
+
             assert(self.tx.socket.fd != -1);
             assert(&self.tx.socket.completion == completion);
 

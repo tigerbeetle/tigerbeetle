@@ -1,5 +1,7 @@
-usingnamespace @import("tigerbeetle.zig");
-usingnamespace @import("demo.zig");
+const tb = @import("tigerbeetle.zig");
+const demo = @import("demo.zig");
+
+const Account = tb.Account;
 
 pub fn main() !void {
     const accounts = [_]Account{
@@ -29,5 +31,5 @@ pub fn main() !void {
         },
     };
 
-    try Demo.request(.create_accounts, accounts, Demo.on_create_accounts);
+    try demo.request(.create_accounts, accounts, demo.on_create_accounts);
 }

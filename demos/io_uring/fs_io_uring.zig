@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const IO_Uring = std.os.linux.IO_Uring;
 const io_uring_cqe = std.os.linux.io_uring_cqe;
@@ -16,7 +17,7 @@ const io_uring_cqe = std.os.linux.io_uring_cqe;
 /// * Finegrained submission, at present we simply submit a batch of events then wait for a batch.
 ///   We could also submit a batch of events, and then submit partial batches as events complete.
 pub fn main() !void {
-    if (std.builtin.os.tag != .linux) return error.LinuxRequired;
+    if (builtin.os.tag != .linux) return error.LinuxRequired;
 
     const size: usize = 256 * 1024 * 1024;
     const page: usize = 4096;
@@ -78,7 +79,7 @@ pub fn main() !void {
                 w.flags |= std.os.linux.IOSQE_IO_LINK;
                 var f = try ring.fsync(event_f, fd, 0);
                 f.flags |= std.os.linux.IOSQE_IO_LINK;
-                var r = try ring.read(event_r, fd, buffer_r[0..], offset_submitted);
+                _ = try ring.read(event_r, fd, buffer_r[0..], offset_submitted);
                 offset_submitted += page;
                 events += 3;
             }

@@ -1,9 +1,11 @@
 #!/bin/bash
 set -e
 
-# Default to the 0.8.1 build, or allow the latest dev build, or an explicit release version:
+ZIG_RELEASE_DEFAULT="0.9.0"
+
+# Default to the release build, or allow the latest dev build, or an explicit release version:
 if [ -z "$1" ]; then
-    ZIG_RELEASE="0.8.1"
+    ZIG_RELEASE=$ZIG_RELEASE_DEFAULT
 elif [ "$1" == "latest" ]; then
     ZIG_RELEASE="builds"
 else

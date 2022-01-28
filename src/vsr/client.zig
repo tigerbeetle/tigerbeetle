@@ -30,7 +30,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             message: *Message,
         };
 
-        allocator: *mem.Allocator,
+        allocator: mem.Allocator,
         message_bus: *MessageBus,
 
         /// A universally unique identifier for the client (must not be zero).
@@ -82,7 +82,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         prng: std.rand.DefaultPrng,
 
         pub fn init(
-            allocator: *mem.Allocator,
+            allocator: mem.Allocator,
             id: u128,
             cluster: u32,
             replica_count: u8,
@@ -115,7 +115,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self) void {}
+        pub fn deinit(_: *Self) void {}
 
         pub fn on_message(self: *Self, message: *Message) void {
             log.debug("{}: on_message: {}", .{ self.id, message.header });
@@ -238,7 +238,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             assert(eviction.header.client == self.id);
             assert(eviction.header.view >= self.view);
 
-            log.emerg("{}: session evicted: too many concurrent client sessions", .{self.id});
+            log.err("{}: session evicted: too many concurrent client sessions", .{self.id});
             @panic("session evicted: too many concurrent client sessions");
         }
 
@@ -361,7 +361,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         fn on_request_timeout(self: *Self) void {
-            self.request_timeout.backoff(&self.prng);
+            self.request_timeout.backoff(self.prng.random());
 
             const message = self.request_queue.head_ptr().?.message;
             assert(message.header.command == .request);
@@ -435,7 +435,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
         fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
             const message = self.create_message_from_header(header) orelse {
-                log.alert("{}: no header-only message available, dropping message to replica {}", .{
+                log.err("{}: no header-only message available, dropping message to replica {}", .{
                     self.id,
                     replica,
                 });
@@ -448,7 +448,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
         fn send_header_to_replicas(self: *Self, header: Header) void {
             const message = self.create_message_from_header(header) orelse {
-                log.alert("{}: no header-only message available, dropping message to replicas", .{
+                log.err("{}: no header-only message available, dropping message to replicas", .{
                     self.id,
                 });
                 return;

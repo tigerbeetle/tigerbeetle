@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const builtin = std.builtin;
+const builtin = @import("builtin");
 const net = std.net;
 const os = std.os;
 const IO_Uring = os.linux.IO_Uring;
@@ -28,11 +28,11 @@ pub fn main() !void {
 
     const address = try net.Address.parseIp4("127.0.0.1", port);
     const domain = address.any.family;
-    const socket_type = os.SOCK_STREAM | os.SOCK_CLOEXEC;
-    const protocol = os.IPPROTO_TCP;
+    const socket_type = os.SOCK.STREAM | os.SOCK.CLOEXEC;
+    const protocol = os.IPPROTO.TCP;
     const server = try os.socket(domain, socket_type, protocol);
     errdefer os.close(server);
-    try os.setsockopt(server, os.SOL_SOCKET, os.SO_REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
+    try os.setsockopt(server, os.SOL.SOCKET, os.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
     try os.bind(server, &address.any, address.getOsSockLen());
     try os.listen(server, kernel_backlog);
     std.debug.print("net: echo server: io_uring: listening on {}...\n", .{address});
@@ -43,7 +43,7 @@ pub fn main() !void {
     var cqes: [512]io_uring_cqe = undefined;
     var accept_addr: os.sockaddr = undefined;
     var accept_addr_len: os.socklen_t = @sizeOf(@TypeOf(accept_addr));
-    for (buffers) |b, index| {
+    for (buffers) |_, index| {
         buffers[index] = [_]u8{0} ** max_buffer;
     }
 
@@ -56,8 +56,8 @@ pub fn main() !void {
             const cqe = cqes[i];
             if (cqe.res < 0) {
                 switch (-cqe.res) {
-                    os.EPIPE => std.debug.print("EPIPE {}\n", .{cqe}),
-                    os.ECONNRESET => std.debug.print("ECONNRESET {}\n", .{cqe}),
+                    os.E.PIPE => std.debug.print("EPIPE {}\n", .{cqe}),
+                    os.E.CONNRESET => std.debug.print("ECONNRESET {}\n", .{cqe}),
                     else => std.debug.print("ERROR {}\n", .{cqe}),
                 }
                 os.exit(1);
@@ -90,12 +90,12 @@ fn accept(ring: *IO_Uring, fd: os.fd_t, addr: *os.sockaddr, addr_len: *os.sockle
 
 fn recv(ring: *IO_Uring, fd: os.fd_t) !void {
     var user_data = get_user_data(fd, .Recv);
-    _ = try ring.recv(user_data, fd, get_buffer(fd)[0..], os.MSG_NOSIGNAL);
+    _ = try ring.recv(user_data, fd, get_buffer(fd)[0..], os.MSG.NOSIGNAL);
 }
 
 fn send(ring: *IO_Uring, fd: os.fd_t, size: usize) !void {
     var user_data = get_user_data(fd, .Send);
-    _ = try ring.send(user_data, fd, get_buffer(fd)[0..size], os.MSG_NOSIGNAL);
+    _ = try ring.send(user_data, fd, get_buffer(fd)[0..size], os.MSG.NOSIGNAL);
 }
 
 fn get_buffer(fd: os.fd_t) []u8 {

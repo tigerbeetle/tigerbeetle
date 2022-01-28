@@ -16,7 +16,7 @@ pub const Clock = @import("vsr/clock.zig").Clock;
 pub const Journal = @import("vsr/journal.zig").Journal;
 
 /// Viewstamped Replication protocol commands:
-pub const Command = packed enum(u8) {
+pub const Command = enum(u8) {
     reserved,
 
     ping,
@@ -390,14 +390,14 @@ pub const Timeout = struct {
     /// Allows the attempts counter to wrap from time to time.
     /// The overflow period is kept short to surface any related bugs sooner rather than later.
     /// We do not saturate the counter as this would cause round-robin retries to get stuck.
-    pub fn backoff(self: *Timeout, prng: *std.rand.DefaultPrng) void {
+    pub fn backoff(self: *Timeout, random: std.rand.Random) void {
         assert(self.ticking);
 
         self.ticks = 0;
         self.attempts +%= 1;
 
         log.debug("{}: {s} backing off", .{ self.id, self.name });
-        self.set_after_for_rtt_and_attempts(prng);
+        self.set_after_for_rtt_and_attempts(random);
     }
 
     /// It's important to check that when fired() is acted on that the timeout is stopped/started,
@@ -406,7 +406,7 @@ pub const Timeout = struct {
         if (self.ticking and self.ticks >= self.after) {
             log.debug("{}: {s} fired", .{ self.id, self.name });
             if (self.ticks > self.after) {
-                log.emerg("{}: {s} is firing every tick", .{ self.id, self.name });
+                log.err("{}: {s} is firing every tick", .{ self.id, self.name });
                 @panic("timeout was not reset correctly");
             }
             return true;
@@ -426,13 +426,13 @@ pub const Timeout = struct {
     /// Sets the value of `after` as a function of `rtt` and `attempts`.
     /// Adds exponential backoff and jitter.
     /// May be called only after a timeout has been stopped or reset, to prevent backward jumps.
-    pub fn set_after_for_rtt_and_attempts(self: *Timeout, prng: *std.rand.DefaultPrng) void {
+    pub fn set_after_for_rtt_and_attempts(self: *Timeout, random: std.rand.Random) void {
         // If `after` is reduced by this function to less than `ticks`, then `fired()` will panic:
         assert(self.ticks == 0);
         assert(self.rtt > 0);
 
         const after = (self.rtt * self.rtt_multiple) + exponential_backoff_with_jitter(
-            prng,
+            random,
             config.backoff_min_ticks,
             config.backoff_max_ticks,
             self.attempts,
@@ -491,7 +491,7 @@ pub const Timeout = struct {
 
 /// Calculates exponential backoff with jitter to prevent cascading failure due to thundering herds.
 pub fn exponential_backoff_with_jitter(
-    prng: *std.rand.DefaultPrng,
+    random: std.rand.Random,
     min: u64,
     max: u64,
     attempt: u64,
@@ -507,35 +507,39 @@ pub fn exponential_backoff_with_jitter(
     // 1<<0 = 1, 1<<1 = 2, 1<<2 = 4, 1<<3 = 8
     const power = std.math.shlExact(u128, 1, exponent) catch unreachable; // Do not truncate.
 
+    // Ensure that `backoff` is calculated correctly when min is 0, taking `std.math.max(1, min)`.
+    // Otherwise, the final result will always be 0. This was an actual bug we encountered.
+    const min_non_zero = std.math.max(1, min);
+    assert(min_non_zero > 0);
+    assert(power > 0);
+
     // Calculate the capped exponential backoff component, `min(range, min * 2 ^ attempt)`:
-    const backoff = std.math.min(range, std.math.max(1, min) * power);
-    const jitter = prng.random.uintAtMostBiased(u64, backoff);
+    const backoff = std.math.min(range, min_non_zero * power);
+    const jitter = random.uintAtMostBiased(u64, backoff);
 
     const result = @intCast(u64, min + jitter);
     assert(result >= min);
     assert(result <= max);
+
     return result;
 }
 
 test "exponential_backoff_with_jitter" {
     const testing = std.testing;
 
-    const attempts = 1000;
     var prng = std.rand.DefaultPrng.init(0);
+    const random = prng.random();
+
+    const attempts = 1000;
     const max: u64 = std.math.maxInt(u64);
     const min = max - attempts;
+
     var attempt = max - attempts;
     while (attempt < max) : (attempt += 1) {
-        const ebwj = exponential_backoff_with_jitter(&prng, min, max, attempt);
+        const ebwj = exponential_backoff_with_jitter(random, min, max, attempt);
         try testing.expect(ebwj >= min);
         try testing.expect(ebwj <= max);
     }
-
-    // Check that `backoff` is calculated correctly when min is 0 by taking `std.math.max(1, min)`.
-    // Otherwise, the final result will always be 0. This was an actual bug we encountered.
-    // If the PRNG ever changes, then there is a small chance that we may collide for 0,
-    // but this is outweighed by the probability that we refactor and fail to take the max.
-    try testing.expect(exponential_backoff_with_jitter(&prng, 0, max, 0) > 0);
 }
 
 /// Returns An array containing the remote or local addresses of each of the 2f + 1 replicas:
@@ -547,17 +551,17 @@ test "exponential_backoff_with_jitter" {
 /// The caller owns the memory of the returned slice of addresses.
 /// TODO Unit tests.
 /// TODO Integrate into `src/cli.zig`.
-pub fn parse_addresses(allocator: *std.mem.Allocator, raw: []const u8) ![]std.net.Address {
+pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8) ![]std.net.Address {
     var addresses = try allocator.alloc(std.net.Address, config.replicas_max);
     errdefer allocator.free(addresses);
 
     var index: usize = 0;
-    var comma_iterator = std.mem.split(raw, ",");
+    var comma_iterator = std.mem.split(u8, raw, ",");
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
         if (index == config.replicas_max) return error.AddressLimitExceeded;
 
-        var colon_iterator = std.mem.split(raw_address, ":");
+        var colon_iterator = std.mem.split(u8, raw_address, ":");
         // The split iterator will always return non-null once, even if the delimiter is not found:
         const raw_ipv4 = colon_iterator.next().?;
 

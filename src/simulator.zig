@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 
@@ -17,7 +18,7 @@ const output = std.log.scoped(.state_checker);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
-const log_state_transitions_only = std.builtin.mode != .Debug;
+const log_state_transitions_only = builtin.mode != .Debug;
 
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
@@ -40,13 +41,13 @@ pub fn main() !void {
         break :seed_from_arg parse_seed(arg_two);
     };
 
-    if (std.builtin.mode == .ReleaseFast or std.builtin.mode == .ReleaseSmall) {
+    if (builtin.mode == .ReleaseFast or builtin.mode == .ReleaseSmall) {
         // We do not support ReleaseFast or ReleaseSmall because they disable assertions.
         @panic("the simulator must be run with -OReleaseSafe");
     }
 
     if (seed == seed_random) {
-        if (std.builtin.mode != .ReleaseSafe) {
+        if (builtin.mode != .ReleaseSafe) {
             // If no seed is provided, than Debug is too slow and ReleaseSafe is much faster.
             @panic("no seed provided: the simulator must be run with -OReleaseSafe");
         }
@@ -56,53 +57,53 @@ pub fn main() !void {
     }
 
     var prng = std.rand.DefaultPrng.init(seed);
-    const random = &prng.random;
+    const random = prng.random();
 
-    const replica_count = 1 + prng.random.uintLessThan(u8, config.replicas_max);
-    const client_count = 1 + prng.random.uintLessThan(u8, config.clients_max);
+    const replica_count = 1 + random.uintLessThan(u8, config.replicas_max);
+    const client_count = 1 + random.uintLessThan(u8, config.clients_max);
     const node_count = replica_count + client_count;
 
     const ticks_max = 100_000_000;
     const transitions_max = config.journal_size_max / config.message_size_max;
-    const request_probability = 1 + prng.random.uintLessThan(u8, 99);
-    const idle_on_probability = prng.random.uintLessThan(u8, 20);
-    const idle_off_probability = 10 + prng.random.uintLessThan(u8, 10);
+    const request_probability = 1 + random.uintLessThan(u8, 99);
+    const idle_on_probability = random.uintLessThan(u8, 20);
+    const idle_off_probability = 10 + random.uintLessThan(u8, 10);
 
-    cluster = try Cluster.create(allocator, &prng.random, .{
+    cluster = try Cluster.create(allocator, random, .{
         .cluster = 0,
         .replica_count = replica_count,
         .client_count = client_count,
-        .seed = prng.random.int(u64),
+        .seed = random.int(u64),
         .network_options = .{
             .packet_simulator_options = .{
                 .replica_count = replica_count,
                 .client_count = client_count,
                 .node_count = node_count,
 
-                .seed = prng.random.int(u64),
-                .one_way_delay_mean = 3 + prng.random.uintLessThan(u16, 10),
-                .one_way_delay_min = prng.random.uintLessThan(u16, 3),
-                .packet_loss_probability = prng.random.uintLessThan(u8, 30),
-                .path_maximum_capacity = 20 + prng.random.uintLessThan(u8, 20),
-                .path_clog_duration_mean = prng.random.uintLessThan(u16, 500),
-                .path_clog_probability = prng.random.uintLessThan(u8, 2),
-                .packet_replay_probability = prng.random.uintLessThan(u8, 50),
+                .seed = random.int(u64),
+                .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
+                .one_way_delay_min = random.uintLessThan(u16, 3),
+                .packet_loss_probability = random.uintLessThan(u8, 30),
+                .path_maximum_capacity = 20 + random.uintLessThan(u8, 20),
+                .path_clog_duration_mean = random.uintLessThan(u16, 500),
+                .path_clog_probability = random.uintLessThan(u8, 2),
+                .packet_replay_probability = random.uintLessThan(u8, 50),
 
                 .partition_mode = random_partition_mode(random),
-                .partition_probability = prng.random.uintLessThan(u8, 3),
-                .unpartition_probability = 1 + prng.random.uintLessThan(u8, 10),
-                .partition_stability = 100 + prng.random.uintLessThan(u32, 100),
-                .unpartition_stability = prng.random.uintLessThan(u32, 20),
+                .partition_probability = random.uintLessThan(u8, 3),
+                .unpartition_probability = 1 + random.uintLessThan(u8, 10),
+                .partition_stability = 100 + random.uintLessThan(u32, 100),
+                .unpartition_stability = random.uintLessThan(u32, 20),
             },
         },
         .storage_options = .{
-            .seed = prng.random.int(u64),
-            .read_latency_min = prng.random.uintLessThan(u16, 3),
-            .read_latency_mean = 3 + prng.random.uintLessThan(u16, 10),
-            .write_latency_min = prng.random.uintLessThan(u16, 3),
-            .write_latency_mean = 3 + prng.random.uintLessThan(u16, 10),
-            .read_fault_probability = prng.random.uintLessThan(u8, 10),
-            .write_fault_probability = prng.random.uintLessThan(u8, 10),
+            .seed = random.int(u64),
+            .read_latency_min = random.uintLessThan(u16, 3),
+            .read_latency_mean = 3 + random.uintLessThan(u16, 10),
+            .write_latency_min = random.uintLessThan(u16, 3),
+            .write_latency_mean = 3 + random.uintLessThan(u16, 10),
+            .read_fault_probability = random.uintLessThan(u8, 10),
+            .write_fault_probability = random.uintLessThan(u8, 10),
         },
     });
     defer cluster.destroy();
@@ -206,7 +207,7 @@ pub fn main() !void {
     }
 
     if (cluster.state_checker.transitions < transitions_max) {
-        output.emerg("you can reproduce this failure with seed={}", .{seed});
+        output.err("you can reproduce this failure with seed={}", .{seed});
         @panic("unable to complete transitions_max before ticks_max");
     }
 
@@ -216,13 +217,13 @@ pub fn main() !void {
 }
 
 /// Returns true, `p` percent of the time, else false.
-fn chance(random: *std.rand.Random, p: u8) bool {
+fn chance(random: std.rand.Random, p: u8) bool {
     assert(p <= 100);
     return random.uintLessThan(u8, 100) < p;
 }
 
 /// Returns the next argument for the simulator or null (if none available)
-fn args_next(args: *std.process.ArgIterator, allocator: *std.mem.Allocator) ?[:0]const u8 {
+fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]const u8 {
     const err_or_bytes = args.next(allocator) orelse return null;
     return err_or_bytes catch @panic("Unable to extract next value from args");
 }
@@ -232,7 +233,7 @@ fn on_change_replica(replica: *Replica) void {
     cluster.state_checker.check_state(replica.replica);
 }
 
-fn send_request(random: *std.rand.Random) bool {
+fn send_request(random: std.rand.Random) bool {
     const client_index = random.uintLessThan(u8, cluster.options.client_count);
 
     const client = &cluster.clients[client_index];
@@ -280,11 +281,14 @@ fn client_callback(
     operation: StateMachine.Operation,
     results: Client.Error![]const u8,
 ) void {
+    _ = operation;
+    _ = results catch unreachable;
+
     assert(user_data == 0);
 }
 
 /// Returns a random partitioning mode, excluding .custom
-fn random_partition_mode(random: *std.rand.Random) PartitionMode {
+fn random_partition_mode(random: std.rand.Random) PartitionMode {
     const typeInfo = @typeInfo(PartitionMode).Enum;
     var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 2);
     if (enumAsInt >= @enumToInt(PartitionMode.custom)) enumAsInt += 1;
@@ -310,8 +314,8 @@ pub fn log(
     const prefix = if (log_state_transitions_only) "" else prefix_default;
 
     // Print the message to stdout, silently ignoring any errors
-    const held = std.debug.getStderrMutex().acquire();
-    defer held.release();
     const stderr = std.io.getStdErr().writer();
+    std.debug.getStderrMutex().lock();
+    defer std.debug.getStderrMutex().unlock();
     nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
 }

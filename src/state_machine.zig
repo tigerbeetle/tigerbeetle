@@ -2,7 +2,25 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.state_machine);
 
-usingnamespace @import("tigerbeetle.zig");
+const tb = @import("tigerbeetle.zig");
+
+const Account = tb.Account;
+const AccountFlags = tb.AccountFlags;
+
+const Transfer = tb.Transfer;
+const TransferFlags = tb.TransferFlags;
+
+const Commit = tb.Commit;
+const CommitFlags = tb.CommitFlags;
+
+const CreateAccountsResult = tb.CreateAccountsResult;
+const CreateTransfersResult = tb.CreateTransfersResult;
+const CommitTransfersResult = tb.CommitTransfersResult;
+
+const CreateAccountResult = tb.CreateAccountResult;
+const CreateTransferResult = tb.CreateTransferResult;
+const CommitTransferResult = tb.CommitTransferResult;
+const LookupAccountResult = tb.LookupAccountResult;
 
 const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);
@@ -21,13 +39,9 @@ pub const StateMachine = struct {
         commit_transfers,
         lookup_accounts,
         lookup_transfers,
-
-        pub fn jsonStringify(self: Command, options: StringifyOptions, writer: anytype) !void {
-            try std.fmt.format(writer, "\"{}\"", .{@tagName(self)});
-        }
     };
 
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     prepare_timestamp: u64,
     commit_timestamp: u64,
     accounts: HashMapAccounts,
@@ -35,22 +49,22 @@ pub const StateMachine = struct {
     commits: HashMapCommits,
 
     pub fn init(
-        allocator: *std.mem.Allocator,
+        allocator: std.mem.Allocator,
         accounts_max: usize,
         transfers_max: usize,
         commits_max: usize,
     ) !StateMachine {
         var accounts = HashMapAccounts.init(allocator);
         errdefer accounts.deinit();
-        try accounts.ensureCapacity(@intCast(u32, accounts_max));
+        try accounts.ensureTotalCapacity(@intCast(u32, accounts_max));
 
         var transfers = HashMapTransfers.init(allocator);
         errdefer transfers.deinit();
-        try transfers.ensureCapacity(@intCast(u32, transfers_max));
+        try transfers.ensureTotalCapacity(@intCast(u32, transfers_max));
 
         var commits = HashMapCommits.init(allocator);
         errdefer commits.deinit();
-        try commits.ensureCapacity(@intCast(u32, commits_max));
+        try commits.ensureTotalCapacity(@intCast(u32, commits_max));
 
         // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
         // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
@@ -140,6 +154,8 @@ pub const StateMachine = struct {
         input: []const u8,
         output: []u8,
     ) usize {
+        _ = client;
+
         return switch (operation) {
             .init => unreachable,
             .register => 0,
@@ -263,7 +279,7 @@ pub const StateMachine = struct {
         const output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
         const results = std.mem.bytesAsSlice(Account, output[0..output_len]);
         var results_count: usize = 0;
-        for (batch) |id, index| {
+        for (batch) |id| {
             if (self.get_account(id)) |result| {
                 results[results_count] = result.*;
                 results_count += 1;
@@ -277,7 +293,7 @@ pub const StateMachine = struct {
         const output_len = @divFloor(output.len, @sizeOf(Transfer)) * @sizeOf(Transfer);
         const results = std.mem.bytesAsSlice(Transfer, output[0..output_len]);
         var results_count: usize = 0;
-        for (batch) |id, index| {
+        for (batch) |id| {
             if (self.get_transfer(id)) |result| {
                 results[results_count] = result.*;
                 results_count += 1;
@@ -538,7 +554,8 @@ const testing = std.testing;
 test "create/lookup accounts" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    
+    const allocator = arena.allocator();
 
     const Vector = struct { result: CreateAccountResult, object: Account };
 
@@ -693,7 +710,8 @@ test "create/lookup accounts" {
 test "linked accounts" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    
+    const allocator = arena.allocator();
 
     const accounts_max = 5;
     const transfers_max = 0;
@@ -733,7 +751,7 @@ test "linked accounts" {
         std.mem.zeroInit(Account, .{ .id = 3 }),
     };
 
-    var state_machine = try StateMachine.init(allocator, accounts.len, transfers_max, commits_max);
+    var state_machine = try StateMachine.init(allocator, accounts_max, transfers_max, commits_max);
     defer state_machine.deinit();
 
     const input = std.mem.asBytes(&accounts);
@@ -774,7 +792,8 @@ test "linked accounts" {
 test "create/lookup/rollback transfers" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    
+    const allocator = arena.allocator();
 
     var accounts = [_]Account{
         std.mem.zeroInit(Account, .{ .id = 1 }),
@@ -795,10 +814,12 @@ test "create/lookup/rollback transfers" {
 
     state_machine.prepare(0, .create_accounts, input);
     const size = state_machine.commit(0, .create_accounts, input, output);
-    const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
-    for (accounts) |account, i| {
-        try testing.expectEqual(accounts[i], state_machine.get_account(accounts[i].id).?.*);
+    const errors = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
+    try testing.expectEqual(@as(usize, 0), errors.len);
+
+    for (accounts) |account| {
+        try testing.expectEqual(account, state_machine.get_account(account.id).?.*);
     }
 
     const Vector = struct { result: CreateTransferResult, object: Transfer };
@@ -1088,7 +1109,8 @@ test "create/lookup/rollback transfers" {
 test "create/lookup/rollback commits" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    
+    const allocator = arena.allocator();
 
     const Vector = struct { result: CommitTransferResult, object: Commit };
 
@@ -1171,10 +1193,13 @@ test "create/lookup/rollback commits" {
     // Accounts:
     state_machine.prepare(0, .create_accounts, input);
     const size = state_machine.commit(0, .create_accounts, input, output);
-    const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
+    {
+        const errors = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
+        try testing.expectEqual(@as(usize, 0), errors.len);
+    }
 
-    for (accounts) |account, i| {
-        try testing.expectEqual(accounts[i], state_machine.get_account(accounts[i].id).?.*);
+    for (accounts) |account| {
+        try testing.expectEqual(account, state_machine.get_account(account.id).?.*);
     }
 
     // Transfers:
@@ -1182,11 +1207,17 @@ test "create/lookup/rollback commits" {
     const output_transfers = try allocator.alloc(u8, 4096);
 
     state_machine.prepare(0, .create_transfers, object_transfers);
-    const size_transfers = state_machine.commit(0, .create_transfers, object_transfers, output_transfers);
-    const results_transfers = std.mem.bytesAsSlice(CreateTransfersResult, output_transfers[0..size_transfers]);
+    const size_transfers = state_machine.commit(
+        0,
+        .create_transfers,
+        object_transfers,
+        output_transfers,
+    );
+    const errors = std.mem.bytesAsSlice(CreateTransfersResult, output_transfers[0..size_transfers]);
+    try testing.expectEqual(@as(usize, 0), errors.len);
 
-    for (transfers) |transfer, i| {
-        try testing.expectEqual(transfers[i], state_machine.get_transfer(transfers[i].id).?.*);
+    for (transfers) |transfer| {
+        try testing.expectEqual(transfer, state_machine.get_transfer(transfer.id).?.*);
     }
 
     // Commits:
