@@ -134,7 +134,7 @@ pub const Marzullo = struct {
 fn test_smallest_interval(bounds: []const i64, smallest_interval: Marzullo.Interval) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    
+
     const allocator = arena.allocator();
 
     var tuples = try allocator.alloc(Marzullo.Tuple, bounds.len);
