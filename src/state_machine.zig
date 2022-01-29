@@ -554,7 +554,7 @@ const testing = std.testing;
 test "create/lookup accounts" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    
+
     const allocator = arena.allocator();
 
     const Vector = struct { result: CreateAccountResult, object: Account };
@@ -710,7 +710,7 @@ test "create/lookup accounts" {
 test "linked accounts" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    
+
     const allocator = arena.allocator();
 
     const accounts_max = 5;
@@ -792,7 +792,7 @@ test "linked accounts" {
 test "create/lookup/rollback transfers" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    
+
     const allocator = arena.allocator();
 
     var accounts = [_]Account{
@@ -1109,7 +1109,7 @@ test "create/lookup/rollback transfers" {
 test "create/lookup/rollback commits" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    
+
     const allocator = arena.allocator();
 
     const Vector = struct { result: CommitTransferResult, object: Commit };

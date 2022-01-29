@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.clock);
+const fmt = std.fmt;
 
 const config = @import("../config.zig");
 
@@ -377,9 +378,9 @@ pub fn Clock(comptime Time: type) type {
                 self.replica,
                 new_interval.sources_true,
                 self.epoch.sources.len,
-                fmtDurationSigned(new_interval.lower_bound),
-                fmtDurationSigned(new_interval.upper_bound),
-                fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
+                fmt.fmtDurationSigned(new_interval.lower_bound),
+                fmt.fmtDurationSigned(new_interval.upper_bound),
+                fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
             });
 
             const elapsed = @intCast(i64, self.epoch.elapsed(self));
@@ -393,12 +394,12 @@ pub fn Clock(comptime Time: type) type {
                 if (delta < std.time.ns_per_ms) {
                     log.info("{}: system time is {} behind", .{
                         self.replica,
-                        fmtDurationSigned(delta),
+                        fmt.fmtDurationSigned(delta),
                     });
                 } else {
                     log.err("{}: system time is {} behind, clamping system time to cluster time", .{
                         self.replica,
-                        fmtDurationSigned(delta),
+                        fmt.fmtDurationSigned(delta),
                     });
                 }
             } else {
@@ -406,12 +407,12 @@ pub fn Clock(comptime Time: type) type {
                 if (delta < std.time.ns_per_ms) {
                     log.info("{}: system time is {} ahead", .{
                         self.replica,
-                        fmtDurationSigned(delta),
+                        fmt.fmtDurationSigned(delta),
                     });
                 } else {
                     log.err("{}: system time is {} ahead, clamping system time to cluster time", .{
                         self.replica,
-                        fmtDurationSigned(delta),
+                        fmt.fmtDurationSigned(delta),
                     });
                 }
             }
@@ -448,28 +449,6 @@ pub fn Clock(comptime Time: type) type {
             return b;
         }
     };
-}
-
-/// Return a Formatter for a signed number of nanoseconds according to magnitude:
-/// [#y][#w][#d][#h][#m]#[.###][n|u|m]s
-pub fn fmtDurationSigned(ns: i64) std.fmt.Formatter(formatDurationSigned) {
-    return .{ .data = ns };
-}
-
-fn formatDurationSigned(
-    ns: i64,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = fmt;
-    _ = options;
-
-    if (ns < 0) {
-        try writer.print("-{}", .{std.fmt.fmtDuration(@intCast(u64, -ns))});
-    } else {
-        try writer.print("{}", .{std.fmt.fmtDuration(@intCast(u64, ns))});
-    }
 }
 
 const testing = std.testing;
@@ -822,11 +801,11 @@ test "fuzz test" {
         clock_count,
     });
     std.debug.print("absolute clock offsets with respect to test time:\n", .{});
-    std.debug.print("maximum={}\n", .{fmtDurationSigned(@intCast(i64, max_clock_offset))});
-    std.debug.print("minimum={}\n", .{fmtDurationSigned(@intCast(i64, min_clock_offset))});
+    std.debug.print("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_clock_offset))});
+    std.debug.print("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_clock_offset))});
     std.debug.print("\nabsolute synchronization errors between clocks:\n", .{});
-    std.debug.print("maximum={}\n", .{fmtDurationSigned(@intCast(i64, max_sync_error))});
-    std.debug.print("minimum={}\n", .{fmtDurationSigned(@intCast(i64, min_sync_error))});
+    std.debug.print("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_sync_error))});
+    std.debug.print("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_sync_error))});
     std.debug.print("clock ticks without synchronization={d}\n", .{
         clock_ticks_without_synchronization,
     });
