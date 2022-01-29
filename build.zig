@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub fn build(b: *std.build.Builder) void {
-    const target = fixedStandardTargetOptions(b);
+    const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
     {
@@ -63,89 +63,4 @@ pub fn build(b: *std.build.Builder) void {
         const step = b.step("benchmark_ewah", "Benchmark EWAH codec");
         step.dependOn(&run_cmd.step);
     }
-}
-
-// A patched version of std.build.Builder.standardTargetOptions() to backport the fix
-// from https://github.com/ziglang/zig/pull/9817.
-fn fixedStandardTargetOptions(self: *std.build.Builder) std.zig.CrossTarget {
-    const maybe_triple = self.option(
-        []const u8,
-        "target",
-        "The CPU architecture, OS, and ABI to build for",
-    );
-    const mcpu = self.option([]const u8, "cpu", "Target CPU");
-
-    if (maybe_triple == null and mcpu == null) {
-        return .{};
-    }
-
-    const triple = maybe_triple orelse "native";
-
-    var diags: std.zig.CrossTarget.ParseOptions.Diagnostics = .{};
-    var selected_target = std.zig.CrossTarget.parse(.{
-        .arch_os_abi = triple,
-        .cpu_features = mcpu,
-        .diagnostics = &diags,
-    }) catch |err| switch (err) {
-        error.UnknownCpuModel => {
-            std.debug.print("Unknown CPU: '{s}'\nAvailable CPUs for architecture '{s}':\n", .{
-                diags.cpu_name.?,
-                @tagName(diags.arch.?),
-            });
-            for (diags.arch.?.allCpuModels()) |cpu| {
-                std.debug.print(" {s}\n", .{cpu.name});
-            }
-            std.debug.print("\n", .{});
-            self.invalid_user_input = true;
-            return .{};
-        },
-        error.UnknownCpuFeature => {
-            std.debug.print(
-                \\Unknown CPU feature: '{s}'
-                \\Available CPU features for architecture '{s}':
-                \\
-            , .{
-                diags.unknown_feature_name,
-                @tagName(diags.arch.?),
-            });
-            for (diags.arch.?.allFeaturesList()) |feature| {
-                std.debug.print(" {s}: {s}\n", .{ feature.name, feature.description });
-            }
-            std.debug.print("\n", .{});
-            self.invalid_user_input = true;
-            return .{};
-        },
-        error.UnknownOperatingSystem => {
-            std.debug.print(
-                \\Unknown OS: '{s}'
-                \\Available operating systems:
-                \\
-            , .{diags.os_name});
-            inline for (std.meta.fields(std.Target.Os.Tag)) |field| {
-                std.debug.print(" {s}\n", .{field.name});
-            }
-            std.debug.print("\n", .{});
-            self.invalid_user_input = true;
-            return .{};
-        },
-        else => |e| {
-            std.debug.print("Unable to parse target '{s}': {s}\n\n", .{ triple, @errorName(e) });
-            self.invalid_user_input = true;
-            return .{};
-        },
-    };
-
-    // Work around LibExeObjStep.make() explicitly omitting -mcpu=baseline
-    // even when the target arch is native. The proper fix is in https://github.com/ziglang/zig/pull/9817
-    // but we can work around this by providing an explicit arch if the baseline cpu and native arch
-    // were requested.
-    const cpu = selected_target.getCpu();
-    if (selected_target.cpu_arch == null and cpu.model == std.Target.Cpu.baseline(cpu.arch).model) {
-        const native_target_info = std.zig.system.NativeTargetInfo.detect(self.allocator, .{}) catch {
-            @panic("failed to detect native target info");
-        };
-        selected_target.cpu_arch = native_target_info.target.cpu.arch;
-    }
-
-    return selected_target;
 }
