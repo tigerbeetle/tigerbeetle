@@ -91,7 +91,7 @@ pub const Storage = struct {
         buffer: []u8,
         offset: u64,
     ) void {
-        self.assert_alignment(buffer, offset);
+        assert_alignment(buffer, offset);
 
         read.* = .{
             .completion = undefined,
@@ -228,7 +228,7 @@ pub const Storage = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
-        self.assert_alignment(buffer, offset);
+        assert_alignment(buffer, offset);
 
         write.* = .{
             .completion = undefined,
@@ -296,7 +296,7 @@ pub const Storage = struct {
     /// If this is not the case, then the underlying syscall will return EINVAL.
     /// We check this only at the start of a read or write because the physical sector size may be
     /// less than our logical sector size so that partial IOs then leave us no longer aligned.
-    fn assert_alignment(_: *Storage, buffer: []const u8, offset: u64) void {
+    fn assert_alignment(buffer: []const u8, offset: u64) void {
         assert(@ptrToInt(buffer.ptr) % config.sector_size == 0);
         assert(buffer.len % config.sector_size == 0);
         assert(offset % config.sector_size == 0);
