@@ -425,6 +425,7 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.offset != 0) return "offset != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
