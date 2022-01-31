@@ -222,6 +222,7 @@ pub const clock_synchronization_window_max_ms = 20000;
 comptime {
     const std = @import("std");
 
+    // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
     _ = @as(u16, port);
 }
