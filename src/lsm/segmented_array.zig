@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
@@ -110,117 +111,161 @@ pub fn SegmentedArray(
             absolute_index: u32,
             elements: []T,
         ) void {
-            // TODO add a comptime assert to check the relation between growth factor and this
-            // runtime assert.
-            assert(elements.len <= node_capacity);
+            assert(elements.len > 0);
             assert(absolute_index + elements.len <= element_count_max);
 
-            for (elements) |element, i| {
-                array.insert_element(node_pool, absolute_index + @intCast(u32, i), element);
+            var i: u32 = 0;
+            while (i < elements.len) {
+                const batch = math.min(node_capacity, elements.len - i);
+                array.insert_elements_batch(
+                    node_pool,
+                    absolute_index + i,
+                    elements[i..][0..batch],
+                );
+                i += batch;
             }
+            assert(i == elements.len);
         }
 
-        /// The `absolute_index` argument is the index the new element will take and may
-        /// therefore be one past the end of the array.
-        pub fn insert_element(
+        fn insert_elements_batch(
             array: *Self,
             node_pool: *NodePool,
             absolute_index: u32,
-            element: T,
+            elements: []T,
         ) void {
-            assert(absolute_index < element_count_max);
+            assert(elements.len > 0);
+            assert(elements.len <= node_capacity);
+            assert(absolute_index + elements.len <= element_count_max);
 
             if (array.node_count == 0) {
                 assert(absolute_index == 0);
 
-                array.node_count = 1;
-                array.nodes[0] = @ptrCast(*[node_capacity]T, node_pool.acquire());
-                array.counts[0] = 0;
-                array.indexes[0] = 0;
+                array.insert_empty_node_at(node_pool, 0);
+
+                assert(array.node_count == 1);
+                assert(array.nodes[0] != null);
+                assert(array.counts[0] == 0);
+                assert(array.indexes[0] == 0);
             }
 
-            const cursor = array.split_node_if_full(node_pool, absolute_index);
+            const cursor = array.cursor_for_absolute_index(absolute_index);
             assert(cursor.node < array.node_count);
-            assert(array.counts[cursor.node] < node_capacity);
-            if (cursor.node == array.node_count - 1) {
-                // Insertion may target the index one past the end of the array.
-                assert(cursor.relative_index <= array.counts[cursor.node]);
-            } else {
-                assert(cursor.relative_index < array.counts[cursor.node]);
-            }
 
-            const pointer = array.nodes[cursor.node].?;
-            if (cursor.relative_index + 1 < node_capacity) {
+            const total = array.counts[cursor.node] + @intCast(u32, elements.len);
+            if (total <= node_capacity) {
+                const pointer = array.nodes[cursor.node].?;
                 mem.copyBackwards(
                     T,
-                    pointer[cursor.relative_index + 1 .. array.counts[cursor.node] + 1],
+                    pointer[cursor.relative_index + elements.len ..],
                     pointer[cursor.relative_index..array.counts[cursor.node]],
                 );
+                mem.copy(T, pointer[cursor.relative_index..], elements);
+                array.counts[cursor.node] += @intCast(u32, elements.len);
+                if (cursor.node < array.node_count - 1) {
+                    for (array.indexes[cursor.node + 1 .. array.node_count]) |*i| {
+                        i.* += @intCast(u32, elements.len);
+                    }
+                }
+                return;
             }
 
-            pointer[cursor.relative_index] = element;
-            array.counts[cursor.node] += 1;
-            if (cursor.node < array.node_count - 1) {
-                for (array.indexes[cursor.node + 1 .. array.node_count]) |*i| {
-                    i.* += 1;
+            // Insert a new node after the node being split.
+            const a = cursor.node;
+            const b = a + 1;
+            array.insert_empty_node_at(node_pool, b);
+
+            const a_half = utils.div_ceil(total, 2);
+            const b_half = total - a_half;
+            assert(a_half >= b_half);
+            assert(a_half + b_half == total);
+
+            const a_pointer = array.nodes[a].?;
+            const b_pointer = array.nodes[b].?;
+
+            // The 1st case can be seen as a special case of the 2nd.
+            // The 5th case can be seen as a special case of the 4th.
+            //
+            // elements: [yyyyyy], relative_index: 0
+            // [xxxxx_]
+            // [yyyyyy][xxxxx_]
+            //
+            // elements: [yy], relative_index: 1
+            // [xxxxx_]
+            // [xyyx__][xxx___]
+            //
+            // elements: [yy], relative_index: 2
+            // [xxx_]
+            // [xxy_][yx__]
+            //
+            // elements: [yy], relative_index: 5
+            // [xxxxxx]
+            // [xxxx__][xyyx__]
+            //
+            // elements: [yyyyy_], relative_index: 5
+            // [xxxxx_]
+            // [xxxxx_][yyyyy_]
+
+            assert(cursor.relative_index <= array.counts[a]);
+
+            const existing_a_head = a_pointer[0..@minimum(a_half, cursor.relative_index)];
+            const existing_b_head = a_pointer[existing_a_head.len..cursor.relative_index];
+
+            const existing_a_tail = a_pointer[existing_a_head.len..][0..a_half -|
+                (cursor.relative_index + elements.len)];
+            const existing_b_tail = a_pointer[existing_a_head.len + existing_a_tail.len +
+                existing_b_head.len .. array.counts[a]];
+
+            const elements_a = elements[0 .. a_half - existing_a_head.len - existing_a_tail.len];
+            const elements_b = elements[elements_a.len..];
+
+            assert(array.counts[a] == existing_a_head.len + existing_b_head.len +
+                existing_a_tail.len + existing_b_tail.len);
+            assert(elements.len == elements_a.len + elements_b.len);
+            assert(a_half == existing_a_head.len + elements_a.len + existing_a_tail.len);
+            assert(b_half == existing_b_head.len + elements_b.len + existing_b_tail.len);
+            assert(total == a_half + b_half);
+
+            if (existing_a_tail.len > 0) assert(existing_b_head.len == 0 and elements_b.len == 0);
+            if (existing_b_head.len > 0) assert(elements_a.len == 0 and existing_a_tail.len == 0);
+            if (elements_a.len > 0) assert(existing_b_head.len == 0);
+            if (elements_b.len > 0) assert(existing_a_tail.len == 0);
+
+            assert(existing_a_head.ptr == a_pointer);
+            assert(existing_a_head.ptr + existing_a_head.len == existing_a_tail.ptr);
+            assert(existing_a_head.ptr + existing_a_head.len == existing_b_head.ptr);
+            if (existing_b_head.len > 0) {
+                assert(existing_b_head.ptr + existing_b_head.len == existing_b_tail.ptr);
+            } else {
+                assert(existing_a_tail.ptr + existing_a_tail.len == existing_b_tail.ptr);
+            }
+
+            mem.copy(T, b_pointer[existing_b_head.len + elements_b.len ..], existing_b_tail);
+            mem.copy(T, b_pointer[existing_b_head.len..], elements_b);
+            mem.copy(T, b_pointer, existing_b_head);
+
+            mem.copyBackwards(
+                T,
+                a_pointer[existing_a_head.len + elements_a.len ..],
+                existing_a_tail,
+            );
+            mem.copy(T, a_pointer[existing_a_head.len..], elements_a);
+
+            array.counts[a] = a_half;
+            array.counts[b] = b_half;
+
+            array.indexes[b] = array.indexes[a] + array.counts[a];
+            if (b < array.node_count - 1) {
+                for (array.indexes[b + 1 .. array.node_count]) |*i| {
+                    i.* += @intCast(u32, elements.len);
                 }
             }
         }
 
-        fn split_node_if_full(array: *Self, node_pool: *NodePool, absolute_index: u32) Cursor {
-            assert(absolute_index < element_count_max);
-
-            const cursor = array.cursor_for_absolute_index(absolute_index);
-
-            assert(cursor.node < array.node_count);
-            if (array.counts[cursor.node] < node_capacity) return cursor;
-            assert(array.counts[cursor.node] == node_capacity);
-
-            array.split_node(node_pool, cursor.node);
-
-            // Splitting the node invalidates the cursor. We could avoid calling
-            // cursor_for_absolute_index() here and instead use our knowledge of how splitting
-            // is implemented to calculate the new cursor in constant time, but that would be
-            // more error prone.
-            // TODO We think that such an optimization wouldn't be worthwhile as it doesn't affect
-            // the data plane enough.
-            return array.cursor_for_absolute_index(absolute_index);
-        }
-
-        /// Split the node at index `node` into two nodes, inserting the new node directly after
-        /// `node`. This invalidates all cursors into the SegmentedArray but does not affect
-        /// absolute indexes.
-        fn split_node(array: *Self, node_pool: *NodePool, node: u32) void {
-            assert(node < array.node_count);
-            assert(array.counts[node] == node_capacity);
-
-            // Insert a new node after the node being split.
-            const new_node = node + 1;
-            array.insert_empty_node_at(node_pool, new_node);
-
-            const half = node_capacity / 2;
-            comptime assert(node_capacity % 2 == 0);
-
-            const pointer = array.nodes[node].?;
-            const new_pointer = array.nodes[new_node].?;
-
-            // We can do new_pointer[0..half] here because we assert node_capacity is even.
-            // If it was odd, this redundant bounds check would fail.
-            mem.copyBackwards(T, new_pointer[0..half], pointer[half..]);
-
-            array.counts[node] = half;
-            array.counts[new_node] = node_capacity - half;
-            array.indexes[new_node] = array.indexes[node] + half;
-        }
-
         /// Insert an empty node at index `node`.
         fn insert_empty_node_at(array: *Self, node_pool: *NodePool, node: u32) void {
-            assert(array.node_count > 0);
             assert(array.node_count + 1 < node_count_max);
-            // The first node can only be created by the special case in `insert_element()`.
-            assert(node > 0);
-            assert(node <= array.node_count);
 
+            assert(node <= array.node_count);
             if (node < array.node_count) {
                 mem.copyBackwards(
                     ?*[node_capacity]T,
@@ -242,7 +287,7 @@ pub fn SegmentedArray(
             array.node_count += 1;
             array.nodes[node] = @ptrCast(*[node_capacity]T, node_pool.acquire());
             array.counts[node] = 0;
-            array.indexes[node] = array.indexes[node - 1] + array.counts[node - 1];
+            array.indexes[node] = if (node == 0) 0 else array.indexes[node - 1] + array.counts[node - 1];
         }
 
         pub fn remove_elements(
@@ -252,7 +297,7 @@ pub fn SegmentedArray(
             count: u32,
         ) void {
             assert(absolute_index + count <= element_count_max);
-            assert(count <= node_capacity);
+            assert(count > 0);
 
             var i: u32 = count;
             while (i > 0) {
@@ -682,9 +727,9 @@ fn TestContext(
 
             if (count_free == 0) return;
 
-            var buffer: [TestArray.node_capacity]T = undefined;
+            var buffer: [TestArray.node_capacity * 3]T = undefined;
 
-            const count_max = @minimum(count_free, TestArray.node_capacity);
+            const count_max = @minimum(count_free, TestArray.node_capacity * 3);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
             context.random.bytes(mem.sliceAsBytes(buffer[0..count]));
 
@@ -705,7 +750,7 @@ fn TestContext(
             const reference_len = @intCast(u32, context.reference.items.len);
             if (reference_len == 0) return;
 
-            const count_max = @minimum(reference_len, TestArray.node_capacity);
+            const count_max = @minimum(reference_len, TestArray.node_capacity * 3);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
 
             assert(context.reference.items.len <= element_count_max);
@@ -738,6 +783,16 @@ fn TestContext(
         }
 
         fn verify(context: *Self) !void {
+            if (log) {
+                std.debug.print("expect: ", .{});
+                for (context.reference.items) |i| std.debug.print("{}, ", .{i});
+
+                std.debug.print("\nactual: ", .{});
+                var it = context.array.iterator(0, 0, .ascending);
+                while (it.next()) |i| std.debug.print("{}, ", .{i.*});
+                std.debug.print("\n", .{});
+            }
+
             try testing.expectEqual(context.reference.items.len, context.array.len());
 
             {
@@ -776,6 +831,49 @@ fn TestContext(
 
             for (context.array.nodes[context.array.node_count..]) |node| {
                 try testing.expectEqual(@as(?*[TestArray.node_capacity]T, null), node);
+            }
+
+            if (context.reference.items.len > 0) {
+                const reference_len = @intCast(u32, context.reference.items.len);
+                const index = context.random.uintLessThanBiased(u32, reference_len);
+                const cursor = context.array.cursor_for_absolute_index(index);
+
+                {
+                    const start_node = context.random.uintAtMostBiased(u32, cursor.node);
+
+                    var it = context.array.iterator(index, start_node, .ascending);
+
+                    for (context.reference.items[index..]) |expect| {
+                        const actual = it.next() orelse return error.TestUnexpectedResult;
+                        try testing.expectEqual(expect, actual.*);
+                    }
+                    try testing.expectEqual(@as(?*const T, null), it.next());
+                }
+
+                {
+                    const start_node = cursor.node + context.random.uintAtMostBiased(
+                        u32,
+                        context.array.node_count - 1 - cursor.node,
+                    );
+                    assert(start_node >= cursor.node);
+                    assert(start_node < context.array.node_count);
+
+                    var it = context.array.iterator(index, start_node, .descending);
+
+                    var i = index + 1;
+                    while (i > 0) {
+                        i -= 1;
+
+                        const expect = context.reference.items[i];
+                        const actual = it.next() orelse return error.TestUnexpectedResult;
+                        try testing.expectEqual(expect, actual.*);
+                    }
+                    try testing.expectEqual(@as(?*const T, null), it.next());
+                }
+            }
+
+            for (context.array.counts[0..context.array.node_count -| 1]) |count| {
+                try testing.expect(count >= @divExact(TestArray.node_capacity, 2));
             }
         }
     };
