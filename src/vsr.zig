@@ -234,7 +234,8 @@ pub const Header = packed struct {
             .reply => self.invalid_reply(),
             .commit => self.invalid_commit(),
             .start_view_change => self.invalid_start_view_change(),
-            .do_view_change, .start_view => self.invalid_do_view_change(),
+            .do_view_change => self.invalid_do_view_change(),
+            .start_view => self.invalid_start_view(),
             .recovery => self.invalid_recovery(),
             .recovery_response => self.invalid_recovery_response(),
             .request_start_view => self.invalid_request_start_view(),
@@ -376,10 +377,16 @@ pub const Header = packed struct {
 
     fn invalid_reply(self: *const Header) ?[]const u8 {
         assert(self.command == .reply);
+        // Initialization within `client.zig` asserts that client `id` is greater than zero:
         if (self.client == 0) return "client == 0";
         if (self.context != 0) return "context != 0";
-        if (self.op != self.commit) return "reserved: op != commit";
-        if (self.operation != .register) {
+        if (self.op != self.commit) return "op != commit";
+        if (self.operation == .register) {
+            // In this context, the commit number is the newly registered session number.
+            // The `0` commit number is reserved for cluster initialization.
+            if (self.commit == 0) return "commit == 0";
+            if (self.request != 0) return "request != 0";
+        } else {
             if (self.commit == 0) return "commit == 0";
             if (self.request == 0) return "request == 0";
         }
@@ -390,7 +397,6 @@ pub const Header = packed struct {
         assert(self.command == .commit);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
-        if (self.context == 0) return "context == 0";
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.offset != 0) return "offset != 0";
@@ -412,11 +418,22 @@ pub const Header = packed struct {
     }
 
     fn invalid_do_view_change(self: *const Header) ?[]const u8 {
-        assert(self.command == .do_view_change or self.command == .start_view);
+        assert(self.command == .do_view_change);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_start_view(self: *const Header) ?[]const u8 {
+        assert(self.command == .start_view);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.offset != 0) return "offset != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -429,12 +446,7 @@ pub const Header = packed struct {
 
     fn invalid_recovery_response(self: *const Header) ?[]const u8 {
         assert(self.command == .recovery_response);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.offset != 0) return "offset != 0";
-        if (self.op == 0) return "op == 0";
-        if (self.operation != .reserved) return "operation != .reserved";
+        // TODO implement validation once the message is actually used.
         return null;
     }
 
@@ -458,7 +470,9 @@ pub const Header = packed struct {
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.offset != 0) return "offset != 0";
+        // TODO Add local recovery mechanism for repairing the cluster initialization "zero" op.
         if (self.op == 0) return "op == 0";
+        if (self.commit > self.op) return "op_min > op_max";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -719,7 +733,6 @@ test "exponential_backoff_with_jitter" {
 /// * A replica's IP address may be changed without reconfiguration.
 /// This does require that the user specify the same order to all replicas.
 /// The caller owns the memory of the returned slice of addresses.
-/// TODO Integrate into `src/cli.zig`.
 pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8) ![]std.net.Address {
     return parse_addresses_limit(allocator, raw, config.replicas_max);
 }
@@ -771,17 +784,17 @@ fn parse_addresses_limit(allocator: std.mem.Allocator, raw: []const u8, max: usi
 }
 
 test "parse_addresses" {
-    const test_successes = &[_]struct{
+    const vectors_positive = &[_]struct{
         raw: []const u8,
         addresses: [3]std.net.Address,
     }{
         .{
-            // Test the minimum/maximum port.
-            .raw = "1.2.3.4:0,2.3.4.5:789,3.4.5.6:65535",
+            // Test the minimum/maximum address/port.
+            .raw = "1.2.3.4:567,0.0.0.0:0,255.255.255.255:65535",
             .addresses = [3]std.net.Address{
-                std.net.Address.initIp4([_]u8{1, 2, 3, 4}, 0),
-                std.net.Address.initIp4([_]u8{2, 3, 4, 5}, 789),
-                std.net.Address.initIp4([_]u8{3, 4, 5, 6}, 65535),
+                std.net.Address.initIp4([_]u8{1, 2, 3, 4}, 567),
+                std.net.Address.initIp4([_]u8{0, 0, 0, 0}, 0),
+                std.net.Address.initIp4([_]u8{255, 255, 255, 255}, 65535),
             },
         },
         .{
@@ -804,7 +817,7 @@ test "parse_addresses" {
         },
     };
 
-    const test_errors = &[_]struct{
+    const vectors_negative = &[_]struct{
         raw: []const u8,
         err: anyerror![]std.net.Address,
     }{
@@ -821,12 +834,12 @@ test "parse_addresses" {
         .{ .raw = "1.2.3.4:5,2.3.4.5:65536", .err = error.PortOverflow },
     };
 
-    for (test_successes) |t| {
-        const addresses_actual = try parse_addresses_limit(std.testing.allocator, t.raw, 3);
+    for (vectors_positive) |vector| {
+        const addresses_actual = try parse_addresses_limit(std.testing.allocator, vector.raw, 3);
         defer std.testing.allocator.free(addresses_actual);
 
         try std.testing.expectEqual(addresses_actual.len, 3);
-        for (t.addresses) |address_expect, i| {
+        for (vector.addresses) |address_expect, i| {
             const address_actual = addresses_actual[i];
             try std.testing.expectEqual(address_expect.in.sa.family, address_actual.in.sa.family);
             try std.testing.expectEqual(address_expect.in.sa.port, address_actual.in.sa.port);
@@ -835,8 +848,8 @@ test "parse_addresses" {
         }
     }
 
-    for (test_errors) |t| {
-        try std.testing.expectEqual(t.err, parse_addresses_limit(std.testing.allocator, t.raw, 2));
+    for (vectors_negative) |vector| {
+        try std.testing.expectEqual(vector.err, parse_addresses_limit(std.testing.allocator, vector.raw, 2));
     }
 }
 
