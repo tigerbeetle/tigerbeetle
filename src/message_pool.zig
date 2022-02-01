@@ -24,11 +24,8 @@ pub const messages_max = messages_max: {
     const journal_messages_max = config.io_depth_read + config.io_depth_write;
     const loopback_queue_messages_max = 1;
     const pipelining_messages_max = config.pipelining_max;
-    // There are 3 quorums:
-    // - start_view_change_from_other_replicas
-    // - do_view_change_from_all_replicas
-    // - nack_prepare_from_other_replicas
-    const quorum_messages_max = 3 * config.replicas_max;
+    // Only 1 quorum stores messages (QuorumMessages): do_view_change_from_all_replicas.
+    const quorum_messages_max = config.replicas_max;
 
     // +1 to account for the Connection's `recv_message`.
     const connection_messages_max = config.connection_send_queue_max + 1;
