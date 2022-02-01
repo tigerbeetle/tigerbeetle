@@ -144,13 +144,13 @@ pub fn Replica(
         loopback_queue: ?*Message = null,
 
         /// Unique start_view_change messages for the same view from OTHER replicas (excluding ourself).
-        start_view_change_from_other_replicas: QuorumMessages = QuorumMessagesNull,
+        start_view_change_from_other_replicas: QuorumCounter = QuorumCounterNull,
 
         /// Unique do_view_change messages for the same view from ALL replicas (including ourself).
         do_view_change_from_all_replicas: QuorumMessages = QuorumMessagesNull,
 
         /// Unique nack_prepare messages for the same view from OTHER replicas (excluding ourself).
-        nack_prepare_from_other_replicas: QuorumMessages = QuorumMessagesNull,
+        nack_prepare_from_other_replicas: QuorumCounter = QuorumCounterNull,
 
         /// Whether a replica has received a quorum of start_view_change messages for the view change:
         start_view_change_quorum: bool = false,
@@ -391,13 +391,7 @@ pub fn Replica(
                 self.loopback_queue = null;
             }
 
-            for (self.start_view_change_from_other_replicas) |message| {
-                if (message) |m| self.message_bus.unref(m);
-            }
             for (self.do_view_change_from_all_replicas) |message| {
-                if (message) |m| self.message_bus.unref(m);
-            }
-            for (self.nack_prepare_from_other_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
             }
         }
@@ -735,8 +729,8 @@ pub fn Replica(
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
             const threshold = self.quorum_replication;
 
-            const count = self.add_prepare_ok_and_receive_quorum_exactly_once(
-                prepare,
+            const count = self.tally_message_and_receive_quorum_exactly_once(
+                &prepare.ok_from_all_replicas,
                 message,
                 threshold,
             ) orelse return;
@@ -896,14 +890,14 @@ pub fn Replica(
             assert(self.replica_count > 1);
             const threshold = self.quorum_view_change - 1;
 
-            const count = self.add_message_and_receive_quorum_exactly_once(
+            const count = self.tally_message_and_receive_quorum_exactly_once(
                 &self.start_view_change_from_other_replicas,
                 message,
                 threshold,
             ) orelse return;
 
             assert(count == threshold);
-            assert(self.start_view_change_from_other_replicas[self.replica] == null);
+            assert(!self.start_view_change_from_other_replicas.isSet(self.replica));
             log.debug("{}: on_start_view_change: view={} quorum received", .{
                 self.replica,
                 self.view,
@@ -1410,14 +1404,14 @@ pub fn Replica(
             assert(threshold < self.replica_count);
 
             // Wait until we have `threshold` messages for quorum:
-            const count = self.add_message_and_receive_quorum_exactly_once(
+            const count = self.tally_message_and_receive_quorum_exactly_once(
                 &self.nack_prepare_from_other_replicas,
                 message,
                 threshold,
             ) orelse return;
 
             assert(count == threshold);
-            assert(self.nack_prepare_from_other_replicas[self.replica] == null);
+            assert(!self.nack_prepare_from_other_replicas.isSet(self.replica));
             log.debug("{}: on_nack_prepare: quorum received", .{self.replica});
 
             self.discard_uncommitted_ops_from(op, checksum);
@@ -1608,22 +1602,9 @@ pub fn Replica(
             assert(message.header.replica < self.replica_count);
             assert(message.header.view == self.view);
             switch (message.header.command) {
-                .start_view_change => {
-                    assert(self.replica_count > 1);
-                    if (self.replica_count == 2) assert(threshold == 1);
-
-                    assert(self.status == .view_change);
-                },
                 .do_view_change => {
                     assert(self.replica_count > 1);
                     if (self.replica_count == 2) assert(threshold == 2);
-
-                    assert(self.status == .view_change);
-                    assert(self.leader_index(self.view) == self.replica);
-                },
-                .nack_prepare => {
-                    assert(self.replica_count > 1);
-                    if (self.replica_count == 2) assert(threshold >= 1);
 
                     assert(self.status == .view_change);
                     assert(self.leader_index(self.view) == self.replica);
@@ -1671,9 +1652,10 @@ pub fn Replica(
             return count;
         }
 
-        fn add_prepare_ok_and_receive_quorum_exactly_once(
+        fn tally_message_and_receive_quorum_exactly_once(
             self: *Self,
-            prepare: *Prepare,
+            //prepare: *Prepare,
+            messages: *QuorumCounter,
             message: *Message,
             threshold: u32,
         ) ?usize {
@@ -1684,26 +1666,42 @@ pub fn Replica(
             assert(message.header.cluster == self.cluster);
             assert(message.header.replica < self.replica_count);
             assert(message.header.view == self.view);
-            assert(message.header.command == .prepare_ok);
-            assert(message.header.context == prepare.message.header.checksum);
 
-            if (self.replica_count <= 2) assert(threshold == self.replica_count);
+            switch (message.header.command) {
+                .prepare_ok => {
+                    if (self.replica_count <= 2) assert(threshold == self.replica_count);
 
-            assert(self.status == .normal);
-            assert(self.leader());
+                    assert(self.status == .normal);
+                    assert(self.leader());
+                },
+                .start_view_change => {
+                    assert(self.replica_count > 1);
+                    if (self.replica_count == 2) assert(threshold == 1);
+
+                    assert(self.status == .view_change);
+                },
+                .nack_prepare => {
+                    assert(self.replica_count > 1);
+                    if (self.replica_count == 2) assert(threshold >= 1);
+
+                    assert(self.status == .view_change);
+                    assert(self.leader_index(self.view) == self.replica);
+                },
+                else => unreachable,
+            }
 
             const command: []const u8 = @tagName(message.header.command);
 
             // Do not allow duplicate messages to trigger multiple passes through a state transition:
-            if (prepare.ok_from_all_replicas.isSet(message.header.replica)) {
+            if (messages.isSet(message.header.replica)) {
                 log.debug("{}: on_{s}: ignoring (duplicate message)", .{ self.replica, command });
                 return null;
             }
 
-            prepare.ok_from_all_replicas.set(message.header.replica);
+            messages.set(message.header.replica);
 
             // Count the number of unique messages now received:
-            const count = prepare.ok_from_all_replicas.count();
+            const count = messages.count();
             log.debug("{}: on_{s}: {} message(s)", .{ self.replica, command, count });
 
             // Wait until we have exactly `threshold` messages for quorum:
@@ -3372,17 +3370,11 @@ pub fn Replica(
                     assert(nack_prepare_op <= op);
                     if (nack_prepare_op != op) {
                         self.nack_prepare_op = op;
-                        self.reset_quorum_messages(
-                            &self.nack_prepare_from_other_replicas,
-                            .nack_prepare,
-                        );
+                        self.reset_quorum_counter(&self.nack_prepare_from_other_replicas);
                     }
                 } else {
                     self.nack_prepare_op = op;
-                    self.reset_quorum_messages(
-                        &self.nack_prepare_from_other_replicas,
-                        .nack_prepare,
-                    );
+                    self.reset_quorum_counter(&self.nack_prepare_from_other_replicas);
                 }
 
                 assert(self.nack_prepare_op.? == op);
@@ -3496,18 +3488,26 @@ pub fn Replica(
             log.debug("{}: reset {} {s} message(s)", .{ self.replica, count, @tagName(command) });
         }
 
+        fn reset_quorum_counter(self: *Self, messages: *QuorumCounter) void {
+            var messages_iter = messages.iterator(.{});
+            while (messages_iter.next()) |replica| {
+                assert(replica < self.replica_count);
+            }
+            messages.setIntersection(QuorumCounterNull);
+        }
+
         fn reset_quorum_do_view_change(self: *Self) void {
             self.reset_quorum_messages(&self.do_view_change_from_all_replicas, .do_view_change);
             self.do_view_change_quorum = false;
         }
 
         fn reset_quorum_nack_prepare(self: *Self) void {
-            self.reset_quorum_messages(&self.nack_prepare_from_other_replicas, .nack_prepare);
+            self.reset_quorum_counter(&self.nack_prepare_from_other_replicas);
             self.nack_prepare_op = null;
         }
 
         fn reset_quorum_start_view_change(self: *Self) void {
-            self.reset_quorum_messages(&self.start_view_change_from_other_replicas, .start_view_change);
+            self.reset_quorum_counter(&self.start_view_change_from_other_replicas);
             self.start_view_change_quorum = false;
         }
 
@@ -3612,11 +3612,7 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.start_view_change_quorum);
             assert(!self.do_view_change_quorum);
-            const count_start_view_change = self.count_quorum(
-                &self.start_view_change_from_other_replicas,
-                .start_view_change,
-                0,
-            );
+            const count_start_view_change = self.start_view_change_from_other_replicas.count();
             assert(count_start_view_change >= self.quorum_view_change - 1);
 
             const message = self.create_view_change_message(.do_view_change) orelse {
