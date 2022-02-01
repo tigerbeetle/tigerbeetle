@@ -389,7 +389,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
 
-            const message = self.message_bus.pool.get_header_only_message() orelse return null;
+            const message = self.message_bus.pool.get_message() orelse return null;
             defer self.message_bus.unref(message);
 
             message.header.* = header;

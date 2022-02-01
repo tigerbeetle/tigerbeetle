@@ -198,10 +198,6 @@ pub const Cluster = struct {
             var it = message_bus.pool.free_list;
             while (it) |message| : (it = message.next) messages_in_pool += 1;
         }
-        {
-            var it = message_bus.pool.header_only_free_list;
-            while (it) |message| : (it = message.next) messages_in_pool += 1;
-        }
 
         const total_messages = message_pool.messages_max + message_pool.headers_max;
         assert(messages_in_network + messages_in_pool == total_messages);
