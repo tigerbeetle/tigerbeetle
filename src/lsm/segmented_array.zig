@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
@@ -151,21 +152,21 @@ pub fn SegmentedArray(
             const cursor = array.cursor_for_absolute_index(absolute_index);
             assert(cursor.node < array.node_count);
 
+            // TODO move the a_foo declarations up here and stop using cursor
+
             const total = array.counts[cursor.node] + @intCast(u32, elements.len);
             if (total <= node_capacity) {
                 const pointer = array.nodes[cursor.node].?;
+
                 mem.copyBackwards(
                     T,
                     pointer[cursor.relative_index + elements.len ..],
                     pointer[cursor.relative_index..array.counts[cursor.node]],
                 );
                 mem.copy(T, pointer[cursor.relative_index..], elements);
+
                 array.counts[cursor.node] += @intCast(u32, elements.len);
-                if (cursor.node < array.node_count - 1) {
-                    for (array.indexes[cursor.node + 1 .. array.node_count]) |*i| {
-                        i.* += @intCast(u32, elements.len);
-                    }
-                }
+                array.increment_indexes_after(cursor.node, @intCast(u32, elements.len));
                 return;
             }
 
@@ -252,13 +253,8 @@ pub fn SegmentedArray(
 
             array.counts[a] = a_half;
             array.counts[b] = b_half;
-
             array.indexes[b] = array.indexes[a] + array.counts[a];
-            if (b < array.node_count - 1) {
-                for (array.indexes[b + 1 .. array.node_count]) |*i| {
-                    i.* += @intCast(u32, elements.len);
-                }
-            }
+            array.increment_indexes_after(b, @intCast(u32, elements.len));
         }
 
         /// Insert an empty node at index `node`.
@@ -296,110 +292,179 @@ pub fn SegmentedArray(
             absolute_index: u32,
             count: u32,
         ) void {
-            assert(absolute_index + count <= element_count_max);
+            assert(array.node_count > 0);
             assert(count > 0);
+            assert(absolute_index + count <= element_count_max);
+            assert(absolute_index + count <=
+                array.indexes[array.node_count - 1] + array.counts[array.node_count - 1]);
+
+            const half = @divExact(node_capacity, 2);
 
             var i: u32 = count;
             while (i > 0) {
-                i -= 1;
-
-                array.remove_element(node_pool, absolute_index + i);
+                const batch = math.min(half, i);
+                array.remove_elements_batch(node_pool, absolute_index, batch);
+                i -= batch;
             }
         }
 
-        // To remove an element, we simply find the node it is in and delete it from
-        // the elements array, decrementing numElements. If this reduces the node to less
-        // than half-full, then we move elements from the next node to fill it back up
-        // above half. If this leaves the next node less than half full, then we move
-        // all its remaining elements into the current node, then bypass and delete it.
-        pub fn remove_element(
+        fn remove_elements_batch(
             array: *Self,
             node_pool: *NodePool,
             absolute_index: u32,
+            count: u32,
         ) void {
             assert(array.node_count > 0);
-            assert(absolute_index < element_count_max);
-            assert(absolute_index <
+
+            // Restricting the batch size to half node capacity ensures that elements
+            // are removed from at most two nodes.
+            const half = @divExact(node_capacity, 2);
+            assert(count <= half);
+            assert(count > 0);
+
+            assert(absolute_index + count <= element_count_max);
+            assert(absolute_index + count <=
                 array.indexes[array.node_count - 1] + array.counts[array.node_count - 1]);
 
             const cursor = array.cursor_for_absolute_index(absolute_index);
             assert(cursor.node < array.node_count);
 
-            const b = cursor.node;
-            const b_elements = array.nodes[b].?;
+            const a = cursor.node;
+            const a_pointer = array.nodes[a].?;
+            const a_remaining = cursor.relative_index;
 
-            // If we are removing the last element, nothing needs to be shifted.
-            assert(cursor.relative_index <= array.counts[b] - 1);
-            if (cursor.relative_index < array.counts[b] - 1) {
+            // Remove elements from exactly one node:
+            if (a_remaining + count <= array.counts[a]) {
                 mem.copy(
                     T,
-                    b_elements[cursor.relative_index .. array.counts[b] - 1],
-                    b_elements[cursor.relative_index + 1 .. array.counts[b]],
+                    a_pointer[a_remaining..],
+                    a_pointer[a_remaining + count .. array.counts[a]],
                 );
-            }
-            array.counts[b] -= 1;
-            b_elements[array.counts[b]] = undefined;
 
-            // Removing an element requires the start indexes of subsequent nodes to be shifted.
-            // If removing from the last node however, there is nothing to shift.
-            assert(b <= array.node_count);
-            if (b < array.node_count - 1) {
-                for (array.indexes[b + 1 .. array.node_count]) |*i| i.* -= 1;
-            }
+                array.counts[a] -= count;
+                array.decrement_indexes_after(a, count);
 
-            // If node_capacity is 2 and the node was half full, the element we just removed
-            // made the node empty. Otherwise, we only allow the last node to be less than
-            // half full so only the last node could have become empty.
-            if (array.counts[b] == 0) {
-                assert(b == array.node_count - 1 or node_capacity == 2);
-                array.remove_empty_node_at(node_pool, b);
+                array.maybe_remove_or_merge_node(node_pool, a);
                 return;
             }
 
-            // The last node is allowed to be less than half full.
-            if (b == array.node_count - 1) return;
+            // Remove elements from exactly two nodes:
 
-            const half = node_capacity / 2;
+            const b = a + 1;
+            const b_pointer = array.nodes[b].?;
+            const b_remaining = b_pointer[count -
+                (array.counts[a] - a_remaining) .. array.counts[b]];
 
-            const b_count = array.counts[b];
-            assert(b_count >= half - 1);
-            assert(b_count <= node_capacity);
+            assert(@ptrToInt(b_remaining.ptr) > @ptrToInt(b_pointer));
 
-            const c = b + 1;
-            const c_elements = array.nodes[c].?;
-            const c_count = array.counts[c];
-            assert(c_count >= half or c == array.node_count - 1);
-            assert(c_count <= node_capacity);
+            // Only one of these nodes may become empty, as we limit batch size to
+            // half node capacity.
+            assert(a_remaining > 0 or b_remaining.len > 0);
 
-            if (b_count + c_count <= node_capacity) {
-                mem.copy(
-                    T,
-                    b_elements[b_count..][0..c_count],
-                    c_elements[0..c_count],
-                );
-                array.counts[b] += c_count;
-                array.counts[c] = 0;
-                array.remove_empty_node_at(node_pool, c);
-            } else if (b_count < half) {
-                assert(b_count == half - 1);
-                assert(c_count > half + 1);
+            if (a_remaining >= half) {
+                mem.copy(T, b_pointer, b_remaining);
 
-                b_elements[b_count] = c_elements[0];
-                mem.copy(
-                    T,
-                    c_elements[0 .. c_count - 1],
-                    c_elements[1..c_count],
-                );
+                array.counts[a] = a_remaining;
+                array.counts[b] = @intCast(u32, b_remaining.len);
+                array.indexes[b] = array.indexes[a] + array.counts[a];
+                array.decrement_indexes_after(b, count);
 
-                array.counts[b] += 1;
-                array.counts[c] -= 1;
-                array.indexes[c] += 1;
+                array.maybe_remove_or_merge_node(node_pool, b);
+            } else if (b_remaining.len >= half) {
+                assert(a_remaining < half);
 
-                assert(array.counts[b] == half);
-                assert(array.counts[c] > half);
+                array.counts[a] = a_remaining;
+                array.decrement_indexes_after(b, count);
+
+                array.maybe_merge_node_with_slice(node_pool, a, b_remaining);
+            } else {
+                assert(a_remaining < half and b_remaining.len < half);
+                assert(a_remaining + b_remaining.len <= node_capacity);
+
+                mem.copy(T, a_pointer[a_remaining..], b_remaining);
+
+                array.counts[a] = @intCast(u32, a_remaining + b_remaining.len);
+                array.counts[b] = 0;
+                array.decrement_indexes_after(b, count);
+
+                array.remove_empty_node_at(node_pool, b);
+                array.maybe_remove_or_merge_node(node_pool, a);
+            }
+        }
+
+        fn maybe_remove_or_merge_node(array: *Self, node_pool: *NodePool, node: u32) void {
+            assert(node < array.node_count);
+
+            if (array.counts[node] == 0) {
+                array.remove_empty_node_at(node_pool, node);
+                return;
             }
 
-            assert(array.counts[b] >= half);
+            if (node == array.node_count - 1) return;
+
+            const next_elements = array.nodes[node + 1].?[0..array.counts[node + 1]];
+            array.maybe_merge_node_with_slice(node_pool, node, next_elements);
+        }
+
+        fn maybe_merge_node_with_slice(
+            array: *Self,
+            node_pool: *NodePool,
+            node: u32,
+            elements_next_node: []T,
+        ) void {
+            const half = @divExact(node_capacity, 2);
+
+            const a = node;
+            const a_pointer = array.nodes[a].?;
+            assert(array.counts[a] <= node_capacity);
+
+            // The counts and indexes of b must never be read
+            // by this function, they may be invalid.
+            const b = a + 1;
+            const b_pointer = array.nodes[b].?;
+            const b_elements = elements_next_node;
+            assert(b_elements.len > 0);
+            assert(b_elements.len >= half or b == array.node_count - 1);
+            assert(b_elements.len <= node_capacity);
+            assert(@ptrToInt(b_elements.ptr) >= @ptrToInt(b_pointer));
+
+            // Our function would still be correct if this assert fails, but we would
+            // unnecessarily copy all elements of b to node a and then delete b
+            // instead of simply deleting a.
+            assert(!(array.counts[a] == 0 and b_pointer == b_elements.ptr));
+
+            const total = array.counts[a] + @intCast(u32, b_elements.len);
+            if (total <= node_capacity) {
+                mem.copy(T, a_pointer[array.counts[a]..], b_elements);
+
+                array.counts[a] += @intCast(u32, b_elements.len);
+                array.counts[b] = 0;
+
+                array.remove_empty_node_at(node_pool, b);
+
+                assert(array.counts[a] >= half or a == array.node_count - 1);
+            } else if (array.counts[a] < half) {
+                const a_half = utils.div_ceil(total, 2);
+                const b_half = total - a_half;
+                assert(a_half >= b_half);
+                assert(a_half + b_half == total);
+
+                mem.copy(
+                    T,
+                    a_pointer[array.counts[a]..a_half],
+                    b_elements[0 .. a_half - array.counts[a]],
+                );
+                mem.copy(T, b_pointer, b_elements[a_half - array.counts[a] ..]);
+
+                array.counts[a] = a_half;
+                array.counts[b] = b_half;
+                array.indexes[b] = array.indexes[a] + array.counts[a];
+
+                assert(array.counts[a] >= half);
+                assert(array.counts[b] >= half);
+            } else {
+                assert(b_pointer == b_elements.ptr);
+            }
         }
 
         /// Remove an empty node at index `node`.
@@ -434,6 +499,18 @@ pub fn SegmentedArray(
             array.nodes[array.node_count] = null;
             array.counts[array.node_count] = undefined;
             array.indexes[array.node_count] = undefined;
+        }
+
+        fn increment_indexes_after(array: *Self, node: u32, delta: u32) void {
+            if (node < array.node_count - 1) {
+                for (array.indexes[node + 1 .. array.node_count]) |*i| i.* += delta;
+            }
+        }
+
+        fn decrement_indexes_after(array: *Self, node: u32, delta: u32) void {
+            if (node < array.node_count - 1) {
+                for (array.indexes[node + 1 .. array.node_count]) |*i| i.* -= delta;
+            }
         }
 
         pub fn node_elements(array: Self, node: u32) []T {
@@ -915,13 +992,21 @@ test "SegmentedArray" {
     var tested_padding = false;
     var tested_capacity_min = false;
 
+    // We want to explore not just the bottom boundary but also the surrounding area
+    // as it may also have interesting edge cases.
     inline for (.{
-        Options{ .element_type = u32, .node_size = 16, .element_count_max = 512 },
-        Options{ .element_type = u32, .node_size = 8, .element_count_max = 512 },
         Options{ .element_type = u32, .node_size = 8, .element_count_max = 3 },
+        Options{ .element_type = u32, .node_size = 8, .element_count_max = 4 },
+        Options{ .element_type = u32, .node_size = 8, .element_count_max = 5 },
+        Options{ .element_type = u32, .node_size = 8, .element_count_max = 6 },
+        Options{ .element_type = u32, .node_size = 8, .element_count_max = 1024 },
+        Options{ .element_type = u32, .node_size = 16, .element_count_max = 1024 },
+        Options{ .element_type = u32, .node_size = 32, .element_count_max = 1024 },
+        Options{ .element_type = u32, .node_size = 64, .element_count_max = 1024 },
         Options{ .element_type = TableInfo, .node_size = 256, .element_count_max = 3 },
         Options{ .element_type = TableInfo, .node_size = 256, .element_count_max = 4 },
         Options{ .element_type = TableInfo, .node_size = 256, .element_count_max = 1024 },
+        Options{ .element_type = TableInfo, .node_size = 512, .element_count_max = 1024 },
         Options{ .element_type = TableInfo, .node_size = 1024, .element_count_max = 1024 },
     }) |options| {
         const Context = TestContext(
