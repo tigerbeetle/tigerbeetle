@@ -96,8 +96,15 @@ pub const pipelining_max = clients_max;
 pub const connection_delay_min_ms = 50;
 pub const connection_delay_max_ms = 1000;
 
-/// The maximum number of outgoing messages that may be queued on a connection.
-pub const connection_send_queue_max = pipelining_max;
+/// The maximum number of outgoing messages that may be queued on a replica connection.
+pub const connection_send_queue_max_replica = pipelining_max;
+
+/// The maximum number of outgoing messages that may be queued on a client connection.
+/// The client has one in-flight request, and occasionally a ping.
+pub const connection_send_queue_max_client = 2;
+
+/// The maximum number of outgoing requests that may be queued on a client (including the in-flight request).
+pub const client_request_queue_max = 32;
 
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
 /// If the backlog argument is greater than the value in `/proc/sys/net/core/somaxconn`, then it is
