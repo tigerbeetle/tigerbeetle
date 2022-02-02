@@ -199,7 +199,7 @@ pub const Cluster = struct {
             while (it) |message| : (it = message.next) messages_in_pool += 1;
         }
 
-        const total_messages = message_pool.messages_max + message_pool.headers_max;
+        const total_messages = message_pool.messages_max_replica;
         assert(messages_in_network + messages_in_pool == total_messages);
 
         replica.* = try Replica.init(

@@ -17,14 +17,16 @@ const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 
-const SendQueue = RingBuffer(*Message, config.connection_send_queue_max);
-
 pub const MessageBusReplica = MessageBusImpl(.replica);
 pub const MessageBusClient = MessageBusImpl(.client);
 
-const ProcessType = enum { replica, client };
+fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
+    const SendQueue = RingBuffer(*Message, switch (process_type) {
+        .replica => config.connection_send_queue_max_replica,
+        // A client has at most 1 in-flight request, plus pings.
+        .client => config.connection_send_queue_max_client,
+    });
 
-fn MessageBusImpl(comptime process_type: ProcessType) type {
     return struct {
         const Self = @This();
 
@@ -105,7 +107,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             };
 
             var bus: Self = .{
-                .pool = try MessagePool.init(allocator),
+                .pool = try MessagePool.init(allocator, process_type),
                 .io = io,
                 .cluster = cluster,
                 .configuration = configuration,
