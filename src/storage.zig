@@ -487,19 +487,19 @@ pub const Storage = struct {
         while (true) {
             const rc = os.linux.fallocate(fd, mode, offset, length);
             switch (os.linux.getErrno(rc)) {
-                0 => return,
-                os.linux.EBADF => return error.FileDescriptorInvalid,
-                os.linux.EFBIG => return error.FileTooBig,
-                os.linux.EINTR => continue,
-                os.linux.EINVAL => return error.ArgumentsInvalid,
-                os.linux.EIO => return error.InputOutput,
-                os.linux.ENODEV => return error.NoDevice,
-                os.linux.ENOSPC => return error.NoSpaceLeft,
-                os.linux.ENOSYS => return error.SystemOutdated,
-                os.linux.EOPNOTSUPP => return error.OperationNotSupported,
-                os.linux.EPERM => return error.PermissionDenied,
-                os.linux.ESPIPE => return error.Unseekable,
-                os.linux.ETXTBSY => return error.FileBusy,
+                .SUCCESS => return,
+                .BADF => return error.FileDescriptorInvalid,
+                .FBIG => return error.FileTooBig,
+                .INTR => continue,
+                .INVAL => return error.ArgumentsInvalid,
+                .IO => return error.InputOutput,
+                .NODEV => return error.NoDevice,
+                .NOSPC => return error.NoSpaceLeft,
+                .NOSYS => return error.SystemOutdated,
+                .OPNOTSUPP => return error.OperationNotSupported,
+                .PERM => return error.PermissionDenied,
+                .SPIPE => return error.Unseekable,
+                .TXTBSY => return error.FileBusy,
                 else => |errno| return os.unexpectedErrno(errno),
             }
         }
