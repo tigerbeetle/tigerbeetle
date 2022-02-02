@@ -213,7 +213,7 @@ pub fn main() !void {
 
     assert(cluster.state_checker.convergence());
 
-    output.info("\n          PASSED", .{});
+    output.info("\n          PASSED ({} ticks)", .{tick});
 }
 
 /// Returns true, `p` percent of the time, else false.
