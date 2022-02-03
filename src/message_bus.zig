@@ -340,7 +340,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
             bus.process.accept_connection.?.on_accept(bus, fd);
         }
 
-        pub fn get_message(bus: *Self) ?*Message {
+        pub fn get_message(bus: *Self) *Message {
             return bus.pool.get_message();
         }
 
@@ -734,14 +734,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                 // `references` and `header` metadata.
                 if (connection.recv_progress == header.size) return connection.recv_message.?.ref();
 
-                const message = bus.get_message() orelse {
-                    // TODO Decrease the probability of this happening by:
-                    // 1. using a header-only message if possible.
-                    // 2. determining a true upper limit for static allocation.
-                    log.err("no free buffer available to deliver message from {}", .{connection.peer});
-                    connection.terminate(bus, .shutdown);
-                    return null;
-                };
+                const message = bus.get_message();
                 mem.copy(u8, message.buffer, data[0..header.size]);
                 return message;
             }
@@ -826,14 +819,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                     return;
                 }
 
-                const new_message = bus.get_message() orelse {
-                    // TODO Decrease the probability of this happening by:
-                    // 1. using a header-only message if possible.
-                    // 2. determining a true upper limit for static allocation.
-                    log.err("no free buffer available to recv message from {}", .{connection.peer});
-                    connection.terminate(bus, .shutdown);
-                    return;
-                };
+                const new_message = bus.get_message();
                 defer bus.unref(new_message);
 
                 if (connection.recv_message) |recv_message| {

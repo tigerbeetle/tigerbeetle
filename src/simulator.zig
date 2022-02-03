@@ -244,7 +244,7 @@ fn send_request(random: std.rand.Random) bool {
     if (client.request_queue.full()) return false;
     if (checker_request_queue.full()) return false;
 
-    const message = client.get_message() orelse return false;
+    const message = client.get_message();
     defer client.unref(message);
 
     const body_size_max = config.message_size_max - @sizeOf(Header);

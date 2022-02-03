@@ -108,10 +108,10 @@ pub const MessagePool = struct {
         return ret;
     }
 
-    /// Get an unused message with a buffer of config.message_size_max. If no such message is
-    /// available, an error is returned. The returned message has exactly one reference.
-    pub fn get_message(pool: *MessagePool) ?*Message {
-        const ret = pool.free_list orelse return null;
+    /// Get an unused message with a buffer of config.message_size_max.
+    /// The returned message has exactly one reference.
+    pub fn get_message(pool: *MessagePool) *Message {
+        const ret = pool.free_list.?;
         pool.free_list = ret.next;
         ret.next = null;
         assert(ret.references == 0);
