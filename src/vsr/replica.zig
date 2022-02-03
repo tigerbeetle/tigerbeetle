@@ -876,14 +876,8 @@ pub fn Replica(
                 // If we are the leader of the new view, then wait until we have a message to send a
                 // do_view_change message to ourself. The on_do_view_change() handler will panic if
                 // we received a start_view_change quorum without a do_view_change to ourself.
-                if (self.message_bus.get_message()) |available| {
-                    self.message_bus.unref(available);
-                } else {
-                    log.err("{}: on_start_view_change: waiting for message for do_view_change", .{
-                        self.replica,
-                    });
-                    return;
-                }
+                const available = self.message_bus.get_message();
+                self.message_bus.unref(available);
             }
 
             // Wait until we have `f` messages (excluding ourself) for quorum:
@@ -1120,10 +1114,7 @@ pub fn Replica(
                 return;
             }
 
-            const response = self.message_bus.get_message() orelse {
-                log.err("{}: on_recovery: ignoring (waiting for message)", .{self.replica});
-                return;
-            };
+            const response = self.message_bus.get_message();
             defer self.message_bus.unref(response);
 
             response.header.* = .{
@@ -1270,14 +1261,7 @@ pub fn Replica(
             assert(message.header.view == self.view);
             assert(message.header.replica != self.replica);
 
-            const response = self.message_bus.get_message() orelse {
-                log.err("{}: on_request_headers: ignoring (op={}..{}, no message available)", .{
-                    self.replica,
-                    message.header.commit,
-                    message.header.op,
-                });
-                return;
-            };
+            const response = self.message_bus.get_message();
             defer self.message_bus.unref(response);
 
             response.header.* = .{
@@ -1882,10 +1866,7 @@ pub fn Replica(
             }
 
             // TODO We can optimize this to commit into the client table reply if it exists.
-            const reply = self.message_bus.get_message() orelse {
-                log.err("{}: commit_ops_commit: waiting for message", .{self.replica});
-                return;
-            };
+            const reply = self.message_bus.get_message();
             defer self.message_bus.unref(reply);
 
             self.commit_op(prepare.?, reply);
@@ -1990,11 +1971,7 @@ pub fn Replica(
                 assert(count >= self.quorum_replication);
 
                 // TODO We can optimize this to commit into the client table reply if it exists.
-                const reply = self.message_bus.get_message() orelse {
-                    // Eventually handled by on_prepare_timeout().
-                    log.err("{}: commit_pipeline: waiting for message", .{self.replica});
-                    return;
-                };
+                const reply = self.message_bus.get_message();
                 defer self.message_bus.unref(reply);
 
                 self.commit_op(prepare.message, reply);
@@ -2130,7 +2107,7 @@ pub fn Replica(
             // We may send a start_view message in normal status to resolve a follower's view jump:
             assert(self.status == .normal or self.status == .view_change);
 
-            const message = self.message_bus.get_message() orelse return null;
+            const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
             message.header.* = .{
@@ -2185,7 +2162,7 @@ pub fn Replica(
             assert(header.view == self.view or header.command == .request_start_view);
             assert(header.size == @sizeOf(Header));
 
-            const message = self.message_bus.pool.get_message() orelse return null;
+            const message = self.message_bus.pool.get_message();
             defer self.message_bus.unref(message);
 
             message.header.* = header;

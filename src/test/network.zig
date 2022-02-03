@@ -139,10 +139,7 @@ pub const Network = struct {
 
         const target_bus = &network.buses.items[path.target];
 
-        const message = target_bus.get_message() orelse {
-            log.debug("deliver_message: target message bus has no free messages, dropping", .{});
-            return;
-        };
+        const message = target_bus.get_message();
         defer target_bus.unref(message);
 
         std.mem.copy(u8, message.buffer, packet.message.buffer);
