@@ -62,7 +62,7 @@ pub const MessageBus = struct {
 
     pub fn tick(_: *MessageBus) void {}
 
-    pub fn get_message(bus: *MessageBus) ?*Message {
+    pub fn get_message(bus: *MessageBus) *Message {
         return bus.pool.get_message();
     }
 

@@ -206,7 +206,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         /// Acquires a message from the message bus if one is available.
-        pub fn get_message(self: *Self) ?*Message {
+        pub fn get_message(self: *Self) *Message {
             return self.message_bus.get_message();
         }
 
@@ -388,7 +388,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
 
-            const message = self.message_bus.pool.get_message() orelse return null;
+            const message = self.message_bus.pool.get_message();
             defer self.message_bus.unref(message);
 
             message.header.* = header;
@@ -402,8 +402,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         fn register(self: *Self) void {
             if (self.request_number > 0) return;
 
-            var message = self.message_bus.get_message() orelse
-                @panic("register: no message available to register a session with the cluster");
+            var message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
             // We will set parent, context, view and checksums only when sending for the first time:
