@@ -24,13 +24,6 @@ pub const Cursor = struct {
     relative_index: u32,
 };
 
-// TODO:
-// 1 Implement remove()
-// 2 Merge nodes if they become half full (check during remove)
-// 3 Unit tests for SegmentedArray
-// - Special Level 0 ManifestLevel that allows overlapping tables.
-// - Go back to compaction and track tables during the compaction to be inserted/removed.
-
 pub fn SegmentedArray(
     comptime T: type,
     comptime NodePool: type,
@@ -62,9 +55,8 @@ pub fn SegmentedArray(
             // If a node fills up it is divided into two new nodes. Therefore,
             // the worst possible space overhead is when all nodes are half full.
             // This uses flooring division, we want to examine the worst case here.
-            const elements_per_node_min = node_capacity / 2;
-            // TODO Can we get rid of this +1?
-            break :blk utils.div_ceil(element_count_max, elements_per_node_min) + 1;
+            const elements_per_node_min = @divExact(node_capacity, 2);
+            break :blk utils.div_ceil(element_count_max, elements_per_node_min);
         };
 
         node_count: u32 = 0,
@@ -150,35 +142,31 @@ pub fn SegmentedArray(
             const cursor = array.cursor_for_absolute_index(absolute_index);
             assert(cursor.node < array.node_count);
 
-            // TODO move the a_foo declarations up here and stop using cursor
+            const a = cursor.node;
+            const a_pointer = array.nodes[a].?;
 
-            const total = array.count(cursor.node) + @intCast(u32, elements.len);
+            const total = array.count(a) + @intCast(u32, elements.len);
             if (total <= node_capacity) {
-                const pointer = array.nodes[cursor.node].?;
-
                 mem.copyBackwards(
                     T,
-                    pointer[cursor.relative_index + elements.len ..],
-                    pointer[cursor.relative_index..array.count(cursor.node)],
+                    a_pointer[cursor.relative_index + elements.len ..],
+                    a_pointer[cursor.relative_index..array.count(a)],
                 );
-                mem.copy(T, pointer[cursor.relative_index..], elements);
+                mem.copy(T, a_pointer[cursor.relative_index..], elements);
 
-                array.increment_indexes_after(cursor.node, @intCast(u32, elements.len));
+                array.increment_indexes_after(a, @intCast(u32, elements.len));
                 return;
             }
 
             // Insert a new node after the node being split.
-            const a = cursor.node;
             const b = a + 1;
             array.insert_empty_node_at(node_pool, b);
+            const b_pointer = array.nodes[b].?;
 
             const a_half = utils.div_ceil(total, 2);
             const b_half = total - a_half;
             assert(a_half >= b_half);
             assert(a_half + b_half == total);
-
-            const a_pointer = array.nodes[a].?;
-            const b_pointer = array.nodes[b].?;
 
             // The 1st case can be seen as a special case of the 2nd.
             // The 5th case can be seen as a special case of the 4th.
@@ -972,7 +960,7 @@ test "SegmentedArray" {
     };
 
     var tested_padding = false;
-    var tested_capacity_min = false;
+    var tested_node_capacity_min = false;
 
     // We want to explore not just the bottom boundary but also the surrounding area
     // as it may also have interesting edge cases.
@@ -1003,9 +991,9 @@ test "SegmentedArray" {
         try context.run();
 
         if (options.node_size % @sizeOf(options.element_type) != 0) tested_padding = true;
-        if (Context.TestArray.node_capacity == 2) tested_capacity_min = true;
+        if (Context.TestArray.node_capacity == 2) tested_node_capacity_min = true;
     }
 
     assert(tested_padding);
-    assert(tested_capacity_min);
+    assert(tested_node_capacity_min);
 }
