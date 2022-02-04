@@ -1683,6 +1683,7 @@ pub fn Replica(
             }
 
             messages.set(message.header.replica);
+            assert(messages.count() <= self.replica_count);
 
             // Count the number of unique messages now received:
             const count = messages.count();
@@ -3470,7 +3471,9 @@ pub fn Replica(
             while (messages_iter.next()) |replica| {
                 assert(replica < self.replica_count);
             }
+
             messages.setIntersection(QuorumCounterNull);
+            assert(messages.count() == 0);
         }
 
         fn reset_quorum_do_view_change(self: *Self) void {
