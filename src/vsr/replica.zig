@@ -599,7 +599,7 @@ pub fn Replica(
             message.header.view = self.view;
             message.header.op = self.op + 1;
             message.header.commit = self.commit_max;
-            message.header.offset = self.journal.next_offset(latest_entry);
+            message.header.offset = Journal.next_offset(latest_entry);
             message.header.replica = self.replica;
             message.header.command = .prepare;
 
@@ -986,7 +986,7 @@ pub fn Replica(
                     assert(replica_view_normal < m.header.view);
 
                     var replica_latest = Header.reserved();
-                    self.set_latest_op(self.message_body_as_headers(m), &replica_latest);
+                    set_latest_op(self.message_body_as_headers(m), &replica_latest);
                     assert(replica_latest.op == m.header.op);
 
                     log.debug(
@@ -1062,7 +1062,7 @@ pub fn Replica(
             assert(message.header.view == self.view);
 
             var latest = Header.reserved();
-            self.set_latest_op(self.message_body_as_headers(message), &latest);
+            set_latest_op(self.message_body_as_headers(message), &latest);
             assert(latest.op == message.header.op);
 
             self.set_latest_op_and_k(&latest, message.header.commit, "on_start_view");
@@ -1685,7 +1685,6 @@ pub fn Replica(
 
         /// Returns whether `b` succeeds `a` by having a newer view or same view and newer op.
         fn ascending_viewstamps(
-            _: *Self,
             a: *const Header,
             b: *const Header,
         ) bool {
@@ -3075,7 +3074,7 @@ pub fn Replica(
                 while (op > 0) {
                     op -= 1;
                     if (self.journal.entry_for_op(op)) |neighbor| {
-                        if (self.journal.next_offset(neighbor) > header.offset) return true;
+                        if (Journal.next_offset(neighbor) > header.offset) return true;
                         break;
                     }
                 }
@@ -3085,7 +3084,7 @@ pub fn Replica(
                 var op: u64 = header.op + 1;
                 while (op <= self.op) : (op += 1) {
                     if (self.journal.entry_for_op(op)) |neighbor| {
-                        if (self.journal.next_offset(header) > neighbor.offset) return true;
+                        if (Journal.next_offset(header) > neighbor.offset) return true;
                         break;
                     }
                 }
@@ -3785,7 +3784,7 @@ pub fn Replica(
 
         /// Finds the header with the highest op number in a slice of headers from a replica.
         /// Searches only by op number to find the highest `self.op for the replica.
-        fn set_latest_op(_: *Self, headers: []Header, latest: *Header) void {
+        fn set_latest_op(headers: []Header, latest: *Header) void {
             switch (latest.command) {
                 .reserved, .prepare => assert(latest.valid_checksum()),
                 else => unreachable,
@@ -4116,7 +4115,7 @@ pub fn Replica(
                 if (self.journal.entry_for_op_exact(op)) |a| {
                     assert(a.op + 1 == b.op);
                     if (a.checksum == b.parent) {
-                        assert(self.ascending_viewstamps(a, b));
+                        assert(ascending_viewstamps(a, b));
                         b = a;
                     } else {
                         log.debug("{}: valid_hash_chain_between: break: A: {}", .{ self.replica, a });

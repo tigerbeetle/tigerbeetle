@@ -92,7 +92,7 @@ pub fn main() !void {
     message_bus.set_on_message(*Client, &client, Client.on_message);
 
     // Pre-allocate a million transfers:
-    var transfers = try arena.allocator().alloc(Transfer, MAX_TRANSFERS);
+    const transfers = try arena.allocator().alloc(Transfer, MAX_TRANSFERS);
     for (transfers) |*transfer, index| {
         transfer.* = .{
             .id = index,
@@ -108,7 +108,7 @@ pub fn main() !void {
     }
 
     // Pre-allocate a million commits:
-    var commits: ?[]Commit = if (IS_TWO_PHASE_COMMIT) try arena.allocator().alloc(Commit, MAX_TRANSFERS) else null;
+    const commits: ?[]Commit = if (IS_TWO_PHASE_COMMIT) try arena.allocator().alloc(Commit, MAX_TRANSFERS) else null;
     if (commits) |all_commits| {
         for (all_commits) |*commit, index| {
             commit.* = .{
