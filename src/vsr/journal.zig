@@ -279,7 +279,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return self.entry_for_op(header.op + 1);
         }
 
-        pub fn next_offset(_: *Self, header: *const Header) u64 {
+        pub fn next_offset(header: *const Header) u64 {
             // TODO Snapshots
             assert(header.command == .prepare);
             return header.offset + vsr.sector_ceil(header.size);

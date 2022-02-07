@@ -370,10 +370,10 @@ pub const IO = struct {
             struct {
                 fn doOperation(op: anytype) CloseError!void {
                     return switch (os.errno(os.system.close(op.fd))) {
-                        os.E.SUCCESS => {},
-                        os.E.BADF => error.FileDescriptorInvalid,
-                        os.E.INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
-                        os.E.IO => error.InputOutput,
+                        .SUCCESS => {},
+                        .BADF => error.FileDescriptorInvalid,
+                        .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
+                        .IO => error.InputOutput,
                         else => |errno| os.unexpectedErrno(errno),
                     };
                 }
@@ -498,20 +498,20 @@ pub const IO = struct {
                             @bitCast(isize, op.offset),
                         );
                         return switch (os.errno(rc)) {
-                            os.E.SUCCESS => @intCast(usize, rc),
-                            os.E.INTR => continue,
-                            os.E.AGAIN => error.WouldBlock,
-                            os.E.BADF => error.NotOpenForReading,
-                            os.E.CONNRESET => error.ConnectionResetByPeer,
-                            os.E.FAULT => unreachable,
-                            os.E.INVAL => error.Alignment,
-                            os.E.IO => error.InputOutput,
-                            os.E.ISDIR => error.IsDir,
-                            os.E.NOBUFS => error.SystemResources,
-                            os.E.NOMEM => error.SystemResources,
-                            os.E.NXIO => error.Unseekable,
-                            os.E.OVERFLOW => error.Unseekable,
-                            os.E.SPIPE => error.Unseekable,
+                            .SUCCESS => @intCast(usize, rc),
+                            .INTR => continue,
+                            .AGAIN => error.WouldBlock,
+                            .BADF => error.NotOpenForReading,
+                            .CONNRESET => error.ConnectionResetByPeer,
+                            .FAULT => unreachable,
+                            .INVAL => error.Alignment,
+                            .IO => error.InputOutput,
+                            .ISDIR => error.IsDir,
+                            .NOBUFS => error.SystemResources,
+                            .NOMEM => error.SystemResources,
+                            .NXIO => error.Unseekable,
+                            .OVERFLOW => error.Unseekable,
+                            .SPIPE => error.Unseekable,
                             else => |err| os.unexpectedErrno(err),
                         };
                     }

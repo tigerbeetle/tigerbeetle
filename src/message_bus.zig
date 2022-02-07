@@ -136,9 +136,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             context: Context,
             comptime on_message: fn (context: Context, message: *Message) void,
         ) void {
-            // TODO This looks like a bug in the compiler, not seeing on_message as used?
-            _ = on_message;
-
             assert(bus.on_message_callback == null);
             assert(bus.on_message_context == null);
 
@@ -629,10 +626,10 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                         // Especially how this interacts with our assumptions around pending I/O.
                         const rc = os.system.shutdown(connection.fd, os.SHUT.RDWR);
                         switch (os.errno(rc)) {
-                            os.E.SUCCESS => {},
-                            os.E.BADF => unreachable,
-                            os.E.INVAL => unreachable,
-                            os.E.NOTCONN => {
+                            .SUCCESS => {},
+                            .BADF => unreachable,
+                            .INVAL => unreachable,
+                            .NOTCONN => {
                                 // This should only happen if we for some reason decide to terminate
                                 // a connection while a connect operation is in progress.
                                 // This is fine though, we simply continue with the logic below and
@@ -647,7 +644,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                                 //assert(connection.recv_submitted);
                                 //assert(!connection.send_submitted);
                             },
-                            os.E.NOTSOCK => unreachable,
+                            .NOTSOCK => unreachable,
                             else => |err| os.unexpectedErrno(err) catch {},
                         }
                     },
