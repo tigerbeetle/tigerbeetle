@@ -34,7 +34,7 @@ pub const ClusterOptions = struct {
 };
 
 pub const Cluster = struct {
-    allocator: *mem.Allocator,
+    allocator: mem.Allocator,
     options: ClusterOptions,
 
     state_machines: []StateMachine,
@@ -49,7 +49,7 @@ pub const Cluster = struct {
     state_checker: StateChecker = undefined,
     on_change_state: fn (replica: *Replica) void = undefined,
 
-    pub fn create(allocator: *mem.Allocator, prng: *std.rand.Random, options: ClusterOptions) !*Cluster {
+    pub fn create(allocator: mem.Allocator, prng: std.rand.Random, options: ClusterOptions) !*Cluster {
         const cluster = try allocator.create(Cluster);
         errdefer allocator.destroy(cluster);
 

@@ -3,24 +3,22 @@
 This is a simple demo to get you comfortable building TigerBeetle and show how
 low-level code can be easier than high-level code.
 
-## Download and install Zig master into your path
-
-[Follow these instructions...](../../docs/DEEP_DIVE.md#install-zig)
-
-## Clone TigerBeetle or update
+## Preliminaries
 
 ```shell
 git clone https://github.com/coilhq/tigerbeetle
 cd tigerbeetle
-git pull
-cd demos/bitcast
+scripts/install_zig.sh
 ```
+
+Now, add the binary at `zig/zig` to your path.
 
 ## Compile and run decode.zig vs decode.js
 
 ```shell
+cd demos/bitcast
 zig build-exe decode.zig -O ReleaseSafe
-time ./decode # Do a throwaway run in case Catalina adds SIP latency.
+time ./decode # Do a throwaway run in case macOS adds SIP latency.
 time ./decode
 time node decode.js
 ```
@@ -75,7 +73,7 @@ Coming from JavaScript, this is less code.
 
 ## What's the performance impact?
 
-Deserializing 16,384 transfers takes 5ms to 20ms in JavaScript and 0.21ms in
+Roughly, deserializing 16,384 transfers takes 5ms to 20ms in JavaScript and 0.21ms in
 Zig:
 
 ```shell

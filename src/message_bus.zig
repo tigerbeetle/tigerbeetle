@@ -1,10 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 const os = std.os;
 
-const target = std.Target.current;
-const is_linux = target.os.tag == .linux;
+const is_linux = builtin.target.os.tag == .linux;
 
 const config = @import("config.zig");
 const log = std.log.scoped(.message_bus);
@@ -54,8 +54,8 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
         /// The callback to be called when a message is received. Use set_on_message() to set
         /// with type safety for the context pointer.
-        on_message_callback: ?fn (context: ?*c_void, message: *Message) void = null,
-        on_message_context: ?*c_void = null,
+        on_message_callback: ?fn (context: ?*anyopaque, message: *Message) void = null,
+        on_message_context: ?*anyopaque = null,
 
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
@@ -75,7 +75,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
         /// Initialize the MessageBus for the given cluster, configuration and replica/client process.
         pub fn init(
-            allocator: *mem.Allocator,
+            allocator: mem.Allocator,
             cluster: u32,
             configuration: []std.net.Address,
             process: switch (process_type) {
@@ -124,7 +124,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
             // Pre-allocate enough memory to hold all possible connections in the client map.
             if (process_type == .replica) {
-                try bus.process.clients.ensureCapacity(allocator, config.connections_max);
+                try bus.process.clients.ensureTotalCapacity(allocator, config.connections_max);
             }
 
             return bus;
@@ -140,7 +140,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             assert(bus.on_message_context == null);
 
             bus.on_message_callback = struct {
-                fn wrapper(_context: ?*c_void, message: *Message) void {
+                fn wrapper(_context: ?*anyopaque, message: *Message) void {
                     on_message(@intToPtr(Context, @ptrToInt(_context)), message);
                 }
             }.wrapper;
@@ -148,13 +148,13 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
         }
 
         /// TODO This is required by the Client.
-        pub fn deinit(bus: *Self) void {}
+        pub fn deinit(_: *Self) void {}
 
         fn init_tcp(address: std.net.Address) !os.socket_t {
             const fd = try IO.openSocket(
                 address.any.family,
-                os.SOCK_STREAM,
-                os.IPPROTO_TCP,
+                os.SOCK.STREAM,
+                os.IPPROTO.TCP,
             );
             errdefer os.close(fd);
 
@@ -168,44 +168,44 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             if (config.tcp_rcvbuf > 0) rcvbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
-                    if (set(fd, os.SOL_SOCKET, os.SO_RCVBUFFORCE, config.tcp_rcvbuf)) |_| {
+                    if (set(fd, os.SOL.SOCKET, os.SO.RCVBUFFORCE, config.tcp_rcvbuf)) |_| {
                         break :rcvbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, os.SOL_SOCKET, os.SO_RCVBUF, config.tcp_rcvbuf);
+                try set(fd, os.SOL.SOCKET, os.SO.RCVBUF, config.tcp_rcvbuf);
             }
 
             // Set tcp send buffer size
             if (config.tcp_sndbuf > 0) sndbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
-                    if (set(fd, os.SOL_SOCKET, os.SO_SNDBUFFORCE, config.tcp_sndbuf)) |_| {
+                    if (set(fd, os.SOL.SOCKET, os.SO.SNDBUFFORCE, config.tcp_sndbuf)) |_| {
                         break :sndbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, os.SOL_SOCKET, os.SO_SNDBUF, config.tcp_sndbuf);
+                try set(fd, os.SOL.SOCKET, os.SO.SNDBUF, config.tcp_sndbuf);
             }
 
             // Set tcp keep alive
             if (config.tcp_keepalive) {
-                try set(fd, os.SOL_SOCKET, os.SO_KEEPALIVE, 1);
+                try set(fd, os.SOL.SOCKET, os.SO.KEEPALIVE, 1);
                 if (is_linux) {
-                    try set(fd, os.IPPROTO_TCP, os.TCP_KEEPIDLE, config.tcp_keepidle);
-                    try set(fd, os.IPPROTO_TCP, os.TCP_KEEPINTVL, config.tcp_keepintvl);
-                    try set(fd, os.IPPROTO_TCP, os.TCP_KEEPCNT, config.tcp_keepcnt);
+                    try set(fd, os.IPPROTO.TCP, os.TCP_KEEPIDLE, config.tcp_keepidle);
+                    try set(fd, os.IPPROTO.TCP, os.TCP_KEEPINTVL, config.tcp_keepintvl);
+                    try set(fd, os.IPPROTO.TCP, os.TCP_KEEPCNT, config.tcp_keepcnt);
                 }
             }
 
             // Set tcp user timeout
             if (config.tcp_user_timeout > 0) {
                 if (is_linux) {
-                    try set(fd, os.IPPROTO_TCP, os.TCP_USER_TIMEOUT, config.tcp_user_timeout);
+                    try set(fd, os.IPPROTO.TCP, os.TCP_USER_TIMEOUT, config.tcp_user_timeout);
                 }
             }
 
@@ -215,10 +215,10 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 // https://github.com/rust-lang/libc/search?q=TCP_NODELAY
                 // https://github.com/ziglang/zig/search?q=TCP_NODELAY
                 const TCP_NODELAY: u32 = 1;
-                try set(fd, os.IPPROTO_TCP, TCP_NODELAY, 1);
+                try set(fd, os.IPPROTO.TCP, TCP_NODELAY, 1);
             }
 
-            try set(fd, os.SOL_SOCKET, os.SO_REUSEADDR, 1);
+            try set(fd, os.SOL.SOCKET, os.SO.REUSEADDR, 1);
             try os.bind(fd, &address.any, address.getOsSockLen());
             try os.listen(fd, config.tcp_backlog);
 
@@ -279,7 +279,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 if (connection.state == .terminating) return;
             }
 
-            log.notice("all connections in use but not all replicas are connected, " ++
+            log.info("all connections in use but not all replicas are connected, " ++
                 "attempting to disconnect a client", .{});
             for (bus.connections) |*connection| {
                 if (connection.peer == .client) {
@@ -288,7 +288,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 }
             }
 
-            log.notice("failed to disconnect a client as no peer was a known client, " ++
+            log.info("failed to disconnect a client as no peer was a known client, " ++
                 "attempting to disconnect an unknown peer.", .{});
             for (bus.connections) |*connection| {
                 if (connection.peer == .unknown) {
@@ -330,6 +330,8 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
             completion: *IO.Completion,
             result: IO.AcceptError!os.socket_t,
         ) void {
+            _ = completion;
+
             comptime assert(process_type == .replica);
             assert(bus.process.accept_connection != null);
             defer bus.process.accept_connection = null;
@@ -448,7 +450,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 // The first replica's network address family determines the
                 // family for all other replicas:
                 const family = bus.configuration[0].any.family;
-                connection.fd = IO.openSocket(family, os.SOCK_STREAM, os.IPPROTO_TCP) catch return;
+                connection.fd = IO.openSocket(family, os.SOCK.STREAM, os.IPPROTO.TCP) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;
@@ -458,7 +460,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
 
                 var attempts = &bus.replicas_connect_attempts[replica];
                 const ms = vsr.exponential_backoff_with_jitter(
-                    &bus.prng,
+                    bus.prng.random(),
                     config.connection_delay_min_ms,
                     config.connection_delay_max_ms,
                     attempts.*,
@@ -589,7 +591,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 connection.send_queue.push(message.ref()) catch |err| switch (err) {
                     error.NoSpaceLeft => {
                         bus.unref(message);
-                        log.notice("message queue for peer {} full, dropping message", .{
+                        log.info("message queue for peer {} full, dropping message", .{
                             connection.peer,
                         });
                         return;
@@ -622,12 +624,12 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                         //
                         // TODO: Investigate differences between shutdown() on Linux vs Darwin.
                         // Especially how this interacts with our assumptions around pending I/O.
-                        const rc = os.system.shutdown(connection.fd, os.SHUT_RDWR);
+                        const rc = os.system.shutdown(connection.fd, os.SHUT.RDWR);
                         switch (os.errno(rc)) {
-                            0 => {},
-                            os.EBADF => unreachable,
-                            os.EINVAL => unreachable,
-                            os.ENOTCONN => {
+                            .SUCCESS => {},
+                            .BADF => unreachable,
+                            .INVAL => unreachable,
+                            .NOTCONN => {
                                 // This should only happen if we for some reason decide to terminate
                                 // a connection while a connect operation is in progress.
                                 // This is fine though, we simply continue with the logic below and
@@ -642,7 +644,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                                 //assert(connection.recv_submitted);
                                 //assert(!connection.send_submitted);
                             },
-                            os.ENOTSOCK => unreachable,
+                            .NOTSOCK => unreachable,
                             else => |err| os.unexpectedErrno(err) catch {},
                         }
                     },

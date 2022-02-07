@@ -1,5 +1,7 @@
-usingnamespace @import("tigerbeetle.zig");
-usingnamespace @import("demo.zig");
+const tb = @import("tigerbeetle.zig");
+const demo = @import("demo.zig");
+
+const Transfer = tb.Transfer;
 
 pub fn main() !void {
     const transfers = [_]Transfer{
@@ -16,5 +18,5 @@ pub fn main() !void {
         },
     };
 
-    try Demo.request(.create_transfers, transfers, Demo.on_create_transfers);
+    try demo.request(.create_transfers, transfers, demo.on_create_transfers);
 }

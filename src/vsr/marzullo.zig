@@ -117,6 +117,8 @@ pub const Marzullo = struct {
     /// upper bound. Alternatively, if such pathological overlaps are considered objectionable then
     /// they can be avoided by sorting the upper bound before the lower bound.
     fn less_than(context: void, a: Tuple, b: Tuple) bool {
+        _ = context;
+
         if (a.offset < b.offset) return true;
         if (b.offset < a.offset) return false;
         if (a.bound == .lower and b.bound == .upper) return true;
@@ -130,9 +132,10 @@ pub const Marzullo = struct {
 };
 
 fn test_smallest_interval(bounds: []const i64, smallest_interval: Marzullo.Interval) !void {
-    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena_allocator.deinit();
-    const allocator = &arena_allocator.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
 
     var tuples = try allocator.alloc(Marzullo.Tuple, bounds.len);
     for (bounds) |bound, i| {

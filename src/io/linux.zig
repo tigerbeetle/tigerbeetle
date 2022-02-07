@@ -52,15 +52,15 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
-    /// in the __kernel_timespec struct.
+    /// in the kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
         var current_ts: os.timespec = undefined;
-        os.clock_gettime(os.CLOCK_MONOTONIC, &current_ts) catch unreachable;
+        os.clock_gettime(os.CLOCK.MONOTONIC, &current_ts) catch unreachable;
         // The absolute CLOCK_MONOTONIC time after which we may return from this function:
-        const timeout_ts: os.__kernel_timespec = .{
+        const timeout_ts: os.linux.kernel_timespec = .{
             .tv_sec = current_ts.tv_sec,
             .tv_nsec = current_ts.tv_nsec + nanoseconds,
         };
@@ -73,7 +73,7 @@ pub const IO = struct {
                 break :blk self.ring.get_sqe() catch unreachable;
             };
             // Submit an absolute timeout that will be canceled if any other SQE completes first:
-            linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.IORING_TIMEOUT_ABS);
+            linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
             timeout_sqe.user_data = 0;
             timeouts += 1;
             // The amount of time this call will block is bounded by the timeout we just submitted:
@@ -125,7 +125,7 @@ pub const IO = struct {
                     // it was completed due to the completion of an event, in which case `cqe.res`
                     // would be 0. It is possible for multiple timeout operations to complete at the
                     // same time if the nanoseconds value passed to `run_for_ns()` is very short.
-                    if (-cqe.res == os.ETIME) etime.* = true;
+                    if (-cqe.res == @enumToInt(os.E.TIME)) etime.* = true;
                     continue;
                 }
                 const completion = @intToPtr(*Completion, @intCast(usize, cqe.user_data));
@@ -174,10 +174,8 @@ pub const IO = struct {
         result: i32 = undefined,
         next: ?*Completion = null,
         operation: Operation,
-        // This is one of the usecases for c_void outside of C code and as such c_void will
-        // be replaced with anyopaque eventually: https://github.com/ziglang/zig/issues/323
-        context: ?*c_void,
-        callback: fn (context: ?*c_void, completion: *Completion, result: *const c_void) void,
+        context: ?*anyopaque,
+        callback: fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
@@ -187,7 +185,7 @@ pub const IO = struct {
                         op.socket,
                         &op.address,
                         &op.address_size,
-                        os.SOCK_CLOEXEC,
+                        os.SOCK.CLOEXEC,
                     );
                 },
                 .close => |op| {
@@ -213,10 +211,10 @@ pub const IO = struct {
                     );
                 },
                 .recv => |op| {
-                    linux.io_uring_prep_recv(sqe, op.socket, op.buffer, os.MSG_NOSIGNAL);
+                    linux.io_uring_prep_recv(sqe, op.socket, op.buffer, os.MSG.NOSIGNAL);
                 },
                 .send => |op| {
-                    linux.io_uring_prep_send(sqe, op.socket, op.buffer, os.MSG_NOSIGNAL);
+                    linux.io_uring_prep_send(sqe, op.socket, op.buffer, os.MSG.NOSIGNAL);
                 },
                 .timeout => |*op| {
                     linux.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
@@ -236,184 +234,241 @@ pub const IO = struct {
         fn complete(completion: *Completion) void {
             switch (completion.operation) {
                 .accept => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {
-                            completion.io.enqueue(completion);
-                            return;
-                        },
-                        os.EAGAIN => error.WouldBlock,
-                        os.EBADF => error.FileDescriptorInvalid,
-                        os.ECONNABORTED => error.ConnectionAborted,
-                        os.EFAULT => unreachable,
-                        os.EINVAL => error.SocketNotListening,
-                        os.EMFILE => error.ProcessFdQuotaExceeded,
-                        os.ENFILE => error.SystemFdQuotaExceeded,
-                        os.ENOBUFS => error.SystemResources,
-                        os.ENOMEM => error.SystemResources,
-                        os.ENOTSOCK => error.FileDescriptorNotASocket,
-                        os.EOPNOTSUPP => error.OperationNotSupported,
-                        os.EPERM => error.PermissionDenied,
-                        os.EPROTO => error.ProtocolFailure,
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else @intCast(os.socket_t, completion.result);
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .AGAIN => error.WouldBlock,
+                                .BADF => error.FileDescriptorInvalid,
+                                .CONNABORTED => error.ConnectionAborted,
+                                .FAULT => unreachable,
+                                .INVAL => error.SocketNotListening,
+                                .MFILE => error.ProcessFdQuotaExceeded,
+                                .NFILE => error.SystemFdQuotaExceeded,
+                                .NOBUFS => error.SystemResources,
+                                .NOMEM => error.SystemResources,
+                                .NOTSOCK => error.FileDescriptorNotASocket,
+                                .OPNOTSUPP => error.OperationNotSupported,
+                                .PERM => error.PermissionDenied,
+                                .PROTO => error.ProtocolFailure,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(os.socket_t, completion.result);
+                        }
+                    };
                     completion.callback(completion.context, completion, &result);
                 },
                 .close => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
-                        os.EBADF => error.FileDescriptorInvalid,
-                        os.EDQUOT => error.DiskQuota,
-                        os.EIO => error.InputOutput,
-                        os.ENOSPC => error.NoSpaceLeft,
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else assert(completion.result == 0);
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
+                                .BADF => error.FileDescriptorInvalid,
+                                .DQUOT => error.DiskQuota,
+                                .IO => error.InputOutput,
+                                .NOSPC => error.NoSpaceLeft,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            assert(completion.result == 0);
+                        }
+                    };
                     completion.callback(completion.context, completion, &result);
                 },
                 .connect => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {
-                            completion.io.enqueue(completion);
-                            return;
-                        },
-                        os.EACCES => error.AccessDenied,
-                        os.EADDRINUSE => error.AddressInUse,
-                        os.EADDRNOTAVAIL => error.AddressNotAvailable,
-                        os.EAFNOSUPPORT => error.AddressFamilyNotSupported,
-                        os.EAGAIN, os.EINPROGRESS => error.WouldBlock,
-                        os.EALREADY => error.OpenAlreadyInProgress,
-                        os.EBADF => error.FileDescriptorInvalid,
-                        os.ECONNREFUSED => error.ConnectionRefused,
-                        os.ECONNRESET => error.ConnectionResetByPeer,
-                        os.EFAULT => unreachable,
-                        os.EISCONN => error.AlreadyConnected,
-                        os.ENETUNREACH => error.NetworkUnreachable,
-                        os.ENOENT => error.FileNotFound,
-                        os.ENOTSOCK => error.FileDescriptorNotASocket,
-                        os.EPERM => error.PermissionDenied,
-                        os.EPROTOTYPE => error.ProtocolNotSupported,
-                        os.ETIMEDOUT => error.ConnectionTimedOut,
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else assert(completion.result == 0);
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .ACCES => error.AccessDenied,
+                                .ADDRINUSE => error.AddressInUse,
+                                .ADDRNOTAVAIL => error.AddressNotAvailable,
+                                .AFNOSUPPORT => error.AddressFamilyNotSupported,
+                                .AGAIN, .INPROGRESS => error.WouldBlock,
+                                .ALREADY => error.OpenAlreadyInProgress,
+                                .BADF => error.FileDescriptorInvalid,
+                                .CONNREFUSED => error.ConnectionRefused,
+                                .CONNRESET => error.ConnectionResetByPeer,
+                                .FAULT => unreachable,
+                                .ISCONN => error.AlreadyConnected,
+                                .NETUNREACH => error.NetworkUnreachable,
+                                .NOENT => error.FileNotFound,
+                                .NOTSOCK => error.FileDescriptorNotASocket,
+                                .PERM => error.PermissionDenied,
+                                .PROTOTYPE => error.ProtocolNotSupported,
+                                .TIMEDOUT => error.ConnectionTimedOut,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            assert(completion.result == 0);
+                        }
+                    };
                     completion.callback(completion.context, completion, &result);
                 },
                 .fsync => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {
-                            completion.io.enqueue(completion);
-                            return;
-                        },
-                        os.EBADF => error.FileDescriptorInvalid,
-                        os.EDQUOT => error.DiskQuota,
-                        os.EINVAL => error.ArgumentsInvalid,
-                        os.EIO => error.InputOutput,
-                        os.ENOSPC => error.NoSpaceLeft,
-                        os.EROFS => error.ReadOnlyFileSystem,
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else assert(completion.result == 0);
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .BADF => error.FileDescriptorInvalid,
+                                .DQUOT => error.DiskQuota,
+                                .INVAL => error.ArgumentsInvalid,
+                                .IO => error.InputOutput,
+                                .NOSPC => error.NoSpaceLeft,
+                                .ROFS => error.ReadOnlyFileSystem,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            assert(completion.result == 0);
+                        }
+                    };
                     completion.callback(completion.context, completion, &result);
                 },
                 .read => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {
-                            completion.io.enqueue(completion);
-                            return;
-                        },
-                        os.EAGAIN => error.WouldBlock,
-                        os.EBADF => error.NotOpenForReading,
-                        os.ECONNRESET => error.ConnectionResetByPeer,
-                        os.EFAULT => unreachable,
-                        os.EINVAL => error.Alignment,
-                        os.EIO => error.InputOutput,
-                        os.EISDIR => error.IsDir,
-                        os.ENOBUFS => error.SystemResources,
-                        os.ENOMEM => error.SystemResources,
-                        os.ENXIO => error.Unseekable,
-                        os.EOVERFLOW => error.Unseekable,
-                        os.ESPIPE => error.Unseekable,
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else @intCast(usize, completion.result);
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .AGAIN => error.WouldBlock,
+                                .BADF => error.NotOpenForReading,
+                                .CONNRESET => error.ConnectionResetByPeer,
+                                .FAULT => unreachable,
+                                .INVAL => error.Alignment,
+                                .IO => error.InputOutput,
+                                .ISDIR => error.IsDir,
+                                .NOBUFS => error.SystemResources,
+                                .NOMEM => error.SystemResources,
+                                .NXIO => error.Unseekable,
+                                .OVERFLOW => error.Unseekable,
+                                .SPIPE => error.Unseekable,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(usize, completion.result);
+                        }
+                    };
                     completion.callback(completion.context, completion, &result);
                 },
                 .recv => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {
-                            completion.io.enqueue(completion);
-                            return;
-                        },
-                        os.EAGAIN => error.WouldBlock,
-                        os.EBADF => error.FileDescriptorInvalid,
-                        os.ECONNREFUSED => error.ConnectionRefused,
-                        os.EFAULT => unreachable,
-                        os.EINVAL => unreachable,
-                        os.ENOMEM => error.SystemResources,
-                        os.ENOTCONN => error.SocketNotConnected,
-                        os.ENOTSOCK => error.FileDescriptorNotASocket,
-                        os.ECONNRESET => error.ConnectionResetByPeer,
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else @intCast(usize, completion.result);
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .AGAIN => error.WouldBlock,
+                                .BADF => error.FileDescriptorInvalid,
+                                .CONNREFUSED => error.ConnectionRefused,
+                                .FAULT => unreachable,
+                                .INVAL => unreachable,
+                                .NOMEM => error.SystemResources,
+                                .NOTCONN => error.SocketNotConnected,
+                                .NOTSOCK => error.FileDescriptorNotASocket,
+                                .CONNRESET => error.ConnectionResetByPeer,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(usize, completion.result);
+                        }
+                    };
                     completion.callback(completion.context, completion, &result);
                 },
                 .send => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {
-                            completion.io.enqueue(completion);
-                            return;
-                        },
-                        os.EACCES => error.AccessDenied,
-                        os.EAGAIN => error.WouldBlock,
-                        os.EALREADY => error.FastOpenAlreadyInProgress,
-                        os.EAFNOSUPPORT => error.AddressFamilyNotSupported,
-                        os.EBADF => error.FileDescriptorInvalid,
-                        os.ECONNRESET => error.ConnectionResetByPeer,
-                        os.EDESTADDRREQ => unreachable,
-                        os.EFAULT => unreachable,
-                        os.EINVAL => unreachable,
-                        os.EISCONN => unreachable,
-                        os.EMSGSIZE => error.MessageTooBig,
-                        os.ENOBUFS => error.SystemResources,
-                        os.ENOMEM => error.SystemResources,
-                        os.ENOTCONN => error.SocketNotConnected,
-                        os.ENOTSOCK => error.FileDescriptorNotASocket,
-                        os.EOPNOTSUPP => error.OperationNotSupported,
-                        os.EPIPE => error.BrokenPipe,
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else @intCast(usize, completion.result);
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .ACCES => error.AccessDenied,
+                                .AGAIN => error.WouldBlock,
+                                .ALREADY => error.FastOpenAlreadyInProgress,
+                                .AFNOSUPPORT => error.AddressFamilyNotSupported,
+                                .BADF => error.FileDescriptorInvalid,
+                                .CONNRESET => error.ConnectionResetByPeer,
+                                .DESTADDRREQ => unreachable,
+                                .FAULT => unreachable,
+                                .INVAL => unreachable,
+                                .ISCONN => unreachable,
+                                .MSGSIZE => error.MessageTooBig,
+                                .NOBUFS => error.SystemResources,
+                                .NOMEM => error.SystemResources,
+                                .NOTCONN => error.SocketNotConnected,
+                                .NOTSOCK => error.FileDescriptorNotASocket,
+                                .OPNOTSUPP => error.OperationNotSupported,
+                                .PIPE => error.BrokenPipe,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(usize, completion.result);
+                        }
+                    };
                     completion.callback(completion.context, completion, &result);
                 },
                 .timeout => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {
+                    assert(completion.result < 0);
+                    const result = switch (@intToEnum(os.E, -completion.result)) {
+                        .INTR => {
                             completion.io.enqueue(completion);
                             return;
                         },
-                        os.ECANCELED => error.Canceled,
-                        os.ETIME => {}, // A success.
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else unreachable;
+                        .CANCELED => error.Canceled,
+                        .TIME => {}, // A success.
+                        else => |errno| os.unexpectedErrno(errno),
+                    };
                     completion.callback(completion.context, completion, &result);
                 },
                 .write => {
-                    const result = if (completion.result < 0) switch (-completion.result) {
-                        os.EINTR => {
-                            completion.io.enqueue(completion);
-                            return;
-                        },
-                        os.EAGAIN => error.WouldBlock,
-                        os.EBADF => error.NotOpenForWriting,
-                        os.EDESTADDRREQ => error.NotConnected,
-                        os.EDQUOT => error.DiskQuota,
-                        os.EFAULT => unreachable,
-                        os.EFBIG => error.FileTooBig,
-                        os.EINVAL => error.Alignment,
-                        os.EIO => error.InputOutput,
-                        os.ENOSPC => error.NoSpaceLeft,
-                        os.ENXIO => error.Unseekable,
-                        os.EOVERFLOW => error.Unseekable,
-                        os.EPERM => error.AccessDenied,
-                        os.EPIPE => error.BrokenPipe,
-                        os.ESPIPE => error.Unseekable,
-                        else => |errno| os.unexpectedErrno(@intCast(usize, errno)),
-                    } else @intCast(usize, completion.result);
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .AGAIN => error.WouldBlock,
+                                .BADF => error.NotOpenForWriting,
+                                .DESTADDRREQ => error.NotConnected,
+                                .DQUOT => error.DiskQuota,
+                                .FAULT => unreachable,
+                                .FBIG => error.FileTooBig,
+                                .INVAL => error.Alignment,
+                                .IO => error.InputOutput,
+                                .NOSPC => error.NoSpaceLeft,
+                                .NXIO => error.Unseekable,
+                                .OVERFLOW => error.Unseekable,
+                                .PERM => error.AccessDenied,
+                                .PIPE => error.BrokenPipe,
+                                .SPIPE => error.Unseekable,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(usize, completion.result);
+                        }
+                    };
                     completion.callback(completion.context, completion, &result);
                 },
             }
@@ -451,7 +506,7 @@ pub const IO = struct {
             buffer: []const u8,
         },
         timeout: struct {
-            timespec: os.__kernel_timespec,
+            timespec: os.linux.kernel_timespec,
         },
         write: struct {
             fd: os.fd_t,
@@ -490,7 +545,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -532,7 +587,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -582,7 +637,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -625,7 +680,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -671,7 +726,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -716,7 +771,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -766,7 +821,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -802,7 +857,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -847,11 +902,13 @@ pub const IO = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
+        _ = callback;
+
         completion.* = .{
             .io = self,
             .context = context,
             .callback = struct {
-                fn wrapper(ctx: ?*c_void, comp: *Completion, res: *const c_void) void {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
