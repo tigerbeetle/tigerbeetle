@@ -45,7 +45,7 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
 
     const allocator = std.heap.c_allocator;
     var global = Globals.init(allocator, env) catch {
-        std.log.emerg("Failed to initialise environment.\n", .{});
+        std.log.err("Failed to initialise environment.\n", .{});
         return null;
     };
     errdefer global.deinit();
@@ -57,7 +57,7 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     // state.
     translate.set_instance_data(
         env,
-        @ptrCast(*c_void, @alignCast(@alignOf(u8), global)),
+        @ptrCast(*anyopaque, @alignCast(@alignOf(u8), global)),
         Globals.destroy,
     ) catch {
         global.deinit();
@@ -68,11 +68,11 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
 }
 
 const Globals = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     io: IO,
     napi_undefined: c.napi_value,
 
-    pub fn init(allocator: *std.mem.Allocator, env: c.napi_env) !*Globals {
+    pub fn init(allocator: std.mem.Allocator, env: c.napi_env) !*Globals {
         const self = try allocator.create(Globals);
         errdefer allocator.destroy(self);
 
@@ -93,7 +93,7 @@ const Globals = struct {
         };
         errdefer self.io.deinit();
 
-        if (c.napi_get_undefined(env, &self.napi_undefined) != .napi_ok) {
+        if (c.napi_get_undefined(env, &self.napi_undefined) != c.napi_ok) {
             return translate.throw(env, "Failed to capture the value of \"undefined\".");
         }
 
@@ -105,13 +105,16 @@ const Globals = struct {
         self.allocator.destroy(self);
     }
 
-    pub fn destroy(env: c.napi_env, data: ?*c_void, hint: ?*c_void) callconv(.C) void {
+    pub fn destroy(env: c.napi_env, data: ?*anyopaque, hint: ?*anyopaque) callconv(.C) void {
+        _ = env;
+        _ = hint;
+
         const self = globalsCast(data.?);
         self.deinit();
     }
 };
 
-fn globalsCast(globals_raw: *c_void) *Globals {
+fn globalsCast(globals_raw: *anyopaque) *Globals {
     return @ptrCast(*Globals, @alignCast(@alignOf(Globals), globals_raw));
 }
 
@@ -123,7 +126,7 @@ const Context = struct {
 
     fn create(
         env: c.napi_env,
-        allocator: *std.mem.Allocator,
+        allocator: std.mem.Allocator,
         io: *IO,
         cluster: u32,
         addresses_raw: []const u8,
@@ -163,7 +166,7 @@ const Context = struct {
     }
 };
 
-fn contextCast(context_raw: *c_void) !*Context {
+fn contextCast(context_raw: *anyopaque) !*Context {
     return @ptrCast(*Context, @alignCast(@alignOf(Context), context_raw));
 }
 
@@ -522,7 +525,7 @@ fn encode_napi_results_array(
 fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 1;
     var argv: [1]c.napi_value = undefined;
-    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
     if (argc != 1) translate.throw(
@@ -555,7 +558,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 4;
     var argv: [4]c.napi_value = undefined;
-    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
 
@@ -609,7 +612,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
 fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 4;
     var argv: [4]c.napi_value = undefined;
-    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
 
@@ -730,11 +733,10 @@ fn on_result(user_data: u128, operation: Operation, results: Client.Error![]cons
 fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 1;
     var argv: [1]c.napi_value = undefined;
-    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
 
-    const allocator = std.heap.c_allocator;
     if (argc != 1) translate.throw(
         env,
         "Function tick() requires 1 argument exactly.",
@@ -760,7 +762,7 @@ fn tick(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     var argc: usize = 1;
     var argv: [1]c.napi_value = undefined;
-    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != .napi_ok) {
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
 
