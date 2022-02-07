@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.clock);
+const fmt = std.fmt;
 
 const config = @import("../config.zig");
 
@@ -95,7 +96,7 @@ pub fn Clock(comptime Time: type) type {
         synchronization_disabled: bool,
 
         pub fn init(
-            allocator: *std.mem.Allocator,
+            allocator: std.mem.Allocator,
             /// The size of the cluster, i.e. the number of clock sources (including this replica).
             replica_count: u8,
             replica: u8,
@@ -133,7 +134,7 @@ pub fn Clock(comptime Time: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.epoch.sources);
             allocator.free(self.window.sources);
             allocator.free(self.marzullo_tuples);
@@ -273,7 +274,7 @@ pub fn Clock(comptime Time: type) type {
             // Expire the current epoch if successive windows failed to synchronize:
             // Gradual clock drift prevents us from using an epoch for more than a few seconds.
             if (self.epoch.elapsed(self) >= epoch_max) {
-                log.alert(
+                log.err(
                     "{}: no agreement on cluster time (partitioned or too many clock faults)",
                     .{self.replica},
                 );
@@ -320,13 +321,13 @@ pub fn Clock(comptime Time: type) type {
                 // We took too long to synchronize the window, expire stale samples...
                 const sources_sampled = self.window.sources_sampled();
                 if (sources_sampled <= @divTrunc(self.window.sources.len, 2)) {
-                    log.crit("{}: synchronization failed, partitioned (sources={} samples={})", .{
+                    log.err("{}: synchronization failed, partitioned (sources={} samples={})", .{
                         self.replica,
                         sources_sampled,
                         self.window.samples,
                     });
                 } else {
-                    log.crit("{}: synchronization failed, no agreement (sources={} samples={})", .{
+                    log.err("{}: synchronization failed, no agreement (sources={} samples={})", .{
                         self.replica,
                         sources_sampled,
                         self.window.samples,
@@ -377,9 +378,9 @@ pub fn Clock(comptime Time: type) type {
                 self.replica,
                 new_interval.sources_true,
                 self.epoch.sources.len,
-                fmtDurationSigned(new_interval.lower_bound),
-                fmtDurationSigned(new_interval.upper_bound),
-                fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
+                fmt.fmtDurationSigned(new_interval.lower_bound),
+                fmt.fmtDurationSigned(new_interval.upper_bound),
+                fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
             });
 
             const elapsed = @intCast(i64, self.epoch.elapsed(self));
@@ -393,12 +394,12 @@ pub fn Clock(comptime Time: type) type {
                 if (delta < std.time.ns_per_ms) {
                     log.info("{}: system time is {} behind", .{
                         self.replica,
-                        fmtDurationSigned(delta),
+                        fmt.fmtDurationSigned(delta),
                     });
                 } else {
                     log.err("{}: system time is {} behind, clamping system time to cluster time", .{
                         self.replica,
-                        fmtDurationSigned(delta),
+                        fmt.fmtDurationSigned(delta),
                     });
                 }
             } else {
@@ -406,12 +407,12 @@ pub fn Clock(comptime Time: type) type {
                 if (delta < std.time.ns_per_ms) {
                     log.info("{}: system time is {} ahead", .{
                         self.replica,
-                        fmtDurationSigned(delta),
+                        fmt.fmtDurationSigned(delta),
                     });
                 } else {
                     log.err("{}: system time is {} ahead, clamping system time to cluster time", .{
                         self.replica,
-                        fmtDurationSigned(delta),
+                        fmt.fmtDurationSigned(delta),
                     });
                 }
             }
@@ -450,25 +451,6 @@ pub fn Clock(comptime Time: type) type {
     };
 }
 
-/// Return a Formatter for a signed number of nanoseconds according to magnitude:
-/// [#y][#w][#d][#h][#m]#[.###][n|u|m]s
-pub fn fmtDurationSigned(ns: i64) std.fmt.Formatter(formatDurationSigned) {
-    return .{ .data = ns };
-}
-
-fn formatDurationSigned(
-    ns: i64,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    if (ns < 0) {
-        try writer.print("-{}", .{std.fmt.fmtDuration(@intCast(u64, -ns))});
-    } else {
-        try writer.print("{}", .{std.fmt.fmtDuration(@intCast(u64, ns))});
-    }
-}
-
 const testing = std.testing;
 const OffsetType = @import("../test/time.zig").OffsetType;
 const DeterministicTime = @import("../test/time.zig").Time;
@@ -482,7 +464,7 @@ const ClockUnitTestContainer = struct {
     learn_interval: u64 = 5,
 
     pub fn init(
-        allocator: *std.mem.Allocator,
+        allocator: std.mem.Allocator,
         offset_type: OffsetType,
         offset_coefficient_A: i64,
         offset_coefficient_B: i64,
@@ -581,7 +563,7 @@ const ClockUnitTestContainer = struct {
 };
 
 test "ideal clocks get clamped to cluster time" {
-    std.testing.log_level = .crit;
+    std.testing.log_level = .err;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = &arena.allocator;
@@ -646,7 +628,10 @@ const ClockSimulator = struct {
         clock_simulator: *ClockSimulator,
 
         /// PacketSimulator requires this function, but we don't actually have anything to deinit.
-        pub fn deinit(packet: *const Packet, path: Path) void {}
+        pub fn deinit(packet: *const Packet, path: Path) void {
+            _ = packet;
+            _ = path;
+        }
     };
 
     const Options = struct {
@@ -655,14 +640,14 @@ const ClockSimulator = struct {
         network_options: PacketSimulatorOptions,
     };
 
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     options: Options,
     ticks: u64 = 0,
     network: PacketSimulator(Packet),
     clocks: []DeterministicClock,
     prng: std.rand.DefaultPrng,
 
-    pub fn init(allocator: *std.mem.Allocator, options: Options) !ClockSimulator {
+    pub fn init(allocator: std.mem.Allocator, options: Options) !ClockSimulator {
         var self = ClockSimulator{
             .allocator = allocator,
             .options = options,
@@ -753,13 +738,12 @@ const ClockSimulator = struct {
 };
 
 test "fuzz test" {
-    std.testing.log_level = .emerg; // silence all clock logs
+    std.testing.log_level = .err; // silence all clock logs
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_allocator.deinit();
     const allocator = &arena_allocator.allocator;
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
-    const test_delta_time: u64 = std.time.ns_per_s / 2;
     const SystemTime = @import("../time.zig").Time;
     var system_time = SystemTime{};
     var seed = @intCast(u64, system_time.realtime());
@@ -787,7 +771,6 @@ test "fuzz test" {
     while (simulator.ticks < ticks_max) {
         simulator.tick();
 
-        const test_time: u64 = simulator.ticks * test_delta_time;
         for (simulator.clocks) |*clock, index| {
             var offset = clock.time.offset(simulator.ticks);
             var abs_offset = if (offset >= 0) @intCast(u64, offset) else @intCast(u64, -offset);
@@ -818,11 +801,11 @@ test "fuzz test" {
         clock_count,
     });
     std.debug.print("absolute clock offsets with respect to test time:\n", .{});
-    std.debug.print("maximum={}\n", .{fmtDurationSigned(@intCast(i64, max_clock_offset))});
-    std.debug.print("minimum={}\n", .{fmtDurationSigned(@intCast(i64, min_clock_offset))});
+    std.debug.print("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_clock_offset))});
+    std.debug.print("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_clock_offset))});
     std.debug.print("\nabsolute synchronization errors between clocks:\n", .{});
-    std.debug.print("maximum={}\n", .{fmtDurationSigned(@intCast(i64, max_sync_error))});
-    std.debug.print("minimum={}\n", .{fmtDurationSigned(@intCast(i64, min_sync_error))});
+    std.debug.print("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_sync_error))});
+    std.debug.print("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_sync_error))});
     std.debug.print("clock ticks without synchronization={d}\n", .{
         clock_ticks_without_synchronization,
     });

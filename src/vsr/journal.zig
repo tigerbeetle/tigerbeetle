@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const math = std.math;
@@ -120,7 +121,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         recovering: bool = false,
 
         pub fn init(
-            allocator: *Allocator,
+            allocator: Allocator,
             storage: *Storage,
             replica: u8,
             size: u64,
@@ -201,7 +202,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self, allocator: *Allocator) void {
+        pub fn deinit(self: *Self, allocator: Allocator) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
 
             self.dirty.deinit(allocator);
@@ -278,7 +279,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return self.entry_for_op(header.op + 1);
         }
 
-        pub fn next_offset(self: *Self, header: *const Header) u64 {
+        pub fn next_offset(header: *const Header) u64 {
             // TODO Snapshots
             assert(header.command == .prepare);
             return header.offset + vsr.sector_ceil(header.size);
@@ -860,7 +861,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const sectors = message.buffer[0..vsr.sector_ceil(message.header.size)];
             assert(message.header.offset + sectors.len <= self.size_circular_buffer);
 
-            if (std.builtin.mode == .Debug) {
+            if (builtin.mode == .Debug) {
                 // Assert that any sector padding has already been zeroed:
                 var sum_of_sector_padding_bytes: u32 = 0;
                 for (sectors[message.header.size..]) |byte| sum_of_sector_padding_bytes += byte;
@@ -1227,7 +1228,7 @@ pub const BitSet = struct {
     /// The number of bits set (updated incrementally as bits are set or cleared):
     len: u64 = 0,
 
-    fn init(allocator: *Allocator, count: u64) !BitSet {
+    fn init(allocator: Allocator, count: u64) !BitSet {
         const bits = try allocator.alloc(bool, count);
         errdefer allocator.free(bits);
         std.mem.set(bool, bits, false);
@@ -1235,7 +1236,7 @@ pub const BitSet = struct {
         return BitSet{ .bits = bits };
     }
 
-    fn deinit(self: *BitSet, allocator: *Allocator) void {
+    fn deinit(self: *BitSet, allocator: Allocator) void {
         allocator.free(self.bits);
     }
 

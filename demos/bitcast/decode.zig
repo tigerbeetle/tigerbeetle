@@ -26,7 +26,7 @@ pub fn main() !void {
     const transfer = @bitCast(Transfer, bytes);
 
     // Log to the console... formatting the ID as lower case hexadecimal:
-    std.debug.warn("id={x} flags={} amount={} timeout={} timestamp={}\n", .{
+    std.debug.print("id={x} flags={} amount={} timeout={} timestamp={}\n", .{
         transfer.id,
         transfer.flags,
         transfer.amount,

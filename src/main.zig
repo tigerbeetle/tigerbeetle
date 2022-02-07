@@ -20,12 +20,20 @@ const vsr = @import("vsr.zig");
 const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
 
 pub fn main() !void {
-    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const arena = &arena_allocator.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-    switch (cli.parse_args(arena)) {
-        .init => |args| try init(arena, args.cluster, args.replica, args.dir_fd),
-        .start => |args| try start(arena, args.cluster, args.replica, args.addresses, args.dir_fd),
+    const allocator = arena.allocator();
+
+    switch (cli.parse_args(allocator)) {
+        .init => |args| try init(args.cluster, args.replica, args.dir_fd),
+        .start => |args| try start(
+            allocator,
+            args.cluster,
+            args.replica,
+            args.addresses,
+            args.dir_fd,
+        ),
     }
 }
 
@@ -34,7 +42,7 @@ const filename_fmt = "cluster_{d:0>10}_replica_{d:0>3}.tigerbeetle";
 const filename_len = fmt.count(filename_fmt, .{ 0, 0 });
 
 /// Create a .tigerbeetle data file for the given args and exit
-fn init(arena: *mem.Allocator, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
+fn init(cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
     // Add 1 for the terminating null byte
     var buffer: [filename_len + 1]u8 = undefined;
     const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica }) catch unreachable;
@@ -53,7 +61,7 @@ fn init(arena: *mem.Allocator, cluster: u32, replica: u8, dir_fd: os.fd_t) !void
 
 /// Run as a replica server defined by the given args
 fn start(
-    arena: *mem.Allocator,
+    allocator: mem.Allocator,
     cluster: u32,
     replica_index: u8,
     addresses: []std.net.Address,
@@ -75,14 +83,14 @@ fn start(
     );
     var io = try IO.init(128, 0);
     var state_machine = try StateMachine.init(
-        arena,
+        allocator,
         config.accounts_max,
         config.transfers_max,
         config.commits_max,
     );
     var storage = try Storage.init(config.journal_size_max, storage_fd, &io);
     var message_bus = try MessageBus.init(
-        arena,
+        allocator,
         cluster,
         addresses,
         replica_index,
@@ -90,7 +98,7 @@ fn start(
     );
     var time: Time = .{};
     var replica = try Replica.init(
-        arena,
+        allocator,
         cluster,
         @intCast(u8, addresses.len),
         replica_index,

@@ -7,8 +7,6 @@ const assert = std.debug.assert;
 /// This should be the fastest candidate after io_uring, faster than Zig's evented I/O on Linux
 /// since it does not context switch to an async I/O thread.
 pub fn main() !void {
-    if (std.builtin.os.tag != .linux) return error.LinuxRequired;
-
     const size: usize = 256 * 1024 * 1024;
     const page: usize = 4096;
     const runs: usize = 5;

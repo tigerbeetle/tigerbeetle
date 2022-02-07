@@ -55,8 +55,10 @@ pub const Storage = struct {
         /// Tick at which this read is considered "completed" and the callback should be called.
         done_at_tick: u64,
 
-        fn less_than(storage: *Read, other: *Read) math.Order {
-            return math.order(storage.done_at_tick, other.done_at_tick);
+        fn less_than(context: void, a: *Read, b: *Read) math.Order {
+            _ = context;
+
+            return math.order(a.done_at_tick, b.done_at_tick);
         }
     };
 
@@ -67,8 +69,10 @@ pub const Storage = struct {
         /// Tick at which this write is considered "completed" and the callback should be called.
         done_at_tick: u64,
 
-        fn less_than(storage: *Write, other: *Write) math.Order {
-            return math.order(storage.done_at_tick, other.done_at_tick);
+        fn less_than(context: void, a: *Write, b: *Write) math.Order {
+            _ = context;
+
+            return math.order(a.done_at_tick, b.done_at_tick);
         }
     };
 
@@ -92,13 +96,13 @@ pub const Storage = struct {
     // allow faults in certian areas which differ between replicas.
     faulty_areas: FaultyAreas,
 
-    reads: std.PriorityQueue(*Storage.Read),
-    writes: std.PriorityQueue(*Storage.Write),
+    reads: std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
+    writes: std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
 
     pub fn init(
-        allocator: *mem.Allocator,
+        allocator: mem.Allocator,
         size: u64,
         options: Storage.Options,
         replica_index: u8,
@@ -112,13 +116,13 @@ pub const Storage = struct {
         // TODO: random data
         mem.set(u8, memory, 0);
 
-        var reads = std.PriorityQueue(*Storage.Read).init(allocator, Storage.Read.less_than);
+        var reads = std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than).init(allocator, {});
         errdefer reads.deinit();
-        try reads.ensureCapacity(config.io_depth_read);
+        try reads.ensureTotalCapacity(config.io_depth_read);
 
-        var writes = std.PriorityQueue(*Storage.Write).init(allocator, Storage.Write.less_than);
+        var writes = std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
         errdefer writes.deinit();
-        try writes.ensureCapacity(config.io_depth_write);
+        try writes.ensureTotalCapacity(config.io_depth_write);
 
         return Storage{
             .memory = memory,
@@ -138,7 +142,7 @@ pub const Storage = struct {
         storage.writes.len = 0;
     }
 
-    pub fn deinit(storage: *Storage, allocator: *mem.Allocator) void {
+    pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
         allocator.free(storage.memory);
         storage.reads.deinit();
         storage.writes.deinit();
@@ -186,7 +190,7 @@ pub const Storage = struct {
             // Randomly corrupt one of the faulty sectors the read targeted
             // TODO: inject more realistic and varied storage faults as described above.
             const sector_count = @divExact(faulty.len, config.sector_size);
-            const faulty_sector = storage.prng.random.uintLessThan(u64, sector_count);
+            const faulty_sector = storage.prng.random().uintLessThan(u64, sector_count);
             const faulty_sector_offset = faulty_sector * config.sector_size;
             const faulty_sector_bytes = faulty[faulty_sector_offset..][0..config.sector_size];
 
@@ -195,7 +199,7 @@ pub const Storage = struct {
                 storage.replica_index,
             });
 
-            storage.prng.random.bytes(faulty_sector_bytes);
+            storage.prng.random().bytes(faulty_sector_bytes);
         }
 
         mem.copy(u8, read.buffer, storage.memory[read.offset..][0..read.buffer.len]);
@@ -230,7 +234,7 @@ pub const Storage = struct {
             // Randomly corrupt one of the faulty sectors the write targeted
             // TODO: inject more realistic and varied storage faults as described above.
             const sector_count = @divExact(faulty.len, config.sector_size);
-            const faulty_sector = storage.prng.random.uintLessThan(u64, sector_count);
+            const faulty_sector = storage.prng.random().uintLessThan(u64, sector_count);
             const faulty_sector_offset = faulty_sector * config.sector_size;
             const faulty_sector_bytes = faulty[faulty_sector_offset..][0..config.sector_size];
 
@@ -239,7 +243,7 @@ pub const Storage = struct {
                 storage.replica_index,
             });
 
-            storage.prng.random.bytes(faulty_sector_bytes);
+            storage.prng.random().bytes(faulty_sector_bytes);
         }
 
         write.callback(write);
@@ -265,18 +269,18 @@ pub const Storage = struct {
     }
 
     fn latency(storage: *Storage, min: u64, mean: u64) u64 {
-        return min + @floatToInt(u64, @intToFloat(f64, mean - min) * storage.prng.random.floatExp(f64));
+        return min + @floatToInt(u64, @intToFloat(f64, mean - min) * storage.prng.random().floatExp(f64));
     }
 
     /// Return true with probability x/100.
     fn x_in_100(storage: *Storage, x: u8) bool {
         assert(x <= 100);
-        return x > storage.prng.random.uintLessThan(u8, 100);
+        return x > storage.prng.random().uintLessThan(u8, 100);
     }
 
     /// The return value is a slice into the provided out array.
     pub fn generate_faulty_areas(
-        prng: *std.rand.Random,
+        prng: std.rand.Random,
         size: u64,
         replica_count: u8,
         out: *[config.replicas_max]FaultyAreas,

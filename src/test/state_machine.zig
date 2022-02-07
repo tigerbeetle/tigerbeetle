@@ -24,6 +24,10 @@ pub const StateMachine = struct {
         operation: Operation,
         input: []u8,
     ) void {
+        _ = state_machine;
+        _ = realtime;
+        _ = operation;
+        _ = input;
         // TODO: use realtime in some way to test the system
     }
 
