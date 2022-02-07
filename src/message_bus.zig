@@ -164,7 +164,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 }
             }.set;
 
-            // Set tcp recv buffer size
             if (config.tcp_rcvbuf > 0) rcvbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
@@ -178,7 +177,6 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 try set(fd, os.SOL.SOCKET, os.SO.RCVBUF, config.tcp_rcvbuf);
             }
 
-            // Set tcp send buffer size
             if (config.tcp_sndbuf > 0) sndbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
@@ -192,30 +190,26 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                 try set(fd, os.SOL.SOCKET, os.SO.SNDBUF, config.tcp_sndbuf);
             }
 
-            // Set tcp keep alive
             if (config.tcp_keepalive) {
                 try set(fd, os.SOL.SOCKET, os.SO.KEEPALIVE, 1);
                 if (is_linux) {
-                    try set(fd, os.IPPROTO.TCP, os.TCP_KEEPIDLE, config.tcp_keepidle);
-                    try set(fd, os.IPPROTO.TCP, os.TCP_KEEPINTVL, config.tcp_keepintvl);
-                    try set(fd, os.IPPROTO.TCP, os.TCP_KEEPCNT, config.tcp_keepcnt);
+                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPIDLE, config.tcp_keepidle);
+                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPINTVL, config.tcp_keepintvl);
+                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPCNT, config.tcp_keepcnt);
                 }
             }
 
-            // Set tcp user timeout
             if (config.tcp_user_timeout > 0) {
                 if (is_linux) {
-                    try set(fd, os.IPPROTO.TCP, os.TCP_USER_TIMEOUT, config.tcp_user_timeout);
+                    try set(fd, os.IPPROTO.TCP, os.TCP.USER_TIMEOUT, config.tcp_user_timeout);
                 }
             }
 
             // Set tcp no-delay
             if (config.tcp_nodelay) {
-                // TODO: use the version in the zig standard library when upgrading to 0.9
-                // https://github.com/rust-lang/libc/search?q=TCP_NODELAY
-                // https://github.com/ziglang/zig/search?q=TCP_NODELAY
-                const TCP_NODELAY: u32 = 1;
-                try set(fd, os.IPPROTO.TCP, TCP_NODELAY, 1);
+                if (is_linux) {
+                    try set(fd, os.IPPROTO.TCP, os.TCP.NODELAY, 1);
+                }
             }
 
             try set(fd, os.SOL.SOCKET, os.SO.REUSEADDR, 1);
