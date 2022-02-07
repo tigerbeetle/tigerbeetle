@@ -457,23 +457,23 @@ pub const Storage = struct {
 
             // try to pre-allocate contiguous space and fall back to default non-continugous
             var res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
-            if (os.errno(res) != os.E.SUCCESS) {
+            if (os.errno(res) != .SUCCESS) {
                 store.fst_flags = F_ALLOCATEALL;
                 res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
             }
 
             switch (os.errno(res)) {
-                os.E.SUCCESS => {},
-                os.E.ACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
-                os.E.BADF => return error.FileDescriptorInvalid,
-                os.E.DEADLK => unreachable, // F_SETLKW
-                os.E.INTR => unreachable, // F_SETLKW
-                os.E.INVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
-                os.E.MFILE => unreachable, // F_DUPFD or F_DUPED
-                os.E.NOLCK => unreachable, // F_SETLK or F_SETLKW
-                os.E.OVERFLOW => return error.FileTooBig,
-                os.E.SRCH => unreachable, // F_SETOWN
-                os.E.OPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
+                .SUCCESS => {},
+                .ACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
+                .BADF => return error.FileDescriptorInvalid,
+                .DEADLK => unreachable, // F_SETLKW
+                .INTR => unreachable, // F_SETLKW
+                .INVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
+                .MFILE => unreachable, // F_DUPFD or F_DUPED
+                .NOLCK => unreachable, // F_SETLK or F_SETLKW
+                .OVERFLOW => return error.FileTooBig,
+                .SRCH => unreachable, // F_SETOWN
+                .OPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
                 else => |errno| return os.unexpectedErrno(errno),
             }
 
