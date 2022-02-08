@@ -634,7 +634,7 @@ pub const IO = struct {
     }
 
     pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
-        return os.openZ(dir_path, os.O_CLOEXEC | os.O_RDONLY, 0);
+        return os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
     }
 
     pub fn open_file(
@@ -665,7 +665,7 @@ pub const IO = struct {
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert((flags & os.O_DSYNC) > 0);
+        assert((flags & os.O.DSYNC) > 0);
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
@@ -747,7 +747,7 @@ pub const IO = struct {
 
         // try to pre-allocate contiguous space and fall back to default non-continugous
         var res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
-        if (os.errno(res) != 0) {
+        if (os.errno(res) != .SUCCESS) {
             store.fst_flags = F_ALLOCATEALL;
             res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
         }
