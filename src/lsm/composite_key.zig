@@ -41,7 +41,7 @@ pub fn CompositeKey(comptime Secondary: type) type {
 
         // TODO: consider optimizing this by reinterpreting the raw memory in an advantageous way
         // This may require modifying the struct layout.
-        pub fn compare_keys(a: Self, b: Self) math.Order {
+        pub inline fn compare_keys(a: Self, b: Self) math.Order {
             if (a.secondary < b.secondary) {
                 return .lt;
             } else if (a.secondary > b.secondary) {
@@ -55,18 +55,18 @@ pub fn CompositeKey(comptime Secondary: type) type {
             }
         }
 
-        pub fn key_from_value(value: Value) Self {
+        pub inline fn key_from_value(value: Value) Self {
             return .{
                 .secondary = value.secondary,
                 .timestamp = @truncate(u63, value.timestamp),
             };
         }
 
-        pub fn tombstone(value: Value) bool {
+        pub inline fn tombstone(value: Value) bool {
             return value.timestamp & tombstone_bit != 0;
         }
 
-        pub fn tombstone_from_key(key: Self) Value {
+        pub inline fn tombstone_from_key(key: Self) Value {
             return .{
                 .secondary = key.secondary,
                 .timestamp = key.timestamp | tombstone_bit,
