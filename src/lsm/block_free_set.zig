@@ -38,17 +38,17 @@ pub const BlockFreeSet = struct {
         assert(shard_size % @bitSizeOf(MaskInt) == 0);
     }
 
-    pub fn init(allocator: *mem.Allocator, blocks_count: usize) !BlockFreeSet {
+    pub fn init(allocator: mem.Allocator, blocks_count: usize) !BlockFreeSet {
         assert(shard_size <= blocks_count);
         assert(blocks_count % shard_size == 0);
         assert(blocks_count % @bitSizeOf(usize) == 0);
 
         // Every block bit is covered by exactly one index bit.
         const shards_count = @divExact(blocks_count, shard_size);
-        var index = try DynamicBitSetUnmanaged.initFull(shards_count, allocator);
+        var index = try DynamicBitSetUnmanaged.initFull(allocator, shards_count);
         errdefer index.deinit(allocator);
 
-        var blocks = try DynamicBitSetUnmanaged.initFull(blocks_count, allocator);
+        var blocks = try DynamicBitSetUnmanaged.initFull(allocator, blocks_count);
         errdefer blocks.deinit(allocator);
 
         return BlockFreeSet{
@@ -58,7 +58,7 @@ pub const BlockFreeSet = struct {
         };
     }
 
-    pub fn deinit(set: *BlockFreeSet, allocator: *mem.Allocator) void {
+    pub fn deinit(set: *BlockFreeSet, allocator: mem.Allocator) void {
         set.index.deinit(allocator);
         set.blocks.deinit(allocator);
     }
@@ -208,7 +208,9 @@ test "BlockFreeSet encode, decode, encode" {
     // Random.
     var seed: u64 = undefined;
     try std.os.getrandom(mem.asBytes(&seed));
+
     var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
 
     const fills = [_]TestPatternFill{ .uniform_ones, .uniform_zeros, .literal };
     var t: usize = 0;
@@ -219,7 +221,7 @@ test "BlockFreeSet encode, decode, encode" {
         var i: usize = 0;
         while (i < shard_size) : (i += 1) {
             try patterns.append(.{
-                .fill = fills[prng.random.uintLessThan(usize, fills.len)],
+                .fill = fills[random.uintLessThan(usize, fills.len)],
                 .words = 1,
             });
         }
@@ -237,7 +239,9 @@ const TestPatternFill = enum { uniform_ones, uniform_zeros, literal };
 fn test_encode(patterns: []const TestPattern) !void {
     var seed: u64 = undefined;
     try std.os.getrandom(mem.asBytes(&seed));
+
     var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
 
     var blocks_count: usize = 0;
     for (patterns) |pattern| blocks_count += pattern.words * @bitSizeOf(usize);
@@ -260,7 +264,7 @@ fn test_encode(patterns: []const TestPattern) !void {
                 blocks[blocks_offset] = switch (pattern.fill) {
                     .uniform_ones => ~@as(usize, 0),
                     .uniform_zeros => 0,
-                    .literal => prng.random.intRangeLessThan(usize, 1, std.math.maxInt(usize)),
+                    .literal => random.intRangeLessThan(usize, 1, std.math.maxInt(usize)),
                 };
                 const index_bit = blocks_offset * @bitSizeOf(usize) / BlockFreeSet.shard_size;
                 if (pattern.fill != .uniform_zeros) decoded_expect.index.set(index_bit);
@@ -395,7 +399,7 @@ test "find_first_set_bit" {
     // Verify that only bits within the specified range are returned.
     var size: usize = @bitSizeOf(BitSet.MaskInt);
     while (size <= @bitSizeOf(BitSet.MaskInt) * 2) : (size += 1) {
-        var set = try BitSet.initEmpty(size, std.testing.allocator);
+        var set = try BitSet.initEmpty(std.testing.allocator, size);
         defer set.deinit(std.testing.allocator);
 
         var s: usize = 0;
@@ -412,7 +416,7 @@ test "find_first_set_bit" {
 
     {
         // Make sure the first bit is returned.
-        var set = try BitSet.initEmpty(16, std.testing.allocator);
+        var set = try BitSet.initEmpty(std.testing.allocator, 16);
         defer set.deinit(std.testing.allocator);
         set.set(2);
         set.set(5);
@@ -421,7 +425,7 @@ test "find_first_set_bit" {
 
     {
         // Don't return a bit outside of the bitset's interval, even with `initFull`.
-        var set = try BitSet.initFull(56, std.testing.allocator);
+        var set = try BitSet.initFull(std.testing.allocator, 56);
         defer set.deinit(std.testing.allocator);
         try std.testing.expectEqual(@as(?usize, null), find_first_set_bit(set, 56, 56));
     }

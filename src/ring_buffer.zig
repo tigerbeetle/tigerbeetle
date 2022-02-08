@@ -29,13 +29,13 @@ pub fn RingBuffer(
         pub usingnamespace switch (buffer_type) {
             .array => struct {},
             .pointer => struct {
-                pub fn init(allocator: *mem.Allocator) !Self {
+                pub fn init(allocator: mem.Allocator) !Self {
                     const buffer = try allocator.create([size]T);
                     errdefer allocator.destroy(buffer);
                     return Self{ .buffer = buffer };
                 }
 
-                pub fn deinit(self: *Self, allocator: *mem.Allocator) void {
+                pub fn deinit(self: *Self, allocator: mem.Allocator) void {
                     allocator.destroy(self.buffer);
                 }
             },
