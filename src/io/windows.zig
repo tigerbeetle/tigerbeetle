@@ -159,7 +159,7 @@ pub const IO = struct {
     /// This struct holds the data needed for a single IO operation
     pub const Completion = struct {
         next: ?*Completion,
-        context: ?*c_void,
+        context: ?*anyopaque,
         callback: fn (Context) void,
         operation: Operation,
 
@@ -259,7 +259,7 @@ pub const IO = struct {
         // Setup the completion with the callback wrapper above
         completion.* = .{
             .next = null,
-            .context = @ptrCast(?*c_void, context),
+            .context = @ptrCast(?*anyopaque, context),
             .callback = Callback.onComplete,
             .operation = @unionInit(Completion.Operation, @tagName(op_tag), op_data),
         };
@@ -456,7 +456,7 @@ pub const IO = struct {
                             Socket: os.windows.ws2_32.SOCKET,
                             SockAddr: *const os.windows.ws2_32.sockaddr,
                             SockLen: os.socklen_t,
-                            SendBuf: ?*const c_void,
+                            SendBuf: ?*const anyopaque,
                             SendBufLen: os.windows.DWORD,
                             BytesSent: *os.windows.DWORD,
                             Overlapped: *os.windows.OVERLAPPED,
@@ -764,6 +764,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) ReadError!usize {
+                    _ = ctx;
                     return os.pread(op.fd, op.buf[0..op.len], op.offset) catch |err| switch (err) {
                         error.OperationAborted => unreachable,
                         error.BrokenPipe => unreachable,
@@ -805,6 +806,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) WriteError!usize {
+                    _ = ctx;
                     return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
                 }
             },
@@ -831,6 +833,8 @@ pub const IO = struct {
             .{ .fd = fd },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) CloseError!void {
+                    _ = ctx;
+                    
                     // Check if the fd is a SOCKET by seeing if getsockopt() returns ENOTSOCK
                     // https://stackoverflow.com/a/50981652
                     const socket = @ptrCast(os.socket_t, op.fd);
@@ -919,6 +923,8 @@ pub const IO = struct {
         size: u64,
         must_create: bool,
     ) !os.fd_t {
+        _ = self;
+        
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
 
         // FILE_CREATE = O_CREAT | O_EXCL
@@ -1001,6 +1007,7 @@ pub const IO = struct {
 
         // Don't fsync the directory handle as it's not open with write access
         // try os.fsync(dir_handle);
+        _ = dir_handle;
 
         const file_size = try os.windows.GetFileSizeEx(handle);
         if (file_size != size) @panic("data file inode size was truncated or corrupted");

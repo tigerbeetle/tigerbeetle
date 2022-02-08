@@ -861,6 +861,8 @@ pub const IO = struct {
     pub const INVALID_SOCKET = -1;
 
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+        _ = self;
+        
         return os.socket(family, sock_type, protocol);
     }
 
@@ -875,14 +877,16 @@ pub const IO = struct {
         size: u64,
         must_create: bool,
     ) !os.fd_t {
+        _ = self;
+
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
 
-        var flags: u32 = os.O_CLOEXEC | os.O_RDWR | os.O_DSYNC;
+        var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
         var mode: os.mode_t = 0;
 
         // TODO Document this and investigate whether this is in fact correct to set here.
-        if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O_LARGEFILE;
+        if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
 
         var direct_io_supported = false;
         if (config.direct_io) {
@@ -900,15 +904,15 @@ pub const IO = struct {
 
         if (must_create) {
             log.info("creating \"{s}\"...", .{relative_path});
-            flags |= os.O_CREAT;
-            flags |= os.O_EXCL;
+            flags |= os.O.CREAT;
+            flags |= os.O.EXCL;
             mode = 0o666;
         } else {
             log.info("opening \"{s}\"...", .{relative_path});
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert((flags & os.O_DSYNC) > 0);
+        assert((flags & os.O.DSYNC) > 0);
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
@@ -920,7 +924,7 @@ pub const IO = struct {
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
-        os.flock(fd, os.LOCK_EX | os.LOCK_NB) catch |err| switch (err) {
+        os.flock(fd, os.LOCK.EX | os.LOCK.NB) catch |err| switch (err) {
             error.WouldBlock => @panic("another process holds the data file lock"),
             else => return err,
         };
@@ -973,12 +977,12 @@ pub const IO = struct {
 
         const path = "fs_supports_direct_io";
         const dir = std.fs.Dir{ .fd = dir_fd };
-        const fd = try os.openatZ(dir_fd, path, os.O_CLOEXEC | os.O_CREAT | os.O_TRUNC, 0o666);
+        const fd = try os.openatZ(dir_fd, path, os.O.CLOEXEC | os.O.CREAT | os.O.TRUNC, 0o666);
         defer os.close(fd);
         defer dir.deleteFile(path) catch {};
 
         while (true) {
-            const res = os.system.openat(dir_fd, path, os.O_CLOEXEC | os.O_RDONLY | os.O_DIRECT, 0);
+            const res = os.system.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
             switch (os.linux.getErrno(res)) {
                 0 => {
                     os.close(@intCast(os.fd_t, res));
@@ -1001,19 +1005,19 @@ pub const IO = struct {
         while (true) {
             const rc = os.linux.fallocate(fd, mode, offset, length);
             switch (os.linux.getErrno(rc)) {
-                0 => return,
-                os.linux.EBADF => return error.FileDescriptorInvalid,
-                os.linux.EFBIG => return error.FileTooBig,
-                os.linux.EINTR => continue,
-                os.linux.EINVAL => return error.ArgumentsInvalid,
-                os.linux.EIO => return error.InputOutput,
-                os.linux.ENODEV => return error.NoDevice,
-                os.linux.ENOSPC => return error.NoSpaceLeft,
-                os.linux.ENOSYS => return error.SystemOutdated,
-                os.linux.EOPNOTSUPP => return error.OperationNotSupported,
-                os.linux.EPERM => return error.PermissionDenied,
-                os.linux.ESPIPE => return error.Unseekable,
-                os.linux.ETXTBSY => return error.FileBusy,
+                .SUCCESS => return,
+                .BADF => return error.FileDescriptorInvalid,
+                .FBIG => return error.FileTooBig,
+                .INTR => continue,
+                .INVAL => return error.ArgumentsInvalid,
+                .IO => return error.InputOutput,
+                .NODEV => return error.NoDevice,
+                .NOSPC => return error.NoSpaceLeft,
+                .NOSYS => return error.SystemOutdated,
+                .OPNOTSUPP => return error.OperationNotSupported,
+                .PERM => return error.PermissionDenied,
+                .SPIPE => return error.Unseekable,
+                .TXTBSY => return error.FileBusy,
                 else => |errno| return os.unexpectedErrno(errno),
             }
         }

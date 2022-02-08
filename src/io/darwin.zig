@@ -623,6 +623,8 @@ pub const IO = struct {
     pub const INVALID_SOCKET = -1;
 
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+        _ = self;
+        
         const fd = try os.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
         errdefer os.closeSocket(fd);
 
@@ -642,19 +644,21 @@ pub const IO = struct {
         size: u64,
         must_create: bool,
     ) !os.fd_t {
+        _ = self;
+
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
 
-        var flags: u32 = os.O_CLOEXEC | os.O_RDWR | os.O_DSYNC;
+        var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
         var mode: os.mode_t = 0;
 
         // TODO Document this and investigate whether this is in fact correct to set here.
-        if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O_LARGEFILE;
+        if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
 
         if (must_create) {
             log.info("creating \"{s}\"...", .{relative_path});
-            flags |= os.O_CREAT;
-            flags |= os.O_EXCL;
+            flags |= os.O.CREAT;
+            flags |= os.O.EXCL;
             mode = 0o666;
         } else {
             log.info("opening \"{s}\"...", .{relative_path});
@@ -679,7 +683,7 @@ pub const IO = struct {
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
-        os.flock(fd, os.LOCK_EX | os.LOCK_NB) catch |err| switch (err) {
+        os.flock(fd, os.LOCK.EX | os.LOCK.NB) catch |err| switch (err) {
             error.WouldBlock => @panic("another process holds the data file lock"),
             else => return err,
         };
@@ -725,7 +729,6 @@ pub const IO = struct {
         const F_ALLOCATECONTIG = 0x2; // allocate contiguous space
         const F_ALLOCATEALL = 0x4; // allocate all or nothing
         const F_PEOFPOSMODE = 3; // use relative offset from the seek pos mode
-        const F_VOLPOSMODE = 4; // use the specified volume offset
         const fstore_t = extern struct {
             fst_flags: c_uint,
             fst_posmode: c_int,
@@ -750,16 +753,17 @@ pub const IO = struct {
         }
 
         switch (os.errno(res)) {
-            0 => {},
-            os.EACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
-            os.EBADF => return error.FileDescriptorInvalid,
-            os.EDEADLK => unreachable, // F_SETLKW
-            os.EINTR => unreachable, // F_SETLKW
-            os.EINVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
-            os.EMFILE => unreachable, // F_DUPFD or F_DUPED
-            os.ENOLCK => unreachable, // F_SETLK or F_SETLKW
-            os.EOVERFLOW => return error.FileTooBig,
-            os.ESRCH => unreachable, // F_SETOWN
+            .SUCCESS => {},
+            .ACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
+            .BADF => return error.FileDescriptorInvalid,
+            .DEADLK => unreachable, // F_SETLKW
+            .INTR => unreachable, // F_SETLKW
+            .INVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
+            .MFILE => unreachable, // F_DUPFD or F_DUPED
+            .NOLCK => unreachable, // F_SETLK or F_SETLKW
+            .OVERFLOW => return error.FileTooBig,
+            .SRCH => unreachable, // F_SETOWN
+            .OPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
             else => |errno| return os.unexpectedErrno(errno),
         }
 

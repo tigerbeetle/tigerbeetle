@@ -67,7 +67,7 @@ fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
 /// Run as a replica server defined by the given args
 fn start(
     io: *IO,
-    arena: mem.Allocator,
+    allocator: mem.Allocator,
     cluster: u32,
     replica_index: u8,
     addresses: []std.net.Address,
