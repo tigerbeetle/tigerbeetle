@@ -635,11 +635,7 @@ fn MessageBusImpl(comptime process_type: ProcessType) type {
                                 //assert(!connection.send_submitted);
                             },
                             // Ignore all the remaining errors for now
-                            error.ConnectionAborted,
-                            error.ConnectionResetByPeer,
-                            error.BlockingOperationInProgress,
-                            error.NetworkSubsystemFailed,
-                            error.SystemResources => {},
+                            error.ConnectionAborted, error.ConnectionResetByPeer, error.BlockingOperationInProgress, error.NetworkSubsystemFailed, error.SystemResources, error.Unexpected => {},
                         };
                     },
                     .close => {},

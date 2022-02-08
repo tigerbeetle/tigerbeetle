@@ -53,8 +53,7 @@ fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
     assert(filename.len == filename_len);
 
     // TODO Expose data file size on the CLI.
-    _ = try Storage.open(
-        io,
+    _ = try io.open_file(
         dir_fd,
         filename,
         config.journal_size_max, // TODO Double-check that we have space for redundant headers.
@@ -81,8 +80,7 @@ fn start(
     assert(filename.len == filename_len);
 
     // TODO Expose data file size on the CLI.
-    const storage_fd = try Storage.open(
-        io,
+    const storage_fd = try io.open_file(
         dir_fd,
         filename,
         config.journal_size_max, // TODO Double-check that we have space for redundant headers.

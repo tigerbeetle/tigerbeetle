@@ -305,33 +305,4 @@ pub const Storage = struct {
         assert(buffer.len > 0);
         assert(offset + buffer.len <= self.size);
     }
-
-    // Static helper functions to handle data file creation/opening/allocation:
-
-    /// Opens or creates a journal file:
-    /// - For reading and writing.
-    /// - For Direct I/O (if possible in development mode, but required in production mode).
-    /// - Obtains an advisory exclusive lock to the file descriptor.
-    /// - Allocates the file contiguously on disk if this is supported by the file system.
-    /// - Ensures that the file data (and file inode in the parent directory) is durable on disk.
-    ///   The caller is responsible for ensuring that the parent directory inode is durable.
-    /// - Verifies that the file size matches the expected file size before returning.
-    pub fn open(
-        io: *IO,
-        dir_fd: os.fd_t,
-        relative_path: [:0]const u8,
-        size: u64,
-        must_create: bool,
-    ) !os.fd_t {
-        assert(relative_path.len > 0);
-        assert(size >= config.sector_size);
-        assert(size % config.sector_size == 0);
-
-        return io.open_file(
-            dir_fd,
-            relative_path,
-            size,
-            must_create,
-        );
-    }
 };

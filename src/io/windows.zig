@@ -916,7 +916,7 @@ pub const IO = struct {
 
         return socket;
     }
-    
+
     /// Opens a directory with read only access.
     pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
         const dir = try std.fs.cwd().openDirZ(dir_path, .{});
@@ -1007,7 +1007,7 @@ pub const IO = struct {
             log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
             fs_allocate(handle, size) catch {
                 log.warn("file system failed to preallocate the file memory", .{});
-                log.notice("allocating by writing to the last sector of the file instead...", .{});
+                log.info("allocating by writing to the last sector of the file instead...", .{});
 
                 const sector_size = config.sector_size;
                 const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
@@ -1027,7 +1027,7 @@ pub const IO = struct {
         // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
         try os.fsync(handle);
 
-        // We cannot fsync the directory handle on Windows. 
+        // We cannot fsync the directory handle on Windows.
         // We have no way to open a directory with write access.
         //
         // try os.fsync(dir_handle);
