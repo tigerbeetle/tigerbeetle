@@ -622,6 +622,7 @@ pub const IO = struct {
 
     pub const INVALID_SOCKET = -1;
 
+    /// Creates a socket that can be used for async operations with the IO instance.
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         _ = self;
 
@@ -633,10 +634,19 @@ pub const IO = struct {
         return fd;
     }
 
+    /// Opens a directory with read only access.
     pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
         return os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
     }
 
+    /// Opens or creates a journal file:
+    /// - For reading and writing.
+    /// - For Direct I/O (required on darwin).
+    /// - Obtains an advisory exclusive lock to the file descriptor.
+    /// - Allocates the file contiguously on disk if this is supported by the file system.
+    /// - Ensures that the file data (and file inode in the parent directory) is durable on disk.
+    ///   The caller is responsible for ensuring that the parent directory inode is durable.
+    /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
         self: *IO,
         dir_fd: os.fd_t,
@@ -646,9 +656,15 @@ pub const IO = struct {
     ) !os.fd_t {
         _ = self;
 
+        assert(relative_path.len > 0);
+        assert(size >= config.sector_size);
+        assert(size % config.sector_size == 0);
+
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
 
+        // Opening with O_DSYNC is essential for both durability and correctness.
+        // O_DSYNC enables us to omit fsync() calls in the data plane, since we sync to the disk on every write.
         var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
         var mode: os.mode_t = 0;
 
@@ -675,8 +691,8 @@ pub const IO = struct {
 
         // TODO Check that the file is actually a file.
 
-        // On darwin assume that direct_io is always supported.
-        // Use F_NOCACHE to disable the page cache as O_DIRECT doesn't exit.
+        // On darwin assume that Direct I/O is always supported.
+        // Use F_NOCACHE to disable the page cache as O_DIRECT doesn't exist.
         if (config.direct_io) {
             _ = try os.fcntl(fd, os.F.NOCACHE, 1);
         }
@@ -710,7 +726,8 @@ pub const IO = struct {
         return fd;
     }
 
-    /// Darwin's version of fsync() assuming O_DSYNC
+    /// Darwin's fsync() syscall does not flush past the disk cache. We must use F_FULLFSYNC instead.
+    /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
     fn fs_sync(fd: os.fd_t) !void {
         _ = os.fcntl(fd, os.F.FULLFSYNC, 1) catch return os.fsync(fd);
     }
@@ -720,15 +737,15 @@ pub const IO = struct {
     fn fs_allocate(fd: os.fd_t, size: u64) !void {
         log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
 
-        // darwin doesn't have fallocate() but we can simulate it using fcntl()s
+        // Darwin doesn't have fallocate() but we can simulate it using fcntl()s.
         //
         // https://stackoverflow.com/a/11497568
         // https://api.kde.org/frameworks/kcoreaddons/html/posix__fallocate__mac_8h_source.html
         // http://hg.mozilla.org/mozilla-central/file/3d846420a907/xpcom/glue/FileUtils.cpp#l61
 
-        const F_ALLOCATECONTIG = 0x2; // allocate contiguous space
-        const F_ALLOCATEALL = 0x4; // allocate all or nothing
-        const F_PEOFPOSMODE = 3; // use relative offset from the seek pos mode
+        const F_ALLOCATECONTIG = 0x2; // Allocate contiguous space.
+        const F_ALLOCATEALL = 0x4; // Allocate all or nothing.
+        const F_PEOFPOSMODE = 3; // Use relative offset from the seek pos mode.
         const fstore_t = extern struct {
             fst_flags: c_uint,
             fst_posmode: c_int,
@@ -745,7 +762,7 @@ pub const IO = struct {
             .fst_bytesalloc = 0,
         };
 
-        // try to pre-allocate contiguous space and fall back to default non-continugous
+        // Try to pre-allocate contiguous space and fall back to default non-contiguous.
         var res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
         if (os.errno(res) != .SUCCESS) {
             store.fst_flags = F_ALLOCATEALL;
@@ -767,7 +784,7 @@ pub const IO = struct {
             else => |errno| return os.unexpectedErrno(errno),
         }
 
-        // now actually perform the allocation
+        // Now actually perform the allocation.
         return os.ftruncate(fd, size) catch |err| switch (err) {
             error.AccessDenied => error.PermissionDenied,
             else => |e| e,

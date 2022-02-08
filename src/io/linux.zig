@@ -860,16 +860,25 @@ pub const IO = struct {
 
     pub const INVALID_SOCKET = -1;
 
+    /// Creates a socket that can be used for async operations with the IO instance.
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         _ = self;
-
         return os.socket(family, sock_type, protocol);
     }
 
+    /// Opens a directory with read only access.
     pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
         return os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
     }
 
+    /// Opens or creates a journal file:
+    /// - For reading and writing.
+    /// - For Direct I/O (if possible in development mode, but required in production mode).
+    /// - Obtains an advisory exclusive lock to the file descriptor.
+    /// - Allocates the file contiguously on disk if this is supported by the file system.
+    /// - Ensures that the file data (and file inode in the parent directory) is durable on disk.
+    ///   The caller is responsible for ensuring that the parent directory inode is durable.
+    /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
         self: *IO,
         dir_fd: os.fd_t,
@@ -878,6 +887,10 @@ pub const IO = struct {
         must_create: bool,
     ) !os.fd_t {
         _ = self;
+
+        assert(relative_path.len > 0);
+        assert(size >= config.sector_size);
+        assert(size % config.sector_size == 0);
 
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.

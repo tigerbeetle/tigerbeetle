@@ -885,7 +885,9 @@ pub const IO = struct {
 
     pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;
 
+    /// Creates a socket that can be used for async operations with the IO instance.
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+        // SOCK_NONBLOCK | SOCK_CLOEXEC
         var flags: os.windows.DWORD = 0;
         flags |= os.windows.ws2_32.WSA_FLAG_OVERLAPPED;
         flags |= os.windows.ws2_32.WSA_FLAG_NO_HANDLE_INHERIT;
@@ -914,12 +916,21 @@ pub const IO = struct {
 
         return socket;
     }
-
+    
+    /// Opens a directory with read only access.
     pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
         const dir = try std.fs.cwd().openDirZ(dir_path, .{});
         return dir.fd;
     }
 
+    /// Opens or creates a journal file:
+    /// - For reading and writing.
+    /// - For Direct I/O (required on windows).
+    /// - Obtains an advisory exclusive lock to the file descriptor.
+    /// - Allocates the file contiguously on disk if this is supported by the file system.
+    /// - Ensures that the file data is durable on disk.
+    ///   The caller is responsible for ensuring that the parent directory inode is durable.
+    /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
         self: *IO,
         dir_handle: os.fd_t,
@@ -928,6 +939,10 @@ pub const IO = struct {
         must_create: bool,
     ) !os.fd_t {
         _ = self;
+
+        assert(relative_path.len > 0);
+        assert(size >= config.sector_size);
+        assert(size % config.sector_size == 0);
 
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
 
@@ -949,10 +964,13 @@ pub const IO = struct {
         access_mask |= os.windows.GENERIC_READ;
         access_mask |= os.windows.GENERIC_WRITE;
 
-        // O_DIRECT
+        // O_DIRECT | O_DSYNC
         var attributes: os.windows.DWORD = 0;
         attributes |= os.windows.FILE_FLAG_NO_BUFFERING;
         attributes |= os.windows.FILE_FLAG_WRITE_THROUGH;
+
+        // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
+        assert((attributes & os.windows.FILE_FLAG_WRITE_THROUGH) > 0);
 
         // TODO: Add ReadFileEx/WriteFileEx support.
         // Not currently needed for O_DIRECT disk IO.
@@ -1009,7 +1027,9 @@ pub const IO = struct {
         // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
         try os.fsync(handle);
 
-        // Don't fsync the directory handle as it's not open with write access
+        // We cannot fsync the directory handle on Windows. 
+        // We have no way to open a directory with write access.
+        //
         // try os.fsync(dir_handle);
         _ = dir_handle;
 
