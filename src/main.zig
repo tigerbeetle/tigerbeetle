@@ -28,7 +28,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    switch (cli.parse_args(allocator)) {
+    switch (try cli.parse_args(allocator)) {
         .init => |args| try init(&io, args.cluster, args.replica, args.dir_fd),
         .start => |args| try start(
             &io,

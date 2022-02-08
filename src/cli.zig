@@ -88,32 +88,22 @@ pub const Command = union(enum) {
 
 /// Parse the command line arguments passed to the tigerbeetle binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args(allocator: std.mem.Allocator) Command {
+pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var maybe_cluster: ?[]const u8 = null;
     var maybe_replica: ?[]const u8 = null;
     var maybe_addresses: ?[]const u8 = null;
     var maybe_directory: ?[:0]const u8 = null;
 
-    const Args = struct {
-        args: std.process.ArgIterator,
-        alloc: *std.mem.Allocator,
-
-        fn next(self: *@This()) ?[:0]const u8 {
-            const arg = self.args.next(self.alloc) orelse return null;
-            return (arg catch return null);
-        }
-    };
-
-    var args = Args{
-        .args = std.process.args(),
-        .alloc = allocator,
-    };
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
 
     // Skip argv[0] which is the name of this executable
-    _ = args.next();
+    const did_skip = args.skip();
+    assert(did_skip);
 
-    const raw_command = args.next() orelse
-        fatal("no command provided, expected 'start' or 'init'", .{});
+    const raw_command = try (args.next(allocator) orelse
+        fatal("no command provided, expected 'start' or 'init'", .{}));
+    defer allocator.free(raw_command);
 
     if (mem.eql(u8, raw_command, "-h") or mem.eql(u8, raw_command, "--help")) {
         std.io.getStdOut().writeAll(usage) catch os.exit(1);
@@ -122,7 +112,10 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     const command = meta.stringToEnum(meta.Tag(Command), raw_command) orelse
         fatal("unknown command '{s}', expected 'start' or 'init'", .{raw_command});
 
-    while (args.next()) |arg| {
+    while (args.next(allocator)) |parsed_arg| {
+        const arg = try parsed_arg;
+        defer allocator.free(arg);
+
         if (mem.startsWith(u8, arg, "--cluster")) {
             maybe_cluster = parse_flag("--cluster", arg);
         } else if (mem.startsWith(u8, arg, "--replica")) {
@@ -157,11 +150,13 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
                 fatal("--addresses: supported only by 'start' command", .{});
             }
 
-            return .{ .init = .{
-                .cluster = cluster,
-                .replica = replica,
-                .dir_fd = dir_fd,
-            } };
+            return Command{
+                .init = .{
+                    .cluster = cluster,
+                    .replica = replica,
+                    .dir_fd = dir_fd,
+                },
+            };
         },
         .start => {
             const raw_addresses = maybe_addresses orelse
@@ -172,12 +167,14 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
                 fatal("--replica: value greater than length of --addresses array", .{});
             }
 
-            return .{ .start = .{
-                .cluster = cluster,
-                .replica = replica,
-                .addresses = addresses,
-                .dir_fd = dir_fd,
-            } };
+            return Command{
+                .start = .{
+                    .cluster = cluster,
+                    .replica = replica,
+                    .addresses = addresses,
+                    .dir_fd = dir_fd,
+                },
+            };
         },
     }
 }
