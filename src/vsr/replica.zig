@@ -729,7 +729,7 @@ pub fn Replica(
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
             const threshold = self.quorum_replication;
 
-            const count = self.tally_message_and_receive_quorum_exactly_once(
+            const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
                 message,
                 threshold,
@@ -872,19 +872,11 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(message.header.view == self.view);
 
-            if (self.leader_index(self.view) == self.replica) {
-                // If we are the leader of the new view, then wait until we have a message to send a
-                // do_view_change message to ourself. The on_do_view_change() handler will panic if
-                // we received a start_view_change quorum without a do_view_change to ourself.
-                const available = self.message_bus.get_message();
-                self.message_bus.unref(available);
-            }
-
             // Wait until we have `f` messages (excluding ourself) for quorum:
             assert(self.replica_count > 1);
             const threshold = self.quorum_view_change - 1;
 
-            const count = self.tally_message_and_receive_quorum_exactly_once(
+            const count = self.count_message_and_receive_quorum_exactly_once(
                 &self.start_view_change_from_other_replicas,
                 message,
                 threshold,
@@ -944,7 +936,7 @@ pub fn Replica(
             assert(self.replica_count > 1);
             const threshold = self.quorum_view_change;
 
-            const count = self.add_message_and_receive_quorum_exactly_once(
+            const count = self.reference_message_and_receive_quorum_exactly_once(
                 &self.do_view_change_from_all_replicas,
                 message,
                 threshold,
@@ -1085,12 +1077,7 @@ pub fn Replica(
             assert(message.header.replica != self.replica);
             assert(self.leader());
 
-            const start_view = self.create_view_change_message(.start_view) orelse {
-                log.err("{}: on_request_start_view: dropping start_view, no message available", .{
-                    self.replica,
-                });
-                return;
-            };
+            const start_view = self.create_view_change_message(.start_view);
             defer self.message_bus.unref(start_view);
 
             assert(start_view.references == 1);
@@ -1388,7 +1375,7 @@ pub fn Replica(
             assert(threshold < self.replica_count);
 
             // Wait until we have `threshold` messages for quorum:
-            const count = self.tally_message_and_receive_quorum_exactly_once(
+            const count = self.count_message_and_receive_quorum_exactly_once(
                 &self.nack_prepare_from_other_replicas,
                 message,
                 threshold,
@@ -1465,11 +1452,16 @@ pub fn Replica(
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [config.replicas_max]u8 = undefined;
             var waiting_len: usize = 0;
-            var ok_from_all_replicas_iter = prepare.ok_from_all_replicas.iterator(.{
+            var ok_from_all_replicas_iterator = prepare.ok_from_all_replicas.iterator(.{
                 .kind = .unset,
             });
-            while (ok_from_all_replicas_iter.next()) |replica| {
-                if (replica == self.replica_count) break;
+            while (ok_from_all_replicas_iterator.next()) |replica| {
+                // Ensure we don't wait for replicas that don't exist.
+                if (replica == self.replica_count) {
+                    assert(self.replica_count < config.replicas_max);
+                    break;
+                }
+
                 if (replica != self.replica) {
                     waiting[waiting_len] = @intCast(u8, replica);
                     waiting_len += 1;
@@ -1572,7 +1564,7 @@ pub fn Replica(
             self.repair();
         }
 
-        fn add_message_and_receive_quorum_exactly_once(
+        fn reference_message_and_receive_quorum_exactly_once(
             self: *Self,
             messages: *QuorumMessages,
             message: *Message,
@@ -1636,10 +1628,9 @@ pub fn Replica(
             return count;
         }
 
-        fn tally_message_and_receive_quorum_exactly_once(
+        fn count_message_and_receive_quorum_exactly_once(
             self: *Self,
-            //prepare: *Prepare,
-            messages: *QuorumCounter,
+            counter: *QuorumCounter,
             message: *Message,
             threshold: u32,
         ) ?usize {
@@ -1677,17 +1668,19 @@ pub fn Replica(
             const command: []const u8 = @tagName(message.header.command);
 
             // Do not allow duplicate messages to trigger multiple passes through a state transition:
-            if (messages.isSet(message.header.replica)) {
+            if (counter.isSet(message.header.replica)) {
                 log.debug("{}: on_{s}: ignoring (duplicate message)", .{ self.replica, command });
                 return null;
             }
 
-            messages.set(message.header.replica);
-            assert(messages.count() <= self.replica_count);
+            // Record the first receipt of this message:
+            counter.set(message.header.replica);
+            assert(counter.isSet(message.header.replica));
 
             // Count the number of unique messages now received:
-            const count = messages.count();
+            const count = counter.count();
             log.debug("{}: on_{s}: {} message(s)", .{ self.replica, command, count });
+            assert(count <= self.replica_count);
 
             // Wait until we have exactly `threshold` messages for quorum:
             if (count < threshold) {
@@ -1866,11 +1859,7 @@ pub fn Replica(
                 return;
             }
 
-            // TODO We can optimize this to commit into the client table reply if it exists.
-            const reply = self.message_bus.get_message();
-            defer self.message_bus.unref(reply);
-
-            self.commit_op(prepare.?, reply);
+            self.commit_op(prepare.?);
 
             assert(self.commit_min == op);
             assert(self.commit_min <= self.commit_max);
@@ -1880,7 +1869,7 @@ pub fn Replica(
             self.commit_ops_read();
         }
 
-        fn commit_op(self: *Self, prepare: *const Message, reply: *Message) void {
+        fn commit_op(self: *Self, prepare: *const Message) void {
             // TODO Can we add more checks around allowing commit_op() during a view change?
             assert(self.status == .normal or self.status == .view_change);
             assert(prepare.header.command == .prepare);
@@ -1903,6 +1892,9 @@ pub fn Replica(
                 prepare.header.checksum,
                 @tagName(prepare.header.operation.cast(StateMachine)),
             });
+
+            const reply = self.message_bus.get_message();
+            defer self.message_bus.unref(reply);
 
             const reply_body_size = @intCast(u32, self.state_machine.commit(
                 prepare.header.client,
@@ -1970,12 +1962,9 @@ pub fn Replica(
 
                 const count = prepare.ok_from_all_replicas.count();
                 assert(count >= self.quorum_replication);
+                assert(count <= self.replica_count);
 
-                // TODO We can optimize this to commit into the client table reply if it exists.
-                const reply = self.message_bus.get_message();
-                defer self.message_bus.unref(reply);
-
-                self.commit_op(prepare.message, reply);
+                self.commit_op(prepare.message);
 
                 assert(self.commit_min == self.commit_max);
                 assert(self.commit_max == prepare.message.header.op);
@@ -2102,7 +2091,7 @@ pub fn Replica(
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_view_change_message(self: *Self, command: Command) ?*Message {
+        fn create_view_change_message(self: *Self, command: Command) *Message {
             assert(command == .do_view_change or command == .start_view);
 
             // We may send a start_view message in normal status to resolve a follower's view jump:
@@ -2158,7 +2147,7 @@ pub fn Replica(
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_message_from_header(self: *Self, header: Header) ?*Message {
+        fn create_message_from_header(self: *Self, header: Header) *Message {
             assert(header.replica == self.replica);
             assert(header.view == self.view or header.command == .request_start_view);
             assert(header.size == @sizeOf(Header));
@@ -3466,14 +3455,19 @@ pub fn Replica(
             log.debug("{}: reset {} {s} message(s)", .{ self.replica, count, @tagName(command) });
         }
 
-        fn reset_quorum_counter(self: *Self, messages: *QuorumCounter) void {
-            var messages_iter = messages.iterator(.{});
-            while (messages_iter.next()) |replica| {
+        fn reset_quorum_counter(self: *Self, counter: *QuorumCounter) void {
+            var counter_iterator = counter.iterator(.{});
+            while (counter_iterator.next()) |replica| {
                 assert(replica < self.replica_count);
             }
 
-            messages.setIntersection(QuorumCounterNull);
-            assert(messages.count() == 0);
+            counter.setIntersection(QuorumCounterNull);
+            assert(counter.count() == 0);
+
+            var replica: usize = 0;
+            while (replica < self.replica_count) : (replica += 1) {
+                assert(!counter.isSet(replica));
+            }
         }
 
         fn reset_quorum_do_view_change(self: *Self) void {
@@ -3592,13 +3586,12 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.start_view_change_quorum);
             assert(!self.do_view_change_quorum);
+
             const count_start_view_change = self.start_view_change_from_other_replicas.count();
             assert(count_start_view_change >= self.quorum_view_change - 1);
+            assert(count_start_view_change <= self.replica_count - 1);
 
-            const message = self.create_view_change_message(.do_view_change) orelse {
-                log.err("{}: send_do_view_change: waiting for message", .{self.replica});
-                return;
-            };
+            const message = self.create_view_change_message(.do_view_change);
             defer self.message_bus.unref(message);
 
             assert(message.references == 1);
@@ -3630,25 +3623,14 @@ pub fn Replica(
         }
 
         fn send_header_to_client(self: *Self, client: u128, header: Header) void {
-            const message = self.create_message_from_header(header) orelse {
-                log.err("{}: no header-only message available, dropping message to client {}", .{
-                    self.replica,
-                    client,
-                });
-                return;
-            };
+            const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
             self.message_bus.send_message_to_client(client, message);
         }
 
         fn send_header_to_other_replicas(self: *Self, header: Header) void {
-            const message = self.create_message_from_header(header) orelse {
-                log.err("{}: no header-only message available, dropping message to replicas", .{
-                    self.replica,
-                });
-                return;
-            };
+            const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
             var replica: u8 = 0;
@@ -3660,13 +3642,7 @@ pub fn Replica(
         }
 
         fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
-            const message = self.create_message_from_header(header) orelse {
-                log.err("{}: no header-only message available, dropping message to replica {}", .{
-                    self.replica,
-                    replica,
-                });
-                return;
-            };
+            const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
             self.send_message_to_replica(replica, message);
@@ -3924,10 +3900,7 @@ pub fn Replica(
             assert(self.journal.faulty.len == 0);
             assert(self.nack_prepare_op == null);
 
-            const start_view = self.create_view_change_message(.start_view) orelse {
-                log.err("{}: start_view_as_the_new_leader: waiting for message", .{self.replica});
-                return;
-            };
+            const start_view = self.create_view_change_message(.start_view);
             defer self.message_bus.unref(start_view);
 
             self.transition_to_normal_status(self.view);

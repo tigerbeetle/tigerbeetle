@@ -383,7 +383,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_message_from_header(self: *Self, header: Header) ?*Message {
+        fn create_message_from_header(self: *Self, header: Header) *Message {
             assert(header.client == self.id);
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
@@ -402,7 +402,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         fn register(self: *Self) void {
             if (self.request_number > 0) return;
 
-            var message = self.message_bus.get_message();
+            const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
             // We will set parent, context, view and checksums only when sending for the first time:
@@ -431,25 +431,14 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
-            const message = self.create_message_from_header(header) orelse {
-                log.err("{}: no header-only message available, dropping message to replica {}", .{
-                    self.id,
-                    replica,
-                });
-                return;
-            };
+            const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
             self.send_message_to_replica(replica, message);
         }
 
         fn send_header_to_replicas(self: *Self, header: Header) void {
-            const message = self.create_message_from_header(header) orelse {
-                log.err("{}: no header-only message available, dropping message to replicas", .{
-                    self.id,
-                });
-                return;
-            };
+            const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
             var replica: u8 = 0;

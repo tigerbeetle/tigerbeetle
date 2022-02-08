@@ -27,6 +27,11 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
         .client => config.connection_send_queue_max_client,
     });
 
+    const tcp_sndbuf = switch (process_type) {
+        .replica => config.tcp_sndbuf_replica,
+        .client => config.tcp_sndbuf_client,
+    };
+
     return struct {
         const Self = @This();
 
@@ -179,17 +184,17 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                 try set(fd, os.SOL.SOCKET, os.SO.RCVBUF, config.tcp_rcvbuf);
             }
 
-            if (config.tcp_sndbuf > 0) sndbuf: {
+            if (tcp_sndbuf > 0) sndbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
-                    if (set(fd, os.SOL.SOCKET, os.SO.SNDBUFFORCE, config.tcp_sndbuf)) |_| {
+                    if (set(fd, os.SOL.SOCKET, os.SO.SNDBUFFORCE, tcp_sndbuf)) |_| {
                         break :sndbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, os.SOL.SOCKET, os.SO.SNDBUF, config.tcp_sndbuf);
+                try set(fd, os.SOL.SOCKET, os.SO.SNDBUF, tcp_sndbuf);
             }
 
             if (config.tcp_keepalive) {
