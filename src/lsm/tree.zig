@@ -9,14 +9,10 @@ const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
 
 const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
-const BlockPtr = @import("../storage.zig").BlockPtr;
-const BlockPtrConst = @import("../storage.zig").BlockPtrConst;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const Storage = @import("../storage.zig").Storage;
 
-const block_size = @import("../storage.zig").block_size;
 // StateMachine:
 //
 // /// state machine will pass this on to all object stores
@@ -109,6 +105,7 @@ pub const Direction = enum {
 pub const table_count_max = compute_table_count_max(config.lsm_growth_factor, config.levels);
 
 pub fn Tree(
+    comptime Storage: type,
     /// Key sizes of 8, 16, 32, etc. are supported with alignment 8 or 16.
     comptime Key: type,
     comptime Value: type,
@@ -119,6 +116,10 @@ pub fn Tree(
     comptime tombstone: fn (Value) bool,
     comptime tombstone_from_key: fn (Key) Value,
 ) type {
+    const BlockPtr = Storage.BlockPtr;
+    const BlockPtrConst = Storage.BlockPtrConst; // TODO Use this more where we can.
+    const block_size = Storage.block_size;
+
     _ = tombstone;
 
     assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
@@ -889,12 +890,12 @@ pub fn Tree(
                 );
             }
 
-            inline fn index_timestamp(index_block: BlockPtr) u32 {
+            inline fn index_timestamp(index_block: BlockPtrConst) u32 {
                 const header = mem.bytesAsValue(index_block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.offset);
             }
 
-            inline fn index_data_blocks_used(index_block: BlockPtr) u32 {
+            inline fn index_data_blocks_used(index_block: BlockPtrConst) u32 {
                 const header = mem.bytesAsValue(index_block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.request);
             }
@@ -915,7 +916,7 @@ pub fn Tree(
                 return data_block_values(data_block)[0..values_used];
             }
 
-            inline fn block_address(block: BlockPtr) u64 {
+            inline fn block_address(block: BlockPtrConst) u64 {
                 const header = mem.bytesAsValue(block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.op);
             }
@@ -1742,6 +1743,7 @@ test "table count max" {
 test {
     const Key = CompositeKey(u128);
     const TestTree = Tree(
+        @import("../storage.zig").Storage,
         Key,
         Key.Value,
         Key.compare_keys,
@@ -1749,7 +1751,6 @@ test {
         Key.sentinel_key,
         Key.tombstone,
         Key.tombstone_from_key,
-        Storage,
     );
 
     // TODO ref all decls instead
