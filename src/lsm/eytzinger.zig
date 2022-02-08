@@ -55,8 +55,8 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             while (node < nodes.len) : (node += 1) {
                 // Left and right inclusive bounds for the children of this node,
                 // as if we were doing a binary search.
-                const l = if (left_ancestor(&nodes, node)) |l| nodes[l] + 1 else 0;
-                const r = if (right_ancestor(&nodes, node)) |r| nodes[r] - 1 else values_max - 1;
+                const l = if (left_ancestor(node)) |l| nodes[l] + 1 else 0;
+                const r = if (right_ancestor(node)) |r| nodes[r] - 1 else values_max - 1;
 
                 // The binary search index into source for this node in the Eytzinger layout.
                 // This is (r + l) / 2 ... but without overflow bugs.
@@ -66,23 +66,23 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             break :blk nodes;
         };
 
-        fn left_ancestor(nodes: []const u32, node: u32) ?u32 {
+        fn left_ancestor(node: u32) ?u32 {
             var n = node;
             while (!is_right_child(n)) {
-                n = parent(nodes, n) orelse return null;
+                n = parent(n) orelse return null;
             }
-            return parent(nodes, n).?;
+            return parent(n).?;
         }
 
-        fn right_ancestor(nodes: []const u32, node: u32) ?u32 {
+        fn right_ancestor(node: u32) ?u32 {
             var n = node;
             while (!is_left_child(n)) {
-                n = parent(nodes, n) orelse return null;
+                n = parent(n) orelse return null;
             }
-            return parent(nodes, n).?;
+            return parent(n).?;
         }
 
-        fn parent(nodes: []const u32, node: u32) ?u32 {
+        fn parent(node: u32) ?u32 {
             if (node == 0) return null;
             return (node - 1) / 2;
         }
@@ -104,37 +104,6 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             /// This sentinel must compare greater than all actual keys.
             comptime sentinel_key: Key,
             values: []const Value,
-            layout: *[keys_count + 1]Key,
-        ) void {
-            comptime assert(tree.len + 1 == layout.len);
-            assert(values.len > 0);
-            assert(values.len <= values_max);
-
-            // We leave the first slot in layout empty for purposes of alignment.
-            // If we did not do this, the level in the tree with 16 great great
-            // grand childern would be split across cache lines with one child
-            // in the first cache line and the other 15 in the second.
-            mem.set(u8, mem.asBytes(&layout[0]), 0);
-            // 0 8 4 12 2 6 10 14 1 3 5 7 9 11 13 15
-            // ^
-            // padding element
-
-            for (tree) |values_index, i| {
-                if (values_index < values.len) {
-                    layout[i + 1] = key_from_value(values[values_index]);
-                } else {
-                    layout[i + 1] = sentinel_key;
-                }
-            }
-        }
-
-        /// Writes the Eytzinger layout to the passed layout buffer.
-        /// The values slice must be sorted by key in ascending order.
-        pub fn layout_from_keys(
-            comptime Key: type,
-            /// This sentinel must compare greater than all actual keys.
-            comptime sentinel_key: Key,
-            keys: []const Key,
             layout: *[keys_count + 1]Key,
         ) void {
             comptime assert(tree.len + 1 == layout.len);
@@ -392,7 +361,7 @@ const test_eytzinger = struct {
                 std.debug.print("keys: {any}\n", .{@as([]u32, keys)});
             }
 
-            // This is a regression test for our test code. We added this because we originally failed
+            // This is a regression test for our test code. We added this after we originally failed
             // to test exactly the case this is checking for.
             var at_least_one_target_key_not_in_values = false;
 
@@ -496,7 +465,10 @@ const test_eytzinger = struct {
                     target_key,
                 );
 
-                try std.testing.expectEqual(@as([*]const Value, expect_slice.ptr), actual_slice.ptr);
+                try std.testing.expectEqual(
+                    @as([*]const Value, expect_slice.ptr),
+                    actual_slice.ptr,
+                );
                 try std.testing.expectEqual(expect_slice.len, actual_slice.len);
             }
 

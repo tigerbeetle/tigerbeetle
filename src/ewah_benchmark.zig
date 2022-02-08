@@ -19,11 +19,11 @@ const repeats: usize = 100_000;
 // - "literals_length_e": Expected length of a sequence of literals.
 const configs = [_]BitSetConfig{
     // primarily runs
-    .{.words = 640, .run_length_e = 10, .literals_length_e = 10},
-    .{.words = 640, .run_length_e = 100, .literals_length_e = 10},
-    .{.words = 640, .run_length_e = 200, .literals_length_e = 10},
+    .{ .words = 640, .run_length_e = 10, .literals_length_e = 10 },
+    .{ .words = 640, .run_length_e = 100, .literals_length_e = 10 },
+    .{ .words = 640, .run_length_e = 200, .literals_length_e = 10 },
     // primarily literals
-    .{.words = 640, .run_length_e = 1, .literals_length_e = 100},
+    .{ .words = 640, .run_length_e = 1, .literals_length_e = 100 },
 };
 
 var prng = std.rand.DefaultPrng.init(42);
