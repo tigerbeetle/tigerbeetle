@@ -109,12 +109,12 @@ pub fn Tree(
     /// Key sizes of 8, 16, 32, etc. are supported with alignment 8 or 16.
     comptime Key: type,
     comptime Value: type,
-    comptime compare_keys: fn (Key, Key) math.Order,
-    comptime key_from_value: fn (Value) Key,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    comptime key_from_value: fn (Value) callconv(.Inline) Key,
     /// Must compare greater than all other keys.
     comptime sentinel_key: Key,
-    comptime tombstone: fn (Value) bool,
-    comptime tombstone_from_key: fn (Key) Value,
+    comptime tombstone: fn (Value) callconv(.Inline) bool,
+    comptime tombstone_from_key: fn (Key) callconv(.Inline) Value,
 ) type {
     const BlockPtr = Storage.BlockPtr;
     const BlockPtrConst = Storage.BlockPtrConst; // TODO Use this more where we can.
