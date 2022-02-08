@@ -144,11 +144,11 @@ pub fn Tree(
 
                 address: u64,
 
-                /// Set to the current snapshot tick on creation.
+                /// Set to the current snapshot tick on table creation.
                 snapshot_min: u64,
-                /// Initially math.maxInt(u64) on creation, set to the current
-                /// snapshot tick on deletion.
-                snapshot_max: u64,
+
+                /// Set to the current snapshot tick on table deletion.
+                snapshot_max: u64 = math.maxInt(u64),
 
                 flags: u64 = 0,
 
@@ -658,8 +658,8 @@ pub fn Tree(
 
                 table.* = .{
                     .buffer = buffer,
-                    .table_info = builder.index_block_finish(),
-                    .flush_iterator = .{},
+                    .table_info = builder.index_block_finish(timestamp),
+                    .flush_iterator = .{ .storage = storage },
                 };
             }
 
@@ -848,10 +848,12 @@ pub fn Tree(
                     const info: Manifest.TableInfo = .{
                         .checksum = header.checksum,
                         .address = address,
-                        .timestamp = timestamp,
+                        .snapshot_min = timestamp,
                         .key_min = builder.key_min,
                         .key_max = builder.key_max,
                     };
+
+                    assert(info.snapshot_max == math.maxInt(u64));
 
                     // Reset the builder to its initial state, leaving the buffers untouched.
                     builder.* = .{
