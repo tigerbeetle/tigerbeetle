@@ -784,7 +784,7 @@ fn parse_addresses_limit(allocator: std.mem.Allocator, raw: []const u8, max: usi
 }
 
 test "parse_addresses" {
-    const vectors_positive = &[_]struct{
+    const vectors_positive = &[_]struct {
         raw: []const u8,
         addresses: [3]std.net.Address,
     }{
@@ -792,32 +792,32 @@ test "parse_addresses" {
             // Test the minimum/maximum address/port.
             .raw = "1.2.3.4:567,0.0.0.0:0,255.255.255.255:65535",
             .addresses = [3]std.net.Address{
-                std.net.Address.initIp4([_]u8{1, 2, 3, 4}, 567),
-                std.net.Address.initIp4([_]u8{0, 0, 0, 0}, 0),
-                std.net.Address.initIp4([_]u8{255, 255, 255, 255}, 65535),
+                std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 567),
+                std.net.Address.initIp4([_]u8{ 0, 0, 0, 0 }, 0),
+                std.net.Address.initIp4([_]u8{ 255, 255, 255, 255 }, 65535),
             },
         },
         .{
             // Addresses are not reordered.
             .raw = "3.4.5.6:7777,200.3.4.5:6666,1.2.3.4:5555",
             .addresses = [3]std.net.Address{
-                std.net.Address.initIp4([_]u8{3, 4, 5, 6}, 7777),
-                std.net.Address.initIp4([_]u8{200, 3, 4, 5}, 6666),
-                std.net.Address.initIp4([_]u8{1, 2, 3, 4}, 5555),
+                std.net.Address.initIp4([_]u8{ 3, 4, 5, 6 }, 7777),
+                std.net.Address.initIp4([_]u8{ 200, 3, 4, 5 }, 6666),
+                std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 5555),
             },
         },
         .{
             // Test default address and port.
             .raw = "1.2.3.4:5,4321,2.3.4.5",
             .addresses = [3]std.net.Address{
-                std.net.Address.initIp4([_]u8{1, 2, 3, 4}, 5),
+                std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 5),
                 try std.net.Address.parseIp4(config.address, 4321),
-                std.net.Address.initIp4([_]u8{2, 3, 4, 5}, config.port),
+                std.net.Address.initIp4([_]u8{ 2, 3, 4, 5 }, config.port),
             },
         },
     };
 
-    const vectors_negative = &[_]struct{
+    const vectors_negative = &[_]struct {
         raw: []const u8,
         err: anyerror![]std.net.Address,
     }{
