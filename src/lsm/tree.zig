@@ -627,7 +627,8 @@ pub fn Tree(
 
                 var stream = sorted_values;
                 for (data_blocks) |*data_block| {
-                    builder.data_block = @alignCast(config.sector_size, data_block);
+                    const data_block_aligned = @alignCast(config.sector_size, data_block);
+                    builder.data_block = data_block_aligned;
 
                     const slice = stream[0..math.min(data.value_count_max, stream.len)];
                     stream = stream[slice.len..];
@@ -646,7 +647,7 @@ pub fn Tree(
 
                     if (stream.len == 0) break;
 
-                    assert(data_block_values_used(data_block).len == data.value_count_max);
+                    assert(data_block_values_used(data_block_aligned).len == data.value_count_max);
                 } else {
                     // We must always copy *all* values from sorted_values into the table,
                     // which will result in breaking from the loop as `stream.len` is 0.
