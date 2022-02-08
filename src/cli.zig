@@ -97,6 +97,14 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
+    // Keep track of the args from the ArgIterator above that were allocated
+    // then free them all at the end of the scope.
+    var args_allocated = std.ArrayList([:0]const u8).init(allocator);
+    defer {
+        for (args_allocated.items) |arg| allocator.free(arg);
+        args_allocated.deinit();
+    }
+
     // Skip argv[0] which is the name of this executable
     const did_skip = args.skip();
     assert(did_skip);
@@ -114,7 +122,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
     while (args.next(allocator)) |parsed_arg| {
         const arg = try parsed_arg;
-        defer allocator.free(arg);
+        try args_allocated.append(arg);
 
         if (mem.startsWith(u8, arg, "--cluster")) {
             maybe_cluster = parse_flag("--cluster", arg);
