@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const os = std.os;
 const testing = std.testing;
 const assert = std.debug.assert;
@@ -383,7 +384,7 @@ test "tick to wait" {
             // Other tests already check .tick() with IO based completions.
             // This simulates IO being completed by an external system
             var send_buf = std.mem.zeroes([64]u8);
-            const wrote = try os.send(self.accepted, &send_buf, 0);
+            const wrote = try os_send(self.accepted, &send_buf, 0);
             try testing.expectEqual(wrote, send_buf.len);
 
             // Wait for the recv() to complete using only IO.tick().
@@ -431,6 +432,41 @@ test "tick to wait" {
 
             assert(!self.received);
             self.received = true;
+        }
+
+        // TODO: use os.send() instead when it gets fixed for windows
+        fn os_send(sock: os.socket_t, buf: []const u8, flags: u32) !usize {
+            if (builtin.target.os.tag != .windows) {
+                return os.send(sock, buf, flags);
+            }
+
+            const rc = os.windows.sendto(sock, buf.ptr, buf.len, flags, null, 0);
+            if (rc == os.windows.ws2_32.SOCKET_ERROR) {
+                switch (os.windows.ws2_32.WSAGetLastError()) {
+                    .WSAEACCES => return error.AccessDenied,
+                    .WSAEADDRNOTAVAIL => return error.AddressNotAvailable,
+                    .WSAECONNRESET => return error.ConnectionResetByPeer,
+                    .WSAEMSGSIZE => return error.MessageTooBig,
+                    .WSAENOBUFS => return error.SystemResources,
+                    .WSAENOTSOCK => return error.FileDescriptorNotASocket,
+                    .WSAEAFNOSUPPORT => return error.AddressFamilyNotSupported,
+                    .WSAEDESTADDRREQ => unreachable, // A destination address is required.
+                    .WSAEFAULT => unreachable, // The lpBuffers, lpTo, lpOverlapped, lpNumberOfBytesSent, or lpCompletionRoutine parameters are not part of the user address space, or the lpTo parameter is too small.
+                    .WSAEHOSTUNREACH => return error.NetworkUnreachable,
+                    // TODO: WSAEINPROGRESS, WSAEINTR
+                    .WSAEINVAL => unreachable,
+                    .WSAENETDOWN => return error.NetworkSubsystemFailed,
+                    .WSAENETRESET => return error.ConnectionResetByPeer,
+                    .WSAENETUNREACH => return error.NetworkUnreachable,
+                    .WSAENOTCONN => return error.SocketNotConnected,
+                    .WSAESHUTDOWN => unreachable, // The socket has been shut down; it is not possible to WSASendTo on a socket after shutdown has been invoked with how set to SD_SEND or SD_BOTH.
+                    .WSAEWOULDBLOCK => return error.WouldBlock,
+                    .WSANOTINITIALISED => unreachable, // A successful WSAStartup call must occur before using this function.
+                    else => |err| return os.windows.unexpectedWSAError(err),
+                }
+            } else {
+                return @intCast(usize, rc);
+            }
         }
     }.run_test();
 }

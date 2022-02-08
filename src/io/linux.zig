@@ -867,7 +867,7 @@ pub const IO = struct {
     }
 
     pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
-        return os.openZ(dir_path, os.O_CLOEXEC | os.O_RDONLY, 0);
+        return os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
     }
 
     pub fn open_file(
@@ -892,7 +892,7 @@ pub const IO = struct {
         if (config.direct_io) {
             direct_io_supported = try fs_supports_direct_io(dir_fd);
             if (direct_io_supported) {
-                flags |= os.O_DIRECT;
+                flags |= os.O.DIRECT;
             } else if (config.deployment_environment == .development) {
                 log.warn("file system does not support Direct I/O", .{});
             } else {
@@ -937,7 +937,7 @@ pub const IO = struct {
             fs_allocate(fd, size) catch |err| switch (err) {
                 error.OperationNotSupported => {
                     log.warn("file system does not support fallocate(), an ENOSPC will panic", .{});
-                    log.notice("allocating by writing to the last sector of the file instead...", .{});
+                    log.info("allocating by writing to the last sector of the file instead...", .{});
 
                     const sector_size = config.sector_size;
                     const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;

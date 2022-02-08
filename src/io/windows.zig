@@ -301,12 +301,13 @@ pub const IO = struct {
                     var transferred: os.windows.DWORD = undefined;
 
                     const rc = switch (op.client_socket) {
+                        // When first called, the client_socket is invalid so we start the op.
                         INVALID_SOCKET => blk: {
-                            // Create the socket that will be used for accept
+                            // Create the socket that will be used for accept.
                             op.client_socket = ctx.io.open_socket(
-                                os.AF_INET,
-                                os.SOCK_STREAM,
-                                os.IPPROTO_TCP,
+                                os.AF.INET,
+                                os.SOCK.STREAM,
+                                os.IPPROTO.TCP,
                             ) catch |err| switch (err) {
                                 error.AddressFamilyNotSupported, error.ProtocolNotSupported => unreachable,
                                 else => |e| return e,
@@ -318,7 +319,7 @@ pub const IO = struct {
                                 .completion = ctx.completion,
                             };
 
-                            // Start the asynchronous accept with the created socket
+                            // Start the asynchronous accept with the created socket.
                             break :blk os.windows.ws2_32.AcceptEx(
                                 op.listen_socket,
                                 op.client_socket,
@@ -330,6 +331,7 @@ pub const IO = struct {
                                 &op.overlapped.raw,
                             );
                         },
+                        // Called after accept was started, so get the result
                         else => os.windows.ws2_32.WSAGetOverlappedResult(
                             op.listen_socket,
                             &op.overlapped.raw,
@@ -344,8 +346,8 @@ pub const IO = struct {
                         // enables getsockopt, setsockopt, getsockname, getpeername
                         _ = os.windows.ws2_32.setsockopt(
                             op.client_socket,
-                            os.windows.ws2_32.SOL_SOCKET,
-                            os.windows.ws2_32.SO_UPDATE_ACCEPT_CONTEXT,
+                            os.windows.ws2_32.SOL.SOCKET,
+                            os.windows.ws2_32.SO.UPDATE_ACCEPT_CONTEXT,
                             null,
                             0,
                         );
@@ -353,7 +355,7 @@ pub const IO = struct {
                         return op.client_socket;
                     }
 
-                    // destroy the client socket we made if we get a non EAGAIN error code
+                    // destroy the client_socket we created if we get a non WouldBlock error
                     errdefer |result| {
                         _ = result catch |err| switch (err) {
                             error.WouldBlock => {},
@@ -422,6 +424,7 @@ pub const IO = struct {
                     var transferred: os.windows.DWORD = undefined;
 
                     const rc = blk: {
+                        // Poll for the result if we've already started the connect op.
                         if (op.pending) {
                             break :blk os.windows.ws2_32.WSAGetOverlappedResult(
                                 op.socket,
@@ -460,6 +463,7 @@ pub const IO = struct {
                             Overlapped: *os.windows.OVERLAPPED,
                         ) callconv(os.windows.WINAPI) os.windows.BOOL;
 
+                        // Find the ConnectEx function by dynamically looking it up on the socket.
                         const connect_ex = os.windows.loadWinsockExtensionFunction(
                             LPFN_CONNECTEX,
                             op.socket,
@@ -476,6 +480,7 @@ pub const IO = struct {
                             .completion = ctx.completion,
                         };
 
+                        // Start the connect operation.
                         break :blk (connect_ex)(
                             op.socket,
                             &op.address.any,
@@ -492,8 +497,8 @@ pub const IO = struct {
                         // enables getsockopt, setsockopt, getsockname, getpeername
                         _ = os.windows.ws2_32.setsockopt(
                             op.socket,
-                            os.windows.ws2_32.SOL_SOCKET,
-                            os.windows.ws2_32.SO_UPDATE_CONNECT_CONTEXT,
+                            os.windows.ws2_32.SOL.SOCKET,
+                            os.windows.ws2_32.SO.UPDATE_CONNECT_CONTEXT,
                             null,
                             0,
                         );
@@ -559,6 +564,7 @@ pub const IO = struct {
                     var transferred: os.windows.DWORD = undefined;
 
                     const rc = blk: {
+                        // Poll for the result if we've already started the send op.
                         if (op.pending) {
                             break :blk os.windows.ws2_32.WSAGetOverlappedResult(
                                 op.socket,
@@ -575,6 +581,7 @@ pub const IO = struct {
                             .completion = ctx.completion,
                         };
 
+                        // Start the send operation.
                         break :blk switch (os.windows.ws2_32.WSASend(
                             op.socket,
                             @ptrCast([*]os.windows.ws2_32.WSABUF, &op.buf),
@@ -590,6 +597,7 @@ pub const IO = struct {
                         };
                     };
 
+                    // Return bytes transferred on success.
                     if (rc != os.windows.FALSE)
                         return transferred;
 
@@ -656,6 +664,7 @@ pub const IO = struct {
                     var transferred: os.windows.DWORD = undefined;
 
                     const rc = blk: {
+                        // Poll for the result if we've already started the recv op.
                         if (op.pending) {
                             break :blk os.windows.ws2_32.WSAGetOverlappedResult(
                                 op.socket,
@@ -672,6 +681,7 @@ pub const IO = struct {
                             .completion = ctx.completion,
                         };
 
+                        // Start the recv operation.
                         break :blk switch (os.windows.ws2_32.WSARecv(
                             op.socket,
                             @ptrCast([*]os.windows.ws2_32.WSABUF, &op.buf),
@@ -687,6 +697,7 @@ pub const IO = struct {
                         };
                     };
 
+                    // Return bytes received on success.
                     if (rc != os.windows.FALSE)
                         return transferred;
 
@@ -755,6 +766,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) ReadError!usize {
+                    // Do a synchronous read for now.
                     _ = ctx;
                     return os.pread(op.fd, op.buf[0..op.len], op.offset) catch |err| switch (err) {
                         error.OperationAborted => unreachable,
@@ -797,6 +809,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) WriteError!usize {
+                    // Do a synchronous write for now.
                     _ = ctx;
                     return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
                 }
@@ -1079,14 +1092,14 @@ pub const IO = struct {
     }
 };
 
-// TODO: use os.getsockoptError when fixed in stdlib
+// TODO: use os.getsockoptError when fixed for windows in stdlib
 fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
     var err_code: u32 = undefined;
     var size: i32 = @sizeOf(u32);
     const rc = os.windows.ws2_32.getsockopt(
         socket,
-        os.SOL_SOCKET,
-        os.SO_ERROR,
+        os.SOL.SOCKET,
+        os.SO.ERROR,
         std.mem.asBytes(&err_code),
         &size,
     );
@@ -1099,7 +1112,7 @@ fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
             .WSAEINVAL => unreachable, // The level parameter is unknown or invalid
             .WSAENOPROTOOPT => unreachable, // The option is unknown at the level indicated.
             .WSAENOTSOCK => return error.FileDescriptorNotASocket,
-            else => |err| return os.unexpectedErrno(@enumToInt(err)),
+            else => |err| return os.windows.unexpectedWSAError(err),
         }
     }
 
