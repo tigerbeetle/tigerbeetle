@@ -206,7 +206,10 @@ test "ewah Word=u8 encode→decode→encode" {
 
     var seed: u64 = undefined;
     try std.os.getrandom(mem.asBytes(&seed));
+
     var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
     var decoded_expect: [4096]u8 = undefined;
     var decoded_actual: [4096]u8 = undefined;
 
@@ -219,8 +222,8 @@ test "ewah Word=u8 encode→decode→encode" {
 
     var t: usize = 0;
     while (t < 100) : (t += 1) {
-        prng.random.bytes(decoded_expect[0..]);
-        const encoded_actual_length = codec.encode(decoded_expect[0..], encoded_actual);
+        random.bytes(decoded_expect[0..]);
+        _ = codec.encode(decoded_expect[0..], encoded_actual);
         const decoded_actual_length = codec.decode(encoded_actual[0..], decoded_actual[0..]);
         try std.testing.expectEqual(decoded_expect.len, decoded_actual_length);
         try std.testing.expectEqual(decoded_expect, decoded_actual);
