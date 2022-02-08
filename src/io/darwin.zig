@@ -624,7 +624,7 @@ pub const IO = struct {
 
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         _ = self;
-        
+
         const fd = try os.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
         errdefer os.closeSocket(fd);
 
@@ -725,7 +725,7 @@ pub const IO = struct {
         // https://stackoverflow.com/a/11497568
         // https://api.kde.org/frameworks/kcoreaddons/html/posix__fallocate__mac_8h_source.html
         // http://hg.mozilla.org/mozilla-central/file/3d846420a907/xpcom/glue/FileUtils.cpp#l61
-        
+
         const F_ALLOCATECONTIG = 0x2; // allocate contiguous space
         const F_ALLOCATEALL = 0x4; // allocate all or nothing
         const F_PEOFPOSMODE = 3; // use relative offset from the seek pos mode

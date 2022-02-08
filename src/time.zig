@@ -24,7 +24,7 @@ pub const Time = struct {
         const m = blk: {
             // Uses QueryPerformanceCounter() on windows due to it being the highest precision timer
             // available while also accounting for time spent suspended by default:
-            // https://docs.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-queryunbiasedinterrupttime#remarks 
+            // https://docs.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-queryunbiasedinterrupttime#remarks
             if (is_windows) {
                 // QPF need not be globally cached either as it ends up being a load from read-only
                 // memory mapped to all processed by the kernel called KUSER_SHARED_DATA (See "QpcFrequency")
@@ -58,7 +58,7 @@ pub const Time = struct {
                 // mach_timebase_info() called through libc already does global caching for us
                 // https://opensource.apple.com/source/xnu/xnu-7195.81.3/libsyscall/wrappers/mach_timebase_info.c.auto.html
                 var info: darwin.mach_timebase_info_t = undefined;
-                if (darwin.mach_timebase_info(&info) != 0) 
+                if (darwin.mach_timebase_info(&info) != 0)
                     @panic("mach_timebase_info() failed");
 
                 const now = darwin.mach_continuous_time();

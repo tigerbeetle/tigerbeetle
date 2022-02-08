@@ -862,7 +862,7 @@ pub const IO = struct {
 
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         _ = self;
-        
+
         return os.socket(family, sock_type, protocol);
     }
 
@@ -1001,7 +1001,7 @@ pub const IO = struct {
         const mode: i32 = 0;
         const offset: i64 = 0;
         const length = @intCast(i64, size);
-        
+
         while (true) {
             const rc = os.linux.fallocate(fd, mode, offset, length);
             switch (os.linux.getErrno(rc)) {

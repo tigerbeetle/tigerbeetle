@@ -88,7 +88,7 @@ fn start(
         config.journal_size_max, // TODO Double-check that we have space for redundant headers.
         false,
     );
-    
+
     var state_machine = try StateMachine.init(
         allocator,
         config.accounts_max,

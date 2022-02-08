@@ -30,7 +30,7 @@ pub fn main() !void {
         .rx = .{ .buffer = buffer[1 * buffer_size ..][0..buffer_size] },
     };
     defer self.io.deinit();
-    
+
     var timer = Time{};
     const started = timer.monotonic();
     defer {
