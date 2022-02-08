@@ -138,6 +138,10 @@ pub fn Tree(
             /// need to do any extra work before sending the message on repair.
             pub const TableInfo = extern struct {
                 checksum: u128,
+
+                key_min: Key,
+                key_max: Key,
+
                 address: u64,
 
                 /// Set to the current snapshot tick on creation.
@@ -146,18 +150,17 @@ pub fn Tree(
                 /// snapshot tick on deletion.
                 snapshot_max: u64,
 
-                key_min: Key,
-                key_max: Key,
+                flags: u64 = 0,
 
                 comptime {
-                    assert(@sizeOf(TableInfo) == 40 + key_size * 2);
+                    assert(@sizeOf(TableInfo) == 48 + key_size * 2);
                     assert(@alignOf(TableInfo) == 16);
                 }
             };
 
             pub const Level = struct {
                 key_mins: []Key,
-                key_mins: []Key,
+                key_maxs: []Key,
             };
 
             levels: [config.lsm_levels]Level,
