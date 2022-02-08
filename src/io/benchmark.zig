@@ -1,6 +1,7 @@
 const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
+const log = std.log.scoped(.io_benchmark);
 
 const Time = @import("../time.zig").Time;
 const IO = @import("../io.zig").IO;
@@ -14,7 +15,7 @@ const run_duration = 1 * std.time.ns_per_s;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator();
     defer {
         const leaks = gpa.deinit();
         assert(!leaks);
@@ -37,21 +38,21 @@ pub fn main() !void {
         const elapsed_ns = timer.monotonic() - started;
         const transferred_mb = @intToFloat(f64, self.transferred) / 1024 / 1024;
 
-        std.debug.print("IO throughput test: took {}ms @ {d:.2} MB/s\n", .{
+        log.info("took {}ms @ {d:.2} MB/s\n", .{
             elapsed_ns / std.time.ns_per_ms,
             transferred_mb / (@intToFloat(f64, elapsed_ns) / std.time.ns_per_s),
         });
     }
 
     // Setup the server socket
-    self.server.fd = try self.io.open_socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+    self.server.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
     defer os.closeSocket(self.server.fd);
 
     const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
     try os.setsockopt(
         self.server.fd,
-        os.SOL_SOCKET,
-        os.SO_REUSEADDR,
+        os.SOL.SOCKET,
+        os.SO.REUSEADDR,
         &std.mem.toBytes(@as(c_int, 1)),
     );
     try os.bind(self.server.fd, &address.any, address.getOsSockLen());
@@ -67,7 +68,7 @@ pub fn main() !void {
     );
 
     // Setup the client connection
-    self.tx.socket.fd = try self.io.open_socket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+    self.tx.socket.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
     defer os.closeSocket(self.tx.socket.fd);
 
     self.io.connect(
@@ -80,6 +81,7 @@ pub fn main() !void {
     );
 
     // Run the IO loop for the duration of the benchmark
+    log.info("running for {}", .{std.fmt.fmtDuration(run_duration)});
     try self.io.run_for_ns(run_duration);
 
     // Assert that everything is connected
@@ -128,6 +130,8 @@ const Context = struct {
         completion: *IO.Completion,
         result: IO.ConnectError!void,
     ) void {
+        _ = result catch unreachable;
+
         assert(self.tx.socket.fd != IO.INVALID_SOCKET);
         assert(&self.tx.socket.completion == completion);
 
@@ -137,8 +141,8 @@ const Context = struct {
     }
 
     const TransferType = enum {
-        read = 0,
-        write = 1,
+        read,
+        write,
     };
 
     fn do_transfer(
