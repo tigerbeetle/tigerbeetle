@@ -194,7 +194,9 @@ test "ewah Word=u8 decode→encode→decode" {
                 .uniform_word_count = @intCast(codec.MarkerUniformCount, uniform_word_count),
                 .literal_word_count = 3,
             }),
-            12, 34, 56,
+            12,
+            34,
+            56,
         });
     }
 }
@@ -208,8 +210,11 @@ test "ewah Word=u8 encode→decode→encode" {
     var decoded_expect: [4096]u8 = undefined;
     var decoded_actual: [4096]u8 = undefined;
 
-    const encoded_actual = try std.testing.allocator.alignedAlloc(u8, @alignOf(u8),
-        codec.encode_size_max(decoded_expect[0..]));
+    const encoded_actual = try std.testing.allocator.alignedAlloc(
+        u8,
+        @alignOf(u8),
+        codec.encode_size_max(decoded_expect[0..]),
+    );
     defer std.testing.allocator.free(encoded_actual);
 
     var t: usize = 0;
@@ -287,8 +292,11 @@ fn test_decode(comptime Word: type, encoded_expect_words: []Word) !void {
 
     const decoded_expect_length = codec.decode(encoded_expect, decoded_expect_data);
     const decoded_expect = decoded_expect_data[0..decoded_expect_length];
-    const encoded_actual = try std.testing.allocator.alignedAlloc(u8, @alignOf(Word),
-        codec.encode_size_max(decoded_expect));
+    const encoded_actual = try std.testing.allocator.alignedAlloc(
+        u8,
+        @alignOf(Word),
+        codec.encode_size_max(decoded_expect),
+    );
     defer std.testing.allocator.free(encoded_actual);
 
     const encoded_actual_length = codec.encode(decoded_expect, encoded_actual);

@@ -199,6 +199,8 @@ fn TestContext(comptime k_max: u32) type {
         }
 
         fn stream_precedence(context: *Self, a: u32, b: u32) bool {
+            _ = context;
+
             // Higher streams have higher precedence
             return a > b;
         }
@@ -296,8 +298,8 @@ fn TestContext(comptime k_max: u32) type {
                 var target: usize = 0;
                 var previous_key: ?u32 = null;
                 for (expect_with_duplicates) |value| {
-                    if (previous_key) |previous| {
-                        if (value.key == previous_key) continue;
+                    if (previous_key) |p| {
+                        if (value.key == p) continue;
                     }
                     previous_key = value.key;
                     expect_with_duplicates[target] = value;

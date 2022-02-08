@@ -9,6 +9,12 @@ const IO = @import("io.zig").IO;
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
 
+pub const block_size = config.lsm_table_block_size; // TODO Rename to config.block_size
+pub const BlockPtr = *align(config.sector_size) [block_size]u8;
+pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
+
+const BlockFreeSet = @import("src/lsm/block_free_set.zig");
+
 pub const Storage = struct {
     /// See usage in Journal.write_sectors() for details.
     pub const synchronicity: enum {
@@ -68,19 +74,61 @@ pub const Storage = struct {
         offset: u64,
     };
 
+    io: *IO,
+    block_free_set: *BlockFreeSet,
+    cluster: u32,
     size: u64,
     fd: os.fd_t,
-    io: *IO,
 
-    pub fn init(size: u64, fd: os.fd_t, io: *IO) !Storage {
+    pub fn init(io: *IO, cluster: u32, size: u64, fd: os.fd_t) !Storage {
+        // TODO Initialize block free set according to size.
+
         return Storage{
+            .io = io,
+            .block_free_set = undefined,
+            .cluster = cluster,
             .size = size,
             .fd = fd,
-            .io = io,
         };
     }
 
-    pub fn deinit() void {}
+    pub fn deinit() void {
+        // TODO Deinit block free set.
+    }
+
+    pub fn write_block(
+        callback: fn (Storage.Write) void,
+        write: *Storage.Write,
+        block: BlockPtrConst,
+        address: u64,
+    ) void {
+        _ = callback;
+        _ = write;
+        _ = block;
+        _ = address;
+
+        // TODO
+    }
+
+    /// This function transparently handles recovery if the checksum fails.
+    /// If necessary, this read will be added to a linked list in Storage,
+    /// which Replica can then interrogate each tick(). The callback passed
+    /// to this function won't be called until the block has been recovered.
+    pub fn read_block(
+        self: *Storage,
+        callback: fn (Storage.Read) void,
+        read: *Storage.Read,
+        block: BlockPtr,
+        address: u64,
+    ) void {
+        _ = self;
+        _ = callback;
+        _ = read;
+        _ = block;
+        _ = address;
+
+        // TODO
+    }
 
     pub fn read_sectors(
         self: *Storage,

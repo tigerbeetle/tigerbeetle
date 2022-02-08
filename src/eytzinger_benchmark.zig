@@ -10,15 +10,15 @@ const GiB = 1 << 30;
 const searches = 500_000;
 
 const kv_types = .{
-    .{.key_size = 8, .value_size = 128},
-    .{.key_size = 8, .value_size = 64},
-    .{.key_size = 16, .value_size = 16},
-    .{.key_size = 32, .value_size = 32},
+    .{ .key_size = 8, .value_size = 128 },
+    .{ .key_size = 8, .value_size = 64 },
+    .{ .key_size = 16, .value_size = 16 },
+    .{ .key_size = 32, .value_size = 32 },
 };
 
 // keys_per_summary = values_per_page / summary_fraction
-const summary_fractions = .{4, 8, 16, 32};
-const values_per_page = .{128, 256, 512, 1024, 2048, 4096, 8192};
+const summary_fractions = .{ 4, 8, 16, 32 };
+const values_per_page = .{ 128, 256, 512, 1024, 2048, 4096, 8192 };
 const body_fmt = "{:_>2}B/{:_>3}B {:_>4}/{:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns" ++
     " CY={:_>6} IN={:_>6} CR={:_>5} CM={:_>5} BM={}\n";
 
@@ -92,9 +92,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
     random.bytes(std.mem.sliceAsBytes(pages));
     for (pages) |*page| {
         for (page.values) |*value, i| value.key = i;
-        Eytzinger.layout_from_keys_or_values(
-            K, V, V.key_from_value, V.max_key,
-            &page.values, &page.keys);
+        Eytzinger.layout_from_keys_or_values(K, V, V.key_from_value, V.max_key, &page.values, &page.keys);
     }
 
     const stdout = std.io.getStdOut().writer();
@@ -313,7 +311,7 @@ fn binary_search_keys(
     const key_stride = layout.values_count / layout.keys_count;
     const high = key_index * key_stride;
     if (key_index < keys.len and keys[key_index] == key) {
-        return if (high == 0) values[0..1] else values[high-1..high];
+        return if (high == 0) values[0..1] else values[high - 1 .. high];
     }
-    return values[high - key_stride..high];
+    return values[high - key_stride .. high];
 }
