@@ -592,7 +592,7 @@ pub fn Tree(
 
             /// The actual data to be written to disk.
             /// The first bytes are a vsr.Header containing checksum, id, count and timestamp.
-            buffer: []align(config.sector_size) const u8,
+            buffer: []align(config.sector_size) u8,
             table_info: Manifest.TableInfo,
             flush_iterator: FlushIterator,
 
@@ -607,6 +607,8 @@ pub fn Tree(
                 assert(sorted_values.len <= data.value_count_max * data_block_count_max);
 
                 const buffer = table.buffer;
+                // TODO Fix this slice to be *align(4096) [65536]u8 instead of *[65536]u8.
+                // Then we can drop the @alignCast(config.sector_size) below.
                 const blocks = mem.bytesAsSlice([block_size]u8, buffer);
 
                 var filter_blocks_index: u32 = 0;
@@ -625,7 +627,7 @@ pub fn Tree(
 
                 var stream = sorted_values;
                 for (data_blocks) |*data_block| {
-                    builder.data_block = data_block;
+                    builder.data_block = @alignCast(config.sector_size, data_block);
 
                     const slice = stream[0..math.min(data.value_count_max, stream.len)];
                     stream = stream[slice.len..];
@@ -635,7 +637,10 @@ pub fn Tree(
 
                     if (builder.filter_block_full() or stream.len == 0) {
                         builder.filter_block_finish();
-                        builder.filter_block = filter_blocks[filter_blocks_index];
+                        builder.filter_block = @alignCast(
+                            config.sector_size,
+                            &filter_blocks[filter_blocks_index],
+                        );
                         filter_blocks_index += 1;
                     }
 
@@ -700,7 +705,7 @@ pub fn Tree(
                     assert(values_max.len == data.value_count_max);
 
                     mem.copy(Value, values_max[builder.value..], values);
-                    builder.value += values.len;
+                    builder.value += @intCast(u32, values.len);
                     // TODO add this value's key to the correct filter block.
                 }
 
@@ -790,6 +795,7 @@ pub fn Tree(
                     _ = builder;
 
                     // TODO
+                    return true;
                 }
 
                 pub fn filter_block_finish(builder: *Builder) void {
@@ -1759,5 +1765,5 @@ test {
     // TODO ref all decls instead
     _ = TestTree;
     _ = TestTree.Table;
-    _ = TestTree.Table.create;
+    _ = TestTree.Table.create_from_sorted_values;
 }
