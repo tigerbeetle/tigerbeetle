@@ -20,33 +20,38 @@ const message_size_max_padded = config.message_size_max + config.sector_size;
 /// The number of full-sized messages allocated at initialization by the replica message pool.
 /// There must be enough messages to ensure that the replica can always progress, to avoid deadlock.
 pub const messages_max_replica = messages_max: {
-    const client_table_messages_max = config.clients_max;
-    const journal_messages_max = config.io_depth_read + config.io_depth_write;
-    const loopback_queue_messages_max = 1;
-    const pipelining_messages_max = config.pipelining_max;
-    // Only 1 quorum stores messages (QuorumMessages): do_view_change_from_all_replicas.
-    const quorum_messages_max = config.replicas_max;
+    var sum: usize = 0;
 
-    // +1 to account for the Connection's `recv_message`.
-    const connection_messages_max = config.connection_send_queue_max_replica + 1;
-    const message_bus_messages_max = config.connections_max * connection_messages_max;
+    sum += config.io_depth_read + config.io_depth_write; // journal I/O
+    sum += config.clients_max; // Replica.client_table
+    sum += 1; // Replica.loopback_queue
+    sum += config.pipelining_max; // Replica.pipeline
+    sum += config.replicas_max; // Replica.do_view_change_from_all_replicas quorum (all others are bitsets)
+    sum += config.connections_max; // Connection.recv_message
+    sum += config.connections_max * config.connection_send_queue_max_replica; // Connection.send_queue
+    sum += 1; // Handle bursts (e.g. Connection.parse_message)
+    // Handle Replica.commit_op's reply.
+    // (This is separate from the burst +1 because they may occur concurrently).
+    sum += 1;
 
-    break :messages_max pipelining_messages_max + quorum_messages_max +
-        loopback_queue_messages_max + client_table_messages_max + journal_messages_max +
-        message_bus_messages_max;
+    break :messages_max sum;
 };
 
 /// The number of full-sized messages allocated at initialization by the client message pool.
 pub const messages_max_client = messages_max: {
-    // +1 to account for the Connection's `recv_message`.
-    const connection_messages_max = config.connection_send_queue_max_client + 1;
-    const message_bus_messages_max = config.replicas_max * connection_messages_max;
-    // +1 to account for creating a ping when the send/request queues are already full.
-    break :messages_max 1 + message_bus_messages_max + config.client_request_queue_max;
+    var sum: usize = 0;
+
+    sum += config.replicas_max; // Connection.recv_message
+    sum += config.replicas_max * config.connection_send_queue_max_client; // Connection.send_queue
+    sum += config.client_request_queue_max; // Client.request_queue
+    // Handle bursts (e.g. Connection.parse_message, or sending a ping when the send queue is full).
+    sum += 1;
+
+    break :messages_max sum;
 };
 
 comptime {
-    // These conditions is necessary (but not sufficient) to prevent deadlocks.
+    // These conditions are necessary (but not sufficient) to prevent deadlocks.
     assert(messages_max_replica > config.replicas_max);
     assert(messages_max_client > config.client_request_queue_max);
 }
@@ -57,7 +62,7 @@ pub const MessagePool = struct {
     pub const Message = struct {
         // TODO: replace this with a header() function to save memory
         header: *Header,
-        /// This buffer is in aligned to config.sector_size and casting to that alignment in order
+        /// This buffer is aligned to config.sector_size and casting to that alignment in order
         /// to perform Direct I/O is safe.
         buffer: []u8,
         references: u32 = 0,
@@ -111,12 +116,13 @@ pub const MessagePool = struct {
     /// Get an unused message with a buffer of config.message_size_max.
     /// The returned message has exactly one reference.
     pub fn get_message(pool: *MessagePool) *Message {
-        const ret = pool.free_list.?;
-        pool.free_list = ret.next;
-        ret.next = null;
-        assert(ret.references == 0);
-        ret.references = 1;
-        return ret;
+        const message = pool.free_list.?;
+        pool.free_list = message.next;
+        message.next = null;
+        assert(message.references == 0);
+
+        message.references = 1;
+        return message;
     }
 
     /// Decrement the reference count of the message, possibly freeing it.

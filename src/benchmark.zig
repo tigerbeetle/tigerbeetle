@@ -228,7 +228,7 @@ const TimedQueue = struct {
         if (self.batches.head_ptr()) |starting_batch| {
             log.debug("sending first batch...", .{});
             self.batch_start = now;
-            var message = self.client.get_message();
+            const message = self.client.get_message();
             defer self.client.unref(message);
 
             std.mem.copy(
@@ -286,7 +286,7 @@ const TimedQueue = struct {
         }
 
         if (self.batches.head_ptr()) |next_batch| {
-            var message = self.client.get_message();
+            const message = self.client.get_message();
             defer self.client.unref(message);
 
             std.mem.copy(

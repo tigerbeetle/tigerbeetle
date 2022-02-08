@@ -1,3 +1,6 @@
+const std = @import("std");
+const assert = std.debug.assert;
+
 /// Whether development or production:
 pub const deployment_environment = .development;
 
@@ -97,7 +100,7 @@ pub const connection_delay_min_ms = 50;
 pub const connection_delay_max_ms = 1000;
 
 /// The maximum number of outgoing messages that may be queued on a replica connection.
-pub const connection_send_queue_max_replica = pipelining_max;
+pub const connection_send_queue_max_replica = std.math.max(std.math.min(clients_max, 4), 2);
 
 /// The maximum number of outgoing messages that may be queued on a client connection.
 /// The client has one in-flight request, and occasionally a ping.
@@ -125,7 +128,8 @@ pub const tcp_rcvbuf = 4 * 1024 * 1024;
 /// This sets SO_SNDBUF as an alternative to the auto-tuning range in /proc/sys/net/ipv4/tcp_wmem.
 /// The value is limited by /proc/sys/net/core/wmem_max, unless the CAP_NET_ADMIN privilege exists.
 /// The kernel doubles this value to allow space for packet bookkeeping overhead.
-pub const tcp_sndbuf = 4 * 1024 * 1024;
+pub const tcp_sndbuf_replica = connection_send_queue_max_replica * message_size_max;
+pub const tcp_sndbuf_client = connection_send_queue_max_client * message_size_max;
 
 /// Whether to enable TCP keepalive:
 pub const tcp_keepalive = true;
@@ -221,9 +225,11 @@ pub const clock_synchronization_window_min_ms = 2000;
 pub const clock_synchronization_window_max_ms = 20000;
 
 comptime {
-    const std = @import("std");
-
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
     _ = @as(u16, port);
+
+    // Avoid latency issues from a too-large sndbuf.
+    assert(tcp_sndbuf_replica <= 4 * 1024 * 1024);
+    assert(tcp_sndbuf_client <= 4 * 1024 * 1024);
 }
