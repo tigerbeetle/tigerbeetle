@@ -5,14 +5,18 @@ const math = std.math;
 const mem = std.mem;
 
 const config = @import("../config.zig");
-const vsr = @import("../vsr.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-
 const eytzinger = @import("eytzinger.zig").eytzinger;
-const CompositeKey = @import("composite_key.zig").CompositeKey;
-const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
-const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
+const vsr = @import("../vsr.zig");
 
+const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
+const BlockPtr = @import("../storage.zig").BlockPtr;
+const BlockPtrConst = @import("../storage.zig").BlockPtrConst;
+const CompositeKey = @import("composite_key.zig").CompositeKey;
+const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
+const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const Storage = @import("../storage.zig").Storage;
+
+const block_size = @import("../storage.zig").block_size;
 // StateMachine:
 //
 // /// state machine will pass this on to all object stores
@@ -90,42 +94,6 @@ pub const ClientTableEntry = packed struct {
     session: u64,
 };
 
-const block_size = config.lsm_table_block_size;
-const BlockPtr = *align(config.sector_size) [block_size]u8;
-const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
-
-// TODO Split a Partition type out of the current Storage.zig, the partition type will be what
-// is shimmed for testing. Then we can put the free set and block writing methods in Storage.
-pub fn BlockStorage(comptime Storage: type) type {
-    return struct {
-        cluster: u32,
-        storage: *Storage,
-        free_set: *BlockFreeSet,
-
-        pub fn write_block(
-            callback: fn (Storage.Write) void,
-            write: *Storage.Write,
-            block: BlockPtrConst,
-            address: u64,
-        ) void {
-            // TODO
-        }
-
-        /// This function transparently handles recovery if the checksum fails.
-        /// If necessary, this read will be added to a linked list in Storage,
-        /// which Replica can then interrogate each tick(). The callback passed
-        /// to this function won't be called until the block has been recovered.
-        pub fn read_block(
-            callback: fn (Storage.Read) void,
-            read: *Storage.Read,
-            block: BlockPtr,
-            address: u64,
-        ) void {
-            // TODO
-        }
-    };
-}
-
 pub const Direction = enum {
     ascending,
     descending,
@@ -140,7 +108,7 @@ pub const Direction = enum {
 
 pub const table_count_max = compute_table_count_max(config.lsm_growth_factor, config.levels);
 
-pub fn LsmTree(
+pub fn Tree(
     /// Key sizes of 8, 16, 32, etc. are supported with alignment 8 or 16.
     comptime Key: type,
     comptime Value: type,
@@ -151,6 +119,8 @@ pub fn LsmTree(
     comptime tombstone: fn (Value) bool,
     comptime tombstone_from_key: fn (Key) Value,
 ) type {
+    _ = tombstone;
+
     assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
     // There must be no padding in the Key type. This avoids buffer bleeds.
     assert(@bitSizeOf(Key) == @sizeOf(Key) * 8);
@@ -159,7 +129,7 @@ pub fn LsmTree(
     const key_size = @sizeOf(Key);
 
     return struct {
-        const Self = @This();
+        const TreeGeneric = @This();
 
         pub const Manifest = struct {
             /// First 128 bytes of the table are a VSR protocol header for a repair message.
@@ -206,19 +176,6 @@ pub fn LsmTree(
                 return null;
             }
 
-            fn table_index(
-                manifest: *Manifest,
-                /// May pass math.maxInt(u64) if there is no snapshot.
-                snapshot: u64,
-                level: u8,
-                key: Key,
-                direction: Direction,
-            ) ?Index {
-                // TODO
-            }
-
-            fn table_index(manifest: *Manifest, index: Index) void {}
-
             pub const Iterator = struct {
                 manifest: *Manifest,
                 snapshot: u64,
@@ -228,6 +185,7 @@ pub fn LsmTree(
                 direction: Direction,
 
                 pub fn next(it: *Iterator) ?TableInfo {
+                    _ = it;
                     // assume direction is ascending
                     // search for the current key_min in the manifest, given level and snapshot
                     //
@@ -273,7 +231,9 @@ pub fn LsmTree(
 
             values: Values = .{},
 
-            pub fn init(allocator: *std.mem.Allocator) !MutableTable {
+            pub fn init(allocator: mem.Allocator) !MutableTable {
+                _ = allocator;
+
                 var table: MutableTable = .{};
                 // TODO This allocates a bit more memory than we need as it rounds up to the next
                 // power of two or similar based on the hash map's growth factor. We never resize
@@ -282,7 +242,7 @@ pub fn LsmTree(
                 return table;
             }
 
-            pub fn deinit(table: *MutableTable, allocator: *std.mem.Allocator) void {
+            pub fn deinit(table: *MutableTable, allocator: mem.Allocator) void {
                 table.values.deinit(allocator);
             }
 
@@ -634,7 +594,7 @@ pub fn LsmTree(
 
             pub fn create_from_sorted_values(
                 table: *Table,
-                storage: *BlockStorage(Storage),
+                storage: *Storage,
                 timestamp: u64,
                 sorted_values: []const Value,
             ) void {
@@ -695,9 +655,7 @@ pub fn LsmTree(
             }
 
             const Builder = struct {
-                const Self = @This();
-
-                storage: *BlockStorage(Storage),
+                storage: *Storage,
                 key_min: Key = undefined,
                 key_max: Key = undefined,
 
@@ -708,11 +666,16 @@ pub fn LsmTree(
                 block: u32 = 0,
                 value: u32 = 0,
 
-                pub fn init(allocator: *mem.Allocator) Self {
+                pub fn init(allocator: mem.Allocator) Builder {
+                    _ = allocator;
+
                     // TODO
                 }
 
-                pub fn deinit(builder: *Self, allocator: *mem.Allocator) void {
+                pub fn deinit(builder: *Builder, allocator: mem.Allocator) void {
+                    _ = builder;
+                    _ = allocator;
+
                     // TODO
                 }
 
@@ -820,10 +783,14 @@ pub fn LsmTree(
 
                 /// Returns true if there is space for at least one more data block in the filter.
                 pub fn filter_block_full(builder: Builder) bool {
+                    _ = builder;
+
                     // TODO
                 }
 
                 pub fn filter_block_finish(builder: *Builder) void {
+                    _ = builder;
+
                     // TODO
                 }
 
@@ -922,12 +889,12 @@ pub fn LsmTree(
                 );
             }
 
-            inline fn timestamp(index_block: BlockPtr) u32 {
+            inline fn index_timestamp(index_block: BlockPtr) u32 {
                 const header = mem.bytesAsValue(index_block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.offset);
             }
 
-            inline fn data_blocks_used(index_block: BlockPtr) u32 {
+            inline fn index_data_blocks_used(index_block: BlockPtr) u32 {
                 const header = mem.bytesAsValue(index_block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.request);
             }
@@ -956,10 +923,11 @@ pub fn LsmTree(
             pub const FlushIterator = struct {
                 const Callback = fn () void;
 
+                storage: *Storage,
                 write: Storage.Write = undefined,
+
                 /// The index of the block that is currently being written/will be written next.
                 block: u32 = 0,
-
                 blocks_max: u32 = undefined,
                 callback: Callback = undefined,
 
@@ -996,7 +964,7 @@ pub fn LsmTree(
                     const block_buffer = table.buffer[it.block * block_size ..][0..block_size];
                     const header = mem.bytesAsValue(block_buffer[0..@sizeOf(vsr.Header)]);
                     const address = header.op;
-                    storage.write_block(on_flush, &it.write, block_buffer, address);
+                    it.storage.write_block(on_flush, &it.write, block_buffer, address);
                 }
 
                 fn flush_complete(it: *FlushIterator) void {
@@ -1041,6 +1009,7 @@ pub fn LsmTree(
                 write: Storage.Write,
             };
 
+            storage: *Storage,
             ticks: u32 = 0,
             io_pending: u32 = 0,
             callback: ?Callback = null,
@@ -1062,7 +1031,9 @@ pub fn LsmTree(
             filter: BlockWrite,
             data: BlockWrite,
 
-            pub fn init(allocator: *mem.Allocator) Compaction {}
+            pub fn init(allocator: mem.Allocator) Compaction {
+                _ = allocator;
+            }
 
             pub fn start(
                 compaction: *Compaction,
@@ -1071,6 +1042,10 @@ pub fn LsmTree(
                 level_b_key_min: Key,
                 level_b_key_max: Key,
             ) void {
+                _ = level_b;
+                _ = level_b_key_min;
+                _ = level_b_key_max;
+
                 assert(compaction.io_pending == 0);
                 // There are at least 2 table inputs to the compaction.
                 assert(level_a_tables.len + 1 >= 2);
@@ -1198,9 +1173,14 @@ pub fn LsmTree(
             ) void {
                 if (block_write.submit) {
                     block_write.submit = false;
+
                     compaction.io_pending += 1;
-                    const address = Table.block_address(block_write.block);
-                    storage.write_block(callback, &block_write.write, block_write.block, address);
+                    compaction.storage.write_block(
+                        callback,
+                        &block_write.write,
+                        block_write.block,
+                        Table.block_address(block_write.block),
+                    );
                 }
             }
 
@@ -1265,8 +1245,8 @@ pub fn LsmTree(
 
                 const it_a = compaction.level_a_iterators()[a + 1];
                 const it_b = compaction.level_a_iterators()[b + 1];
-                const timestamp_a = Table.timestamp(it_a.index);
-                const timestamp_b = Table.timestamp(it_b.index);
+                const timestamp_a = Table.index_timestamp(it_a.index);
+                const timestamp_b = Table.index_timestamp(it_b.index);
                 assert(timestamp_a != timestamp_b);
                 return timestamp_a > timestamp_b;
             }
@@ -1274,7 +1254,7 @@ pub fn LsmTree(
 
         fn LevelIterator(comptime Parent: type, comptime read_done: fn (*Parent) void) type {
             return struct {
-                const Self = @This();
+                const LevelIteratorGeneric = @This();
 
                 const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
 
@@ -1283,9 +1263,9 @@ pub fn LsmTree(
                 key_min: Key,
                 key_max: Key,
                 values: ValuesRingBuffer,
-                tables: RingBuffer(TableIterator(Self, on_read_done), 2, .array),
+                tables: RingBuffer(TableIterator(LevelIteratorGeneric, on_read_done), 2, .array),
 
-                fn init(allocator: *mem.Allocator) !Self {
+                fn init(allocator: mem.Allocator) !LevelIteratorGeneric {
                     var values = try ValuesRingBuffer.init(allocator);
                     errdefer values.deinit(allocator);
 
@@ -1295,7 +1275,7 @@ pub fn LsmTree(
                     var table_b = try TableIterator.init(allocator);
                     errdefer table_b.deinit(allocator);
 
-                    return Self{
+                    return LevelIteratorGeneric{
                         .parent = undefined,
                         .level = undefined,
                         .key_min = undefined,
@@ -1310,31 +1290,32 @@ pub fn LsmTree(
                     };
                 }
 
-                fn deinit(it: *Self, allocator: *mem.Allocator) void {
+                fn deinit(it: *LevelIteratorGeneric, allocator: mem.Allocator) void {
                     it.values.deinit(allocator);
                     for (it.tables.buffer) |*table| table.deinit(allocator);
                     it.* = undefined;
                 }
 
                 fn reset(
-                    it: *Self,
+                    it: *LevelIteratorGeneric,
                     parent: *Parent,
                     level: u32,
                     key_min: Key,
                     key_max: Key,
                 ) void {
                     it.* = .{
+                        .parent = parent,
                         .level = level,
                         .key_min = key_min,
                         .key_max = key_max,
                         .values = .{ .buffer = it.values.buffer },
                         .tables = .{ .buffer = it.tables.buffer },
                     };
-                    assert(values.empty());
-                    assert(tables.empty());
+                    assert(it.values.empty());
+                    assert(it.tables.empty());
                 }
 
-                fn tick(it: *Self) bool {
+                fn tick(it: *LevelIteratorGeneric) bool {
                     if (it.buffered_enough_values()) return false;
 
                     if (it.tables.tail_ptr()) |tail| {
@@ -1363,15 +1344,15 @@ pub fn LsmTree(
                     }
                 }
 
-                fn read_next_table(table: *TableIterator(Self, on_read_done)) void {
-                    // TODO this function doesn't exist yet
-                    const address = manifest.get_next_address() orelse return false;
+                fn read_next_table(table: *TableIterator(LevelIteratorGeneric, on_read_done)) void {
+                    // TODO Implement get_next_address()
+                    const address = table.parent.manifest.get_next_address() orelse return false;
                     table.reset(address);
                     const read_pending = table.tick();
                     assert(read_pending);
                 }
 
-                fn on_read_done(it: *Self) void {
+                fn on_read_done(it: *LevelIteratorGeneric) void {
                     if (!it.tick()) {
                         assert(it.buffered_enough_values());
                         read_done(it.parent);
@@ -1379,11 +1360,13 @@ pub fn LsmTree(
                 }
 
                 /// Returns true if all remaining values in the level have been buffered.
-                fn buffered_all_values(it: Self) bool {
+                fn buffered_all_values(it: LevelIteratorGeneric) bool {
+                    _ = it;
+
                     // TODO look at the manifest to determine this.
                 }
 
-                fn buffered_value_count(it: Self) u32 {
+                fn buffered_value_count(it: LevelIteratorGeneric) u32 {
                     var value_count = @intCast(u32, it.values.count);
                     var tables_it = it.tables.iterator();
                     while (tables_it.next()) |table| {
@@ -1392,12 +1375,12 @@ pub fn LsmTree(
                     return value_count;
                 }
 
-                fn buffered_enough_values(it: Self) bool {
+                fn buffered_enough_values(it: LevelIteratorGeneric) bool {
                     return it.buffered_all_values() or
                         it.buffered_value_count() >= Table.data.value_count_max;
                 }
 
-                fn peek(it: Self) ?Key {
+                fn peek(it: LevelIteratorGeneric) ?Key {
                     if (it.values.head()) |value| return key_from_value(value);
 
                     const table = it.tables.head_ptr() orelse {
@@ -1409,7 +1392,7 @@ pub fn LsmTree(
                 }
 
                 /// This is only safe to call after peek() has returned non-null.
-                fn pop(it: *Self) Value {
+                fn pop(it: *LevelIteratorGeneric) Value {
                     if (it.values.pop()) |value| return value;
 
                     const table = it.tables.head_ptr().?;
@@ -1423,8 +1406,10 @@ pub fn LsmTree(
         }
 
         fn TableIterator(comptime Parent: type, comptime read_done: fn (*Parent) void) type {
+            _ = read_done; // TODO
+
             return struct {
-                const Self = @This();
+                const TableIteratorGeneric = @This();
 
                 const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
 
@@ -1451,9 +1436,9 @@ pub fn LsmTree(
 
                 read: Storage.Read = undefined,
                 /// This field is only used for safety checks, it does not affect the behavior.
-                read_pending = false,
+                read_pending: bool = false,
 
-                fn init(allocator: *mem.Allocator) !Self {
+                fn init(allocator: mem.Allocator) !TableIteratorGeneric {
                     const index = try allocator.alignedAlloc(u8, config.sector_size, block_size);
                     errdefer allocator.free(index);
 
@@ -1484,15 +1469,16 @@ pub fn LsmTree(
                     };
                 }
 
-                fn deinit(it: *Self, allocator: *mem.Allocator) void {
+                fn deinit(it: *TableIteratorGeneric, allocator: mem.Allocator) void {
                     assert(!it.read_pending);
+
                     allocator.free(it.index);
-                    values.deinit(allocator);
-                    for (blocks.buffer) |block| allocator.free(block);
+                    it.values.deinit(allocator);
+                    for (it.blocks.buffer) |block| allocator.free(block);
                     it.* = undefined;
                 }
 
-                fn reset(it: *Self, parent: *Parent, address: u64) void {
+                fn reset(it: *TableIteratorGeneric, parent: *Parent, address: u64) void {
                     assert(!it.read_pending);
                     it.* = .{
                         .parent = parent,
@@ -1504,8 +1490,8 @@ pub fn LsmTree(
                         .blocks = .{ .buffer = it.blocks.buffer },
                         .value = 0,
                     };
-                    assert(values.empty());
-                    assert(blocks.empty());
+                    assert(it.values.empty());
+                    assert(it.blocks.empty());
                 }
 
                 /// Try to buffer at least a full block of values to be peek()'d.
@@ -1513,14 +1499,14 @@ pub fn LsmTree(
                 /// or if the end of the table is reached.
                 /// Returns true if an IO operation was started. If this returns true,
                 /// then read_done() will be called on completion.
-                fn tick(it: *Self) bool {
+                fn tick(it: *TableIteratorGeneric) bool {
                     assert(!it.read_pending);
                     assert(it.address != 0);
 
                     if (it.read_table_index) {
                         assert(!it.read_pending);
                         it.read_pending = true;
-                        storage.read_block(on_read_table_index, &it.read, it.index, address);
+                        it.storage.read_block(on_read_table_index, &it.read, it.index, it.address);
                         return true;
                     }
 
@@ -1540,9 +1526,9 @@ pub fn LsmTree(
                     }
                 }
 
-                fn read_next_data_block(it: *Self, block: BlockPtr) void {
+                fn read_next_data_block(it: *TableIteratorGeneric, block: BlockPtr) void {
                     assert(!it.read_table_index);
-                    assert(it.block < Table.data_blocks_used(it.index));
+                    assert(it.block < Table.index_data_blocks_used(it.index));
 
                     const addresses = Table.index_data_addresses(it.index);
                     const checksums = Table.index_data_checksums(it.index);
@@ -1551,11 +1537,11 @@ pub fn LsmTree(
 
                     assert(!it.read_pending);
                     it.read_pending = true;
-                    storage.read_block(on_read, &it.read, block, address, checksum);
+                    it.parent.storage.read_block(on_read, &it.read, block, address, checksum);
                 }
 
                 fn on_read_table_index(read: *Storage.Read) void {
-                    const it = @fieldParentPtr(Self, "read", read);
+                    const it = @fieldParentPtr(TableIteratorGeneric, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
 
@@ -1568,7 +1554,7 @@ pub fn LsmTree(
                 }
 
                 fn on_read(read: *Storage.Read) void {
-                    const it = @fieldParentPtr(Self, "read", read);
+                    const it = @fieldParentPtr(TableIteratorGeneric, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
 
@@ -1584,15 +1570,15 @@ pub fn LsmTree(
                 }
 
                 /// Return true if all remaining values in the table have been buffered in memory.
-                fn buffered_all_values(it: Self) bool {
+                fn buffered_all_values(it: TableIteratorGeneric) bool {
                     assert(!it.read_pending);
 
-                    const data_blocks_used = Table.data_blocks_used(it.index);
+                    const data_blocks_used = Table.index_data_blocks_used(it.index);
                     assert(it.block <= data_blocks_used);
                     return it.block == data_blocks_used;
                 }
 
-                fn buffered_value_count(it: Self) u32 {
+                fn buffered_value_count(it: TableIteratorGeneric) u32 {
                     assert(!it.read_pending);
 
                     var value_count: u32 = it.values.count;
@@ -1606,21 +1592,21 @@ pub fn LsmTree(
                     return value_count;
                 }
 
-                fn buffered_enough_values(it: Self) bool {
+                fn buffered_enough_values(it: TableIteratorGeneric) bool {
                     assert(!it.read_pending);
 
                     return it.buffered_all_values() or
                         it.buffered_value_count() >= Table.data.value_count_max;
                 }
 
-                fn peek(it: Self) ?Key {
+                fn peek(it: TableIteratorGeneric) ?Key {
                     assert(!it.read_pending);
                     assert(!it.read_table_index);
 
                     if (it.values.head()) |value| return key_from_value(value);
 
                     const block = it.blocks.head() orelse {
-                        assert(it.block == Table.data_blocks_used(it.index));
+                        assert(it.block == Table.index_data_blocks_used(it.index));
                         return null;
                     };
 
@@ -1629,7 +1615,7 @@ pub fn LsmTree(
                 }
 
                 /// This is only safe to call after peek() has returned non-null.
-                fn pop(it: *Self) Value {
+                fn pop(it: *TableIteratorGeneric) Value {
                     assert(!it.read_pending);
                     assert(!it.read_table_index);
 
@@ -1651,7 +1637,7 @@ pub fn LsmTree(
             };
         }
 
-        storage: *BlockStorage(Storage),
+        storage: *Storage,
 
         /// We size and allocate this buffer as a function of MutableTable.value_count_max,
         /// leaving off unneeded data blocks at the end. This saves memory for each LSM tree,
@@ -1660,32 +1646,46 @@ pub fn LsmTree(
 
         manifest: []Manifest,
 
-        pub fn init(
-            allocator: *std.mem.Allocator,
-            storage: *BlockStorage(Storage),
-        ) !Self {}
+        pub fn init(allocator: mem.Allocator, storage: *Storage) !TreeGeneric {
+            _ = allocator;
+            _ = storage;
+        }
 
         pub const Error = error{
             IO,
         };
 
-        pub fn put(tree: *Self, value: Value) void {}
+        pub fn put(tree: *TreeGeneric, value: Value) void {
+            _ = tree;
+            _ = value;
+        }
 
         pub fn flush(
-            tree: *Self,
+            tree: *TreeGeneric,
             callback: fn (result: Error!void) void,
-        ) void {}
+        ) void {
+            _ = tree;
+            _ = callback;
+        }
 
         // ~Special case of put()
-        pub fn remove(tree: *Self, value: Value) void {}
+        pub fn remove(tree: *TreeGeneric, value: Value) void {
+            _ = tree;
+            _ = value;
+        }
 
         pub fn get(
-            tree: *Self,
+            tree: *TreeGeneric,
             /// The snapshot timestamp, if any
             snapshot: ?u64,
             key: Key,
             callback: fn (result: Error!?Value) void,
-        ) void {}
+        ) void {
+            _ = tree;
+            _ = snapshot;
+            _ = key;
+            _ = callback;
+        }
 
         pub const RangeQuery = union(enum) {
             bounded: struct {
@@ -1702,19 +1702,25 @@ pub fn LsmTree(
         };
 
         pub const RangeQueryIterator = struct {
-            tree: *Self,
+            tree: *TreeGeneric,
             snapshot: ?u64,
             query: RangeQuery,
 
-            pub fn next(callback: fn (result: Error!?Value) void) void {}
+            pub fn next(callback: fn (result: Error!?Value) void) void {
+                _ = callback;
+            }
         };
 
         pub fn range_query(
-            tree: *Self,
+            tree: *TreeGeneric,
             /// The snapshot timestamp, if any
             snapshot: ?u64,
             query: RangeQuery,
-        ) RangeQueryIterator {}
+        ) RangeQueryIterator {
+            _ = tree;
+            _ = snapshot;
+            _ = query;
+        }
     };
 }
 
@@ -1735,7 +1741,7 @@ test "table count max" {
 
 test {
     const Key = CompositeKey(u128);
-    const TestTree = LsmTree(
+    const TestTree = Tree(
         Key,
         Key.Value,
         Key.compare_keys,
@@ -1743,7 +1749,7 @@ test {
         Key.sentinel_key,
         Key.tombstone,
         Key.tombstone_from_key,
-        @import("test/storage.zig").Storage,
+        Storage,
     );
 
     // TODO ref all decls instead

@@ -192,17 +192,17 @@ fn test_block_shards_count(expect_shards_count: usize, blocks_count: usize) !voi
 test "BlockFreeSet encode, decode, encode" {
     const shard_size = BlockFreeSet.shard_size / @bitSizeOf(usize);
     // Uniform.
-    try test_encode(&.{.{.fill = .uniform_ones, .words = shard_size}});
-    try test_encode(&.{.{.fill = .uniform_zeros, .words = shard_size}});
-    try test_encode(&.{.{.fill = .literal, .words = shard_size}});
-    try test_encode(&.{.{.fill = .uniform_ones, .words = std.math.maxInt(u16) + 1}});
+    try test_encode(&.{.{ .fill = .uniform_ones, .words = shard_size }});
+    try test_encode(&.{.{ .fill = .uniform_zeros, .words = shard_size }});
+    try test_encode(&.{.{ .fill = .literal, .words = shard_size }});
+    try test_encode(&.{.{ .fill = .uniform_ones, .words = std.math.maxInt(u16) + 1 }});
 
     // Mixed.
     try test_encode(&.{
-        .{.fill = .uniform_ones, .words = shard_size / 4},
-        .{.fill = .uniform_zeros, .words = shard_size / 4},
-        .{.fill = .literal, .words = shard_size / 4},
-        .{.fill = .uniform_ones, .words = shard_size / 4},
+        .{ .fill = .uniform_ones, .words = shard_size / 4 },
+        .{ .fill = .uniform_zeros, .words = shard_size / 4 },
+        .{ .fill = .literal, .words = shard_size / 4 },
+        .{ .fill = .uniform_ones, .words = shard_size / 4 },
     });
 
     // Random.
@@ -210,7 +210,7 @@ test "BlockFreeSet encode, decode, encode" {
     try std.os.getrandom(mem.asBytes(&seed));
     var prng = std.rand.DefaultPrng.init(seed);
 
-    const fills = [_]TestPatternFill{.uniform_ones, .uniform_zeros, .literal};
+    const fills = [_]TestPatternFill{ .uniform_ones, .uniform_zeros, .literal };
     var t: usize = 0;
     while (t < 10) : (t += 1) {
         var patterns = std.ArrayList(TestPattern).init(std.testing.allocator);
@@ -270,8 +270,11 @@ fn test_encode(patterns: []const TestPattern) !void {
         assert(blocks_offset == blocks.len);
     }
 
-    var encoded = try std.testing.allocator.alignedAlloc(u8, @alignOf(usize),
-        decoded_expect.encode_size_max());
+    var encoded = try std.testing.allocator.alignedAlloc(
+        u8,
+        @alignOf(usize),
+        decoded_expect.encode_size_max(),
+    );
     defer std.testing.allocator.free(encoded);
 
     try std.testing.expectEqual(encoded.len % 8, 0);
@@ -303,8 +306,11 @@ test "BlockFreeSet decode small bitset into large bitset" {
     // Set up a small bitset (with blocks_count==shard_size) with no free blocks.
     var i: usize = 0;
     while (i < small_set.blocks.bit_length) : (i += 1) _ = small_set.acquire();
-    var small_buffer = try std.testing.allocator.alignedAlloc(u8, @alignOf(usize),
-        small_set.encode_size_max());
+    var small_buffer = try std.testing.allocator.alignedAlloc(
+        u8,
+        @alignOf(usize),
+        small_set.encode_size_max(),
+    );
     defer std.testing.allocator.free(small_buffer);
 
     const small_buffer_written = small_set.encode(small_buffer);
@@ -352,8 +358,11 @@ test "BlockFreeSet encode/decode manual" {
     try std.testing.expectEqualSlices(usize, &decoded_expect, bitset_masks(decoded_actual.blocks));
 
     // Test encode.
-    var encoded_actual = try std.testing.allocator.alignedAlloc(u8, @alignOf(usize),
-        decoded_actual.encode_size_max());
+    var encoded_actual = try std.testing.allocator.alignedAlloc(
+        u8,
+        @alignOf(usize),
+        decoded_actual.encode_size_max(),
+    );
     defer std.testing.allocator.free(encoded_actual);
 
     const encoded_actual_length = decoded_actual.encode(encoded_actual);
@@ -371,7 +380,7 @@ fn find_first_set_bit(bitset: DynamicBitSetUnmanaged, start: usize, end: usize) 
 
     // Only iterate over the subset of bits that were requested.
     var iter = bitset.iterator(.{});
-    iter.words_remain = bitset.masks[word_start+1..word_end];
+    iter.words_remain = bitset.masks[word_start + 1 .. word_end];
     const mask = ~@as(MaskInt, 0);
     iter.bits_remain = bitset.masks[word_start] & std.math.shl(MaskInt, mask, word_offset);
 
