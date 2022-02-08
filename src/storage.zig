@@ -9,13 +9,14 @@ const IO = @import("io.zig").IO;
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
 
-pub const block_size = config.lsm_table_block_size; // TODO Rename to config.block_size
-pub const BlockPtr = *align(config.sector_size) [block_size]u8;
-pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
-
-const BlockFreeSet = @import("src/lsm/block_free_set.zig");
+const BlockFreeSet = @import("lsm/block_free_set.zig");
 
 pub const Storage = struct {
+    pub const block_size = config.lsm_table_block_size; // TODO Rename to config.block_size
+
+    pub const BlockPtr = *align(config.sector_size) [block_size]u8;
+    pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
+
     /// See usage in Journal.write_sectors() for details.
     pub const synchronicity: enum {
         always_synchronous,
