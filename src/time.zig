@@ -37,8 +37,7 @@ pub const Time = struct {
                 // We can optimize towards this by converting to ns via a single multiply.
                 // https://github.com/microsoft/STL/blob/785143a0c73f030238ef618890fd4d6ae2b3a3a0/stl/inc/chrono#L694-L701
                 const common_qpf = 10_000_000;
-                if (qpf == common_qpf)
-                    break :blk qpc * (std.time.ns_per_s / common_qpf);
+                if (qpf == common_qpf) break :blk qpc * (std.time.ns_per_s / common_qpf);
 
                 // Convert qpc to nanos using fixed point to avoid expensive extra divs and overflow.
                 const scale = (std.time.ns_per_s << 32) / qpf;
@@ -58,8 +57,7 @@ pub const Time = struct {
                 // mach_timebase_info() called through libc already does global caching for us
                 // https://opensource.apple.com/source/xnu/xnu-7195.81.3/libsyscall/wrappers/mach_timebase_info.c.auto.html
                 var info: darwin.mach_timebase_info_t = undefined;
-                if (darwin.mach_timebase_info(&info) != 0)
-                    @panic("mach_timebase_info() failed");
+                if (darwin.mach_timebase_info(&info) != 0) @panic("mach_timebase_info() failed");
 
                 const now = darwin.mach_continuous_time();
                 return (now * info.numer) / info.denom;

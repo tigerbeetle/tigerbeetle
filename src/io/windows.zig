@@ -40,7 +40,7 @@ pub const IO = struct {
 
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
         const Callback = struct {
-            fn onTimeout(timed_out: *bool, completion: *Completion, result: TimeoutError!void) void {
+            fn on_timeout(timed_out: *bool, completion: *Completion, result: TimeoutError!void) void {
                 _ = result catch unreachable;
                 _ = completion;
                 timed_out.* = true;
@@ -49,7 +49,7 @@ pub const IO = struct {
 
         var timed_out = false;
         var completion: Completion = undefined;
-        self.timeout(*bool, &timed_out, Callback.onTimeout, &completion, nanoseconds);
+        self.timeout(*bool, &timed_out, Callback.on_timeout, &completion, nanoseconds);
 
         while (!timed_out) {
             try self.flush(.blocking);
