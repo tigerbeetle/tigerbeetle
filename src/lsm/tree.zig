@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
+const os = std.os;
 
 const config = @import("../config.zig");
 const eytzinger = @import("eytzinger.zig").eytzinger;
@@ -1270,13 +1271,19 @@ pub fn Tree(
                 const LevelIteratorGeneric = @This();
 
                 const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
+                const TablesRingBuffer = RingBuffer(
+                    TableIterator(LevelIteratorGeneric, on_read_done),
+                    2,
+                    .array,
+                );
 
+                storage: *Storage,
                 parent: *Parent,
                 level: u32,
                 key_min: Key,
                 key_max: Key,
                 values: ValuesRingBuffer,
-                tables: RingBuffer(TableIterator(LevelIteratorGeneric, on_read_done), 2, .array),
+                tables: TablesRingBuffer,
 
                 fn init(allocator: mem.Allocator) !LevelIteratorGeneric {
                     var values = try ValuesRingBuffer.init(allocator);
@@ -1289,6 +1296,7 @@ pub fn Tree(
                     errdefer table_b.deinit(allocator);
 
                     return LevelIteratorGeneric{
+                        .storage = undefined,
                         .parent = undefined,
                         .level = undefined,
                         .key_min = undefined,
@@ -1311,12 +1319,14 @@ pub fn Tree(
 
                 fn reset(
                     it: *LevelIteratorGeneric,
+                    storage: *Storage,
                     parent: *Parent,
                     level: u32,
                     key_min: Key,
                     key_max: Key,
                 ) void {
                     it.* = .{
+                        .storage = storage,
                         .parent = parent,
                         .level = level,
                         .key_min = key_min,
@@ -1426,9 +1436,11 @@ pub fn Tree(
 
                 const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
 
+                storage: *Storage,
                 parent: *Parent,
                 read_table_index: bool,
                 address: u64,
+                checksum: u128,
 
                 index: BlockPtr,
                 /// The index of the current block in the table index block.
@@ -1465,10 +1477,12 @@ pub fn Tree(
                     errdefer allocator.free(block_b);
 
                     return .{
+                        .storage = undefined,
                         .parent = undefined,
                         .read_table_index = undefined,
                         // Use 0 so that we can assert(address != 0) in tick().
                         .address = 0,
+                        .checksum = undefined,
                         .index = index[0..block_size],
                         .block = undefined,
                         .values = values,
@@ -1491,12 +1505,20 @@ pub fn Tree(
                     it.* = undefined;
                 }
 
-                fn reset(it: *TableIteratorGeneric, parent: *Parent, address: u64) void {
+                fn reset(
+                    it: *TableIteratorGeneric,
+                    storage: *Storage,
+                    parent: *Parent,
+                    address: u64,
+                    checksum: u128,
+                ) void {
                     assert(!it.read_pending);
                     it.* = .{
+                        .storage = storage,
                         .parent = parent,
                         .read_table_index = true,
                         .address = address,
+                        .checksum = checksum,
                         .index = it.index,
                         .block = 0,
                         .values = .{ .buffer = it.values.buffer },
@@ -1519,7 +1541,13 @@ pub fn Tree(
                     if (it.read_table_index) {
                         assert(!it.read_pending);
                         it.read_pending = true;
-                        it.storage.read_block(on_read_table_index, &it.read, it.index, it.address);
+                        it.storage.read_block(
+                            on_read_table_index,
+                            &it.read,
+                            it.index,
+                            it.address,
+                            it.checksum,
+                        );
                         return true;
                     }
 
@@ -1550,7 +1578,7 @@ pub fn Tree(
 
                     assert(!it.read_pending);
                     it.read_pending = true;
-                    it.parent.storage.read_block(on_read, &it.read, block, address, checksum);
+                    it.storage.read_block(on_read, &it.read, block, address, checksum);
                 }
 
                 fn on_read_table_index(read: *Storage.Read) void {
@@ -1788,9 +1816,35 @@ test "table count max" {
 }
 
 test {
+    const IO = @import("../io.zig").IO;
+    const Storage = @import("../storage.zig").Storage;
+
+    const dir_path = ".";
+    const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err| {
+        std.debug.print("failed to open directory '{s}': {}", .{ dir_path, err });
+        return;
+    };
+
+    const storage_fd = try Storage.open(
+        dir_fd,
+        "lsm",
+        config.journal_size_max,
+        false, // Set this to true the first time to create the data file.
+    );
+
+    var io = try IO.init(128, 0);
+    defer io.deinit();
+
+    const cluster = 32;
+
+    var storage = try Storage.init(std.testing.allocator, &io, cluster, config.journal_size_max, storage_fd);
+    defer storage.deinit(std.testing.allocator);
+
+    _ = storage;
+
     const Key = CompositeKey(u128);
     const TestTree = Tree(
-        @import("../storage.zig").Storage,
+        Storage,
         Key,
         Key.Value,
         Key.compare_keys,
@@ -1804,4 +1858,5 @@ test {
     _ = TestTree;
     _ = TestTree.Table;
     _ = TestTree.Table.create_from_sorted_values;
+    _ = TestTree.Compaction;
 }
