@@ -102,10 +102,7 @@ pub const Direction = enum {
     }
 };
 
-pub const table_count_max = compute_table_count_max_for_tree(
-    config.lsm_growth_factor,
-    config.lsm_levels,
-);
+pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
 
 pub fn Tree(
     comptime Storage: type,
@@ -999,11 +996,11 @@ pub fn Tree(
             };
         };
 
-        /// Compact tables in level a with overlapping tables in level b.
+        /// Compact tables in level A with overlapping tables in level B.
         pub const Compaction = struct {
             pub const Callback = fn (it: *Compaction, done: bool) void;
 
-            const level_0_table_count_max = 10;
+            const level_0_table_count_max = table_count_max_for_level(config.lsm_growth_factor, 0);
             const level_a_table_count_max = level_0_table_count_max;
 
             const LevelAIterator = TableIterator(Compaction, on_io_done);
@@ -1741,7 +1738,7 @@ pub fn Tree(
 }
 
 /// The total number of tables that can be supported by the tree across so many levels.
-pub fn compute_table_count_max_for_tree(growth_factor: u32, levels_count: u32) u32 {
+pub fn table_count_max_for_tree(growth_factor: u32, levels_count: u32) u32 {
     assert(growth_factor >= 4);
     assert(growth_factor <= 16); // Limit excessive write amplification.
     assert(levels_count >= 2);
@@ -1751,13 +1748,13 @@ pub fn compute_table_count_max_for_tree(growth_factor: u32, levels_count: u32) u
     var count: u32 = 0;
     var level: u32 = 0;
     while (level < levels_count) : (level += 1) {
-        count += compute_table_count_max_for_level(growth_factor, level);
+        count += table_count_max_for_level(growth_factor, level);
     }
     return count;
 }
 
 /// The total number of tables that can be supported by the level alone.
-pub fn compute_table_count_max_for_level(growth_factor: u32, level: u32) u32 {
+pub fn table_count_max_for_level(growth_factor: u32, level: u32) u32 {
     assert(level >= 0);
     assert(level < config.lsm_levels);
 
@@ -1772,22 +1769,22 @@ pub fn compute_table_count_max_for_level(growth_factor: u32, level: u32) u32 {
 test "table count max" {
     const expectEqual = std.testing.expectEqual;
 
-    try expectEqual(@as(u32, 8), compute_table_count_max_for_level(8, 0));
-    try expectEqual(@as(u32, 8), compute_table_count_max_for_level(8, 1));
-    try expectEqual(@as(u32, 64), compute_table_count_max_for_level(8, 2));
-    try expectEqual(@as(u32, 512), compute_table_count_max_for_level(8, 3));
-    try expectEqual(@as(u32, 4096), compute_table_count_max_for_level(8, 4));
-    try expectEqual(@as(u32, 32768), compute_table_count_max_for_level(8, 5));
-    try expectEqual(@as(u32, 262144), compute_table_count_max_for_level(8, 6));
-    try expectEqual(@as(u32, 2097152), compute_table_count_max_for_level(8, 7));
+    try expectEqual(@as(u32, 8), table_count_max_for_level(8, 0));
+    try expectEqual(@as(u32, 8), table_count_max_for_level(8, 1));
+    try expectEqual(@as(u32, 64), table_count_max_for_level(8, 2));
+    try expectEqual(@as(u32, 512), table_count_max_for_level(8, 3));
+    try expectEqual(@as(u32, 4096), table_count_max_for_level(8, 4));
+    try expectEqual(@as(u32, 32768), table_count_max_for_level(8, 5));
+    try expectEqual(@as(u32, 262144), table_count_max_for_level(8, 6));
+    try expectEqual(@as(u32, 2097152), table_count_max_for_level(8, 7));
 
-    try expectEqual(@as(u32, 8 + 8), compute_table_count_max_for_tree(8, 2));
-    try expectEqual(@as(u32, 16 + 64), compute_table_count_max_for_tree(8, 3));
-    try expectEqual(@as(u32, 80 + 512), compute_table_count_max_for_tree(8, 4));
-    try expectEqual(@as(u32, 592 + 4096), compute_table_count_max_for_tree(8, 5));
-    try expectEqual(@as(u32, 4688 + 32768), compute_table_count_max_for_tree(8, 6));
-    try expectEqual(@as(u32, 37456 + 262144), compute_table_count_max_for_tree(8, 7));
-    try expectEqual(@as(u32, 299600 + 2097152), compute_table_count_max_for_tree(8, 8));
+    try expectEqual(@as(u32, 8 + 8), table_count_max_for_tree(8, 2));
+    try expectEqual(@as(u32, 16 + 64), table_count_max_for_tree(8, 3));
+    try expectEqual(@as(u32, 80 + 512), table_count_max_for_tree(8, 4));
+    try expectEqual(@as(u32, 592 + 4096), table_count_max_for_tree(8, 5));
+    try expectEqual(@as(u32, 4688 + 32768), table_count_max_for_tree(8, 6));
+    try expectEqual(@as(u32, 37456 + 262144), table_count_max_for_tree(8, 7));
+    try expectEqual(@as(u32, 299600 + 2097152), table_count_max_for_tree(8, 8));
 }
 
 test {
