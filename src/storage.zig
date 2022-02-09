@@ -124,16 +124,18 @@ pub const Storage = struct {
     /// to this function won't be called until the block has been recovered.
     pub fn read_block(
         self: *Storage,
-        callback: fn (Storage.Read) void,
+        callback: fn (*Storage.Read) void,
         read: *Storage.Read,
         block: BlockPtr,
         address: u64,
+        checksum: u128,
     ) void {
         _ = self;
         _ = callback;
         _ = read;
         _ = block;
         _ = address;
+        _ = checksum;
 
         // TODO
     }
