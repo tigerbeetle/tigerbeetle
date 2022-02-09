@@ -9,8 +9,8 @@ pub fn KWayMergeIterator(
     comptime Context: type,
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) Key,
-    comptime compare_keys: fn (Key, Key) math.Order,
+    comptime key_from_value: fn (Value) callconv(.Inline) Key,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     comptime k_max: u32,
     comptime stream_peek: fn (context: *Context, stream_id: u32) ?Key,
     comptime stream_pop: fn (context: *Context, stream_id: u32) Value,
@@ -164,6 +164,7 @@ pub fn KWayMergeIterator(
 
 fn TestContext(comptime k_max: u32) type {
     const testing = std.testing;
+
     return struct {
         const Self = @This();
 
@@ -173,14 +174,14 @@ fn TestContext(comptime k_max: u32) type {
             key: u32,
             version: u32,
 
-            fn to_key(v: Value) u32 {
+            inline fn to_key(v: Value) u32 {
                 return v.key;
             }
         };
 
         streams: [k_max][]const Value,
 
-        fn compare_keys(a: u32, b: u32) math.Order {
+        inline fn compare_keys(a: u32, b: u32) math.Order {
             return math.order(a, b);
         }
 
@@ -243,7 +244,7 @@ fn TestContext(comptime k_max: u32) type {
             for (stream_ids) |*id, i| id.* = @intCast(u32, i) + k_max;
 
             var context: Self = .{ .streams = streams };
-            var kway = KWay.init(&context, stream_ids, direction);
+            var kway = KWay.init(&context, k_max, direction);
 
             while (kway.pop()) |value| {
                 try actual.append(value);
@@ -252,7 +253,7 @@ fn TestContext(comptime k_max: u32) type {
             try testing.expectEqualSlices(Value, expect, actual.items);
         }
 
-        fn fuzz(random: *std.rand.Random, stream_key_count_max: u32) !void {
+        fn fuzz(random: std.rand.Random, stream_key_count_max: u32) !void {
             if (log) std.debug.print("\n", .{});
             const allocator = testing.allocator;
 
@@ -324,7 +325,7 @@ fn TestContext(comptime k_max: u32) type {
             }
         }
 
-        fn fuzz_stream_len(random: *std.rand.Random, stream_key_count_max: u32) u32 {
+        fn fuzz_stream_len(random: std.rand.Random, stream_key_count_max: u32) u32 {
             return switch (random.uintLessThanBiased(u8, 100)) {
                 0...4 => 0,
                 5...9 => stream_key_count_max,
@@ -332,7 +333,7 @@ fn TestContext(comptime k_max: u32) type {
             };
         }
 
-        fn fuzz_stream_keys(random: *std.rand.Random, stream: []u32) void {
+        fn fuzz_stream_keys(random: std.rand.Random, stream: []u32) void {
             const key_max = random.intRangeLessThanBiased(u32, 512, 1024);
             switch (random.uintLessThanBiased(u8, 100)) {
                 0...4 => {
@@ -432,5 +433,7 @@ test "k_way_merge: fuzz" {
     errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
 
     var prng = std.rand.DefaultPrng.init(seed);
-    try TestContext(32).fuzz(&prng.random, 256);
+    const random = prng.random();
+
+    try TestContext(32).fuzz(random, 256);
 }
