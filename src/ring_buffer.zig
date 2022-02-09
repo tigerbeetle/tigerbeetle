@@ -52,6 +52,11 @@ pub fn RingBuffer(
             return &self.buffer[self.index];
         }
 
+        pub inline fn head_ptr_const(self: *const Self) ?*const T {
+            if (self.empty()) return null;
+            return &self.buffer[self.index];
+        }
+
         pub inline fn tail(self: Self) ?T {
             if (self.empty()) return null;
             return self.buffer[(self.index + self.count - 1) % self.buffer.len];
@@ -62,12 +67,22 @@ pub fn RingBuffer(
             return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
+        pub inline fn tail_ptr_const(self: *const Self) ?*const T {
+            if (self.empty()) return null;
+            return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
+        }
+
         pub inline fn next_tail(self: Self) ?T {
             if (self.full()) return null;
             return self.buffer[(self.index + self.count) % self.buffer.len];
         }
 
         pub inline fn next_tail_ptr(self: *Self) ?*T {
+            if (self.full()) return null;
+            return &self.buffer[(self.index + self.count) % self.buffer.len];
+        }
+
+        pub inline fn next_tail_ptr_const(self: *const Self) ?*const T {
             if (self.full()) return null;
             return &self.buffer[(self.index + self.count) % self.buffer.len];
         }
@@ -131,7 +146,7 @@ pub fn RingBuffer(
         }
 
         pub const Iterator = struct {
-            ring: *Self,
+            ring: *const Self,
             count: usize = 0,
 
             pub fn next(it: *Iterator) ?T {
@@ -141,7 +156,7 @@ pub fn RingBuffer(
                 return it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
             }
 
-            pub fn next_ptr(it: *Iterator) ?*T {
+            pub fn next_ptr(it: *Iterator) ?*const T {
                 assert(it.count <= it.ring.count);
                 if (it.count == it.ring.count) return null;
                 defer it.count += 1;
@@ -151,7 +166,7 @@ pub fn RingBuffer(
 
         /// Returns an iterator to iterate through all `count` items in the ring buffer.
         /// The iterator is invalidated and unsafe if the ring buffer is modified.
-        pub fn iterator(self: *Self) Iterator {
+        pub fn iterator(self: *const Self) Iterator {
             return .{ .ring = self };
         }
     };
@@ -232,24 +247,17 @@ fn test_low_level_interface(comptime Ring: type, ring: *Ring) !void {
     try testing.expectEqual(@as(u32, 2), ring.tail_ptr().?.*);
     try test_iterator(Ring, ring, &[_]u32{ 1, 2 });
 
-    var iterator = ring.iterator();
-    while (iterator.next_ptr()) |item_ptr| {
-        item_ptr.* += 1000;
-    }
-
-    try testing.expectEqual(@as(?u32, 1001), ring.head());
-    try testing.expectEqual(@as(u32, 1001), ring.head_ptr().?.*);
     ring.advance_head();
-    try test_iterator(Ring, ring, &[_]u32{1002});
+    try test_iterator(Ring, ring, &[_]u32{2});
 
     ring.next_tail_ptr().?.* = 3;
     ring.advance_tail();
     try testing.expectEqual(@as(?u32, 3), ring.tail());
     try testing.expectEqual(@as(u32, 3), ring.tail_ptr().?.*);
-    try test_iterator(Ring, ring, &[_]u32{ 1002, 3 });
+    try test_iterator(Ring, ring, &[_]u32{ 2, 3 });
 
-    try testing.expectEqual(@as(?u32, 1002), ring.head());
-    try testing.expectEqual(@as(u32, 1002), ring.head_ptr().?.*);
+    try testing.expectEqual(@as(?u32, 2), ring.head());
+    try testing.expectEqual(@as(u32, 2), ring.head_ptr().?.*);
     ring.advance_head();
     try test_iterator(Ring, ring, &[_]u32{3});
 
