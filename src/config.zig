@@ -191,7 +191,7 @@ pub const io_depth_write = 8;
 pub const lsm_trees = 30;
 
 /// Number of levels in an LSM tree.
-pub const lsm_levels = 6;
+pub const lsm_levels = 8;
 
 pub const lsm_growth_factor = 8;
 
