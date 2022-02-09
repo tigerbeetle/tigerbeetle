@@ -775,9 +775,9 @@ pub fn Tree(
 
                     const key_max = key_from_value(values[values.len - 1]);
 
-                    index_keys(builder.index)[builder.block] = key_max;
-                    index_data_addresses(builder.index)[builder.block] = address;
-                    index_data_checksums(builder.index)[builder.block] = header.checksum;
+                    index_keys(builder.index_block)[builder.block] = key_max;
+                    index_data_addresses(builder.index_block)[builder.block] = address;
+                    index_data_checksums(builder.index_block)[builder.block] = header.checksum;
 
                     if (builder.block == 0) builder.key_min = key_from_value(values[0]);
                     builder.key_max = key_max;
@@ -904,12 +904,12 @@ pub fn Tree(
             }
 
             inline fn index_timestamp(index_block: BlockPtrConst) u32 {
-                const header = mem.bytesAsValue(index_block[0..@sizeOf(vsr.Header)]);
+                const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.offset);
             }
 
             inline fn index_data_blocks_used(index_block: BlockPtrConst) u32 {
-                const header = mem.bytesAsValue(index_block[0..@sizeOf(vsr.Header)]);
+                const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.request);
             }
 
@@ -1013,8 +1013,11 @@ pub fn Tree(
                 Value,
                 key_from_value,
                 compare_keys,
-                // Add one for the level B iterator
+                // Add one for the level B iterator:
                 level_a_table_count_max + 1,
+                stream_peek,
+                stream_pop,
+                stream_precedence,
             );
 
             const BlockWrite = struct {
@@ -1031,7 +1034,7 @@ pub fn Tree(
             /// argument of the Callback to know when the compaction has finished.
             last_tick: bool = false,
 
-            /// Addresses of all source tables in level a
+            /// Addresses of all source tables in level A:
             level_a_table_count: u32,
             level_a_iterators_max: [level_a_table_count_max]LevelAIterator,
 
@@ -1369,7 +1372,9 @@ pub fn Tree(
 
                 fn read_next_table(table: *TableIterator(LevelIteratorGeneric, on_read_done)) void {
                     // TODO Implement get_next_address()
-                    const address = table.parent.manifest.get_next_address() orelse return false;
+                    //const address = table.parent.manifest.get_next_address() orelse return false;
+                    if (true) @panic("implement get_next_address()");
+                    const address = 0;
                     table.reset(address);
                     const read_pending = table.tick();
                     assert(read_pending);
@@ -1630,7 +1635,7 @@ pub fn Tree(
                     // We do this subtraction last to avoid underflow.
                     value_count -= it.value;
 
-                    return value_count;
+                    return @intCast(u32, value_count);
                 }
 
                 fn buffered_enough_values(it: TableIteratorGeneric) bool {
