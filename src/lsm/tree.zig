@@ -1389,7 +1389,7 @@ pub fn Tree(
                         it.tables.advance_tail();
                         return true;
                     } else {
-                        var table = it.tables.head().?;
+                        const table = it.tables.head_ptr().?;
                         while (table.peek() != null) {
                             it.values.push(table.pop()) catch unreachable;
                         }
@@ -1426,25 +1426,24 @@ pub fn Tree(
                     return false;
                 }
 
-                // TODO(ifreund): Do we need this non-const `it` pointer for `it.tables.iterator()`?
-                fn buffered_value_count(it: *LevelIteratorGeneric) u32 {
+                fn buffered_value_count(it: LevelIteratorGeneric) u32 {
                     var value_count = @intCast(u32, it.values.count);
                     var tables_it = it.tables.iterator();
-                    while (tables_it.next()) |*table| {
+                    while (tables_it.next()) |table| {
                         value_count += table.buffered_value_count();
                     }
                     return value_count;
                 }
 
-                fn buffered_enough_values(it: *LevelIteratorGeneric) bool {
+                fn buffered_enough_values(it: LevelIteratorGeneric) bool {
                     return it.buffered_all_values() or
                         it.buffered_value_count() >= Table.data.value_count_max;
                 }
 
-                fn peek(it: *LevelIteratorGeneric) ?Key {
+                fn peek(it: LevelIteratorGeneric) ?Key {
                     if (it.values.head()) |value| return key_from_value(value);
 
-                    const table = it.tables.head_ptr() orelse {
+                    const table = it.tables.head_ptr_const() orelse {
                         assert(it.buffered_all_values());
                         return null;
                     };
@@ -1657,7 +1656,7 @@ pub fn Tree(
                     return it.block == data_blocks_used;
                 }
 
-                fn buffered_value_count(it: *TableIteratorGeneric) u32 {
+                fn buffered_value_count(it: TableIteratorGeneric) u32 {
                     assert(!it.read_pending);
 
                     var value_count = it.values.count;
@@ -1671,7 +1670,7 @@ pub fn Tree(
                     return @intCast(u32, value_count);
                 }
 
-                fn buffered_enough_values(it: *TableIteratorGeneric) bool {
+                fn buffered_enough_values(it: TableIteratorGeneric) bool {
                     assert(!it.read_pending);
 
                     return it.buffered_all_values() or
