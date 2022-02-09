@@ -102,7 +102,10 @@ pub const Direction = enum {
     }
 };
 
-pub const table_count_max = compute_table_count_max(config.lsm_growth_factor, config.levels);
+pub const table_count_max = compute_table_count_max_for_tree(
+    config.lsm_growth_factor,
+    config.lsm_levels,
+);
 
 pub fn Tree(
     comptime Storage: type,
@@ -1737,19 +1740,54 @@ pub fn Tree(
     };
 }
 
-// TODO double check how this interacts with dynamic tables sizes across levels.
-pub fn compute_table_count_max(growth_factor: u32, levels: u32) u32 {
-    var table_count: u32 = 0;
+/// The total number of tables that can be supported by the tree across so many levels.
+pub fn compute_table_count_max_for_tree(growth_factor: u32, levels_count: u32) u32 {
+    assert(growth_factor >= 4);
+    assert(growth_factor <= 16); // Limit excessive write amplification.
+    assert(levels_count >= 2);
+    assert(levels_count <= 10); // Limit excessive read amplification.
+    assert(levels_count <= config.lsm_levels);
+
+    var count: u32 = 0;
     var level: u32 = 0;
-    while (level < levels) : (level += 1) {
-        table_count += math.pow(u32, growth_factor, level + 1);
+    while (level < levels_count) : (level += 1) {
+        count += compute_table_count_max_for_level(growth_factor, level);
     }
-    return table_count;
+    return count;
+}
+
+/// The total number of tables that can be supported by the level alone.
+pub fn compute_table_count_max_for_level(growth_factor: u32, level: u32) u32 {
+    assert(level >= 0);
+    assert(level < config.lsm_levels);
+
+    // In the worst case, when compacting level 0 we may need to pick all overlapping tables.
+    // We therefore do not grow the size of level 1 since that would further amplify this cost.
+    if (level == 0) return growth_factor;
+    if (level == 1) return growth_factor;
+
+    return math.pow(u32, growth_factor, level);
 }
 
 test "table count max" {
-    try std.testing.expectEqual(@as(u32, 8), compute_table_count_max(8, 1));
-    try std.testing.expectEqual(@as(u32, 2396744), compute_table_count_max(8, 6));
+    const expectEqual = std.testing.expectEqual;
+
+    try expectEqual(@as(u32, 8), compute_table_count_max_for_level(8, 0));
+    try expectEqual(@as(u32, 8), compute_table_count_max_for_level(8, 1));
+    try expectEqual(@as(u32, 64), compute_table_count_max_for_level(8, 2));
+    try expectEqual(@as(u32, 512), compute_table_count_max_for_level(8, 3));
+    try expectEqual(@as(u32, 4096), compute_table_count_max_for_level(8, 4));
+    try expectEqual(@as(u32, 32768), compute_table_count_max_for_level(8, 5));
+    try expectEqual(@as(u32, 262144), compute_table_count_max_for_level(8, 6));
+    try expectEqual(@as(u32, 2097152), compute_table_count_max_for_level(8, 7));
+
+    try expectEqual(@as(u32, 8 + 8), compute_table_count_max_for_tree(8, 2));
+    try expectEqual(@as(u32, 16 + 64), compute_table_count_max_for_tree(8, 3));
+    try expectEqual(@as(u32, 80 + 512), compute_table_count_max_for_tree(8, 4));
+    try expectEqual(@as(u32, 592 + 4096), compute_table_count_max_for_tree(8, 5));
+    try expectEqual(@as(u32, 4688 + 32768), compute_table_count_max_for_tree(8, 6));
+    try expectEqual(@as(u32, 37456 + 262144), compute_table_count_max_for_tree(8, 7));
+    try expectEqual(@as(u32, 299600 + 2097152), compute_table_count_max_for_tree(8, 8));
 }
 
 test {
