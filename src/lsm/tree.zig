@@ -762,12 +762,12 @@ pub fn Tree(
                     const header_bytes = block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.storage.free_set.acquire();
+                    const address = builder.storage.block_free_set.acquire().?;
 
                     header.* = .{
                         .cluster = builder.storage.cluster,
                         .op = address,
-                        .request = values.len,
+                        .request = @intCast(u32, values.len),
                         .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
                         .command = .block,
                     };
@@ -835,7 +835,7 @@ pub fn Tree(
                     const header_bytes = index_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.storage.free_set.acquire();
+                    const address = builder.storage.block_free_set.acquire().?;
 
                     header.* = .{
                         .cluster = builder.storage.cluster,
