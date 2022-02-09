@@ -244,6 +244,7 @@ fn TestContext(comptime k_max: u32) type {
             for (stream_ids) |*id, i| id.* = @intCast(u32, i) + k_max;
 
             var context: Self = .{ .streams = streams };
+            // TODO We have an integer underflow in init() using k incorrectly:
             var kway = KWay.init(&context, k_max, direction);
 
             while (kway.pop()) |value| {
