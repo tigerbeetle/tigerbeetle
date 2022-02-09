@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const mem = std.mem;
 const os = std.os;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
@@ -9,7 +10,7 @@ const IO = @import("io.zig").IO;
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
 
-const BlockFreeSet = @import("lsm/block_free_set.zig");
+const BlockFreeSet = @import("lsm/block_free_set.zig").BlockFreeSet;
 
 pub const Storage = struct {
     pub const block_size = config.lsm_table_block_size; // TODO Rename to config.block_size
@@ -76,25 +77,31 @@ pub const Storage = struct {
     };
 
     io: *IO,
-    block_free_set: *BlockFreeSet,
+    block_free_set: BlockFreeSet,
     cluster: u32,
     size: u64,
     fd: os.fd_t,
 
-    pub fn init(io: *IO, cluster: u32, size: u64, fd: os.fd_t) !Storage {
-        // TODO Initialize block free set according to size.
+    pub fn init(allocator: mem.Allocator, io: *IO, cluster: u32, size: u64, fd: os.fd_t) !Storage {
+        const blocks_count = 1024 * 1024; // TODO
+
+        var block_free_set = try BlockFreeSet.init(allocator, blocks_count);
+        errdefer block_free_set.deinit(allocator);
 
         return Storage{
             .io = io,
-            .block_free_set = undefined,
+            .block_free_set = block_free_set,
             .cluster = cluster,
             .size = size,
             .fd = fd,
         };
     }
 
-    pub fn deinit() void {
-        // TODO Deinit block free set.
+    pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
+        assert(storage.fd >= 0);
+        storage.fd = -1;
+
+        storage.block_free_set.deinit(allocator);
     }
 
     pub fn write_block(
