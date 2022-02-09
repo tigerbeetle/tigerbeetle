@@ -28,20 +28,25 @@ pub fn KWayMergeIterator(
         direction: Direction,
         previous_key_popped: ?Key = null,
 
-        pub fn init(context: *Context, k: u32, direction: Direction) Self {
+        /// This function may create an Iterator with k less than stream_id_max if
+        /// stream_peek() for one of the streams immediately returns null.
+        pub fn init(context: *Context, stream_id_max: u32, direction: Direction) Self {
+            assert(stream_id_max <= k_max);
+
             var it: Self = .{
                 .context = context,
                 .keys = undefined,
                 .stream_ids = undefined,
-                .k = k,
+                .k = 0,
                 .direction = direction,
             };
 
-            var i: u32 = 0;
-            while (i < k) : (i += 1) {
-                it.keys[i] = stream_peek(context, i) orelse continue;
-                it.stream_ids[i] = i;
-                it.up_heap(i);
+            var stream_id: u32 = 0;
+            while (stream_id < stream_id_max) : (stream_id += 1) {
+                it.keys[it.k] = stream_peek(context, stream_id) orelse continue;
+                it.stream_ids[it.k] = stream_id;
+                it.up_heap(it.k);
+                it.k += 1;
             }
 
             return it;
@@ -186,16 +191,14 @@ fn TestContext(comptime k_max: u32) type {
         }
 
         fn stream_peek(context: *Self, id: u32) ?u32 {
-            const index = id - k_max;
-            const stream = context.streams[index];
+            const stream = context.streams[id];
             if (stream.len == 0) return null;
             return stream[0].key;
         }
 
         fn stream_pop(context: *Self, id: u32) Value {
-            const index = id - k_max;
-            const stream = context.streams[index];
-            context.streams[index] = stream[1..];
+            const stream = context.streams[id];
+            context.streams[id] = stream[1..];
             return stream[0];
         }
 
@@ -239,13 +242,8 @@ fn TestContext(comptime k_max: u32) type {
             }
             defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
 
-            var stream_ids_buffer: [k_max]u32 = undefined;
-            const stream_ids = stream_ids_buffer[0..streams_keys.len];
-            for (stream_ids) |*id, i| id.* = @intCast(u32, i) + k_max;
-
             var context: Self = .{ .streams = streams };
-            // TODO We have an integer underflow in init() using k incorrectly:
-            var kway = KWay.init(&context, k_max, direction);
+            var kway = KWay.init(&context, @intCast(u32, streams_keys.len), direction);
 
             while (kway.pop()) |value| {
                 try actual.append(value);
