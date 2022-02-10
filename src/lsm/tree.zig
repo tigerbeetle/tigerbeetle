@@ -7,6 +7,7 @@ const os = std.os;
 
 const config = @import("../config.zig");
 const eytzinger = @import("eytzinger.zig").eytzinger;
+const utils = @import("../utils.zig");
 const vsr = @import("../vsr.zig");
 
 const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
@@ -218,7 +219,7 @@ pub fn Tree(
         };
 
         /// Point queries go through the object cache instead of directly accessing this table.
-        /// Range queries are not supported on MutableTable, they must instead be made immutable.
+        /// Range queries are not supported on the MutableTable, it must first be made immutable.
         pub const MutableTable = struct {
             const value_count_max = config.lsm_mutable_table_size_max / value_size;
 
@@ -237,13 +238,11 @@ pub fn Tree(
             values: Values = .{},
 
             pub fn init(allocator: mem.Allocator) !MutableTable {
-                _ = allocator;
-
                 var table: MutableTable = .{};
                 // TODO This allocates a bit more memory than we need as it rounds up to the next
                 // power of two or similar based on the hash map's growth factor. We never resize
                 // the hashmap so this is wasted memory for us.
-                try table.values.ensureTotalCapacity(value_count_max);
+                try table.values.ensureTotalCapacity(allocator, value_count_max);
                 return table;
             }
 
@@ -591,43 +590,65 @@ pub fn Tree(
                 }
             }
 
-            /// The actual data to be written to disk.
-            /// The first bytes are a vsr.Header containing checksum, id, count and timestamp.
-            buffer: []align(config.sector_size) u8,
+            blocks: []align(config.sector_size) [block_size]u8,
             table_info: Manifest.TableInfo,
             flush_iterator: FlushIterator,
+
+            pub fn init(allocator: mem.Allocator) !Table {
+                // We allocate blocks from MutableTable.value_count_max, not data_block_count_max.
+                // This saves memory for every LSM tree, which is important as we may have many.
+                // TODO We could similarly reduce filter_block_count accordingly.
+                const block_count = index_block_count + filter_block_count +
+                    utils.div_ceil(MutableTable.value_count_max, data.value_count_max);
+
+                const blocks = try allocator.allocAdvanced(
+                    [block_size]u8,
+                    config.sector_size,
+                    block_count,
+                    .exact,
+                );
+                errdefer allocator.free(blocks);
+
+                return Table{
+                    .blocks = blocks,
+                    .table_info = undefined,
+                    .flush_iterator = undefined,
+                };
+            }
+
+            pub fn deinit(table: *Table, allocator: mem.Allocator) void {
+                allocator.free(table.blocks);
+            }
 
             pub fn create_from_sorted_values(
                 table: *Table,
                 storage: *Storage,
-                timestamp: u64,
+                snapshot_min: u64,
                 sorted_values: []const Value,
             ) void {
-                assert(timestamp > 0);
+                assert(snapshot_min > 0);
                 assert(sorted_values.len > 0);
                 assert(sorted_values.len <= data.value_count_max * data_block_count_max);
 
-                const buffer = table.buffer;
-                // TODO Fix this slice to be *align(4096) [65536]u8 instead of *[65536]u8.
-                // Then we can drop the @alignCast(config.sector_size) below.
-                const blocks = mem.bytesAsSlice([block_size]u8, buffer);
-
                 var filter_blocks_index: u32 = 0;
-                const filter_blocks = blocks[index_block_count..][0..filter_block_count];
+                const filter_blocks = table.blocks[index_block_count..][0..filter_block_count];
 
                 var builder: Builder = .{
                     .storage = storage,
-                    .index_block = &blocks[0],
+                    .index_block = &table.blocks[0],
                     .filter_block = &filter_blocks[0],
                     .data_block = undefined,
                 };
                 filter_blocks_index += 1;
 
-                const data_blocks =
-                    blocks[index_block_count + filter_block_count ..][0..data_block_count_max];
-
                 var stream = sorted_values;
+
+                // Do not slice by data_block_count_max as the mutable table may have less blocks.
+                const data_blocks = table.blocks[index_block_count + filter_block_count ..];
+                assert(data_blocks.len <= data_block_count_max);
+
                 for (data_blocks) |*data_block| {
+                    // TODO Fix compiler to see that this @alignCast is unnecessary:
                     const data_block_aligned = @alignCast(config.sector_size, data_block);
                     builder.data_block = data_block_aligned;
 
@@ -659,8 +680,8 @@ pub fn Tree(
                 assert(filter_blocks_index <= filter_block_count);
 
                 table.* = .{
-                    .buffer = buffer,
-                    .table_info = builder.index_block_finish(timestamp),
+                    .blocks = table.blocks,
+                    .table_info = builder.index_block_finish(snapshot_min),
                     .flush_iterator = .{ .storage = storage },
                 };
             }
@@ -810,7 +831,7 @@ pub fn Tree(
                     return builder.block == data_block_count_max;
                 }
 
-                pub fn index_block_finish(builder: *Builder, timestamp: u64) Manifest.TableInfo {
+                pub fn index_block_finish(builder: *Builder, snapshot_min: u64) Manifest.TableInfo {
                     assert(builder.block > 0);
 
                     // TODO assert that filter is finished
@@ -840,7 +861,7 @@ pub fn Tree(
                         .op = address,
                         .commit = filter_blocks_used,
                         .request = builder.block,
-                        .offset = timestamp,
+                        .offset = snapshot_min,
                         .size = index.size,
                         .command = .block,
                     };
@@ -850,7 +871,7 @@ pub fn Tree(
                     const info: Manifest.TableInfo = .{
                         .checksum = header.checksum,
                         .address = address,
-                        .snapshot_min = timestamp,
+                        .snapshot_min = snapshot_min,
                         .key_min = builder.key_min,
                         .key_max = builder.key_max,
                     };
@@ -930,7 +951,7 @@ pub fn Tree(
             }
 
             inline fn block_address(block: BlockPtrConst) u64 {
-                const header = mem.bytesAsValue(block[0..@sizeOf(vsr.Header)]);
+                const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.op);
             }
 
@@ -954,7 +975,11 @@ pub fn Tree(
                 fn flush_internal(it: *FlushIterator) void {
                     const table = @fieldParentPtr(Table, "flush_iterator", it);
 
-                    const index_header = mem.bytesAsValue(table.buffer[0..@sizeOf(vsr.Header)]);
+                    const index_header = mem.bytesAsValue(
+                        vsr.Header,
+                        table.blocks[0][0..@sizeOf(vsr.Header)],
+                    );
+
                     const filter_blocks_used = index_header.commit;
                     const data_blocks_used = index_header.request;
                     const total_blocks_used = 1 + filter_blocks_used + data_blocks_used;
@@ -972,13 +997,13 @@ pub fn Tree(
 
                     if (it.block == 1 + filter_blocks_used) {
                         const filter_blocks_unused = filter_block_count - filter_blocks_used;
-                        it.block += filter_blocks_unused;
+                        it.block += @intCast(u32, filter_blocks_unused);
                     }
 
-                    const block_buffer = table.buffer[it.block * block_size ..][0..block_size];
-                    const header = mem.bytesAsValue(block_buffer[0..@sizeOf(vsr.Header)]);
+                    const block = @alignCast(config.sector_size, &table.blocks[it.block]);
+                    const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                     const address = header.op;
-                    it.storage.write_block(on_flush, &it.write, block_buffer, address);
+                    it.storage.write_block(on_flush, &it.write, block, address);
                 }
 
                 fn flush_complete(it: *FlushIterator) void {
