@@ -12,9 +12,11 @@ pub fn KWayMergeIterator(
     comptime key_from_value: fn (Value) callconv(.Inline) Key,
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     comptime k_max: u32,
-    comptime stream_peek: fn (context: *Context, stream_id: u32) ?Key,
-    comptime stream_pop: fn (context: *Context, stream_id: u32) Value,
-    /// Returns true if stream a has higher precedence than stream b.
+    /// Peek the next key in the stream identified by stream_index.
+    /// For example, peek(stream_index=2) returns user_streams[2][0].
+    comptime stream_peek: fn (context: *Context, stream_index: u32) ?Key,
+    comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
+    /// Returns true if stream A has higher precedence than stream B.
     /// This is used to deduplicate values across streams.
     comptime stream_precedence: fn (context: *Context, a: u32, b: u32) bool,
 ) type {
@@ -22,29 +24,41 @@ pub fn KWayMergeIterator(
         const Self = @This();
 
         context: *Context,
+
+        /// Sorted array of keys, with each key representing the next key in each stream.
         keys: [k_max]Key,
-        stream_ids: [k_max]u32,
+
+        /// For each key in keys above, the corresponding index of the stream containing that key.
+        /// This decouples the order and storage of streams, the user being responsible for storage.
+        /// The user's streams array is never reordered while keys are swapped, only this mapping.
+        streams: [k_max]u32,
+
+        /// The number of streams remaining in the iterator.
         k: u32,
+
         direction: Direction,
         previous_key_popped: ?Key = null,
 
-        /// This function may create an Iterator with k less than stream_id_max if
+        /// This function may create an Iterator with k being less than stream_count_max if
         /// stream_peek() for one of the streams immediately returns null.
-        pub fn init(context: *Context, stream_id_max: u32, direction: Direction) Self {
-            assert(stream_id_max <= k_max);
+        pub fn init(context: *Context, stream_count_max: u32, direction: Direction) Self {
+            // TODO Do we ever expect stream_count_max to be 0?
+            assert(stream_count_max <= k_max);
 
             var it: Self = .{
                 .context = context,
                 .keys = undefined,
-                .stream_ids = undefined,
+                .streams = undefined,
                 .k = 0,
                 .direction = direction,
             };
 
-            var stream_id: u32 = 0;
-            while (stream_id < stream_id_max) : (stream_id += 1) {
-                it.keys[it.k] = stream_peek(context, stream_id) orelse continue;
-                it.stream_ids[it.k] = stream_id;
+            // We must loop on stream_index but assign at it.k, as k may be less than stream_index.
+            // TODO Do we have test coverage for this edge case?
+            var stream_index: u32 = 0;
+            while (stream_index < stream_count_max) : (stream_index += 1) {
+                it.keys[it.k] = stream_peek(context, stream_index) orelse continue;
+                it.streams[it.k] = stream_index;
                 it.up_heap(it.k);
                 it.k += 1;
             }
@@ -77,7 +91,7 @@ pub fn KWayMergeIterator(
         fn pop_internal(it: *Self) ?Value {
             if (it.k == 0) return null;
 
-            const root = it.stream_ids[0];
+            const root = it.streams[0];
             // We know that each input iterator is sorted, so we don't need to compare the next
             // key on that iterator with the current min/max.
             const value = stream_pop(it.context, root);
@@ -154,13 +168,13 @@ pub fn KWayMergeIterator(
 
         fn swap(it: *Self, a: u32, b: u32) void {
             mem.swap(Key, &it.keys[a], &it.keys[b]);
-            mem.swap(u32, &it.stream_ids[a], &it.stream_ids[b]);
+            mem.swap(u32, &it.streams[a], &it.streams[b]);
         }
 
         inline fn ordered(it: Self, a: u32, b: ?u32) bool {
             return b == null or switch (compare_keys(it.keys[a], it.keys[b.?])) {
                 .lt => it.direction == .ascending,
-                .eq => stream_precedence(it.context, it.stream_ids[a], it.stream_ids[b.?]),
+                .eq => stream_precedence(it.context, it.streams[a], it.streams[b.?]),
                 .gt => it.direction == .descending,
             };
         }
@@ -190,15 +204,15 @@ fn TestContext(comptime k_max: u32) type {
             return math.order(a, b);
         }
 
-        fn stream_peek(context: *Self, id: u32) ?u32 {
-            const stream = context.streams[id];
+        fn stream_peek(context: *Self, stream_index: u32) ?u32 {
+            const stream = context.streams[stream_index];
             if (stream.len == 0) return null;
             return stream[0].key;
         }
 
-        fn stream_pop(context: *Self, id: u32) Value {
-            const stream = context.streams[id];
-            context.streams[id] = stream[1..];
+        fn stream_pop(context: *Self, stream_index: u32) Value {
+            const stream = context.streams[stream_index];
+            context.streams[stream_index] = stream[1..];
             return stream[0];
         }
 
