@@ -1718,21 +1718,31 @@ pub fn Tree(
 
         storage: *Storage,
 
-        /// We size and allocate this buffer as a function of MutableTable.value_count_max,
-        /// leaving off unneeded data blocks at the end. This saves memory for each LSM tree,
-        /// which is important as we have many LSM trees.
-        immutable_table_buffer: []u8,
+        mutable_table: MutableTable,
+        table: Table,
 
         manifest: []Manifest,
 
         pub fn init(allocator: mem.Allocator, storage: *Storage) !TreeGeneric {
-            _ = allocator;
-            _ = storage;
+            var mutable_table = try MutableTable.init(allocator);
+            errdefer mutable_table.deinit(allocator);
+
+            var table = try Table.init(allocator);
+            errdefer table.deinit(allocator);
+
+            return TreeGeneric{
+                .storage = storage,
+                .mutable_table = mutable_table,
+                .table = table,
+                .manifest = undefined, // TODO
+            };
         }
 
-        pub const Error = error{
-            IO,
-        };
+        pub fn deinit(tree: *TreeGeneric, allocator: mem.Allocator) void {
+            // TODO Consider whether we should release blocks acquired from Storage.block_free_set.
+            tree.mutable_table.deinit(allocator);
+            tree.table.deinit(allocator);
+        }
 
         pub fn put(tree: *TreeGeneric, value: Value) void {
             _ = tree;
