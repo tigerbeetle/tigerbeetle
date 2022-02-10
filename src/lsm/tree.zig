@@ -265,8 +265,8 @@ pub fn Tree(
                 assert(table.values.count() <= value_count_max);
             }
 
-            pub fn get(table: *MutableTable, key: Key) ?Value {
-                return table.values.get(tombstone_from_key(key));
+            pub fn get(table: *MutableTable, key: Key) ?*const Value {
+                return table.values.getPtr(tombstone_from_key(key));
             }
 
             pub fn sort_values(
@@ -1074,7 +1074,13 @@ pub fn Tree(
             data: BlockWrite,
 
             pub fn init(allocator: mem.Allocator) Compaction {
+                // TODO
                 _ = allocator;
+            }
+
+            pub fn deinit(compaction: *Compaction) void {
+                // TODO
+                _ = compaction;
             }
 
             pub fn start(
@@ -1735,7 +1741,7 @@ pub fn Tree(
 
         pub fn flush(
             tree: *TreeGeneric,
-            callback: fn (result: Error!void) void,
+            callback: fn () void,
         ) void {
             _ = tree;
             _ = callback;
@@ -1747,16 +1753,70 @@ pub fn Tree(
             _ = value;
         }
 
-        pub fn get(
-            tree: *TreeGeneric,
-            /// The snapshot timestamp, if any
-            snapshot: ?u64,
+        pub const GetContext = struct {
             key: Key,
-            callback: fn (result: Error!?Value) void,
+            snapshot: ?u64,
+
+            // Private internal state:
+            level: u32 = null,
+            // TODO Assert that no writes happened during the lifetime of the get.
+        };
+
+        /// Returns true if the value (if any) was found in memory.
+        /// Updates the GetContext so that further calls only search the block cache.
+        pub fn get_from_memory(tree: *TreeGeneric, context: *GetContext) ??*const Value {
+            assert(context.snapshot == null or context.snapshot < math.maxInt(u64) - 1);
+            assert(context.level == null or context.level < config.lsm_levels);
+
+            return tree.get_from_object_cache(context) orelse
+                tree.get_from_mutable_table(context) orelse
+                tree.get_from_immutable_table(context) orelse
+                tree.get_from_block_cache(context) orelse
+                null; // The lookup MAY require asynchronous I/O.
+        }
+
+        fn get_from_object_cache(tree: *TreeGeneric, context: *GetContext) ??*const Value {
+            // TODO
+            _ = tree;
+            _ = context;
+        }
+
+        fn get_from_mutable_table(tree: *TreeGeneric, context: *GetContext) ??*const Value {
+            // The creation of any snapshot converts the extent mutable table to a table.
+            if (context.level == null and context.snapshot == null) {
+                return tree.mutable_table.get(context.key);
+            } else {
+                return null;
+            }
+        }
+
+        fn get_from_immutable_table(tree: *TreeGeneric, context: *GetContext) ??*const Value {
+            if (context.level != null) return;
+            context.level = 0;
+
+            // TODO
+            // the table may not exist if it was already flushed to disk or if we only have
+            //
+            _ = tree;
+        }
+
+        fn get_from_block_cache(tree: *TreeGeneric, context: *GetContext) ??*const Value {
+            // TODO
+            _ = tree;
+            _ = context;
+        }
+
+        /// The caller must always call get_from_memory() before calling get_from_storage().
+        /// The caller must also call get_from_memory() again after any other get_from_storage(),
+        /// because the act of reading another key from storage may cause other keys to be cached.
+        /// Asserts that the callback was called asynchronously in order to prevent stack overflow.
+        pub fn get_from_storage(
+            tree: *TreeGeneric,
+            context: *GetContext,
+            callback: fn (?*const Value) void,
         ) void {
             _ = tree;
-            _ = snapshot;
-            _ = key;
+            _ = context;
             _ = callback;
         }
 
@@ -1779,7 +1839,7 @@ pub fn Tree(
             snapshot: ?u64,
             query: RangeQuery,
 
-            pub fn next(callback: fn (result: Error!?Value) void) void {
+            pub fn next(callback: fn (result: ?Value) void) void {
                 _ = callback;
             }
         };
@@ -1848,6 +1908,9 @@ test "table count max" {
 }
 
 test {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
     const IO = @import("../io.zig").IO;
     const Storage = @import("../storage.zig").Storage;
 
@@ -1869,8 +1932,8 @@ test {
 
     const cluster = 32;
 
-    var storage = try Storage.init(std.testing.allocator, &io, cluster, config.journal_size_max, storage_fd);
-    defer storage.deinit(std.testing.allocator);
+    var storage = try Storage.init(allocator, &io, cluster, config.journal_size_max, storage_fd);
+    defer storage.deinit(allocator);
 
     _ = storage;
 
@@ -1886,9 +1949,17 @@ test {
         Key.tombstone_from_key,
     );
 
-    // TODO ref all decls instead
-    _ = TestTree;
+    var tree = try TestTree.init(allocator, &storage);
+    defer tree.deinit(allocator);
+
+    std.testing.refAllDecls(@This());
+
     _ = TestTree.Table;
     _ = TestTree.Table.create_from_sorted_values;
+    _ = TestTree.Table.FlushIterator;
+    _ = TestTree.Table.FlushIterator.flush;
+    _ = TestTree.TableIterator;
+    _ = TestTree.LevelIterator;
     _ = TestTree.Compaction;
+    _ = TestTree.Table.Builder.data_block_finish;
 }
