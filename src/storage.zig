@@ -105,11 +105,13 @@ pub const Storage = struct {
     }
 
     pub fn write_block(
-        callback: fn (Storage.Write) void,
+        storage: *Storage,
+        callback: fn (*Storage.Write) void,
         write: *Storage.Write,
         block: BlockPtrConst,
         address: u64,
     ) void {
+        _ = storage;
         _ = callback;
         _ = write;
         _ = block;
@@ -123,14 +125,14 @@ pub const Storage = struct {
     /// which Replica can then interrogate each tick(). The callback passed
     /// to this function won't be called until the block has been recovered.
     pub fn read_block(
-        self: *Storage,
+        storage: *Storage,
         callback: fn (*Storage.Read) void,
         read: *Storage.Read,
         block: BlockPtr,
         address: u64,
         checksum: u128,
     ) void {
-        _ = self;
+        _ = storage;
         _ = callback;
         _ = read;
         _ = block;
