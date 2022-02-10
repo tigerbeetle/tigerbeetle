@@ -1457,15 +1457,20 @@ pub fn Replica(
             });
             while (ok_from_all_replicas_iterator.next()) |replica| {
                 // Ensure we don't wait for replicas that don't exist.
+                // The bits between `replica_count` and `replicas_max` are always unset,
+                // since they don't actually represent replicas.
                 if (replica == self.replica_count) {
                     assert(self.replica_count < config.replicas_max);
                     break;
                 }
+                assert(replica < self.replica_count);
 
                 if (replica != self.replica) {
                     waiting[waiting_len] = @intCast(u8, replica);
                     waiting_len += 1;
                 }
+            } else {
+                assert(self.replica_count == config.replicas_max);
             }
 
             if (waiting_len == 0) {
