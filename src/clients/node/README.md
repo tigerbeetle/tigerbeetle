@@ -9,13 +9,12 @@ The following steps will install the `tigerbeetle-node` module to your current w
 * NodeJS >= `14.0.0`. _(If the correct version is not installed, an installation error will occur)_ 
 
 > Your operating system should be Linux (kernel >= v5.6) or macOS. Windows support is not yet available but is in the works.
-
-> Ensure you are not currently in the project (tigerbeetle-node) directory, but the `parent` directory instead;
      
 ### YARN Package Manager
 
 ```sh
-yarn add tigerbeetle-node
+# Run the following from this directory
+yarn add
 ```
 or
 
@@ -146,7 +145,7 @@ const errors = await client.createTransfers([transfer])
 Two-phase transfers are supported natively by toggling the appropriate flag. TigerBeetle will then adjust the `credits_reserved` and `debits_reserved` fields of the appropriate accounts. A corresponding commit transfer then needs to be sent to accept or reject the transfer.
 | bit 0    | bit 1              | bit 2            |
 |----------|--------------------|------------------|
-| `linked` | `two_phase_commit` | `condition`      |
+| `linked` | `posting`          | `condition`      |
 
 The `condition` flag signals to TigerBeetle that a 256-bit cryptographic condition will be supplied in the `reserved` field. This will be validated against a supplied pre-image when the transfer is committed. Transfers within a batch may also be linked (see [linked events](#linked-events)).
 ```js
