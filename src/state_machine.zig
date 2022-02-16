@@ -24,7 +24,7 @@ const LookupAccountResult = tb.LookupAccountResult;
 
 const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);
-const HashMapCommits = std.AutoHashMap(u128, Commit);
+const HashMapCommits = std.AutoHashMap(u128, Transfer);
 
 pub const StateMachine = struct {
     pub const Operation = enum(u8) {
@@ -89,7 +89,7 @@ pub const StateMachine = struct {
         return switch (operation) {
             .create_accounts => Account,
             .create_transfers => Transfer,
-            .commit_transfers => Commit,
+            .commit_transfers => Transfer,
             .lookup_accounts => u128,
             .lookup_transfers => u128,
             else => unreachable,
@@ -339,82 +339,142 @@ pub const StateMachine = struct {
     fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
         assert(t.timestamp > self.commit_timestamp);
 
-        if (t.flags.padding != 0) return .reserved_flag_padding;
-        if (t.flags.two_phase_commit) {
-            // Otherwise reserved amounts may never be released:
-            if (t.timeout == 0) return .two_phase_commit_must_timeout;
-        } else if (t.timeout != 0) {
-            return .timeout_reserved_for_two_phase_commit;
-        }
-        if (!t.flags.condition and !zeroed_32_bytes(t.reserved)) return .reserved_field;
+        if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
+            if (t.flags.post_pending_transfer) {
+                if (!t.flags.preimage and !zeroed_32_bytes(t.reserved)) return .reserved_field;
+                if (t.flags.padding != 0) return .reserved_flag_padding;
 
-        if (t.amount == 0) return .amount_is_zero;
+                var lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
+                assert(t.timestamp > t.timestamp);
 
-        if (t.debit_account_id == t.credit_account_id) return .accounts_are_the_same;
+                if (!lookup.flags.posting) return .transfer_not_two_phase_commit;
 
-        // The etymology of the DR and CR abbreviations for debit and credit is interesting, either:
-        // 1. derived from the Latin past participles of debitum and creditum, debere and credere,
-        // 2. standing for debit record and credit record, or
-        // 3. relating to debtor and creditor.
-        // We use them to distinguish between `cr` (credit account), and `c` (commit).
-        var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
-        var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
-        assert(t.timestamp > dr.timestamp);
-        assert(t.timestamp > cr.timestamp);
+                if (self.get_commit(t.id)) |exists| {
+                    if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .already_committed_but_accepted;
+                    if (exists.flags.void_pending_transfer and !t.flags.void_pending_transfer) return .already_committed_but_rejected;
+                    return .already_committed;
+                }
 
-        if (dr.unit != cr.unit) return .accounts_have_different_units;
+                if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
 
-        // TODO We need a lookup before inserting in case transfer exists and would overflow limits.
-        // If the transfer exists, then we should rather return .exists as an error.
-        if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
-        if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
+                if (lookup.flags.condition) {
+                    if (!t.flags.preimage) return .condition_requires_preimage;
+                    if (!valid_preimage(lookup.reserved, t.reserved)) return .preimage_invalid;
+                } else if (t.flags.preimage) {
+                    return .preimage_requires_condition;
+                }
 
-        var insert = self.transfers.getOrPutAssumeCapacity(t.id);
-        if (insert.found_existing) {
-            const exists = insert.value_ptr.*;
-            if (exists.debit_account_id != t.debit_account_id) {
-                return .exists_with_different_debit_account_id;
-            } else if (exists.credit_account_id != t.credit_account_id) {
-                return .exists_with_different_credit_account_id;
-            }
-            if (exists.amount != t.amount) return .exists_with_different_amount;
-            if (@bitCast(u32, exists.flags) != @bitCast(u32, t.flags)) {
-                return .exists_with_different_flags;
-            }
-            if (exists.user_data != t.user_data) return .exists_with_different_user_data;
-            if (!equal_32_bytes(exists.reserved, t.reserved)) {
-                return .exists_with_different_reserved_field;
-            }
-            if (exists.timeout != t.timeout) return .exists_with_different_timeout;
-            return .exists;
-        } else {
-            insert.value_ptr.* = t;
-            if (t.flags.two_phase_commit) {
-                dr.debits_reserved += t.amount;
-                cr.credits_reserved += t.amount;
+                var dr = self.get_account(lookup.debit_account_id) orelse return .debit_account_not_found;
+                var cr = self.get_account(lookup.credit_account_id) orelse return .credit_account_not_found;
+                assert(lookup.timestamp > dr.timestamp);
+                assert(lookup.timestamp > cr.timestamp);
+
+                assert(lookup.flags.posting);
+                if (dr.debits_pending < lookup.amount) return .debit_amount_was_not_reserved;
+                if (cr.credits_pending < lookup.amount) return .credit_amount_was_not_reserved;
+
+                // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
+                assert(!dr.debits_exceed_credits(0));
+                assert(!cr.credits_exceed_debits(0));
+
+                // TODO We can combine this lookup with the previous lookup if we return `error!void`:
+                var insert = self.commits.getOrPutAssumeCapacity(t.id);
+                if (insert.found_existing) {
+                    unreachable;
+                } else {
+                    insert.value_ptr.* = t;
+                    dr.debits_pending -= lookup.amount;
+                    cr.credits_pending -= lookup.amount;
+                    if (!t.flags.void_pending_transfer) {
+                        //TODO Need to cater for partial commit if amount is lower...
+                        dr.debits_posted += lookup.amount;
+                        cr.credits_posted += lookup.amount;
+                    }
+                    self.commit_timestamp = t.timestamp;
+                    return .ok;
+                }
             } else {
-                dr.debits_accepted += t.amount;
-                cr.credits_accepted += t.amount;
+                //TODO rollback here
+                return .ok;
             }
-            self.commit_timestamp = t.timestamp;
-            return .ok;
+        } else {
+            if (t.flags.padding != 0) return .reserved_flag_padding;
+            if (t.flags.posting) {
+                // Otherwise reserved amounts may never be released:
+                if (t.timeout == 0) return .two_phase_commit_must_timeout;
+            } else if (t.timeout != 0) {
+                return .timeout_reserved_for_two_phase_commit;
+            }
+            if (!t.flags.condition and !zeroed_32_bytes(t.reserved)) return .reserved_field;
+
+            if (t.amount == 0) return .amount_is_zero;
+
+            if (t.debit_account_id == t.credit_account_id) return .accounts_are_the_same;
+
+            // The etymology of the DR and CR abbreviations for debit and credit is interesting, either:
+            // 1. derived from the Latin past participles of debitum and creditum, debere and credere,
+            // 2. standing for debit record and credit record, or
+            // 3. relating to debtor and creditor.
+            // We use them to distinguish between `cr` (credit account), and `c` (commit).
+            var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
+            var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
+            assert(t.timestamp > dr.timestamp);
+            assert(t.timestamp > cr.timestamp);
+
+            if (dr.unit != cr.unit) return .accounts_have_different_units;
+
+            // TODO We need a lookup before inserting in case transfer exists and would overflow limits.
+            // If the transfer exists, then we should rather return .exists as an error.
+            if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
+            if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
+
+            var insert = self.transfers.getOrPutAssumeCapacity(t.id);
+            if (insert.found_existing) {
+                const exists = insert.value_ptr.*;
+                if (exists.debit_account_id != t.debit_account_id) {
+                    return .exists_with_different_debit_account_id;
+                } else if (exists.credit_account_id != t.credit_account_id) {
+                    return .exists_with_different_credit_account_id;
+                }
+                if (exists.amount != t.amount) return .exists_with_different_amount;
+                //TODO @jason if (@bitCast(u32, exists.flags) != @bitCast(u32, t.flags)) {
+                //    return .exists_with_different_flags;
+                //}
+                if (exists.user_data != t.user_data) return .exists_with_different_user_data;
+                if (!equal_32_bytes(exists.reserved, t.reserved)) {
+                    return .exists_with_different_reserved_field;
+                }
+                if (exists.timeout != t.timeout) return .exists_with_different_timeout;
+                return .exists;
+            } else {
+                insert.value_ptr.* = t;
+                if (t.flags.posting) {
+                    dr.debits_pending += t.amount;
+                    cr.credits_pending += t.amount;
+                } else {
+                    dr.debits_posted += t.amount;
+                    cr.credits_posted += t.amount;
+                }
+                self.commit_timestamp = t.timestamp;
+                return .ok;
+            }
         }
     }
 
     fn create_transfer_rollback(self: *StateMachine, t: Transfer) void {
         var dr = self.get_account(t.debit_account_id).?;
         var cr = self.get_account(t.credit_account_id).?;
-        if (t.flags.two_phase_commit) {
-            dr.debits_reserved -= t.amount;
-            cr.credits_reserved -= t.amount;
+        if (t.flags.posting) {
+            dr.debits_pending -= t.amount;
+            cr.credits_pending -= t.amount;
         } else {
-            dr.debits_accepted -= t.amount;
-            cr.credits_accepted -= t.amount;
+            dr.debits_posted -= t.amount;
+            cr.credits_posted -= t.amount;
         }
         assert(self.transfers.remove(t.id));
     }
 
-    fn commit_transfer(self: *StateMachine, c: Commit) CommitTransferResult {
+    fn commit_transfer(self: *StateMachine, c: Transfer) CommitTransferResult {
         assert(c.timestamp > self.commit_timestamp);
 
         if (!c.flags.preimage and !zeroed_32_bytes(c.reserved)) return .reserved_field;
@@ -423,11 +483,11 @@ pub const StateMachine = struct {
         var t = self.get_transfer(c.id) orelse return .transfer_not_found;
         assert(c.timestamp > t.timestamp);
 
-        if (!t.flags.two_phase_commit) return .transfer_not_two_phase_commit;
+        if (!t.flags.posting) return .transfer_not_two_phase_commit;
 
         if (self.get_commit(c.id)) |exists| {
-            if (!exists.flags.reject and c.flags.reject) return .already_committed_but_accepted;
-            if (exists.flags.reject and !c.flags.reject) return .already_committed_but_rejected;
+            if (!exists.flags.void_pending_transfer and c.flags.void_pending_transfer) return .already_committed_but_accepted;
+            if (exists.flags.void_pending_transfer and !c.flags.void_pending_transfer) return .already_committed_but_rejected;
             return .already_committed;
         }
 
@@ -445,9 +505,9 @@ pub const StateMachine = struct {
         assert(t.timestamp > dr.timestamp);
         assert(t.timestamp > cr.timestamp);
 
-        assert(t.flags.two_phase_commit);
-        if (dr.debits_reserved < t.amount) return .debit_amount_was_not_reserved;
-        if (cr.credits_reserved < t.amount) return .credit_amount_was_not_reserved;
+        assert(t.flags.posting);
+        if (dr.debits_pending < t.amount) return .debit_amount_was_not_reserved;
+        if (cr.credits_pending < t.amount) return .credit_amount_was_not_reserved;
 
         // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
         assert(!dr.debits_exceed_credits(0));
@@ -459,27 +519,27 @@ pub const StateMachine = struct {
             unreachable;
         } else {
             insert.value_ptr.* = c;
-            dr.debits_reserved -= t.amount;
-            cr.credits_reserved -= t.amount;
-            if (!c.flags.reject) {
-                dr.debits_accepted += t.amount;
-                cr.credits_accepted += t.amount;
+            dr.debits_pending -= t.amount;
+            cr.credits_pending -= t.amount;
+            if (!c.flags.void_pending_transfer) {
+                dr.debits_posted += t.amount;
+                cr.credits_posted += t.amount;
             }
             self.commit_timestamp = c.timestamp;
             return .ok;
         }
     }
 
-    fn commit_transfer_rollback(self: *StateMachine, c: Commit) void {
+    fn commit_transfer_rollback(self: *StateMachine, c: Transfer) void {
         assert(self.get_commit(c.id) != null);
         var t = self.get_transfer(c.id).?;
         var dr = self.get_account(t.debit_account_id).?;
         var cr = self.get_account(t.credit_account_id).?;
-        dr.debits_reserved += t.amount;
-        cr.credits_reserved += t.amount;
-        if (!c.flags.reject) {
-            dr.debits_accepted -= t.amount;
-            cr.credits_accepted -= t.amount;
+        dr.debits_pending += t.amount;
+        cr.credits_pending += t.amount;
+        if (!c.flags.void_pending_transfer) {
+            dr.debits_posted -= t.amount;
+            cr.credits_posted -= t.amount;
         }
         assert(self.commits.remove(c.id));
     }
@@ -500,7 +560,7 @@ pub const StateMachine = struct {
     }
 
     /// See the comment for get_account().
-    fn get_commit(self: *StateMachine, id: u128) ?*Commit {
+    fn get_commit(self: *StateMachine, id: u128) ?*Transfer {
         return self.commits.getPtr(id);
     }
 };
@@ -581,7 +641,7 @@ test "create/lookup accounts" {
             .object = std.mem.zeroInit(Account, .{
                 .id = 3,
                 .timestamp = 1,
-                .debits_reserved = 10,
+                .debits_pending = 10,
                 .flags = .{ .debits_must_not_exceed_credits = true },
             }),
         },
@@ -590,7 +650,7 @@ test "create/lookup accounts" {
             .object = std.mem.zeroInit(Account, .{
                 .id = 4,
                 .timestamp = 1,
-                .debits_accepted = 10,
+                .debits_posted = 10,
                 .flags = .{ .debits_must_not_exceed_credits = true },
             }),
         },
@@ -599,7 +659,7 @@ test "create/lookup accounts" {
             .object = std.mem.zeroInit(Account, .{
                 .id = 5,
                 .timestamp = 1,
-                .credits_reserved = 10,
+                .credits_pending = 10,
                 .flags = .{ .credits_must_not_exceed_debits = true },
             }),
         },
@@ -608,7 +668,7 @@ test "create/lookup accounts" {
             .object = std.mem.zeroInit(Account, .{
                 .id = 6,
                 .timestamp = 1,
-                .credits_accepted = 10,
+                .credits_posted = 10,
                 .flags = .{ .credits_must_not_exceed_debits = true },
             }),
         },
@@ -846,7 +906,7 @@ test "create/lookup/rollback transfers" {
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 3,
                 .timestamp = timestamp,
-                .flags = .{ .two_phase_commit = true },
+                .flags = .{ .posting = true },
             }),
         },
         Vector{
@@ -1043,7 +1103,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .two_phase_commit = true },
+                .flags = .{ .posting = true },
                 .timeout = 0,
             }),
         },
@@ -1055,7 +1115,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .two_phase_commit = true },
+                .flags = .{ .posting = true },
                 .timeout = 20,
             }),
         },
@@ -1067,7 +1127,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .two_phase_commit = true },
+                .flags = .{ .posting = true },
                 .timeout = 25,
             }),
         },
@@ -1081,28 +1141,28 @@ test "create/lookup/rollback transfers" {
     }
 
     // 2 phase commit [reserved]:
-    try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_reserved);
-    try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_reserved);
-    try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_reserved);
-    try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_reserved);
+    try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_pending);
+    try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_pending);
+    try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_pending);
+    try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_pending);
     // 1 phase commit [accepted]:
-    try testing.expectEqual(@as(u64, 20), state_machine.get_account(7).?.*.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_accepted);
-    try testing.expectEqual(@as(u64, 20), state_machine.get_account(8).?.*.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_accepted);
+    try testing.expectEqual(@as(u64, 20), state_machine.get_account(7).?.*.debits_posted);
+    try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_posted);
+    try testing.expectEqual(@as(u64, 20), state_machine.get_account(8).?.*.credits_posted);
+    try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_posted);
 
     // Rollback transfer with id [12], amount of 10:
     state_machine.create_transfer_rollback(state_machine.get_transfer(vectors[11].object.id).?.*);
-    try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_accepted);
-    try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_accepted);
+    try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_posted);
+    try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_posted);
+    try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_posted);
+    try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_posted);
     try testing.expect(state_machine.get_transfer(vectors[11].object.id) == null);
 
     // Rollback transfer with id [15], amount of 10:
     state_machine.create_transfer_rollback(state_machine.get_transfer(vectors[22].object.id).?.*);
-    try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.debits_reserved);
-    try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.credits_reserved);
+    try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.debits_pending);
+    try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.credits_pending);
     try testing.expect(state_machine.get_transfer(vectors[22].object.id) == null);
 }
 
@@ -1112,7 +1172,7 @@ test "create/lookup/rollback commits" {
 
     const allocator = arena.allocator();
 
-    const Vector = struct { result: CommitTransferResult, object: Commit };
+    const Vector = struct { result: CommitTransferResult, object: Transfer };
 
     var accounts = [_]Account{
         std.mem.zeroInit(Account, .{ .id = 1 }),
@@ -1133,7 +1193,7 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
-            .flags = .{ .two_phase_commit = true },
+            .flags = .{ .posting = true },
             .timeout = 25,
         }),
         std.mem.zeroInit(Transfer, .{
@@ -1141,7 +1201,7 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
-            .flags = .{ .two_phase_commit = true },
+            .flags = .{ .posting = true },
             .timeout = 25,
         }),
         std.mem.zeroInit(Transfer, .{
@@ -1149,7 +1209,7 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
-            .flags = .{ .two_phase_commit = true },
+            .flags = .{ .posting = true },
             .timeout = 1,
         }),
         std.mem.zeroInit(Transfer, .{
@@ -1158,7 +1218,7 @@ test "create/lookup/rollback commits" {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .flags = .{
-                .two_phase_commit = true,
+                .posting = true,
                 .condition = true,
             },
             .timeout = 25,
@@ -1169,7 +1229,7 @@ test "create/lookup/rollback commits" {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .flags = .{
-                .two_phase_commit = true,
+                .posting = true,
                 .condition = false,
             },
             .timeout = 25,
@@ -1179,7 +1239,7 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 3,
             .credit_account_id = 4,
-            .flags = .{ .two_phase_commit = true },
+            .flags = .{ .posting = true },
             .timeout = 25,
         }),
     };
@@ -1225,7 +1285,7 @@ test "create/lookup/rollback commits" {
     const vectors = [_]Vector{
         Vector{
             .result = .reserved_field,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 1,
                 .timestamp = timestamp,
                 .reserved = [_]u8{1} ** 32,
@@ -1233,7 +1293,7 @@ test "create/lookup/rollback commits" {
         },
         Vector{
             .result = .reserved_flag_padding,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 1,
                 .timestamp = timestamp,
                 .flags = .{ .padding = 1 },
@@ -1241,28 +1301,28 @@ test "create/lookup/rollback commits" {
         },
         Vector{
             .result = .transfer_not_found,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 777,
                 .timestamp = timestamp,
             }),
         },
         Vector{
             .result = .transfer_not_two_phase_commit,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 1,
                 .timestamp = timestamp,
             }),
         },
         Vector{
             .result = .ok,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 2,
                 .timestamp = timestamp,
             }),
         },
         Vector{
             .result = .already_committed_but_accepted,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 2,
                 .timestamp = timestamp + 1,
                 .flags = .{ .reject = true },
@@ -1270,14 +1330,14 @@ test "create/lookup/rollback commits" {
         },
         Vector{
             .result = .already_committed,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 2,
                 .timestamp = timestamp + 1,
             }),
         },
         Vector{
             .result = .ok,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 3,
                 .timestamp = timestamp + 1,
                 .flags = .{ .reject = true },
@@ -1285,28 +1345,28 @@ test "create/lookup/rollback commits" {
         },
         Vector{
             .result = .already_committed_but_rejected,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 3,
                 .timestamp = timestamp + 2,
             }),
         },
         Vector{
             .result = .transfer_expired,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 4,
                 .timestamp = timestamp + 2,
             }),
         },
         Vector{
             .result = .condition_requires_preimage,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 5,
                 .timestamp = timestamp + 2,
             }),
         },
         Vector{
             .result = .preimage_invalid,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 5,
                 .timestamp = timestamp + 2,
                 .flags = .{ .preimage = true },
@@ -1315,7 +1375,7 @@ test "create/lookup/rollback commits" {
         },
         Vector{
             .result = .preimage_requires_condition,
-            .object = std.mem.zeroInit(Commit, .{
+            .object = std.mem.zeroInit(Transfer, .{
                 .id = 6,
                 .timestamp = timestamp + 2,
                 .flags = .{ .preimage = true },
@@ -1326,16 +1386,16 @@ test "create/lookup/rollback commits" {
     // Test balances BEFORE commit
     // Account 1:
     const account_1_before = state_machine.get_account(1).?.*;
-    try testing.expectEqual(@as(u64, 15), account_1_before.debits_accepted);
-    try testing.expectEqual(@as(u64, 75), account_1_before.debits_reserved);
-    try testing.expectEqual(@as(u64, 0), account_1_before.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), account_1_before.credits_reserved);
+    try testing.expectEqual(@as(u64, 15), account_1_before.debits_posted);
+    try testing.expectEqual(@as(u64, 75), account_1_before.debits_pending);
+    try testing.expectEqual(@as(u64, 0), account_1_before.credits_posted);
+    try testing.expectEqual(@as(u64, 0), account_1_before.credits_pending);
     // Account 2:
     const account_2_before = state_machine.get_account(2).?.*;
-    try testing.expectEqual(@as(u64, 0), account_2_before.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), account_2_before.debits_reserved);
-    try testing.expectEqual(@as(u64, 15), account_2_before.credits_accepted);
-    try testing.expectEqual(@as(u64, 75), account_2_before.credits_reserved);
+    try testing.expectEqual(@as(u64, 0), account_2_before.debits_posted);
+    try testing.expectEqual(@as(u64, 0), account_2_before.debits_pending);
+    try testing.expectEqual(@as(u64, 15), account_2_before.credits_posted);
+    try testing.expectEqual(@as(u64, 75), account_2_before.credits_pending);
 
     for (vectors) |vector| {
         try testing.expectEqual(vector.result, state_machine.commit_transfer(vector.object));
@@ -1347,26 +1407,26 @@ test "create/lookup/rollback commits" {
     // Test balances AFTER commit
     // Account 1:
     const account_1_after = state_machine.get_account(1).?.*;
-    try testing.expectEqual(@as(u64, 30), account_1_after.debits_accepted);
+    try testing.expectEqual(@as(u64, 30), account_1_after.debits_posted);
     // +15 (acceptance applied):
-    try testing.expectEqual(@as(u64, 45), account_1_after.debits_reserved);
+    try testing.expectEqual(@as(u64, 45), account_1_after.debits_pending);
     // -15 (reserved moved):
-    try testing.expectEqual(@as(u64, 0), account_1_after.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), account_1_after.credits_reserved);
+    try testing.expectEqual(@as(u64, 0), account_1_after.credits_posted);
+    try testing.expectEqual(@as(u64, 0), account_1_after.credits_pending);
     // Account 2:
     const account_2_after = state_machine.get_account(2).?.*;
-    try testing.expectEqual(@as(u64, 0), account_2_after.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), account_2_after.debits_reserved);
+    try testing.expectEqual(@as(u64, 0), account_2_after.debits_posted);
+    try testing.expectEqual(@as(u64, 0), account_2_after.debits_pending);
     // +15 (acceptance applied):
-    try testing.expectEqual(@as(u64, 30), account_2_after.credits_accepted);
+    try testing.expectEqual(@as(u64, 30), account_2_after.credits_posted);
     // -15 (reserved moved):
-    try testing.expectEqual(@as(u64, 45), account_2_after.credits_reserved);
+    try testing.expectEqual(@as(u64, 45), account_2_after.credits_pending);
 
     // Test COMMIT with invalid debit/credit accounts
     state_machine.create_account_rollback(accounts[3]);
     try testing.expect(state_machine.get_account(accounts[3].id) == null);
     try testing.expectEqual(
-        state_machine.commit_transfer(std.mem.zeroInit(Commit, .{
+        state_machine.commit_transfer(std.mem.zeroInit(Transfer, .{
             .id = 7,
             .timestamp = timestamp + 2,
         })),
@@ -1375,7 +1435,7 @@ test "create/lookup/rollback commits" {
     state_machine.create_account_rollback(accounts[2]);
     try testing.expect(state_machine.get_account(accounts[2].id) == null);
     try testing.expectEqual(
-        state_machine.commit_transfer(std.mem.zeroInit(Commit, .{
+        state_machine.commit_transfer(std.mem.zeroInit(Transfer, .{
             .id = 7,
             .timestamp = timestamp + 2,
         })),
@@ -1388,35 +1448,35 @@ test "create/lookup/rollback commits" {
     // Account 1:
     const account_1_rollback = state_machine.get_account(1).?.*;
     // -15 (rollback):
-    try testing.expectEqual(@as(u64, 15), account_1_rollback.debits_accepted);
-    try testing.expectEqual(@as(u64, 60), account_1_rollback.debits_reserved);
-    try testing.expectEqual(@as(u64, 0), account_1_rollback.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), account_1_rollback.credits_reserved);
+    try testing.expectEqual(@as(u64, 15), account_1_rollback.debits_posted);
+    try testing.expectEqual(@as(u64, 60), account_1_rollback.debits_pending);
+    try testing.expectEqual(@as(u64, 0), account_1_rollback.credits_posted);
+    try testing.expectEqual(@as(u64, 0), account_1_rollback.credits_pending);
     // Account 2:
     const account_2_rollback = state_machine.get_account(2).?.*;
-    try testing.expectEqual(@as(u64, 0), account_2_rollback.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), account_2_rollback.debits_reserved);
+    try testing.expectEqual(@as(u64, 0), account_2_rollback.debits_posted);
+    try testing.expectEqual(@as(u64, 0), account_2_rollback.debits_pending);
     // -15 (rollback):
-    try testing.expectEqual(@as(u64, 15), account_2_rollback.credits_accepted);
-    try testing.expectEqual(@as(u64, 60), account_2_rollback.credits_reserved);
+    try testing.expectEqual(@as(u64, 15), account_2_rollback.credits_posted);
+    try testing.expectEqual(@as(u64, 60), account_2_rollback.credits_pending);
 
     // Rollback [id=3] rejected:
     state_machine.commit_transfer_rollback(vectors[7].object);
     // Account 1:
     const account_1_rollback_reject = state_machine.get_account(1).?.*;
-    try testing.expectEqual(@as(u64, 15), account_1_rollback_reject.debits_accepted);
+    try testing.expectEqual(@as(u64, 15), account_1_rollback_reject.debits_posted);
     // Remains unchanged:
-    try testing.expectEqual(@as(u64, 75), account_1_rollback_reject.debits_reserved);
+    try testing.expectEqual(@as(u64, 75), account_1_rollback_reject.debits_pending);
     // +15 rolled back:
-    try testing.expectEqual(@as(u64, 0), account_1_rollback_reject.credits_accepted);
-    try testing.expectEqual(@as(u64, 0), account_1_rollback_reject.credits_reserved);
+    try testing.expectEqual(@as(u64, 0), account_1_rollback_reject.credits_posted);
+    try testing.expectEqual(@as(u64, 0), account_1_rollback_reject.credits_pending);
     // Account 2:
     const account_2_rollback_reject = state_machine.get_account(2).?.*;
-    try testing.expectEqual(@as(u64, 0), account_2_rollback_reject.debits_accepted);
-    try testing.expectEqual(@as(u64, 0), account_2_rollback_reject.debits_reserved);
-    try testing.expectEqual(@as(u64, 15), account_2_rollback_reject.credits_accepted);
+    try testing.expectEqual(@as(u64, 0), account_2_rollback_reject.debits_posted);
+    try testing.expectEqual(@as(u64, 0), account_2_rollback_reject.debits_pending);
+    try testing.expectEqual(@as(u64, 15), account_2_rollback_reject.credits_posted);
     // +15 rolled back"
-    try testing.expectEqual(@as(u64, 75), account_2_rollback_reject.credits_reserved);
+    try testing.expectEqual(@as(u64, 75), account_2_rollback_reject.credits_pending);
 }
 
 fn test_routine_zeroed(comptime len: usize) !void {
