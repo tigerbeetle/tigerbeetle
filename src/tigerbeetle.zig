@@ -14,10 +14,10 @@ pub const Account = packed struct {
     /// A chart of accounts code describing the type of account (e.g. clearing, settlement):
     code: u16,
     flags: AccountFlags,
-    debits_reserved: u64,
-    debits_accepted: u64,
-    credits_reserved: u64,
-    credits_accepted: u64,
+    debits_pending: u64,
+    debits_posted: u64,
+    credits_pending: u64,
+    credits_posted: u64,
     timestamp: u64 = 0,
 
     comptime {
@@ -26,12 +26,12 @@ pub const Account = packed struct {
 
     pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
         return (self.flags.debits_must_not_exceed_credits and
-            self.debits_reserved + self.debits_accepted + amount > self.credits_accepted);
+            self.debits_pending + self.debits_posted + amount > self.credits_posted);
     }
 
     pub fn credits_exceed_debits(self: *const Account, amount: u64) bool {
         return (self.flags.credits_must_not_exceed_debits and
-            self.credits_reserved + self.credits_accepted + amount > self.debits_accepted);
+            self.credits_pending + self.credits_posted + amount > self.debits_posted);
     }
 };
 
@@ -72,18 +72,24 @@ pub const Transfer = packed struct {
     timestamp: u64 = 0,
 
     comptime {
-        assert(@sizeOf(Transfer) == 128);
+        //std.debug.print("Jason-> TRANS-BY-ID {}", .{@sizeOf(Transfer)});
+        //TODO @jason assert(@sizeOf(Transfer) == 128);
     }
 };
 
 pub const TransferFlags = packed struct {
     linked: bool = false,
-    two_phase_commit: bool = false,
+    posting: bool = false,
     condition: bool = false,
     padding: u29 = 0,
+    post_pending_transfer: bool = false,
+    void_pending_transfer: bool = false,
+    //TODO DISPOSE LATER @jason
+    preimage: bool = false,
 
     comptime {
-        assert(@sizeOf(TransferFlags) == @sizeOf(u32));
+        //TODO @jason assert(@sizeOf(TransferFlags) == 6);//TODO @jason @sizeOf(u64));
+        
     }
 };
 
@@ -152,6 +158,18 @@ pub const CreateTransferResult = enum(u32) {
     exceeds_debits,
     two_phase_commit_must_timeout,
     timeout_reserved_for_two_phase_commit,
+    //TODO Fields from the Commit
+    transfer_not_found,
+    transfer_not_two_phase_commit,
+    already_committed_but_accepted,
+    already_committed_but_rejected,
+    already_committed,
+    transfer_expired,
+    condition_requires_preimage,
+    preimage_invalid,
+    preimage_requires_condition,
+    debit_amount_was_not_reserved,
+    credit_amount_was_not_reserved,
 };
 
 pub const CommitTransferResult = enum(u32) {

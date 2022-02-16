@@ -101,7 +101,7 @@ pub fn main() !void {
             .user_data = 0,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = if (IS_TWO_PHASE_COMMIT) .{ .two_phase_commit = true } else .{},
+            .flags = if (IS_TWO_PHASE_COMMIT) .{ .posting = true } else .{},
             .amount = 1,
             .timeout = if (IS_TWO_PHASE_COMMIT) std.time.ns_per_hour else 0,
         };
@@ -228,7 +228,9 @@ const TimedQueue = struct {
         if (self.batches.head_ptr()) |starting_batch| {
             log.debug("sending first batch...", .{});
             self.batch_start = now;
-            const message = self.client.get_message();
+            var message = self.client.get_message() orelse {
+                @panic("Client message pool has been exhausted. Cannot execute batch.");
+            };
             defer self.client.unref(message);
 
             std.mem.copy(
@@ -286,7 +288,9 @@ const TimedQueue = struct {
         }
 
         if (self.batches.head_ptr()) |next_batch| {
-            const message = self.client.get_message();
+            var message = self.client.get_message() orelse {
+                @panic("Client message pool has been exhausted.");
+            };
             defer self.client.unref(message);
 
             std.mem.copy(
