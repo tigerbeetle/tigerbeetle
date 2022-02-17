@@ -15,11 +15,11 @@ const CommitFlags = tb.CommitFlags;
 
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
-const CommitTransfersResult = tb.CommitTransfersResult;
+//const CommitTransfersResult = tb.CommitTransfersResult;
 
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
-const CommitTransferResult = tb.CommitTransferResult;
+//const CommitTransferResult = tb.CommitTransferResult;
 const LookupAccountResult = tb.LookupAccountResult;
 
 const HashMapAccounts = std.AutoHashMap(u128, Account);
@@ -36,14 +36,14 @@ pub const StateMachine = struct {
         /// Operations exported by TigerBeetle:
         create_accounts,
         create_transfers,
-        commit_transfers,
+        //commit_transfers,
         lookup_accounts,
         lookup_transfers,
     };
 
     allocator: std.mem.Allocator,
-    prepare_timestamp: u64,
-    commit_timestamp: u64,
+    pending_timestamp: u64,
+    post_timestamp: u64,
     accounts: HashMapAccounts,
     transfers: HashMapTransfers,
     commits: HashMapCommits,
@@ -66,13 +66,13 @@ pub const StateMachine = struct {
         errdefer commits.deinit();
         try commits.ensureTotalCapacity(@intCast(u32, commits_max));
 
-        // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
-        // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
+        // TODO After recovery, set pending_timestamp max(wall clock, op timestamp).
+        // TODO After recovery, set post_timestamp max(wall clock, commit timestamp).
 
         return StateMachine{
             .allocator = allocator,
-            .prepare_timestamp = 0,
-            .commit_timestamp = 0,
+            .pending_timestamp = 0,
+            .post_timestamp = 0,
             .accounts = accounts,
             .transfers = transfers,
             .commits = commits,
@@ -89,7 +89,7 @@ pub const StateMachine = struct {
         return switch (operation) {
             .create_accounts => Account,
             .create_transfers => Transfer,
-            .commit_transfers => Transfer,
+            //.commit_transfers => Transfer,
             .lookup_accounts => u128,
             .lookup_transfers => u128,
             else => unreachable,
@@ -100,7 +100,7 @@ pub const StateMachine = struct {
         return switch (operation) {
             .create_accounts => CreateAccountsResult,
             .create_transfers => CreateTransfersResult,
-            .commit_transfers => CommitTransfersResult,
+            //.commit_transfers => CreateTransfersResult,
             .lookup_accounts => Account,
             .lookup_transfers => Transfer,
             else => unreachable,
@@ -113,7 +113,7 @@ pub const StateMachine = struct {
             .register => {},
             .create_accounts => self.prepare_timestamps(realtime, .create_accounts, input),
             .create_transfers => self.prepare_timestamps(realtime, .create_transfers, input),
-            .commit_transfers => self.prepare_timestamps(realtime, .commit_transfers, input),
+            //.commit_transfers => self.prepare_timestamps(realtime, .commit_transfers, input),
             .lookup_accounts => {},
             .lookup_transfers => {},
             else => unreachable,
@@ -127,19 +127,19 @@ pub const StateMachine = struct {
         input: []u8,
     ) void {
         // Guard against the wall clock going backwards by taking the max with timestamps issued:
-        self.prepare_timestamp = std.math.max(
-            // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
+        self.pending_timestamp = std.math.max(
+            // The cluster `post_timestamp` may be ahead of our `pending_timestamp` because this
             // may be our first prepare as a recently elected leader:
-            std.math.max(self.prepare_timestamp, self.commit_timestamp) + 1,
+            std.math.max(self.pending_timestamp, self.post_timestamp) + 1,
             @intCast(u64, realtime),
         );
-        assert(self.prepare_timestamp > self.commit_timestamp);
+        assert(self.pending_timestamp > self.post_timestamp);
         var sum_reserved_timestamps: usize = 0;
         var events = std.mem.bytesAsSlice(Event(operation), input);
         for (events) |*event| {
             sum_reserved_timestamps += event.timestamp;
-            self.prepare_timestamp += 1;
-            event.timestamp = self.prepare_timestamp;
+            self.pending_timestamp += 1;
+            event.timestamp = self.pending_timestamp;
         }
         // The client is responsible for ensuring that timestamps are reserved:
         // Use a single branch condition to detect non-zero reserved timestamps.
@@ -161,7 +161,7 @@ pub const StateMachine = struct {
             .register => 0,
             .create_accounts => self.execute(.create_accounts, input, output),
             .create_transfers => self.execute(.create_transfers, input, output),
-            .commit_transfers => self.execute(.commit_transfers, input, output),
+            //.commit_transfers => self.execute(.commit_transfers, input, output),
             .lookup_accounts => self.execute_lookup_accounts(input, output),
             .lookup_transfers => self.execute_lookup_transfers(input, output),
             else => unreachable,
@@ -191,7 +191,7 @@ pub const StateMachine = struct {
             const result = if (chain_broken) .linked_event_failed else switch (operation) {
                 .create_accounts => self.create_account(event),
                 .create_transfers => self.create_transfer(event),
-                .commit_transfers => self.commit_transfer(event),
+                //.commit_transfers => self.commit_transfer(event),
                 else => unreachable,
             };
             log.debug("{s} {}/{}: {}: {}", .{
@@ -247,7 +247,7 @@ pub const StateMachine = struct {
 
         // We commit events in FIFO order.
         // We must therefore rollback events in LIFO order with a reverse loop.
-        // We do not rollback `self.commit_timestamp` to ensure that subsequent events are
+        // We do not rollback `self.post_timestamp` to ensure that subsequent events are
         // timestamped correctly.
         var index = chain_error_index;
         while (index > chain_start_index) {
@@ -256,12 +256,12 @@ pub const StateMachine = struct {
             assert(index >= chain_start_index);
             assert(index < chain_error_index);
             const event = events[index];
-            assert(event.timestamp <= self.commit_timestamp);
+            assert(event.timestamp <= self.post_timestamp);
 
             switch (operation) {
                 .create_accounts => self.create_account_rollback(event),
                 .create_transfers => self.create_transfer_rollback(event),
-                .commit_transfers => self.commit_transfer_rollback(event),
+                //.commit_transfers => self.commit_transfer_rollback(event),
                 else => unreachable,
             }
             log.debug("{s} {}/{}: rollback(): {}", .{
@@ -303,7 +303,7 @@ pub const StateMachine = struct {
     }
 
     fn create_account(self: *StateMachine, a: Account) CreateAccountResult {
-        assert(a.timestamp > self.commit_timestamp);
+        assert(a.timestamp > self.post_timestamp);
 
         if (!zeroed_48_bytes(a.reserved)) return .reserved_field;
         if (a.flags.padding != 0) return .reserved_flag_padding;
@@ -327,7 +327,7 @@ pub const StateMachine = struct {
             return .exists;
         } else {
             insert.value_ptr.* = a;
-            self.commit_timestamp = a.timestamp;
+            self.post_timestamp = a.timestamp;
             return .ok;
         }
     }
@@ -337,64 +337,60 @@ pub const StateMachine = struct {
     }
 
     fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
-        assert(t.timestamp > self.commit_timestamp);
+        assert(t.timestamp > self.post_timestamp);
 
+        // Either a 2-phase transfer post/void
         if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-            if (t.flags.post_pending_transfer) {
-                if (!t.flags.preimage and !zeroed_32_bytes(t.reserved)) return .reserved_field;
-                if (t.flags.padding != 0) return .reserved_flag_padding;
+            if (!t.flags.preimage and !zeroed_32_bytes(t.reserved)) return .reserved_field;
+            if (t.flags.padding != 0) return .reserved_flag_padding;
 
-                var lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
-                assert(t.timestamp > t.timestamp);
+            var lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
+            assert(t.timestamp > t.timestamp);
 
-                if (!lookup.flags.posting) return .transfer_not_two_phase_commit;
+            if (!lookup.flags.posting) return .transfer_not_two_phase_commit;
 
-                if (self.get_commit(t.id)) |exists| {
-                    if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .already_committed_but_accepted;
-                    if (exists.flags.void_pending_transfer and !t.flags.void_pending_transfer) return .already_committed_but_rejected;
-                    return .already_committed;
-                }
+            if (self.get_commit(t.id)) |exists| {
+                if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .already_committed_but_accepted;
+                if (exists.flags.void_pending_transfer and !t.flags.void_pending_transfer) return .already_committed_but_rejected;
+                return .already_committed;
+            }
 
-                if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
+            if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
 
-                if (lookup.flags.condition) {
-                    if (!t.flags.preimage) return .condition_requires_preimage;
-                    if (!valid_preimage(lookup.reserved, t.reserved)) return .preimage_invalid;
-                } else if (t.flags.preimage) {
-                    return .preimage_requires_condition;
-                }
+            if (lookup.flags.condition) {
+                if (!t.flags.preimage) return .condition_requires_preimage;
+                if (!valid_preimage(lookup.reserved, t.reserved)) return .preimage_invalid;
+            } else if (t.flags.preimage) {
+                return .preimage_requires_condition;
+            }
 
-                var dr = self.get_account(lookup.debit_account_id) orelse return .debit_account_not_found;
-                var cr = self.get_account(lookup.credit_account_id) orelse return .credit_account_not_found;
-                assert(lookup.timestamp > dr.timestamp);
-                assert(lookup.timestamp > cr.timestamp);
+            var dr = self.get_account(lookup.debit_account_id) orelse return .debit_account_not_found;
+            var cr = self.get_account(lookup.credit_account_id) orelse return .credit_account_not_found;
+            assert(lookup.timestamp > dr.timestamp);
+            assert(lookup.timestamp > cr.timestamp);
 
-                assert(lookup.flags.posting);
-                if (dr.debits_pending < lookup.amount) return .debit_amount_was_not_reserved;
-                if (cr.credits_pending < lookup.amount) return .credit_amount_was_not_reserved;
+            assert(lookup.flags.posting);
+            if (dr.debits_pending < lookup.amount) return .debit_amount_was_not_reserved;
+            if (cr.credits_pending < lookup.amount) return .credit_amount_was_not_reserved;
 
-                // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
-                assert(!dr.debits_exceed_credits(0));
-                assert(!cr.credits_exceed_debits(0));
+            // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
+            assert(!dr.debits_exceed_credits(0));
+            assert(!cr.credits_exceed_debits(0));
 
-                // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-                var insert = self.commits.getOrPutAssumeCapacity(t.id);
-                if (insert.found_existing) {
-                    unreachable;
-                } else {
-                    insert.value_ptr.* = t;
-                    dr.debits_pending -= lookup.amount;
-                    cr.credits_pending -= lookup.amount;
-                    if (!t.flags.void_pending_transfer) {
-                        //TODO Need to cater for partial commit if amount is lower...
-                        dr.debits_posted += lookup.amount;
-                        cr.credits_posted += lookup.amount;
-                    }
-                    self.commit_timestamp = t.timestamp;
-                    return .ok;
-                }
+            // TODO We can combine this lookup with the previous lookup if we return `error!void`:
+            var insert = self.commits.getOrPutAssumeCapacity(t.id);
+            if (insert.found_existing) {
+                unreachable;
             } else {
-                //TODO rollback here
+                insert.value_ptr.* = t;
+                dr.debits_pending -= lookup.amount;
+                cr.credits_pending -= lookup.amount;
+                if (!t.flags.void_pending_transfer) {
+                    //TODO Need to cater for partial commit if amount is lower...
+                    dr.debits_posted += lookup.amount;
+                    cr.credits_posted += lookup.amount;
+                }
+                self.post_timestamp = t.timestamp;
                 return .ok;
             }
         } else {
@@ -455,7 +451,7 @@ pub const StateMachine = struct {
                     dr.debits_posted += t.amount;
                     cr.credits_posted += t.amount;
                 }
-                self.commit_timestamp = t.timestamp;
+                self.post_timestamp = t.timestamp;
                 return .ok;
             }
         }
@@ -474,64 +470,65 @@ pub const StateMachine = struct {
         assert(self.transfers.remove(t.id));
     }
 
-    fn commit_transfer(self: *StateMachine, c: Transfer) CommitTransferResult {
-        assert(c.timestamp > self.commit_timestamp);
-
-        if (!c.flags.preimage and !zeroed_32_bytes(c.reserved)) return .reserved_field;
-        if (c.flags.padding != 0) return .reserved_flag_padding;
-
-        var t = self.get_transfer(c.id) orelse return .transfer_not_found;
-        assert(c.timestamp > t.timestamp);
-
-        if (!t.flags.posting) return .transfer_not_two_phase_commit;
-
-        if (self.get_commit(c.id)) |exists| {
-            if (!exists.flags.void_pending_transfer and c.flags.void_pending_transfer) return .already_committed_but_accepted;
-            if (exists.flags.void_pending_transfer and !c.flags.void_pending_transfer) return .already_committed_but_rejected;
-            return .already_committed;
-        }
-
-        if (t.timeout > 0 and t.timestamp + t.timeout <= c.timestamp) return .transfer_expired;
-
-        if (t.flags.condition) {
-            if (!c.flags.preimage) return .condition_requires_preimage;
-            if (!valid_preimage(t.reserved, c.reserved)) return .preimage_invalid;
-        } else if (c.flags.preimage) {
-            return .preimage_requires_condition;
-        }
-
-        var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
-        var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
-        assert(t.timestamp > dr.timestamp);
-        assert(t.timestamp > cr.timestamp);
-
-        assert(t.flags.posting);
-        if (dr.debits_pending < t.amount) return .debit_amount_was_not_reserved;
-        if (cr.credits_pending < t.amount) return .credit_amount_was_not_reserved;
-
-        // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
-        assert(!dr.debits_exceed_credits(0));
-        assert(!cr.credits_exceed_debits(0));
-
-        // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-        var insert = self.commits.getOrPutAssumeCapacity(c.id);
-        if (insert.found_existing) {
-            unreachable;
-        } else {
-            insert.value_ptr.* = c;
-            dr.debits_pending -= t.amount;
-            cr.credits_pending -= t.amount;
-            if (!c.flags.void_pending_transfer) {
-                dr.debits_posted += t.amount;
-                cr.credits_posted += t.amount;
-            }
-            self.commit_timestamp = c.timestamp;
-            return .ok;
-        }
-    }
+//    fn commit_transfer(self: *StateMachine, c: Transfer) CommitTransferResult {
+//        assert(c.timestamp > self.post_timestamp);
+//
+//        if (!c.flags.preimage and !zeroed_32_bytes(c.reserved)) return .reserved_field;
+//        if (c.flags.padding != 0) return .reserved_flag_padding;
+//
+//        var t = self.get_transfer(c.id) orelse return .transfer_not_found;
+//        assert(c.timestamp > t.timestamp);
+//
+//        if (!t.flags.posting) return .transfer_not_two_phase_commit;
+//
+//        if (self.get_commit(c.id)) |exists| {
+//            if (!exists.flags.void_pending_transfer and c.flags.void_pending_transfer) return .already_committed_but_accepted;
+//            if (exists.flags.void_pending_transfer and !c.flags.void_pending_transfer) return .already_committed_but_rejected;
+//            return .already_committed;
+//        }
+//
+//        if (t.timeout > 0 and t.timestamp + t.timeout <= c.timestamp) return .transfer_expired;
+//
+//        if (t.flags.condition) {
+//            if (!c.flags.preimage) return .condition_requires_preimage;
+//            if (!valid_preimage(t.reserved, c.reserved)) return .preimage_invalid;
+//        } else if (c.flags.preimage) {
+//            return .preimage_requires_condition;
+//        }
+//
+//        var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
+//        var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
+//        assert(t.timestamp > dr.timestamp);
+//        assert(t.timestamp > cr.timestamp);
+//
+//        assert(t.flags.posting);
+//        if (dr.debits_pending < t.amount) return .debit_amount_was_not_reserved;
+//        if (cr.credits_pending < t.amount) return .credit_amount_was_not_reserved;
+//
+//        // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
+//        assert(!dr.debits_exceed_credits(0));
+//        assert(!cr.credits_exceed_debits(0));
+//
+//        // TODO We can combine this lookup with the previous lookup if we return `error!void`:
+//        var insert = self.commits.getOrPutAssumeCapacity(c.id);
+//        if (insert.found_existing) {
+//            unreachable;
+//        } else {
+//            insert.value_ptr.* = c;
+//            dr.debits_pending -= t.amount;
+//            cr.credits_pending -= t.amount;
+//            if (!c.flags.void_pending_transfer) {
+//                dr.debits_posted += t.amount;
+//                cr.credits_posted += t.amount;
+//            }
+//            self.post_timestamp = c.timestamp;
+//            return .ok;
+//        }
+//    }
 
     fn commit_transfer_rollback(self: *StateMachine, c: Transfer) void {
         assert(self.get_commit(c.id) != null);
+
         var t = self.get_transfer(c.id).?;
         var dr = self.get_account(t.debit_account_id).?;
         var cr = self.get_account(t.credit_account_id).?;
@@ -884,7 +881,7 @@ test "create/lookup/rollback transfers" {
 
     const Vector = struct { result: CreateTransferResult, object: Transfer };
 
-    const timestamp: u64 = (state_machine.commit_timestamp + 1);
+    const timestamp: u64 = (state_machine.post_timestamp + 1);
     const vectors = [_]Vector{
         Vector{
             .result = .amount_is_zero,
@@ -1172,7 +1169,7 @@ test "create/lookup/rollback commits" {
 
     const allocator = arena.allocator();
 
-    const Vector = struct { result: CommitTransferResult, object: Transfer };
+    const Vector = struct { result: CreateTransferResult, object: Transfer };
 
     var accounts = [_]Account{
         std.mem.zeroInit(Account, .{ .id = 1 }),
@@ -1281,7 +1278,7 @@ test "create/lookup/rollback commits" {
     }
 
     // Commits:
-    const timestamp: u64 = (state_machine.commit_timestamp + 1);
+    const timestamp: u64 = (state_machine.post_timestamp + 1);
     const vectors = [_]Vector{
         Vector{
             .result = .reserved_field,

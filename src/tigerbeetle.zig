@@ -93,30 +93,30 @@ pub const TransferFlags = packed struct {
     }
 };
 
-pub const Commit = packed struct {
-    id: u128,
-    /// Reserved for accounting policy primitives:
-    reserved: [32]u8,
-    /// A chart of accounts code describing the reason for the accept/reject:
-    code: u32,
-    flags: CommitFlags,
-    timestamp: u64 = 0,
+//pub const Commit = packed struct {
+//    id: u128,
+//    /// Reserved for accounting policy primitives:
+//    reserved: [32]u8,
+//    /// A chart of accounts code describing the reason for the accept/reject:
+//    code: u32,
+//    flags: CommitFlags,
+//    timestamp: u64 = 0,
+//
+//    comptime {
+//        assert(@sizeOf(Commit) == 64);
+//    }
+//};
 
-    comptime {
-        assert(@sizeOf(Commit) == 64);
-    }
-};
-
-pub const CommitFlags = packed struct {
-    linked: bool = false,
-    reject: bool = false,
-    preimage: bool = false,
-    padding: u29 = 0,
-
-    comptime {
-        assert(@sizeOf(CommitFlags) == @sizeOf(u32));
-    }
-};
+//pub const CommitFlags = packed struct {
+//    linked: bool = false,
+//    reject: bool = false,
+//    preimage: bool = false,
+//    padding: u29 = 0,
+//
+//    comptime {
+//        assert(@sizeOf(CommitFlags) == @sizeOf(u32));
+//    }
+//};
 
 pub const CreateAccountResult = enum(u32) {
     ok,
@@ -172,27 +172,27 @@ pub const CreateTransferResult = enum(u32) {
     credit_amount_was_not_reserved,
 };
 
-pub const CommitTransferResult = enum(u32) {
-    ok,
-    linked_event_failed,
-    reserved_field,
-    reserved_flag_padding,
-    transfer_not_found,
-    transfer_not_two_phase_commit,
-    transfer_expired,
-    already_committed,
-    already_committed_but_accepted,
-    already_committed_but_rejected,
-    debit_account_not_found,
-    credit_account_not_found,
-    debit_amount_was_not_reserved,
-    credit_amount_was_not_reserved,
-    exceeds_credits,
-    exceeds_debits,
-    condition_requires_preimage,
-    preimage_requires_condition,
-    preimage_invalid,
-};
+//pub const CommitTransferResult = enum(u32) {
+//    ok,
+//    linked_event_failed,
+//    reserved_field,
+//    reserved_flag_padding,
+//    transfer_not_found,
+//    transfer_not_two_phase_commit,
+//    transfer_expired,
+//    already_committed,
+//    already_committed_but_accepted,
+//    already_committed_but_rejected,
+//    debit_account_not_found,
+//    credit_account_not_found,
+//    debit_amount_was_not_reserved,
+//    credit_amount_was_not_reserved,
+//    exceeds_credits,
+//    exceeds_debits,
+//    condition_requires_preimage,
+//    preimage_requires_condition,
+//    preimage_invalid,
+//};
 
 pub const CreateAccountsResult = packed struct {
     index: u32,
@@ -212,14 +212,14 @@ pub const CreateTransfersResult = packed struct {
     }
 };
 
-pub const CommitTransfersResult = packed struct {
-    index: u32,
-    result: CommitTransferResult,
-
-    comptime {
-        assert(@sizeOf(CommitTransfersResult) == 8);
-    }
-};
+//pub const CommitTransfersResult = packed struct {
+//    index: u32,
+//    result: CommitTransferResult,
+//
+//    comptime {
+//        assert(@sizeOf(CommitTransfersResult) == 8);
+//    }
+//};
 
 comptime {
     if (builtin.target.os.tag != .linux and !builtin.target.isDarwin()) {
