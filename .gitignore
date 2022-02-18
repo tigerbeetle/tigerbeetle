@@ -5,7 +5,8 @@ dist/
 journal
 main
 simulator
-tigerbeetle
+tigerbeetle*
+benchmark.log
 cluster_*_replica_*.tigerbeetle
 zig/
 zig-cache/
