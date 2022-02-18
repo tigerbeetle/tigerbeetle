@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const os = std.os;
 const testing = std.testing;
 const assert = std.debug.assert;
@@ -6,7 +7,7 @@ const assert = std.debug.assert;
 const Time = @import("../time.zig").Time;
 const IO = @import("../io.zig").IO;
 
-test "write/fsync/read/close" {
+test "write/read/close" {
     try struct {
         const Context = @This();
 
@@ -18,11 +19,10 @@ test "write/fsync/read/close" {
         read_buf: [20]u8 = [_]u8{98} ** 20,
 
         written: usize = 0,
-        fsynced: bool = false,
         read: usize = 0,
 
         fn run_test() !void {
-            const path = "test_io_write_fsync_read";
+            const path = "test_io_write_read_close";
             const file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = true });
             defer std.fs.cwd().deleteFile(path) catch {};
 
@@ -46,7 +46,6 @@ test "write/fsync/read/close" {
             while (!self.done) try self.io.tick();
 
             try testing.expectEqual(self.write_buf.len, self.written);
-            try testing.expect(self.fsynced);
             try testing.expectEqual(self.read_buf.len, self.read);
             try testing.expectEqualSlices(u8, &self.write_buf, &self.read_buf);
         }
@@ -57,17 +56,6 @@ test "write/fsync/read/close" {
             result: IO.WriteError!usize,
         ) void {
             self.written = result catch @panic("write error");
-            self.io.fsync(*Context, self, fsync_callback, completion, self.fd);
-        }
-
-        fn fsync_callback(
-            self: *Context,
-            completion: *IO.Completion,
-            result: IO.FsyncError!void,
-        ) void {
-            _ = result catch @panic("fsync error");
-
-            self.fsynced = true;
             self.io.read(*Context, self, read_callback, completion, self.fd, &self.read_buf, 10);
         }
 
@@ -97,7 +85,7 @@ test "accept/connect/send/receive" {
     try struct {
         const Context = @This();
 
-        io: IO,
+        io: *IO,
         done: bool = false,
         server: os.socket_t,
         client: os.socket_t,
@@ -111,12 +99,15 @@ test "accept/connect/send/receive" {
         received: usize = 0,
 
         fn run_test() !void {
+            var io = try IO.init(32, 0);
+            defer io.deinit();
+
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
-            const server = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const server = try io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
 
-            const client = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const client = try io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             try os.setsockopt(
@@ -129,11 +120,10 @@ test "accept/connect/send/receive" {
             try os.listen(server, kernel_backlog);
 
             var self: Context = .{
-                .io = try IO.init(32, 0),
+                .io = &io,
                 .server = server,
                 .client = client,
             };
-            defer self.io.deinit();
 
             var client_completion: IO.Completion = undefined;
             self.io.connect(
@@ -228,7 +218,6 @@ test "timeout" {
         fn run_test() !void {
             var timer = Time{};
             const start_time = timer.monotonic();
-
             var self: Context = .{
                 .timer = &timer,
                 .io = try IO.init(32, 0),
@@ -321,7 +310,7 @@ test "tick to wait" {
         const Context = @This();
 
         io: IO,
-        accepted: os.socket_t = -1,
+        accepted: os.socket_t = IO.INVALID_SOCKET,
         connected: bool = false,
         received: bool = false,
 
@@ -332,7 +321,7 @@ test "tick to wait" {
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
             const kernel_backlog = 1;
 
-            const server = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const server = try self.io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
 
             try os.setsockopt(
@@ -344,7 +333,7 @@ test "tick to wait" {
             try os.bind(server, &address.any, address.getOsSockLen());
             try os.listen(server, kernel_backlog);
 
-            const client = try IO.openSocket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const client = try self.io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             // Start the accept
@@ -364,13 +353,13 @@ test "tick to wait" {
 
             // Tick the IO to drain the accept & connect completions
             assert(!self.connected);
-            assert(self.accepted == -1);
+            assert(self.accepted == IO.INVALID_SOCKET);
 
-            while (self.accepted == -1 or !self.connected)
+            while (self.accepted == IO.INVALID_SOCKET or !self.connected)
                 try self.io.tick();
 
             assert(self.connected);
-            assert(self.accepted != -1);
+            assert(self.accepted != IO.INVALID_SOCKET);
             defer os.closeSocket(self.accepted);
 
             // Start receiving on the client
@@ -395,7 +384,7 @@ test "tick to wait" {
             // Other tests already check .tick() with IO based completions.
             // This simulates IO being completed by an external system
             var send_buf = std.mem.zeroes([64]u8);
-            const wrote = try os.write(self.accepted, &send_buf);
+            const wrote = try os_send(self.accepted, &send_buf, 0);
             try testing.expectEqual(wrote, send_buf.len);
 
             // Wait for the recv() to complete using only IO.tick().
@@ -417,7 +406,7 @@ test "tick to wait" {
         ) void {
             _ = completion;
 
-            assert(self.accepted == -1);
+            assert(self.accepted == IO.INVALID_SOCKET);
             self.accepted = result catch @panic("accept error");
         }
 
@@ -444,6 +433,41 @@ test "tick to wait" {
             assert(!self.received);
             self.received = true;
         }
+
+        // TODO: use os.send() instead when it gets fixed for windows
+        fn os_send(sock: os.socket_t, buf: []const u8, flags: u32) !usize {
+            if (builtin.target.os.tag != .windows) {
+                return os.send(sock, buf, flags);
+            }
+
+            const rc = os.windows.sendto(sock, buf.ptr, buf.len, flags, null, 0);
+            if (rc == os.windows.ws2_32.SOCKET_ERROR) {
+                switch (os.windows.ws2_32.WSAGetLastError()) {
+                    .WSAEACCES => return error.AccessDenied,
+                    .WSAEADDRNOTAVAIL => return error.AddressNotAvailable,
+                    .WSAECONNRESET => return error.ConnectionResetByPeer,
+                    .WSAEMSGSIZE => return error.MessageTooBig,
+                    .WSAENOBUFS => return error.SystemResources,
+                    .WSAENOTSOCK => return error.FileDescriptorNotASocket,
+                    .WSAEAFNOSUPPORT => return error.AddressFamilyNotSupported,
+                    .WSAEDESTADDRREQ => unreachable, // A destination address is required.
+                    .WSAEFAULT => unreachable, // The lpBuffers, lpTo, lpOverlapped, lpNumberOfBytesSent, or lpCompletionRoutine parameters are not part of the user address space, or the lpTo parameter is too small.
+                    .WSAEHOSTUNREACH => return error.NetworkUnreachable,
+                    // TODO: WSAEINPROGRESS, WSAEINTR
+                    .WSAEINVAL => unreachable,
+                    .WSAENETDOWN => return error.NetworkSubsystemFailed,
+                    .WSAENETRESET => return error.ConnectionResetByPeer,
+                    .WSAENETUNREACH => return error.NetworkUnreachable,
+                    .WSAENOTCONN => return error.SocketNotConnected,
+                    .WSAESHUTDOWN => unreachable, // The socket has been shut down; it is not possible to WSASendTo on a socket after shutdown has been invoked with how set to SD_SEND or SD_BOTH.
+                    .WSAEWOULDBLOCK => return error.WouldBlock,
+                    .WSANOTINITIALISED => unreachable, // A successful WSAStartup call must occur before using this function.
+                    else => |err| return os.windows.unexpectedWSAError(err),
+                }
+            } else {
+                return @intCast(usize, rc);
+            }
+        }
     }.run_test();
 }
 
@@ -458,7 +482,7 @@ test "pipe data over socket" {
 
         const Context = @This();
         const Socket = struct {
-            fd: os.socket_t = -1,
+            fd: os.socket_t = IO.INVALID_SOCKET,
             completion: IO.Completion = undefined,
         };
         const Pipe = struct {
@@ -470,13 +494,11 @@ test "pipe data over socket" {
         fn run() !void {
             const tx_buf = try testing.allocator.alloc(u8, buffer_size);
             defer testing.allocator.free(tx_buf);
-
             const rx_buf = try testing.allocator.alloc(u8, buffer_size);
             defer testing.allocator.free(rx_buf);
 
             std.mem.set(u8, tx_buf, 1);
             std.mem.set(u8, rx_buf, 0);
-
             var self = Context{
                 .io = try IO.init(32, 0),
                 .tx = .{ .buffer = tx_buf },
@@ -484,7 +506,7 @@ test "pipe data over socket" {
             };
             defer self.io.deinit();
 
-            self.server.fd = try IO.openSocket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
+            self.server.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(self.server.fd);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
@@ -506,7 +528,7 @@ test "pipe data over socket" {
                 self.server.fd,
             );
 
-            self.tx.socket.fd = try IO.openSocket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
+            self.tx.socket.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(self.tx.socket.fd);
 
             self.io.connect(
@@ -528,9 +550,9 @@ test "pipe data over socket" {
                 }
             }
 
-            try testing.expect(self.server.fd != -1);
-            try testing.expect(self.tx.socket.fd != -1);
-            try testing.expect(self.rx.socket.fd != -1);
+            try testing.expect(self.server.fd != IO.INVALID_SOCKET);
+            try testing.expect(self.tx.socket.fd != IO.INVALID_SOCKET);
+            try testing.expect(self.rx.socket.fd != IO.INVALID_SOCKET);
             os.closeSocket(self.rx.socket.fd);
 
             try testing.expectEqual(self.tx.transferred, buffer_size);
@@ -543,7 +565,7 @@ test "pipe data over socket" {
             completion: *IO.Completion,
             result: IO.AcceptError!os.socket_t,
         ) void {
-            assert(self.rx.socket.fd == -1);
+            assert(self.rx.socket.fd == IO.INVALID_SOCKET);
             assert(&self.server.completion == completion);
             self.rx.socket.fd = result catch |err| std.debug.panic("accept error {}", .{err});
 
@@ -559,7 +581,7 @@ test "pipe data over socket" {
             _ = completion;
             _ = result catch unreachable;
 
-            assert(self.tx.socket.fd != -1);
+            assert(self.tx.socket.fd != IO.INVALID_SOCKET);
             assert(&self.tx.socket.completion == completion);
 
             assert(self.tx.transferred == 0);

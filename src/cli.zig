@@ -8,6 +8,7 @@ const os = std.os;
 
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
+const IO = @import("io.zig").IO;
 
 const usage = fmt.comptimePrint(
     \\Usage:
@@ -87,18 +88,31 @@ pub const Command = union(enum) {
 
 /// Parse the command line arguments passed to the tigerbeetle binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args(allocator: std.mem.Allocator) Command {
+pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var maybe_cluster: ?[]const u8 = null;
     var maybe_replica: ?[]const u8 = null;
     var maybe_addresses: ?[]const u8 = null;
     var maybe_directory: ?[:0]const u8 = null;
 
-    var args = std.process.args();
-    // Skip argv[0] which is the name of this executable
-    _ = args.nextPosix();
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
 
-    const raw_command = args.nextPosix() orelse
-        fatal("no command provided, expected 'start' or 'init'", .{});
+    // Keep track of the args from the ArgIterator above that were allocated
+    // then free them all at the end of the scope.
+    var args_allocated = std.ArrayList([:0]const u8).init(allocator);
+    defer {
+        for (args_allocated.items) |arg| allocator.free(arg);
+        args_allocated.deinit();
+    }
+
+    // Skip argv[0] which is the name of this executable
+    const did_skip = args.skip();
+    assert(did_skip);
+
+    const raw_command = try (args.next(allocator) orelse
+        fatal("no command provided, expected 'start' or 'init'", .{}));
+    defer allocator.free(raw_command);
+
     if (mem.eql(u8, raw_command, "-h") or mem.eql(u8, raw_command, "--help")) {
         std.io.getStdOut().writeAll(usage) catch os.exit(1);
         os.exit(0);
@@ -106,7 +120,10 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     const command = meta.stringToEnum(meta.Tag(Command), raw_command) orelse
         fatal("unknown command '{s}', expected 'start' or 'init'", .{raw_command});
 
-    while (args.nextPosix()) |arg| {
+    while (args.next(allocator)) |parsed_arg| {
+        const arg = try parsed_arg;
+        try args_allocated.append(arg);
+
         if (mem.startsWith(u8, arg, "--cluster")) {
             maybe_cluster = parse_flag("--cluster", arg);
         } else if (mem.startsWith(u8, arg, "--replica")) {
@@ -132,7 +149,7 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     const replica = parse_replica(raw_replica);
 
     const dir_path = maybe_directory orelse config.directory;
-    const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err|
+    const dir_fd = IO.open_dir(dir_path) catch |err|
         fatal("failed to open directory '{s}': {}", .{ dir_path, err });
 
     switch (command) {
@@ -141,11 +158,13 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
                 fatal("--addresses: supported only by 'start' command", .{});
             }
 
-            return .{ .init = .{
-                .cluster = cluster,
-                .replica = replica,
-                .dir_fd = dir_fd,
-            } };
+            return Command{
+                .init = .{
+                    .cluster = cluster,
+                    .replica = replica,
+                    .dir_fd = dir_fd,
+                },
+            };
         },
         .start => {
             const raw_addresses = maybe_addresses orelse
@@ -156,12 +175,14 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
                 fatal("--replica: value greater than length of --addresses array", .{});
             }
 
-            return .{ .start = .{
-                .cluster = cluster,
-                .replica = replica,
-                .addresses = addresses,
-                .dir_fd = dir_fd,
-            } };
+            return Command{
+                .start = .{
+                    .cluster = cluster,
+                    .replica = replica,
+                    .addresses = addresses,
+                    .dir_fd = dir_fd,
+                },
+            };
         },
     }
 }
