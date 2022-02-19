@@ -619,8 +619,13 @@ pub fn Tree(
             }
 
             blocks: []align(config.sector_size) [block_size]u8,
-            table_info: Manifest.TableInfo,
+            info: Manifest.TableInfo,
             flush_iterator: FlushIterator,
+            state: enum {
+                empty, // The immutable table is empty and has no valid data.
+                flush, // The immutable table must be flushed before the superblock is checkpointed.
+                flushing, // The flush is in progress and not yet complete.
+            },
 
             pub fn init(allocator: mem.Allocator) !Table {
                 // We allocate blocks from MutableTable.value_count_max, not data_block_count_max.
@@ -639,8 +644,9 @@ pub fn Tree(
 
                 return Table{
                     .blocks = blocks,
-                    .table_info = undefined,
+                    .info = undefined,
                     .flush_iterator = undefined,
+                    .state = .empty,
                 };
             }
 
@@ -709,8 +715,9 @@ pub fn Tree(
 
                 table.* = .{
                     .blocks = table.blocks,
-                    .table_info = builder.index_block_finish(snapshot_min),
+                    .info = builder.index_block_finish(snapshot_min),
                     .flush_iterator = .{ .storage = storage },
+                    .state = .flush,
                 };
             }
 
@@ -952,7 +959,7 @@ pub fn Tree(
                 );
             }
 
-            inline fn index_timestamp(index_block: BlockPtrConst) u32 {
+            inline fn index_snapshot_min(index_block: BlockPtrConst) u32 {
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.offset);
             }
@@ -1321,10 +1328,12 @@ pub fn Tree(
 
                 const it_a = compaction.level_a_iterators()[a + 1];
                 const it_b = compaction.level_a_iterators()[b + 1];
-                const timestamp_a = Table.index_timestamp(it_a.index);
-                const timestamp_b = Table.index_timestamp(it_b.index);
-                assert(timestamp_a != timestamp_b);
-                return timestamp_a > timestamp_b;
+
+                const snapshot_min_a = Table.index_snapshot_min(it_a.index);
+                const snapshot_min_b = Table.index_snapshot_min(it_b.index);
+
+                assert(snapshot_min_a != snapshot_min_b);
+                return snapshot_min_a > snapshot_min_b;
             }
         };
 
