@@ -1932,20 +1932,6 @@ pub fn Tree(
             tree.prefetch_count = 0;
         }
 
-        /// The caller must always call get_from_memory() before calling get_from_storage().
-        /// The caller must also call get_from_memory() again after any other get_from_storage(),
-        /// because the act of reading another key from storage may cause other keys to be cached.
-        /// Asserts that the callback was called asynchronously in order to prevent stack overflow.
-        pub fn get_from_storage(
-            tree: *TreeGeneric,
-            //context: *GetContext,
-            callback: fn (*const Value) void,
-        ) void {
-            _ = tree;
-            //_ = context;
-            _ = callback;
-        }
-
         pub const RangeQuery = union(enum) {
             bounded: struct {
                 start: Key,
