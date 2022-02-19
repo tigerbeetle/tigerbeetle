@@ -6,6 +6,7 @@ const mem = std.mem;
 const os = std.os;
 
 const config = @import("../config.zig");
+const binary_search = @import("binary_search.zig").binary_search;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const utils = @import("../utils.zig");
 const vsr = @import("../vsr.zig");
@@ -278,7 +279,10 @@ pub fn Tree(
                 table.values.deinit(allocator);
             }
 
-            /// Add the given value to the table
+            pub fn get(table: *MutableTable, key: Key) ?*const Value {
+                return table.values.getPtr(tombstone_from_key(key));
+            }
+
             pub fn put(table: *MutableTable, value: Value) void {
                 table.values.putAssumeCapacity(value, {});
                 // The hash map implementation may allocate more memory
@@ -291,10 +295,6 @@ pub fn Tree(
                 // The hash map implementation may allocate more memory
                 // than strictly needed due to a growth factor.
                 assert(table.values.count() <= value_count_max);
-            }
-
-            pub fn get(table: *MutableTable, key: Key) ?*const Value {
-                return table.values.getPtr(tombstone_from_key(key));
             }
 
             pub fn sort_values(
@@ -660,6 +660,8 @@ pub fn Tree(
                 snapshot_min: u64,
                 sorted_values: []const Value,
             ) void {
+                // TODO(ifreund) Do we assert sorted values are unique, even across data blocks?
+
                 assert(snapshot_min > 0);
                 assert(sorted_values.len > 0);
                 assert(sorted_values.len <= data.value_count_max * data_block_count_max);
@@ -719,6 +721,34 @@ pub fn Tree(
                     .flush_iterator = .{ .storage = storage },
                     .state = .flush,
                 };
+            }
+
+            // TODO(ifreund) This would be great to unit test.
+            fn get(table: *Table, key: Key) ?*const Value {
+                assert(table.state != .empty);
+                assert(table.info.address != 0);
+                assert(table.info.snapshot_max == math.maxInt(u64));
+
+                if (compare_keys(key, table.info.key_min) == .lt) return null;
+                if (compare_keys(key, table.info.key_max) == .gt) return null;
+
+                var index_block = &table.blocks[0];
+
+                const i = index_data_block_for_key(index_block, key);
+
+                const meta_block_count = index_block_count + filter_block_count;
+                const data_blocks_used = index_data_blocks_used(index_block);
+                const data_block = table.blocks[meta_block_count..][0..data_blocks_used][i];
+
+                if (builtin.mode == .Debug) {
+                    // TODO What else do we expect?
+                    assert(compare_keys(key, index_data_keys(index_block)[i]) != .gt);
+                    assert(index_data_addresses(index_block)[i] != 0);
+                }
+
+                // TODO(ifreund) Hook up Eytzinger search and binary search.
+                _ = data_block;
+                @panic("todo");
             }
 
             const Builder = struct {
@@ -831,7 +861,7 @@ pub fn Tree(
 
                     const key_max = key_from_value(values[values.len - 1]);
 
-                    index_keys(builder.index_block)[builder.block] = key_max;
+                    index_data_keys(builder.index_block)[builder.block] = key_max;
                     index_data_addresses(builder.index_block)[builder.block] = address;
                     index_data_checksums(builder.index_block)[builder.block] = header.checksum;
 
@@ -873,9 +903,11 @@ pub fn Tree(
 
                     const index_block = builder.index_block;
 
-                    const index_keys_padding = index_keys(index_block)[builder.block..];
-                    const index_keys_padding_bytes = mem.sliceAsBytes(index_keys_padding);
-                    mem.set(u8, index_keys_padding_bytes, 0);
+                    // TODO(ifreund) We may have a bug here using builder.block if not all filter
+                    // blocks are used?
+                    const index_data_keys_padding = index_data_keys(index_block)[builder.block..];
+                    const index_data_keys_padding_bytes = mem.sliceAsBytes(index_data_keys_padding);
+                    mem.set(u8, index_data_keys_padding_bytes, 0);
                     mem.set(u64, index_data_addresses(index_block)[builder.block..], 0);
                     mem.set(u128, index_data_checksums(index_block)[builder.block..], 0);
 
@@ -927,8 +959,12 @@ pub fn Tree(
                 }
             };
 
-            inline fn index_keys(index_block: BlockPtr) []Key {
+            inline fn index_data_keys(index_block: BlockPtr) []Key {
                 return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
+            }
+
+            inline fn index_data_keys_used(index_block: BlockPtr) []const Key {
+                return index_data_keys(index_block)[0..index_data_blocks_used(index_block)];
             }
 
             inline fn index_data_addresses(index_block: BlockPtr) []u64 {
@@ -966,7 +1002,24 @@ pub fn Tree(
 
             inline fn index_data_blocks_used(index_block: BlockPtrConst) u32 {
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-                return @intCast(u32, header.request);
+                const used = @intCast(u32, header.request);
+                assert(used <= data_block_count_max);
+                return used;
+            }
+
+            /// Returns the zero-based index of the data block that may contain the key.
+            /// May be called on an index block only when the key is already in range of the table.
+            inline fn index_data_block_for_key(index_block: BlockPtr, key: Key) u32 {
+                // TODO(ifreund) We can move ManifestLevel binary search into binary_search.zig
+                // and then use it here instead of this simple for loop.
+                for (Table.index_data_keys_used(index_block)) |data_block_key_max, i| {
+                    if (compare_keys(key, data_block_key_max) == .gt) continue;
+                    return @intCast(u32, i);
+                } else {
+                    // The key cannot be greater than the last key_max.
+                    // There must also be at least one key in the index block.
+                    unreachable;
+                }
             }
 
             inline fn data_block_values(data_block: BlockPtr) []Value {
@@ -980,14 +1033,18 @@ pub fn Tree(
                 const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
                 // TODO we should be able to cross-check this with the header size
                 // for more safety.
-                const values_used = @intCast(u32, header.request);
-                assert(values_used <= data.value_count_max);
-                return data_block_values(data_block)[0..values_used];
+                const used = @intCast(u32, header.request);
+                assert(used <= data.value_count_max);
+                return data_block_values(data_block)[0..used];
             }
 
-            inline fn block_address(block: BlockPtrConst) u64 {
+            // TODO(ifreund): Should we use `BlockPtrConst` as we had before?
+            // The reason for `Block` is so that HashMapContext's can call this without alignCast.
+            inline fn block_address(block: Block) u64 {
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-                return @intCast(u32, header.op);
+                const address = header.op;
+                // TODO(ifreund) We had an intCast(u32) here before but it didn't make sense?
+                return address;
             }
 
             pub const FlushIterator = struct {
@@ -1031,6 +1088,11 @@ pub fn Tree(
                     }
 
                     if (it.block == 1 + filter_blocks_used) {
+                        // TODO(ifreund) When skipping over unused filter blocks, let's assert
+                        // here that they all have a zero address, with Builder zeroing the address.
+                        // This way, if there's any mismatch, we'll catch it.
+                        // This is one of the tricky things about how we have a full allocation of
+                        // blocks, but don't always use all the allocated filter blocks.
                         const filter_blocks_unused = filter_block_count - filter_blocks_used;
                         it.block += @intCast(u32, filter_blocks_unused);
                     }
