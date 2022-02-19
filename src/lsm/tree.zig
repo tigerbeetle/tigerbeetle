@@ -144,6 +144,35 @@ pub fn Tree(
     return struct {
         const TreeGeneric = @This();
 
+        const HashMapContextValue = struct {
+            pub fn eql(_: HashMapContextValue, a: Value, b: Value) bool {
+                return compare_keys(key_from_value(a), key_from_value(b)) == .eq;
+            }
+
+            pub fn hash(_: HashMapContextValue, value: Value) u64 {
+                const key = key_from_value(value);
+                return std.hash_map.getAutoHashFn(Key, HashMapContextValue)(.{}, key);
+            }
+        };
+
+        const HashMapContextBlock = struct {
+            pub fn eql(_: HashMapContextBlock, a: Block, b: Block) bool {
+                const x = Table.block_address(a);
+                const y = Table.block_address(b);
+
+                assert(x != 0);
+                assert(y != 0);
+
+                return x == y;
+            }
+
+            pub fn hash(_: HashMapContextBlock, block: Block) u64 {
+                const address = Table.block_address(block);
+                assert(address != 0);
+                return std.hash_map.getAutoHashFn(u64, HashMapContextBlock)(.{}, address);
+            }
+        };
+
         pub const Manifest = struct {
             /// First 128 bytes of the table are a VSR protocol header for a repair message.
             /// This data is filled in on writing the table so that we don't
@@ -228,24 +257,13 @@ pub fn Tree(
             }
         };
 
-        /// Point queries go through the object cache instead of directly accessing this table.
         /// Range queries are not supported on the MutableTable, it must first be made immutable.
         pub const MutableTable = struct {
             const value_count_max = config.lsm_mutable_table_size_max / value_size;
 
-            const ValuesContext = struct {
-                pub fn eql(_: ValuesContext, a: Value, b: Value) bool {
-                    return compare_keys(key_from_value(a), key_from_value(b)) == .eq;
-                }
-                pub fn hash(_: ValuesContext, value: Value) u64 {
-                    const key = key_from_value(value);
-                    return std.hash_map.getAutoHashFn(Key, ValuesContext)(.{}, key);
-                }
-            };
             const load_factor = 50;
-            const Values = std.HashMapUnmanaged(Value, void, ValuesContext, load_factor);
 
-            values: Values = .{},
+            values: std.HashMapUnmanaged(Value, void, HashMapContextValue, load_factor) = .{},
 
             pub fn init(allocator: mem.Allocator) !MutableTable {
                 var table: MutableTable = .{};
@@ -1725,14 +1743,48 @@ pub fn Tree(
             };
         }
 
+        pub const PrefetchCache = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
+
+        // TODO(ifreund) Replace both of these types with SetAssociativeCache:
+        pub const ValueCache = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
+        pub const BlockCache = std.HashMapUnmanaged(Block, void, HashMapContextBlock, 70);
+
         storage: *Storage,
+
+        prefetch_keys: []Key,
+        prefetch_count: u32 = 0,
+
+        /// A separate hash map for prefetched values not found in the mutable table or value cache.
+        /// This is required for correctness, to not evict other prefetch hits from the value cache.
+        prefetch_cache: PrefetchCache,
+
+        /// A set associative cache of values shared by trees with the same key/value sizes.
+        /// This is used to accelerate point lookups and is not used for range queries.
+        /// Secondary index trees used only for range queries can therefore set this to null.
+        value_cache: ?*ValueCache,
+
+        /// A set associative cache of blocks shared by all trees.
+        block_cache: *BlockCache,
 
         mutable_table: MutableTable,
         table: Table,
 
         manifest: []Manifest,
 
-        pub fn init(allocator: mem.Allocator, storage: *Storage) !TreeGeneric {
+        pub fn init(
+            allocator: mem.Allocator,
+            storage: *Storage,
+            prefetch_cache_capacity: u32,
+            value_cache: ?*ValueCache,
+            block_cache: *BlockCache,
+        ) !TreeGeneric {
+            var prefetch_keys = try allocator.alloc(Key, prefetch_cache_capacity);
+            errdefer allocator.free(prefetch_keys);
+
+            var prefetch_cache = PrefetchCache{};
+            try prefetch_cache.ensureTotalCapacity(allocator, prefetch_cache_capacity);
+            errdefer prefetch_cache.deinit(allocator);
+
             var mutable_table = try MutableTable.init(allocator);
             errdefer mutable_table.deinit(allocator);
 
@@ -1741,6 +1793,10 @@ pub fn Tree(
 
             return TreeGeneric{
                 .storage = storage,
+                .prefetch_keys = prefetch_keys,
+                .prefetch_cache = prefetch_cache,
+                .value_cache = value_cache,
+                .block_cache = block_cache,
                 .mutable_table = mutable_table,
                 .table = table,
                 .manifest = undefined, // TODO
@@ -1749,13 +1805,30 @@ pub fn Tree(
 
         pub fn deinit(tree: *TreeGeneric, allocator: mem.Allocator) void {
             // TODO Consider whether we should release blocks acquired from Storage.block_free_set.
+            allocator.free(tree.prefetch_keys);
+            tree.prefetch_cache.deinit(allocator);
             tree.mutable_table.deinit(allocator);
             tree.table.deinit(allocator);
         }
 
-        pub fn put(tree: *TreeGeneric, value: Value) void {
+        pub fn get(tree: *TreeGeneric, key: Key) ?*const Value {
+            // TODO
+            // Look in mutable table, then in value cache, then in prefetch cache:
+            // 1. if null return null,
+            // 2. if tombstone return null,
+            // 3. return value
+            // TODO Assert that prefetch was called and completed.
+
             _ = tree;
-            _ = value;
+            _ = key;
+        }
+
+        pub fn put(tree: *TreeGeneric, value: Value) void {
+            tree.mutable_table.put(value);
+        }
+
+        pub fn remove(tree: *TreeGeneric, key: Key) void {
+            tree.mutable_table.remove(key);
         }
 
         pub fn flush(
@@ -1766,63 +1839,26 @@ pub fn Tree(
             _ = callback;
         }
 
-        // ~Special case of put()
-        pub fn remove(tree: *TreeGeneric, value: Value) void {
-            _ = tree;
-            _ = value;
+        pub fn prefetch_enqueue(tree: *TreeGeneric, key: Key) void {
+            // TODO Assert that prefetching is not in progress.
+
+            if (tree.mutable_table.get(key) != null) return;
+            if (tree.value_cache.getPtr(tombstone_from_key(key)) != null) return;
+
+            // TODO If present in immutable table then copy to prefetch cache.
+
+            tree.prefetch_keys[tree.prefetch_count] = key;
+            tree.prefetch_count += 1;
         }
 
-        pub const GetContext = struct {
-            key: Key,
-            snapshot: ?u64,
+        /// Ensure that all enqueued keys are in the cache when the callback returns.
+        pub fn prefetch(tree: *TreeGeneric, callback: fn () void) void {
+            _ = callback;
 
-            // Private internal state:
-            level: u32 = null,
-            // TODO Assert that no writes happened during the lifetime of the get.
-        };
+            tree.prefetch_cache.clearRetainingCapacity();
+            assert(tree.count() == 0);
 
-        /// Returns true if the value (if any) was found in memory.
-        /// Updates the GetContext so that further calls only search the block cache.
-        pub fn get_from_memory(tree: *TreeGeneric, context: *GetContext) ??*const Value {
-            assert(context.snapshot == null or context.snapshot < math.maxInt(u64) - 1);
-            assert(context.level == null or context.level < config.lsm_levels);
-
-            return tree.get_from_object_cache(context) orelse
-                tree.get_from_mutable_table(context) orelse
-                tree.get_from_immutable_table(context) orelse
-                tree.get_from_block_cache(context) orelse
-                null; // The lookup MAY require asynchronous I/O.
-        }
-
-        fn get_from_object_cache(tree: *TreeGeneric, context: *GetContext) ??*const Value {
-            // TODO
-            _ = tree;
-            _ = context;
-        }
-
-        fn get_from_mutable_table(tree: *TreeGeneric, context: *GetContext) ??*const Value {
-            // The creation of any snapshot converts the extent mutable table to a table.
-            if (context.level == null and context.snapshot == null) {
-                return tree.mutable_table.get(context.key);
-            } else {
-                return null;
-            }
-        }
-
-        fn get_from_immutable_table(tree: *TreeGeneric, context: *GetContext) ??*const Value {
-            if (context.level != null) return;
-            context.level = 0;
-
-            // TODO
-            // the table may not exist if it was already flushed to disk or if we only have
-            //
-            _ = tree;
-        }
-
-        fn get_from_block_cache(tree: *TreeGeneric, context: *GetContext) ??*const Value {
-            // TODO
-            _ = tree;
-            _ = context;
+            tree.prefetch_count = 0;
         }
 
         /// The caller must always call get_from_memory() before calling get_from_storage().
@@ -1831,11 +1867,11 @@ pub fn Tree(
         /// Asserts that the callback was called asynchronously in order to prevent stack overflow.
         pub fn get_from_storage(
             tree: *TreeGeneric,
-            context: *GetContext,
-            callback: fn (?*const Value) void,
+            //context: *GetContext,
+            callback: fn (*const Value) void,
         ) void {
             _ = tree;
-            _ = context;
+            //_ = context;
             _ = callback;
         }
 
@@ -1926,7 +1962,7 @@ test "table count max" {
     try expectEqual(@as(u32, 299600 + 2097152), table_count_max_for_tree(8, 8));
 }
 
-test {
+pub fn main() !void {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -1954,9 +1990,8 @@ test {
     var storage = try Storage.init(allocator, &io, cluster, config.journal_size_max, storage_fd);
     defer storage.deinit(allocator);
 
-    _ = storage;
-
     const Key = CompositeKey(u128);
+
     const TestTree = Tree(
         Storage,
         Key,
@@ -1968,17 +2003,37 @@ test {
         Key.tombstone_from_key,
     );
 
-    var tree = try TestTree.init(allocator, &storage);
+    const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
+    const prefetch_cache_capacity = batch_size_max / 128;
+
+    var value_cache = TestTree.ValueCache{};
+    try value_cache.ensureTotalCapacity(allocator, 10000);
+    defer value_cache.deinit(allocator);
+
+    var block_cache = TestTree.BlockCache{};
+    try block_cache.ensureTotalCapacity(allocator, 100);
+    defer block_cache.deinit(allocator);
+
+    var tree = try TestTree.init(
+        allocator,
+        &storage,
+        prefetch_cache_capacity,
+        &value_cache,
+        &block_cache,
+    );
     defer tree.deinit(allocator);
 
-    std.testing.refAllDecls(@This());
+    testing.refAllDecls(@This());
 
     _ = TestTree.Table;
     _ = TestTree.Table.create_from_sorted_values;
+    _ = TestTree.Table.get;
     _ = TestTree.Table.FlushIterator;
     _ = TestTree.Table.FlushIterator.flush;
     _ = TestTree.TableIterator;
     _ = TestTree.LevelIterator;
     _ = TestTree.Compaction;
     _ = TestTree.Table.Builder.data_block_finish;
+
+    std.debug.print("done\n", .{});
 }
