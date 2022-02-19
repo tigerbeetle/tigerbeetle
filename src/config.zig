@@ -185,9 +185,7 @@ pub const io_depth_read = 8;
 /// The maximum number of concurrent write I/O operations to allow at once.
 pub const io_depth_write = 8;
 
-// TODO docs
-// TODO We probably don't need quite this many.
-// This should be fine up to 100 though.
+// TODO Document and tune these LSM options:
 pub const lsm_trees = 30;
 
 /// Number of levels in an LSM tree.
@@ -195,7 +193,7 @@ pub const lsm_levels = 8;
 
 pub const lsm_growth_factor = 8;
 
-/// Max key size for the LSM Trees in bytes
+/// The maximum key size for an LSM tree in bytes.
 pub const lsm_key_size_max = 32;
 
 pub const lsm_table_size_max = 64 * 1024 * 1024;
@@ -205,12 +203,13 @@ pub const lsm_table_size_max = 64 * 1024 * 1024;
 pub const lsm_table_block_size = 64 * 1024;
 
 /// Size of nodes used by the LSM tree manifest implementation.
-/// TODO double check this with our "LSM Manifest" spreadsheet
+/// TODO Double-check this with our "LSM Manifest" spreadsheet.
 pub const lsm_manifest_node_size = 16 * 1024;
 
+/// TODO Assert this relative to lsm_table_size_max.
+/// We want to ensure that a mutable table can be converted to an immutable table without overflow.
 pub const lsm_mutable_table_size_max = 4 * message_size_max;
 
-/// TODO: docs
 pub const lsm_snapshots_max = 32;
 
 pub const lsm_value_to_key_layout_ratio_min = 16;
