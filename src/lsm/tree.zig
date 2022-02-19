@@ -1822,6 +1822,10 @@ pub fn Tree(
 
         storage: *Storage,
 
+        /// Keys enqueued to be prefetched.
+        /// Prefetching ensures that point lookups against the latest snapshot are synchronous.
+        /// This shields state machine implementations from the challenges of concurrency and I/O,
+        /// and enables simple state machine function signatures that commit writes atomically.
         prefetch_keys: []Key,
         prefetch_count: u32 = 0,
 
