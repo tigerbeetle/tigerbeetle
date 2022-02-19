@@ -111,25 +111,35 @@ pub fn Tree(
     /// Key sizes of 8, 16, 32, etc. are supported with alignment 8 or 16.
     comptime Key: type,
     comptime Value: type,
+    /// Returns the sort order between two keys.
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    /// Returns the key for a value. For example, given `object` returns `object.id`.
+    /// Since most objects contain an id, this avoids duplicating the key when storing the value.
     comptime key_from_value: fn (Value) callconv(.Inline) Key,
     /// Must compare greater than all other keys.
     comptime sentinel_key: Key,
+    /// Returns whether a value is a tombstone value.
     comptime tombstone: fn (Value) callconv(.Inline) bool,
+    /// Returns a tombstone value representation for a key.
     comptime tombstone_from_key: fn (Key) callconv(.Inline) Value,
 ) type {
+    const Block = Storage.Block;
     const BlockPtr = Storage.BlockPtr;
     const BlockPtrConst = Storage.BlockPtrConst; // TODO Use this more where we can.
+
     const block_size = Storage.block_size;
 
-    _ = tombstone;
+    _ = tombstone; // TODO
 
     assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
-    // There must be no padding in the Key type. This avoids buffer bleeds.
-    assert(@bitSizeOf(Key) == @sizeOf(Key) * 8);
+    // TODO(ifreund) What are our alignment expectations for Value?
 
-    const value_size = @sizeOf(Value);
+    // There must be no padding in the Key/Value types to avoid buffer bleeds.
+    assert(@bitSizeOf(Key) == @sizeOf(Key) * 8);
+    assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
+
     const key_size = @sizeOf(Key);
+    const value_size = @sizeOf(Value);
 
     return struct {
         const TreeGeneric = @This();
