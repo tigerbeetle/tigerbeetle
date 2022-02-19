@@ -279,7 +279,9 @@ pub fn ManifestLevel(
             exact: bool,
         };
 
-        // TODO move this back to binary_search.zig and allow max key searching.
+        // TODO(ifreund) move this back to binary_search.zig and allow max key searching.
+        // Once this is in binary_search.zig we can then use it within tree.zig to find data blocks.
+        // We also need test coverage for this.
         fn binary_search(keys: []const Key, key: Key) BinarySearchResult {
             assert(keys.len > 0);
 
@@ -290,7 +292,7 @@ pub fn ManifestLevel(
                 const mid = offset + half;
 
                 // This trick seems to be what's needed to get llvm to emit branchless code for this,
-                // a ternay-style if expression was generated as a jump here for whatever reason.
+                // a ternary-style if expression was generated as a jump here for whatever reason.
                 const next_offsets = [_]usize{ offset, mid };
                 offset = next_offsets[@boolToInt(compare_keys(keys[mid], key) == .lt)];
 
