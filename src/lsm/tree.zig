@@ -184,21 +184,22 @@ pub fn Tree(
         };
 
         pub const Manifest = struct {
+
             /// First 128 bytes of the table are a VSR protocol header for a repair message.
             /// This data is filled in on writing the table so that we don't
             /// need to do any extra work before sending the message on repair.
             pub const TableInfo = extern struct {
                 checksum: u128,
-
                 key_min: Key,
                 key_max: Key,
-
                 address: u64,
 
-                /// Set to the current snapshot tick on table creation.
+                /// The minimum snapshot that can see this table (with exclusive bounds).
+                /// This value is set to the current snapshot tick on table creation.
                 snapshot_min: u64,
 
-                /// Set to the current snapshot tick on table deletion.
+                /// The maximum snapshot that can see this table (with exclusive bounds).
+                /// This value is set to the current snapshot tick on table deletion.
                 snapshot_max: u64 = math.maxInt(u64),
 
                 flags: u64 = 0,
@@ -208,7 +209,7 @@ pub fn Tree(
                     assert(@alignOf(TableInfo) == 16);
                 }
 
-                pub fn visible(info: *TableInfo, snapshot: u64) bool {
+                pub fn visible(info: *const TableInfo, snapshot: u64) bool {
                     assert(snapshot <= snapshot_latest);
                     assert(snapshot != info.snapshot_min);
                     assert(snapshot != info.snapshot_max);
