@@ -4,7 +4,7 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
-pub fn NodePool(comptime _node_size: u32, comptime node_alignment: u12) type {
+pub fn NodePool(comptime _node_size: u32, comptime node_alignment: u13) type {
     return struct {
         const Self = @This();
 
@@ -14,6 +14,7 @@ pub fn NodePool(comptime _node_size: u32, comptime node_alignment: u12) type {
         comptime {
             assert(node_size > 0);
             assert(node_alignment > 0);
+            assert(node_alignment <= 4096);
             assert(math.isPowerOfTwo(node_size));
             assert(math.isPowerOfTwo(node_alignment));
             assert(node_size % node_alignment == 0);
