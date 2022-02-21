@@ -17,6 +17,11 @@ const vsr = @import("../vsr.zig");
 const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
+const ManifestLevel = @import("manifest_level.zig").ManifestLevel;
+const NodePool = @import("node_pool.zig").NodePool(
+    config.lsm_manifest_node_size,
+    config.sector_size,
+);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 // We reserve maxInt(u64) to indicate that a table has not been deleted.
@@ -212,25 +217,31 @@ pub fn Tree(
                 }
             };
 
-            pub const Level = struct {
-                key_mins: []Key,
-                key_maxs: []Key,
-            };
+            levels: [config.lsm_levels]ManifestLevel(NodePool, Key, TableInfo, compare_keys),
 
-            levels: [config.lsm_levels]Level,
+            pub fn init() !void {}
 
-            pub fn table(
+            pub const LookupIterator = struct {
                 manifest: *Manifest,
                 snapshot: u64,
-                level: u8,
                 key: Key,
-            ) ?TableInfo {
-                const info = manifest.levels[level].get(key, snapshot) orelse return null;
+                level: u8 = 0,
+                index: u32 = 0,
 
-                assert(compare_keys(key, info.key_max) != .gt);
-                if (compare_keys(key, info.key_min) != .lt) return info;
+                pub fn next(it: *LookupIterator) ?*const TableInfo {
+                    _ = it;
 
-                return null;
+                    // TODO
+                    return null;
+                }
+            };
+
+            pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key) LookupIterator {
+                return .{
+                    .manifest = manifest,
+                    .snapshot = snapshot,
+                    .key = key,
+                };
             }
 
             pub const Iterator = struct {
@@ -243,9 +254,6 @@ pub fn Tree(
 
                 pub fn next(it: *Iterator) ?TableInfo {
                     _ = it;
-                    // assume direction is ascending
-                    // search for the current key_min in the manifest, given level and snapshot
-                    //
                 }
             };
 
@@ -1856,7 +1864,7 @@ pub fn Tree(
         mutable_table: MutableTable,
         table: Table,
 
-        manifest: []Manifest,
+        manifest: Manifest,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -1956,8 +1964,17 @@ pub fn Tree(
                 }
             }
 
-            // TODO Search overlapping tables in level 0 in order of precedence.
-            // TODO Search tables in subsequent levels.
+            var it = tree.manifest.lookup(snapshot, key);
+            if (it.next()) |info| {
+                assert(info.visible(snapshot));
+                assert(compare_keys(key, info.key_min) != .lt);
+                assert(compare_keys(key, info.key_max) != .gt);
+
+                // TODO
+            } else {
+                callback(null);
+                return;
+            }
         }
 
         /// Returns null if the value is null or a tombstone, otherwise returns the value.
