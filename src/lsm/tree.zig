@@ -2197,13 +2197,14 @@ pub fn main() !void {
     _ = TestTree.LevelIterator;
     _ = TestTree.Compaction;
     _ = TestTree.Table.Builder.data_block_finish;
-    _ = TestTree.prefetch_enqueue;
-    _ = TestTree.prefetch;
-    _ = TestTree.prefetch_key;
-    _ = TestTree.get;
-    _ = TestTree.put;
-    _ = TestTree.remove;
-    _ = TestTree.lookup;
+    _ = tree.prefetch_enqueue;
+    _ = tree.prefetch;
+    _ = tree.prefetch_key;
+    _ = tree.get;
+    _ = tree.put;
+    _ = tree.remove;
+    _ = tree.lookup;
+    _ = tree.manifest;
 
     std.debug.print("done\n", .{});
 }
