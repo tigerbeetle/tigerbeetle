@@ -1914,7 +1914,7 @@ pub fn Tree(
                 tree.value_cache.?.getKeyPtr(tombstone_from_key(key)) orelse
                 tree.prefetch_values.getKeyPtr(tombstone_from_key(key));
 
-            return if (value == null or tombstone(value.?.*)) null else value.?;
+            return unwrap_tombstone(value);
         }
 
         pub fn put(tree: *TreeGeneric, value: Value) void {
@@ -1923,6 +1923,48 @@ pub fn Tree(
 
         pub fn remove(tree: *TreeGeneric, key: Key) void {
             tree.mutable_table.remove(key);
+        }
+
+        pub fn lookup(
+            tree: *TreeGeneric,
+            snapshot: u64,
+            key: Key,
+            callback: fn (value: ?*const Value) void,
+        ) void {
+            assert(tree.prefetch_keys.count() == 0);
+            assert(tree.prefetch_keys_iterator == null);
+
+            assert(snapshot <= snapshot_latest);
+            if (snapshot == snapshot_latest) {
+                // The mutable table is converted to an immutable table when a snapshot is created.
+                // This means that a snapshot will never be able to see the mutable table.
+                // This simplifies the mutable table and eliminates compaction for duplicate puts.
+                // The value cache is only used for the latest snapshot for simplicity.
+                // Earlier snapshots will still be able to utilize the block cache.
+                if (tree.mutable_table.get(key) orelse
+                    tree.value_cache.?.getKeyPtr(tombstone_from_key(key))) |value|
+                {
+                    callback(unwrap_tombstone(value));
+                    return;
+                }
+            }
+
+            if (tree.table.state != .empty and tree.table.info.visible(snapshot)) {
+                if (tree.table.get(key)) |value| {
+                    callback(unwrap_tombstone(value));
+                    return;
+                }
+            }
+
+            // TODO Search overlapping tables in level 0 in order of precedence.
+            // TODO Search tables in subsequent levels.
+        }
+
+        /// Returns null if the value is null or a tombstone, otherwise returns the value.
+        /// We use tombstone values internally, but expose them as null to the user.
+        /// This distinction enables us to cache a null result as a tombstone in our hash maps.
+        inline fn unwrap_tombstone(value: ?*const Value) ?*const Value {
+            return if (value == null or tombstone(value.?.*)) null else value.?;
         }
 
         pub fn flush(
@@ -2140,6 +2182,7 @@ pub fn main() !void {
     _ = TestTree.get;
     _ = TestTree.put;
     _ = TestTree.remove;
+    _ = TestTree.lookup;
 
     std.debug.print("done\n", .{});
 }
