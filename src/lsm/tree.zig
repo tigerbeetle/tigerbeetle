@@ -1856,6 +1856,12 @@ pub fn Tree(
             var prefetch_keys = try allocator.alloc(Key, prefetch_cache_capacity);
             errdefer allocator.free(prefetch_keys);
 
+            if (value_cache == null) {
+                assert(prefetch_cache_capacity == 0);
+            } else {
+                assert(prefetch_cache_capacity > 0);
+            }
+
             var prefetch_cache = PrefetchCache{};
             try prefetch_cache.ensureTotalCapacity(allocator, prefetch_cache_capacity);
             errdefer prefetch_cache.deinit(allocator);
@@ -1887,6 +1893,7 @@ pub fn Tree(
         }
 
         pub fn get(tree: *TreeGeneric, key: Key) ?*const Value {
+            assert(tree.value_cache != null);
             // TODO
             // Look in mutable table, then in value cache, then in prefetch cache:
             // 1. if null return null,
@@ -1915,6 +1922,8 @@ pub fn Tree(
         }
 
         pub fn prefetch_enqueue(tree: *TreeGeneric, key: Key) void {
+            assert(tree.value_cache != null);
+
             // TODO Assert that prefetching is not in progress.
 
             if (tree.mutable_table.get(key) != null) return;
@@ -1928,6 +1937,8 @@ pub fn Tree(
 
         /// Ensure that all enqueued keys are in the cache when the callback returns.
         pub fn prefetch(tree: *TreeGeneric, callback: fn () void) void {
+            assert(tree.value_cache != null);
+
             _ = callback;
 
             tree.prefetch_cache.clearRetainingCapacity();
