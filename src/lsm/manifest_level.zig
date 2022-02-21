@@ -6,7 +6,6 @@ const meta = std.meta;
 
 const config = @import("../config.zig");
 const lsm = @import("tree.zig");
-const binary_search = @import("binary_search").binary_search;
 
 const Direction = @import("tree.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
@@ -18,20 +17,22 @@ fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denomin
 }
 
 pub fn ManifestLevel(
+    comptime NodePool: type,
     comptime Key: type,
     comptime TableInfo: type,
-    comptime compare_keys: fn (Key, Key) math.Order,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
 ) type {
     return struct {
         const Self = @This();
 
-        const Keys = SegmentedArray(Key, node_size, lsm.table_count_max);
-        const Tables = SegmentedArray(TableInfo, node_size, lsm.table_count_max);
+        const Keys = SegmentedArray(Key, NodePool, lsm.table_count_max);
+        const Tables = SegmentedArray(TableInfo, NodePool, lsm.table_count_max);
 
         /// The minimum key of each key node in the keys segmented array.
         /// This is the starting point of our tiered lookup approach.
         /// Only the first keys.node_count elements are valid.
         root_keys_array: *[Keys.node_count_max]Key,
+
         /// This is the index of the table node containing the TableInfo corresponding to a given
         /// root key. This allows us to skip table nodes which cannot contain the target TableInfo
         /// when searching for the TableInfo with a given absolute index.
@@ -43,7 +44,33 @@ pub fn ManifestLevel(
         keys: Keys,
         tables: Tables,
 
-        fn init(allocator: *mem.Allocator, level: u8) !Self {}
+        pub fn init(allocator: mem.Allocator) !Self {
+            var root_keys_array = try allocator.create([Keys.node_count_max]Key);
+            errdefer allocator.destroy(root_keys_array);
+
+            var root_table_nodes_array = try allocator.create([Keys.node_count_max]u32);
+            errdefer allocator.destroy(root_table_nodes_array);
+
+            var keys = try Keys.init(allocator);
+            errdefer keys.deinit(allocator, null);
+
+            var tables = try Tables.init(allocator);
+            errdefer tables.deinit(allocator, null);
+
+            return Self{
+                .root_keys_array = root_keys_array,
+                .root_table_nodes_array = root_table_nodes_array,
+                .keys = keys,
+                .tables = tables,
+            };
+        }
+
+        pub fn deinit(level: *Self, allocator: mem.Allocator, node_pool: *NodePool) void {
+            allocator.destroy(level.root_keys_array);
+            allocator.destroy(level.root_table_nodes_array);
+            level.keys.deinit(allocator, node_pool);
+            level.tables.deinit(allocator, node_pool);
+        }
 
         pub const Iterator = struct {
             level: *const Self,
@@ -68,7 +95,7 @@ pub fn ManifestLevel(
                     if (it.snapshot > table_info.snapshot_max) continue;
                     assert(it.snapshot != table_info.snapshot_max);
 
-                    switch (direction) {
+                    switch (it.direction) {
                         .ascending => {
                             // Unlike in the descending case, it is not guaranteed that
                             // table_info.key_max is less than it.key_min on the first iteration
@@ -243,8 +270,8 @@ pub fn ManifestLevel(
                 adjusted_next = reverse.cursor;
             } else {
                 switch (direction) {
-                    .ascending => assert(meta.eql(adjusted, keys.last())),
-                    .descending => assert(meta.eql(adjusted, keys.first())),
+                    .ascending => assert(meta.eql(adjusted, level.keys.last())),
+                    .descending => assert(meta.eql(adjusted, level.keys.first())),
                 }
             }
             assert(compare_keys(start_key, level.keys.element_at_cursor(adjusted)) == .eq);
