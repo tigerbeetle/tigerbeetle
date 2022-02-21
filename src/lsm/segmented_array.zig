@@ -90,7 +90,7 @@ pub fn SegmentedArray(
 
         pub fn deinit(array: Self, allocator: mem.Allocator, node_pool: ?*NodePool) void {
             for (array.nodes[0..array.node_count]) |node| {
-                node_pool.release(@ptrCast(NodePool.Node, node.?));
+                node_pool.?.release(@ptrCast(NodePool.Node, node.?));
             }
             allocator.free(array.nodes);
             allocator.free(array.indexes);
