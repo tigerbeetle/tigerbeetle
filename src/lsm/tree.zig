@@ -1993,17 +1993,20 @@ pub fn Tree(
             _ = callback;
         }
 
+        /// This should be called by the state machine for every key that must be prefetched.
         pub fn prefetch_enqueue(tree: *TreeGeneric, key: Key) void {
             assert(tree.value_cache != null);
             assert(tree.prefetch_keys_iterator == null);
 
             if (tree.mutable_table.get(key) != null) return;
-            if (tree.value_cache.?.getPtr(tombstone_from_key(key)) != null) return;
+            if (tree.value_cache.?.contains(tombstone_from_key(key))) return;
 
+            // We tolerate duplicate keys enqueued by the state machine.
+            // For example, if all unique operations require the same two dependencies.
             tree.prefetch_keys.putAssumeCapacity(key, {});
         }
 
-        /// Ensure that all enqueued keys are in the cache when the callback returns.
+        /// Ensure keys enqueued by `prefetch_enqueue()` are in the cache when the callback returns.
         pub fn prefetch(tree: *TreeGeneric, callback: fn () void) void {
             assert(tree.value_cache != null);
             assert(tree.prefetch_keys_iterator == null);
@@ -2029,7 +2032,7 @@ pub fn Tree(
 
             if (verify) {
                 assert(tree.mutable_table.get(key) == null);
-                assert(tree.value_cache.?.getPtr(tombstone_from_key(key)) == null);
+                assert(!tree.value_cache.?.contains(tombstone_from_key(key)));
             }
 
             return true; // TODO
