@@ -133,8 +133,6 @@ pub fn Tree(
 
     const block_size = Storage.block_size;
 
-    _ = tombstone; // TODO
-
     assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
     // TODO(ifreund) What are our alignment expectations for Value?
 
@@ -283,7 +281,7 @@ pub fn Tree(
             }
 
             pub fn get(table: *MutableTable, key: Key) ?*const Value {
-                return table.values.getPtr(tombstone_from_key(key));
+                return table.values.getKeyPtr(tombstone_from_key(key));
             }
 
             pub fn put(table: *MutableTable, value: Value) void {
@@ -1817,7 +1815,8 @@ pub fn Tree(
             };
         }
 
-        pub const PrefetchCache = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
+        pub const PrefetchKeys = std.AutoHashMapUnmanaged(Key, void);
+        pub const PrefetchValues = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
 
         // TODO(ifreund) Replace both of these types with SetAssociativeCache:
         pub const ValueCache = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
@@ -1829,12 +1828,13 @@ pub fn Tree(
         /// Prefetching ensures that point lookups against the latest snapshot are synchronous.
         /// This shields state machine implementations from the challenges of concurrency and I/O,
         /// and enables simple state machine function signatures that commit writes atomically.
-        prefetch_keys: []Key,
-        prefetch_count: u32 = 0,
+        prefetch_keys: PrefetchKeys,
+
+        prefetch_keys_iterator: ?PrefetchKeys.KeyIterator = null,
 
         /// A separate hash map for prefetched values not found in the mutable table or value cache.
         /// This is required for correctness, to not evict other prefetch hits from the value cache.
-        prefetch_cache: PrefetchCache,
+        prefetch_values: PrefetchValues,
 
         /// A set associative cache of values shared by trees with the same key/value sizes.
         /// This is used to accelerate point lookups and is not used for range queries.
@@ -1852,22 +1852,23 @@ pub fn Tree(
         pub fn init(
             allocator: mem.Allocator,
             storage: *Storage,
-            prefetch_cache_capacity: u32,
+            prefetch_capacity: u32,
             value_cache: ?*ValueCache,
             block_cache: *BlockCache,
         ) !TreeGeneric {
-            var prefetch_keys = try allocator.alloc(Key, prefetch_cache_capacity);
-            errdefer allocator.free(prefetch_keys);
-
             if (value_cache == null) {
-                assert(prefetch_cache_capacity == 0);
+                assert(prefetch_capacity == 0);
             } else {
-                assert(prefetch_cache_capacity > 0);
+                assert(prefetch_capacity > 0);
             }
 
-            var prefetch_cache = PrefetchCache{};
-            try prefetch_cache.ensureTotalCapacity(allocator, prefetch_cache_capacity);
-            errdefer prefetch_cache.deinit(allocator);
+            var prefetch_keys = PrefetchKeys{};
+            try prefetch_keys.ensureTotalCapacity(allocator, prefetch_capacity);
+            errdefer prefetch_keys.deinit(allocator);
+
+            var prefetch_values = PrefetchValues{};
+            try prefetch_values.ensureTotalCapacity(allocator, prefetch_capacity);
+            errdefer prefetch_values.deinit(allocator);
 
             var mutable_table = try MutableTable.init(allocator);
             errdefer mutable_table.deinit(allocator);
@@ -1878,7 +1879,7 @@ pub fn Tree(
             return TreeGeneric{
                 .storage = storage,
                 .prefetch_keys = prefetch_keys,
-                .prefetch_cache = prefetch_cache,
+                .prefetch_values = prefetch_values,
                 .value_cache = value_cache,
                 .block_cache = block_cache,
                 .mutable_table = mutable_table,
@@ -1889,23 +1890,22 @@ pub fn Tree(
 
         pub fn deinit(tree: *TreeGeneric, allocator: mem.Allocator) void {
             // TODO Consider whether we should release blocks acquired from Storage.block_free_set.
-            allocator.free(tree.prefetch_keys);
-            tree.prefetch_cache.deinit(allocator);
+            tree.prefetch_keys.deinit(allocator);
+            tree.prefetch_values.deinit(allocator);
             tree.mutable_table.deinit(allocator);
             tree.table.deinit(allocator);
         }
 
         pub fn get(tree: *TreeGeneric, key: Key) ?*const Value {
-            assert(tree.value_cache != null);
-            // TODO
-            // Look in mutable table, then in value cache, then in prefetch cache:
-            // 1. if null return null,
-            // 2. if tombstone return null,
-            // 3. return value
-            // TODO Assert that prefetch was called and completed.
+            // Ensure that prefetch() was called and completed if any keys were enqueued:
+            assert(tree.prefetch_keys.count() == 0);
+            assert(tree.prefetch_keys_iterator == null);
 
-            _ = tree;
-            _ = key;
+            const value = tree.mutable_table.get(key) orelse
+                tree.value_cache.?.getKeyPtr(tombstone_from_key(key)) orelse
+                tree.prefetch_values.getKeyPtr(tombstone_from_key(key));
+
+            return if (value == null or tombstone(value.?.*)) null else value.?;
         }
 
         pub fn put(tree: *TreeGeneric, value: Value) void {
@@ -1926,28 +1926,44 @@ pub fn Tree(
 
         pub fn prefetch_enqueue(tree: *TreeGeneric, key: Key) void {
             assert(tree.value_cache != null);
-
-            // TODO Assert that prefetching is not in progress.
+            assert(tree.prefetch_keys_iterator == null);
 
             if (tree.mutable_table.get(key) != null) return;
-            if (tree.value_cache.getPtr(tombstone_from_key(key)) != null) return;
+            if (tree.value_cache.?.getPtr(tombstone_from_key(key)) != null) return;
 
-            // TODO If present in immutable table then copy to prefetch cache.
-
-            tree.prefetch_keys[tree.prefetch_count] = key;
-            tree.prefetch_count += 1;
+            tree.prefetch_keys.putAssumeCapacity(key, {});
         }
 
         /// Ensure that all enqueued keys are in the cache when the callback returns.
         pub fn prefetch(tree: *TreeGeneric, callback: fn () void) void {
             assert(tree.value_cache != null);
+            assert(tree.prefetch_keys_iterator == null);
 
+            // Ensure that no stale values leak through from the previous prefetch batch.
+            tree.prefetch_values.clearRetainingCapacity();
+            assert(tree.prefetch_values.count() == 0);
+
+            tree.prefetch_keys_iterator = tree.prefetch_keys.keyIterator();
+
+            // After finish:
             _ = callback;
 
-            tree.prefetch_cache.clearRetainingCapacity();
-            assert(tree.count() == 0);
+            // Ensure that no keys leak through into the next prefetch batch.
+            tree.prefetch_keys.clearRetainingCapacity();
+            assert(tree.prefetch_keys.count() == 0);
 
-            tree.prefetch_count = 0;
+            tree.prefetch_keys_iterator = null;
+        }
+
+        fn prefetch_key(tree: *TreeGeneric, key: Key) bool {
+            assert(tree.value_cache != null);
+
+            if (verify) {
+                assert(tree.mutable_table.get(key) == null);
+                assert(tree.value_cache.?.getPtr(tombstone_from_key(key)) == null);
+            }
+
+            return true; // TODO
         }
 
         pub const RangeQuery = union(enum) {
@@ -2079,7 +2095,7 @@ pub fn main() !void {
     );
 
     const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
-    const prefetch_cache_capacity = batch_size_max / 128;
+    const prefetch_capacity = batch_size_max / 128;
 
     var value_cache = TestTree.ValueCache{};
     try value_cache.ensureTotalCapacity(allocator, 10000);
@@ -2092,7 +2108,7 @@ pub fn main() !void {
     var tree = try TestTree.init(
         allocator,
         &storage,
-        prefetch_cache_capacity,
+        prefetch_capacity,
         &value_cache,
         &block_cache,
     );
@@ -2109,6 +2125,12 @@ pub fn main() !void {
     _ = TestTree.LevelIterator;
     _ = TestTree.Compaction;
     _ = TestTree.Table.Builder.data_block_finish;
+    _ = TestTree.prefetch_enqueue;
+    _ = TestTree.prefetch;
+    _ = TestTree.prefetch_key;
+    _ = TestTree.get;
+    _ = TestTree.put;
+    _ = TestTree.remove;
 
     std.debug.print("done\n", .{});
 }
