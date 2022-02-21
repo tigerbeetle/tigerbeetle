@@ -19,6 +19,9 @@ const CompositeKey = @import("composite_key.zig").CompositeKey;
 const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
+// We reserve maxInt(u64) to indicate that a table has not been deleted.
+pub const snapshot_latest = math.maxInt(u64) - 1;
+
 // StateMachine:
 //
 // /// state machine will pass this on to all object stores
@@ -199,6 +202,14 @@ pub fn Tree(
                     assert(@sizeOf(TableInfo) == 48 + key_size * 2);
                     assert(@alignOf(TableInfo) == 16);
                 }
+
+                pub fn visible(info: *TableInfo, snapshot: u64) bool {
+                    assert(snapshot <= snapshot_latest);
+                    assert(snapshot != info.snapshot_min);
+                    assert(snapshot != info.snapshot_max);
+
+                    return info.snapshot_min < snapshot and snapshot < info.snapshot_max;
+                }
             };
 
             pub const Level = struct {
@@ -210,7 +221,6 @@ pub fn Tree(
 
             pub fn table(
                 manifest: *Manifest,
-                /// May pass math.maxInt(u64) if there is no snapshot.
                 snapshot: u64,
                 level: u8,
                 key: Key,
@@ -241,7 +251,6 @@ pub fn Tree(
 
             pub fn get_tables(
                 manifest: *Manifest,
-                /// May pass math.maxInt(u64) if there is no snapshot.
                 snapshot: u64,
                 level: u8,
                 key_min: Key,
@@ -1982,7 +1991,7 @@ pub fn Tree(
 
         pub const RangeQueryIterator = struct {
             tree: *TreeGeneric,
-            snapshot: ?u64,
+            snapshot: u64,
             query: RangeQuery,
 
             pub fn next(callback: fn (result: ?Value) void) void {
@@ -1993,7 +2002,7 @@ pub fn Tree(
         pub fn range_query(
             tree: *TreeGeneric,
             /// The snapshot timestamp, if any
-            snapshot: ?u64,
+            snapshot: u64,
             query: RangeQuery,
         ) RangeQueryIterator {
             _ = tree;
