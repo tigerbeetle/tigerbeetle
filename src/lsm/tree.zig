@@ -5,6 +5,9 @@ const math = std.math;
 const mem = std.mem;
 const os = std.os;
 
+/// Whether to perform slow, intensive online verification of data.
+const verify = true;
+
 const config = @import("../config.zig");
 const binary_search = @import("binary_search.zig").binary_search;
 const eytzinger = @import("eytzinger.zig").eytzinger;
@@ -740,7 +743,7 @@ pub fn Tree(
                 const data_blocks_used = index_data_blocks_used(index_block);
                 const data_block = table.blocks[meta_block_count..][0..data_blocks_used][i];
 
-                if (builtin.mode == .Debug) {
+                if (verify) {
                     // TODO What else do we expect?
                     assert(compare_keys(key, index_data_keys(index_block)[i]) != .gt);
                     assert(index_data_addresses(index_block)[i] != 0);
@@ -813,7 +816,7 @@ pub fn Tree(
 
                     const values = values_max[0..builder.value];
 
-                    if (builtin.mode == .Debug) {
+                    if (verify) {
                         var a = values[0];
                         for (values[1..]) |b| {
                             assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
