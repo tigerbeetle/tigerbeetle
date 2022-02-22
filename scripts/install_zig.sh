@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-ZIG_RELEASE_DEFAULT="0.9.0"
+ZIG_RELEASE_DEFAULT="0.9.1"
 
 # Default to the release build, or allow the latest dev build, or an explicit release version:
 if [ -z "$1" ]; then
