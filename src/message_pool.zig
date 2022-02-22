@@ -30,9 +30,10 @@ pub const messages_max_replica = messages_max: {
     sum += config.connections_max; // Connection.recv_message
     sum += config.connections_max * config.connection_send_queue_max_replica; // Connection.send_queue
     sum += 1; // Handle bursts (e.g. Connection.parse_message)
-    // Handle Replica.commit_op's reply.
+    // Handle Replica.commit_op's reply:
     // (This is separate from the burst +1 because they may occur concurrently).
     sum += 1;
+    sum += 20; // TODO Our network simulator allows up to 20 messages for path_capacity_max.
 
     break :messages_max sum;
 };
@@ -46,6 +47,7 @@ pub const messages_max_client = messages_max: {
     sum += config.client_request_queue_max; // Client.request_queue
     // Handle bursts (e.g. Connection.parse_message, or sending a ping when the send queue is full).
     sum += 1;
+    sum += 20; // TODO Our network simulator allows up to 20 messages for path_capacity_max.
 
     break :messages_max sum;
 };
