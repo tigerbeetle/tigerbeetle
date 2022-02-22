@@ -18,10 +18,7 @@ const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
 const ManifestLevel = @import("manifest_level.zig").ManifestLevel;
-const NodePool = @import("node_pool.zig").NodePool(
-    config.lsm_manifest_node_size,
-    config.sector_size,
-);
+const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 // We reserve maxInt(u64) to indicate that a table has not been deleted.
@@ -218,9 +215,29 @@ pub fn Tree(
                 }
             };
 
-            levels: [config.lsm_levels]ManifestLevel(NodePool, Key, TableInfo, compare_keys),
+            const Level = ManifestLevel(NodePool, Key, TableInfo, compare_keys);
 
-            pub fn init() !void {}
+            node_pool: *NodePool,
+            levels: [config.lsm_levels]Level,
+
+            pub fn init(allocator: mem.Allocator, node_pool: *NodePool) !Manifest {
+                var manifest = Manifest{
+                    .node_pool = node_pool,
+                    .levels = undefined,
+                };
+
+                for (manifest.levels) |*level, i| {
+                    errdefer for (manifest.levels[0..i]) |*l| l.deinit(allocator, node_pool);
+
+                    level.* = try Level.init(allocator);
+                }
+
+                return manifest;
+            }
+
+            pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
+                for (manifest.levels) |*level| level.deinit(allocator, manifest.node_pool);
+            }
 
             pub const LookupIterator = struct {
                 manifest: *Manifest,
@@ -1842,8 +1859,6 @@ pub fn Tree(
 
         storage: *Storage,
 
-        node_pool: *NodePool,
-
         /// Keys enqueued to be prefetched.
         /// Prefetching ensures that point lookups against the latest snapshot are synchronous.
         /// This shields state machine implementations from the challenges of concurrency and I/O,
@@ -1897,16 +1912,18 @@ pub fn Tree(
             var table = try Table.init(allocator);
             errdefer table.deinit(allocator);
 
+            var manifest = try Manifest.init(allocator, node_pool);
+            errdefer manifest.deinit(allocator);
+
             return TreeGeneric{
                 .storage = storage,
-                .node_pool = node_pool,
                 .prefetch_keys = prefetch_keys,
                 .prefetch_values = prefetch_values,
                 .value_cache = value_cache,
                 .block_cache = block_cache,
                 .mutable_table = mutable_table,
                 .table = table,
-                .manifest = undefined, // TODO
+                .manifest = manifest,
             };
         }
 
@@ -1916,6 +1933,7 @@ pub fn Tree(
             tree.prefetch_values.deinit(allocator);
             tree.mutable_table.deinit(allocator);
             tree.table.deinit(allocator);
+            tree.manifest.deinit(allocator);
         }
 
         pub fn get(tree: *TreeGeneric, key: Key) ?*const Value {
