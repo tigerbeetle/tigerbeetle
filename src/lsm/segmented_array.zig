@@ -7,17 +7,7 @@ const meta = std.meta;
 
 const utils = @import("../utils.zig");
 
-pub const Direction = enum {
-    ascending,
-    descending,
-
-    pub fn reverse(d: Direction) Direction {
-        return switch (d) {
-            .ascending => .descending,
-            .descending => .ascending,
-        };
-    }
-};
+const Direction = @import("direction.zig").Direction;
 
 pub const Cursor = struct {
     node: u32,

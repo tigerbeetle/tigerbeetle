@@ -8,7 +8,7 @@ const config = @import("../config.zig");
 const lsm = @import("tree.zig");
 const binary_search_keys = @import("binary_search.zig").binary_search_keys;
 
-const Direction = @import("tree.zig").Direction;
+const Direction = @import("direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
