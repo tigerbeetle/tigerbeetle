@@ -140,7 +140,7 @@ pub fn ManifestLevel(
         ) Iterator {
             const inner = blk: {
                 if (level.iterator_start(key_min, key_max, direction)) |start| {
-                    break :blk level.keys.iterator(
+                    break :blk level.tables.iterator(
                         level.keys.absolute_index_for_cursor(start),
                         level.iterator_start_table_node_for_key_node(start.node, direction),
                         direction,
@@ -198,7 +198,7 @@ pub fn ManifestLevel(
                 switch (direction) {
                     // In the case of an ascending search, we start at the first table in the level
                     // since the target key_min is less than the key_min of the first table.
-                    .ascending => return .{
+                    .ascending => return SegmentedArrayCursor{
                         .node = 0,
                         .relative_index = 0,
                     },
@@ -252,7 +252,7 @@ pub fn ManifestLevel(
             key_cursor: SegmentedArrayCursor,
             direction: Direction,
         ) SegmentedArrayCursor {
-            const reverse = level.keys.iterator(
+            var reverse = level.keys.iterator(
                 level.keys.absolute_index_for_cursor(key_cursor),
                 key_cursor.node,
                 direction.reverse(),
@@ -261,12 +261,12 @@ pub fn ManifestLevel(
             assert(meta.eql(reverse.cursor, key_cursor));
             // This cursor will always point to a key equal to start_key.
             var adjusted = reverse.cursor;
-            const start_key = reverse.next().?;
+            const start_key = reverse.next().?.*;
             assert(compare_keys(start_key, level.keys.element_at_cursor(adjusted)) == .eq);
 
             var adjusted_next = reverse.cursor;
             while (reverse.next()) |k| {
-                if (compare_keys(start_key, k) != .eq) break;
+                if (compare_keys(start_key, k.*) != .eq) break;
                 adjusted = adjusted_next;
                 adjusted_next = reverse.cursor;
             } else {
@@ -290,9 +290,7 @@ pub fn ManifestLevel(
             if (direction == .descending) {
                 // Since the corresponding table node in the root_table_nodes_array is a lower
                 // bound, we need to add one to make it an upper bound when descending.
-                key_node += 1;
-
-                if (key_node == level.keys.node_count) {
+                if (key_node + 1 == level.keys.node_count) {
                     // If we were already at the last key node, then we
                     // should instead return the very last table node.
                     return level.tables.node_count - 1;

@@ -11,11 +11,11 @@ const math = std.math;
 pub fn binary_search_values_raw(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) Key,
-    comptime compare_keys: fn (Key, Key) math.Order,
+    comptime key_from_value: fn (Value) callconv(.Inline) Key,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key: Key,
-) usize {
+) u32 {
     assert(values.len > 0);
 
     var offset: usize = 0;
@@ -32,19 +32,19 @@ pub fn binary_search_values_raw(
         length -= half;
     }
 
-    return offset + @boolToInt(compare_keys(key_from_value(values[offset]), key) == .lt);
+    return @intCast(u32, offset + @boolToInt(compare_keys(key_from_value(values[offset]), key) == .lt));
 }
 
 const BinarySearchResult = struct {
-    index: usize,
+    index: u32,
     exact: bool,
 };
 
 pub inline fn binary_search_values(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) Key,
-    comptime compare_keys: fn (Key, Key) math.Order,
+    comptime key_from_value: fn (Value) callconv(.Inline) Key,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key: Key,
 ) BinarySearchResult {
@@ -57,7 +57,7 @@ pub inline fn binary_search_values(
 
 pub inline fn binary_search_keys(
     comptime Key: type,
-    comptime compare_keys: fn (Key, Key) math.Order,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     keys: []const Key,
     key: Key,
 ) BinarySearchResult {
@@ -65,7 +65,7 @@ pub inline fn binary_search_keys(
         Key,
         Key,
         struct {
-            fn key_from_key(k: Key) Key {
+            inline fn key_from_key(k: Key) Key {
                 return k;
             }
         }.key_from_key,
@@ -80,7 +80,7 @@ const test_binary_search = struct {
 
     const gpa = std.testing.allocator;
 
-    fn compare_keys(a: u32, b: u32) math.Order {
+    inline fn compare_keys(a: u32, b: u32) math.Order {
         return math.order(a, b);
     }
 
@@ -95,7 +95,7 @@ const test_binary_search = struct {
             var expect: BinarySearchResult = .{ .index = 0, .exact = false };
             for (keys) |key, i| {
                 switch (compare_keys(key, target_key)) {
-                    .lt => expect.index = i + 1,
+                    .lt => expect.index = @intCast(u32, i) + 1,
                     .eq => {
                         expect.exact = true;
                         break;
