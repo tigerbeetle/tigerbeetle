@@ -1842,6 +1842,8 @@ pub fn Tree(
 
         storage: *Storage,
 
+        node_pool: *NodePool,
+
         /// Keys enqueued to be prefetched.
         /// Prefetching ensures that point lookups against the latest snapshot are synchronous.
         /// This shields state machine implementations from the challenges of concurrency and I/O,
@@ -1870,6 +1872,7 @@ pub fn Tree(
         pub fn init(
             allocator: mem.Allocator,
             storage: *Storage,
+            node_pool: *NodePool,
             prefetch_capacity: u32,
             value_cache: ?*ValueCache,
             block_cache: *BlockCache,
@@ -1896,6 +1899,7 @@ pub fn Tree(
 
             return TreeGeneric{
                 .storage = storage,
+                .node_pool = node_pool,
                 .prefetch_keys = prefetch_keys,
                 .prefetch_values = prefetch_values,
                 .value_cache = value_cache,
@@ -2166,8 +2170,10 @@ pub fn main() !void {
         Key.tombstone_from_key,
     );
 
-    const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
-    const prefetch_capacity = batch_size_max / 128;
+    // Check out our spreadsheet to see how we calculate node_count for a forest of trees.
+    const node_count = 1024;
+    var node_pool = try NodePool.init(allocator, node_count);
+    defer node_pool.deinit(allocator);
 
     var value_cache = TestTree.ValueCache{};
     try value_cache.ensureTotalCapacity(allocator, 10000);
@@ -2177,9 +2183,13 @@ pub fn main() !void {
     try block_cache.ensureTotalCapacity(allocator, 100);
     defer block_cache.deinit(allocator);
 
+    const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
+    const prefetch_capacity = batch_size_max / 128;
+
     var tree = try TestTree.init(
         allocator,
         &storage,
+        &node_pool,
         prefetch_capacity,
         &value_cache,
         &block_cache,
