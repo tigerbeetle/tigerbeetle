@@ -9,12 +9,12 @@ const os = std.os;
 const verify = true;
 
 const config = @import("../config.zig");
-const binary_search = @import("binary_search.zig").binary_search;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const utils = @import("../utils.zig");
 const vsr = @import("../vsr.zig");
 
 const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
+const Direction = @import("direction.zig").Direction;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
 const ManifestLevel = @import("manifest_level.zig").ManifestLevel;
@@ -99,18 +99,6 @@ pub const ClientTableEntry = packed struct {
     message_checksum: u128,
     message_offset: u64,
     session: u64,
-};
-
-pub const Direction = enum {
-    ascending,
-    descending,
-
-    pub fn reverse(d: Direction) Direction {
-        return switch (d) {
-            .ascending => .descending,
-            .descending => .ascending,
-        };
-    }
 };
 
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
@@ -2147,7 +2135,7 @@ test "table count max" {
     try expectEqual(@as(u32, 299600 + 2097152), table_count_max_for_tree(8, 8));
 }
 
-pub fn main() !void {
+test {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -2234,5 +2222,5 @@ pub fn main() !void {
     _ = tree.lookup;
     _ = tree.manifest;
 
-    std.debug.print("done\n", .{});
+    std.debug.print("table_count_max={}\n", .{table_count_max});
 }

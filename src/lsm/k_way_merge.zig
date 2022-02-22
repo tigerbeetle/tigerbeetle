@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const Direction = @import("tree.zig").Direction;
+const Direction = @import("direction.zig").Direction;
 
 pub fn KWayMergeIterator(
     comptime Context: type,
