@@ -165,7 +165,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (size_headers_copies >= size) return error.SizeTooSmallForHeadersCount;
 
             const size_circular_buffer = size - size_headers_copies;
-            if (size_circular_buffer < 64 * 1024 * 1024) return error.SizeTooSmallForCircularBuffer;
+            if (size_circular_buffer < 64 * config.message_size_max) return error.SizeTooSmallForCircularBuffer;
 
             log.debug("{}: size={} headers_len={} headers={} circular_buffer={}", .{
                 replica,
@@ -277,12 +277,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // TODO Snapshots
             if (header.op + 1 == self.headers.len) return null;
             return self.entry_for_op(header.op + 1);
-        }
-
-        pub fn next_offset(header: *const Header) u64 {
-            // TODO Snapshots
-            assert(header.command == .prepare);
-            return header.offset + vsr.sector_ceil(header.size);
         }
 
         pub fn has(self: *Self, header: *const Header) bool {
@@ -536,10 +530,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .destination_replica = destination_replica,
             };
 
-            assert(exact.offset + physical_size <= self.size_circular_buffer);
-
             const buffer = message.buffer[0..physical_size];
-            const offset = self.offset_in_circular_buffer(exact.offset);
+            const offset = self.offset_in_circular_buffer_for_op(op);
+            assert(offset + physical_size <= self.size_headers + self.size_circular_buffer);
 
             // Memory must not be owned by `self.headers` as these may be modified concurrently:
             assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
@@ -571,7 +564,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            _ = replica.journal.entry_for_op_exact_with_checksum(op, checksum) orelse {
+            _ = self.entry_for_op_exact_with_checksum(op, checksum) orelse {
                 self.read_prepare_log(op, checksum, "no entry exactly");
                 read.callback(replica, null, null);
                 return;
@@ -693,6 +686,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn recover_headers_buffer(self: *Self, message: *Message, offset: u64) []u8 {
             const max = std.math.min(message.buffer.len, self.size_headers - offset);
             assert(max % config.sector_size == 0);
+            assert(max % @sizeOf(Header) == 0);
             return message.buffer[0..max];
         }
 
@@ -855,7 +849,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
             const sectors = message.buffer[0..vsr.sector_ceil(message.header.size)];
-            assert(message.header.offset + sectors.len <= self.size_circular_buffer);
+            const offset = self.offset_in_circular_buffer_for_op(message.header.op);
+            assert(offset + sectors.len <= self.size_headers + self.size_circular_buffer);
 
             if (builtin.mode == .Debug) {
                 // Assert that any sector padding has already been zeroed:
@@ -864,12 +859,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(sum_of_sector_padding_bytes == 0);
             }
 
-            self.write_sectors(
-                write_prepare_header,
-                write,
-                sectors,
-                self.offset_in_circular_buffer(message.header.offset),
-            );
+            self.write_sectors(write_prepare_header, write, sectors, offset);
         }
 
         /// Attempt to lock the in-memory sector containing the header being written.
@@ -1018,9 +1008,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
         }
 
-        pub fn offset_in_circular_buffer(self: *Self, offset: u64) u64 {
-            assert(offset < self.size_circular_buffer);
-            return self.size_headers + offset;
+        fn offset_in_circular_buffer_for_op(self: *Self, op: u64) u64 {
+            const message_slots = @divTrunc(self.size_circular_buffer, config.message_size_max);
+            const message_slot = op % message_slots;
+            const message_offset = config.message_size_max * message_slot;
+            assert(message_offset < self.size_circular_buffer);
+
+            const message_offset_in_circular_buffer = self.size_headers + message_offset;
+            return message_offset_in_circular_buffer;
         }
 
         fn offset_in_headers_version(self: *Self, offset: u64, version: u1) u64 {
