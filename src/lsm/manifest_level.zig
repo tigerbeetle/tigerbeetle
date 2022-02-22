@@ -6,6 +6,7 @@ const meta = std.meta;
 
 const config = @import("../config.zig");
 const lsm = @import("tree.zig");
+const binary_search_keys = @import("binary_search.zig").binary_search_keys;
 
 const Direction = @import("tree.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
@@ -183,7 +184,7 @@ pub fn ManifestLevel(
                 .descending => key_max,
             };
 
-            const root_result = binary_search(root, key);
+            const root_result = binary_search_keys(Key, compare_keys, root, key);
             if (root_result.exact) {
                 return level.iterator_start_boundary(
                     .{
@@ -217,7 +218,7 @@ pub fn ManifestLevel(
                 assert(compare_keys(root[key_node], root[root_result.index]) == .lt);
 
                 const keys = level.keys.node_elements(key_node);
-                const keys_result = binary_search(keys, key);
+                const keys_result = binary_search_keys(Key, compare_keys, keys, key);
 
                 // Since we didn't have an exact match in the previous binary search, and since
                 // we've already handled the case of being out of bounds to the left with an
@@ -299,37 +300,6 @@ pub fn ManifestLevel(
             }
 
             return level.root_table_nodes_array[key_node];
-        }
-
-        const BinarySearchResult = struct {
-            index: usize,
-            exact: bool,
-        };
-
-        // TODO(ifreund) move this back to binary_search.zig and allow max key searching.
-        // Once this is in binary_search.zig we can then use it within tree.zig to find data blocks.
-        // We also need test coverage for this.
-        fn binary_search(keys: []const Key, key: Key) BinarySearchResult {
-            assert(keys.len > 0);
-
-            var offset: usize = 0;
-            var length: usize = keys.len;
-            while (length > 1) {
-                const half = length / 2;
-                const mid = offset + half;
-
-                // This trick seems to be what's needed to get llvm to emit branchless code for this,
-                // a ternary-style if expression was generated as a jump here for whatever reason.
-                const next_offsets = [_]usize{ offset, mid };
-                offset = next_offsets[@boolToInt(compare_keys(keys[mid], key) == .lt)];
-
-                length -= half;
-            }
-            const exact = compare_keys(keys[offset], key) == .eq;
-            return .{
-                .index = offset + @boolToInt(!exact),
-                .exact = exact,
-            };
         }
 
         inline fn root_keys(level: Self) []Key {
