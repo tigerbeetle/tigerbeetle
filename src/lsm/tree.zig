@@ -20,6 +20,8 @@ const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
 const ManifestLevel = @import("manifest_level.zig").ManifestLevel;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
+const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
 // We reserve maxInt(u64) to indicate that a table has not been deleted.
 pub const snapshot_latest = math.maxInt(u64) - 1;
@@ -169,10 +171,6 @@ pub fn Tree(
         };
 
         pub const Manifest = struct {
-
-            /// First 128 bytes of the table are a VSR protocol header for a repair message.
-            /// This data is filled in on writing the table so that we don't
-            /// need to do any extra work before sending the message on repair.
             pub const TableInfo = extern struct {
                 checksum: u128,
                 key_min: Key,
@@ -194,48 +192,77 @@ pub fn Tree(
                     assert(@alignOf(TableInfo) == 16);
                 }
 
-                pub fn visible(info: *const TableInfo, snapshot: u64) bool {
+                pub fn visible(table: *const TableInfo, snapshot: u64) bool {
                     assert(snapshot <= snapshot_latest);
-                    assert(snapshot != info.snapshot_min);
-                    assert(snapshot != info.snapshot_max);
+                    assert(snapshot != table.snapshot_min);
+                    assert(snapshot != table.snapshot_max);
 
-                    return info.snapshot_min < snapshot and snapshot < info.snapshot_max;
+                    return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
                 }
             };
 
-            const Level = ManifestLevel(NodePool, Key, TableInfo, compare_keys);
+            /// Level 0 is special since tables can overlap the same key range.
+            /// Here, we simply store tables in reverse order of precedence (i.e. newest first).
+            const Level0 = SegmentedArray(TableInfo, NodePool, table_count_max);
+
+            /// Levels beyond level 0 have tables with disjoint key ranges.
+            /// Here, we use a structure with indexes over the segmented array for performance.
+            const LevelN = ManifestLevel(NodePool, Key, TableInfo, compare_keys);
 
             node_pool: *NodePool,
-            levels: [config.lsm_levels]Level,
+
+            level_0: Level0,
+            level_n: [config.lsm_levels - 1]LevelN,
 
             pub fn init(allocator: mem.Allocator, node_pool: *NodePool) !Manifest {
-                var manifest = Manifest{
-                    .node_pool = node_pool,
-                    .levels = undefined,
-                };
+                var level_0 = try Level0.init(allocator);
+                errdefer level_0.deinit(allocator, node_pool);
 
-                for (manifest.levels) |*level, i| {
-                    errdefer for (manifest.levels[0..i]) |*l| l.deinit(allocator, node_pool);
+                var level_n: [config.lsm_levels - 1]LevelN = undefined;
+                for (level_n) |*level, i| {
+                    errdefer for (level_n[0..i]) |*l| l.deinit(allocator, node_pool);
 
-                    level.* = try Level.init(allocator);
+                    level.* = try LevelN.init(allocator);
                 }
+                errdefer for (level_n) |*l| l.deinit(allocator, node_pool);
 
-                return manifest;
+                return Manifest{
+                    .node_pool = node_pool,
+                    .level_0 = level_0,
+                    .level_n = level_n,
+                };
             }
 
             pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
-                for (manifest.levels) |*level| level.deinit(allocator, manifest.node_pool);
+                manifest.level_0.deinit(allocator, manifest.node_pool);
+                for (manifest.level_n) |*level| level.deinit(allocator, manifest.node_pool);
             }
 
             pub const LookupIterator = struct {
                 manifest: *Manifest,
                 snapshot: u64,
                 key: Key,
-                level: u8 = 0,
-                index: u32 = 0,
+                level: u8,
+                level_0: Level0.Iterator,
+                level_n: LevelN.Iterator,
 
                 pub fn next(it: *LookupIterator) ?*const TableInfo {
-                    _ = it;
+                    if (it.level == 0) {
+                        while (it.level_0.next()) |table| {
+                            // TODO Filter on snapshot and key.
+                            return table;
+                        }
+                        assert(it.level_0.done);
+
+                        it.level += 1;
+                        it.level_n = it.manifest.level_n[it.level - 1].iterator(
+                            it.snapshot,
+                            it.key,
+                            it.key,
+                            .ascending,
+                        );
+                    }
+                    assert(it.level > 0);
 
                     // TODO
                     return null;
@@ -247,37 +274,9 @@ pub fn Tree(
                     .manifest = manifest,
                     .snapshot = snapshot,
                     .key = key,
-                };
-            }
-
-            pub const Iterator = struct {
-                manifest: *Manifest,
-                snapshot: u64,
-                level: u8,
-                index: u32,
-                end: Key,
-                direction: Direction,
-
-                pub fn next(it: *Iterator) ?TableInfo {
-                    _ = it;
-                }
-            };
-
-            pub fn get_tables(
-                manifest: *Manifest,
-                snapshot: u64,
-                level: u8,
-                key_min: Key,
-                key_max: Key,
-                direction: Direction,
-            ) Iterator {
-                return .{
-                    .manifest = manifest,
-                    .snapshot = snapshot,
-                    .level = level,
-                    .key_min = key_min,
-                    .key_max = key_max,
-                    .direction = direction,
+                    .level = 0,
+                    .level_0 = manifest.level_0.iterator(0, 0, .ascending),
+                    .level_n = undefined,
                 };
             }
         };
