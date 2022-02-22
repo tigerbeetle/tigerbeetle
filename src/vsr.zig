@@ -383,6 +383,7 @@ pub const Header = packed struct {
         if (self.client == 0) return "client == 0";
         if (self.context != 0) return "context != 0";
         if (self.op != self.commit) return "op != commit";
+        if (self.offset != 0) return "offset != 0";
         if (self.operation == .register) {
             // In this context, the commit number is the newly registered session number.
             // The `0` commit number is reserved for cluster initialization.
