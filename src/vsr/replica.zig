@@ -593,7 +593,6 @@ pub fn Replica(
             message.header.view = self.view;
             message.header.op = self.op + 1;
             message.header.commit = self.commit_max;
-            message.header.offset = Journal.next_offset(latest_entry);
             message.header.replica = self.replica;
             message.header.command = .prepare;
 
@@ -2988,16 +2987,6 @@ pub fn Replica(
                 return false;
             }
 
-            // Caveat: Do not repair an existing op or gap if doing so would overlap another:
-            if (self.repair_header_would_overlap_another(header)) {
-                if (!self.repair_header_would_connect_hash_chain(header)) {
-                    log.debug("{}: repair_header: false (overlap)", .{self.replica});
-                    return false;
-                }
-                // We may have to overlap previous entries in order to connect the hash chain:
-                log.debug("{}: repair_header: overlap, connects hash chain", .{self.replica});
-            }
-
             // TODO Snapshots: Skip if this header is already snapshotted.
 
             assert(header.op < self.op or
@@ -3068,34 +3057,6 @@ pub fn Replica(
             assert(entry.op == self.op);
             assert(entry.checksum == self.journal.entry_for_op_exact(self.op).?.checksum);
             return true;
-        }
-
-        /// If we repair this header, then would this overlap and overwrite part of another batch?
-        /// Journal entries have variable-sized batches that may overlap if entries are disconnected.
-        fn repair_header_would_overlap_another(self: *Self, header: *const Header) bool {
-            // TODO Snapshots: Handle journal wrap around.
-            {
-                // Look behind this entry for any preceeding entry that this would overlap:
-                var op: u64 = header.op;
-                while (op > 0) {
-                    op -= 1;
-                    if (self.journal.entry_for_op(op)) |neighbor| {
-                        if (Journal.next_offset(neighbor) > header.offset) return true;
-                        break;
-                    }
-                }
-            }
-            {
-                // Look beyond this entry for any succeeding entry that this would overlap:
-                var op: u64 = header.op + 1;
-                while (op <= self.op) : (op += 1) {
-                    if (self.journal.entry_for_op(op)) |neighbor| {
-                        if (Journal.next_offset(header) > neighbor.offset) return true;
-                        break;
-                    }
-                }
-            }
-            return false;
         }
 
         /// Reads prepares into the pipeline (before we start the view as the new leader).
