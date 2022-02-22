@@ -165,6 +165,9 @@ pub const Header = packed struct {
     /// The journal offset to which this message relates. This enables direct access to a prepare in
     /// storage, without yet having any previous prepares. All prepares are of variable size, since
     /// a prepare may contain any number of data structures (even if these are of fixed size).
+    ///
+    /// * A `pong` sets this to the sender's wall clock value.
+    /// * A `do_view_change` sets this to the latest normal view number.
     offset: u64 = 0,
 
     /// The size of the Header structure (always), plus any associated body.

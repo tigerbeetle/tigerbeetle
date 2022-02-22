@@ -1192,7 +1192,7 @@ pub fn Replica(
                         checksum,
                     });
 
-                    // We have gauranteed the prepare but our copy is faulty (not safe to nack).
+                    // We have guaranteed the prepare but our copy is faulty (not safe to nack).
                     return;
                 }
 
