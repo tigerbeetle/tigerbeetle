@@ -206,68 +206,99 @@ pub fn Tree(
 
             /// Level 0 is special since tables can overlap the same key range.
             /// Here, we simply store tables in reverse order of precedence (i.e. newest first).
-            const Level0 = SegmentedArray(TableInfo, NodePool, table_count_max);
+            const Conjoint = SegmentedArray(TableInfo, NodePool, table_count_max);
 
             /// Levels beyond level 0 have tables with disjoint key ranges.
             /// Here, we use a structure with indexes over the segmented array for performance.
-            const LevelN = ManifestLevel(NodePool, Key, TableInfo, compare_keys);
+            const Disjoint = ManifestLevel(NodePool, Key, TableInfo, compare_keys);
+
+            const Level = union(LevelTag) {
+                conjoint: Conjoint,
+                disjoint: Disjoint,
+            };
+
+            const LevelTag = enum {
+                conjoint,
+                disjoint,
+            };
 
             node_pool: *NodePool,
 
-            level_0: Level0,
-            level_n: [config.lsm_levels - 1]LevelN,
+            levels: [config.lsm_levels]Level,
 
             pub fn init(allocator: mem.Allocator, node_pool: *NodePool) !Manifest {
-                var level_0 = try Level0.init(allocator);
-                errdefer level_0.deinit(allocator, node_pool);
+                var levels: [config.lsm_levels]Level = undefined;
 
-                var level_n: [config.lsm_levels - 1]LevelN = undefined;
-                for (level_n) |*level, i| {
-                    errdefer for (level_n[0..i]) |*l| l.deinit(allocator, node_pool);
+                levels[0] = .{ .conjoint = try Conjoint.init(allocator) };
+                errdefer levels[0].conjoint.deinit(allocator, node_pool);
 
-                    level.* = try LevelN.init(allocator);
+                for (levels[1..]) |*level, i| {
+                    errdefer for (levels[1..i]) |*l| l.disjoint.deinit(allocator, node_pool);
+
+                    level.* = .{ .disjoint = try Disjoint.init(allocator) };
                 }
-                errdefer for (level_n) |*l| l.deinit(allocator, node_pool);
+                errdefer for (levels[1..]) |*l| l.disjoint.deinit(allocator, node_pool);
 
                 return Manifest{
                     .node_pool = node_pool,
-                    .level_0 = level_0,
-                    .level_n = level_n,
+                    .levels = levels,
                 };
             }
 
             pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
-                manifest.level_0.deinit(allocator, manifest.node_pool);
-                for (manifest.level_n) |*level| level.deinit(allocator, manifest.node_pool);
+                manifest.levels[0].conjoint.deinit(allocator, manifest.node_pool);
+                for (manifest.levels[1..]) |*l| l.disjoint.deinit(allocator, manifest.node_pool);
             }
 
             pub const LookupIterator = struct {
                 manifest: *Manifest,
                 snapshot: u64,
                 key: Key,
-                level: u8,
-                level_0: Level0.Iterator,
-                level_n: LevelN.Iterator,
+                level: u8 = 0,
+                inner: ?Conjoint.Iterator = null,
+                precedence: ?u64 = null,
 
                 pub fn next(it: *LookupIterator) ?*const TableInfo {
-                    if (it.level == 0) {
-                        while (it.level_0.next()) |table| {
-                            // TODO Filter on snapshot and key.
-                            return table;
+                    while (it.level < config.lsm_levels) : (it.level += 1) {
+                        switch (it.manifest.levels[it.level]) {
+                            .conjoint => |*level| {
+                                assert(it.level == 0);
+
+                                if (it.inner == null) it.inner = level.iterator(0, 0, .ascending);
+                                while (it.inner.?.next()) |table| {
+                                    if (it.precedence) |p| assert(p > table.snapshot_min);
+                                    it.precedence = table.snapshot_min;
+
+                                    if (!table.visible(it.snapshot)) continue;
+                                    if (compare_keys(it.key, table.key_min) == .lt) continue;
+                                    if (compare_keys(it.key, table.key_max) == .gt) continue;
+
+                                    return table;
+                                }
+                                assert(it.inner.?.done);
+                                it.inner = null;
+                            },
+                            .disjoint => |*level| {
+                                assert(it.level > 0);
+
+                                var inner = level.iterator(it.snapshot, it.key, it.key, .ascending);
+                                if (inner.next()) |table| {
+                                    if (it.precedence) |p| assert(p > table.snapshot_min);
+                                    it.precedence = table.snapshot_min;
+
+                                    assert(table.visible(it.snapshot));
+                                    assert(compare_keys(it.key, table.key_min) != .lt);
+                                    assert(compare_keys(it.key, table.key_max) != .gt);
+                                    assert(inner.next() == null);
+
+                                    it.level += 1;
+                                    return table;
+                                }
+                            },
                         }
-                        assert(it.level_0.done);
-
-                        it.level += 1;
-                        it.level_n = it.manifest.level_n[it.level - 1].iterator(
-                            it.snapshot,
-                            it.key,
-                            it.key,
-                            .ascending,
-                        );
                     }
-                    assert(it.level > 0);
 
-                    // TODO
+                    assert(it.level == config.lsm_levels);
                     return null;
                 }
             };
@@ -277,9 +308,6 @@ pub fn Tree(
                     .manifest = manifest,
                     .snapshot = snapshot,
                     .key = key,
-                    .level = 0,
-                    .level_0 = manifest.level_0.iterator(0, 0, .ascending),
-                    .level_n = undefined,
                 };
             }
         };
@@ -2213,6 +2241,7 @@ test {
     _ = TestTree.Table.FlushIterator.flush;
     _ = TestTree.TableIterator;
     _ = TestTree.LevelIterator;
+    _ = TestTree.Manifest.LookupIterator.next;
     _ = TestTree.Compaction;
     _ = TestTree.Table.Builder.data_block_finish;
     _ = tree.prefetch_enqueue;
@@ -2223,6 +2252,7 @@ test {
     _ = tree.remove;
     _ = tree.lookup;
     _ = tree.manifest;
+    _ = tree.manifest.lookup;
 
     std.debug.print("table_count_max={}\n", .{table_count_max});
 }
