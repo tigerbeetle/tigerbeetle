@@ -14,8 +14,11 @@ pub const tb_packet_list_t = ClientThread.Packet.List;
 pub const tb_client_t = *anyopaque;
 pub const tb_status_t = enum(c_int) {
     success = 0,
-    out_of_memory = 1,
-    todo_error = 0xff,
+    unexpected,
+    out_of_memory,
+    invalid_address,
+    system_resources,
+    network_subsystem,
 };
 
 pub export fn tb_client_init(
@@ -42,8 +45,11 @@ pub export fn tb_client_init(
     ) catch |err| {
         Context.allocator.destroy(context);
         return switch (err) {
-            // TODO handle errors
-            else => .todo_error,
+            error.Unexpected => .unexpected,
+            error.OutOfMemory => .out_of_memory,
+            error.InvalidAddress => .invalid_address,
+            error.SystemResources => .system_resources,
+            error.NetworkSubsystemFailed => .network_subsystem,
         };
     };
 
