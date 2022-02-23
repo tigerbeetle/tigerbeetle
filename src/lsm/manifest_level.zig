@@ -12,11 +12,6 @@ const Direction = @import("direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
-fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
-    const T = @TypeOf(numerator, denominator);
-    return math.divCeil(T, numerator, denominator) catch unreachable;
-}
-
 pub fn ManifestLevel(
     comptime NodePool: type,
     comptime Key: type,
