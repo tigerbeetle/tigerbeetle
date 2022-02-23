@@ -287,17 +287,19 @@ pub fn ManifestLevel(
         ) u32 {
             assert(key_node < level.keys.node_count);
 
-            if (direction == .descending) {
-                // Since the corresponding table node in the root_table_nodes_array is a lower
-                // bound, we need to add one to make it an upper bound when descending.
-                if (key_node + 1 == level.keys.node_count) {
-                    // If we were already at the last key node, then we
-                    // should instead return the very last table node.
-                    return level.tables.node_count - 1;
-                }
+            switch (direction) {
+                .ascending => return level.root_table_nodes_array[key_node],
+                .descending => {
+                    if (key_node + 1 < level.keys.node_count) {
+                        // Since the corresponding node in root_table_nodes_array is a lower bound,
+                        // we must add one to make it an upper bound when descending.
+                        return level.root_table_nodes_array[key_node + 1];
+                    } else {
+                        // However, if we are at the last key node, then return the last table node.
+                        return level.tables.node_count - 1;
+                    }
+                },
             }
-
-            return level.root_table_nodes_array[key_node];
         }
 
         inline fn root_keys(level: Self) []Key {
