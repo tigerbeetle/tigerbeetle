@@ -89,22 +89,32 @@ pub fn ManifestLevel(
 
                     switch (it.direction) {
                         .ascending => {
+                            // Check if the table is out of bounds to the left.
+                            //
                             // Unlike in the descending case, it is not guaranteed that
-                            // table.key_max is less than it.key_min on the first iteration
-                            // as only the key_min of a table is stored in our root/key nodes.
-                            // On subsequent iterations this check will always be true.
-                            if (compare_keys(it.key_min, table.key_max) == .gt or
-                                compare_keys(it.key_max, table.key_min) == .lt)
-                            {
+                            // table.key_max is greater than or equal to it.key_min on the
+                            // first iteration as only the key_min of a table is stored in our
+                            // root/key nodes. On subsequent iterations this check will always
+                            // be false.
+                            if (compare_keys(it.key_min, table.key_max) == .gt) {
+                                continue;
+                            }
+
+                            // Check if the table is out of bounds to the right.
+                            if (compare_keys(it.key_max, table.key_min) == .lt) {
                                 it.inner.done = true;
                                 return null;
                             }
                         },
                         .descending => {
+                            // Assert that the table is not out of bounds to the right.
+                            //
                             // We can assert this as it is exactly the same key comparison when we
                             // binary search in iterator_start(), and since we move in descending
                             // order this also remains true beyond the first iteration.
                             assert(compare_keys(it.key_max, table.key_min) != .lt);
+
+                            // Check if the table is out of bounds to the left.
                             if (compare_keys(it.key_min, table.key_max) == .gt) {
                                 it.inner.done = true;
                                 return null;
