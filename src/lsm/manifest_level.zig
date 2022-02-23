@@ -76,8 +76,6 @@ pub fn ManifestLevel(
         pub const Iterator = struct {
             level: *const Self,
             inner: Tables.Iterator,
-
-            /// May pass math.maxInt(u64)-1 if there is no snapshot.
             snapshot: u64,
             key_min: Key,
             key_max: Key,
