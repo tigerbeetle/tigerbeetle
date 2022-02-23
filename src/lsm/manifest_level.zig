@@ -84,45 +84,37 @@ pub fn ManifestLevel(
             direction: Direction,
 
             pub fn next(it: *Iterator) ?*const TableInfo {
-                while (it.inner.next()) |table_info| {
-                    // We can't assert that it.inner.done == false as inner.next() may set done
-                    // before returning.
+                while (it.inner.next()) |table| {
+                    // We can't assert !it.inner.done as inner.next() may set done before returning.
 
-                    assert(table_info.snapshot_min < table_info.snapshot_max);
-
-                    if (it.snapshot < table_info.snapshot_min) continue;
-                    assert(it.snapshot != table_info.snapshot_min);
-
-                    if (it.snapshot > table_info.snapshot_max) continue;
-                    assert(it.snapshot != table_info.snapshot_max);
+                    if (!table.visible(it.snapshot)) continue;
 
                     switch (it.direction) {
                         .ascending => {
                             // Unlike in the descending case, it is not guaranteed that
-                            // table_info.key_max is less than it.key_min on the first iteration
+                            // table.key_max is less than it.key_min on the first iteration
                             // as only the key_min of a table is stored in our root/key nodes.
                             // On subsequent iterations this check will always be true.
-                            if (compare_keys(table_info.key_max, it.key_min) == .lt or
-                                compare_keys(table_info.key_min, it.key_max) == .gt)
+                            if (compare_keys(it.key_min, table.key_max) == .gt or
+                                compare_keys(it.key_max, table.key_min) == .lt)
                             {
                                 it.inner.done = true;
                                 return null;
                             }
                         },
                         .descending => {
-                            // We can assert this as it is exactly the same key comparison we
-                            // perform when doing binary search in iterator_start(), and since
-                            // we move in descending order this remains true beyond the first
-                            // iteration.
-                            assert(compare_keys(table_info.key_min, it.key_max) != .gt);
-                            if (compare_keys(table_info.key_max, it.key_min) == .lt) {
+                            // We can assert this as it is exactly the same key comparison when we
+                            // binary search in iterator_start(), and since we move in descending
+                            // order this also remains true beyond the first iteration.
+                            assert(compare_keys(it.key_max, table.key_min) != .lt);
+                            if (compare_keys(it.key_min, table.key_max) == .gt) {
                                 it.inner.done = true;
                                 return null;
                             }
                         },
                     }
 
-                    return table_info;
+                    return table;
                 }
 
                 assert(it.inner.done);
@@ -132,12 +124,14 @@ pub fn ManifestLevel(
 
         pub fn iterator(
             level: *const Self,
-            /// May pass math.maxInt(u64) if there is no snapshot.
             snapshot: u64,
             key_min: Key,
             key_max: Key,
             direction: Direction,
         ) Iterator {
+            assert(snapshot <= lsm.snapshot_latest);
+            assert(compare_keys(key_min, key_max) != .gt);
+
             const inner = blk: {
                 if (level.iterator_start(key_min, key_max, direction)) |start| {
                     break :blk level.tables.iterator(
@@ -176,6 +170,8 @@ pub fn ManifestLevel(
             key_max: Key,
             direction: Direction,
         ) ?SegmentedArrayCursor {
+            assert(compare_keys(key_min, key_max) != .gt);
+
             const root = level.root_keys();
             if (root.len == 0) return null;
 

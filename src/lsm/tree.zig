@@ -193,7 +193,10 @@ pub fn Tree(
                 }
 
                 pub fn visible(table: *const TableInfo, snapshot: u64) bool {
+                    assert(table.address != 0);
+                    assert(table.snapshot_min < table.snapshot_max);
                     assert(snapshot <= snapshot_latest);
+
                     assert(snapshot != table.snapshot_min);
                     assert(snapshot != table.snapshot_max);
 
