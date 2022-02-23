@@ -162,6 +162,14 @@ pub fn ClientThread(
         signal: Signal,
         thread: std.Thread,
 
+        pub const Error = error{
+            Unexpected,
+            OutOfMemory,
+            InvalidAddress,
+            SystemResources,
+            NetworkSubsystemFailed,
+        };
+
         pub fn init(
             self: *Self,
             allocator: std.mem.Allocator,
@@ -169,7 +177,7 @@ pub fn ClientThread(
             addresses: []const u8, 
             num_packets: u32,
             on_completion_fn: fn (*Self, Packet.List) callconv(.C) void,
-        ) !void {
+        ) Error!void {
             self.allocator = allocator;
             self.client_id = std.crypto.random.int(u128);
             log.debug("init: initializing client_id={}.", .{self.client_id});
@@ -177,21 +185,25 @@ pub fn ClientThread(
             log.debug("init: allocating tb_packets.", .{});
             self.packets = self.allocator.alloc(Packet, num_packets) catch |err| {
                 log.err("failed to allocate tb_packets: {}", .{err});
-                return err;
+                return Error.OutOfMemory;
             };
             errdefer self.allocator.free(self.packets);
 
             log.debug("init: parsing vsr addresses.", .{});
             self.addresses = vsr.parse_addresses(self.allocator, addresses) catch |err| {
                 log.err("failed to parse addresses: {}.", .{err});
-                return err;
+                return Error.InvalidAddress;
             };
             errdefer self.allocator.free(self.addresses);
 
             log.debug("init: initializing IO.", .{});
             self.io = IO.init(32, 0) catch |err| {
                 log.err("failed to initialize IO: {}.", .{err});
-                return err;
+                return switch (err) {
+                    error.ProcessFdQuotaExceeded => error.SystemResources,
+                    error.Unexpected => error.Unexpected,
+                    else => unreachable,
+                };
             }; 
             errdefer self.io.deinit();
 
@@ -240,7 +252,13 @@ pub fn ClientThread(
             log.debug("init: spawning Context thread.", .{});
             self.thread = std.Thread.spawn(.{}, Self.run, .{self}) catch |err| {
                 log.err("failed to spawn context thread: {}.", .{err});
-                return err;
+                return switch (err) {
+                    error.Unexpected => error.Unexpected,
+                    error.OutOfMemory => error.OutOfMemory,
+                    error.SystemResources,
+                    error.ThreadQuotaExceeded,
+                    error.LockedMemoryLimitExceeded => error.SystemResources,
+                };
             };
         }
         
@@ -372,19 +390,61 @@ const Signal = struct {
 
     pub fn init(self: *Signal, io: *IO, on_signal_fn: fn (*Signal) void) !void {
         self.io = io;
-        self.server_socket = try os.socket(
+        self.server_socket = os.socket(
             os.AF.INET, 
             os.SOCK.STREAM | os.SOCK.NONBLOCK, 
             os.IPPROTO.TCP,
-        );
+        ) catch |err| {
+            log.err("failed to create signal server socket: {}", .{err});
+            return switch (err) {
+                error.PermissionDenied,
+                error.ProtocolNotSupported,
+                error.SocketTypeNotSupported,
+                error.AddressFamilyNotSupported,
+                error.ProtocolFamilyNotAvailable => error.NetworkSubsystemFailed,
+                error.ProcessFdQuotaExceeded,
+                error.SystemFdQuotaExceeded,
+                error.SystemResources => error.SystemResources,
+                error.Unexpected => error.Unexpected,
+            };
+        };
         errdefer os.closeSocket(self.server_socket);
 
-        try os.listen(self.server_socket, 1);
+        os.listen(self.server_socket, 1) catch |err| {
+            log.err("failed to listen on signal server socket: {}", .{err});
+            return switch (err) {
+                error.AddressInUse => unreachable,
+                error.FileDescriptorNotASocket => unreachable,
+                error.AlreadyConnected => unreachable,
+                error.SocketNotBound => unreachable,
+                error.OperationNotSupported,
+                error.NetworkSubsystemFailed => error.NetworkSubsystemFailed,
+                error.SystemResources => error.SystemResources,
+                error.Unexpected => error.Unexpected,
+            };
+        };
+
         var addr = std.net.Address.initIp4(undefined, undefined);
         var addr_len = addr.getOsSockLen();
-        try os.getsockname(self.server_socket, &addr.any, &addr_len);
+        os.getsockname(self.server_socket, &addr.any, &addr_len) catch |err| {
+            log.err("failed to get address of signal server socket: {}", .{err});
+            return switch (err) {
+                error.SocketNotBound => unreachable,
+                error.FileDescriptorNotASocket => unreachable,
+                error.SystemResources => error.SystemResources,
+                error.NetworkSubsystemFailed => error.NetworkSubsystemFailed,
+                error.Unexpected => error.Unexpected,
+            };
+        };
 
-        self.connect_socket = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
+        self.connect_socket = self.io.open_socket(
+            os.AF.INET,
+            os.SOCK.STREAM,
+            os.IPPROTO.TCP,
+        ) catch |err| {
+            log.err("failed to create signal connect socket: {}", .{err});
+            return error.Unexpected;
+        };
         errdefer os.closeSocket(self.connect_socket);
 
         // Tracks when the connect_socket connects to the server_socket
@@ -418,18 +478,51 @@ const Signal = struct {
         // Wait for the connect_socket to connect to the server_socket.
         self.accept_socket = IO.INVALID_SOCKET;
         while (!do_connect.is_connected) {
-            try self.io.tick();
+            self.io.tick() catch |err| {
+                log.err("failed to tick IO when setting up signal: {}", .{err});
+                return error.Unexpected;
+            };
 
             // Try to accept the connection from the connect_socket as the accept_socket
             if (self.accept_socket == IO.INVALID_SOCKET) {
-                self.accept_socket = os.accept(self.server_socket, null, null, 0) catch |err| {
-                    if (err == error.WouldBlock) continue;
-                    return err;
+                self.accept_socket = os.accept(self.server_socket, null, null, 0) catch |e| switch (e) {
+                    error.WouldBlock => continue,
+                    error.ConnectionAborted => unreachable,
+                    error.ConnectionResetByPeer => unreachable,
+                    error.FileDescriptorNotASocket => unreachable,
+                    error.ProcessFdQuotaExceeded,
+                    error.SystemFdQuotaExceeded,
+                    error.SystemResources => return error.SystemResources,
+                    error.SocketNotListening => unreachable,
+                    error.BlockedByFirewall => unreachable,
+                    error.ProtocolFailure,
+                    error.OperationNotSupported,
+                    error.NetworkSubsystemFailed => return error.NetworkSubsystemFailed,
+                    error.Unexpected => return error.Unexpected,
                 };
             }
         }
 
-        try do_connect.result;
+        _ = do_connect.result catch |err| {
+            log.err("failed to connect on signal client socket: {}", .{err});
+            return switch (err) {
+                error.FileNotFound => unreachable,
+                error.SystemResources => error.SystemResources,
+                error.WouldBlock => unreachable,
+                error.AddressInUse => unreachable,
+                error.AddressFamilyNotSupported => unreachable,
+                error.AddressNotAvailable,
+                error.PermissionDenied,
+                error.ConnectionTimedOut,
+                error.ConnectionRefused,
+                error.ConnectionResetByPeer => error.Unexpected,
+                error.NetworkUnreachable => error.NetworkSubsystemFailed,
+                error.ConnectionPending => unreachable,
+                error.FileDescriptorNotASocket => unreachable,
+                error.Unexpected => error.Unexpected,
+            };
+        };
+
         assert(do_connect.is_connected);
         assert(self.accept_socket != IO.INVALID_SOCKET);
         assert(self.connect_socket != IO.INVALID_SOCKET);
