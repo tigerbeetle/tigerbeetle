@@ -3,9 +3,10 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct tb_uint128_t {
-    __bytes: uint8_t[16];
+    uint8_t __bytes[16];
 } tb_uint128_t;
 
 typedef struct tb_account_flags_t {
@@ -199,11 +200,11 @@ TB_STATUS tb_client_init(
     uint32_t address_len,
     uint32_t num_packets,
     uintptr_t on_completion_ctx,
-    void (*on_completion_fn)(uintptr_t, tb_client_t, *tb_packet_list_t)
+    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_list_t*)
 );
 
 void tb_client_submit(
-    tb_client client,
+    tb_client_t client,
     tb_packet_list_t* packets
 );
 
