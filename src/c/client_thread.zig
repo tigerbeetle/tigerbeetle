@@ -505,22 +505,7 @@ const Signal = struct {
 
         _ = do_connect.result catch |err| {
             log.err("failed to connect on signal client socket: {}", .{err});
-            return switch (err) {
-                error.FileNotFound => unreachable,
-                error.SystemResources => error.SystemResources,
-                error.WouldBlock => unreachable,
-                error.AddressInUse => unreachable,
-                error.AddressFamilyNotSupported => unreachable,
-                error.AddressNotAvailable,
-                error.PermissionDenied,
-                error.ConnectionTimedOut,
-                error.ConnectionRefused,
-                error.ConnectionResetByPeer => error.Unexpected,
-                error.NetworkUnreachable => error.NetworkSubsystemFailed,
-                error.ConnectionPending => unreachable,
-                error.FileDescriptorNotASocket => unreachable,
-                error.Unexpected => error.Unexpected,
-            };
+            return error.Unexpected;
         };
 
         assert(do_connect.is_connected);

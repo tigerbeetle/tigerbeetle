@@ -591,6 +591,7 @@ pub const IO = struct {
         PermissionDenied,
         ProtocolNotSupported,
         ConnectionTimedOut,
+        SystemResources,
     } || os.UnexpectedError;
 
     pub fn connect(
