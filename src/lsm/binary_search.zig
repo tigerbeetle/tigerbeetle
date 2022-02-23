@@ -7,6 +7,8 @@ const math = std.math;
 // TODO The Zig self hosted compiler will implement inlining itself before passing the IR to llvm,
 // which should eliminate the current poor codegen of key_from_value/compare_keys.
 
+/// Returns the index of the key either exactly equal to the target key or, if there is no exact
+/// match, the next greatest key.
 /// Doesn't preform the extra key comparison to determine if the match is exact
 pub fn binary_search_values_raw(
     comptime Key: type,
