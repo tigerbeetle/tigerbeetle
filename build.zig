@@ -50,6 +50,7 @@ pub fn build(b: *std.build.Builder) void {
         tb_client.setMainPkgPath("src");
         tb_client.setTarget(target);
         tb_client.setBuildMode(mode);
+        tb_client.setOutputDir("zig-out");
 
         const os_tag = target.os_tag orelse builtin.target.os.tag;
         if (os_tag != .windows) {
