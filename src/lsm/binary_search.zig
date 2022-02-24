@@ -37,6 +37,26 @@ pub fn binary_search_values_raw(
     return @intCast(u32, offset + @boolToInt(compare_keys(key_from_value(values[offset]), key) == .lt));
 }
 
+pub inline fn binary_search_keys_raw(
+    comptime Key: type,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    keys: []const Key,
+    key: Key,
+) u32 {
+    return binary_search_values_raw(
+        Key,
+        Key,
+        struct {
+            inline fn key_from_key(k: Key) Key {
+                return k;
+            }
+        }.key_from_key,
+        compare_keys,
+        keys,
+        key,
+    );
+}
+
 const BinarySearchResult = struct {
     index: u32,
     exact: bool,
@@ -63,18 +83,11 @@ pub inline fn binary_search_keys(
     keys: []const Key,
     key: Key,
 ) BinarySearchResult {
-    return binary_search_values(
-        Key,
-        Key,
-        struct {
-            inline fn key_from_key(k: Key) Key {
-                return k;
-            }
-        }.key_from_key,
-        compare_keys,
-        keys,
-        key,
-    );
+    const index = binary_search_keys_raw(Key, compare_keys, keys, key);
+    return .{
+        .index = index,
+        .exact = index < keys.len and compare_keys(keys[index], key) == .eq,
+    };
 }
 
 const test_binary_search = struct {

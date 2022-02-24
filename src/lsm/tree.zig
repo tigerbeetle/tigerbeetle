@@ -1107,16 +1107,19 @@ pub fn Tree(
             /// Returns the zero-based index of the data block that may contain the key.
             /// May be called on an index block only when the key is already in range of the table.
             inline fn index_data_block_for_key(index_block: BlockPtrConst, key: Key) u32 {
-                // TODO(ifreund) We can move ManifestLevel binary search into binary_search.zig
-                // and then use it here instead of this simple for loop.
-                for (Table.index_data_keys_used_const(index_block)) |data_block_key_max, i| {
-                    if (compare_keys(key, data_block_key_max) == .gt) continue;
-                    return @intCast(u32, i);
-                } else {
-                    // The key cannot be greater than the last key_max.
-                    // There must also be at least one key in the index block.
-                    unreachable;
-                }
+                // Because we store key_max in the index block we can use the raw binary search
+                // here and avoid the extra comparison. If the search finds an exact match, we
+                // want to return that data block. If the search does not find an exact match
+                // it returns the index of the next greatest key, which again is the index of the
+                // data block that may contain the key.
+                const data_block_index = binary_search.binary_search_keys_raw(
+                    Key,
+                    compare_keys,
+                    Table.index_data_keys_used_const(index_block),
+                    key,
+                );
+                assert(data_block_index < index_data_blocks_used(index_block));
+                return data_block_index;
             }
 
             inline fn data_block_values(data_block: BlockPtr) []Value {
