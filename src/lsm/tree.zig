@@ -12,6 +12,7 @@ const config = @import("../config.zig");
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const utils = @import("../utils.zig");
 const vsr = @import("../vsr.zig");
+const binary_search = @import("binary_search.zig");
 
 const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
 const Direction = @import("direction.zig").Direction;
@@ -786,13 +787,16 @@ pub fn Tree(
                 if (compare_keys(key, table.info.key_min) == .lt) return null;
                 if (compare_keys(key, table.info.key_max) == .gt) return null;
 
-                var index_block = &table.blocks[0];
+                const index_block = &table.blocks[0];
 
                 const i = index_data_block_for_key(index_block, key);
 
                 const meta_block_count = index_block_count + filter_block_count;
                 const data_blocks_used = index_data_blocks_used(index_block);
-                const data_block = table.blocks[meta_block_count..][0..data_blocks_used][i];
+                const data_block = @alignCast(
+                    config.sector_size,
+                    &table.blocks[meta_block_count..][0..data_blocks_used][i],
+                );
 
                 if (verify) {
                     // TODO What else do we expect?
@@ -800,9 +804,44 @@ pub fn Tree(
                     assert(index_data_addresses(index_block)[i] != 0);
                 }
 
-                // TODO(ifreund) Hook up Eytzinger search and binary search.
-                _ = data_block;
-                @panic("todo");
+                // TODO(ifreund) Check the filter block before searching in the data block
+
+                assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
+                const key_layout_bytes = @alignCast(
+                    @alignOf(Key),
+                    data_block[data.key_layout_offset..][0..data.key_layout_size],
+                );
+                const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
+
+                const e = eytzinger(data.key_count, data.value_count_max);
+                const values = e.search_values(
+                    Key,
+                    Value,
+                    compare_keys,
+                    key_layout,
+                    data_block_values_used(data_block),
+                    key,
+                );
+
+                switch (values.len) {
+                    0 => return null,
+                    1 => return &values[0],
+                    else => {
+                        const result = binary_search.binary_search_values(
+                            Key,
+                            Value,
+                            key_from_value,
+                            compare_keys,
+                            values,
+                            key,
+                        );
+                        if (result.exact) {
+                            return &values[result.index];
+                        } else {
+                            return null;
+                        }
+                    },
+                }
             }
 
             const Builder = struct {
@@ -1017,8 +1056,12 @@ pub fn Tree(
                 return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
             }
 
-            inline fn index_data_keys_used(index_block: BlockPtr) []const Key {
-                return index_data_keys(index_block)[0..index_data_blocks_used(index_block)];
+            inline fn index_data_keys_const(index_block: BlockPtrConst) []const Key {
+                return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
+            }
+
+            inline fn index_data_keys_used_const(index_block: BlockPtrConst) []const Key {
+                return index_data_keys_const(index_block)[0..index_data_blocks_used(index_block)];
             }
 
             inline fn index_data_addresses(index_block: BlockPtr) []u64 {
@@ -1063,10 +1106,10 @@ pub fn Tree(
 
             /// Returns the zero-based index of the data block that may contain the key.
             /// May be called on an index block only when the key is already in range of the table.
-            inline fn index_data_block_for_key(index_block: BlockPtr, key: Key) u32 {
+            inline fn index_data_block_for_key(index_block: BlockPtrConst, key: Key) u32 {
                 // TODO(ifreund) We can move ManifestLevel binary search into binary_search.zig
                 // and then use it here instead of this simple for loop.
-                for (Table.index_data_keys_used(index_block)) |data_block_key_max, i| {
+                for (Table.index_data_keys_used_const(index_block)) |data_block_key_max, i| {
                     if (compare_keys(key, data_block_key_max) == .gt) continue;
                     return @intCast(u32, i);
                 } else {
