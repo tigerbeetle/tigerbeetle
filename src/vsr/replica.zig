@@ -1148,6 +1148,15 @@ pub fn Replica(
             _ = message;
         }
 
+        /// If the requested prepare has been guaranteed by this replica:
+        /// * Read the prepare from storage, and forward it to the replica that requested it.
+        /// * Otherwise send no reply — it isn't safe to nack.
+        /// If the requested prepare has *not* been guaranteed by this replica, then send a nack.
+        ///
+        /// A prepare is considered "guaranteed" by a replica if that replica has acknowledged it
+        /// to the cluster. The cluster sees the replica as an underwriter of a guaranteed
+        /// prepare. If a guaranteed prepare is found to by faulty, the replica must repair it
+        /// to restore durability.
         fn on_request_prepare(self: *Self, message: *const Message) void {
             if (self.ignore_repair_message(message)) return;
 

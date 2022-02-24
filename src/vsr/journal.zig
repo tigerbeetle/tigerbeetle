@@ -12,6 +12,14 @@ const Header = vsr.Header;
 
 const log = std.log.scoped(.journal);
 
+/// The contiguous zones of a journal file.
+const Zone = enum {
+    /// A circular buffer of the message headers.
+    headers,
+    /// A circular buffer of Prepare messages. Each message is padded to `config.message_size_max`.
+    prepares,
+};
+
 pub fn Journal(comptime Replica: type, comptime Storage: type) type {
     return struct {
         const Self = @This();
@@ -93,10 +101,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// We copy-on-write to these buffers when writing, as in-memory headers may change concurrently.
         /// The buffers belong to the IOP at the corresponding index in IOPS.
         headers_iops: *align(config.sector_size) [config.io_depth_write][config.sector_size]u8,
-        /// Apart from the header written with the entry, we also store two redundant copies of each
-        /// header at different locations on disk, and we alternate between these for each append.
-        /// This tracks which version (0 or 1) should be written to next:
-        headers_version: u1 = 0,
 
         /// Statically allocated read IO operation context data.
         reads: IOPS(Read, config.io_depth_read) = .{},
@@ -159,12 +163,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             ))[0..config.io_depth_write];
             errdefer allocator.free(headers_iops);
 
-            const header_copies = 2;
             const size_headers = headers.len * @sizeOf(Header);
-            const size_headers_copies = size_headers * header_copies;
-            if (size_headers_copies >= size) return error.SizeTooSmallForHeadersCount;
+            if (size_headers >= size) return error.SizeTooSmallForHeaders;
 
-            const size_circular_buffer = size - size_headers_copies;
+            const size_circular_buffer = size - size_headers;
             if (size_circular_buffer < 64 * config.message_size_max) return error.SizeTooSmallForCircularBuffer;
 
             log.debug("{}: size={} headers_len={} headers={} circular_buffer={}", .{
@@ -532,7 +534,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             const buffer = message.buffer[0..physical_size];
             const offset = self.offset_in_circular_buffer_for_op(op);
-            assert(offset + physical_size <= self.size_headers + self.size_circular_buffer);
+            assert(offset + physical_size <= self.size_circular_buffer);
+
+            const offset_file = self.offset_in_file(.prepares, offset);
 
             // Memory must not be owned by `self.headers` as these may be modified concurrently:
             assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
@@ -540,10 +544,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             log.debug(
                 "{}: read_sectors: offset={} len={}",
-                .{ replica.replica, offset, buffer.len },
+                .{ replica.replica, offset_file, buffer.len },
             );
 
-            self.storage.read_sectors(on_read, &read.completion, buffer, offset);
+            self.storage.read_sectors(on_read, &read.completion, buffer, offset_file);
         }
 
         fn on_read(completion: *Storage.Read) void {
@@ -619,30 +623,23 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             log.debug("{}: recover: recovering", .{self.replica});
 
-            self.recover_headers(0, 0);
-            self.recover_headers(0, 1);
+            self.recover_headers(0);
         }
 
-        fn recover_headers(self: *Self, offset: u64, version: u1) void {
+        fn recover_headers(self: *Self, offset: u64) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
 
             assert(!self.recovered);
             assert(self.recovering);
 
             if (offset == self.size_headers) {
-                log.debug("{}: recover_headers: version={} recovered", .{
-                    self.replica,
-                    version,
-                });
-                if (self.reads.executing() == 0) {
-                    log.debug("{}: recover_headers: both versions recovered", .{self.replica});
-                    self.recovered = true;
-                    self.recovering = false;
-                    // The initialization op (TODO Snapshots):
-                    assert(!self.dirty.bit(0));
-                    assert(!self.faulty.bit(0));
-                    // From here it's over to the Recovery protocol from VRR 2012.
-                }
+                log.debug("{}: recover_headers: recovered", .{self.replica});
+                self.recovered = true;
+                self.recovering = false;
+                // The initialization op (TODO Snapshots):
+                assert(!self.dirty.bit(0));
+                assert(!self.faulty.bit(0));
+                // From here it's over to the Recovery protocol from VRR 2012.
                 return;
             }
             assert(offset < self.size_headers);
@@ -650,9 +647,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
-            // We use the count of reads executing to know when both versions have finished reading:
             // We expect that no other process is issuing reads while we are recovering.
-            assert(self.reads.executing() < 2);
+            assert(self.reads.executing() == 0);
 
             const read = self.reads.acquire() orelse unreachable;
             read.* = .{
@@ -662,15 +658,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .callback = undefined,
                 .op = undefined,
                 .checksum = offset,
-                .destination_replica = version,
+                .destination_replica = undefined,
             };
 
             const buffer = self.recover_headers_buffer(message, offset);
             assert(buffer.len > 0);
 
-            log.debug("{}: recover_headers: version={} offset={} size={} recovering", .{
+            log.debug("{}: recover_headers: offset={} size={} recovering", .{
                 self.replica,
-                version,
                 offset,
                 buffer.len,
             });
@@ -679,7 +674,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 recover_headers_on_read,
                 &read.completion,
                 buffer,
-                self.offset_in_headers_version(offset, version),
+                self.offset_in_file(.headers, offset),
             );
         }
 
@@ -697,12 +692,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const message = read.message;
 
             const offset = @intCast(u64, read.checksum);
-            const version = @intCast(u1, read.destination_replica.?);
             const buffer = self.recover_headers_buffer(message, offset);
 
-            log.debug("{}: recover_headers: version={} offset={} size={} recovered", .{
+            log.debug("{}: recover_headers: offset={} size={} recovered", .{
                 self.replica,
-                version,
                 offset,
                 buffer.len,
             });
@@ -751,7 +744,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             replica.message_bus.unref(read.message);
             self.reads.release(read);
 
-            self.recover_headers(offset + buffer.len, version);
+            self.recover_headers(offset + buffer.len);
         }
 
         /// A safe way of removing an entry, where the header must match the current entry to succeed.
@@ -850,7 +843,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
             const sectors = message.buffer[0..vsr.sector_ceil(message.header.size)];
             const offset = self.offset_in_circular_buffer_for_op(message.header.op);
-            assert(offset + sectors.len <= self.size_headers + self.size_circular_buffer);
+            assert(offset + sectors.len <= self.size_circular_buffer);
+
+            const offset_file = self.offset_in_file(.prepares, offset);
 
             if (builtin.mode == .Debug) {
                 // Assert that any sector padding has already been zeroed:
@@ -859,7 +854,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(sum_of_sector_padding_bytes == 0);
             }
 
-            self.write_sectors(write_prepare_header, write, sectors, offset);
+            self.write_sectors(write_prepare_header, write, sectors, offset_file);
         }
 
         /// Attempt to lock the in-memory sector containing the header being written.
@@ -910,42 +905,27 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 std.mem.sliceAsBytes(self.headers)[offset..][0..config.sector_size],
             );
 
+            const offset_file = self.offset_in_file(.headers, offset);
+
             log.debug("{}: write_header: op={} sectors[{}..{}]", .{
                 self.replica,
                 message.header.op,
-                offset,
-                offset + config.sector_size,
+                offset_file,
+                offset_file + config.sector_size,
             });
 
-            // TODO Snapshots
-            if (self.write_prepare_header_once(message.header)) {
-                const version = self.write_headers_increment_version();
-                self.write_prepare_header_to_version(write, write_prepare_on_write_header, version, write.header_sector(self), offset);
-            } else {
-                // Versions must be incremented upfront:
-                // If we don't increment upfront we could end up writing to the same copy twice.
-                // We would then lose the redundancy required to locate headers or even overwrite all copies.
-                const version = self.write_headers_increment_version();
-                _ = self.write_headers_increment_version();
-                switch (version) {
-                    0 => self.write_prepare_header_to_version(write, write_prepare_on_write_header_version_0, 0, write.header_sector(self), offset),
-                    1 => self.write_prepare_header_to_version(write, write_prepare_on_write_header_version_1, 1, write.header_sector(self), offset),
-                }
-            }
-        }
+            const buffer: []const u8 = write.header_sector(self);
+            assert(offset + buffer.len <= self.size_headers);
+            // Memory must not be owned by self.headers as self.headers may be modified concurrently:
+            assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
+                @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + self.size_headers);
 
-        fn write_prepare_on_write_header_version_0(write: *Self.Write) void {
-            const self = write.self;
-            const offset = write_prepare_header_offset(write.message);
-            // Pass the opposite version bit from the one we just finished writing.
-            self.write_prepare_header_to_version(write, write_prepare_on_write_header, 1, write.header_sector(self), offset);
-        }
-
-        fn write_prepare_on_write_header_version_1(write: *Self.Write) void {
-            const self = write.self;
-            const offset = write_prepare_header_offset(write.message);
-            // Pass the opposite version bit from the one we just finished writing.
-            self.write_prepare_header_to_version(write, write_prepare_on_write_header, 0, write.header_sector(self), offset);
+            self.write_sectors(
+                write_prepare_on_write_header,
+                write,
+                buffer,
+                offset_file,
+            );
         }
 
         fn write_prepare_on_write_header(write: *Self.Write) void {
@@ -1014,92 +994,26 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const message_offset = config.message_size_max * message_slot;
             assert(message_offset < self.size_circular_buffer);
 
-            const message_offset_in_circular_buffer = self.size_headers + message_offset;
+            const message_offset_in_circular_buffer = message_offset;
             return message_offset_in_circular_buffer;
         }
 
-        fn offset_in_headers_version(self: *Self, offset: u64, version: u1) u64 {
-            assert(offset < self.size_headers);
-            return switch (version) {
-                0 => offset,
-                1 => self.size_headers + self.size_circular_buffer + offset,
+        fn offset_in_file(self: *Self, zone: Zone, offset: u64) u64 {
+            return switch (zone) {
+                .headers => {
+                    assert(offset < self.size_headers);
+                    return offset;
+                },
+                .prepares => {
+                    assert(offset < self.size_circular_buffer);
+                    return offset + self.size_headers;
+                },
             };
         }
 
         fn write_prepare_header_offset(message: *Message) u64 {
             comptime assert(config.sector_size % @sizeOf(Header) == 0);
             return vsr.sector_floor(message.header.op * @sizeOf(Header));
-        }
-
-        fn write_headers_increment_version(self: *Self) u1 {
-            self.headers_version +%= 1;
-            return self.headers_version;
-        }
-
-        /// Since we allow gaps in the journal, we may have to write our headers twice.
-        /// If a dirty header is being written as reserved (empty) then write twice to make this clear.
-        /// If a dirty header has no previous clean chained entry to give its offset then write twice.
-        /// Otherwise, we only need to write the headers once because their other copy can be located in
-        /// the body of the journal (using the previous entry's offset and size).
-        fn write_prepare_header_once(self: *Self, header: *const Header) bool {
-            // TODO Optimize this to decide whether to write once or twice once we add support to
-            // recover from either header version at startup.
-            const always_write_twice = true;
-            if (always_write_twice) return false;
-
-            // TODO Snapshots
-            if (header.command == .reserved) {
-                log.debug("{}: write_prepare_header_once: dirty reserved header", .{
-                    self.replica,
-                });
-                return false;
-            }
-            if (self.previous_entry(header)) |previous| {
-                assert(previous.command == .prepare);
-                if (previous.checksum != header.parent) {
-                    log.debug("{}: write_headers_once: no hash chain", .{self.replica});
-                    return false;
-                }
-                // TODO Add is_dirty(header)
-                // TODO Snapshots
-                if (self.dirty.bit(previous.op)) {
-                    log.debug("{}: write_prepare_header_once: previous entry is dirty", .{
-                        self.replica,
-                    });
-                    return false;
-                }
-            } else {
-                log.debug("{}: write_prepare_header_once: no previous entry", .{self.replica});
-                return false;
-            }
-            return true;
-        }
-
-        fn write_prepare_header_to_version(
-            self: *Self,
-            write: *Self.Write,
-            callback: fn (completion: *Self.Write) void,
-            version: u1,
-            buffer: []const u8,
-            offset: u64,
-        ) void {
-            log.debug("{}: write_prepare_header_to_version: version={} offset={} len={}", .{
-                self.replica,
-                version,
-                offset,
-                buffer.len,
-            });
-            assert(offset + buffer.len <= self.size_headers);
-            // Memory must not be owned by self.headers as self.headers may be modified concurrently:
-            assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
-                @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + self.size_headers);
-
-            self.write_sectors(
-                callback,
-                write,
-                buffer,
-                self.offset_in_headers_version(offset, version),
-            );
         }
 
         fn write_sectors(
