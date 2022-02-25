@@ -199,8 +199,6 @@ test "binary search: explicit" {
     );
 }
 
-// Our ManifestLevel implementation requires that if the target key is not found,
-// the index of the next greatest key is returned even in the presence of duplicates.
 test "binary search: duplicates" {
     if (test_binary_search.log) std.debug.print("\n", .{});
     try test_binary_search.explicit_search(

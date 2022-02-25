@@ -6,7 +6,7 @@ const meta = std.meta;
 
 const config = @import("../config.zig");
 const lsm = @import("tree.zig");
-const binary_search_keys = @import("binary_search.zig").binary_search_keys;
+const binary_search_keys_raw = @import("binary_search.zig").binary_search_keys_raw;
 
 const Direction = @import("direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
@@ -24,7 +24,7 @@ pub fn ManifestLevel(
         const Keys = SegmentedArray(Key, NodePool, lsm.table_count_max);
         const Tables = SegmentedArray(TableInfo, NodePool, lsm.table_count_max);
 
-        /// The minimum key of each key node in the keys segmented array.
+        /// The maximum key of each key node in the keys segmented array.
         /// This is the starting point of our tiered lookup approach.
         /// Only the first keys.node_count elements are valid.
         root_keys_array: *[Keys.node_count_max]Key,
@@ -34,8 +34,8 @@ pub fn ManifestLevel(
         /// when searching for the TableInfo with a given absolute index.
         root_table_nodes_array: *[Keys.node_count_max]u32,
 
-        // These two segmented arrays are parallel. That is, the absolute indexes of key and
-        // corresponding TableInfo are the same. However, the number of nodes, node index, and
+        // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
+        // and corresponding TableInfo are the same. However, the number of nodes, node index, and
         // relative index into the node differ as the elements per node are different.
         keys: Keys,
         tables: Tables,
@@ -84,33 +84,33 @@ pub fn ManifestLevel(
 
                     switch (it.direction) {
                         .ascending => {
-                            // Check if the table is out of bounds to the left.
+                            // Assert that the table is not out of bounds to the left.
                             //
-                            // Unlike in the descending case, it is not guaranteed that
-                            // table.key_max is greater than or equal to it.key_min on the
-                            // first iteration as only the key_min of a table is stored in our
-                            // root/key nodes. On subsequent iterations this check will always
-                            // be false.
-                            if (compare_keys(it.key_min, table.key_max) == .gt) {
-                                continue;
-                            }
+                            // We can assert this as it is exactly the same key comparison when we
+                            // binary search in iterator_start(), and since we move in ascending
+                            // order this also remains true beyond the first iteration.
+                            assert(compare_keys(table.key_max, it.key_min) != .lt);
 
                             // Check if the table is out of bounds to the right.
-                            if (compare_keys(it.key_max, table.key_min) == .lt) {
+                            if (compare_keys(table.key_min, it.key_max) == .gt) {
                                 it.inner.done = true;
                                 return null;
                             }
                         },
                         .descending => {
-                            // Assert that the table is not out of bounds to the right.
+                            // Check if the table is out of bounds to the right.
                             //
-                            // We can assert this as it is exactly the same key comparison when we
-                            // binary search in iterator_start(), and since we move in descending
-                            // order this also remains true beyond the first iteration.
-                            assert(compare_keys(it.key_max, table.key_min) != .lt);
+                            // Unlike in the ascending case, it is not guaranteed that
+                            // table.key_min is less than or equal to it.key_max on the
+                            // first iteration as only the key_max of a table is stored in our
+                            // root/key nodes. On subsequent iterations this check will always
+                            // be false.
+                            if (compare_keys(table.key_min, it.key_max) == .gt) {
+                                continue;
+                            }
 
                             // Check if the table is out of bounds to the left.
-                            if (compare_keys(it.key_min, table.key_max) == .gt) {
+                            if (compare_keys(table.key_max, it.key_min) == .lt) {
                                 it.inner.done = true;
                                 return null;
                             }
@@ -166,7 +166,8 @@ pub fn ManifestLevel(
         /// May return null if there is nothing to iterate because we know for sure that the key
         /// range is disjoint with the tables stored in this level.
         /// However, the cursor returned is not guaranteed to be in range for the query as only
-        /// the key_min is stored in the index structures, not the key_max.
+        /// the key_max is stored in the index structures, not the key_min, and only the start
+        /// bound for the given direction is checked here.
         fn iterator_start(
             level: Self,
             key_min: Key,
@@ -183,69 +184,39 @@ pub fn ManifestLevel(
                 .descending => key_max,
             };
 
-            const root_result = binary_search_keys(Key, compare_keys, root, key);
-            if (root_result.exact) {
-                return level.iterator_start_boundary(
-                    .{
-                        .node = root_result.index,
-                        .relative_index = 0,
-                    },
-                    direction,
-                );
-            } else if (root_result.index == 0) {
-                // Out of bounds to the left.
+            const key_node = binary_search_keys_raw(Key, compare_keys, root, key);
+            assert(key_node <= level.keys.node_count);
+            if (key_node == level.keys.node_count) {
                 switch (direction) {
-                    // In the case of an ascending search, we start at the first table in the level
-                    // since the target key_min is less than the key_min of the first table.
-                    .ascending => return SegmentedArrayCursor{
-                        .node = 0,
-                        .relative_index = 0,
-                    },
-                    // In the case of a descending search, we are already finished because the first
-                    // key_min in the entire level is greater than the target key_max.
-                    .descending => return null,
+                    // The key_min of the target range is greater than the key_max of the last
+                    // table in the level and we are ascending, so this range matches no tables
+                    // on this level.
+                    .ascending => return null,
+                    // The key_max of the target range is greater than the key_max of the last
+                    // table in the level and we are desceneding, so we need to start iteration
+                    // at the last table in the level.
+                    .descending => return level.keys.last(),
                 }
-            } else {
-                // Since there was not an exact match, the binary search returns the index of
-                // the next greatest key. We must therefore subtract one to perform the next
-                // binary search in the key node which may contain `key`.
-                const key_node = root_result.index - 1;
-                // In the rather unlikely event that two or more key_nodes share the same key_min
-                // a simple root_result.index - 1 isn't sufficient to get to the next lowest key_min,
-                // unless our binary search implementation guarantees to always return the immediate
-                // next greatest key even in the presence of duplicates, which it does.
-                assert(compare_keys(root[key_node], root[root_result.index]) == .lt);
-
-                const keys = level.keys.node_elements(key_node);
-                const keys_result = binary_search_keys(Key, compare_keys, keys, key);
-
-                // Since we didn't have an exact match in the previous binary search, and since
-                // we've already handled the case of being out of bounds to the left with an
-                // early return, we know that the target key_min is strictly greater than the
-                // first key in the key node.
-                assert(keys_result.index != 0);
-
-                // In the case of an inexact match, the binary search returns the index of
-                // the next greatest key. We must therefore subtract one as it is possible for
-                // the previous table to contain `key`. That is, the key_max of the previous
-                // table could be greater than `key`.
-                const relative_index = keys_result.index - @boolToInt(!keys_result.exact);
-
-                // This mirrors the earlier assertion on root[key_node], root[root_result.index].
-                if (!keys_result.exact) {
-                    assert(compare_keys(keys[relative_index], keys[keys_result.index]) == .lt);
-                }
-
-                return level.iterator_start_boundary(
-                    .{
-                        .node = key_node,
-                        .relative_index = relative_index,
-                    },
-                    direction,
-                );
             }
+
+            const keys = level.keys.node_elements(key_node);
+            const relative_index = binary_search_keys_raw(Key, compare_keys, keys, key);
+
+            // The key must be less than or equal to the maximum key of this key node since the
+            // first binary search checked this exact condition.
+            assert(relative_index < keys.len);
+
+            return level.iterator_start_boundary(
+                .{
+                    .node = key_node,
+                    .relative_index = relative_index,
+                },
+                direction,
+            );
         }
 
+        /// This function exists because there may be tables in the level with the same
+        /// key_max but non-overlapping snapshot visibility.
         fn iterator_start_boundary(
             level: Self,
             key_cursor: SegmentedArrayCursor,
