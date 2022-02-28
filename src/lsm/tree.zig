@@ -61,10 +61,16 @@ pub const SuperBlock = packed struct {
     // latest SuperBlock at startup, which we cross-check using the parent hash chain.
     version: u64,
     parent: u128,
+    /// The copy number of the superblock enables us to detect misdirected reads at startup.
+    /// For example, if multiple reads are all misdirected to a single copy of the superblock.
+    copy: u8,
 
     // TODO remove this?
     replica: u8,
-    vsr_committed_log_offset: u64,
+
+    /// The last operation that was committed to the state machine.
+    vsr_commit_number: u64,
+
     client_table: [config.clients_max]ClientTableEntry,
 
     /// The size and checksum of the block free set stored in the SuperBlock trailer.
