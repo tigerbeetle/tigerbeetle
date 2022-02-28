@@ -180,9 +180,8 @@ pub fn Tree(
         pub const Manifest = struct {
             pub const TableInfo = extern struct {
                 checksum: u128,
-                key_min: Key,
-                key_max: Key,
                 address: u64,
+                flags: u64 = 0,
 
                 /// The minimum snapshot that can see this table (with exclusive bounds).
                 /// This value is set to the current snapshot tick on table creation.
@@ -192,7 +191,8 @@ pub fn Tree(
                 /// This value is set to the current snapshot tick on table deletion.
                 snapshot_max: u64 = math.maxInt(u64),
 
-                flags: u64 = 0,
+                key_min: Key,
+                key_max: Key,
 
                 comptime {
                     assert(@sizeOf(TableInfo) == 48 + key_size * 2);
