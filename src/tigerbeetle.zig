@@ -89,7 +89,6 @@ pub const TransferFlags = packed struct {
 
     comptime {
         //TODO @jason assert(@sizeOf(TransferFlags) == 6);//TODO @jason @sizeOf(u64));
-        
     }
 };
 
