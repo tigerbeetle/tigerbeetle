@@ -29,9 +29,10 @@ pub fn ManifestLevel(
         /// Only the first keys.node_count elements are valid.
         root_keys_array: *[Keys.node_count_max]Key,
 
-        /// This is the index of the table node containing the TableInfo corresponding to a given
-        /// root key. This allows us to skip table nodes which cannot contain the target TableInfo
-        /// when searching for the TableInfo with a given absolute index.
+        /// This is the index of the first table node that might contain the TableInfo
+        /// corresponding to a given key node. This allows us to skip table nodes which cannot
+        /// contain the target TableInfo when searching for the TableInfo with a given absolute
+        /// index. Only the first keys.node_count elements are valid.
         root_table_nodes_array: *[Keys.node_count_max]u32,
 
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
@@ -66,6 +67,90 @@ pub fn ManifestLevel(
             allocator.destroy(level.root_table_nodes_array);
             level.keys.deinit(allocator, node_pool);
             level.tables.deinit(allocator, node_pool);
+        }
+
+        /// Insert a batch of tables into the tables segmented array then update the metadata/indexes.
+        pub fn insert_tables(level: *Self, node_pool: *NodePool, tables: []const TableInfo) void {
+            // TODO: insert multiple elements at once into the segmented arrays if possible as an
+            // optimization. We can't always do this because we must maintain sorted order and
+            // there may be duplicate keys due to snapshots.
+            var i: usize = 0;
+            while (i < tables.len) : (i += 1) {
+                const table = &tables[i];
+                const absolute_index = level.absolute_index_for_insert(table.key_max);
+                level.keys.insert_elements(node_pool, absolute_index, &[_]Key{table.key_max});
+                level.tables.insert_elements(node_pool, absolute_index, tables[i..][0..1]);
+                level.rebuild_root();
+            }
+        }
+
+        /// Return the index at which to insert a new table given the table's key_max.
+        /// Requires all metadata/indexes to be valid.
+        fn absolute_index_for_insert(level: Self, key_max: Key) u32 {
+            const root = level.root_keys();
+            if (root.len == 0) {
+                assert(level.keys.len() == 0);
+                assert(level.tables.len() == 0);
+                return 0;
+            }
+
+            const key_node = binary_search_keys_raw(Key, compare_keys, root, key_max);
+            assert(key_node <= level.keys.node_count);
+            if (key_node == level.keys.node_count) {
+                assert(level.keys.len() == level.tables.len());
+                return level.keys.len();
+            }
+
+            const keys = level.keys.node_elements(key_node);
+            const relative_index = binary_search_keys_raw(Key, compare_keys, keys, key_max);
+
+            // The key must be less than or equal to the maximum key of this key node since the
+            // first binary search checked this exact condition.
+            assert(relative_index < keys.len);
+
+            return level.keys.absolute_index_for_cursor(.{
+                .node = key_node,
+                .relative_index = relative_index,
+            });
+        }
+
+        /// Rebuilds the root_keys and root_table_nodes arrays based on the current state of the
+        /// keys and tables segmented arrays.
+        fn rebuild_root(level: *Self) void {
+            assert(level.keys.len() == level.tables.len());
+
+            {
+                level.root_keys_array = undefined;
+                var key_node: u32 = 0;
+                while (key_node < level.keys.node_count) : (key_node += 1) {
+                    level.root_keys_array[key_node] = level.keys.node_last_element(key_node);
+                }
+            }
+
+            {
+                level.root_table_nodes_array = undefined;
+                level.root_table_nodes_array[0] = 0;
+                var key_node: u32 = 1;
+                var table_node: u32 = 0;
+                while (key_node < level.keys.node_count) : (key_node += 1) {
+                    const previous_key_node_key_max = level.root_keys_array[key_node - 1];
+
+                    // While the key_max of the table node is less than or equal to the key_max
+                    // of the previous key_node, increment table_node.
+                    while (table_node < level.tables.node_count) : (table_node += 1) {
+                        const table_node_table_max = level.tables.node_last_element(table_node);
+                        const table_node_key_max = table_node_table_max.key_max;
+                        if (compare_keys(table_node_key_max, previous_key_node_key_max) == .gt) {
+                            break;
+                        }
+                    } else {
+                        // Assert that we found the appropriate table_node and hit the break above.
+                        unreachable;
+                    }
+
+                    level.root_table_nodes_array[key_node] = table_node;
+                }
+            }
         }
 
         pub const Iterator = struct {
@@ -177,7 +262,11 @@ pub fn ManifestLevel(
             assert(compare_keys(key_min, key_max) != .gt);
 
             const root = level.root_keys();
-            if (root.len == 0) return null;
+            if (root.len == 0) {
+                assert(level.keys.len() == 0);
+                assert(level.tables.len() == 0);
+                return null;
+            }
 
             const key = switch (direction) {
                 .ascending => key_min,

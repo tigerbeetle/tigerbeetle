@@ -90,7 +90,7 @@ pub fn SegmentedArray(
             array: *Self,
             node_pool: *NodePool,
             absolute_index: u32,
-            elements: []T,
+            elements: []const T,
         ) void {
             assert(elements.len > 0);
             assert(absolute_index + elements.len <= element_count_max);
@@ -112,7 +112,7 @@ pub fn SegmentedArray(
             array: *Self,
             node_pool: *NodePool,
             absolute_index: u32,
-            elements: []T,
+            elements: []const T,
         ) void {
             assert(elements.len > 0);
             assert(elements.len <= node_capacity);
@@ -474,6 +474,10 @@ pub fn SegmentedArray(
         pub inline fn node_elements(array: Self, node: u32) []T {
             assert(node < array.node_count);
             return array.nodes[node].?[0..array.count(node)];
+        }
+
+        pub inline fn node_last_element(array: Self, node: u32) T {
+            return array.node_elements(node)[array.count(node) - 1];
         }
 
         pub inline fn element_at_cursor(array: Self, cursor: Cursor) T {
