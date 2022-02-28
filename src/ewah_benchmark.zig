@@ -42,7 +42,7 @@ pub fn main() !void {
         var bitset_lengths: [samples]usize = undefined;
         while (i < samples) : (i += 1) {
             bitsets[i] = try make_bitset(&arena.allocator, config);
-            bitsets_encoded[i] = try arena.allocator.alignedAlloc(u8, @alignOf(usize), ewah.encode_size_max(bitsets[0]));
+            bitsets_encoded[i] = try arena.allocator.alignedAlloc(u8, @alignOf(usize), ewah.encode_size_max(bitsets[0].len));
             bitsets_decoded[i] = try arena.allocator.alloc(usize, config.words);
         }
 
