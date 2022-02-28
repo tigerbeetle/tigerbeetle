@@ -48,6 +48,16 @@ pub const snapshot_latest = math.maxInt(u64) - 1;
 // pub fn decode_superblock(buffer) void
 //
 
+/// Identifies the type of a sector or block. Protects against misdirected I/O across valid types.
+pub const Magic = enum(u8) {
+    superblock,
+    manifest,
+    prepare,
+    index,
+    filter,
+    data,
+};
+
 pub const SuperBlock = packed struct {
     checksum: u128,
 
@@ -57,8 +67,7 @@ pub const SuperBlock = packed struct {
     /// A monotonically increasing counter to locate the latest superblock at startup.
     sequence: u64,
 
-    /// Protects against misdirected I/O by identifying the sector as a superblock.
-    magic: u8,
+    magic: Magic = .superblock,
 
     /// The version of the superblock format in use.
     version: u8 = 0,
