@@ -48,37 +48,57 @@ pub const snapshot_latest = math.maxInt(u64) - 1;
 // pub fn decode_superblock(buffer) void
 //
 
-// vsr.zig
 pub const SuperBlock = packed struct {
     checksum: u128,
-    cluster: u32,
-    local_storage_size: u32,
 
-    /// Reserved for future use (e.g. changing compression algorithm of trailer)
-    flags: u64,
-
-    // Monotonically increasing counter of superblock generations. This enables us to find the
-    // latest SuperBlock at startup, which we cross-check using the parent hash chain.
-    version: u64,
+    /// The checksum of the previous superblock to verify across sequence numbers.
     parent: u128,
-    /// The copy number of the superblock enables us to detect misdirected reads at startup.
+
+    /// A monotonically increasing counter to locate the latest superblock at startup.
+    sequence: u64,
+
+    /// Protects against misdirected I/O by identifying the sector as a superblock.
+    magic: u8,
+
+    /// The version of the superblock format in use.
+    version: u8 = 0,
+
+    /// Protects against misdirected reads at startup.
     /// For example, if multiple reads are all misdirected to a single copy of the superblock.
     copy: u8,
 
-    // TODO remove this?
+    /// Protects against writing to or reading from the wrong data file.
     replica: u8,
 
-    /// The last operation that was committed to the state machine.
-    vsr_commit_number: u64,
+    cluster: u32,
 
+    /// The current size of the data file.
+    size: u64,
+
+    /// The maximum size of the data file.
+    size_max: u64,
+
+    /// The last operation committed to the state machine. At startup, we replay the log thereafter.
+    commit: u64,
+
+    /// Reserved for future use (e.g. changing compression algorithm of the trailer).
+    flags: u64 = 0,
+
+    /// A listing of VSR client table messages committed to the state machine.
+    /// These are stored in a client table zone containing messages up to message_size_max.
+    /// We recover any faulty client table entries as prepare messages and not as block messages.
     client_table: [config.clients_max]ClientTableEntry,
 
-    /// The size and checksum of the block free set stored in the SuperBlock trailer.
+    /// A listing of persistent read snapshots that have been issued to clients.
+    /// A snapshot.created timestamp of 0 indicates that the snapshot is null.
+    snapshots: [config.lsm_snapshots_max]Snapshot,
+
+    /// The size and checksum of the block free set stored in the superblock trailer.
     block_free_set_size: u32,
     block_free_set_checksum: u128,
 
     /// The number of manifest block addresses and block checksums stored in the
-    /// SuperBlock trailer and the checksum of this data.
+    /// superblock trailer and the checksum of this data.
     ///
     /// The block addresses and block checksums in the trailer are laid out as follows:
     /// [manifest_blocks_count]u64 address
@@ -88,26 +108,30 @@ pub const SuperBlock = packed struct {
     /// Since we only write the bytes that we actually use however, we can be quite generous
     /// with the fixed size disk allocation for this trailer.
     ///
-    /// TODO One possible layout
-    /// 1. all positive manifest blocks of LSM 1, in order of their appearance in the manifest.
-    /// 2. all negative manifest blocks of LSM 1, in order of their appearance in the manifest.
-    /// 3. all positive manifest blocks of LSM 2, ...
-    /// 4. ...
     manifest_blocks_count: u32,
     manifest_blocks_checksum: u128,
 
-    /// Timestamp of 0 indicates that the snapshot slot is free
-    snapshot_timestamps: [config.lsm_snapshots_max]u64,
-    snapshot_last_used: [config.lsm_snapshots_max]u64,
+    reserved: [2184]u8,
 
-    _reserved: [1024]u8,
-};
+    pub const ClientTableEntry = packed struct {
+        message_checksum: u128,
+        message_offset: u64,
+        session: u64,
+    };
 
-// vsr.zig
-pub const ClientTableEntry = packed struct {
-    message_checksum: u128,
-    message_offset: u64,
-    session: u64,
+    pub const Snapshot = packed struct {
+        created: u64,
+
+        /// When a read query last used the snapshot.
+        queried: u64,
+
+        /// Snapshots may auto-expire after a timeout of inactivity.
+        timeout: u64,
+    };
+
+    comptime {
+        assert(@sizeOf(SuperBlock) == config.sector_size);
+    }
 };
 
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
