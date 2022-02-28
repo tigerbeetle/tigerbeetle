@@ -831,7 +831,6 @@ pub fn Tree(
 
                 switch (values.len) {
                     0 => return null,
-                    1 => return &values[0],
                     else => {
                         const result = binary_search.binary_search_values(
                             Key,
