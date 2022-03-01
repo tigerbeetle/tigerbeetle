@@ -17,7 +17,6 @@ const Client = vsr.Client(StateMachine, MessageBus);
 
 const tb = @import("tigerbeetle.zig");
 const Transfer = tb.Transfer;
-const Commit = tb.Commit;
 const Account = tb.Account;
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
@@ -108,7 +107,7 @@ pub fn main() !void {
     }
 
     // Pre-allocate a million commits:
-    const commits: ?[]Commit = if (IS_TWO_PHASE_COMMIT) try arena.allocator().alloc(Commit, MAX_TRANSFERS) else null;
+    const commits: ?[]Transfer = if (IS_TWO_PHASE_COMMIT) try arena.allocator().alloc(Transfer, MAX_TRANSFERS) else null;
     if (commits) |all_commits| {
         for (all_commits) |*commit, index| {
             commit.* = .{
@@ -143,7 +142,7 @@ pub fn main() !void {
 
         if (IS_TWO_PHASE_COMMIT) {
             try queue.push(.{
-                .operation = .commit_transfers,
+                .operation = .create_transfers,
                 .data = std.mem.sliceAsBytes(commits.?[count..][0..BATCH_SIZE]),
             });
         }
@@ -228,9 +227,7 @@ const TimedQueue = struct {
         if (self.batches.head_ptr()) |starting_batch| {
             log.debug("sending first batch...", .{});
             self.batch_start = now;
-            var message = self.client.get_message() orelse {
-                @panic("Client message pool has been exhausted. Cannot execute batch.");
-            };
+            const message = self.client.get_message();
             defer self.client.unref(message);
 
             std.mem.copy(
@@ -279,18 +276,16 @@ const TimedQueue = struct {
                     self.max_transfers_latency = latency;
                 }
             },
-            .commit_transfers => {
-                if (latency > self.max_commits_latency) {
-                    self.max_commits_latency = latency;
-                }
-            },
+            //.commit_transfers => {
+            //    if (latency > self.max_commits_latency) {
+            //        self.max_commits_latency = latency;
+            //    }
+            //},
             else => unreachable,
         }
 
         if (self.batches.head_ptr()) |next_batch| {
-            var message = self.client.get_message() orelse {
-                @panic("Client message pool has been exhausted.");
-            };
+            const message = self.client.get_message();
             defer self.client.unref(message);
 
             std.mem.copy(
