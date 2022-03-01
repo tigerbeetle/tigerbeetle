@@ -71,17 +71,44 @@ pub fn ManifestLevel(
 
         /// Insert a batch of tables into the tables segmented array then update the metadata/indexes.
         pub fn insert_tables(level: *Self, node_pool: *NodePool, tables: []const TableInfo) void {
+            assert(tables.len > 0);
+            assert(level.keys.len() == level.tables.len());
+
+            if (lsm.verify and tables.len > 1) {
+                var a = tables[0];
+                assert(compare_keys(a.key_min, a.key_max) == .lt);
+                for (tables[1..]) |b| {
+                    assert(compare_keys(a.key_max, b.key_min) == .lt);
+                    assert(compare_keys(b.key_min, b.key_max) == .lt);
+                    a = b;
+                }
+            }
+
             // TODO: insert multiple elements at once into the segmented arrays if possible as an
             // optimization. We can't always do this because we must maintain sorted order and
             // there may be duplicate keys due to snapshots.
+
+            var absolute_index = level.absolute_index_for_insert(tables[0].key_max);
             var i: usize = 0;
             while (i < tables.len) : (i += 1) {
                 const table = &tables[i];
-                const absolute_index = level.absolute_index_for_insert(table.key_max);
+
+                // Increment absolute_index until the key_max at absolute_index is greater than
+                // or equal to table.key_max. This is the index we want to insert the table at.
+                {
+                    var it = level.keys.iterator(absolute_index, 0, .ascending);
+                    while (it.next()) |key_max| : (absolute_index += 1) {
+                        if (compare_keys(key_max.*, table.key_max) != .lt) break;
+                    }
+                }
+
                 level.keys.insert_elements(node_pool, absolute_index, &[_]Key{table.key_max});
                 level.tables.insert_elements(node_pool, absolute_index, tables[i..][0..1]);
-                level.rebuild_root();
             }
+
+            assert(level.keys.len() == level.tables.len());
+
+            level.rebuild_root();
         }
 
         /// Return the index at which to insert a new table given the table's key_max.

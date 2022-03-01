@@ -6,7 +6,7 @@ const mem = std.mem;
 const os = std.os;
 
 /// Whether to perform slow, intensive online verification of data.
-const verify = true;
+pub const verify = true;
 
 const config = @import("../config.zig");
 const eytzinger = @import("eytzinger.zig").eytzinger;
