@@ -84,7 +84,7 @@ pub fn main() !void {
                 .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
                 .one_way_delay_min = random.uintLessThan(u16, 3),
                 .packet_loss_probability = random.uintLessThan(u8, 30),
-                .path_maximum_capacity = 20 + random.uintLessThan(u8, 20),
+                .path_maximum_capacity = 2 + random.uintLessThan(u8, 19),
                 .path_clog_duration_mean = random.uintLessThan(u16, 500),
                 .path_clog_probability = random.uintLessThan(u8, 2),
                 .packet_replay_probability = random.uintLessThan(u8, 50),

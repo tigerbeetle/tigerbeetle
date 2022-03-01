@@ -224,12 +224,14 @@ pub const CreateTransfersResult = packed struct {
 //};
 
 comptime {
-    if (builtin.target.os.tag != .linux and !builtin.target.isDarwin()) {
-        @compileError("linux or macos required for io");
+    const target = builtin.target;
+
+    if (target.os.tag != .linux and !target.isDarwin() and target.os.tag != .windows) {
+        @compileError("linux, windows or macos is required for io");
     }
 
     // We require little-endian architectures everywhere for efficient network deserialization:
-    if (builtin.target.cpu.arch.endian() != .Little) {
+    if (target.cpu.arch.endian() != .Little) {
         @compileError("big-endian systems not supported");
     }
 }
