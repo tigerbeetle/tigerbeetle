@@ -9,12 +9,11 @@ typedef struct tb_uint128_t {
     uint8_t __bytes[16];
 } tb_uint128_t;
 
-typedef struct tb_account_flags_t {
-    bool linked: 1;
-    bool debits_must_not_exceed_credits: 1;
-    bool credits_must_not_exceed_debits: 1;
-    unsigned __padding: 29;
-} tb_account_flags_t;
+typedef enum TB_ACCOUNT_FLAGS {
+    TB_ACCOUNT_LINKED = 1 << 0,
+    TB_ACCOUNT_DEBITS_MUST_NOT_EXCEED_CREDITS = 1 << 1,
+    TB_ACCOUNT_CREDITS_MUST_NOT_EXCEED_DEBITS = 1 << 2,
+} TB_ACCOUNT_FLAGS;
 
 typedef struct tb_account_t {
     tb_uint128_t id;
@@ -22,7 +21,7 @@ typedef struct tb_account_t {
     uint8_t reserved[48];
     uint16_t unit;
     uint16_t code;
-    tb_account_flags_t flags;
+    uint32_t flags;
     uint64_t debits_reserved;
     uint64_t debits_accepted;
     uint64_t credits_reserved;
@@ -30,12 +29,11 @@ typedef struct tb_account_t {
     uint64_t timestamp;
 } tb_account_t;
 
-typedef struct tb_transfer_flags_t {
-    bool linked: 1;
-    bool two_phase_commit: 1;
-    bool condition: 1;
-    unsigned __padding: 29;
-} tb_transfer_flags_t;
+typedef enum TB_TRANSFER_FLAGS {
+    TB_TRANSFER_LINKED = 1 << 0,
+    TB_TRANSFER_TWO_PHASE_COMMIT = 1 << 1,
+    TB_TRANSFER_CONDITION = 1 << 2,
+} TB_TRANSFER_FLAGS;
 
 typedef struct tb_transfer_t {
     tb_uint128_t id;
@@ -45,23 +43,22 @@ typedef struct tb_transfer_t {
     uint8_t reserved[32];
     uint64_t timeout;
     uint32_t code;
-    tb_transfer_flags_t flags;
+    uint32_t flags;
     uint64_t amount;
     uint64_t timestamp;
 } tb_transfer_t;
 
-typedef struct tb_commit_flags_t {
-    bool linked: 1;
-    bool reject: 1;
-    bool preimage: 1;
-    unsigned __padding: 29;
-} tb_commit_flags_t;
+typedef enum TB_COMMIT_FLAGS {
+    TB_COMMIT_LINKED = 1 << 0,
+    TB_COMMIT_REJECT = 1 << 1,
+    TB_COMMIT_PREIMAGE = 1 << 2,
+} TB_COMMIT_FLAGS;
 
 typedef struct tb_commit_t {
     tb_uint128_t id;
     uint8_t reserved[32];
     uint32_t code;
-    tb_commit_flags_t flags;
+    uint32_t flags;
     uint64_t timestamp;
 } tb_commit_t;
 
@@ -166,14 +163,16 @@ typedef union tb_result_t {
     tb_transfer_t lookup_transfers;
 } tb_result_t;
 
+typedef union tb_packet_data_t {
+    tb_event_t request;
+    tb_result_t response;
+} tb_packet_data_t;
+
 typedef struct tb_packet_t {
     struct tb_packet_t* next;
     uintptr_t user_data;
-    TB_OPERATION operation : 8;
-    union {
-        tb_event_t request;
-        tb_result_t response;
-    } data;
+    uint8_t operation;
+    tb_packet_data_t* data;
 } tb_packet_t;
 
 typedef struct tb_packet_list_t {
