@@ -79,16 +79,18 @@ pub const Transfer = packed struct {
 
 pub const TransferFlags = packed struct {
     linked: bool = false,
-    posting: bool = false,
     condition: bool = false,
     padding: u29 = 0,
+    posting: bool = false,
     post_pending_transfer: bool = false,
     void_pending_transfer: bool = false,
     //TODO DISPOSE LATER @jason
     preimage: bool = false,
 
     comptime {
+        //std.debug.print("Jason-> T-Flags {}", .{@sizeOf(TransferFlags)});
         //TODO @jason assert(@sizeOf(TransferFlags) == 6);//TODO @jason @sizeOf(u64));
+        //assert(@sizeOf(TransferFlags) == 7);
     }
 };
 
@@ -158,6 +160,7 @@ pub const CreateTransferResult = enum(u32) {
     two_phase_commit_must_timeout,
     timeout_reserved_for_two_phase_commit,
     //TODO Fields from the Commit
+    cannot_void_and_post_two_phase_commit,
     transfer_not_found,
     transfer_not_two_phase_commit,
     already_committed_but_accepted,
