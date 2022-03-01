@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
-# Install Zig 0.8.0 if it does not already exist:
+# Install Zig if it does not already exist:
 if [ ! -d "zig" ]; then
-    scripts/install_zig.sh 0.8.0
+    scripts/install_zig.sh
     echo ""
     echo "Running the TigerBeetle VOPR for the first time..."
     echo "Visit https://www.tigerbeetle.com"
