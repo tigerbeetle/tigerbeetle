@@ -91,7 +91,7 @@ pub fn ewah(comptime Word: type) type {
         // Returns the number of bytes written to `target`.
         pub fn encode(source_words: []const Word, target: []align(@alignOf(Word)) u8) usize {
             assert(target.len >= @sizeOf(Marker));
-            assert(target.len == encode_size_max(source_words));
+            assert(target.len == encode_size_max(source_words.len));
             assert(is_disjoint(Word, u8, source_words, target));
 
             const target_words = mem.bytesAsSlice(Word, target);
@@ -139,13 +139,13 @@ pub fn ewah(comptime Word: type) type {
             return target_index * @sizeOf(Word);
         }
 
-        // Returns the maximum number of bytes that `source` needs to encode to.
-        pub fn encode_size_max(source: []const Word) usize {
-            // Assume (pessimistically) that every word will be encoded as a literal.
-            const literal_word_count = source.len;
-            const marker_count = div_ceil(literal_word_count, marker_literal_word_count_max);
+        /// Returns the maximum number of bytes required to encode `word_count` words.
+        /// Assumes (pessimistically) that every word will be encoded as a literal.
+        pub fn encode_size_max(word_count: usize) usize {
+            const marker_count = div_ceil(word_count, marker_literal_word_count_max);
             assert(marker_count != 0);
-            return marker_count * @sizeOf(Marker) + literal_word_count * @sizeOf(Word);
+
+            return marker_count * @sizeOf(Marker) + word_count * @sizeOf(Word);
         }
 
         inline fn is_literal(word: Word) bool {
@@ -216,7 +216,7 @@ test "ewah Word=u8 encode→decode→encode" {
     const encoded_actual = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(u8),
-        codec.encode_size_max(decoded_expect[0..]),
+        codec.encode_size_max(decoded_expect.len),
     );
     defer std.testing.allocator.free(encoded_actual);
 
@@ -298,7 +298,7 @@ fn test_decode(comptime Word: type, encoded_expect_words: []Word) !void {
     const encoded_actual = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(Word),
-        codec.encode_size_max(decoded_expect),
+        codec.encode_size_max(decoded_expect.len),
     );
     defer std.testing.allocator.free(encoded_actual);
 
@@ -306,7 +306,7 @@ fn test_decode(comptime Word: type, encoded_expect_words: []Word) !void {
     try std.testing.expectEqual(encoded_expect.len, encoded_actual_length);
     try std.testing.expectEqualSlices(u8, encoded_expect, encoded_actual[0..encoded_actual_length]);
 
-    const encoded_size_max = codec.encode_size_max(decoded_expect);
+    const encoded_size_max = codec.encode_size_max(decoded_expect.len);
     try std.testing.expect(encoded_expect.len <= encoded_size_max);
 
     const decoded_actual = try std.testing.allocator.alloc(Word, decoded_expect.len);

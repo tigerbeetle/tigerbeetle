@@ -121,14 +121,19 @@ pub const BlockFreeSet = struct {
         }
     }
 
-    // Returns the maximum number of bytes that the `BlockFreeSet` needs to encode to.
-    pub fn encode_size_max(set: BlockFreeSet) usize {
-        return ewah.encode_size_max(bitset_masks(set.blocks));
+    /// Returns the maximum number of bytes that a `BlockFreeSet` with `blocks_count` blocks needs
+    /// to encode to.
+    pub fn encode_size_max(blocks_count: usize) usize {
+        assert(shard_size <= blocks_count);
+        assert(blocks_count % shard_size == 0);
+        assert(blocks_count % @bitSizeOf(usize) == 0);
+
+        return ewah.encode_size_max(@divExact(blocks_count, @bitSizeOf(usize)));
     }
 
-    // Returns the number of bytes written to `target`.
+    /// Returns the number of bytes written to `target`.
     pub fn encode(set: BlockFreeSet, target: []align(@alignOf(usize)) u8) usize {
-        assert(target.len == set.encode_size_max());
+        assert(target.len == BlockFreeSet.encode_size_max(set.blocks.bit_length));
 
         return ewah.encode(bitset_masks(set.blocks), target);
     }
@@ -277,7 +282,7 @@ fn test_encode(patterns: []const TestPattern) !void {
     var encoded = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
-        decoded_expect.encode_size_max(),
+        BlockFreeSet.encode_size_max(decoded_expect.blocks.bit_length),
     );
     defer std.testing.allocator.free(encoded);
 
@@ -313,7 +318,7 @@ test "BlockFreeSet decode small bitset into large bitset" {
     var small_buffer = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
-        small_set.encode_size_max(),
+        BlockFreeSet.encode_size_max(small_set.blocks.bit_length),
     );
     defer std.testing.allocator.free(small_buffer);
 
@@ -365,7 +370,7 @@ test "BlockFreeSet encode/decode manual" {
     var encoded_actual = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
-        decoded_actual.encode_size_max(),
+        BlockFreeSet.encode_size_max(decoded_actual.blocks.bit_length),
     );
     defer std.testing.allocator.free(encoded_actual);
 
