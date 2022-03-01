@@ -24,7 +24,11 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
-// We reserve maxInt(u64) to indicate that a table has not been deleted.
+/// We reserve maxInt(u64) to indicate that a table has not been deleted.
+/// Tables that have not been deleted have snapshot_max of maxInt(u64).
+/// Since we ensure and assert that a query snapshot never exactly matches
+/// the snaphshot_min/snapshot_max of a table, we must use maxInt(u64) - 1
+/// to query all non-deleted tables.
 pub const snapshot_latest = math.maxInt(u64) - 1;
 
 // StateMachine:
