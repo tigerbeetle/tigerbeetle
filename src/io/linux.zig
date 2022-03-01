@@ -22,6 +22,14 @@ pub const IO = struct {
     completed: FIFO(Completion) = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
+        // Detect the linux version to ensure that we support all io_uring ops used.
+        const uts = std.os.uname();
+        const release = std.mem.sliceTo(&uts.release, 0);
+        const version = try std.builtin.Version.parse(release);
+        if (version.major < 5 or version.minor < 5) {
+            @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
+        }
+
         return IO{ .ring = try IO_Uring.init(entries, flags) };
     }
 
