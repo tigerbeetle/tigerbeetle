@@ -153,6 +153,39 @@ pub fn ManifestLevel(
             }
         }
 
+        /// Set snapshot_max to new_snapshot_max for tables with snapshot_max of math.maxInt(u64)
+        /// and matching the given key range.
+        /// Asserts that exactly cardnality tables are modified.
+        pub fn set_snapshot_max(
+            level: Self,
+            new_snapshot_max: u64,
+            key_min: Key,
+            key_max: Key,
+            cardnality: u32,
+        ) void {
+            assert(new_snapshot_max <= lsm.snapshot_latest);
+            assert(compare_keys(key_min, key_max) != .gt);
+
+            var it = level.iterator(lsm.snapshot_latest, key_min, key_max, .ascending);
+            var modified: u32 = 0;
+            while (it.next()) |table_const| {
+                // This const cast is safe as we know that the memory pointed to is in fact
+                // mutable. That is, the table is not in the .text or .rodata section. We do this
+                // to avoid duplicating the iterator code in order to expose only a const iterator
+                // in the public API.
+                const table = @intToPtr(*TableInfo, @ptrToInt(table_const));
+
+                assert(compare_keys(key_min, table.key_min) == .lt);
+                assert(compare_keys(key_max, table.key_max) == .gt);
+
+                assert(table.snapshot_max == math.maxInt(u64));
+                table.snapshot_max = new_snapshot_max;
+                modified += 1;
+            }
+
+            assert(modified == cardnality);
+        }
+
         pub const Iterator = struct {
             level: *const Self,
             inner: Tables.Iterator,
