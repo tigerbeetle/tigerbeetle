@@ -74,22 +74,20 @@ pub const Transfer = packed struct {
     comptime {
         //std.debug.print("Jason-> TRANS-BY-ID {}", .{@sizeOf(Transfer)});
         //TODO @jason assert(@sizeOf(Transfer) == 128);
-        //assert(@sizeOf(Transfer) == 128);
+        assert(@sizeOf(Transfer) == 128);
     }
 };
 
 pub const TransferFlags = packed struct {
     linked: bool = false,
-    condition: bool = false,
     pending: bool = false,
     post_pending_transfer: bool = false,
     void_pending_transfer: bool = false,
-    // TODO DISPOSE LATER @jason
-    preimage: bool = false,
-    padding: u10 = 0,
+    hashlock: bool = false,
+    padding: u27 = 0,
 
     comptime {
-        assert(@sizeOf(TransferFlags) == @sizeOf(u16));
+        assert(@sizeOf(TransferFlags) == @sizeOf(u32));
     }
 };
 
