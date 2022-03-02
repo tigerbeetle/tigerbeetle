@@ -154,6 +154,14 @@ pub fn ManifestLevel(
                 }
             }
 
+            if (lsm.verify and level.keys.node_count > 1) {
+                var a = level.root_keys_array[0];
+                for (level.root_keys_array[1..level.keys.node_count]) |b| {
+                    assert(compare_keys(a, b) != .gt);
+                    a = b;
+                }
+            }
+
             {
                 level.root_table_nodes_array = undefined;
                 var key_node: u32 = 0;
@@ -175,6 +183,14 @@ pub fn ManifestLevel(
                     }
 
                     level.root_table_nodes_array[key_node] = table_node;
+                }
+            }
+
+            if (lsm.verify and level.keys.node_count > 1) {
+                var a = level.root_table_nodes_array[0];
+                for (level.root_table_nodes_array[1..level.keys.node_count]) |b| {
+                    assert(a <= b);
+                    a = b;
                 }
             }
         }
