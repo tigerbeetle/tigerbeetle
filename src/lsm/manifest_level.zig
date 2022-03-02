@@ -156,18 +156,17 @@ pub fn ManifestLevel(
 
             {
                 level.root_table_nodes_array = undefined;
-                level.root_table_nodes_array[0] = 0;
-                var key_node: u32 = 1;
+                var key_node: u32 = 0;
                 var table_node: u32 = 0;
                 while (key_node < level.keys.node_count) : (key_node += 1) {
-                    const previous_key_node_key_max = level.root_keys_array[key_node - 1];
+                    const key_node_first_key = level.keys.node_elements(key_node)[0];
 
-                    // While the key_max of the table node is less than or equal to the key_max
-                    // of the previous key_node, increment table_node.
+                    // While the key_max of the table node is less than the first key_max of the
+                    // key_node, increment table_node.
                     while (table_node < level.tables.node_count) : (table_node += 1) {
                         const table_node_table_max = level.tables.node_last_element(table_node);
                         const table_node_key_max = table_node_table_max.key_max;
-                        if (compare_keys(table_node_key_max, previous_key_node_key_max) == .gt) {
+                        if (compare_keys(table_node_key_max, key_node_first_key) != .lt) {
                             break;
                         }
                     } else {
