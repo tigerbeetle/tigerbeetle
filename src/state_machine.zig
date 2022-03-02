@@ -349,7 +349,7 @@ pub const StateMachine = struct {
             var lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
             assert(t.timestamp > t.timestamp);
 
-            if (!lookup.flags.posting) return .transfer_not_two_phase_commit;
+            if (!lookup.flags.pending) return .transfer_not_two_phase_commit;
 
             if (self.get_commit(t.id)) |exists| {
                 if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .already_committed_but_accepted;
@@ -371,7 +371,7 @@ pub const StateMachine = struct {
             assert(lookup.timestamp > dr.timestamp);
             assert(lookup.timestamp > cr.timestamp);
 
-            assert(lookup.flags.posting);
+            assert(lookup.flags.pending);
             if (dr.debits_pending < lookup.amount) return .debit_amount_was_not_reserved;
             if (cr.credits_pending < lookup.amount) return .credit_amount_was_not_reserved;
 
@@ -402,7 +402,7 @@ pub const StateMachine = struct {
             }
         } else {
             if (t.flags.padding != 0) return .reserved_flag_padding;
-            if (t.flags.posting) {
+            if (t.flags.pending) {
                 // Otherwise reserved amounts may never be released:
                 if (t.timeout == 0) return .two_phase_commit_must_timeout;
             } else if (t.timeout != 0) {
@@ -451,7 +451,7 @@ pub const StateMachine = struct {
                 return .exists;
             } else {
                 insert.value_ptr.* = t;
-                if (t.flags.posting) {
+                if (t.flags.pending) {
                     dr.debits_pending += t.amount;
                     cr.credits_pending += t.amount;
                 } else {
@@ -467,7 +467,7 @@ pub const StateMachine = struct {
     fn create_transfer_rollback(self: *StateMachine, t: Transfer) void {
         var dr = self.get_account(t.debit_account_id).?;
         var cr = self.get_account(t.credit_account_id).?;
-        if (t.flags.posting) {
+        if (t.flags.pending) {
             dr.debits_pending -= t.amount;
             cr.credits_pending -= t.amount;
         } else {
@@ -912,7 +912,7 @@ test "create/lookup/rollback transfers" {
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 3,
                 .timestamp = timestamp,
-                .flags = .{ .posting = true },
+                .flags = .{ .pending = true },
             }),
         },
         Vector{
@@ -1109,7 +1109,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .posting = true },
+                .flags = .{ .pending = true },
                 .timeout = 0,
             }),
         },
@@ -1121,7 +1121,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .posting = true },
+                .flags = .{ .pending = true },
                 .timeout = 20,
             }),
         },
@@ -1133,7 +1133,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .posting = true },
+                .flags = .{ .pending = true },
                 .timeout = 25,
             }),
         },
@@ -1146,12 +1146,12 @@ test "create/lookup/rollback transfers" {
         }
     }
 
-    // 2 phase commit [reserved]:
+    // 2 phase commit [pending]:
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_pending);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_pending);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_pending);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_pending);
-    // 1 phase commit [accepted]:
+    // 1 phase commit [posted]:
     try testing.expectEqual(@as(u64, 20), state_machine.get_account(7).?.*.debits_posted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_posted);
     try testing.expectEqual(@as(u64, 20), state_machine.get_account(8).?.*.credits_posted);
@@ -1199,7 +1199,7 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
-            .flags = .{ .posting = true },
+            .flags = .{ .pending = true },
             .timeout = 25,
         }),
         std.mem.zeroInit(Transfer, .{
@@ -1207,7 +1207,7 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
-            .flags = .{ .posting = true },
+            .flags = .{ .pending = true },
             .timeout = 25,
         }),
         std.mem.zeroInit(Transfer, .{
@@ -1215,7 +1215,7 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
-            .flags = .{ .posting = true },
+            .flags = .{ .pending = true },
             .timeout = 1,
         }),
         std.mem.zeroInit(Transfer, .{
@@ -1224,7 +1224,7 @@ test "create/lookup/rollback commits" {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .flags = .{
-                .posting = true,
+                .pending = true,
                 .condition = true,
             },
             .timeout = 25,
@@ -1235,7 +1235,7 @@ test "create/lookup/rollback commits" {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .flags = .{
-                .posting = true,
+                .pending = true,
                 .condition = false,
             },
             .timeout = 25,
@@ -1245,7 +1245,7 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 3,
             .credit_account_id = 4,
-            .flags = .{ .posting = true },
+            .flags = .{ .pending = true },
             .timeout = 25,
         }),
     };
