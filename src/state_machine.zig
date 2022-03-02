@@ -343,7 +343,7 @@ pub const StateMachine = struct {
         if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
             return .cannot_void_and_post_two_phase_commit;
         } else if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-            if (!t.flags.preimage and !zeroed_32_bytes(t.reserved)) return .reserved_field;
+            if (!t.flags.hashlock and !zeroed_32_bytes(t.reserved)) return .reserved_field;
             if (t.flags.padding != 0) return .reserved_flag_padding;
 
             var lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
@@ -359,10 +359,10 @@ pub const StateMachine = struct {
 
             if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
 
-            if (lookup.flags.condition) {
-                if (!t.flags.preimage) return .condition_requires_preimage;
+            if (lookup.flags.hashlock) {
+                if (!t.flags.hashlock) return .condition_requires_preimage;
                 if (!valid_preimage(lookup.reserved, t.reserved)) return .preimage_invalid;
-            } else if (t.flags.preimage) {
+            } else if (t.flags.hashlock) {
                 return .preimage_requires_condition;
             }
 
@@ -408,7 +408,7 @@ pub const StateMachine = struct {
             } else if (t.timeout != 0) {
                 return .timeout_reserved_for_two_phase_commit;
             }
-            if (!t.flags.condition and !zeroed_32_bytes(t.reserved)) return .reserved_field;
+            if (!t.flags.hashlock and !zeroed_32_bytes(t.reserved)) return .reserved_field;
 
             if (t.amount == 0) return .amount_is_zero;
 
@@ -928,7 +928,7 @@ test "create/lookup/rollback transfers" {
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 5,
                 .timestamp = timestamp,
-                .flags = .{ .condition = false },
+                .flags = .{ .hashlock = false },
                 .reserved = [_]u8{1} ** 32,
             }),
         },
@@ -1050,7 +1050,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .condition = true },
+                .flags = .{ .hashlock = true },
             }),
         },
         Vector{
@@ -1072,7 +1072,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .condition = true },
+                .flags = .{ .hashlock = true },
                 .reserved = [_]u8{1} ** 32,
             }),
         },
@@ -1084,7 +1084,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .condition = true },
+                .flags = .{ .hashlock = true },
                 .reserved = [_]u8{2} ** 32,
             }),
         },
@@ -1096,7 +1096,7 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 7,
                 .credit_account_id = 8,
-                .flags = .{ .condition = true },
+                .flags = .{ .hashlock = true },
                 .reserved = [_]u8{1} ** 32,
                 .timeout = 10,
             }),
@@ -1225,7 +1225,7 @@ test "create/lookup/rollback commits" {
             .credit_account_id = 2,
             .flags = .{
                 .pending = true,
-                .condition = true,
+                .hashlock = true,
             },
             .timeout = 25,
         }),
@@ -1236,7 +1236,7 @@ test "create/lookup/rollback commits" {
             .credit_account_id = 2,
             .flags = .{
                 .pending = true,
-                .condition = false,
+                .hashlock = false,
             },
             .timeout = 25,
         }),
@@ -1384,7 +1384,7 @@ test "create/lookup/rollback commits" {
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 5,
                 .timestamp = timestamp + 2,
-                .flags = .{ .preimage = true, .post_pending_transfer = true },
+                .flags = .{ .hashlock = true, .post_pending_transfer = true },
                 .reserved = [_]u8{1} ** 32,
             }),
         },
@@ -1393,7 +1393,7 @@ test "create/lookup/rollback commits" {
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 6,
                 .timestamp = timestamp + 2,
-                .flags = .{ .preimage = true, .post_pending_transfer = true },
+                .flags = .{ .hashlock = true, .post_pending_transfer = true },
             }),
         },
     };
