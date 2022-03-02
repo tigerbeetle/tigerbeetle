@@ -193,6 +193,23 @@ pub fn ManifestLevel(
                     a = b;
                 }
             }
+
+            if (lsm.verify) {
+                // Assert that the first key in each key node is in the range of the table
+                // directly mapped to by root_table_nodes_array.
+                for (level.root_table_nodes_array[0..level.keys.node_count]) |table_node, i| {
+                    const key_node = @intCast(u32, i);
+                    const key_node_first_key = level.keys.node_elements(key_node)[0];
+
+                    const table_node_key_min = level.tables.node_elements(table_node)[0].key_min;
+                    const table_node_key_max = level.tables.node_last_element(table_node).key_max;
+
+                    assert(compare_keys(table_node_key_min, table_node_key_max) == .lt);
+
+                    assert(compare_keys(key_node_first_key, table_node_key_min) != .lt);
+                    assert(compare_keys(key_node_first_key, table_node_key_max) != .gt);
+                }
+            }
         }
 
         /// Set snapshot_max to new_snapshot_max for tables with snapshot_max of math.maxInt(u64)
