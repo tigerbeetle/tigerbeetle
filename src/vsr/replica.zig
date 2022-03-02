@@ -282,7 +282,6 @@ pub fn Replica(
                     storage,
                     replica,
                     config.journal_size_max,
-                    config.journal_headers_max,
                     &init_prepare,
                 ),
                 .message_bus = message_bus,
@@ -595,6 +594,7 @@ pub fn Replica(
             message.header.commit = self.commit_max;
             message.header.replica = self.replica;
             message.header.command = .prepare;
+            // TODO set header.timestamp?
 
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
@@ -1172,8 +1172,9 @@ pub fn Replica(
                 assert(entry.op == op);
                 assert(checksum == null or entry.checksum == checksum.?);
 
-                if (!self.journal.dirty.bit(op)) {
-                    assert(!self.journal.faulty.bit(op));
+                const slot = self.journal.slot_for_header_exact(entry).?;
+                if (!self.journal.dirty.bit(slot)) {
+                    assert(!self.journal.faulty.bit(slot));
 
                     log.debug("{}: on_request_prepare: op={} checksum={} reading", .{
                         self.replica,
@@ -1193,7 +1194,7 @@ pub fn Replica(
 
                     // We have guaranteed the prepare and our copy is clean (not safe to nack).
                     return;
-                } else if (self.journal.faulty.bit(op)) {
+                } else if (self.journal.faulty.bit(slot)) {
                     log.debug("{}: on_request_prepare: op={} checksum={} faulty", .{
                         self.replica,
                         op,
@@ -1211,8 +1212,10 @@ pub fn Replica(
             if (self.status == .view_change) {
                 assert(message.header.replica == self.leader_index(self.view));
                 assert(checksum != null);
-                if (self.journal.entry_for_op_exact_with_checksum(op, checksum) != null) {
-                    assert(self.journal.dirty.bit(op) and !self.journal.faulty.bit(op));
+
+                if (self.journal.entry_for_op_exact_with_checksum(op, checksum)) |entry| {
+                    const slot = self.journal.slot_for_header_exact(entry).?;
+                    assert(self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot));
                 }
 
                 log.debug("{}: on_request_prepare: op={} checksum={} nacking", .{
@@ -1322,6 +1325,7 @@ pub fn Replica(
 
             const op = self.nack_prepare_op.?;
             const checksum = self.journal.entry_for_op_exact(op).?.checksum;
+            const slot = self.journal.slot_for_op_exact(op).?;
 
             if (message.header.op != op) {
                 log.debug("{}: on_nack_prepare: ignoring (repairing another op)", .{self.replica});
@@ -1356,14 +1360,14 @@ pub fn Replica(
             // Otherwise, if we know we do not have the op, then we can exclude ourselves.
             assert(self.replica_count > 1);
 
-            const threshold = if (self.journal.faulty.bit(op))
+            const threshold = if (self.journal.faulty.bit(slot))
                 self.replica_count - self.quorum_replication + 1
             else
                 self.replica_count - self.quorum_replication;
 
             if (threshold == 0) {
                 assert(self.replica_count == 2);
-                assert(!self.journal.faulty.bit(op));
+                assert(!self.journal.faulty.bit(slot));
 
                 // This is a special case for a cluster-of-two, handled in `repair_prepare()`.
                 log.debug("{}: on_nack_prepare: ignoring (cluster-of-two, not faulty)", .{
@@ -2196,6 +2200,7 @@ pub fn Replica(
             assert(!self.repair_timeout.ticking);
             assert(self.op >= self.commit_max);
             assert(self.replica_count > 1);
+            assert(self.op - self.commit_max <= self.journal.headers.len);
 
             const threshold = self.replica_count - self.quorum_replication;
             if (threshold == 0) {
@@ -2205,7 +2210,7 @@ pub fn Replica(
 
             var op = self.op;
             while (op > self.commit_max) : (op -= 1) {
-                if (self.journal.entry_for_op_exact(op) != null) continue;
+               if (self.journal.entry_for_op_exact(op) != null) continue;
 
                 log.debug("{}: discard_uncommitted_headers: op={} gap", .{ self.replica, op });
 
@@ -2240,9 +2245,10 @@ pub fn Replica(
                     self.journal.remove_entries_from(op);
                     self.op = op - 1;
 
+                    const slot = self.journal.slot_for_op(op);
                     assert(self.journal.entry_for_op(op) == null);
-                    assert(!self.journal.dirty.bit(op));
-                    assert(!self.journal.faulty.bit(op));
+                    assert(!self.journal.dirty.bit(slot));
+                    assert(!self.journal.faulty.bit(slot));
                 }
             }
         }
@@ -2257,10 +2263,11 @@ pub fn Replica(
 
             assert(self.valid_hash_chain("discard_uncommitted_ops_from"));
 
+            const slot = self.journal.slot_for_op_exact(op).?;
             assert(op > self.commit_max);
             assert(op <= self.op);
             assert(self.journal.entry_for_op_exact_with_checksum(op, checksum) != null);
-            assert(self.journal.dirty.bit(op));
+            assert(self.journal.dirty.bit(slot));
 
             log.debug("{}: discard_uncommitted_ops_from: ops={}..{} view={}", .{
                 self.replica,
@@ -2273,8 +2280,8 @@ pub fn Replica(
             self.op = op - 1;
 
             assert(self.journal.entry_for_op(op) == null);
-            assert(!self.journal.dirty.bit(op));
-            assert(!self.journal.faulty.bit(op));
+            assert(!self.journal.dirty.bit(slot));
+            assert(!self.journal.faulty.bit(slot));
 
             // We require that `self.op` always exists. Rewinding `self.op` could change that.
             // However, we do this only as the leader within a view change, with all headers intact.
@@ -2956,7 +2963,8 @@ pub fn Replica(
                 // Do not replace any existing op lightly as doing so may impair durability and even
                 // violate correctness by undoing a prepare already acknowledged to the leader:
                 if (existing.checksum == header.checksum) {
-                    if (!self.journal.dirty.bit(header.op)) {
+                    const slot = self.journal.slot_for_header_exact(header).?;
+                    if (!self.journal.dirty.bit(slot)) {
                         log.debug("{}: repair_header: false (checksum clean)", .{self.replica});
                         return false;
                     }
@@ -3202,10 +3210,12 @@ pub fn Replica(
             }
 
             var op = self.op + 1;
-            while (op > 0) {
+            const op_min = op -| self.journal.headers.len;
+            while (op > op_min) {
                 op -= 1;
 
-                if (self.journal.dirty.bit(op)) {
+                const slot = self.journal.slot_for_op(op);
+                if (self.journal.dirty.bit(slot)) {
                     // If this is an uncommitted op, and we are the leader in `view_change` status,
                     // then we will `request_prepare` from the cluster, set `nack_prepare_op`,
                     // and stop repairing any further prepares:
@@ -3227,7 +3237,7 @@ pub fn Replica(
                         }
                     }
                 } else {
-                    assert(!self.journal.faulty.bit(op));
+                    assert(!self.journal.faulty.bit(slot));
                 }
             }
         }
@@ -3249,9 +3259,11 @@ pub fn Replica(
         /// This is effectively "many-to-one" repair, where a single replica recovers using the
         /// resources of many replicas, for faster recovery.
         fn repair_prepare(self: *Self, op: u64) bool {
+            const slot = self.journal.slot_for_op_exact(op).?;
+
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
-            assert(self.journal.dirty.bit(op));
+            assert(self.journal.dirty.bit(slot));
 
             const checksum = self.journal.entry_for_op_exact(op).?.checksum;
 
@@ -3281,7 +3293,7 @@ pub fn Replica(
                 // Only the leader is allowed to do repairs in a view change:
                 assert(self.leader_index(self.view) == self.replica);
 
-                const reason = if (self.journal.faulty.bit(op)) "faulty" else "dirty";
+                const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
                 log.debug(
                     "{}: repair_prepare: op={} checksum={} (uncommitted, {s}, view_change)",
                     .{
@@ -3292,7 +3304,7 @@ pub fn Replica(
                     },
                 );
 
-                if (self.replica_count == 2 and !self.journal.faulty.bit(op)) {
+                if (self.replica_count == 2 and !self.journal.faulty.bit(slot)) {
                     // This is required to avoid a liveness issue for a cluster-of-two where a new
                     // leader learns of an op during a view change but where the op is faulty on
                     // the old leader. We must immediately roll back the op since it could not have
@@ -3324,7 +3336,7 @@ pub fn Replica(
                 self.send_header_to_other_replicas(request_prepare);
             } else {
                 const nature = if (op > self.commit_max) "uncommitted" else "committed";
-                const reason = if (self.journal.faulty.bit(op)) "faulty" else "dirty";
+                const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
                 log.debug("{}: repair_prepare: op={} checksum={} ({s}, {s})", .{
                     self.replica,
                     op,

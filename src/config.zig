@@ -67,15 +67,6 @@ pub const journal_size_max = switch (deployment_environment) {
     else => 128 * 1024 * 1024,
 };
 
-/// The maximum number of batch entries in the journal file:
-/// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
-/// We need this limit to allocate space for copies of batch headers at the start of the journal.
-/// These header copies enable us to disentangle corruption from crashes and recover accordingly.
-pub const journal_headers_max = switch (deployment_environment) {
-    .production => 1024 * 1024,
-    else => 16384,
-};
-
 /// The maximum number of connections that can be held open by the server at any time:
 pub const connections_max = replicas_max + clients_max;
 

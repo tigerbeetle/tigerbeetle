@@ -64,7 +64,6 @@ pub fn main() !void {
     const node_count = replica_count + client_count;
 
     const ticks_max = 100_000_000;
-    const transitions_max = config.journal_size_max / config.message_size_max;
     const request_probability = 1 + random.uintLessThan(u8, 99);
     const idle_on_probability = random.uintLessThan(u8, 20);
     const idle_off_probability = 10 + random.uintLessThan(u8, 10);
@@ -111,6 +110,8 @@ pub fn main() !void {
     cluster.state_checker = try StateChecker.init(allocator, cluster);
     defer cluster.state_checker.deinit();
 
+    // TODO When storage is supported, run more transitions than fit in the journal.
+    const transitions_max = cluster.replicas[0].journal.headers.len / 2;
     for (cluster.replicas) |*replica| {
         replica.on_change_state = on_change_replica;
     }
