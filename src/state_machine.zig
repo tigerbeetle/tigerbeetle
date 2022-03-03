@@ -426,11 +426,6 @@ pub const StateMachine = struct {
 
             if (dr.unit != cr.unit) return .accounts_have_different_units;
 
-            // TODO We need a lookup before inserting in case transfer exists and would overflow limits.
-            // If the transfer exists, then we should rather return .exists as an error.
-            if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
-            if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
-
             var insert = self.transfers.getOrPutAssumeCapacity(t.id);
             if (insert.found_existing) {
                 const exists = insert.value_ptr.*;
@@ -449,18 +444,21 @@ pub const StateMachine = struct {
                 }
                 if (exists.timeout != t.timeout) return .exists_with_different_timeout;
                 return .exists;
-            } else {
-                insert.value_ptr.* = t;
-                if (t.flags.pending) {
-                    dr.debits_pending += t.amount;
-                    cr.credits_pending += t.amount;
-                } else {
-                    dr.debits_posted += t.amount;
-                    cr.credits_posted += t.amount;
-                }
-                self.post_timestamp = t.timestamp;
-                return .ok;
             }
+
+            if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
+            if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
+
+            insert.value_ptr.* = t;
+            if (t.flags.pending) {
+                dr.debits_pending += t.amount;
+                cr.credits_pending += t.amount;
+            } else {
+                dr.debits_posted += t.amount;
+                cr.credits_posted += t.amount;
+            }
+            self.post_timestamp = t.timestamp;
+            return .ok;
         }
     }
 
