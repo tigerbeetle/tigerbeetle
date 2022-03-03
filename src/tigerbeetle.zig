@@ -72,8 +72,6 @@ pub const Transfer = packed struct {
     timestamp: u64 = 0,
 
     comptime {
-        //std.debug.print("Jason-> TRANS-BY-ID {}", .{@sizeOf(Transfer)});
-        //TODO @jason assert(@sizeOf(Transfer) == 128);
         assert(@sizeOf(Transfer) == 128);
     }
 };
