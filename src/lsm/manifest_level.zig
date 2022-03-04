@@ -245,6 +245,93 @@ pub fn ManifestLevel(
             assert(modified == cardnality);
         }
 
+        /// Remove tables matching the given key range with table.snapshot_max <= snapshot_max.
+        /// Asserts that the key_min/key_max bounds exactly match the first/last table to be removed.
+        /// Asserts that exactly cardnality tables are removed.
+        pub fn remove_tables(
+            level: *Self,
+            node_pool: *NodePool,
+            snapshot_max: u64,
+            key_min: Key,
+            key_max: Key,
+            cardnality: u32,
+        ) void {
+            assert(cardnality > 0);
+            assert(level.keys.len() == level.tables.len());
+            assert(level.keys.len() >= cardnality);
+
+            var absolute_index = level.absolute_index_for_remove(key_min);
+
+            {
+                var it = level.tables.iterator(absolute_index, 0, .ascending);
+                while (it.next()) |table| : (absolute_index += 1) {
+                    if (table.snapshot_max <= snapshot_max) {
+                        // We require the key_min/key_max to be exact, so the first table in the key
+                        // matching the snapshot must have the provided key_min.
+                        assert(compare_keys(key_min, table.key_min) == .eq);
+                        break;
+                    }
+                } else {
+                    unreachable;
+                }
+            }
+
+            var removed: u32 = 0;
+            var safety_counter: u32 = 0;
+            outer: while (safety_counter < cardnality + 1) : (safety_counter += 1) {
+                var it = level.tables.iterator(absolute_index, 0, .ascending);
+                inner: while (it.next()) |table| : (absolute_index += 1) {
+                    if (table.snapshot_max <= snapshot_max) {
+                        level.keys.remove_elements(node_pool, absolute_index, 1);
+                        level.tables.remove_elements(node_pool, absolute_index, 1);
+                        removed += 1;
+
+                        switch (compare_keys(table.key_max, key_max)) {
+                            .lt => break :inner,
+                            .eq => break :outer,
+                            .gt => unreachable,
+                        }
+                    } else {
+                        // We handle the first table to be removed specially before this main loop
+                        // in order to check for an exact key_min match.
+                        assert(removed > 0);
+                    }
+                } else {
+                    unreachable;
+                }
+            }
+            assert(removed == cardnality);
+            assert(safety_counter == cardnality);
+
+            assert(level.keys.len() == level.tables.len());
+
+            level.rebuild_root();
+        }
+
+        /// Return the index of the first table that could have the given key_min.
+        /// Requires all metadata/indexes to be valid.
+        fn absolute_index_for_remove(level: Self, key_min: Key) u32 {
+            const root = level.root_keys();
+            assert(root.len > 0);
+
+            const key_node = binary_search_keys_raw(Key, compare_keys, root, key_min);
+            assert(key_node < level.keys.node_count);
+
+            const keys = level.keys.node_elements(key_node);
+            assert(keys.len > 0);
+
+            const relative_index = binary_search_keys_raw(Key, compare_keys, keys, key_min);
+            assert(relative_index < keys.len);
+
+            return level.keys.absolute_index_for_cursor(level.iterator_start_boundary(
+                .{
+                    .node = key_node,
+                    .relative_index = relative_index,
+                },
+                .ascending,
+            ));
+        }
+
         pub const Iterator = struct {
             level: *const Self,
             inner: Tables.Iterator,
