@@ -30,7 +30,7 @@ pub const BlockFreeSet = struct {
     //
     // e.g. 10TiB disk ÷ 64KiB/block ÷ 512*8 blocks/shard ÷ 8 shards/byte = 5120B index
     const shard_cache_lines = 8;
-    const shard_size = shard_cache_lines * config.cache_line_size * @bitSizeOf(u8);
+    pub const shard_size = shard_cache_lines * config.cache_line_size * @bitSizeOf(u8);
     comptime {
         assert(shard_size == 4096);
         assert(@bitSizeOf(MaskInt) == 64);
@@ -136,6 +136,20 @@ pub const BlockFreeSet = struct {
         assert(target.len == BlockFreeSet.encode_size_max(set.blocks.bit_length));
 
         return ewah.encode(bitset_masks(set.blocks), target);
+    }
+
+    /// Returns `blocks_count` rounded down to the nearest multiple of shard and word bit count.
+    /// Ensures that the result is acceptable to `BlockFreeSet.init()`.
+    pub fn blocks_count_floor(blocks_count: usize) usize {
+        assert(blocks_count > 0);
+        assert(blocks_count >= shard_size);
+
+        const floor = @divFloor(blocks_count, shard_size) * shard_size;
+
+        // We assume that shard_size is itself a multiple of word bit count.
+        assert(floor % @bitSizeOf(usize) == 0);
+
+        return floor;
     }
 };
 

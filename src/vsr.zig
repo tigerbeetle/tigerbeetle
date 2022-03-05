@@ -865,3 +865,9 @@ pub fn sector_ceil(offset: u64) u64 {
     const sectors = math.divCeil(u64, offset, config.sector_size) catch unreachable;
     return sectors * config.sector_size;
 }
+
+pub fn checksum(source: []const u8) u128 {
+    var target: [32]u8 = undefined;
+    std.crypto.hash.Blake3.hash(source, target[0..], .{});
+    return @bitCast(u128, target[0..@sizeOf(u128)].*);
+}

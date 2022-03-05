@@ -185,6 +185,35 @@ pub const io_depth_read = 8;
 /// The maximum number of concurrent write I/O operations to allow at once.
 pub const io_depth_write = 8;
 
+/// The number of redundant copies of the superblock in the superblock storage zone.
+/// This must be either { 4, 6, 8 }, i.e. an even number, for more efficient flexible quorums.
+/// This is further multiplied by two to support copy-on-write across copy sets.
+///
+/// The superblock contains local state for the replica and therefore cannot be replicated remotely.
+/// Loss of the superblock would represent loss of the replica and so it must be protected.
+/// Since each superblock copy also copies the superblock trailer (around 33 MiB), setting this
+/// beyond 4 copies (or decreasing block_size < 64 KiB) can result in a superblock zone > 264 MiB.
+///
+/// This can mean checkpointing latencies in the rare extreme worst-case of at most 264ms, although
+/// this would require EWAH compression of our block free set to have zero effective compression.
+/// In practice, checkpointing latency should be an order of magnitude better due to compression,
+/// because our block free set will fill holes when allocating.
+///
+/// The superblock only needs to be checkpointed every now and then, before the WAL wraps around,
+/// or when a view change needs to take place to elect a new primary.
+pub const superblock_copies = 4;
+
+/// The maximum size of a local data file.
+/// This should not be much larger than several TiB to limit:
+/// * blast radius and recovery time when a whole replica is lost,
+/// * replicated storage overhead, since all data files are mirrored,
+/// * the size of the superblock storage zone, and
+/// * the static memory allocation required for tracking LSM forest metadata in memory.
+pub const size_max = 16 * 1024 * 1024 * 1024 * 1024;
+
+/// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
+pub const block_size = 64 * 1024;
+
 // TODO Document and tune these LSM options:
 pub const lsm_trees = 30;
 
@@ -200,7 +229,8 @@ pub const lsm_table_size_max = 64 * 1024 * 1024;
 
 /// Size of blocks used by the LSM tree implementation. These blocks are passed
 /// through an LRU block cache.
-pub const lsm_table_block_size = 64 * 1024;
+/// TODO Remove this and update references.
+pub const lsm_table_block_size = block_size;
 
 /// Size of nodes used by the LSM tree manifest implementation.
 /// TODO Double-check this with our "LSM Manifest" spreadsheet.

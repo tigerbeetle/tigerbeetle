@@ -303,7 +303,7 @@ pub const Storage = struct {
 
         self.start_write(write);
         // Assert that the callback is called asynchronously.
-        assert(self.buffer.len > 0);
+        assert(write.buffer.len > 0);
     }
 
     fn start_write(self: *Storage, write: *Storage.Write) void {
