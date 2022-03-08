@@ -13,6 +13,7 @@ const eytzinger = @import("eytzinger.zig").eytzinger;
 const utils = @import("../utils.zig");
 const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
+const bloom_filter = @import("bloom_filter.zig");
 
 const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
 const Direction = @import("direction.zig").Direction;
@@ -495,8 +496,11 @@ pub fn Tree(
 
                 const data_index_entry_size = key_size + address_size + checksum_size;
                 const filter_index_entry_size = address_size + checksum_size;
+
                 // TODO audit/tune this number for split block bloom filters
                 const filter_bytes_per_key = 2;
+                const data_blocks_per_filter_block = filter.filter_size /
+                    (block_value_count_max * filter_bytes_per_key);
 
                 var data_index_size = 0;
                 var filter_index_size = 0;
@@ -505,10 +509,7 @@ pub fn Tree(
                 while (true) : (data_blocks -= 1) {
                     data_index_size = data_index_entry_size * data_blocks;
 
-                    filter_blocks = utils.div_ceil(
-                        data_blocks * block_value_count_max * filter_bytes_per_key,
-                        filter.filter_size,
-                    );
+                    filter_blocks = utils.div_ceil(data_blocks, data_blocks_per_filter_block);
                     filter_index_size = filter_index_entry_size * filter_blocks;
 
                     const index_size = @sizeOf(vsr.Header) + data_index_size + filter_index_size;
@@ -526,13 +527,15 @@ pub fn Tree(
                     .block_key_layout_size = block_key_layout_size,
                     .block_value_count_max = block_value_count_max,
 
+                    .data_blocks_per_filter_block = data_blocks_per_filter_block,
+
                     .data_block_count_max = data_blocks,
-                    .filter_block_count = filter_blocks,
+                    .filter_block_count_max = filter_blocks,
                 };
             };
 
             const index_block_count = 1;
-            const filter_block_count = layout.filter_block_count;
+            const filter_block_count_max = layout.filter_block_count_max;
             const data_block_count_max = layout.data_block_count_max;
 
             const index = struct {
@@ -540,7 +543,7 @@ pub fn Tree(
                     keys_size + filter_addresses_size + data_addresses_size;
 
                 const filter_checksums_offset = @sizeOf(vsr.Header);
-                const filter_checksums_size = filter_block_count * checksum_size;
+                const filter_checksums_size = filter_block_count_max * checksum_size;
 
                 const data_checksums_offset = filter_checksums_offset + filter_checksums_size;
                 const data_checksums_size = data_block_count_max * checksum_size;
@@ -549,7 +552,7 @@ pub fn Tree(
                 const keys_size = data_block_count_max * key_size;
 
                 const filter_addresses_offset = keys_offset + keys_size;
-                const filter_addresses_size = filter_block_count * address_size;
+                const filter_addresses_size = filter_block_count_max * address_size;
 
                 const data_addresses_offset = filter_addresses_offset + filter_addresses_size;
                 const data_addresses_size = data_block_count_max * address_size;
@@ -593,8 +596,8 @@ pub fn Tree(
                         \\    block size: {}
                         \\layout:
                         \\    index block count: {}
-                        \\    filter block count: {}
-                        \\    data block count: {}
+                        \\    filter block count max: {}
+                        \\    data block count max: {}
                         \\index:
                         \\    size: {}
                         \\    filter_checksums_offset: {}
@@ -628,7 +631,7 @@ pub fn Tree(
                             block_size,
 
                             index_block_count,
-                            filter_block_count,
+                            filter_block_count_max,
                             data_block_count_max,
 
                             index.size,
@@ -661,25 +664,25 @@ pub fn Tree(
 
             comptime {
                 assert(index_block_count > 0);
-                assert(filter_block_count > 0);
+                assert(filter_block_count_max > 0);
                 assert(data_block_count_max > 0);
-                assert(index_block_count + filter_block_count +
+                assert(index_block_count + filter_block_count_max +
                     data_block_count_max <= table_block_count_max);
                 const filter_bytes_per_key = 2;
-                assert(filter_block_count * filter.filter_size >=
+                assert(filter_block_count_max * filter.filter_size >=
                     data_block_count_max * data.value_count_max * filter_bytes_per_key);
 
                 assert(index.size == @sizeOf(vsr.Header) +
                     data_block_count_max * (key_size + address_size + checksum_size) +
-                    filter_block_count * (address_size + checksum_size));
+                    filter_block_count_max * (address_size + checksum_size));
                 assert(index.size == index.data_addresses_offset + index.data_addresses_size);
                 assert(index.size <= block_size);
                 assert(index.keys_size > 0);
                 assert(index.keys_size % key_size == 0);
                 assert(@divExact(index.data_addresses_size, @sizeOf(u64)) == data_block_count_max);
-                assert(@divExact(index.filter_addresses_size, @sizeOf(u64)) == filter_block_count);
+                assert(@divExact(index.filter_addresses_size, @sizeOf(u64)) == filter_block_count_max);
                 assert(@divExact(index.data_checksums_size, @sizeOf(u128)) == data_block_count_max);
-                assert(@divExact(index.filter_checksums_size, @sizeOf(u128)) == filter_block_count);
+                assert(@divExact(index.filter_checksums_size, @sizeOf(u128)) == filter_block_count_max);
                 assert(block_size == index.padding_offset + index.padding_size);
                 assert(block_size == index.size + index.padding_size);
 
@@ -736,8 +739,8 @@ pub fn Tree(
             pub fn init(allocator: mem.Allocator) !Table {
                 // We allocate blocks from MutableTable.value_count_max, not data_block_count_max.
                 // This saves memory for every LSM tree, which is important as we may have many.
-                // TODO We could similarly reduce filter_block_count accordingly.
-                const block_count = index_block_count + filter_block_count +
+                // TODO We could similarly reduce filter_block_count_max accordingly.
+                const block_count = index_block_count + filter_block_count_max +
                     utils.div_ceil(MutableTable.value_count_max, data.value_count_max);
 
                 const blocks = try allocator.allocAdvanced(
@@ -773,7 +776,7 @@ pub fn Tree(
                 assert(sorted_values.len <= data.value_count_max * data_block_count_max);
 
                 var filter_blocks_index: u32 = 0;
-                const filter_blocks = table.blocks[index_block_count..][0..filter_block_count];
+                const filter_blocks = table.blocks[index_block_count..][0..filter_block_count_max];
 
                 var builder: Builder = .{
                     .storage = storage,
@@ -786,7 +789,7 @@ pub fn Tree(
                 var stream = sorted_values;
 
                 // Do not slice by data_block_count_max as the mutable table may have less blocks.
-                const data_blocks = table.blocks[index_block_count + filter_block_count ..];
+                const data_blocks = table.blocks[index_block_count + filter_block_count_max ..];
                 assert(data_blocks.len <= data_block_count_max);
 
                 for (data_blocks) |*data_block| {
@@ -819,7 +822,7 @@ pub fn Tree(
                     unreachable;
                 }
                 assert(stream.len == 0);
-                assert(filter_blocks_index <= filter_block_count);
+                assert(filter_blocks_index <= filter_block_count_max);
 
                 table.* = .{
                     .blocks = table.blocks,
@@ -842,7 +845,7 @@ pub fn Tree(
 
                 const i = index_data_block_for_key(index_block, key);
 
-                const meta_block_count = index_block_count + filter_block_count;
+                const meta_block_count = index_block_count + filter_block_count_max;
                 const data_blocks_used = index_data_blocks_used(index_block);
                 const data_block = @alignCast(
                     config.sector_size,
@@ -903,8 +906,11 @@ pub fn Tree(
                 filter_block: BlockPtr,
                 data_block: BlockPtr,
 
-                block: u32 = 0,
+                data_block_count: u32 = 0,
                 value: u32 = 0,
+
+                filter_block_count: u32 = 0,
+                data_blocks_in_filter: u32 = 0,
 
                 pub fn init(allocator: mem.Allocator) Builder {
                     _ = allocator;
@@ -925,7 +931,9 @@ pub fn Tree(
 
                     values_max[builder.value] = value;
                     builder.value += 1;
-                    // TODO add this value's key to the correct filter block.
+
+                    const fingerprint = bloom_filter.Fingerprint.create(key_from_value(value));
+                    bloom_filter.add(fingerprint, filter_block_filter(builder.filter_block));
                 }
 
                 pub fn data_block_append_slice(builder: *Builder, values: []const Value) void {
@@ -937,7 +945,12 @@ pub fn Tree(
 
                     mem.copy(Value, values_max[builder.value..], values);
                     builder.value += @intCast(u32, values.len);
-                    // TODO add this value's key to the correct filter block.
+
+                    for (values) |value| {
+                        const key = key_from_value(value);
+                        const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
+                        bloom_filter.add(fingerprint, filter_block_filter(builder.filter_block));
+                    }
                 }
 
                 pub fn data_block_full(builder: Builder) bool {
@@ -1004,60 +1017,76 @@ pub fn Tree(
 
                     const key_max = key_from_value(values[values.len - 1]);
 
-                    index_data_keys(builder.index_block)[builder.block] = key_max;
-                    index_data_addresses(builder.index_block)[builder.block] = address;
-                    index_data_checksums(builder.index_block)[builder.block] = header.checksum;
+                    const current = builder.data_block_count;
+                    index_data_keys(builder.index_block)[current] = key_max;
+                    index_data_addresses(builder.index_block)[current] = address;
+                    index_data_checksums(builder.index_block)[current] = header.checksum;
 
-                    if (builder.block == 0) builder.key_min = key_from_value(values[0]);
+                    if (current == 0) builder.key_min = key_from_value(values[0]);
                     builder.key_max = key_max;
 
-                    if (builder.block == 0 and values.len == 1) {
+                    if (current == 0 and values.len == 1) {
                         assert(compare_keys(builder.key_min, builder.key_max) != .gt);
                     } else {
                         assert(compare_keys(builder.key_min, builder.key_max) == .lt);
                     }
 
-                    builder.block += 1;
+                    builder.data_block_count += 1;
                     builder.value = 0;
+
+                    builder.data_blocks_in_filter += 1;
                 }
 
                 /// Returns true if there is space for at least one more data block in the filter.
                 pub fn filter_block_full(builder: Builder) bool {
-                    _ = builder;
-
-                    // TODO
-                    return true;
+                    assert(builder.data_blocks_in_filter <= layout.data_blocks_per_filter_block);
+                    return builder.data_blocks_in_filter == layout.data_blocks_per_filter_block;
                 }
 
                 pub fn filter_block_finish(builder: *Builder) void {
-                    _ = builder;
+                    const address = builder.storage.block_free_set.acquire().?;
 
-                    // TODO
+                    const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
+                    const header = mem.bytesAsValue(vsr.Header, header_bytes);
+                    header.* = .{
+                        .cluster = builder.storage.cluster,
+                        .op = address,
+                        .size = block_size - filter.padding_size,
+                        .command = .block,
+                    };
+
+                    header.set_checksum_body(builder.filter_block[@sizeOf(vsr.Header)..header.size]);
+                    header.set_checksum();
+
+                    const current = builder.filter_block_count;
+                    index_filter_addresses(builder.index_block)[current] = address;
+                    index_filter_checksums(builder.index_block)[current] = header.checksum;
+
+                    builder.filter_block_count += 1;
+                    builder.data_blocks_in_filter = 0;
                 }
 
                 pub fn index_block_full(builder: Builder) bool {
-                    return builder.block == data_block_count_max;
+                    return builder.data_block_count == data_block_count_max;
                 }
 
                 pub fn index_block_finish(builder: *Builder, snapshot_min: u64) Manifest.TableInfo {
-                    assert(builder.block > 0);
-
-                    // TODO assert that filter is finished
+                    assert(builder.data_block_count > 0);
+                    assert(builder.value == 0);
+                    assert(builder.filter_block_count > builder.data_block_count /
+                        layout.data_blocks_per_filter_block);
+                    assert(builder.data_blocks_in_filter == 0);
 
                     const index_block = builder.index_block;
 
-                    // TODO(ifreund) We may have a bug here using builder.block if not all filter
-                    // blocks are used?
-                    const index_data_keys_padding = index_data_keys(index_block)[builder.block..];
+                    const index_data_keys_padding = index_data_keys(index_block)[builder.data_block_count..];
                     const index_data_keys_padding_bytes = mem.sliceAsBytes(index_data_keys_padding);
                     mem.set(u8, index_data_keys_padding_bytes, 0);
-                    mem.set(u64, index_data_addresses(index_block)[builder.block..], 0);
-                    mem.set(u128, index_data_checksums(index_block)[builder.block..], 0);
+                    mem.set(u64, index_data_addresses(index_block)[builder.data_block_count..], 0);
+                    mem.set(u128, index_data_checksums(index_block)[builder.data_block_count..], 0);
 
-                    // TODO implement filters
-                    const filter_blocks_used = 0;
-                    mem.set(u64, index_filter_addresses(index_block), 0);
-                    mem.set(u128, index_filter_checksums(index_block), 0);
+                    mem.set(u64, index_filter_addresses(index_block)[builder.filter_block_count..], 0);
+                    mem.set(u128, index_filter_checksums(index_block)[builder.filter_block_count..], 0);
 
                     mem.set(u8, index_block[index.padding_offset..][0..index.padding_size], 0);
 
@@ -1069,8 +1098,8 @@ pub fn Tree(
                     header.* = .{
                         .cluster = builder.storage.cluster,
                         .op = address,
-                        .commit = filter_blocks_used,
-                        .request = builder.block,
+                        .commit = builder.filter_block_count,
+                        .request = builder.data_block_count,
                         .offset = snapshot_min,
                         .size = index.size,
                         .command = .block,
@@ -1197,6 +1226,10 @@ pub fn Tree(
                 return address;
             }
 
+            inline fn filter_block_filter(filter_block: BlockPtr) []u8 {
+                return filter_block[filter.filter_offset..][0..filter.filter_size];
+            }
+
             pub const FlushIterator = struct {
                 const Callback = fn () void;
 
@@ -1243,7 +1276,7 @@ pub fn Tree(
                         // This way, if there's any mismatch, we'll catch it.
                         // This is one of the tricky things about how we have a full allocation of
                         // blocks, but don't always use all the allocated filter blocks.
-                        const filter_blocks_unused = filter_block_count - filter_blocks_used;
+                        const filter_blocks_unused = filter_block_count_max - filter_blocks_used;
                         it.block += @intCast(u32, filter_blocks_unused);
                     }
 
