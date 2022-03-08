@@ -393,6 +393,7 @@ pub fn SuperBlock(comptime Storage: type) type {
         manifest: []align(config.sector_size) u8,
         block_free_set: []align(config.sector_size) u8,
 
+        /// Whether the superblock has been opened. An open superblock may not be formatted.
         opened: bool = false,
 
         /// Beyond formatting and opening of the superblock, which are mutually exclusive of all
@@ -400,8 +401,8 @@ pub fn SuperBlock(comptime Storage: type) type {
         /// 1. A view change may queue on a checkpoint.
         /// 2. A checkpoint may queue on a view change.
         /// 
-        /// There may only be a single context queued at a time, to ensure that the VSR protocol
-        /// is careful to submit at most one view change at a time.
+        /// There may only be a single caller queued at a time, to ensure that the VSR protocol is
+        /// careful to submit at most one view change at a time.
         queue_head: ?*Context = null,
         queue_tail: ?*Context = null,
 
