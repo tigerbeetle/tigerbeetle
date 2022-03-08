@@ -149,7 +149,7 @@ pub fn TreeType(
 
             /// Levels beyond level 0 have tables with disjoint key ranges.
             /// Here, we use a structure with indexes over the segmented array for performance.
-            const Disjoint = ManifestLevel(NodePool, Key, TableInfo, compare_keys);
+            const Disjoint = ManifestLevel(NodePool, Key, TableInfo, compare_keys, table_count_max);
 
             const Level = union(LevelTag) {
                 conjoint: Conjoint,
