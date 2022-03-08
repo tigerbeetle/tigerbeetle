@@ -16,6 +16,9 @@ pub const Fingerprint = struct {
         const hash_lower = @truncate(u32, hash);
         const hash_upper = @intCast(u32, hash >> 32);
 
+        // TODO These constants are from the paper and we understand them to be arbitrary odd
+        // integers. Experimentally compare the performance of these with other randomly chosen
+        // odd integers to verify/improve our understanding.
         const odd_integers: meta.Vector(8, u32) = [8]u32{
             0x47b6137b,
             0x44974d91,
@@ -37,35 +40,41 @@ pub const Fingerprint = struct {
     }
 };
 
-pub fn filter(comptime size: u32) type {
-    assert(size > 0);
-    assert(size % @sizeOf(meta.Vector(8, u32)) == 0);
+/// Add the key with the given fingerprint to the filter.
+/// filter.len must be a multiple of 32.
+pub fn add(fingerprint: Fingerprint, filter: []u8) void {
+    comptime assert(@sizeOf(meta.Vector(8, u32)) == 32);
 
-    assert(@sizeOf(meta.Vector(8, u32)) == 32);
+    assert(filter.len > 0);
+    assert(filter.len % @sizeOf(meta.Vector(8, u32)) == 0);
+
+    const blocks = mem.bytesAsSlice([8]u32, filter);
+    const index = block_index(fingerprint.hash, filter.len);
+
+    const current: meta.Vector(8, u32) = blocks[index];
+    blocks[index] = current | fingerprint.mask;
+}
+
+/// Check if the key with the given fingerprint may have been added to the filter.
+/// filter.len must be a multiple of 32.
+pub fn may_contain(fingerprint: Fingerprint, filter: []const u8) bool {
+    comptime assert(@sizeOf(meta.Vector(8, u32)) == 32);
+
+    assert(filter.len > 0);
+    assert(filter.len % @sizeOf(meta.Vector(8, u32)) == 0);
+
+    const blocks = mem.bytesAsSlice([8]u32, filter);
+    const index = block_index(fingerprint.hash, filter.len);
+
+    const current: meta.Vector(8, u32) = blocks[index];
+    return @reduce(.Or, ~current & fingerprint.mask) == 0;
+}
+
+inline fn block_index(hash: u32, size: usize) u32 {
+    assert(size > 0);
 
     const block_count = @divExact(size, @sizeOf(meta.Vector(8, u32)));
-
-    return struct {
-        fn block_index(hash: u32) u32 {
-            return @intCast(u32, (@as(u64, hash) * block_count) >> 32);
-        }
-
-        pub fn add(fingerprint: Fingerprint, filter_bytes: *[size]u8) void {
-            const blocks = mem.bytesAsSlice([8]u32, filter_bytes);
-            const index = block_index(fingerprint.hash);
-
-            const current: meta.Vector(8, u32) = blocks[index];
-            blocks[index] = current | fingerprint.mask;
-        }
-
-        pub fn may_contain(fingerprint: Fingerprint, filter_bytes: *const [size]u8) bool {
-            const blocks = mem.bytesAsSlice([8]u32, filter_bytes);
-            const index = block_index(fingerprint.hash);
-
-            const current: meta.Vector(8, u32) = blocks[index];
-            return @reduce(.Or, ~current & fingerprint.mask) == 0;
-        }
-    };
+    return @intCast(u32, (@as(u64, hash) * block_count) >> 32);
 }
 
 test {
