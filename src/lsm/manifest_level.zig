@@ -6,7 +6,8 @@ const meta = std.meta;
 
 const config = @import("../config.zig");
 const lsm = @import("tree.zig");
-const binary_search_keys_raw = @import("binary_search.zig").binary_search_keys_raw;
+const binary_search = @import("binary_search.zig");
+const binary_search_keys_raw = binary_search.binary_search_keys_raw;
 
 const Direction = @import("direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
@@ -17,12 +18,13 @@ pub fn ManifestLevel(
     comptime Key: type,
     comptime TableInfo: type,
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    comptime table_count_max: u32,
 ) type {
     return struct {
         const Self = @This();
 
-        const Keys = SegmentedArray(Key, NodePool, lsm.table_count_max);
-        const Tables = SegmentedArray(TableInfo, NodePool, lsm.table_count_max);
+        const Keys = SegmentedArray(Key, NodePool, table_count_max);
+        const Tables = SegmentedArray(TableInfo, NodePool, table_count_max);
 
         /// The maximum key of each key node in the keys segmented array.
         /// This is the starting point of our tiered lookup approach.
@@ -548,4 +550,404 @@ pub fn ManifestLevel(
             return level.root_keys_array[0..level.keys.node_count];
         }
     };
+}
+
+pub fn TestContext(
+    comptime node_size: u32,
+    comptime Key: type,
+    comptime table_count_max: u32,
+) type {
+    return struct {
+        const Self = @This();
+
+        const testing = std.testing;
+
+        const log = false;
+
+        inline fn compare_keys(a: Key, b: Key) math.Order {
+            return math.order(a, b);
+        }
+
+        // TODO Import this type from lsm/tree.zig.
+        const TableInfo = extern struct {
+            checksum: u128,
+            address: u64,
+            flags: u64 = 0,
+
+            /// The minimum snapshot that can see this table (with exclusive bounds).
+            /// This value is set to the current snapshot tick on table creation.
+            snapshot_min: u64,
+
+            /// The maximum snapshot that can see this table (with exclusive bounds).
+            /// This value is set to the current snapshot tick on table deletion.
+            snapshot_max: u64 = math.maxInt(u64),
+
+            key_min: Key,
+            key_max: Key,
+
+            comptime {
+                assert(@sizeOf(TableInfo) == 48 + @sizeOf(Key) * 2);
+                assert(@alignOf(TableInfo) == 16);
+            }
+
+            pub fn visible(table: *const @This(), snapshot: u64) bool {
+                assert(table.address != 0);
+                assert(table.snapshot_min < table.snapshot_max);
+                assert(snapshot <= lsm.snapshot_latest);
+
+                assert(snapshot != table.snapshot_min);
+                assert(snapshot != table.snapshot_max);
+
+                return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
+            }
+        };
+
+        const NodePool = @import("node_pool.zig").NodePool;
+
+        const TestPool = NodePool(node_size, @alignOf(TableInfo));
+        const TestLevel = ManifestLevel(TestPool, Key, TableInfo, compare_keys, table_count_max);
+
+        random: std.rand.Random,
+
+        pool: TestPool,
+        level: TestLevel,
+        snapshot_tick: u64 = 0,
+
+        reference: std.ArrayList(TableInfo),
+
+        inserts: u64 = 0,
+        removes: u64 = 0,
+
+        fn init(random: std.rand.Random) !Self {
+            var pool = try TestPool.init(
+                testing.allocator,
+                TestLevel.Keys.node_count_max + TestLevel.Tables.node_count_max,
+            );
+            errdefer pool.deinit(testing.allocator);
+
+            var level = try TestLevel.init(testing.allocator);
+            errdefer level.deinit(testing.allocator, &pool);
+
+            var reference = try std.ArrayList(TableInfo).initCapacity(
+                testing.allocator,
+                table_count_max,
+            );
+            errdefer reference.deinit();
+
+            return Self{
+                .random = random,
+                .pool = pool,
+                .level = level,
+                .reference = reference,
+            };
+        }
+
+        fn deinit(context: *Self) void {
+            context.level.deinit(testing.allocator, &context.pool);
+            context.pool.deinit(testing.allocator);
+
+            context.reference.deinit();
+        }
+
+        fn run(context: *Self) !void {
+            if (log) std.debug.print("\n", .{});
+
+            {
+                var i: usize = 0;
+                while (i < table_count_max * 2) : (i += 1) {
+                    switch (context.random.uintLessThanBiased(u32, 100)) {
+                        0...59 => try context.insert(),
+                        60...99 => try context.remove(),
+                        else => unreachable,
+                    }
+                }
+            }
+
+            {
+                var i: usize = 0;
+                while (i < table_count_max * 2) : (i += 1) {
+                    switch (context.random.uintLessThanBiased(u32, 100)) {
+                        0...39 => try context.insert(),
+                        40...99 => try context.remove(),
+                        else => unreachable,
+                    }
+                }
+            }
+
+            try context.remove_all();
+        }
+
+        fn insert(context: *Self) !void {
+            const reference_len = @intCast(u32, context.reference.items.len);
+            const count_free = table_count_max - reference_len;
+
+            if (count_free == 0) return;
+
+            var buffer: [13]TableInfo = undefined;
+
+            const count_max = @minimum(count_free, 13);
+            const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
+
+            {
+                var key: Key = context.random.uintAtMostBiased(Key, table_count_max * 64);
+
+                for (buffer[0..count]) |*table| {
+                    table.* = context.random_greater_non_overlapping_table(key);
+                    key = table.key_max;
+                }
+            }
+
+            context.level.insert_tables(&context.pool, buffer[0..count]);
+
+            for (buffer[0..count]) |table| {
+                const index = blk: {
+                    if (context.reference.items.len == 0) {
+                        break :blk 0;
+                    } else {
+                        break :blk binary_search.binary_search_values_raw(
+                            Key,
+                            TableInfo,
+                            key_min_from_table,
+                            compare_keys,
+                            context.reference.items,
+                            table.key_max,
+                        );
+                    }
+                };
+                // Can't be equal as the tables may not overlap
+                if (index < context.reference.items.len) {
+                    assert(context.reference.items[index].key_min > table.key_max);
+                }
+                context.reference.insert(index, table) catch unreachable;
+            }
+
+            context.inserts += count;
+
+            try context.verify();
+        }
+
+        fn random_greater_non_overlapping_table(context: Self, key: Key) TableInfo {
+            var new_key_min = key + context.random.uintLessThanBiased(Key, 31) + 1;
+
+            assert(compare_keys(new_key_min, key) == .gt);
+
+            var i = blk: {
+                if (context.reference.items.len == 0) {
+                    break :blk 0;
+                } else {
+                    break :blk binary_search.binary_search_values_raw(
+                        Key,
+                        TableInfo,
+                        key_min_from_table,
+                        compare_keys,
+                        context.reference.items,
+                        new_key_min,
+                    );
+                }
+            };
+
+            if (i > 0) {
+                if (compare_keys(new_key_min, context.reference.items[i - 1].key_max) != .gt) {
+                    new_key_min = context.reference.items[i - 1].key_max + 1;
+                }
+            }
+
+            const next_key_min = for (context.reference.items[i..]) |table| {
+                switch (compare_keys(new_key_min, table.key_min)) {
+                    .lt => break table.key_min,
+                    .eq => new_key_min = table.key_max + 1,
+                    .gt => unreachable,
+                }
+            } else math.maxInt(Key);
+
+            const max_delta = @minimum(32, next_key_min - 1 - new_key_min);
+            const new_key_max = new_key_min + context.random.uintAtMostBiased(Key, max_delta);
+
+            return .{
+                .checksum = context.random.int(u128),
+                .address = context.random.int(u64),
+                .snapshot_min = context.snapshot_tick,
+                .key_min = new_key_min,
+                .key_max = new_key_max,
+            };
+        }
+
+        fn remove(context: *Self) !void {
+            const reference_len = @intCast(u32, context.reference.items.len);
+            if (reference_len == 0) return;
+
+            const count_max = @minimum(reference_len, 13);
+            const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
+
+            assert(context.reference.items.len <= table_count_max);
+            const index = context.random.uintAtMostBiased(u32, reference_len - count);
+
+            const key_min = context.reference.items[index].key_min;
+            const key_max = context.reference.items[index + count - 1].key_max;
+
+            if (log) std.debug.print("Removing {} to {}, cardinality {}\n", .{ key_min, key_max, count });
+
+            context.level.remove_tables(&context.pool, math.maxInt(u64), key_min, key_max, count);
+
+            context.reference.replaceRange(index, count, &[0]TableInfo{}) catch unreachable;
+
+            context.removes += count;
+
+            try context.verify();
+        }
+
+        fn remove_all(context: *Self) !void {
+            while (context.reference.items.len > 0) try context.remove();
+
+            try testing.expectEqual(@as(u32, 0), context.level.keys.len());
+            try testing.expectEqual(@as(u32, 0), context.level.tables.len());
+            try testing.expect(context.inserts > 0);
+            try testing.expect(context.inserts == context.removes);
+
+            if (log) {
+                std.debug.print("\ninserts: {}, removes: {}\n", .{
+                    context.inserts,
+                    context.removes,
+                });
+            }
+
+            try context.verify();
+        }
+
+        fn verify(context: *Self) !void {
+            if (log) {
+                std.debug.print("expect: ", .{});
+                for (context.reference.items) |i| std.debug.print("[{},{}], ", .{ i.key_min, i.key_max });
+
+                std.debug.print("\nactual: ", .{});
+                var it = context.level.iterator(
+                    lsm.snapshot_latest,
+                    0,
+                    math.maxInt(Key),
+                    .ascending,
+                );
+                while (it.next()) |i| std.debug.print("[{},{}], ", .{ i.key_min, i.key_max });
+                std.debug.print("\n", .{});
+            }
+
+            try testing.expectEqual(context.reference.items.len, context.level.keys.len());
+            try testing.expectEqual(context.reference.items.len, context.level.tables.len());
+
+            {
+                var it = context.level.iterator(
+                    lsm.snapshot_latest,
+                    0,
+                    math.maxInt(Key),
+                    .ascending,
+                );
+
+                for (context.reference.items) |expect| {
+                    const actual = it.next() orelse return error.TestUnexpectedResult;
+                    try testing.expectEqual(expect, actual.*);
+                }
+                try testing.expectEqual(@as(?*const TableInfo, null), it.next());
+            }
+
+            {
+                var it = context.level.iterator(
+                    lsm.snapshot_latest,
+                    0,
+                    math.maxInt(Key),
+                    .descending,
+                );
+
+                var i = context.reference.items.len;
+                while (i > 0) {
+                    i -= 1;
+
+                    const expect = context.reference.items[i];
+                    const actual = it.next() orelse return error.TestUnexpectedResult;
+                    try testing.expectEqual(expect, actual.*);
+                }
+                try testing.expectEqual(@as(?*const TableInfo, null), it.next());
+            }
+
+            try testing.expectEqual(context.reference.items.len, context.level.keys.len());
+            try testing.expectEqual(context.reference.items.len, context.level.tables.len());
+
+            if (context.reference.items.len > 0) {
+                const reference_len = @intCast(u32, context.reference.items.len);
+                const start = context.random.uintLessThanBiased(u32, reference_len);
+                const end = context.random.uintLessThanBiased(u32, reference_len - start) + start;
+
+                const key_min = context.reference.items[start].key_min;
+                const key_max = context.reference.items[end].key_max;
+
+                {
+                    var it = context.level.iterator(
+                        lsm.snapshot_latest,
+                        key_min,
+                        key_max,
+                        .ascending,
+                    );
+
+                    for (context.reference.items[start .. end + 1]) |expect| {
+                        const actual = it.next() orelse return error.TestUnexpectedResult;
+                        try testing.expectEqual(expect, actual.*);
+                    }
+                    try testing.expectEqual(@as(?*const TableInfo, null), it.next());
+                }
+
+                {
+                    var it = context.level.iterator(
+                        lsm.snapshot_latest,
+                        key_min,
+                        key_max,
+                        .descending,
+                    );
+
+                    var i = end + 1;
+                    while (i > start) {
+                        i -= 1;
+
+                        const expect = context.reference.items[i];
+                        const actual = it.next() orelse return error.TestUnexpectedResult;
+                        try testing.expectEqual(expect, actual.*);
+                    }
+                    try testing.expectEqual(@as(?*const TableInfo, null), it.next());
+                }
+            }
+        }
+
+        inline fn key_min_from_table(table: TableInfo) Key {
+            return table.key_min;
+        }
+    };
+}
+
+test "ManifestLevel" {
+    const seed = 42;
+
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    const Options = struct {
+        key_type: type,
+        node_size: u32,
+        table_count_max: u32,
+    };
+
+    inline for (.{
+        Options{ .key_type = u64, .node_size = 256, .table_count_max = 33 },
+        Options{ .key_type = u64, .node_size = 256, .table_count_max = 34 },
+        Options{ .key_type = u64, .node_size = 256, .table_count_max = 1024 },
+        Options{ .key_type = u64, .node_size = 512, .table_count_max = 1024 },
+        Options{ .key_type = u64, .node_size = 1024, .table_count_max = 1024 },
+    }) |options| {
+        const Context = TestContext(
+            options.node_size,
+            options.key_type,
+            options.table_count_max,
+        );
+
+        var context = try Context.init(random);
+        defer context.deinit();
+
+        try context.run();
+    }
 }
