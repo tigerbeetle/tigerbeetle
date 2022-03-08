@@ -495,6 +495,7 @@ pub fn Tree(
 
                 const data_index_entry_size = key_size + address_size + checksum_size;
                 const filter_index_entry_size = address_size + checksum_size;
+                // TODO audit/tune this number for split block bloom filters
                 const filter_bytes_per_key = 2;
 
                 var data_index_size = 0;
@@ -504,8 +505,10 @@ pub fn Tree(
                 while (true) : (data_blocks -= 1) {
                     data_index_size = data_index_entry_size * data_blocks;
 
-                    filter_blocks = math.divCeil(comptime_int, data_blocks * block_value_count_max *
-                        filter_bytes_per_key, block_size) catch unreachable;
+                    filter_blocks = utils.div_ceil(
+                        data_blocks * block_value_count_max * filter_bytes_per_key,
+                        filter.filter_size,
+                    );
                     filter_index_size = filter_index_entry_size * filter_blocks;
 
                     const index_size = @sizeOf(vsr.Header) + data_index_size + filter_index_size;
@@ -557,7 +560,7 @@ pub fn Tree(
 
             const filter = struct {
                 const filter_offset = @sizeOf(vsr.Header);
-                const filter_size = 0;
+                const filter_size = block_size - filter_offset;
 
                 const padding_offset = filter_offset + filter_size;
                 const padding_size = block_size - padding_offset;
@@ -606,6 +609,7 @@ pub fn Tree(
                         \\    data_addresses_size: {}
                         \\filter:
                         \\    filter_offset: {}
+                        \\    filter_size: {}
                         \\data:
                         \\    key_count: {}
                         \\    value_count_max: {}
@@ -640,6 +644,7 @@ pub fn Tree(
                             index.data_addresses_size,
 
                             filter.filter_offset,
+                            filter.filter_size,
 
                             data.key_count,
                             data.value_count_max,
@@ -661,8 +666,8 @@ pub fn Tree(
                 assert(index_block_count + filter_block_count +
                     data_block_count_max <= table_block_count_max);
                 const filter_bytes_per_key = 2;
-                assert(filter_block_count * block_size >= data_block_count_max *
-                    data.value_count_max * filter_bytes_per_key);
+                assert(filter_block_count * filter.filter_size >=
+                    data_block_count_max * data.value_count_max * filter_bytes_per_key);
 
                 assert(index.size == @sizeOf(vsr.Header) +
                     data_block_count_max * (key_size + address_size + checksum_size) +
@@ -678,6 +683,9 @@ pub fn Tree(
                 assert(block_size == index.padding_offset + index.padding_size);
                 assert(block_size == index.size + index.padding_size);
 
+                // Split block bloom filters require filters to be a multiple of 32 bytes as they
+                // use 256 bit blocks.
+                assert(filter.filter_size % 32 == 0);
                 assert(block_size == filter.padding_offset + filter.padding_size);
                 assert(block_size == @sizeOf(vsr.Header) + filter.filter_size + filter.padding_size);
 
