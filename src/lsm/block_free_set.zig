@@ -137,6 +137,20 @@ pub const BlockFreeSet = struct {
 
         return ewah.encode(bitset_masks(set.blocks), target);
     }
+
+    /// Returns `blocks_count` rounded down to the nearest multiple of shard and word bit count.
+    /// Ensures that the result is acceptable to `BlockFreeSet.init()`.
+    pub fn blocks_count_floor(blocks_count: usize) usize {
+        assert(blocks_count > 0);
+        assert(blocks_count >= shard_size);
+
+        const floor = @divFloor(blocks_count, shard_size) * shard_size;
+
+        // We assume that shard_size is itself a multiple of word bit count.
+        assert(floor % @bitSizeOf(usize) == 0);
+
+        return floor;
+    }
 };
 
 fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
