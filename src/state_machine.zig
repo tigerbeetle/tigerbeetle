@@ -347,7 +347,7 @@ pub const StateMachine = struct {
             if (t.flags.padding != 0) return .reserved_flag_padding;
 
             var lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
-            assert(t.timestamp > t.timestamp);
+            assert(t.timestamp > lookup.timestamp);
 
             if (!lookup.flags.pending) return .transfer_not_two_phase_commit;
 
@@ -388,7 +388,7 @@ pub const StateMachine = struct {
                 dr.debits_pending -= lookup.amount;
                 cr.credits_pending -= lookup.amount;
                 if (!t.flags.void_pending_transfer) {
-                    //TODO Need to cater for partial commit if amount is lower...
+                    //TODO @jason Need to cater for partial commit if amount is lower (Test Case to be done)...
                     if (t.amount == 0) {
                         dr.debits_posted += lookup.amount;
                         cr.credits_posted += lookup.amount;
@@ -435,9 +435,9 @@ pub const StateMachine = struct {
                     return .exists_with_different_credit_account_id;
                 }
                 if (exists.amount != t.amount) return .exists_with_different_amount;
-                //TODO @jason if (@bitCast(u32, exists.flags) != @bitCast(u32, t.flags)) {
-                //    return .exists_with_different_flags;
-                //}
+                if (@bitCast(u32, exists.flags) != @bitCast(u32, t.flags)) {
+                    return .exists_with_different_flags;
+                }
                 if (exists.user_data != t.user_data) return .exists_with_different_user_data;
                 if (!equal_32_bytes(exists.reserved, t.reserved)) {
                     return .exists_with_different_reserved_field;
@@ -446,8 +446,13 @@ pub const StateMachine = struct {
                 return .exists;
             }
 
-            if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
-            if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
+            if (dr.debits_exceed_credits(t.amount)) {
+                assert(self.transfers.remove(t.id));
+                return .exceeds_credits;
+            } else if (cr.credits_exceed_debits(t.amount)) {
+                assert(self.transfers.remove(t.id));
+                return .exceeds_debits;
+            }
 
             insert.value_ptr.* = t;
             if (t.flags.pending) {
@@ -852,8 +857,6 @@ test "linked accounts" {
 }
 
 test "create/lookup/rollback transfers" {
-    //if (true) return; //TODO we don't want to skip.
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -1171,7 +1174,7 @@ test "create/lookup/rollback transfers" {
 }
 
 test "create/lookup/rollback commits" {
-    if (true) return; //TODO we don't want to skip.
+    //if (true) return; //TODO @jason we don't want to skip.
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -1394,8 +1397,16 @@ test "create/lookup/rollback commits" {
                 .flags = .{ .hashlock = true, .post_pending_transfer = true },
             }),
         },
+        Vector{
+            .result = .cannot_void_and_post_two_phase_commit,
+            .object = std.mem.zeroInit(Transfer, .{
+                .id = 6,
+                .timestamp = timestamp + 2,
+                .flags = .{ .void_pending_transfer = true, .post_pending_transfer = true },
+            }),
+        },
     };
-    //TODO Need to add a test case for [post_pending_transfer & void_pending_transfer]
+    //TODO @jason Need to add a test case for [post_pending_transfer & void_pending_transfer]
 
     // Test balances BEFORE commit
     // Account 1:
@@ -1443,6 +1454,7 @@ test "create/lookup/rollback commits" {
         state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
             .id = 7,
             .timestamp = timestamp + 2,
+            .flags = .{ .post_pending_transfer = true },
         })),
         .credit_account_not_found,
     );
@@ -1452,6 +1464,7 @@ test "create/lookup/rollback commits" {
         state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
             .id = 7,
             .timestamp = timestamp + 2,
+            .flags = .{ .post_pending_transfer = true },
         })),
         .debit_account_not_found,
     );
