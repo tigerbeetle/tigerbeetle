@@ -1,17 +1,17 @@
 const tb = @import("tigerbeetle.zig");
 const demo = @import("demo.zig");
 
-const Commit = tb.Commit;
+const Transfer = tb.Transfer;
 
 pub fn main() !void {
-    const commits = [_]Commit{
-        Commit{
+    const commits = [_]Transfer{
+        Transfer{
             .id = 1001,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = .{ .reject = true },
+            .flags = .{ .void_pending_transfer = true },
         },
     };
 
-    try demo.request(.commit_transfers, commits, demo.on_commit_transfers);
+    try demo.request(.create_transfers, commits, demo.on_create_transfers);
 }

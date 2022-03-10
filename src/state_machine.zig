@@ -10,16 +10,11 @@ const AccountFlags = tb.AccountFlags;
 const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
 
-//const Commit = tb.Commit;
-//const CommitFlags = tb.CommitFlags;
-
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
-//const CommitTransfersResult = tb.CommitTransfersResult;
 
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
-//const CommitTransferResult = tb.CommitTransferResult;
 const LookupAccountResult = tb.LookupAccountResult;
 
 const HashMapAccounts = std.AutoHashMap(u128, Account);
@@ -36,7 +31,6 @@ pub const StateMachine = struct {
         /// Operations exported by TigerBeetle:
         create_accounts,
         create_transfers,
-        //commit_transfers,
         lookup_accounts,
         lookup_transfers,
     };
@@ -388,7 +382,6 @@ pub const StateMachine = struct {
                 dr.debits_pending -= lookup.amount;
                 cr.credits_pending -= lookup.amount;
                 if (!t.flags.void_pending_transfer) {
-                    //TODO @jason Need to cater for partial commit if amount is lower (Test Case to be done)...
                     if (t.amount == 0) {
                         dr.debits_posted += lookup.amount;
                         cr.credits_posted += lookup.amount;
@@ -479,62 +472,6 @@ pub const StateMachine = struct {
         }
         assert(self.transfers.remove(t.id));
     }
-
-    //    fn commit_transfer(self: *StateMachine, c: Transfer) CommitTransferResult {
-    //        assert(c.timestamp > self.post_timestamp);
-    //
-    //        if (!c.flags.preimage and !zeroed_32_bytes(c.reserved)) return .reserved_field;
-    //        if (c.flags.padding != 0) return .reserved_flag_padding;
-    //
-    //        var t = self.get_transfer(c.id) orelse return .transfer_not_found;
-    //        assert(c.timestamp > t.timestamp);
-    //
-    //        if (!t.flags.posting) return .transfer_not_two_phase_commit;
-    //
-    //        if (self.get_commit(c.id)) |exists| {
-    //            if (!exists.flags.void_pending_transfer and c.flags.void_pending_transfer) return .already_committed_but_accepted;
-    //            if (exists.flags.void_pending_transfer and !c.flags.void_pending_transfer) return .already_committed_but_rejected;
-    //            return .already_committed;
-    //        }
-    //
-    //        if (t.timeout > 0 and t.timestamp + t.timeout <= c.timestamp) return .transfer_expired;
-    //
-    //        if (t.flags.condition) {
-    //            if (!c.flags.preimage) return .condition_requires_preimage;
-    //            if (!valid_preimage(t.reserved, c.reserved)) return .preimage_invalid;
-    //        } else if (c.flags.preimage) {
-    //            return .preimage_requires_condition;
-    //        }
-    //
-    //        var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
-    //        var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
-    //        assert(t.timestamp > dr.timestamp);
-    //        assert(t.timestamp > cr.timestamp);
-    //
-    //        assert(t.flags.posting);
-    //        if (dr.debits_pending < t.amount) return .debit_amount_was_not_reserved;
-    //        if (cr.credits_pending < t.amount) return .credit_amount_was_not_reserved;
-    //
-    //        // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
-    //        assert(!dr.debits_exceed_credits(0));
-    //        assert(!cr.credits_exceed_debits(0));
-    //
-    //        // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-    //        var insert = self.commits.getOrPutAssumeCapacity(c.id);
-    //        if (insert.found_existing) {
-    //            unreachable;
-    //        } else {
-    //            insert.value_ptr.* = c;
-    //            dr.debits_pending -= t.amount;
-    //            cr.credits_pending -= t.amount;
-    //            if (!c.flags.void_pending_transfer) {
-    //                dr.debits_posted += t.amount;
-    //                cr.credits_posted += t.amount;
-    //            }
-    //            self.post_timestamp = c.timestamp;
-    //            return .ok;
-    //        }
-    //    }
 
     fn commit_transfer_rollback(self: *StateMachine, c: Transfer) void {
         assert(self.get_commit(c.id) != null);
@@ -1174,8 +1111,6 @@ test "create/lookup/rollback transfers" {
 }
 
 test "create/lookup/rollback commits" {
-    //if (true) return; //TODO @jason we don't want to skip.
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -1186,6 +1121,8 @@ test "create/lookup/rollback commits" {
         std.mem.zeroInit(Account, .{ .id = 2 }),
         std.mem.zeroInit(Account, .{ .id = 3 }),
         std.mem.zeroInit(Account, .{ .id = 4 }),
+        std.mem.zeroInit(Account, .{ .id = 11 }),
+        std.mem.zeroInit(Account, .{ .id = 12 }),
     };
 
     var transfers = [_]Transfer{
@@ -1246,6 +1183,14 @@ test "create/lookup/rollback commits" {
             .amount = 15,
             .debit_account_id = 3,
             .credit_account_id = 4,
+            .flags = .{ .pending = true },
+            .timeout = 25,
+        }),
+        std.mem.zeroInit(Transfer, .{
+            .id = 8,
+            .amount = 15,
+            .debit_account_id = 11,
+            .credit_account_id = 12,
             .flags = .{ .pending = true },
             .timeout = 25,
         }),
@@ -1406,7 +1351,6 @@ test "create/lookup/rollback commits" {
             }),
         },
     };
-    //TODO @jason Need to add a test case for [post_pending_transfer & void_pending_transfer]
 
     // Test balances BEFORE commit
     // Account 1:
@@ -1467,6 +1411,17 @@ test "create/lookup/rollback commits" {
             .flags = .{ .post_pending_transfer = true },
         })),
         .debit_account_not_found,
+    );
+
+    // Commit with pending Transfer amount 15 by setting the amount as [0]
+    try testing.expectEqual(
+        state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
+            .id = 8,
+            .amount = 0,
+            .timestamp = timestamp + 2,
+            .flags = .{ .post_pending_transfer = true },
+        })),
+        .ok,
     );
 
     // Rollback [id=2] not rejected:

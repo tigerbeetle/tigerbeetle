@@ -89,31 +89,6 @@ pub const TransferFlags = packed struct {
     }
 };
 
-//pub const Commit = packed struct {
-//    id: u128,
-//    /// Reserved for accounting policy primitives:
-//    reserved: [32]u8,
-//    /// A chart of accounts code describing the reason for the accept/reject:
-//    code: u32,
-//    flags: CommitFlags,
-//    timestamp: u64 = 0,
-//
-//    comptime {
-//        assert(@sizeOf(Commit) == 64);
-//    }
-//};
-
-//pub const CommitFlags = packed struct {
-//    linked: bool = false,
-//    reject: bool = false,
-//    preimage: bool = false,
-//    padding: u29 = 0,
-//
-//    comptime {
-//        assert(@sizeOf(CommitFlags) == @sizeOf(u32));
-//    }
-//};
-
 pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
@@ -154,7 +129,7 @@ pub const CreateTransferResult = enum(u32) {
     exceeds_debits,
     two_phase_commit_must_timeout,
     timeout_reserved_for_two_phase_commit,
-    //TODO Fields from the Commit
+    //TODO @jason Fields from the Commit
     cannot_void_and_post_two_phase_commit,
     transfer_not_found,
     transfer_not_two_phase_commit,
@@ -168,28 +143,6 @@ pub const CreateTransferResult = enum(u32) {
     debit_amount_was_not_reserved,
     credit_amount_was_not_reserved,
 };
-
-//pub const CommitTransferResult = enum(u32) {
-//    ok,
-//    linked_event_failed,
-//    reserved_field,
-//    reserved_flag_padding,
-//    transfer_not_found,
-//    transfer_not_two_phase_commit,
-//    transfer_expired,
-//    already_committed,
-//    already_committed_but_accepted,
-//    already_committed_but_rejected,
-//    debit_account_not_found,
-//    credit_account_not_found,
-//    debit_amount_was_not_reserved,
-//    credit_amount_was_not_reserved,
-//    exceeds_credits,
-//    exceeds_debits,
-//    condition_requires_preimage,
-//    preimage_requires_condition,
-//    preimage_invalid,
-//};
 
 pub const CreateAccountsResult = packed struct {
     index: u32,
@@ -208,15 +161,6 @@ pub const CreateTransfersResult = packed struct {
         assert(@sizeOf(CreateTransfersResult) == 8);
     }
 };
-
-//pub const CommitTransfersResult = packed struct {
-//    index: u32,
-//    result: CommitTransferResult,
-//
-//    comptime {
-//        assert(@sizeOf(CommitTransfersResult) == 8);
-//    }
-//};
 
 comptime {
     const target = builtin.target;
