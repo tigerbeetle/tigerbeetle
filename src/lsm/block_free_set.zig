@@ -30,7 +30,7 @@ pub const BlockFreeSet = struct {
     //
     // e.g. 10TiB disk ÷ 64KiB/block ÷ 512*8 blocks/shard ÷ 8 shards/byte = 5120B index
     const shard_cache_lines = 8;
-    pub const shard_size = shard_cache_lines * config.cache_line_size * @bitSizeOf(u8);
+    const shard_size = shard_cache_lines * config.cache_line_size * @bitSizeOf(u8);
     comptime {
         assert(shard_size == 4096);
         assert(@bitSizeOf(MaskInt) == 64);
