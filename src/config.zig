@@ -57,15 +57,22 @@ pub const transfers_max = switch (deployment_environment) {
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const commits_max = transfers_max;
 
+/// The maximum number of batch entries in the journal file:
+/// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
+/// We need this limit to allocate space for copies of batch headers at the start of the journal.
+/// These header copies enable us to disentangle corruption from crashes and recover accordingly.
+pub const journal_slot_count = switch (deployment_environment) {
+    .production => 1024 * 1024,
+    else => 128,
+};
+
 /// The maximum size of the journal file:
 /// This is pre-allocated and zeroed for performance when initialized.
 /// Writes within this file never extend the filesystem inode size reducing the cost of fdatasync().
 /// This enables static allocation of disk space so that appends cannot fail with ENOSPC.
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
-pub const journal_size_max = switch (deployment_environment) {
-    .production => 128 * 1024 * 1024 * 1024,
-    else => 128 * 1024 * 1024,
-};
+// TODO remove this; just allocate a part of the total storage for the journal
+pub const journal_size_max = journal_slot_count * (128 + message_size_max);
 
 /// The maximum number of connections that can be held open by the server at any time:
 pub const connections_max = replicas_max + clients_max;

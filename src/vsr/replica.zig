@@ -281,7 +281,7 @@ pub fn Replica(
                     allocator,
                     storage,
                     replica,
-                    config.journal_size_max,
+                    config.journal_slot_count,
                     &init_prepare,
                 ),
                 .message_bus = message_bus,
@@ -586,7 +586,7 @@ pub fn Replica(
                 message.body(),
             );
 
-            var latest_entry = self.journal.entry_for_op_exact(self.op).?;
+            var latest_entry = self.journal.header_with_op(self.op).?;
             message.header.parent = latest_entry.checksum;
             message.header.context = message.header.checksum;
             message.header.view = self.view;
@@ -699,7 +699,7 @@ pub fn Replica(
             });
             assert(message.header.op == self.op + 1);
             self.op = message.header.op;
-            self.journal.set_entry_as_dirty(message.header);
+            self.journal.set_header_as_dirty(message.header);
 
             self.replicate(message);
             self.append(message);
@@ -779,7 +779,7 @@ pub fn Replica(
             assert(message.header.replica == self.leader_index(message.header.view));
 
             // We may not always have the latest commit entry but if we do our checksum must match:
-            if (self.journal.entry_for_op_exact(message.header.commit)) |commit_entry| {
+            if (self.journal.header_with_op(message.header.commit)) |commit_entry| {
                 if (commit_entry.checksum == message.header.context) {
                     log.debug("{}: on_commit: checksum verified", .{self.replica});
                 } else if (self.valid_hash_chain("on_commit")) {
@@ -1004,7 +1004,7 @@ pub fn Replica(
             }
 
             // Verify that the repairs above have not replaced or advanced the latest op:
-            assert(self.journal.entry_for_op_exact(self.op).?.checksum == latest.checksum);
+            assert(self.journal.header_with_op(self.op).?.checksum == latest.checksum);
 
             assert(self.start_view_change_quorum);
             assert(!self.do_view_change_quorum);
@@ -1012,7 +1012,7 @@ pub fn Replica(
 
             self.discard_uncommitted_headers();
             assert(self.op >= self.commit_max);
-            assert(self.journal.entry_for_op_exact(self.op) != null);
+            assert(self.journal.header_with_op(self.op) != null);
 
             // Start repairs according to the CTRL protocol:
             assert(!self.repair_timeout.ticking);
@@ -1052,7 +1052,7 @@ pub fn Replica(
             }
 
             // Verify that the repairs above have not replaced or advanced the latest op:
-            assert(self.journal.entry_for_op_exact(self.op).?.checksum == latest.checksum);
+            assert(self.journal.header_with_op(self.op).?.checksum == latest.checksum);
 
             if (self.status == .view_change) {
                 self.transition_to_normal_status(message.header.view);
@@ -1168,11 +1168,11 @@ pub fn Replica(
             var checksum: ?u128 = message.header.context;
             if (self.leader_index(self.view) == self.replica and checksum.? == 0) checksum = null;
 
-            if (self.journal.entry_for_op_exact_with_checksum(op, checksum)) |entry| {
+            if (self.journal.header_with_op_and_checksum(op, checksum)) |entry| {
                 assert(entry.op == op);
                 assert(checksum == null or entry.checksum == checksum.?);
 
-                const slot = self.journal.slot_for_header_exact(entry).?;
+                const slot = self.journal.slot_with_header(entry).?;
                 if (!self.journal.dirty.bit(slot)) {
                     assert(!self.journal.faulty.bit(slot));
 
@@ -1213,8 +1213,8 @@ pub fn Replica(
                 assert(message.header.replica == self.leader_index(self.view));
                 assert(checksum != null);
 
-                if (self.journal.entry_for_op_exact_with_checksum(op, checksum)) |entry| {
-                    const slot = self.journal.slot_for_header_exact(entry).?;
+                if (self.journal.header_with_op_and_checksum(op, checksum)) |entry| {
+                    const slot = self.journal.slot_with_header(entry).?;
                     assert(self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot));
                 }
 
@@ -1324,8 +1324,8 @@ pub fn Replica(
             }
 
             const op = self.nack_prepare_op.?;
-            const checksum = self.journal.entry_for_op_exact(op).?.checksum;
-            const slot = self.journal.slot_for_op_exact(op).?;
+            const checksum = self.journal.header_with_op(op).?.checksum;
+            const slot = self.journal.slot_with_op(op).?;
 
             if (message.header.op != op) {
                 log.debug("{}: on_nack_prepare: ignoring (repairing another op)", .{self.replica});
@@ -1536,7 +1536,7 @@ pub fn Replica(
             assert(self.commit_min == self.commit_max);
 
             // TODO Snapshots: Use snapshot checksum if commit is no longer in journal.
-            const latest_committed_entry = self.journal.entry_for_op_exact(self.commit_max).?;
+            const latest_committed_entry = self.journal.header_with_op(self.commit_max).?;
 
             self.send_header_to_other_replicas(.{
                 .command = .commit,
@@ -1831,7 +1831,7 @@ pub fn Replica(
             // Even a naive state transfer may fail to correct for this.
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
-                const checksum = self.journal.entry_for_op_exact(op).?.checksum;
+                const checksum = self.journal.header_with_op(op).?.checksum;
                 self.journal.read_prepare(commit_ops_commit, op, checksum, null);
             } else {
                 self.committing = false;
@@ -1871,7 +1871,7 @@ pub fn Replica(
                 return;
             }
 
-            if (prepare.?.header.checksum != self.journal.entry_for_op_exact(op).?.checksum) {
+            if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
                 log.debug("{}: commit_ops_commit: checksum changed", .{self.replica});
                 return;
             }
@@ -1898,7 +1898,7 @@ pub fn Replica(
             // happened since we last checked in `commit_ops_read()`. However, this would relate to
             // subsequent ops, since by now we have already verified the hash chain for this commit.
 
-            assert(self.journal.entry_for_op_exact(self.commit_min).?.checksum ==
+            assert(self.journal.header_with_op(self.commit_min).?.checksum ==
                 prepare.header.parent);
 
             log.debug("{}: commit_op: executing view={} {} op={} checksum={} ({s})", .{
@@ -2210,7 +2210,7 @@ pub fn Replica(
 
             var op = self.op;
             while (op > self.commit_max) : (op -= 1) {
-               if (self.journal.entry_for_op_exact(op) != null) continue;
+               if (self.journal.header_with_op(op) != null) continue;
 
                 log.debug("{}: discard_uncommitted_headers: op={} gap", .{ self.replica, op });
 
@@ -2246,7 +2246,7 @@ pub fn Replica(
                     self.op = op - 1;
 
                     const slot = self.journal.slot_for_op(op);
-                    assert(self.journal.entry_for_op(op) == null);
+                    assert(self.journal.header_for_op(op) == null);
                     assert(!self.journal.dirty.bit(slot));
                     assert(!self.journal.faulty.bit(slot));
                 }
@@ -2263,10 +2263,10 @@ pub fn Replica(
 
             assert(self.valid_hash_chain("discard_uncommitted_ops_from"));
 
-            const slot = self.journal.slot_for_op_exact(op).?;
+            const slot = self.journal.slot_with_op(op).?;
             assert(op > self.commit_max);
             assert(op <= self.op);
-            assert(self.journal.entry_for_op_exact_with_checksum(op, checksum) != null);
+            assert(self.journal.header_with_op_and_checksum(op, checksum) != null);
             assert(self.journal.dirty.bit(slot));
 
             log.debug("{}: discard_uncommitted_ops_from: ops={}..{} view={}", .{
@@ -2279,13 +2279,13 @@ pub fn Replica(
             self.journal.remove_entries_from(op);
             self.op = op - 1;
 
-            assert(self.journal.entry_for_op(op) == null);
+            assert(self.journal.header_for_op(op) == null);
             assert(!self.journal.dirty.bit(slot));
             assert(!self.journal.faulty.bit(slot));
 
             // We require that `self.op` always exists. Rewinding `self.op` could change that.
             // However, we do this only as the leader within a view change, with all headers intact.
-            assert(self.journal.entry_for_op_exact(self.op) != null);
+            assert(self.journal.header_with_op(self.op) != null);
         }
 
         /// Returns whether the replica is a follower for the current view.
@@ -2697,7 +2697,7 @@ pub fn Replica(
                 self.replica,
                 self.op,
                 header.op - 1,
-                self.journal.entry_for_op_exact(self.op).?.checksum,
+                self.journal.header_with_op(self.op).?.checksum,
                 header.parent,
             });
 
@@ -2738,7 +2738,7 @@ pub fn Replica(
             assert(self.commit_min == self.commit_max);
 
             var op = self.commit_max + 1;
-            var parent = self.journal.entry_for_op_exact(self.commit_max).?.checksum;
+            var parent = self.journal.header_with_op(self.commit_max).?.checksum;
             var iterator = self.pipeline.iterator();
             while (iterator.next_ptr()) |prepare| {
                 assert(prepare.message.header.command == .prepare);
@@ -2815,8 +2815,8 @@ pub fn Replica(
             assert(self.commit_min <= self.commit_max);
 
             // We expect these always to exist:
-            assert(self.journal.entry_for_op_exact(self.commit_min) != null);
-            assert(self.journal.entry_for_op_exact(self.op) != null);
+            assert(self.journal.header_with_op(self.commit_min) != null);
+            assert(self.journal.header_with_op(self.op) != null);
 
             // Request outstanding committed prepares to advance our op number:
             // This handles the case of an idle cluster, where a follower will not otherwise advance.
@@ -2945,7 +2945,7 @@ pub fn Replica(
                 log.debug("{}: repair_header: false (advances self.op)", .{self.replica});
                 return false;
             } else if (header.op == self.op) {
-                if (self.journal.entry_for_op_exact_with_checksum(self.op, header.checksum)) |_| {
+                if (self.journal.header_with_op_and_checksum(self.op, header.checksum)) |_| {
                     // Fall through below to check if self.op is uncommitted AND reordered,
                     // which we would see by the presence of an earlier op with higher view number,
                     // that breaks the chain with self.op. In this case, we must skip the repair to
@@ -2959,11 +2959,11 @@ pub fn Replica(
                 }
             }
 
-            if (self.journal.entry(header)) |existing| {
+            if (self.journal.header_for_entry(header)) |existing| {
                 // Do not replace any existing op lightly as doing so may impair durability and even
                 // violate correctness by undoing a prepare already acknowledged to the leader:
                 if (existing.checksum == header.checksum) {
-                    const slot = self.journal.slot_for_header_exact(header).?;
+                    const slot = self.journal.slot_with_header(header).?;
                     if (!self.journal.dirty.bit(slot)) {
                         log.debug("{}: repair_header: false (checksum clean)", .{self.replica});
                         return false;
@@ -3007,9 +3007,9 @@ pub fn Replica(
             // TODO Snapshots: Skip if this header is already snapshotted.
 
             assert(header.op < self.op or
-                self.journal.entry_for_op_exact(self.op).?.checksum == header.checksum);
+                self.journal.header_with_op(self.op).?.checksum == header.checksum);
 
-            self.journal.set_entry_as_dirty(header);
+            self.journal.set_header_as_dirty(header);
             return true;
         }
 
@@ -3072,7 +3072,7 @@ pub fn Replica(
             }
 
             assert(entry.op == self.op);
-            assert(entry.checksum == self.journal.entry_for_op_exact(self.op).?.checksum);
+            assert(entry.checksum == self.journal.header_with_op(self.op).?.checksum);
             return true;
         }
 
@@ -3117,7 +3117,7 @@ pub fn Replica(
                 assert(op <= self.op);
                 assert(self.commit_max + self.pipeline.count + 1 == op);
 
-                const checksum = self.journal.entry_for_op_exact(op).?.checksum;
+                const checksum = self.journal.header_with_op(op).?.checksum;
 
                 log.debug("{}: repair_pipeline_read: op={} checksum={}", .{
                     self.replica,
@@ -3176,7 +3176,7 @@ pub fn Replica(
                 return;
             }
 
-            if (prepare.?.header.checksum != self.journal.entry_for_op_exact(op).?.checksum) {
+            if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
                 log.debug("{}: repair_pipeline_push: checksum changed", .{self.replica});
                 return;
             }
@@ -3259,13 +3259,13 @@ pub fn Replica(
         /// This is effectively "many-to-one" repair, where a single replica recovers using the
         /// resources of many replicas, for faster recovery.
         fn repair_prepare(self: *Self, op: u64) bool {
-            const slot = self.journal.slot_for_op_exact(op).?;
+            const slot = self.journal.slot_with_op(op).?;
 
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.bit(slot));
 
-            const checksum = self.journal.entry_for_op_exact(op).?.checksum;
+            const checksum = self.journal.header_with_op(op).?.checksum;
 
             // We may be appending to or repairing the journal concurrently.
             // We do not want to re-request any of these prepares unnecessarily.
@@ -3549,7 +3549,7 @@ pub fn Replica(
                 // * being able to send what we have will allow the pipeline to commit earlier, and
                 // * the leader will drop any prepare_ok for a prepare not in the pipeline.
                 // This is safe only because the leader can verify against the prepare checksum.
-                if (self.journal.entry_for_op_exact(op)) |header| {
+                if (self.journal.header_with_op(op)) |header| {
                     self.send_prepare_ok(header);
                     defer self.flush_loopback_queue();
                 }
@@ -3845,15 +3845,15 @@ pub fn Replica(
             // Do not set the latest op as dirty if we already have it exactly:
             // Otherwise, this would trigger a repair and delay the view change, or worse, it would
             // prevent us from assisting another replica to recover when we do in fact have the op.
-            if (self.journal.entry_for_op_exact_with_checksum(latest.op, latest.checksum)) |_| {
+            if (self.journal.header_with_op_and_checksum(latest.op, latest.checksum)) |_| {
                 log.debug("{}: {s}: latest op exists exactly", .{ self.replica, method });
             } else {
-                self.journal.set_entry_as_dirty(latest);
+                self.journal.set_header_as_dirty(latest);
             }
 
             assert(self.op == latest.op);
             self.journal.remove_entries_from(self.op + 1);
-            assert(self.journal.entry_for_op_exact(self.op).?.checksum == latest.checksum);
+            assert(self.journal.header_with_op(self.op).?.checksum == latest.checksum);
         }
 
         fn start_view_as_the_new_leader(self: *Self) void {
@@ -3870,7 +3870,7 @@ pub fn Replica(
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
             var pipeline_op = self.commit_max + 1;
-            var pipeline_parent = self.journal.entry_for_op_exact(self.commit_max).?.checksum;
+            var pipeline_parent = self.journal.header_with_op(self.commit_max).?.checksum;
             var iterator = self.pipeline.iterator();
             while (iterator.next_ptr()) |prepare| {
                 assert(prepare.message.header.command == .prepare);
@@ -4065,13 +4065,13 @@ pub fn Replica(
             // If we use anything less than self.op then we may commit ops for a forked hash chain that
             // have since been reordered by a new leader.
             assert(op_max == self.op);
-            var b = self.journal.entry_for_op_exact(op_max).?;
+            var b = self.journal.header_with_op(op_max).?;
 
             var op = op_max;
             while (op > op_min) {
                 op -= 1;
 
-                if (self.journal.entry_for_op_exact(op)) |a| {
+                if (self.journal.header_with_op(op)) |a| {
                     assert(a.op + 1 == b.op);
                     if (a.checksum == b.parent) {
                         assert(ascending_viewstamps(a, b));
