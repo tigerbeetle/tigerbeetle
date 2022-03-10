@@ -295,7 +295,7 @@ const superblock_trailer_size_max = blk: {
 // Therefore 1 MiB of references equates to 256 sectors, 43520 manifest blocks or 22 million tables.
 // This allows room for switching from 64 KiB to a smaller block size without limiting table count.
 // It's also not material in comparison to the size of the trailer's encoded block free set.
-const superblock_trailer_manifest_size_max = 1048576;
+const superblock_trailer_manifest_size_max = 1024 * 1024;
 
 const superblock_trailer_block_free_set_size_max = blk: {
     // Local storage consists of four zones: Superblock, WriteAheadLog, ClientTable, Block.
@@ -516,21 +516,17 @@ pub fn SuperBlock(comptime Storage: type) type {
                 .block_free_set_size = @intCast(u32, superblock.block_free_set.len),
             };
 
-            for (superblock.working.client_table) |*entry| {
-                entry.* = .{
-                    .message_checksum = 0,
-                    .message_offset = 0,
-                    .session = 0,
-                };
-            }
+            mem.set(SuperBlockSector.ClientTableEntry, &superblock.working.client_table, .{
+                .message_checksum = 0,
+                .message_offset = 0,
+                .session = 0,
+            });
 
-            for (superblock.working.snapshots) |*snapshot| {
-                snapshot.* = .{
-                    .created = 0,
-                    .queried = 0,
-                    .timeout = 0,
-                };
-            }
+            mem.set(SuperBlockSector.Snapshot, &superblock.working.snapshots, .{
+                .created = 0,
+                .queried = 0,
+                .timeout = 0,
+            });
 
             superblock.working.set_checksum();
 
@@ -790,6 +786,12 @@ pub fn SuperBlock(comptime Storage: type) type {
             assert(superblock.staging.parent == superblock.writing.checksum);
             assert(meta.eql(superblock.staging.vsr_state, superblock.writing.vsr_state));
 
+            // The superblock cluster and replica should never change once formatted:
+            assert(superblock.writing.cluster == superblock.working.cluster);
+            assert(superblock.writing.cluster == superblock.staging.cluster);
+            assert(superblock.writing.replica == superblock.working.replica);
+            assert(superblock.writing.replica == superblock.staging.replica);
+
             assert(context.copy < superblock_copies_max);
             assert(context.copy >= starting_copy_for_sequence(superblock.writing.sequence));
             assert(context.copy <= stopping_copy_for_sequence(superblock.writing.sequence));
@@ -952,8 +954,6 @@ pub fn SuperBlock(comptime Storage: type) type {
                     error.ParentQuorumLost => @panic("superblock parent quorum lost"),
                     error.VSRStateNotMonotonic => @panic("superblock vsr state not monotonic"),
                     error.SequenceNotMonotonic => @panic("superblock sequence not monotonic"),
-                    error.ClusterDifferent => @panic("superblock copies have different clusters"),
-                    error.ReplicaDifferent => @panic("superblock copies have different replicas"),
                 }
             } else {
                 context.copy += 1;
@@ -1185,8 +1185,6 @@ const Quorums = struct {
         ParentQuorumLost,
         SequenceNotMonotonic,
         VSRStateNotMonotonic,
-        ClusterDifferent,
-        ReplicaDifferent,
     };
 
     /// Returns the working superblock according to the quorum with the highest sequence number.
@@ -1206,7 +1204,7 @@ const Quorums = struct {
 
         for (copies) |*copy, index| quorums.count_copy(copy, index, threshold);
 
-        std.sort.sort(Quorum, quorums.slice(), {}, sort_a_before_b);
+        std.sort.sort(Quorum, quorums.slice(), {}, sort_priority_descending);
 
         for (quorums.slice()) |quorum| {
             if (quorum.count.count() == config.superblock_copies) {
@@ -1231,17 +1229,14 @@ const Quorums = struct {
         // No working copies of any sequence number exist in the superblock storage zone at all.
         if (quorums.slice().len == 0) return error.NotFound;
 
-        // At least one copy exists.
+        // At least one copy or quorum exists.
         const b = quorums.slice()[0];
 
-        // Verify that all other copies have the same cluster and replica numbers:
+        // Verify that the remaining quorums are correctly sorted:
         for (quorums.slice()[1..]) |a| {
-            assert(sort_a_before_b({}, b, a));
+            assert(sort_priority_descending({}, b, a));
             assert(a.sector.magic == .superblock);
             assert(a.sector.valid_checksum());
-
-            if (a.sector.cluster != b.sector.cluster) return error.ClusterDifferent;
-            if (a.sector.replica != b.sector.replica) return error.ReplicaDifferent;
         }
 
         // Even the best copy with the most quorum still has inadequate quorum.
@@ -1249,8 +1244,22 @@ const Quorums = struct {
 
         // Verify that the parent copy exists:
         for (quorums.slice()[1..]) |a| {
-            if (a.sector.checksum == b.sector.parent) {
+            if (a.sector.cluster != b.sector.cluster) {
+                log.err("superblock copy={} has cluster={} instead of {}", .{
+                    a.sector.copy,
+                    a.sector.cluster,
+                    b.sector.cluster,
+                });
+            } else if (a.sector.replica != b.sector.replica) {
+                log.err("superblock copy={} has replica={} instead of {}", .{
+                    a.sector.copy,
+                    a.sector.replica,
+                    b.sector.replica,
+                });
+            } else if (a.sector.checksum == b.sector.parent) {
                 assert(a.sector.checksum != b.sector.checksum);
+                assert(a.sector.cluster == b.sector.cluster);
+                assert(a.sector.replica == b.sector.replica);
 
                 if (!a.valid) {
                     return error.ParentQuorumLost;
@@ -1347,7 +1356,7 @@ const Quorums = struct {
         return quorums.array[0..quorums.count];
     }
 
-    fn sort_a_before_b(_: void, a: Quorum, b: Quorum) bool {
+    fn sort_priority_descending(_: void, a: Quorum, b: Quorum) bool {
         assert(a.sector.checksum != b.sector.checksum);
         assert(a.sector.magic == .superblock);
         assert(b.sector.magic == .superblock);
@@ -1450,7 +1459,7 @@ const TestRunner = struct {
     }
 };
 
-pub fn main() !void {
+pub fn test_main() !void {
     const testing = std.testing;
     const allocator = testing.allocator;
 
