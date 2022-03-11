@@ -263,6 +263,30 @@ pub fn Tree(
                 }
             };
 
+            pub fn insert_tables(manifest: *Manifest, level: u8, tables: []const TableInfo) void {
+                assert(tables.len > 0);
+
+                switch (manifest.levels[level]) {
+                    .conjoint => |*segmented_array| {
+                        assert(level == 0);
+
+                        // We only expect to flush one table at a time:
+                        // We would also otherwise need to think through precedence order.
+                        assert(tables.len == 1);
+
+                        const absolute_index = 0;
+                        segmented_array.insert_elements(manifest.node_pool, absolute_index, tables);
+                    },
+                    .disjoint => |*manifest_level| {
+                        assert(level > 0);
+
+                        manifest_level.insert_tables(manifest.node_pool, tables);
+                    },
+                }
+
+                // TODO Verify that tables can be found exactly before returning.
+            }
+
             pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key) LookupIterator {
                 return .{
                     .manifest = manifest,
@@ -272,8 +296,8 @@ pub fn Tree(
             }
 
             /// Returns a unique snapshot, incrementing the greatest snapshot value seen so far,
-            /// whether this was a TableInfo.snapshot_min/snapshot_max or registered snapshot.
-            pub fn increment_snapshot(manifest: *Manifest) u64 {
+            /// whether this was for a TableInfo.snapshot_min/snapshot_max or registered snapshot.
+            pub fn take_snapshot(manifest: *Manifest) u64 {
                 // A snapshot cannot be 0 as this is a reserved value in the superblock.
                 assert(manifest.snapshot_max > 0);
                 // The constant snapshot_latest must compare greater than any issued snapshot.
@@ -329,24 +353,34 @@ pub fn Tree(
                 assert(table.values.count() <= table.value_count_max);
             }
 
-            fn cannot_commit_batch(table: *MutableTable, batch_count: u32) bool {
-                assert(table.values.count() <= table.value_count_max);
+            pub fn cannot_commit_batch(table: *MutableTable, batch_count: u32) bool {
                 assert(batch_count <= table.value_count_max);
+                return table.count() + batch_count > table.value_count_max;
+            }
 
-                return table.values.count() + batch_count > table.value_count_max;
+            pub fn clear(table: *MutableTable) void {
+                assert(table.values.count() > 0);
+                table.values.clearRetainingCapacity();
+                assert(table.values.count() == 0);
+            }
+
+            pub fn count(table: *MutableTable) u32 {
+                const value = @intCast(u32, table.values.count());
+                assert(value <= table.value_count_max);
+                return value;
             }
 
             /// The returned slice is invalidated whenever this is called for any tree.
-            fn as_sorted_values(
+            pub fn as_sorted_values(
                 table: *MutableTable,
                 sort_buffer: []align(@alignOf(Value)) u8,
             ) []const Value {
                 const sort_buffer_count_max = @divFloor(sort_buffer.len, @sizeOf(Value));
                 assert(sort_buffer_count_max >= table.value_count_max);
 
-                assert(table.values.count() > 0);
-                assert(table.values.count() <= table.value_count_max);
-                assert(table.values.count() <= sort_buffer_count_max);
+                assert(table.count() > 0);
+                assert(table.count() <= table.value_count_max);
+                assert(table.count() <= sort_buffer_count_max);
 
                 const values_max = mem.bytesAsSlice(
                     Value,
@@ -359,7 +393,7 @@ pub fn Tree(
                     values_max[i] = value.*;
                 }
                 const values = values_max[0..i];
-                assert(values.len == table.values.count());
+                assert(values.len == table.count());
 
                 std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
 
@@ -1224,7 +1258,7 @@ pub fn Tree(
             }
 
             pub const FlushIterator = struct {
-                const Callback = fn () void;
+                const Callback = fn (tree: *TreeGeneric) void;
 
                 storage: *Storage,
                 write: Storage.Write = undefined,
@@ -1238,18 +1272,9 @@ pub fn Tree(
 
                 callback: Callback = undefined,
 
-                /// Returns whether the flush has flushed all used table blocks.
-                pub fn complete(it: *FlushIterator) bool {
-                    const table = @fieldParentPtr(Table, "flush", it);
-                    assert(!table.free);
-
-                    assert(it.block <= table.blocks_used());
-                    return it.block == table.blocks_used();
-                }
-
                 pub fn tick(it: *FlushIterator, callback: Callback) void {
                     const table = @fieldParentPtr(Table, "flush", it);
-                    assert(!it.complete());
+                    assert(it.block < table.blocks_used());
                     assert(!it.writing);
                     it.writing = true;
 
@@ -1264,7 +1289,7 @@ pub fn Tree(
 
                 pub fn tick_to_completion(it: *FlushIterator, callback: Callback) void {
                     const table = @fieldParentPtr(Table, "flush", it);
-                    assert(!it.complete());
+                    assert(it.block < table.blocks_used());
                     assert(!it.writing);
                     it.writing = true;
 
@@ -1276,7 +1301,7 @@ pub fn Tree(
 
                 fn write_block(it: *FlushIterator) void {
                     const table = @fieldParentPtr(Table, "flush", it);
-                    assert(!it.complete());
+                    assert(it.block < table.blocks_used());
                     assert(it.writing);
 
                     assert(it.block < table.blocks_used());
@@ -1292,20 +1317,27 @@ pub fn Tree(
                 fn write_block_callback(write: *Storage.Write) void {
                     const it = @fieldParentPtr(FlushIterator, "write", write);
                     const table = @fieldParentPtr(Table, "flush", it);
-                    assert(!it.complete());
+                    assert(it.block < table.blocks_used());
                     assert(it.writing);
 
                     it.block += 1;
                     it.blocks_per_tick -= 1;
 
                     if (it.blocks_per_tick == 0) {
-                        assert(it.block <= table.blocks_used());
+                        const tree = @fieldParentPtr(TreeGeneric, "table", table);
 
                         const callback = it.callback;
                         it.writing = false;
+                        it.block = math.maxInt(u32);
                         it.blocks_per_tick = undefined;
                         it.callback = undefined;
-                        callback();
+
+                        tree.manifest.insert_tables(0, &[_]Manifest.TableInfo{tree.table.info});
+
+                        assert(!tree.table.free);
+                        tree.table.free = true;
+
+                        callback(tree);
                     } else {
                         it.write_block();
                     }
@@ -2178,10 +2210,30 @@ pub fn Tree(
 
         pub fn flush(
             tree: *TreeGeneric,
-            callback: fn () void,
+            sort_buffer: []align(@alignOf(Value)) u8,
+            callback: fn (tree: *TreeGeneric) void,
         ) void {
-            _ = tree;
-            _ = callback;
+            // Convert the mutable table to an immutable table if necessary:
+            if (tree.mutable_table.cannot_commit_batch(tree.options.commit_count_max)) {
+                assert(tree.mutable_table.count() > 0);
+                assert(tree.table.free);
+
+                tree.table.create_from_sorted_values(
+                    tree.storage,
+                    tree.manifest.take_snapshot(),
+                    tree.mutable_table.as_sorted_values(sort_buffer),
+                );
+                assert(!tree.table.free);
+
+                tree.mutable_table.clear();
+                assert(tree.mutable_table.count() == 0);
+            }
+
+            if (!tree.table.free) {
+                tree.table.flush.tick(callback);
+            } else {
+                callback(tree);
+            }
         }
 
         /// This should be called by the state machine for every key that must be prefetched.
