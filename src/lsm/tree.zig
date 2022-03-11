@@ -736,58 +736,55 @@ pub fn Tree(
             ) void {
                 assert(table.free);
                 assert(snapshot_min > 0);
+                assert(snapshot_min < snapshot_latest);
                 assert(sorted_values.len > 0);
-                assert(sorted_values.len <= data.value_count_max * data_block_count_max);
                 assert(sorted_values.len <= table.value_count_max);
+                assert(sorted_values.len <= data.value_count_max * data_block_count_max);
 
-                var filter_blocks_index: u32 = 0;
-                const filter_blocks = table.blocks[index_block_count..][0..filter_block_count_max];
+                const data_block_count = div_ceil(sorted_values.len, data.value_count_max);
+                assert(data_block_count <= data_block_count_max);
+
+                const filter_block_count = div_ceil(data_block_count, filter.data_block_count_max);
+                assert(filter_block_count <= filter_block_count_max);
+
+                assert(index_block_count == 1);
+                const filter_blocks = table.blocks[1..][0..filter_block_count];
+                const data_blocks = table.blocks[1 + filter_blocks.len ..][0..data_block_count];
 
                 var builder: Builder = .{
                     .storage = storage,
                     .index_block = &table.blocks[0],
                     .filter_block = &filter_blocks[0],
-                    .data_block = undefined,
+                    .data_block = &data_blocks[0],
                 };
-                filter_blocks_index += 1;
+
+                var filter_block_next: u32 = 1;
+                var data_block_next: u32 = 1;
 
                 var stream = sorted_values;
-
-                // Do not slice by data_block_count_max as the mutable table may have less blocks.
-                const data_blocks = table.blocks[index_block_count + filter_block_count_max ..];
-                assert(data_blocks.len <= data_block_count_max);
-
-                for (data_blocks) |*data_block| {
-                    // TODO Fix compiler to see that this @alignCast is unnecessary:
-                    const data_block_aligned = @alignCast(config.sector_size, data_block);
-                    builder.data_block = data_block_aligned;
-
+                while (stream.len > 0) {
                     const slice = stream[0..math.min(data.value_count_max, stream.len)];
                     stream = stream[slice.len..];
 
                     builder.data_block_append_slice(slice);
                     builder.data_block_finish();
+                    builder.data_block = @alignCast(
+                        config.sector_size,
+                        &data_blocks[data_block_next],
+                    );
+                    data_block_next += 1;
 
                     if (builder.filter_block_full() or stream.len == 0) {
                         builder.filter_block_finish();
                         builder.filter_block = @alignCast(
                             config.sector_size,
-                            &filter_blocks[filter_blocks_index],
+                            &filter_blocks[filter_block_next],
                         );
-                        filter_blocks_index += 1;
+                        filter_block_next += 1;
                     }
-
-                    if (stream.len == 0) break;
-
-                    assert(data_block_values_used(data_block_aligned).len == data.value_count_max);
-                } else {
-                    // We must always copy *all* values from sorted_values into the table,
-                    // which will result in breaking from the loop as `stream.len` is 0.
-                    // This is the case even when all data blocks are completely filled.
-                    unreachable;
                 }
-                assert(stream.len == 0);
-                assert(filter_blocks_index <= filter_block_count_max);
+                assert(filter_block_next == filter_block_count);
+                assert(data_block_next == data_block_count);
 
                 table.* = .{
                     .value_count_max = table.value_count_max,
