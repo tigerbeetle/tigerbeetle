@@ -236,9 +236,12 @@ pub const lsm_table_block_size = block_size;
 /// TODO Double-check this with our "LSM Manifest" spreadsheet.
 pub const lsm_manifest_node_size = 16 * 1024;
 
+/// A multiple of batch inserts that a mutable table can definitely accommodate before flushing.
+/// For example, if a message_size_max batch can contain at most 8181 transfers then a multiple of 4
+/// means that the transfer tree's mutable table will be sized to 8191 * 4 = 32764 transfers.
 /// TODO Assert this relative to lsm_table_size_max.
 /// We want to ensure that a mutable table can be converted to an immutable table without overflow.
-pub const lsm_mutable_table_size_max = 4 * message_size_max;
+pub const lsm_mutable_table_batch_multiple = 4;
 
 pub const lsm_snapshots_max = 32;
 
