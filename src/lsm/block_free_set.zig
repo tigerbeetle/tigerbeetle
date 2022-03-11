@@ -10,7 +10,7 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer(
     .array,
 );
 const ewah = @import("../ewah.zig").ewah(usize);
-const div_ceil = @import("../utils.zig").div_ceil;
+const div_ceil = @import("../util.zig").div_ceil;
 
 /// The 0 address is reserved for usage as a sentinel and will never be returned by acquire().
 ///

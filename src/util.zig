@@ -6,13 +6,13 @@ pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerat
         switch (@typeInfo(@TypeOf(numerator))) {
             .Int => |int| assert(int.signedness == .unsigned),
             .ComptimeInt => assert(numerator >= 0),
-            else => @compileError("utils.div_ceil: invalid numerator type"),
+            else => @compileError("div_ceil: invalid numerator type"),
         }
 
         switch (@typeInfo(@TypeOf(denominator))) {
             .Int => |int| assert(int.signedness == .unsigned),
             .ComptimeInt => assert(denominator > 0),
-            else => @compileError("utils.div_ceil: invalid denominator type"),
+            else => @compileError("div_ceil: invalid denominator type"),
         }
     }
 
