@@ -24,6 +24,7 @@ const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
+
 const SuperBlock = @import("superblock.zig").SuperBlock;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
@@ -73,10 +74,12 @@ pub fn Tree(
     /// Returns a tombstone value representation for a key.
     comptime tombstone_from_key: fn (Key) callconv(.Inline) Value,
 ) type {
-    const BlockPtr = Storage.BlockPtr;
-    const BlockPtrConst = Storage.BlockPtrConst; // TODO Use this more where we can.
+    const Blocks = @import("blocks.zig").Blocks(Storage);
+    _ = Blocks;
 
-    const block_size = Storage.block_size;
+    const block_size = config.block_size;
+    const BlockPtr = *align(config.sector_size) [block_size]u8;
+    const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
     assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
     // TODO(ifreund) What are our alignment expectations for Value?
@@ -394,7 +397,7 @@ pub fn Tree(
             const block_body_size = block_size - @sizeOf(vsr.Header);
 
             const layout = blk: {
-                assert(config.lsm_table_block_size % config.sector_size == 0);
+                assert(block_size % config.sector_size == 0);
                 assert(math.isPowerOfTwo(table_size_max));
                 assert(math.isPowerOfTwo(block_size));
 
@@ -745,7 +748,7 @@ pub fn Tree(
 
             pub fn create_from_sorted_values(
                 table: *Table,
-                storage: *Storage,
+                blocks: *Blocks,
                 snapshot_min: u64,
                 sorted_values: []const Value,
             ) void {
@@ -767,7 +770,7 @@ pub fn Tree(
                 const data_blocks = table.blocks[1 + filter_blocks.len ..][0..data_block_count];
 
                 var builder: Builder = .{
-                    .storage = storage,
+                    .blocks = blocks,
                     .index_block = &table.blocks[0],
                     .filter_block = &filter_blocks[0],
                     .data_block = &data_blocks[0],
@@ -806,7 +809,9 @@ pub fn Tree(
                     .blocks = table.blocks,
                     .free = false,
                     .info = builder.index_block_finish(snapshot_min),
-                    .flush = .{ .storage = storage },
+                    // TODO FlushIterator does not need a pointer to blocks, it can use tree.blocks
+                    // instead via @fieldParentPtr. That will clear up the name abiguity.
+                    .flush = .{ .blocks = blocks },
                 };
             }
 
@@ -2024,6 +2029,7 @@ pub fn Tree(
         pub const ValueCache = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
 
         storage: *Storage,
+        blocks: *Blocks,
 
         options: Options,
 
@@ -2062,6 +2068,7 @@ pub fn Tree(
         pub fn init(
             allocator: mem.Allocator,
             storage: *Storage,
+            blocks: *Blocks,
             node_pool: *NodePool,
             value_cache: ?*ValueCache,
             options: Options,
@@ -2091,6 +2098,7 @@ pub fn Tree(
 
             return TreeGeneric{
                 .storage = storage,
+                .blocks = blocks,
                 .options = options,
                 .prefetch_keys = prefetch_keys,
                 .prefetch_values = prefetch_values,
@@ -2347,6 +2355,7 @@ test {
 
     const IO = @import("../io.zig").IO;
     const Storage = @import("../storage.zig").Storage;
+    const Blocks = @import("blocks.zig").Blocks(Storage);
 
     const dir_path = ".";
     const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err| {
@@ -2366,8 +2375,8 @@ test {
 
     const cluster = 32;
 
-    var storage = try Storage.init(allocator, &io, cluster, config.journal_size_max, storage_fd);
-    defer storage.deinit(allocator);
+    var storage = try Storage.init(&io, cluster, config.journal_size_max, storage_fd);
+    defer storage.deinit();
 
     const Key = CompositeKey(u128);
 
@@ -2403,9 +2412,24 @@ test {
     );
     defer allocator.free(sort_buffer);
 
+    var block_free_set = try BlockFreeSet.init(allocator, 1024 * 1024);
+    defer block_free_set.deinit(allocator);
+
+    const blocks_offset = 0; // TODO Take other zones into account.
+    const blocks_size = 1024 * 1024;
+    var blocks = try Blocks.init(
+        allocator,
+        &storage,
+        blocks_offset,
+        blocks_size,
+        &block_free_set,
+    );
+    defer blocks.deinit(allocator);
+
     var tree = try TestTree.init(
         allocator,
         &storage,
+        &blocks,
         &node_pool,
         &value_cache,
         .{
