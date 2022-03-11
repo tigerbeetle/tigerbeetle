@@ -192,8 +192,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(@mod(self.size_prepare_ring, config.sector_size) == 0);
             assert(@mod(self.size_prepare_ring, config.message_size_max) == 0);
             assert(@mod(@ptrToInt(&self.headers[0]), config.sector_size) == 0);
-            assert(self.dirty.bits.len == self.headers.len);
-            assert(self.faulty.bits.len == self.headers.len);
+            assert(self.dirty.bits.bit_length == self.headers.len);
+            assert(self.faulty.bits.bit_length == self.headers.len);
 
             // Op 0 is always the cluster initialization op.
             // TODO This will change when we implement synchronized incremental snapshots.
@@ -868,6 +868,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             //    <  header.op < prepare.op
             //    >  header.op > prepare.op
             //
+            // A "valid" header/prepare:
+            // 1. has a correct checksum, AND
+            // 2. one of the following:
+            //   - command=reserved
+            //   - command=prepare AND is in its proper slot (op % slot_count).
+            //
             const Decision = enum {
                 eql, // The header and prepare are identical; no repair necessary.
                 nil, // Reserved; clear dirty/faulty, no repair necessary.
@@ -893,6 +899,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const match_op = header.?.op == prepare.op;
             const match_view = header.?.view == prepare.view;
 
+            // TODO Add logging for the uncommon error paths here.
             const decision: Decision = decision: {
                 if (!header_valid and !prepare_valid) break :decision .vsr; // @A
 
@@ -994,6 +1001,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(!self.faulty.bit(slot));
                 },
                 .fix => {
+                    // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty). This is tricky because the redundant headers are written in batches.
                     assert(prepare.command == .reserved);
                     self.set_header_as_dirty(prepare);
                     assert(!self.faulty.bit(slot));
@@ -1414,42 +1422,41 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
 // TODO Snapshots
 pub const BitSet = struct {
-    bits: []bool,
+    bits: std.DynamicBitSetUnmanaged,
 
     /// The number of bits set (updated incrementally as bits are set or cleared):
     len: u64 = 0,
 
-    fn init(allocator: Allocator, count: u64) !BitSet {
-        const bits = try allocator.alloc(bool, count);
-        errdefer allocator.free(bits);
-        std.mem.set(bool, bits, false);
+    fn init(allocator: Allocator, count: usize) !BitSet {
+        const bits = try std.DynamicBitSetUnmanaged.initEmpty(allocator, count);
+        errdefer bits.deinit(allocator);
 
         return BitSet{ .bits = bits };
     }
 
     fn deinit(self: *BitSet, allocator: Allocator) void {
-        allocator.free(self.bits);
+        self.bits.deinit(allocator);
     }
 
     /// Clear the bit for a slot (idempotent):
     pub fn clear(self: *BitSet, slot: Slot) void {
-        if (self.bits[slot.index]) {
-            self.bits[slot.index] = false;
+        if (self.bits.isSet(slot.index)) {
+            self.bits.unset(slot.index);
             self.len -= 1;
         }
     }
 
     /// Whether the bit for a slot is set:
     pub fn bit(self: *BitSet, slot: Slot) bool {
-        return self.bits[slot.index];
+        return self.bits.isSet(slot.index);
     }
 
     /// Set the bit for a slot (idempotent):
     pub fn set(self: *BitSet, slot: Slot) void {
-        if (!self.bits[slot.index]) {
-            self.bits[slot.index] = true;
+        if (!self.bits.isSet(slot.index)) {
+            self.bits.set(slot.index);
             self.len += 1;
-            assert(self.len <= self.bits.len);
+            assert(self.len <= self.bits.bit_length);
         }
     }
 };
