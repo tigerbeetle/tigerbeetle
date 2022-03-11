@@ -797,15 +797,12 @@ pub fn Tree(
 
             fn blocks_used(table: *Table) u32 {
                 assert(!table.free);
-
                 return Table.index_blocks_used(&table.blocks[0]);
             }
 
             fn filter_blocks_used(table: *Table) u32 {
                 assert(!table.free);
-
-                const index_block: BlockPtr = table.blocks[0];
-                return Builder.index_filter_blocks_used(index_block);
+                return Table.index_filter_blocks_used(&table.blocks[0]);
             }
 
             // TODO(ifreund) This would be great to unit test.
@@ -1151,26 +1148,31 @@ pub fn Tree(
 
             inline fn index_snapshot_min(index_block: BlockPtrConst) u32 {
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-                return @intCast(u32, header.offset);
+                const value = @intCast(u32, header.offset);
+                assert(value > 0);
+                assert(value < snapshot_latest);
+                return value;
             }
 
             inline fn index_blocks_used(index_block: BlockPtrConst) u32 {
-                return 1 + index_filter_blocks_used(index_block) +
+                return index_block_count + index_filter_blocks_used(index_block) +
                     index_data_blocks_used(index_block);
             }
 
             inline fn index_filter_blocks_used(index_block: BlockPtrConst) u32 {
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-                const used = @intCast(u32, header.commit);
-                assert(used <= filter_block_count_max);
-                return used;
+                const value = @intCast(u32, header.commit);
+                assert(value > 0);
+                assert(value <= filter_block_count_max);
+                return value;
             }
 
             inline fn index_data_blocks_used(index_block: BlockPtrConst) u32 {
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-                const used = @intCast(u32, header.request);
-                assert(used <= data_block_count_max);
-                return used;
+                const value = @intCast(u32, header.request);
+                assert(value > 0);
+                assert(value <= data_block_count_max);
+                return value;
             }
 
             /// Returns the zero-based index of the data block that may contain the key.
@@ -1212,6 +1214,7 @@ pub fn Tree(
             inline fn block_address(block: Block) u64 {
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 const address = header.op;
+                assert(address > 0);
                 // TODO(ifreund) We had an intCast(u32) here before but it didn't make sense?
                 return address;
             }
