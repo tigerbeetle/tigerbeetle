@@ -5,7 +5,7 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
-const utils = @import("../utils.zig");
+const div_ceil = @import("../util.zig").div_ceil;
 
 const Direction = @import("direction.zig").Direction;
 
@@ -46,7 +46,7 @@ pub fn SegmentedArray(
             // the worst possible space overhead is when all nodes are half full.
             // This uses flooring division, we want to examine the worst case here.
             const elements_per_node_min = @divExact(node_capacity, 2);
-            break :blk utils.div_ceil(element_count_max, elements_per_node_min);
+            break :blk div_ceil(element_count_max, elements_per_node_min);
         };
 
         node_count: u32 = 0,
@@ -153,7 +153,7 @@ pub fn SegmentedArray(
             array.insert_empty_node_at(node_pool, b);
             const b_pointer = array.nodes[b].?;
 
-            const a_half = utils.div_ceil(total, 2);
+            const a_half = div_ceil(total, 2);
             const b_half = total - a_half;
             assert(a_half >= b_half);
             assert(a_half + b_half == total);
@@ -408,7 +408,7 @@ pub fn SegmentedArray(
 
                 assert(array.count(a) >= half or a == array.node_count - 1);
             } else if (array.count(a) < half) {
-                const a_half = utils.div_ceil(total, 2);
+                const a_half = div_ceil(total, 2);
                 const b_half = total - a_half;
                 assert(a_half >= b_half);
                 assert(a_half + b_half == total);

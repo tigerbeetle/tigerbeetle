@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
-const div_ceil = @import("utils.zig").div_ceil;
+const div_ceil = @import("util.zig").div_ceil;
 
 /// Encode or decode a bitset using Daniel Lemire's EWAH codec.
 /// ("Histogram-Aware Sorting for Enhanced Word-Aligned Compression in Bitmap Indexes")

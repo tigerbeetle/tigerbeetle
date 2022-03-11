@@ -13,6 +13,6 @@ test {
     _ = @import("io.zig");
 
     _ = @import("ewah.zig");
-    _ = @import("utils.zig");
+    _ = @import("util.zig");
     _ = @import("lsm/block_free_set.zig");
 }
