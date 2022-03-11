@@ -269,19 +269,26 @@ pub fn Tree(
 
         /// Range queries are not supported on the MutableTable, it must first be made immutable.
         pub const MutableTable = struct {
-            const value_count_max = config.lsm_mutable_table_size_max / value_size;
-
             const load_factor = 50;
+            const Values = std.HashMapUnmanaged(Value, void, HashMapContextValue, load_factor);
 
-            values: std.HashMapUnmanaged(Value, void, HashMapContextValue, load_factor) = .{},
+            value_count_max: u32,
+            values: Values = .{},
 
-            pub fn init(allocator: mem.Allocator) !MutableTable {
-                var table: MutableTable = .{};
-                // TODO This allocates a bit more memory than we need as it rounds up to the next
-                // power of two or similar based on the hash map's growth factor. We never resize
-                // the hashmap so this is wasted memory for us.
-                try table.values.ensureTotalCapacity(allocator, value_count_max);
-                return table;
+            pub fn init(allocator: mem.Allocator, commit_count_max: u32) !MutableTable {
+                comptime assert(config.lsm_mutable_table_batch_multiple > 0);
+                assert(commit_count_max > 0);
+
+                const value_count_max = commit_count_max * config.lsm_mutable_table_batch_multiple;
+
+                var values: Values = .{};
+                try values.ensureTotalCapacity(allocator, value_count_max);
+                errdefer values.deinit(allocator);
+
+                return MutableTable{
+                    .value_count_max = value_count_max,
+                    .values = values,
+                };
             }
 
             pub fn deinit(table: *MutableTable, allocator: mem.Allocator) void {
@@ -294,44 +301,54 @@ pub fn Tree(
 
             pub fn put(table: *MutableTable, value: Value) void {
                 table.values.putAssumeCapacity(value, {});
-                // The hash map implementation may allocate more memory
-                // than strictly needed due to a growth factor.
-                assert(table.values.count() <= value_count_max);
+                // The hash map's load factor may allow for more capacity because of rounding:
+                assert(table.values.count() <= table.value_count_max);
             }
 
             pub fn remove(table: *MutableTable, key: Key) void {
                 table.values.putAssumeCapacity(tombstone_from_key(key), {});
-                // The hash map implementation may allocate more memory
-                // than strictly needed due to a growth factor.
-                assert(table.values.count() <= value_count_max);
+                assert(table.values.count() <= table.value_count_max);
             }
 
-            pub fn sort_values(
+            fn cannot_commit_batch(table: *MutableTable, batch_count: u32) bool {
+                assert(table.values.count() <= table.value_count_max);
+                assert(batch_count <= table.value_count_max);
+
+                return table.values.count() + batch_count > table.value_count_max;
+            }
+
+            /// The returned slice is invalidated whenever this is called for any tree.
+            fn as_sorted_values(
                 table: *MutableTable,
                 sort_buffer: []align(@alignOf(Value)) u8,
             ) []const Value {
-                assert(table.values.count() > 0);
-                assert(sort_buffer.len == config.lsm_mutable_table_size_max);
+                const sort_buffer_count_max = @divFloor(sort_buffer.len, @sizeOf(Value));
+                assert(sort_buffer_count_max >= table.value_count_max);
 
-                const values_buffer = mem.bytesAsSlice(Value, sort_buffer[0..value_count_max]);
+                assert(table.values.count() > 0);
+                assert(table.values.count() <= table.value_count_max);
+                assert(table.values.count() <= sort_buffer_count_max);
+
+                const values_max = mem.bytesAsSlice(
+                    Value,
+                    sort_buffer[0 .. table.value_count_max * @sizeOf(Value)],
+                );
 
                 var i: usize = 0;
                 var it = table.values.keyIterator();
                 while (it.next()) |value| : (i += 1) {
-                    values_buffer[i] = value.*;
+                    values_max[i] = value.*;
                 }
-                const values = values_buffer[0..i];
+                const values = values_max[0..i];
                 assert(values.len == table.values.count());
 
-                // Sort values by key:
-                const less_than = struct {
-                    pub fn less_than(_: void, a: Value, b: Value) bool {
-                        return compare_keys(key_from_value(a), key_from_value(b)) == .lt;
-                    }
-                }.less_than;
-                std.sort.sort(Value, values, {}, less_than);
+                std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
 
                 return values;
+            }
+
+            fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
+                return compare_keys(key_from_value(a), key_from_value(b)) == .lt;
             }
         };
 
@@ -637,21 +654,21 @@ pub fn Tree(
                 }
             }
 
+            value_count_max: u32,
             blocks: []align(config.sector_size) [block_size]u8,
-            info: Manifest.TableInfo,
-            flush_iterator: FlushIterator,
-            state: enum {
-                empty, // The immutable table is empty and has no valid data.
-                flush, // The immutable table must be flushed before the superblock is checkpointed.
-                flushing, // The flush is in progress and not yet complete.
-            },
 
-            pub fn init(allocator: mem.Allocator) !Table {
-                // We allocate blocks from MutableTable.value_count_max, not data_block_count_max.
-                // This saves memory for every LSM tree, which is important as we may have many.
-                // TODO We could similarly reduce filter_block_count_max accordingly.
+            /// Whether the in-memory table is free to accept the mutable table, or else flushing.
+            /// As soon as the flush completes, the table will be invalidated and marked as free.
+            free: bool,
+            info: Manifest.TableInfo,
+            flush: FlushIterator,
+
+            pub fn init(allocator: mem.Allocator, commit_count_max: u32) !Table {
+                // The in-memory immutable table is the same size as the mutable table:
+                const value_count_max = commit_count_max * config.lsm_mutable_table_batch_multiple;
+
                 const block_count = index_block_count + filter_block_count_max +
-                    utils.div_ceil(MutableTable.value_count_max, data.value_count_max);
+                    util.div_ceil(value_count_max, data.value_count_max);
 
                 const blocks = try allocator.allocAdvanced(
                     [block_size]u8,
@@ -662,10 +679,11 @@ pub fn Tree(
                 errdefer allocator.free(blocks);
 
                 return Table{
+                    .value_count_max = value_count_max,
                     .blocks = blocks,
+                    .free = true,
                     .info = undefined,
-                    .flush_iterator = undefined,
-                    .state = .empty,
+                    .flush = undefined,
                 };
             }
 
@@ -679,11 +697,11 @@ pub fn Tree(
                 snapshot_min: u64,
                 sorted_values: []const Value,
             ) void {
-                // TODO(ifreund) Do we assert sorted values are unique, even across data blocks?
-
+                assert(table.free);
                 assert(snapshot_min > 0);
                 assert(sorted_values.len > 0);
                 assert(sorted_values.len <= data.value_count_max * data_block_count_max);
+                assert(sorted_values.len <= table.value_count_max);
 
                 var filter_blocks_index: u32 = 0;
                 const filter_blocks = table.blocks[index_block_count..][0..filter_block_count_max];
@@ -735,16 +753,30 @@ pub fn Tree(
                 assert(filter_blocks_index <= filter_block_count_max);
 
                 table.* = .{
+                    .value_count_max = table.value_count_max,
                     .blocks = table.blocks,
+                    .free = false,
                     .info = builder.index_block_finish(snapshot_min),
-                    .flush_iterator = .{ .storage = storage },
-                    .state = .flush,
+                    .flush = .{ .storage = storage },
                 };
+            }
+
+            fn blocks_used(table: *Table) u32 {
+                assert(!table.free);
+
+                return Table.index_blocks_used(&table.blocks[0]);
+            }
+
+            fn filter_blocks_used(table: *Table) u32 {
+                assert(!table.free);
+
+                const index_block: BlockPtr = table.blocks[0];
+                return Builder.index_filter_blocks_used(index_block);
             }
 
             // TODO(ifreund) This would be great to unit test.
             fn get(table: *Table, key: Key) ?*const Value {
-                assert(table.state != .empty);
+                assert(!table.free);
                 assert(table.info.address != 0);
                 assert(table.info.snapshot_max == math.maxInt(u64));
 
@@ -1084,6 +1116,18 @@ pub fn Tree(
             inline fn index_snapshot_min(index_block: BlockPtrConst) u32 {
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
                 return @intCast(u32, header.offset);
+            }
+
+            inline fn index_blocks_used(index_block: BlockPtrConst) u32 {
+                return 1 + index_filter_blocks_used(index_block) +
+                    index_data_blocks_used(index_block);
+            }
+
+            inline fn index_filter_blocks_used(index_block: BlockPtrConst) u32 {
+                const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
+                const used = @intCast(u32, header.commit);
+                assert(used <= filter_block_count_max);
+                return used;
             }
 
             inline fn index_data_blocks_used(index_block: BlockPtrConst) u32 {
@@ -1916,6 +1960,8 @@ pub fn Tree(
 
         storage: *Storage,
 
+        options: Options,
+
         /// Keys enqueued to be prefetched.
         /// Prefetching ensures that point lookups against the latest snapshot are synchronous.
         /// This shields state machine implementations from the challenges of concurrency and I/O,
@@ -1941,32 +1987,40 @@ pub fn Tree(
 
         manifest: Manifest,
 
+        pub const Options = struct {
+            /// The maximum number of keys that may need to be prefetched before commit.
+            prefetch_count_max: u32,
+
+            /// The maximum number of keys that may be committed per batch.
+            commit_count_max: u32,
+        };
+
         pub fn init(
             allocator: mem.Allocator,
             storage: *Storage,
             node_pool: *NodePool,
-            prefetch_capacity: u32,
             value_cache: ?*ValueCache,
             block_cache: *BlockCache,
+            options: Options,
         ) !TreeGeneric {
             if (value_cache == null) {
-                assert(prefetch_capacity == 0);
+                assert(options.prefetch_count_max == 0);
             } else {
-                assert(prefetch_capacity > 0);
+                assert(options.prefetch_count_max > 0);
             }
 
             var prefetch_keys = PrefetchKeys{};
-            try prefetch_keys.ensureTotalCapacity(allocator, prefetch_capacity);
+            try prefetch_keys.ensureTotalCapacity(allocator, options.prefetch_count_max);
             errdefer prefetch_keys.deinit(allocator);
 
             var prefetch_values = PrefetchValues{};
-            try prefetch_values.ensureTotalCapacity(allocator, prefetch_capacity);
+            try prefetch_values.ensureTotalCapacity(allocator, options.prefetch_count_max);
             errdefer prefetch_values.deinit(allocator);
 
-            var mutable_table = try MutableTable.init(allocator);
+            var mutable_table = try MutableTable.init(allocator, options.commit_count_max);
             errdefer mutable_table.deinit(allocator);
 
-            var table = try Table.init(allocator);
+            var table = try Table.init(allocator, options.commit_count_max);
             errdefer table.deinit(allocator);
 
             var manifest = try Manifest.init(allocator, node_pool);
@@ -1974,6 +2028,7 @@ pub fn Tree(
 
             return TreeGeneric{
                 .storage = storage,
+                .options = options,
                 .prefetch_keys = prefetch_keys,
                 .prefetch_values = prefetch_values,
                 .value_cache = value_cache,
@@ -2037,7 +2092,7 @@ pub fn Tree(
                 }
             }
 
-            if (tree.table.state != .empty and tree.table.info.visible(snapshot)) {
+            if (!tree.table.free and tree.table.info.visible(snapshot)) {
                 if (tree.table.get(key)) |value| {
                     callback(unwrap_tombstone(value));
                     return;
@@ -2259,15 +2314,27 @@ test {
     defer block_cache.deinit(allocator);
 
     const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
-    const prefetch_capacity = batch_size_max / 128;
+    const commit_count_max = @divFloor(batch_size_max, 128);
+
+    var sort_buffer = try allocator.allocAdvanced(
+        u8,
+        16,
+        // This must be the greatest commit_count_max and value_size across trees:
+        commit_count_max * config.lsm_mutable_table_batch_multiple * 128,
+        .exact,
+    );
+    defer allocator.free(sort_buffer);
 
     var tree = try TestTree.init(
         allocator,
         &storage,
         &node_pool,
-        prefetch_capacity,
         &value_cache,
         &block_cache,
+        .{
+            .prefetch_count_max = commit_count_max * 2,
+            .commit_count_max = commit_count_max,
+        },
     );
     defer tree.deinit(allocator);
 
@@ -2277,7 +2344,7 @@ test {
     _ = TestTree.Table.create_from_sorted_values;
     _ = TestTree.Table.get;
     _ = TestTree.Table.FlushIterator;
-    _ = TestTree.Table.FlushIterator.flush;
+    _ = TestTree.Table.FlushIterator.tick;
     _ = TestTree.TableIterator;
     _ = TestTree.LevelIterator;
     _ = TestTree.Manifest.LookupIterator.next;
@@ -2292,8 +2359,7 @@ test {
     _ = tree.lookup;
     _ = tree.manifest;
     _ = tree.manifest.lookup;
+    _ = tree.flush;
 
     std.debug.print("table_count_max={}\n", .{table_count_max});
-
-    std.debug.print("sizeOf(SuperBlock)={}\n", .{@sizeOf(SuperBlock)});
 }
