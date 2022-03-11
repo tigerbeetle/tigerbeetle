@@ -10,14 +10,7 @@ const IO = @import("io.zig").IO;
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
 
-const BlockFreeSet = @import("lsm/block_free_set.zig").BlockFreeSet;
-
 pub const Storage = struct {
-    pub const block_size = config.lsm_table_block_size; // TODO Rename to config.block_size
-
-    pub const BlockPtr = *align(config.sector_size) [block_size]u8;
-    pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
-
     /// See usage in Journal.write_sectors() for details.
     pub const synchronicity: enum {
         always_synchronous,
@@ -77,71 +70,22 @@ pub const Storage = struct {
     };
 
     io: *IO,
-    block_free_set: BlockFreeSet,
     cluster: u32,
     size: u64,
     fd: os.fd_t,
 
-    pub fn init(allocator: mem.Allocator, io: *IO, cluster: u32, size: u64, fd: os.fd_t) !Storage {
-        const blocks_count = 1024 * 1024; // TODO
-
-        var block_free_set = try BlockFreeSet.init(allocator, blocks_count);
-        errdefer block_free_set.deinit(allocator);
-
+    pub fn init(io: *IO, cluster: u32, size: u64, fd: os.fd_t) !Storage {
         return Storage{
             .io = io,
-            .block_free_set = block_free_set,
             .cluster = cluster,
             .size = size,
             .fd = fd,
         };
     }
 
-    pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
+    pub fn deinit(storage: *Storage) void {
         assert(storage.fd >= 0);
         storage.fd = -1;
-
-        storage.block_free_set.deinit(allocator);
-    }
-
-    pub fn write_block(
-        storage: *Storage,
-        callback: fn (*Storage.Write) void,
-        write: *Storage.Write,
-        block: BlockPtrConst,
-        address: u64,
-    ) void {
-        _ = storage;
-        _ = callback;
-        _ = write;
-        _ = block;
-        _ = address;
-
-        // TODO
-        assert(address != 0);
-    }
-
-    /// This function transparently handles recovery if the checksum fails.
-    /// If necessary, this read will be added to a linked list in Storage,
-    /// which Replica can then interrogate each tick(). The callback passed
-    /// to this function won't be called until the block has been recovered.
-    pub fn read_block(
-        storage: *Storage,
-        callback: fn (*Storage.Read) void,
-        read: *Storage.Read,
-        block: BlockPtr,
-        address: u64,
-        checksum: u128,
-    ) void {
-        _ = storage;
-        _ = callback;
-        _ = read;
-        _ = block;
-        _ = address;
-        _ = checksum;
-
-        // TODO
-        assert(address != 0);
     }
 
     pub fn read_sectors(

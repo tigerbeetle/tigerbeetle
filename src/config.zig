@@ -227,11 +227,6 @@ pub const lsm_key_size_max = 32;
 
 pub const lsm_table_size_max = 64 * 1024 * 1024;
 
-/// Size of blocks used by the LSM tree implementation. These blocks are passed
-/// through an LRU block cache.
-/// TODO Remove this and update references.
-pub const lsm_table_block_size = block_size;
-
 /// Size of nodes used by the LSM tree manifest implementation.
 /// TODO Double-check this with our "LSM Manifest" spreadsheet.
 pub const lsm_manifest_node_size = 16 * 1024;

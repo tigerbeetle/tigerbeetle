@@ -159,8 +159,7 @@ fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
 }
 
 test "BlockFreeSet acquire/release" {
-    const block_size = config.lsm_table_block_size;
-    const blocks_in_tb = (1 << 40) / block_size;
+    const blocks_in_tb = (1 << 40) / config.block_size;
     try test_block_shards_count(5120 * 8, 10 * blocks_in_tb);
     try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - BlockFreeSet.shard_size);
     try test_block_shards_count(1, BlockFreeSet.shard_size); // At least one index bit is required.
