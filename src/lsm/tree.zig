@@ -181,6 +181,11 @@ pub fn Tree(
 
             levels: [config.lsm_levels]Level,
 
+            // TODO Set this at startup when reading in the manifest.
+            // This should be the greatest TableInfo.snapshot_min/snapshot_max (if deleted) or
+            // registered snapshot seen so far.
+            snapshot_max: u64 = 1,
+
             pub fn init(allocator: mem.Allocator, node_pool: *NodePool) !Manifest {
                 var levels: [config.lsm_levels]Level = undefined;
 
@@ -264,6 +269,20 @@ pub fn Tree(
                     .snapshot = snapshot,
                     .key = key,
                 };
+            }
+
+            /// Returns a unique snapshot, incrementing the greatest snapshot value seen so far,
+            /// whether this was a TableInfo.snapshot_min/snapshot_max or registered snapshot.
+            pub fn increment_snapshot(manifest: *Manifest) u64 {
+                // A snapshot cannot be 0 as this is a reserved value in the superblock.
+                assert(manifest.snapshot_max > 0);
+                // The constant snapshot_latest must compare greater than any issued snapshot.
+                // This also ensures that we are not about to overflow the u64 counter.
+                assert(manifest.snapshot_max < snapshot_latest - 1);
+
+                manifest.snapshot_max += 1;
+
+                return manifest.snapshot_max;
             }
         };
 
