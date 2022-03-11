@@ -20,6 +20,8 @@ pub const BlockFreeSet = struct {
     // That is, if a shard has any free blocks, the corresponding index bit is set.
     index: DynamicBitSetUnmanaged,
     blocks: DynamicBitSetUnmanaged,
+    /// Set bits indicate blocks to be released at the next checkpoint.
+    staging: DynamicBitSetUnmanaged,
     // A fast cache of the 0-indexed bits (not 1-indexed addresses) of recently freed blocks.
     recent: RingBuffer,
 
@@ -51,9 +53,13 @@ pub const BlockFreeSet = struct {
         var blocks = try DynamicBitSetUnmanaged.initFull(allocator, blocks_count);
         errdefer blocks.deinit(allocator);
 
+        var staging = try DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
+        errdefer staging.deinit(allocator);
+
         return BlockFreeSet{
             .index = index,
             .blocks = blocks,
+            .staging = staging,
             .recent = .{},
         };
     }
@@ -61,6 +67,7 @@ pub const BlockFreeSet = struct {
     pub fn deinit(set: *BlockFreeSet, allocator: mem.Allocator) void {
         set.index.deinit(allocator);
         set.blocks.deinit(allocator);
+        set.staging.deinit(allocator);
     }
 
     /// Marks a free block as allocated, and returns the address. Panics if no blocks are available.
@@ -75,6 +82,7 @@ pub const BlockFreeSet = struct {
         const shard = block / shard_size;
         assert(set.index.isSet(shard));
         assert(set.blocks.isSet(block));
+        assert(!set.staging.isSet(block));
 
         set.blocks.unset(block);
         // Update the index when every block in the shard is allocated.
@@ -101,10 +109,31 @@ pub const BlockFreeSet = struct {
     pub fn release(set: *BlockFreeSet, address: u64) void {
         const block = address - 1;
         assert(!set.blocks.isSet(block));
+        assert(!set.staging.isSet(block));
 
         set.index.set(block / shard_size);
         set.blocks.set(block);
         set.recent.push(block) catch {}; // Ignore error.NoSpaceLeft if full.
+    }
+
+    /// Leave the address allocated for now, but free it during the next checkpoint.
+    pub fn release_at_next_checkpoint(set: *BlockFreeSet, address: u64) void {
+        const block = address - 1;
+        assert(!set.blocks.isSet(block));
+        assert(!set.staging.isSet(block));
+
+        set.staging.set(block);
+    }
+
+    /// Free all staged blocks.
+    pub fn checkpoint(set: *BlockFreeSet) void {
+        var iter = set.staging.iterator(.{ .kind = .set });
+        while (iter.next()) |block| {
+            set.staging.unset(block);
+            const address = block + 1;
+            set.release(address);
+        }
+        assert(set.staging.count() == 0);
     }
 
     /// Decodes the compressed bitset in `source` into `set`. Panics if `source`'s encoding is invalid.
@@ -169,6 +198,66 @@ test "BlockFreeSet acquire/release" {
     try test_acquire_release(63 * BlockFreeSet.shard_size);
     try test_acquire_release(64 * BlockFreeSet.shard_size);
     try test_acquire_release(65 * BlockFreeSet.shard_size);
+}
+
+test "BlockFreeSet checkpoint" {
+    const expectEqual = std.testing.expectEqual;
+    const blocks_count = BlockFreeSet.shard_size;
+    var set = try BlockFreeSet.init(std.testing.allocator, blocks_count);
+    defer set.deinit(std.testing.allocator);
+
+    var empty = try BlockFreeSet.init(std.testing.allocator, blocks_count);
+    defer empty.deinit(std.testing.allocator);
+
+    var full = try BlockFreeSet.init(std.testing.allocator, blocks_count);
+    defer full.deinit(std.testing.allocator);
+
+    var i: usize = 0;
+    while (i < full.blocks.bit_length) : (i += 1) {
+        try expectEqual(@as(?u64, i + 1), full.acquire());
+    }
+
+    {
+        // Allocate & stage-release every block.
+        i = 0;
+        while (i < set.blocks.bit_length) : (i += 1) {
+            try expectEqual(@as(?u64, i + 1), set.acquire());
+            set.release_at_next_checkpoint(i + 1);
+        }
+        // All blocks are still allocated, though staged to release at the next checkpoint.
+        try expectEqual(@as(?u64, null), set.acquire());
+    }
+
+    // Free all the blocks.
+    set.checkpoint();
+    try expect_block_free_set_equal(empty, set);
+
+    // Redundant checkpointing is a noop (but safe).
+    set.checkpoint();
+
+    // Allocate & stage-release all blocks again.
+    i = 0;
+    while (i < set.blocks.bit_length) : (i += 1) {
+        try expectEqual(@as(?u64, i + 1), set.acquire());
+        set.release_at_next_checkpoint(i + 1);
+    }
+
+    {
+        // Staged blocks are encoded as if they were still acquired.
+        var set_encoded = try std.testing.allocator.alignedAlloc(
+            u8,
+            @alignOf(usize),
+            BlockFreeSet.encode_size_max(set.blocks.bit_length),
+        );
+        defer std.testing.allocator.free(set_encoded);
+
+        const set_encoded_length = set.encode(set_encoded);
+        var set_decoded = try BlockFreeSet.init(std.testing.allocator, blocks_count);
+        defer set_decoded.deinit(std.testing.allocator);
+
+        set_decoded.decode(set_encoded[0..set_encoded_length]);
+        try expect_block_free_set_equal(full, set_decoded);
+    }
 }
 
 fn test_acquire_release(blocks_count: usize) !void {
@@ -311,6 +400,7 @@ fn test_encode(patterns: []const TestPattern) !void {
 fn expect_block_free_set_equal(a: BlockFreeSet, b: BlockFreeSet) !void {
     try expect_bitset_equal(a.blocks, b.blocks);
     try expect_bitset_equal(a.index, b.index);
+    try expect_bitset_equal(a.staging, b.staging);
 }
 
 fn expect_bitset_equal(a: DynamicBitSetUnmanaged, b: DynamicBitSetUnmanaged) !void {
