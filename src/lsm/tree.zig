@@ -1228,69 +1228,87 @@ pub fn Tree(
 
                 storage: *Storage,
                 write: Storage.Write = undefined,
+                writing: bool = false,
 
-                /// The index of the block that is currently being written/will be written next.
+                /// The index of the block that is being written or will be written next.
                 block: u32 = 0,
-                blocks_max: u32 = undefined,
+
+                /// The maximum number of blocks to write this tick.
+                blocks_per_tick: u32 = undefined,
+
                 callback: Callback = undefined,
 
-                pub fn flush(it: *FlushIterator, blocks_max: ?u32, callback: Callback) void {
-                    it.blocks_max = blocks_max orelse math.maxInt(u32);
-                    it.callback = callback;
-                    it.flush_internal();
+                /// Returns whether the flush has flushed all used table blocks.
+                pub fn complete(it: *FlushIterator) bool {
+                    const table = @fieldParentPtr(Table, "flush", it);
+                    assert(!table.free);
+
+                    assert(it.block <= table.blocks_used());
+                    return it.block == table.blocks_used();
                 }
 
-                fn flush_internal(it: *FlushIterator) void {
-                    const table = @fieldParentPtr(Table, "flush_iterator", it);
+                pub fn tick(it: *FlushIterator, callback: Callback) void {
+                    const table = @fieldParentPtr(Table, "flush", it);
+                    assert(!it.complete());
+                    assert(!it.writing);
+                    it.writing = true;
 
-                    const index_header = mem.bytesAsValue(
-                        vsr.Header,
-                        table.blocks[0][0..@sizeOf(vsr.Header)],
+                    it.blocks_per_tick = math.min(
+                        div_ceil(table.blocks_used(), config.lsm_mutable_table_batch_multiple),
+                        table.blocks_used() - it.block,
                     );
+                    it.callback = callback;
 
-                    const filter_blocks_used = index_header.commit;
-                    const data_blocks_used = index_header.request;
-                    const total_blocks_used = 1 + filter_blocks_used + data_blocks_used;
+                    it.write_block();
+                }
 
-                    if (it.block == total_blocks_used) {
-                        it.flush_complete();
-                        return;
-                    }
-                    assert(it.block < total_blocks_used);
+                pub fn tick_to_completion(it: *FlushIterator, callback: Callback) void {
+                    const table = @fieldParentPtr(Table, "flush", it);
+                    assert(!it.complete());
+                    assert(!it.writing);
+                    it.writing = true;
 
-                    if (it.blocks_max == 0) {
-                        it.flush_complete();
-                        return;
-                    }
+                    it.blocks_per_tick = table.blocks_used() - it.block;
+                    it.callback = callback;
 
-                    if (it.block == 1 + filter_blocks_used) {
-                        // TODO(ifreund) When skipping over unused filter blocks, let's assert
-                        // here that they all have a zero address, with Builder zeroing the address.
-                        // This way, if there's any mismatch, we'll catch it.
-                        // This is one of the tricky things about how we have a full allocation of
-                        // blocks, but don't always use all the allocated filter blocks.
-                        const filter_blocks_unused = filter_block_count_max - filter_blocks_used;
-                        it.block += @intCast(u32, filter_blocks_unused);
-                    }
+                    it.write_block();
+                }
 
-                    const block = @alignCast(config.sector_size, &table.blocks[it.block]);
+                fn write_block(it: *FlushIterator) void {
+                    const table = @fieldParentPtr(Table, "flush", it);
+                    assert(!it.complete());
+                    assert(it.writing);
+
+                    assert(it.block < table.blocks_used());
+                    assert(it.blocks_per_tick > 0);
+                    assert(it.block + it.blocks_per_tick <= table.blocks_used());
+
+                    const block: BlockPtr = @alignCast(config.sector_size, &table.blocks[it.block]);
                     const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                     const address = header.op;
-                    it.storage.write_block(on_flush, &it.write, block, address);
+                    it.storage.write_block(write_block_callback, &it.write, block, address);
                 }
 
-                fn flush_complete(it: *FlushIterator) void {
-                    const callback = it.callback;
-                    it.blocks_max = undefined;
-                    it.callback = undefined;
-                    callback();
-                }
-
-                fn on_flush(write: *Storage.Write) void {
+                fn write_block_callback(write: *Storage.Write) void {
                     const it = @fieldParentPtr(FlushIterator, "write", write);
+                    const table = @fieldParentPtr(Table, "flush", it);
+                    assert(!it.complete());
+                    assert(it.writing);
+
                     it.block += 1;
-                    it.blocks_max -= 1;
-                    it.flush_internal();
+                    it.blocks_per_tick -= 1;
+
+                    if (it.blocks_per_tick == 0) {
+                        assert(it.block <= table.blocks_used());
+
+                        const callback = it.callback;
+                        it.writing = false;
+                        it.blocks_per_tick = undefined;
+                        it.callback = undefined;
+                        callback();
+                    } else {
+                        it.write_block();
+                    }
                 }
             };
         };
