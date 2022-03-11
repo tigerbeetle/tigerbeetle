@@ -73,7 +73,6 @@ pub fn Tree(
     /// Returns a tombstone value representation for a key.
     comptime tombstone_from_key: fn (Key) callconv(.Inline) Value,
 ) type {
-    const Block = Storage.Block;
     const BlockPtr = Storage.BlockPtr;
     const BlockPtrConst = Storage.BlockPtrConst; // TODO Use this more where we can.
 
@@ -104,24 +103,6 @@ pub fn Tree(
             pub fn hash(_: HashMapContextValue, value: Value) u64 {
                 const key = key_from_value(value);
                 return std.hash_map.getAutoHashFn(Key, HashMapContextValue)(.{}, key);
-            }
-        };
-
-        const HashMapContextBlock = struct {
-            pub fn eql(_: HashMapContextBlock, a: Block, b: Block) bool {
-                const x = Table.block_address(a);
-                const y = Table.block_address(b);
-
-                assert(x != 0);
-                assert(y != 0);
-
-                return x == y;
-            }
-
-            pub fn hash(_: HashMapContextBlock, block: Block) u64 {
-                const address = Table.block_address(block);
-                assert(address != 0);
-                return std.hash_map.getAutoHashFn(u64, HashMapContextBlock)(.{}, address);
             }
         };
 
@@ -1243,13 +1224,10 @@ pub fn Tree(
                 return data_block_values(data_block)[0..used];
             }
 
-            // TODO(ifreund): Should we use `BlockPtrConst` as we had before?
-            // The reason for `Block` is so that HashMapContext's can call this without alignCast.
-            inline fn block_address(block: Block) u64 {
+            inline fn block_address(block: BlockPtrConst) u64 {
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 const address = header.op;
                 assert(address > 0);
-                // TODO(ifreund) We had an intCast(u32) here before but it didn't make sense?
                 return address;
             }
 
@@ -2043,9 +2021,7 @@ pub fn Tree(
         pub const PrefetchKeys = std.AutoHashMapUnmanaged(Key, void);
         pub const PrefetchValues = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
 
-        // TODO(ifreund) Replace both of these types with SetAssociativeCache:
         pub const ValueCache = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
-        pub const BlockCache = std.HashMapUnmanaged(Block, void, HashMapContextBlock, 70);
 
         storage: *Storage,
 
@@ -2063,13 +2039,12 @@ pub fn Tree(
         /// This is required for correctness, to not evict other prefetch hits from the value cache.
         prefetch_values: PrefetchValues,
 
+        /// TODO(ifreund) Replace this with SetAssociativeCache:
         /// A set associative cache of values shared by trees with the same key/value sizes.
         /// This is used to accelerate point lookups and is not used for range queries.
         /// Secondary index trees used only for range queries can therefore set this to null.
+        /// The value type will be []u8 and this will be shared by trees with the same value size.
         value_cache: ?*ValueCache,
-
-        /// A set associative cache of blocks shared by all trees.
-        block_cache: *BlockCache,
 
         mutable_table: MutableTable,
         table: Table,
@@ -2089,7 +2064,6 @@ pub fn Tree(
             storage: *Storage,
             node_pool: *NodePool,
             value_cache: ?*ValueCache,
-            block_cache: *BlockCache,
             options: Options,
         ) !TreeGeneric {
             if (value_cache == null) {
@@ -2121,7 +2095,6 @@ pub fn Tree(
                 .prefetch_keys = prefetch_keys,
                 .prefetch_values = prefetch_values,
                 .value_cache = value_cache,
-                .block_cache = block_cache,
                 .mutable_table = mutable_table,
                 .table = table,
                 .manifest = manifest,
@@ -2418,10 +2391,6 @@ test {
     try value_cache.ensureTotalCapacity(allocator, 10000);
     defer value_cache.deinit(allocator);
 
-    var block_cache = TestTree.BlockCache{};
-    try block_cache.ensureTotalCapacity(allocator, 100);
-    defer block_cache.deinit(allocator);
-
     const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
     const commit_count_max = @divFloor(batch_size_max, 128);
 
@@ -2439,7 +2408,6 @@ test {
         &storage,
         &node_pool,
         &value_cache,
-        &block_cache,
         .{
             .prefetch_count_max = commit_count_max * 2,
             .commit_count_max = commit_count_max,

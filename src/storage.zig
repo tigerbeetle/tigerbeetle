@@ -15,9 +15,8 @@ const BlockFreeSet = @import("lsm/block_free_set.zig").BlockFreeSet;
 pub const Storage = struct {
     pub const block_size = config.lsm_table_block_size; // TODO Rename to config.block_size
 
-    pub const Block = [block_size]u8;
-    pub const BlockPtr = *align(config.sector_size) Block;
-    pub const BlockPtrConst = *align(config.sector_size) const Block;
+    pub const BlockPtr = *align(config.sector_size) [block_size]u8;
+    pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
     /// See usage in Journal.write_sectors() for details.
     pub const synchronicity: enum {
