@@ -9,8 +9,8 @@ const os = std.os;
 pub const verify = true;
 
 const config = @import("../config.zig");
+const div_ceil = @import("../util.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
-const utils = @import("../utils.zig");
 const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
 const bloom_filter = @import("bloom_filter.zig");
@@ -436,7 +436,7 @@ pub fn Tree(
                 while (true) : (data_blocks -= 1) {
                     data_index_size = data_index_entry_size * data_blocks;
 
-                    filter_blocks = utils.div_ceil(data_blocks, data_blocks_per_filter_block);
+                    filter_blocks = div_ceil(data_blocks, data_blocks_per_filter_block);
                     filter_index_size = filter_index_entry_size * filter_blocks;
 
                     const index_size = @sizeOf(vsr.Header) + data_index_size + filter_index_size;
@@ -668,7 +668,7 @@ pub fn Tree(
                 const value_count_max = commit_count_max * config.lsm_mutable_table_batch_multiple;
 
                 const block_count = index_block_count + filter_block_count_max +
-                    util.div_ceil(value_count_max, data.value_count_max);
+                    div_ceil(value_count_max, data.value_count_max);
 
                 const blocks = try allocator.allocAdvanced(
                     [block_size]u8,

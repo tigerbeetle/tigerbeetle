@@ -6,7 +6,7 @@ const meta = std.meta;
 const os = std.os;
 
 const config = @import("../config.zig");
-const utils = @import("../utils.zig");
+const div_ceil = @import("../util.zig").div_ceil;
 const vsr = @import("../vsr.zig");
 
 const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
@@ -318,7 +318,7 @@ const superblock_trailer_block_free_set_size_max = blk: {
     const encode_size_max = BlockFreeSet.encode_size_max(blocks_count_floor);
 
     // Round this up to the nearest sector:
-    break :blk utils.div_ceil(encode_size_max, config.sector_size) * config.sector_size;
+    break :blk div_ceil(encode_size_max, config.sector_size) * config.sector_size;
 };
 
 pub fn SuperBlock(comptime Storage: type) type {
