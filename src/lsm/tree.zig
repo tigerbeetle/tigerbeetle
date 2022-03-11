@@ -429,7 +429,7 @@ pub fn Tree(
                 // the total index size is not 64 byte cache line aligned.
                 assert(@sizeOf(Key) >= 4);
                 assert(@sizeOf(Key) % 4 == 0);
-                if (block_keys_layout_count < config.cache_line_size / 4) {
+                if (block_keys_layout_count < @divExact(config.cache_line_size, 4)) {
                     block_keys_layout_count = 0;
                 }
                 assert((block_keys_layout_count * key_size) % config.cache_line_size == 0);
@@ -437,46 +437,50 @@ pub fn Tree(
                 const block_key_layout_size = block_keys_layout_count * key_size;
                 const block_key_count = block_keys_layout_count - 1;
 
-                const block_value_count_max =
-                    (block_body_size - block_key_layout_size) / value_size;
+                const block_value_count_max = @divFloor(
+                    block_body_size - block_key_layout_size,
+                    value_size,
+                );
 
                 const data_index_entry_size = key_size + address_size + checksum_size;
                 const filter_index_entry_size = address_size + checksum_size;
 
-                // TODO audit/tune this number for split block bloom filters
+                // TODO Audit/tune this number for split block bloom filters:
                 const filter_bytes_per_key = 2;
-                const data_blocks_per_filter_block = filter.filter_size /
-                    (block_value_count_max * filter_bytes_per_key);
+                const filter_data_block_count_max = @divFloor(
+                    block_body_size,
+                    block_value_count_max * filter_bytes_per_key,
+                );
 
-                var data_index_size = 0;
-                var filter_index_size = 0;
                 var data_blocks = table_block_count_max - index_block_count;
+                var data_index_size = 0;
                 var filter_blocks = 0;
+                var filter_index_size = 0;
                 while (true) : (data_blocks -= 1) {
                     data_index_size = data_index_entry_size * data_blocks;
 
-                    filter_blocks = div_ceil(data_blocks, data_blocks_per_filter_block);
+                    filter_blocks = div_ceil(data_blocks, filter_data_block_count_max);
                     filter_index_size = filter_index_entry_size * filter_blocks;
 
                     const index_size = @sizeOf(vsr.Header) + data_index_size + filter_index_size;
-                    const total_block_count = index_block_count + data_blocks + filter_blocks;
-                    if (index_size <= block_size and total_block_count <= table_block_count_max) {
+                    const table_block_count = index_block_count + filter_blocks + data_blocks;
+                    if (index_size <= block_size and table_block_count <= table_block_count_max) {
                         break;
                     }
                 }
 
-                const total_block_count = index_block_count + data_blocks + filter_blocks;
-                assert(total_block_count <= table_block_count_max);
+                const table_block_count = index_block_count + filter_blocks + data_blocks;
+                assert(table_block_count <= table_block_count_max);
 
                 break :blk .{
                     .block_key_count = block_key_count,
                     .block_key_layout_size = block_key_layout_size,
                     .block_value_count_max = block_value_count_max,
 
-                    .data_blocks_per_filter_block = data_blocks_per_filter_block,
-
                     .data_block_count_max = data_blocks,
                     .filter_block_count_max = filter_blocks,
+
+                    .filter_data_block_count_max = filter_data_block_count_max,
                 };
             };
 
@@ -508,6 +512,8 @@ pub fn Tree(
             };
 
             const filter = struct {
+                const data_block_count_max = layout.filter_data_block_count_max;
+
                 const filter_offset = @sizeOf(vsr.Header);
                 const filter_size = block_size - filter_offset;
 
@@ -557,8 +563,11 @@ pub fn Tree(
                         \\    data_addresses_offset: {}
                         \\    data_addresses_size: {}
                         \\filter:
+                        \\    data_block_count_max: {}
                         \\    filter_offset: {}
                         \\    filter_size: {}
+                        \\    padding_offset: {}
+                        \\    padding_size: {}
                         \\data:
                         \\    key_count: {}
                         \\    value_count_max: {}
@@ -592,8 +601,11 @@ pub fn Tree(
                             index.data_addresses_offset,
                             index.data_addresses_size,
 
+                            filter.data_block_count_max,
                             filter.filter_offset,
                             filter.filter_size,
+                            filter.padding_offset,
+                            filter.padding_size,
 
                             data.key_count,
                             data.value_count_max,
@@ -614,6 +626,11 @@ pub fn Tree(
                 assert(data_block_count_max > 0);
                 assert(index_block_count + filter_block_count_max +
                     data_block_count_max <= table_block_count_max);
+
+                assert(filter.data_block_count_max > 0);
+                // There should not be more data blocks per filter block than there are data blocks:
+                assert(filter.data_block_count_max <= data_block_count_max);
+
                 const filter_bytes_per_key = 2;
                 assert(filter_block_count_max * filter.filter_size >=
                     data_block_count_max * data.value_count_max * filter_bytes_per_key);
@@ -635,6 +652,7 @@ pub fn Tree(
                 // Split block bloom filters require filters to be a multiple of 32 bytes as they
                 // use 256 bit blocks.
                 assert(filter.filter_size % 32 == 0);
+                assert(filter.filter_size == block_body_size);
                 assert(block_size == filter.padding_offset + filter.padding_size);
                 assert(block_size == @sizeOf(vsr.Header) + filter.filter_size + filter.padding_size);
 
@@ -1000,8 +1018,8 @@ pub fn Tree(
 
                 /// Returns true if there is space for at least one more data block in the filter.
                 pub fn filter_block_full(builder: Builder) bool {
-                    assert(builder.data_blocks_in_filter <= layout.data_blocks_per_filter_block);
-                    return builder.data_blocks_in_filter == layout.data_blocks_per_filter_block;
+                    assert(builder.data_blocks_in_filter <= filter.data_block_count_max);
+                    return builder.data_blocks_in_filter == filter.data_block_count_max;
                 }
 
                 pub fn filter_block_finish(builder: *Builder) void {
@@ -1034,9 +1052,11 @@ pub fn Tree(
                 pub fn index_block_finish(builder: *Builder, snapshot_min: u64) Manifest.TableInfo {
                     assert(builder.data_block_count > 0);
                     assert(builder.value == 0);
-                    assert(builder.filter_block_count > builder.data_block_count /
-                        layout.data_blocks_per_filter_block);
                     assert(builder.data_blocks_in_filter == 0);
+                    assert(builder.filter_block_count == div_ceil(
+                        builder.data_block_count,
+                        filter.data_block_count_max,
+                    ));
 
                     const index_block = builder.index_block;
 
@@ -2379,6 +2399,7 @@ test {
     _ = tree.manifest;
     _ = tree.manifest.lookup;
     _ = tree.flush;
+    _ = TestTree.Table.filter_blocks_used;
 
     std.debug.print("table_count_max={}\n", .{table_count_max});
 }
