@@ -57,7 +57,7 @@ pub const snapshot_latest = math.maxInt(u64) - 1;
 
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
 
-pub fn Tree(
+pub fn TreeType(
     comptime Storage: type,
     /// Key sizes of 8, 16, 32, etc. are supported with alignment 8 or 16.
     comptime Key: type,
@@ -74,7 +74,7 @@ pub fn Tree(
     /// Returns a tombstone value representation for a key.
     comptime tombstone_from_key: fn (Key) callconv(.Inline) Value,
 ) type {
-    const Blocks = @import("blocks.zig").Blocks(Storage);
+    const Blocks = @import("blocks.zig").BlocksType(Storage);
     _ = Blocks;
 
     const block_size = config.block_size;
@@ -96,7 +96,7 @@ pub fn Tree(
     assert(key_size <= 32);
 
     return struct {
-        const TreeGeneric = @This();
+        const Tree = @This();
 
         const HashMapContextValue = struct {
             pub fn eql(_: HashMapContextValue, a: Value, b: Value) bool {
@@ -748,7 +748,7 @@ pub fn Tree(
 
             pub fn create_from_sorted_values(
                 table: *Table,
-                blocks: *Blocks,
+                storage: *Blocks,
                 snapshot_min: u64,
                 sorted_values: []const Value,
             ) void {
@@ -770,7 +770,7 @@ pub fn Tree(
                 const data_blocks = table.blocks[1 + filter_blocks.len ..][0..data_block_count];
 
                 var builder: Builder = .{
-                    .blocks = blocks,
+                    .storage = storage,
                     .index_block = &table.blocks[0],
                     .filter_block = &filter_blocks[0],
                     .data_block = &data_blocks[0],
@@ -809,9 +809,7 @@ pub fn Tree(
                     .blocks = table.blocks,
                     .free = false,
                     .info = builder.index_block_finish(snapshot_min),
-                    // TODO FlushIterator does not need a pointer to blocks, it can use tree.blocks
-                    // instead via @fieldParentPtr. That will clear up the name abiguity.
-                    .flush = .{ .blocks = blocks },
+                    .flush = .{ .storage = storage },
                 };
             }
 
@@ -891,7 +889,7 @@ pub fn Tree(
             }
 
             const Builder = struct {
-                storage: *Storage,
+                storage: *Blocks,
                 key_min: Key = undefined,
                 key_max: Key = undefined,
 
@@ -1241,9 +1239,9 @@ pub fn Tree(
             }
 
             pub const FlushIterator = struct {
-                const Callback = fn (tree: *TreeGeneric) void;
+                const Callback = fn (tree: *Tree) void;
 
-                storage: *Storage,
+                storage: *Blocks,
                 write: Storage.Write = undefined,
                 writing: bool = false,
 
@@ -1307,7 +1305,7 @@ pub fn Tree(
                     it.blocks_per_tick -= 1;
 
                     if (it.blocks_per_tick == 0) {
-                        const tree = @fieldParentPtr(TreeGeneric, "table", table);
+                        const tree = @fieldParentPtr(Tree, "table", table);
 
                         const callback = it.callback;
                         it.writing = false;
@@ -1335,8 +1333,8 @@ pub fn Tree(
             const level_0_table_count_max = table_count_max_for_level(config.lsm_growth_factor, 0);
             const level_a_table_count_max = level_0_table_count_max;
 
-            const LevelAIterator = TableIterator(Compaction, on_io_done);
-            const LevelBIterator = LevelIterator(Compaction, on_io_done);
+            const LevelAIterator = TableIteratorType(Compaction, on_io_done);
+            const LevelBIterator = LevelIteratorType(Compaction, on_io_done);
 
             const MergeIterator = KWayMergeIterator(
                 Compaction,
@@ -1357,7 +1355,7 @@ pub fn Tree(
                 write: Storage.Write,
             };
 
-            storage: *Storage,
+            storage: *Blocks,
             ticks: u32 = 0,
             io_pending: u32 = 0,
             callback: ?Callback = null,
@@ -1608,18 +1606,15 @@ pub fn Tree(
             }
         };
 
-        fn LevelIterator(comptime Parent: type, comptime read_done: fn (*Parent) void) type {
+        fn LevelIteratorType(comptime Parent: type, comptime read_done: fn (*Parent) void) type {
             return struct {
-                const LevelIteratorGeneric = @This();
+                const LevelIterator = @This();
+                const TableIterator = TableIteratorType(LevelIterator, on_read_done);
 
                 const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
-                const TablesRingBuffer = RingBuffer(
-                    TableIterator(LevelIteratorGeneric, on_read_done),
-                    2,
-                    .array,
-                );
+                const TablesRingBuffer = RingBuffer(TableIterator, 2, .array);
 
-                storage: *Storage,
+                storage: *Blocks,
                 parent: *Parent,
                 level: u32,
                 key_min: Key,
@@ -1627,7 +1622,7 @@ pub fn Tree(
                 values: ValuesRingBuffer,
                 tables: TablesRingBuffer,
 
-                fn init(allocator: mem.Allocator) !LevelIteratorGeneric {
+                fn init(allocator: mem.Allocator) !LevelIterator {
                     var values = try ValuesRingBuffer.init(allocator);
                     errdefer values.deinit(allocator);
 
@@ -1637,7 +1632,7 @@ pub fn Tree(
                     var table_b = try TableIterator.init(allocator);
                     errdefer table_b.deinit(allocator);
 
-                    return LevelIteratorGeneric{
+                    return LevelIterator{
                         .storage = undefined,
                         .parent = undefined,
                         .level = undefined,
@@ -1653,15 +1648,15 @@ pub fn Tree(
                     };
                 }
 
-                fn deinit(it: *LevelIteratorGeneric, allocator: mem.Allocator) void {
+                fn deinit(it: *LevelIterator, allocator: mem.Allocator) void {
                     it.values.deinit(allocator);
                     for (it.tables.buffer) |*table| table.deinit(allocator);
                     it.* = undefined;
                 }
 
                 fn reset(
-                    it: *LevelIteratorGeneric,
-                    storage: *Storage,
+                    it: *LevelIterator,
+                    storage: *Blocks,
                     parent: *Parent,
                     level: u32,
                     key_min: Key,
@@ -1680,7 +1675,7 @@ pub fn Tree(
                     assert(it.tables.empty());
                 }
 
-                fn tick(it: *LevelIteratorGeneric) bool {
+                fn tick(it: *LevelIterator) bool {
                     if (it.buffered_enough_values()) return false;
 
                     if (it.tables.tail_ptr()) |tail| {
@@ -1709,7 +1704,7 @@ pub fn Tree(
                     }
                 }
 
-                fn read_next_table(table: *TableIterator(LevelIteratorGeneric, on_read_done)) void {
+                fn read_next_table(table: *TableIterator) void {
                     // TODO Implement get_next_address()
                     //const address = table.parent.manifest.get_next_address() orelse return false;
                     if (true) @panic("implement get_next_address()");
@@ -1719,7 +1714,7 @@ pub fn Tree(
                     assert(read_pending);
                 }
 
-                fn on_read_done(it: *LevelIteratorGeneric) void {
+                fn on_read_done(it: *LevelIterator) void {
                     if (!it.tick()) {
                         assert(it.buffered_enough_values());
                         read_done(it.parent);
@@ -1727,14 +1722,14 @@ pub fn Tree(
                 }
 
                 /// Returns true if all remaining values in the level have been buffered.
-                fn buffered_all_values(it: LevelIteratorGeneric) bool {
+                fn buffered_all_values(it: LevelIterator) bool {
                     _ = it;
 
                     // TODO look at the manifest to determine this.
                     return false;
                 }
 
-                fn buffered_value_count(it: LevelIteratorGeneric) u32 {
+                fn buffered_value_count(it: LevelIterator) u32 {
                     var value_count = @intCast(u32, it.values.count);
                     var tables_it = it.tables.iterator();
                     while (tables_it.next()) |table| {
@@ -1743,12 +1738,12 @@ pub fn Tree(
                     return value_count;
                 }
 
-                fn buffered_enough_values(it: LevelIteratorGeneric) bool {
+                fn buffered_enough_values(it: LevelIterator) bool {
                     return it.buffered_all_values() or
                         it.buffered_value_count() >= Table.data.value_count_max;
                 }
 
-                fn peek(it: LevelIteratorGeneric) ?Key {
+                fn peek(it: LevelIterator) ?Key {
                     if (it.values.head()) |value| return key_from_value(value);
 
                     const table = it.tables.head_ptr_const() orelse {
@@ -1760,7 +1755,7 @@ pub fn Tree(
                 }
 
                 /// This is only safe to call after peek() has returned non-null.
-                fn pop(it: *LevelIteratorGeneric) Value {
+                fn pop(it: *LevelIterator) Value {
                     if (it.values.pop()) |value| return value;
 
                     const table = it.tables.head_ptr().?;
@@ -1773,15 +1768,15 @@ pub fn Tree(
             };
         }
 
-        fn TableIterator(comptime Parent: type, comptime read_done: fn (*Parent) void) type {
+        fn TableIteratorType(comptime Parent: type, comptime read_done: fn (*Parent) void) type {
             _ = read_done; // TODO
 
             return struct {
-                const TableIteratorGeneric = @This();
+                const TableIterator = @This();
 
                 const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
 
-                storage: *Storage,
+                storage: *Blocks,
                 parent: *Parent,
                 read_table_index: bool,
                 address: u64,
@@ -1808,7 +1803,7 @@ pub fn Tree(
                 /// This field is only used for safety checks, it does not affect the behavior.
                 read_pending: bool = false,
 
-                fn init(allocator: mem.Allocator) !TableIteratorGeneric {
+                fn init(allocator: mem.Allocator) !TableIterator {
                     const index = try allocator.alignedAlloc(u8, config.sector_size, block_size);
                     errdefer allocator.free(index);
 
@@ -1841,7 +1836,7 @@ pub fn Tree(
                     };
                 }
 
-                fn deinit(it: *TableIteratorGeneric, allocator: mem.Allocator) void {
+                fn deinit(it: *TableIterator, allocator: mem.Allocator) void {
                     assert(!it.read_pending);
 
                     allocator.free(it.index);
@@ -1851,8 +1846,8 @@ pub fn Tree(
                 }
 
                 fn reset(
-                    it: *TableIteratorGeneric,
-                    storage: *Storage,
+                    it: *TableIterator,
+                    storage: *Blocks,
                     parent: *Parent,
                     address: u64,
                     checksum: u128,
@@ -1879,7 +1874,7 @@ pub fn Tree(
                 /// or if the end of the table is reached.
                 /// Returns true if an IO operation was started. If this returns true,
                 /// then read_done() will be called on completion.
-                fn tick(it: *TableIteratorGeneric) bool {
+                fn tick(it: *TableIterator) bool {
                     assert(!it.read_pending);
                     assert(it.address != 0);
 
@@ -1912,7 +1907,7 @@ pub fn Tree(
                     }
                 }
 
-                fn read_next_data_block(it: *TableIteratorGeneric, block: BlockPtr) void {
+                fn read_next_data_block(it: *TableIterator, block: BlockPtr) void {
                     assert(!it.read_table_index);
                     assert(it.block < Table.index_data_blocks_used(it.index));
 
@@ -1927,7 +1922,7 @@ pub fn Tree(
                 }
 
                 fn on_read_table_index(read: *Storage.Read) void {
-                    const it = @fieldParentPtr(TableIteratorGeneric, "read", read);
+                    const it = @fieldParentPtr(TableIterator, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
 
@@ -1940,7 +1935,7 @@ pub fn Tree(
                 }
 
                 fn on_read(read: *Storage.Read) void {
-                    const it = @fieldParentPtr(TableIteratorGeneric, "read", read);
+                    const it = @fieldParentPtr(TableIterator, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
 
@@ -1956,7 +1951,7 @@ pub fn Tree(
                 }
 
                 /// Return true if all remaining values in the table have been buffered in memory.
-                fn buffered_all_values(it: TableIteratorGeneric) bool {
+                fn buffered_all_values(it: TableIterator) bool {
                     assert(!it.read_pending);
 
                     const data_blocks_used = Table.index_data_blocks_used(it.index);
@@ -1964,7 +1959,7 @@ pub fn Tree(
                     return it.block == data_blocks_used;
                 }
 
-                fn buffered_value_count(it: TableIteratorGeneric) u32 {
+                fn buffered_value_count(it: TableIterator) u32 {
                     assert(!it.read_pending);
 
                     var value_count = it.values.count;
@@ -1978,14 +1973,14 @@ pub fn Tree(
                     return @intCast(u32, value_count);
                 }
 
-                fn buffered_enough_values(it: TableIteratorGeneric) bool {
+                fn buffered_enough_values(it: TableIterator) bool {
                     assert(!it.read_pending);
 
                     return it.buffered_all_values() or
                         it.buffered_value_count() >= Table.data.value_count_max;
                 }
 
-                fn peek(it: TableIteratorGeneric) ?Key {
+                fn peek(it: TableIterator) ?Key {
                     assert(!it.read_pending);
                     assert(!it.read_table_index);
 
@@ -2001,7 +1996,7 @@ pub fn Tree(
                 }
 
                 /// This is only safe to call after peek() has returned non-null.
-                fn pop(it: *TableIteratorGeneric) Value {
+                fn pop(it: *TableIterator) Value {
                     assert(!it.read_pending);
                     assert(!it.read_table_index);
 
@@ -2028,9 +2023,7 @@ pub fn Tree(
 
         pub const ValueCache = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
 
-        storage: *Storage,
-        blocks: *Blocks,
-
+        storage: *Blocks,
         options: Options,
 
         /// Keys enqueued to be prefetched.
@@ -2067,12 +2060,11 @@ pub fn Tree(
 
         pub fn init(
             allocator: mem.Allocator,
-            storage: *Storage,
-            blocks: *Blocks,
+            storage: *Blocks,
             node_pool: *NodePool,
             value_cache: ?*ValueCache,
             options: Options,
-        ) !TreeGeneric {
+        ) !Tree {
             if (value_cache == null) {
                 assert(options.prefetch_count_max == 0);
             } else {
@@ -2096,9 +2088,8 @@ pub fn Tree(
             var manifest = try Manifest.init(allocator, node_pool);
             errdefer manifest.deinit(allocator);
 
-            return TreeGeneric{
+            return Tree{
                 .storage = storage,
-                .blocks = blocks,
                 .options = options,
                 .prefetch_keys = prefetch_keys,
                 .prefetch_values = prefetch_values,
@@ -2109,8 +2100,8 @@ pub fn Tree(
             };
         }
 
-        pub fn deinit(tree: *TreeGeneric, allocator: mem.Allocator) void {
-            // TODO Consider whether we should release blocks acquired from Storage.block_free_set.
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            // TODO Consider whether we should release blocks acquired from Blocks.block_free_set.
             tree.prefetch_keys.deinit(allocator);
             tree.prefetch_values.deinit(allocator);
             tree.mutable_table.deinit(allocator);
@@ -2118,7 +2109,7 @@ pub fn Tree(
             tree.manifest.deinit(allocator);
         }
 
-        pub fn get(tree: *TreeGeneric, key: Key) ?*const Value {
+        pub fn get(tree: *Tree, key: Key) ?*const Value {
             // Ensure that prefetch() was called and completed if any keys were enqueued:
             assert(tree.prefetch_keys.count() == 0);
             assert(tree.prefetch_keys_iterator == null);
@@ -2130,20 +2121,15 @@ pub fn Tree(
             return unwrap_tombstone(value);
         }
 
-        pub fn put(tree: *TreeGeneric, value: Value) void {
+        pub fn put(tree: *Tree, value: Value) void {
             tree.mutable_table.put(value);
         }
 
-        pub fn remove(tree: *TreeGeneric, key: Key) void {
+        pub fn remove(tree: *Tree, key: Key) void {
             tree.mutable_table.remove(key);
         }
 
-        pub fn lookup(
-            tree: *TreeGeneric,
-            snapshot: u64,
-            key: Key,
-            callback: fn (value: ?*const Value) void,
-        ) void {
+        pub fn lookup(tree: *Tree, snapshot: u64, key: Key, callback: fn (value: ?*const Value) void) void {
             assert(tree.prefetch_keys.count() == 0);
             assert(tree.prefetch_keys_iterator == null);
 
@@ -2189,11 +2175,7 @@ pub fn Tree(
             return if (value == null or tombstone(value.?.*)) null else value.?;
         }
 
-        pub fn flush(
-            tree: *TreeGeneric,
-            sort_buffer: []align(@alignOf(Value)) u8,
-            callback: fn (tree: *TreeGeneric) void,
-        ) void {
+        pub fn flush(tree: *Tree, sort_buffer: []align(@alignOf(Value)) u8, callback: fn (tree: *Tree) void) void {
             // Convert the mutable table to an immutable table if necessary:
             if (tree.mutable_table.cannot_commit_batch(tree.options.commit_count_max)) {
                 assert(tree.mutable_table.count() > 0);
@@ -2218,7 +2200,7 @@ pub fn Tree(
         }
 
         /// This should be called by the state machine for every key that must be prefetched.
-        pub fn prefetch_enqueue(tree: *TreeGeneric, key: Key) void {
+        pub fn prefetch_enqueue(tree: *Tree, key: Key) void {
             assert(tree.value_cache != null);
             assert(tree.prefetch_keys_iterator == null);
 
@@ -2231,7 +2213,7 @@ pub fn Tree(
         }
 
         /// Ensure keys enqueued by `prefetch_enqueue()` are in the cache when the callback returns.
-        pub fn prefetch(tree: *TreeGeneric, callback: fn () void) void {
+        pub fn prefetch(tree: *Tree, callback: fn () void) void {
             assert(tree.value_cache != null);
             assert(tree.prefetch_keys_iterator == null);
 
@@ -2251,7 +2233,7 @@ pub fn Tree(
             tree.prefetch_keys_iterator = null;
         }
 
-        fn prefetch_key(tree: *TreeGeneric, key: Key) bool {
+        fn prefetch_key(tree: *Tree, key: Key) bool {
             assert(tree.value_cache != null);
 
             if (verify) {
@@ -2277,7 +2259,7 @@ pub fn Tree(
         };
 
         pub const RangeQueryIterator = struct {
-            tree: *TreeGeneric,
+            tree: *Tree,
             snapshot: u64,
             query: RangeQuery,
 
@@ -2287,7 +2269,7 @@ pub fn Tree(
         };
 
         pub fn range_query(
-            tree: *TreeGeneric,
+            tree: *Tree,
             /// The snapshot timestamp, if any
             snapshot: u64,
             query: RangeQuery,
@@ -2355,7 +2337,7 @@ test {
 
     const IO = @import("../io.zig").IO;
     const Storage = @import("../storage.zig").Storage;
-    const Blocks = @import("blocks.zig").Blocks(Storage);
+    const Blocks = @import("blocks.zig").BlocksType(Storage);
 
     const dir_path = ".";
     const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err| {
@@ -2375,12 +2357,12 @@ test {
 
     const cluster = 32;
 
-    var storage = try Storage.init(&io, cluster, config.journal_size_max, storage_fd);
+    var storage = try Storage.init(&io, config.journal_size_max, storage_fd);
     defer storage.deinit();
 
     const Key = CompositeKey(u128);
 
-    const TestTree = Tree(
+    const TestTree = TreeType(
         Storage,
         Key,
         Key.Value,
@@ -2422,13 +2404,13 @@ test {
         &storage,
         blocks_offset,
         blocks_size,
+        cluster,
         &block_free_set,
     );
     defer blocks.deinit(allocator);
 
     var tree = try TestTree.init(
         allocator,
-        &storage,
         &blocks,
         &node_pool,
         &value_cache,
@@ -2446,8 +2428,8 @@ test {
     _ = TestTree.Table.get;
     _ = TestTree.Table.FlushIterator;
     _ = TestTree.Table.FlushIterator.tick;
-    _ = TestTree.TableIterator;
-    _ = TestTree.LevelIterator;
+    _ = TestTree.TableIteratorType;
+    _ = TestTree.LevelIteratorType;
     _ = TestTree.Manifest.LookupIterator.next;
     _ = TestTree.Compaction;
     _ = TestTree.Table.Builder.data_block_finish;

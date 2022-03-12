@@ -6,45 +6,50 @@ const config = @import("../config.zig");
 
 const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
 
-pub fn Blocks(comptime Storage: type) type {
+pub fn BlocksType(comptime Storage: type) type {
     const block_size = config.block_size;
     const BlockPtr = *align(config.sector_size) [block_size]u8;
     const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
     return struct {
-        const BlocksGeneric = @This();
+        const Blocks = @This();
 
         storage: *Storage,
         offset: u64,
         size: u64,
 
+        // TODO Perhaps access cluster and free set through *SuperBlock.
+        cluster: u32,
+
         /// Owned by SuperBlock, shared with Blocks.
-        free_set: *BlockFreeSet,
+        block_free_set: *BlockFreeSet,
 
         pub fn init(
             allocator: mem.Allocator,
             storage: *Storage,
             offset: u64,
             size: u64,
-            free_set: *BlockFreeSet,
-        ) !BlocksGeneric {
+            cluster: u32,
+            block_free_set: *BlockFreeSet,
+        ) !Blocks {
             _ = allocator; // TODO
 
-            return BlocksGeneric{
+            return Blocks{
                 .storage = storage,
                 .offset = offset,
                 .size = size,
-                .free_set = free_set,
+                .cluster = cluster,
+                .block_free_set = block_free_set,
             };
         }
 
-        pub fn deinit(blocks: *BlocksGeneric, allocator: mem.Allocator) void {
+        pub fn deinit(blocks: *Blocks, allocator: mem.Allocator) void {
             _ = blocks;
             _ = allocator; // TODO
         }
 
         pub fn write_block(
-            blocks: *BlocksGeneric,
+            blocks: *Blocks,
             callback: fn (*Storage.Write) void,
             write: *Storage.Write,
             block: BlockPtrConst,
@@ -65,7 +70,7 @@ pub fn Blocks(comptime Storage: type) type {
         /// interrogate each tick(). The callback passed to this function won't be called until the
         /// block has been recovered.
         pub fn read_block(
-            blocks: *BlocksGeneric,
+            blocks: *Blocks,
             callback: fn (*Storage.Read) void,
             read: *Storage.Read,
             block: BlockPtr,
