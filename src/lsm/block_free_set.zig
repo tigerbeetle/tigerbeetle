@@ -127,8 +127,8 @@ pub const BlockFreeSet = struct {
 
     /// Free all staged blocks.
     pub fn checkpoint(set: *BlockFreeSet) void {
-        var iter = set.staging.iterator(.{ .kind = .set });
-        while (iter.next()) |block| {
+        var it = set.staging.iterator(.{ .kind = .set });
+        while (it.next()) |block| {
             set.staging.unset(block);
             const address = block + 1;
             set.release(address);
