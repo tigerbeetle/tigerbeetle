@@ -70,14 +70,12 @@ pub const Storage = struct {
     };
 
     io: *IO,
-    cluster: u32,
     size: u64,
     fd: os.fd_t,
 
-    pub fn init(io: *IO, cluster: u32, size: u64, fd: os.fd_t) !Storage {
+    pub fn init(io: *IO, size: u64, fd: os.fd_t) !Storage {
         return Storage{
             .io = io,
-            .cluster = cluster,
             .size = size,
             .fd = fd,
         };
