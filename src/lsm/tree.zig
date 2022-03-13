@@ -2362,7 +2362,7 @@ test {
 
     const Key = CompositeKey(u128);
 
-    const TestTree = TreeType(
+    const Tree = TreeType(
         Storage,
         Key,
         Key.Value,
@@ -2378,7 +2378,7 @@ test {
     var node_pool = try NodePool.init(allocator, node_count);
     defer node_pool.deinit(allocator);
 
-    var value_cache = TestTree.ValueCache{};
+    var value_cache = Tree.ValueCache{};
     try value_cache.ensureTotalCapacity(allocator, 10000);
     defer value_cache.deinit(allocator);
 
@@ -2409,7 +2409,7 @@ test {
     );
     defer blocks.deinit(allocator);
 
-    var tree = try TestTree.init(
+    var tree = try Tree.init(
         allocator,
         &blocks,
         &node_pool,
@@ -2423,16 +2423,16 @@ test {
 
     testing.refAllDecls(@This());
 
-    _ = TestTree.Table;
-    _ = TestTree.Table.create_from_sorted_values;
-    _ = TestTree.Table.get;
-    _ = TestTree.Table.FlushIterator;
-    _ = TestTree.Table.FlushIterator.tick;
-    _ = TestTree.TableIteratorType;
-    _ = TestTree.LevelIteratorType;
-    _ = TestTree.Manifest.LookupIterator.next;
-    _ = TestTree.Compaction;
-    _ = TestTree.Table.Builder.data_block_finish;
+    _ = Tree.Table;
+    _ = Tree.Table.create_from_sorted_values;
+    _ = Tree.Table.get;
+    _ = Tree.Table.FlushIterator;
+    _ = Tree.Table.FlushIterator.tick;
+    _ = Tree.TableIteratorType;
+    _ = Tree.LevelIteratorType;
+    _ = Tree.Manifest.LookupIterator.next;
+    _ = Tree.Compaction;
+    _ = Tree.Table.Builder.data_block_finish;
     _ = tree.prefetch_enqueue;
     _ = tree.prefetch;
     _ = tree.prefetch_key;
@@ -2443,7 +2443,7 @@ test {
     _ = tree.manifest;
     _ = tree.manifest.lookup;
     _ = tree.flush;
-    _ = TestTree.Table.filter_blocks_used;
+    _ = Tree.Table.filter_blocks_used;
 
     std.debug.print("table_count_max={}\n", .{table_count_max});
 }
