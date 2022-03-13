@@ -214,13 +214,13 @@ pub fn ManifestLevel(
 
         /// Set snapshot_max to new_snapshot_max for tables with snapshot_max of math.maxInt(u64)
         /// and matching the given key range.
-        /// Asserts that exactly cardnality tables are modified.
+        /// Asserts that exactly cardinality tables are modified.
         pub fn set_snapshot_max(
             level: Self,
             new_snapshot_max: u64,
             key_min: Key,
             key_max: Key,
-            cardnality: u32,
+            cardinality: u32,
         ) void {
             assert(new_snapshot_max <= lsm.snapshot_latest);
             assert(compare_keys(key_min, key_max) != .gt);
@@ -242,23 +242,23 @@ pub fn ManifestLevel(
                 modified += 1;
             }
 
-            assert(modified == cardnality);
+            assert(modified == cardinality);
         }
 
         /// Remove tables matching the given key range with table.snapshot_max <= snapshot_max.
         /// Asserts that the key_min/key_max bounds exactly match the first/last table to be removed.
-        /// Asserts that exactly cardnality tables are removed.
+        /// Asserts that exactly cardinality tables are removed.
         pub fn remove_tables(
             level: *Self,
             node_pool: *NodePool,
             snapshot_max: u64,
             key_min: Key,
             key_max: Key,
-            cardnality: u32,
+            cardinality: u32,
         ) void {
-            assert(cardnality > 0);
+            assert(cardinality > 0);
             assert(level.keys.len() == level.tables.len());
-            assert(level.keys.len() >= cardnality);
+            assert(level.keys.len() >= cardinality);
 
             var absolute_index = level.absolute_index_for_remove(key_min);
 
@@ -278,7 +278,7 @@ pub fn ManifestLevel(
 
             var removed: u32 = 0;
             var safety_counter: u32 = 0;
-            outer: while (safety_counter < cardnality + 1) : (safety_counter += 1) {
+            outer: while (safety_counter < cardinality + 1) : (safety_counter += 1) {
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 inner: while (it.next()) |table| : (absolute_index += 1) {
                     if (table.snapshot_max <= snapshot_max) {
@@ -300,8 +300,8 @@ pub fn ManifestLevel(
                     unreachable;
                 }
             }
-            assert(removed == cardnality);
-            assert(safety_counter == cardnality);
+            assert(removed == cardinality);
+            assert(safety_counter == cardinality);
 
             assert(level.keys.len() == level.tables.len());
 
