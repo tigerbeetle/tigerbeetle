@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log;
+const log = std.log.scoped(.manifest_blocks);
 const mem = std.mem;
 
 const config = @import("../config.zig");
@@ -120,7 +120,7 @@ pub const ManifestBlocks = struct {
 
         blocks.count += 1;
 
-        log.debug("manifest_blocks: append: tree={} checksum={} address={} count={}/{}", .{
+        log.debug("append: tree={} checksum={} address={} count={}/{}", .{
             tree,
             checksum,
             address,
@@ -162,7 +162,7 @@ pub const ManifestBlocks = struct {
             blocks.address[blocks.count] = 0;
             blocks.tree[blocks.count] = 0;
 
-            log.debug("manifest_blocks: remove: tree={} checksum={} address={} count={}/{}", .{
+            log.debug("remove: tree={} checksum={} address={} count={}/{}", .{
                 tree,
                 checksum,
                 address,
