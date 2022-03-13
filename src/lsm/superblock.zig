@@ -61,7 +61,7 @@ pub const SuperBlockSector = extern struct {
     manifest_checksum: u128,
 
     /// The checksum over the actual encoded block free set in the superblock trailer.
-    block_free_set_checksum: u128,
+    free_set_checksum: u128,
 
     /// State stored on stable storage for the Viewstamped Replication consensus protocol.
     vsr_state: VSRState,
@@ -80,12 +80,13 @@ pub const SuperBlockSector = extern struct {
 
     /// The size of the manifest block references stored in the superblock trailer.
     /// The block addresses and checksums in this section of the trailer are laid out as follows:
-    /// [manifest_size / (16 + 8)]u128 checksum
-    /// [manifest_size / (16 + 8)]u64 address
+    /// [manifest_size / (16 + 8 + 1)]u128 checksum
+    /// [manifest_size / (16 + 8 + 1)]u64 address
+    /// [manifest_size / (16 + 8 + 1)]u8 tree
     manifest_size: u32,
 
     /// The size of the block free set stored in the superblock trailer.
-    block_free_set_size: u32,
+    free_set_size: u32,
 
     reserved: [2168]u8 = [1]u8{0} ** 2168,
 
@@ -232,13 +233,13 @@ pub const SuperBlockSector = extern struct {
         if (a.sequence != b.sequence) return false;
         if (a.parent != b.parent) return false;
         if (a.manifest_checksum != b.manifest_checksum) return false;
-        if (a.block_free_set_checksum != b.block_free_set_checksum) return false;
+        if (a.free_set_checksum != b.free_set_checksum) return false;
         if (!meta.eql(a.vsr_state, b.vsr_state)) return false;
         if (a.flags != b.flags) return false;
         if (!meta.eql(a.client_table, b.client_table)) return false;
         if (!meta.eql(a.snapshots, b.snapshots)) return false;
         if (a.manifest_size != b.manifest_size) return false;
-        if (a.block_free_set_size != b.block_free_set_size) return false;
+        if (a.free_set_size != b.free_set_size) return false;
 
         for (mem.bytesAsSlice(u64, &a.reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &b.reserved)) |word| assert(word == 0);
@@ -280,12 +281,12 @@ const superblock_trailer_size_max = blk: {
     assert(superblock_trailer_manifest_size_max > 0);
     assert(superblock_trailer_manifest_size_max % config.sector_size == 0);
 
-    assert(superblock_trailer_block_free_set_size_max > 0);
-    assert(superblock_trailer_block_free_set_size_max % config.sector_size == 0);
+    assert(superblock_trailer_free_set_size_max > 0);
+    assert(superblock_trailer_free_set_size_max % config.sector_size == 0);
 
     // We order the smaller manifest section ahead of the block free set for better access locality.
     // For example, it's cheaper to skip over 1 MiB when reading from disk than to skip over 32 MiB.
-    break :blk superblock_trailer_manifest_size_max + superblock_trailer_block_free_set_size_max;
+    break :blk superblock_trailer_manifest_size_max + superblock_trailer_free_set_size_max;
 };
 
 // A manifest block reference of 24 bytes contains a block address and checksum.
@@ -297,7 +298,7 @@ const superblock_trailer_size_max = blk: {
 // It's also not material in comparison to the size of the trailer's encoded block free set.
 const superblock_trailer_manifest_size_max = 1024 * 1024;
 
-const superblock_trailer_block_free_set_size_max = blk: {
+const superblock_trailer_free_set_size_max = blk: {
     // Local storage consists of four zones: Superblock, WriteAheadLog, ClientTable, Block.
     //
     // We slightly overestimate the number of locally addressable blocks, where this depends on:
@@ -390,8 +391,8 @@ pub fn SuperBlock(comptime Storage: type) type {
         // TODO The safety of these buffers depends on our strict queueing order below. We should
         // rather pass a pointer to BlockFreeSet and our ManifestReferences structures to control
         // how these are encoded/decoded so as to avoid race conditions between callbacks.
-        manifest: []align(config.sector_size) u8,
-        block_free_set: []align(config.sector_size) u8,
+        manifest_buffer: []align(config.sector_size) u8,
+        free_set_buffer: []align(config.sector_size) u8,
 
         /// Whether the superblock has been opened. An open superblock may not be formatted.
         opened: bool = false,
@@ -424,21 +425,21 @@ pub fn SuperBlock(comptime Storage: type) type {
             );
             errdefer allocator.free(reading);
 
-            const manifest = try allocator.allocAdvanced(
+            const manifest_buffer = try allocator.allocAdvanced(
                 u8,
                 config.sector_size,
                 superblock_trailer_manifest_size_max,
                 .exact,
             );
-            errdefer allocator.free(manifest);
+            errdefer allocator.free(manifest_buffer);
 
-            const block_free_set = try allocator.allocAdvanced(
+            const free_set_buffer = try allocator.allocAdvanced(
                 u8,
                 config.sector_size,
-                superblock_trailer_block_free_set_size_max,
+                superblock_trailer_free_set_size_max,
                 .exact,
             );
-            errdefer allocator.free(block_free_set);
+            errdefer allocator.free(free_set_buffer);
 
             return SuperBlockGeneric{
                 .storage = storage,
@@ -446,8 +447,8 @@ pub fn SuperBlock(comptime Storage: type) type {
                 .writing = &b[0],
                 .staging = &c[0],
                 .reading = &reading[0],
-                .manifest = manifest,
-                .block_free_set = block_free_set,
+                .manifest_buffer = manifest_buffer,
+                .free_set_buffer = free_set_buffer,
             };
         }
 
@@ -459,8 +460,8 @@ pub fn SuperBlock(comptime Storage: type) type {
             allocator.destroy(superblock.writing);
             allocator.destroy(superblock.staging);
             allocator.free(superblock.reading);
-            allocator.free(superblock.manifest);
-            allocator.free(superblock.block_free_set);
+            allocator.free(superblock.manifest_buffer);
+            allocator.free(superblock.free_set_buffer);
         }
 
         pub const FormatOptions = struct {
@@ -487,10 +488,10 @@ pub fn SuperBlock(comptime Storage: type) type {
             // This ensures that the entire superblock storage zone is zeroed deterministically.
             // open() can then also detect a partially complete call to format().
 
-            assert(superblock.manifest.len == superblock_trailer_manifest_size_max);
-            assert(superblock.block_free_set.len == superblock_trailer_block_free_set_size_max);
-            mem.set(u8, superblock.manifest, 0);
-            mem.set(u8, superblock.block_free_set, 0);
+            assert(superblock.manifest_buffer.len == superblock_trailer_manifest_size_max);
+            assert(superblock.free_set_buffer.len == superblock_trailer_free_set_size_max);
+            mem.set(u8, superblock.manifest_buffer, 0);
+            mem.set(u8, superblock.free_set_buffer, 0);
 
             superblock.working.* = .{
                 .copy = 0,
@@ -502,8 +503,8 @@ pub fn SuperBlock(comptime Storage: type) type {
                 .size = options.size_max, // TODO Support elastic data file size up to size_max.
                 .size_max = options.size_max,
                 .parent = 0,
-                .manifest_checksum = vsr.checksum(superblock.manifest),
-                .block_free_set_checksum = vsr.checksum(superblock.block_free_set),
+                .manifest_checksum = vsr.checksum(superblock.manifest_buffer),
+                .free_set_checksum = vsr.checksum(superblock.free_set_buffer),
                 .vsr_state = .{
                     .commit_min = 0,
                     .commit_max = 0,
@@ -512,8 +513,8 @@ pub fn SuperBlock(comptime Storage: type) type {
                 },
                 .client_table = undefined,
                 .snapshots = undefined,
-                .manifest_size = @intCast(u32, superblock.manifest.len),
-                .block_free_set_size = @intCast(u32, superblock.block_free_set.len),
+                .manifest_size = @intCast(u32, superblock.manifest_buffer.len),
+                .free_set_size = @intCast(u32, superblock.free_set_buffer.len),
             };
 
             mem.set(SuperBlockSector.ClientTableEntry, &superblock.working.client_table, .{
@@ -696,13 +697,13 @@ pub fn SuperBlock(comptime Storage: type) type {
             const size = vsr.sector_ceil(superblock.writing.manifest_size);
             assert(size <= superblock_trailer_manifest_size_max);
 
-            const buffer = superblock.manifest[0..size];
+            const buffer = superblock.manifest_buffer[0..size];
             const offset = offset_manifest(context.copy, superblock.writing.sequence);
 
             mem.set(u8, buffer[superblock.writing.manifest_size..], 0); // Zero padding.
 
             assert(superblock.writing.manifest_checksum == vsr.checksum(
-                superblock.manifest[0..superblock.writing.manifest_size],
+                superblock.manifest_buffer[0..superblock.writing.manifest_size],
             ));
 
             log.debug("{s}: write_manifest: checksum={x} size={} offset={}", .{
@@ -729,47 +730,47 @@ pub fn SuperBlock(comptime Storage: type) type {
 
         fn write_manifest_callback(write: *Storage.Write) void {
             const context = @fieldParentPtr(Context, "write", write);
-            context.superblock.write_block_free_set(context);
+            context.superblock.write_free_set(context);
         }
 
-        fn write_block_free_set(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn write_free_set(superblock: *SuperBlockGeneric, context: *Context) void {
             assert(superblock.queue_head == context);
 
-            const size = vsr.sector_ceil(superblock.writing.block_free_set_size);
-            assert(size <= superblock_trailer_block_free_set_size_max);
+            const size = vsr.sector_ceil(superblock.writing.free_set_size);
+            assert(size <= superblock_trailer_free_set_size_max);
 
-            const buffer = superblock.block_free_set[0..size];
-            const offset = offset_block_free_set(context.copy, superblock.writing.sequence);
+            const buffer = superblock.free_set_buffer[0..size];
+            const offset = offset_free_set(context.copy, superblock.writing.sequence);
 
-            mem.set(u8, buffer[superblock.writing.block_free_set_size..], 0); // Zero padding.
+            mem.set(u8, buffer[superblock.writing.free_set_size..], 0); // Zero padding.
 
-            assert(superblock.writing.block_free_set_checksum == vsr.checksum(
-                superblock.block_free_set[0..superblock.writing.block_free_set_size],
+            assert(superblock.writing.free_set_checksum == vsr.checksum(
+                superblock.free_set_buffer[0..superblock.writing.free_set_size],
             ));
 
-            log.debug("{s}: write_block_free_set: checksum={x} size={} offset={}", .{
+            log.debug("{s}: write_free_set: checksum={x} size={} offset={}", .{
                 @tagName(context.caller),
-                superblock.writing.block_free_set_checksum,
-                superblock.writing.block_free_set_size,
+                superblock.writing.free_set_checksum,
+                superblock.writing.free_set_size,
                 offset,
             });
 
             superblock.assert_bounds(offset, buffer.len);
 
             if (buffer.len == 0) {
-                write_block_free_set_callback(&context.write);
+                write_free_set_callback(&context.write);
                 return;
             }
 
             superblock.storage.write_sectors(
-                write_block_free_set_callback,
+                write_free_set_callback,
                 &context.write,
                 buffer,
                 offset,
             );
         }
 
-        fn write_block_free_set_callback(write: *Storage.Write) void {
+        fn write_free_set_callback(write: *Storage.Write) void {
             const context = @fieldParentPtr(Context, "write", write);
             context.superblock.write_sector(context);
         }
@@ -836,8 +837,8 @@ pub fn SuperBlock(comptime Storage: type) type {
                     if (superblock.writing.sequence == 2) {
                         superblock.staging.manifest_size = 0;
                         superblock.staging.manifest_checksum = vsr.checksum(&[0]u8{});
-                        superblock.staging.block_free_set_size = 0;
-                        superblock.staging.block_free_set_checksum = vsr.checksum(&[0]u8{});
+                        superblock.staging.free_set_size = 0;
+                        superblock.staging.free_set_checksum = vsr.checksum(&[0]u8{});
                     }
                     superblock.write_staging(context);
                 } else {
@@ -917,7 +918,7 @@ pub fn SuperBlock(comptime Storage: type) type {
                     if (context.caller == .format) {
                         assert(working.sequence == 4);
                         assert(working.manifest_size == 0);
-                        assert(working.block_free_set_size == 0);
+                        assert(working.free_set_size == 0);
                         assert(working.vsr_state.commit_min == 0);
                         assert(working.vsr_state.commit_max == 0);
                         assert(working.vsr_state.view_normal == 0);
@@ -968,7 +969,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             const size = vsr.sector_ceil(superblock.working.manifest_size);
             assert(size <= superblock_trailer_manifest_size_max);
 
-            const buffer = superblock.manifest[0..size];
+            const buffer = superblock.manifest_buffer[0..size];
             const offset = offset_manifest(context.copy, superblock.working.sequence);
 
             log.debug("{s}: read_manifest: copy={} size={} offset={}", .{
@@ -994,11 +995,11 @@ pub fn SuperBlock(comptime Storage: type) type {
 
             assert(superblock.queue_head == context);
 
-            const slice = superblock.manifest[0..superblock.working.manifest_size];
+            const slice = superblock.manifest_buffer[0..superblock.working.manifest_size];
             if (vsr.checksum(slice) == superblock.working.manifest_checksum) {
                 // TODO Repair any impaired copies before we continue.
                 context.copy = starting_copy_for_sequence(superblock.working.sequence);
-                superblock.read_block_free_set(context);
+                superblock.read_free_set(context);
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock manifest lost");
             } else {
@@ -1007,17 +1008,17 @@ pub fn SuperBlock(comptime Storage: type) type {
             }
         }
 
-        fn read_block_free_set(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn read_free_set(superblock: *SuperBlockGeneric, context: *Context) void {
             assert(superblock.queue_head == context);
             assert(context.copy < superblock_copies_max);
 
-            const size = vsr.sector_ceil(superblock.working.block_free_set_size);
-            assert(size <= superblock_trailer_block_free_set_size_max);
+            const size = vsr.sector_ceil(superblock.working.free_set_size);
+            assert(size <= superblock_trailer_free_set_size_max);
 
-            const buffer = superblock.block_free_set[0..size];
-            const offset = offset_block_free_set(context.copy, superblock.working.sequence);
+            const buffer = superblock.free_set_buffer[0..size];
+            const offset = offset_free_set(context.copy, superblock.working.sequence);
 
-            log.debug("{s}: read_block_free_set: copy={} size={} offset={}", .{
+            log.debug("{s}: read_free_set: copy={} size={} offset={}", .{
                 @tagName(context.caller),
                 context.copy,
                 buffer.len,
@@ -1027,33 +1028,33 @@ pub fn SuperBlock(comptime Storage: type) type {
             superblock.assert_bounds(offset, buffer.len);
 
             if (buffer.len == 0) {
-                read_block_free_set_callback(&context.read);
+                read_free_set_callback(&context.read);
                 return;
             }
 
             superblock.storage.read_sectors(
-                read_block_free_set_callback,
+                read_free_set_callback,
                 &context.read,
                 buffer,
                 offset,
             );
         }
 
-        fn read_block_free_set_callback(read: *Storage.Read) void {
+        fn read_free_set_callback(read: *Storage.Read) void {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
 
             assert(superblock.queue_head == context);
 
-            const slice = superblock.block_free_set[0..superblock.working.block_free_set_size];
-            if (vsr.checksum(slice) == superblock.working.block_free_set_checksum) {
+            const slice = superblock.free_set_buffer[0..superblock.working.free_set_size];
+            if (vsr.checksum(slice) == superblock.working.free_set_checksum) {
                 // TODO Repair any impaired copies before we continue.
                 superblock.release(context);
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock block free set lost");
             } else {
                 context.copy += 1;
-                superblock.read_block_free_set(context);
+                superblock.read_free_set(context);
             }
         }
 
@@ -1118,7 +1119,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             return superblock_size * copy + @sizeOf(SuperBlockSector);
         }
 
-        fn offset_block_free_set(copy: u8, sequence: u64) u64 {
+        fn offset_free_set(copy: u8, sequence: u64) u64 {
             assert(copy >= starting_copy_for_sequence(sequence));
             assert(copy <= stopping_copy_for_sequence(sequence));
 
@@ -1482,8 +1483,8 @@ pub fn test_main() !void {
     var io = try IO.init(128, 0);
     defer io.deinit();
 
-    var storage = try Storage.init(allocator, &io, cluster, size_max, storage_fd);
-    defer storage.deinit(allocator);
+    var storage = try Storage.init(&io, size_max, storage_fd);
+    defer storage.deinit();
 
     var superblock = try TestSuperBlock.init(allocator, &storage);
     defer superblock.deinit(allocator);
