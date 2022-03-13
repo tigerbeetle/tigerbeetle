@@ -284,6 +284,11 @@ pub const clock_synchronization_window_min_ms = 2000;
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = 20000;
 
+/// Whether to perform intensive online verification.
+pub const verify = true;
+
+// TODO Move these into a separate `config_valid.zig` which we import here:
+
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
