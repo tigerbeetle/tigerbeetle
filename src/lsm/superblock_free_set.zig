@@ -70,6 +70,20 @@ pub const SuperBlockFreeSet = struct {
         set.staging.deinit(allocator);
     }
 
+    /// Returns the number of released blocks.
+    /// Excludes blocks staged to be released.
+    pub fn count_released(set: *SuperBlockFreeSet) u64 {
+        return set.blocks.count();
+    }
+
+    /// Returns the number of acquired blocks.
+    /// Includes blocks staged to be released.
+    pub fn count_acquired(set: *SuperBlockFreeSet) u64 {
+        return set.blocks.capacity() - set.blocks.count();
+    }
+
+    // TODO Add unit tests for count_released() and count_acquired().
+
     /// Marks a free block as allocated, and returns the address. Panics if no blocks are available.
     pub fn acquire(set: *SuperBlockFreeSet) ?u64 {
         const block = blk: {
