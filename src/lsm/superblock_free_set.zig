@@ -230,7 +230,7 @@ test "SuperBlockFreeSet checkpoint" {
 
     // Free all the blocks.
     set.checkpoint();
-    try expect_block_free_set_equal(empty, set);
+    try expect_free_set_equal(empty, set);
 
     // Redundant checkpointing is a noop (but safe).
     set.checkpoint();
@@ -256,7 +256,7 @@ test "SuperBlockFreeSet checkpoint" {
         defer set_decoded.deinit(std.testing.allocator);
 
         set_decoded.decode(set_encoded[0..set_encoded_length]);
-        try expect_block_free_set_equal(full, set_decoded);
+        try expect_free_set_equal(full, set_decoded);
     }
 }
 
@@ -275,7 +275,7 @@ fn test_acquire_release(blocks_count: usize) !void {
 
     i = 0;
     while (i < blocks_count) : (i += 1) set.release(@as(u64, i + 1));
-    try expect_block_free_set_equal(empty, set);
+    try expect_free_set_equal(empty, set);
 
     i = 0;
     while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire());
@@ -394,10 +394,10 @@ fn test_encode(patterns: []const TestPattern) !void {
     defer decoded_actual.deinit(std.testing.allocator);
 
     decoded_actual.decode(encoded[0..encoded_length]);
-    try expect_block_free_set_equal(decoded_expect, decoded_actual);
+    try expect_free_set_equal(decoded_expect, decoded_actual);
 }
 
-fn expect_block_free_set_equal(a: SuperBlockFreeSet, b: SuperBlockFreeSet) !void {
+fn expect_free_set_equal(a: SuperBlockFreeSet, b: SuperBlockFreeSet) !void {
     try expect_bitset_equal(a.blocks, b.blocks);
     try expect_bitset_equal(a.index, b.index);
     try expect_bitset_equal(a.staging, b.staging);
