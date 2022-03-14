@@ -15,7 +15,6 @@ const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
 const bloom_filter = @import("bloom_filter.zig");
 
-const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
 const Direction = @import("direction.zig").Direction;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
@@ -26,6 +25,7 @@ const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
 const SuperBlock = @import("superblock.zig").SuperBlock;
+const SuperBlockFreeSet = @import("superblock_free_set.zig").SuperBlockFreeSet;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
@@ -2394,8 +2394,8 @@ test {
     );
     defer allocator.free(sort_buffer);
 
-    var block_free_set = try BlockFreeSet.init(allocator, 1024 * 1024);
-    defer block_free_set.deinit(allocator);
+    var free_set = try SuperBlockFreeSet.init(allocator, 1024 * 1024);
+    defer free_set.deinit(allocator);
 
     const blocks_offset = 0; // TODO Take other zones into account.
     const blocks_size = 1024 * 1024;
