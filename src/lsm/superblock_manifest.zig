@@ -62,16 +62,13 @@ pub const SuperBlockManifest = struct {
 
         mem.set(u8, target[size..], 0);
 
-        assert(@divExact(size, @sizeOf(u128) + @sizeOf(u64) + @sizeOf(u8)) == manifest.count);
+        assert(@divExact(size, BlockReferenceSize) == manifest.count);
 
         return size;
     }
 
     pub fn decode(manifest: *SuperBlockManifest, source: []align(@alignOf(u128)) const u8) void {
-        manifest.count = @intCast(
-            u32,
-            @divExact(source.len, @sizeOf(u128) + @sizeOf(u64) + @sizeOf(u8)),
-        );
+        manifest.count = @intCast(u32, @divExact(source.len, BlockReferenceSize));
         assert(manifest.count <= manifest.count_max);
 
         var size: u64 = 0;
@@ -193,6 +190,8 @@ pub const SuperBlockManifest = struct {
         address: u64,
         tree: u8,
     };
+
+    pub const BlockReferenceSize = @sizeOf(u128) + @sizeOf(u64) + @sizeOf(u8);
 
     pub const IteratorReverse = struct {
         manifest: *const SuperBlockManifest,
