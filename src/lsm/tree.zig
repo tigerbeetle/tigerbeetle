@@ -993,7 +993,7 @@ pub fn TreeType(
                     const header_bytes = block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.storage.block_free_set.acquire().?;
+                    const address = builder.storage.free_set.acquire().?;
 
                     header.* = .{
                         .cluster = builder.storage.cluster,
@@ -1035,7 +1035,7 @@ pub fn TreeType(
                 }
 
                 pub fn filter_block_finish(builder: *Builder) void {
-                    const address = builder.storage.block_free_set.acquire().?;
+                    const address = builder.storage.free_set.acquire().?;
 
                     const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
@@ -1086,7 +1086,7 @@ pub fn TreeType(
                     const header_bytes = index_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.storage.block_free_set.acquire().?;
+                    const address = builder.storage.free_set.acquire().?;
 
                     header.* = .{
                         .cluster = builder.storage.cluster,
@@ -2405,7 +2405,7 @@ test {
         blocks_offset,
         blocks_size,
         cluster,
-        &block_free_set,
+        &free_set,
     );
     defer blocks.deinit(allocator);
 
