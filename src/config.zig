@@ -204,10 +204,13 @@ pub const superblock_copies = 4;
 /// * replicated storage overhead, since all data files are mirrored,
 /// * the size of the superblock storage zone, and
 /// * the static memory allocation required for tracking LSM forest metadata in memory.
+// TODO Remove, now that we have block_count_max.
 pub const size_max = 16 * 1024 * 1024 * 1024 * 1024;
 
 /// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
 pub const block_size = 64 * 1024;
+
+pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size);
 
 // TODO Document and tune these LSM options:
 pub const lsm_trees = 30;
@@ -278,6 +281,9 @@ pub const clock_synchronization_window_min_ms = 2000;
 /// This eliminates the impact of gradual clock drift on our clock offset (clock skew) measurements.
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = 20000;
+
+/// Whether to perform intensive online verification.
+pub const verify = true;
 
 // TODO Move these into a separate `config_valid.zig` which we import here:
 
