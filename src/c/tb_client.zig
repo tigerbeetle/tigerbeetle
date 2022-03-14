@@ -10,6 +10,7 @@ pub const tb_result_t = ClientThread.Result;
 
 pub const tb_packet_t = ClientThread.Packet;
 pub const tb_packet_list_t = ClientThread.Packet.List;
+pub const tb_packet_status_t = ClientThread.Packet.Status;
 
 pub const tb_client_t = *anyopaque;
 pub const tb_status_t = enum(c_int) {
@@ -21,6 +22,14 @@ pub const tb_status_t = enum(c_int) {
     network_subsystem,
 };
 
+pub const tb_completion_t = fn (
+    context: usize,
+    client: tb_client_t,
+    packet: *tb_packet_t,
+    result_ptr: ?[*]const u8,
+    result_len: u32,
+) callconv(.C) void;
+
 pub export fn tb_client_init(
     out_client: *tb_client_t,
     out_packets: *tb_packet_list_t,
@@ -29,7 +38,7 @@ pub export fn tb_client_init(
     addresses_len: u32,
     num_packets: u32,
     on_completion_ctx: usize,
-    on_completion_fn: fn (usize, tb_client_t, *tb_packet_list_t) callconv(.C) void,
+    on_completion_fn: tb_completion_t,
 ) tb_status_t {
     const context = Context.allocator.create(Context) catch return .out_of_memory;
     context.on_completion_ctx = on_completion_ctx;
@@ -84,8 +93,9 @@ pub export fn tb_client_deinit(
 const Context = struct {
     client_thread: ClientThread,
     on_completion_ctx: usize,
-    on_completion_fn: fn (usize, tb_client_t, *tb_packet_list_t) callconv(.C) void,
+    on_completion_fn: tb_completion_t,
 
+    // Pick the most suitable allocator
     const allocator = if (builtin.link_libc)
         std.heap.c_allocator
     else if (builtin.target.os.tag == .windows)
@@ -93,15 +103,17 @@ const Context = struct {
     else
         @compileError("tb_client must be built with libc");
 
-    fn on_completion(client_thread: *ClientThread, list: tb_packet_list_t) callconv(.C) void {
+    // Wrapper for zig ClientThread to invoke C tb_completion_t
+    fn on_completion(client_thread: *ClientThread, packet: *tb_packet_t, result: ?[]const u8)  void {
         const context = @fieldParentPtr(Context, "client_thread", client_thread);
         const tb_client = @ptrCast(tb_client_t, context);
 
-        var completed = list;
         context.on_completion_fn(
             context.on_completion_ctx,
             tb_client,
-            &completed,
+            packet,
+            if (result) |r| r.ptr else null,
+            if (result) |r| @intCast(u32, r.len) else 0,
         );
     }
 };

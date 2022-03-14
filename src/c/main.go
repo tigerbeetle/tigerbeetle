@@ -7,98 +7,57 @@ package main
 #include <string.h>
 #include "./tb_client.h"
 
-void onGoPacketCompletion(uintptr_t ctx, tb_client_t client, tb_packet_list_t* packets);
-
-static void tb_client_request(
+void onGoPacketCompletion(
+	uintptr_t ctx,
 	tb_client_t client,
 	tb_packet_t* packet,
-	TB_OPERATION operation,
-	void* request_data,
-	uintptr_t user_data
-) {
-	size_t req_bytes;
-	switch (operation)
-	{
-	case TB_OP_CREATE_ACCOUNTS:
-		req_bytes = sizeof(tb_account_t);
-		break;
-	case TB_OP_CREATE_TRANSFERS:
-		req_bytes = sizeof(tb_transfer_t);
-		break;
-	case TB_OP_COMMIT_TRANSFERS:
-		req_bytes = sizeof(tb_commit_t);
-		break;
-	case TB_OP_LOOKUP_ACCOUNTS:
-	case TB_OP_LOOKUP_TRANSFERS:
-		req_bytes = sizeof(tb_uint128_t);
-		break;
-	default:
-		__builtin_unreachable();
-	}
-
-	packet->user_data = user_data;
-	packet->operation = operation;
-	memcpy(&packet->data.request, request_data, req_bytes);
-
-	tb_packet_list_t list;
-	list.head = packet;
-	list.tail = packet;
-	packet->next = NULL;
-
-	tb_client_submit(client, &list);
-}
-
-static void tb_client_response(
-	tb_packet_t* packet,
-	void* response_data
-) {
-	size_t resp_bytes;
-	switch (packet->operation)
-	{
-	case TB_OP_CREATE_ACCOUNTS:
-		resp_bytes = sizeof(tb_create_accounts_result_t);
-		break;
-	case TB_OP_CREATE_TRANSFERS:
-		resp_bytes = sizeof(tb_create_transfers_result_t);
-		break;
-	case TB_OP_COMMIT_TRANSFERS:
-		resp_bytes = sizeof(tb_commit_transfers_result_t);
-		break;
-	case TB_OP_LOOKUP_ACCOUNTS:
-		resp_bytes = sizeof(tb_account_t);
-		break;
-	case TB_OP_LOOKUP_TRANSFERS:
-		resp_bytes = sizeof(tb_transfer_t);
-		break;
-	default:
-		__builtin_unreachable();
-	}
-
-	memcpy(response_data, &packet->data.response, resp_bytes);
-}
+	const uint8_t* result_ptr,
+	uint32_t result_len
+);
 */
 import "C"
-
 import (
 	"unsafe"
 	"strings"
 )
 
 type Uint128 = C.tb_uint128_t
-
 type Account = C.tb_account_t
 type Transfer = C.tb_transfer_t
 type Commit = C.tb_commit_t
+
+type CreateAccountResult = C.TB_CREATE_ACCOUNT_RESULT
+type CreateTransferResult = C.TB_CREATE_TRANSFER_RESULT
+type CommitTransferResult = C.TB_COMMIT_TRANSFER_RESULT
 
 type CreateAccountsResult = C.tb_create_accounts_result_t
 type CreateTransfersResult = C.tb_create_transfers_result_t
 type CommitTransfersResult = C.tb_commit_transfers_result_t
 
-type ErrClient struct {
+///////////////////////////////////////////////////////////////
+
+type Client interface {
+	CreateAccounts([]Account) (CreateAccountsResult, error)
+	Close()
+}
+
+type request struct {
+	packet *C.tb_packet_t
+	result unsafe.Pointer
+	ready chan struct{}
+}
+
+type c_client struct {
+	tb_client C.tb_client_t
+	max_requests uint32
+	requests chan *request
+}
+
+type clientError struct {
 	status C.TB_STATUS
 }
 
-func (e ErrClient) Error() string {
+func (e clientError) Error() string {
 	switch e.status {
 	case C.TB_STATUS_UNEXPECTED:
 		return "An unexpected error occured when trying to create the TB client"
@@ -115,66 +74,47 @@ func (e ErrClient) Error() string {
 	}
 }
 
-///////////////////////////////////////////////////////////////
-
-type Client interface {
-	CreateAccounts(Account) (CreateAccountsResult, error)
-	CreateTransfers(Transfer) (CreateTransfersResult, error)
-	CommitTransfers(Commit) (CommitTransfersResult, error)
-	LookupAccounts(Uint128) (Account, error)
-	LookupTransfers(Uint128) (Transfer, error)
-	Close()
-}
-
-type request struct {
-	packet *C.tb_packet_t
-	ready chan struct{}
-}
-
-type c_client struct {
-	tb_client C.tb_client_t
-	requests chan *request
-}
-
-//export onGoPacketCompletion
-func onGoPacketCompletion(_ctx C.uintptr_t, client C.tb_client_t, packets *C.tb_packet_list_t) {
-	packet := packets.head
-	for packet != nil {
-		req := (*request)((unsafe.Pointer)((uintptr)(packet.user_data)))
-		packet = packet.next
-		req.ready <- struct{}{}
+func NewClient(
+	clusterID uint32, 
+	addresses []string, 
+	maxConcurrency uint32,
+) (Client, error) {
+	// Cap the maximum amount of packets
+	if maxConcurrency > 4096 {
+		maxConcurrency = 4096
 	}
-}
-
-func NewClient(clusterID uint32, addresses []string) (Client, error) {
+	
+	// Allocate a cstring of the addresses joined with ","
 	addresses_raw := strings.Join(addresses[:], ",")
 	c_addresses := C.CString(addresses_raw)
 	defer C.free(unsafe.Pointer(c_addresses))
 
-	num_packets := 32
 	var tb_client C.tb_client_t
 	var packets C.tb_packet_list_t
 
+	// Create the tb_client
 	status := C.tb_client_init(
 		&tb_client,
 		&packets,
 		C.uint32_t(clusterID),
 		c_addresses,
 		C.uint32_t(len(addresses_raw)),
-		C.uint32_t(num_packets),
+		C.uint32_t(maxConcurrency),
 		C.uintptr_t(0), // on_completion_ctx
 		(*[0]byte)(C.onGoPacketCompletion),
 	)
 
 	if status != C.TB_STATUS_SUCCESS {
-		return nil, ErrClient{ status: status }
+		return nil, clientError{ status: status }
 	}
 
 	c := &c_client{
 		tb_client: tb_client,
-		requests: make(chan *request, num_packets),
+		max_requests: maxConcurrency
+		requests: make(chan *request, int(maxConcurrency)),
 	}
 
+	// Fill the client requests with available packets we received on creation
 	for packet := packets.head; packet != nil; packet = packet.next {
 		c.requests <- &request{
 			packet: packet,
@@ -185,60 +125,163 @@ func NewClient(clusterID uint32, addresses []string) (Client, error) {
 	return c, nil
 }
 
-func (c *c_client) doRequest(op C.TB_OPERATION, event_data, result_data unsafe.Pointer) {
-	req := <- c.requests
-
-	user_data := C.uintptr_t((uintptr)((unsafe.Pointer)(req)))
-	C.tb_client_request(c.tb_client, req.packet, op, event_data, user_data)
-	
-	<- req.ready
-	C.tb_client_response(req.packet, result_data)
-
-	c.requests <- req
-}
-
-func (c *c_client) CreateAccounts(account Account) (CreateAccountsResult, error) {
-	var result CreateAccountsResult
-	c.doRequest(C.TB_OP_CREATE_ACCOUNTS, (unsafe.Pointer)(&account), (unsafe.Pointer)(&result))
-
-	if result.index != 0 {
-		panic("invalid CreateAccountsResult index")
-	}
-	
-	var err error
-	switch result.result {
-	case C.TB_CREATE_ACCOUNT_OK:
-		err = nil
-		break
-	default:
-		panic("todo")
-	}
-
-	return result, err
-}
-
-func (c *c_client) CreateTransfers(transfer Transfer) (CreateTransfersResult, error) {
-	var r CreateTransfersResult
-	return r, nil
-}
-
-func (c *c_client) CommitTransfers(commit Commit) (CommitTransfersResult, error) {
-	var r CommitTransfersResult
-	return r, nil
-}
-
-func (c *c_client) LookupAccounts(account_id Uint128) (Account, error) {
-	var r Account
-	return r, nil
-}
-
-func (c *c_client) LookupTransfers(transfer_id Uint128) (Transfer, error) {
-	var r Transfer
-	return r, nil
-}
-
 func (c *c_client) Close() {
+	// Consume all requests available (waits for pending ones to complete)
+	for i := 0; i < c.max_requests; i++ {
+		_req := <- c.requests
+	}
+
+	// Now that there can be no active requests,
+	// destroy the tb_client and ensure no future requests can procceed
 	C.tb_client_deinit(c.tb_client)
+	close(c.requests)
+}
+
+type packetError struct {
+	status C.TB_PACKET_STATUS
+}
+
+func (e packetError) Error() string {
+	switch e.status {
+	case C.TB_PACKET_TOO_MUCH_DATA:
+		return "Request was given too much data"
+	case C.TB_PACKET_INVALID_OPERATION:
+		panic("unreachable") // we control what operation is given
+	case C.TB_PACKET_INVALID_DATA_SIZE:
+		panic("unreachable") // we control what data is given
+	default:
+		panic("invalid error code")
+	}
+}
+
+func getEventSize(op C.TB_OPERATION) int {
+	switch (op) {
+	case C.TB_OP_CREATE_ACCOUNTS:
+		return unsafe.Sizeof(Account{})
+	case C.TB_OP_CREATE_TRANSFERS:
+		return unsafe.Sizeof(Transfer{})
+	case C.TB_OP_COMMIT_TRANSFERS:
+		return unsafe.Sizeof(Commit{})
+	case C.TB_OP_LOOKUP_ACCOUNTS:
+	case C.TB_OP_LOOKUP_TRANSFERS:
+		return unsafe.Sizeof(Uint128{})
+	default:
+		panic("invalid tigerbeetle operation")
+	}
+}
+
+func getResultSize(op C.TB_OPERATION) int {
+	switch (op) {
+	case C.TB_OP_CREATE_ACCOUNTS:
+		return unsafe.Sizeof(CreateAccountsResult{})
+	case C.TB_OP_CREATE_TRANSFERS:
+		return unsafe.Sizeof(CreateTransfersResult{})
+	case C.TB_OP_COMMIT_TRANSFERS:
+		return unsafe.Sizeof(CommitTransfersResult{})
+	case C.TB_OP_LOOKUP_ACCOUNTS:
+		return unsafe.Sizeof(Account{})
+	case C.TB_OP_LOOKUP_TRANSFERS:
+		return unsafe.Sizeof(Transfer{})
+	default:
+		panic("invalid tigerbeetle operation")
+	}
+}
+
+func (c *c_client) doRequest(
+	op C.TB_OPERATION,
+	count int,
+	data unsafe.Pointer,
+	result unsafe.Pointer,
+) (int, error) {	
+	// Get (and possibly wait) for a request to use.
+	// Returns false if the client was Close()'d.
+	req, isOpen := <- c.requests
+	if !isOpen {
+		return 0, errors.New("Tigerbeetle client was closed")
+	}
+
+	// Setup the packet.
+	req.packet.next = nil
+	req.packet.user_data = C.uintptr_t((uintptr)((unsafe.Pointer)(req)))
+	req.packet.operation = op
+	req.packet.status = C.TB_PACKET_OK
+	req.packet.data_size = count * getEventSize(op)
+	req.packet.data = data
+
+	// Set where to write the result bytes.
+	req.result = result
+
+	// Submit the request.
+	var list C.tb_packet_list_t
+	list.head = req.packet
+	list.tail = req.packet
+	C.tb_client_submit(c.tb_client, &list)
+
+	// Wait for the request to complete.
+	<- req.ready
+	status := req.packet.status
+	wrote := req.packet.data_size
+
+	// Free the request for other goroutines to use.
+	c.requests <- req
+	
+	// Handle packet error
+	if status != C.TB_PACKET_OK {
+		return 0, packetError{ status: status }
+	}
+
+	// Return the amount of bytes written into result
+	return wrote, nil
+}
+
+//export onGoPacketCompletion
+func onGoPacketCompletion(
+	_context C.uintptr_t,
+	client C.tb_client_t,
+	packet *C.tb_packet_t,
+	result_ptr *C.uint8_t,
+	result_len C.uint32_t,
+) {
+	// Get the request from the packet user data
+	req := (*request)((unsafe.Pointer)((uintptr)(packet.user_data)))
+	count := packet.data_size / getEventSize(packet.operation)
+
+	var wrote uint32
+	if result_ptr != nil && {
+		// Make sure the completion handler is giving us valid data
+		resultSize := getResultSize(packet.operation)
+		if result_len == 0 || (result_len % resultSize != 0) {
+			panic("invalid result_len on tigerbeetle packet completion")
+		}
+		
+		// Write the result data into the request's result
+		if req.result != nil {
+			wrote = result_len
+			C.memcpy(req.result, unsafe.Pointer(result_ptr), C.size_t(result_len))
+		}
+	}
+
+	// Signal to the goroutine which owns this request that it's ready
+	req.packet.data_size = wrote
+	req.ready <- struct{}{}
+}
+
+func (c *c_client) CreateAccounts(accounts []Account) ([]CreateAccountsResult, error) {
+	count := len(accounts)
+	results := make([]CreateAccountsResult, count)
+	wrote, err := c.doRequest(
+		C.TB_OP_CREATE_ACCOUNTS,
+		count,
+		unsafe.Pointer(&accounts[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resultCount := wrote / unsafe.Sizeof(CreateAccountsResult{})
+	return results[0:resultCount], nil
 }
 
 

@@ -147,32 +147,20 @@ typedef enum TB_OPERATION {
     TB_OP_LOOKUP_TRANSFERS = 7
 } TB_OPERATION;
 
-typedef union tb_event_t {
-    tb_account_t create_accounts;
-    tb_transfer_t create_transfers;
-    tb_commit_t commit_transfers;
-    tb_uint128_t lookup_accounts;
-    tb_uint128_t lookup_transfers;
-} tb_event_t;
-
-typedef union tb_result_t {
-    tb_create_accounts_result_t create_accounts;
-    tb_create_transfers_result_t create_transfers;
-    tb_commit_transfers_result_t commit_transfers;
-    tb_account_t lookup_accounts;
-    tb_transfer_t lookup_transfers;
-} tb_result_t;
-
-typedef union tb_packet_data_t {
-    tb_event_t request;
-    tb_result_t response;
-} tb_packet_data_t;
+typedef enum TB_PACKET_STATUS {
+    TB_PACKET_OK,
+    TB_PACKET_TOO_MUCH_DATA,
+    TB_PACKET_INVALID_OPERATION,
+    TB_PACKET_INVALID_DATA_SIZE
+} TB_PACKET_STATUS;
 
 typedef struct tb_packet_t {
     struct tb_packet_t* next;
     uintptr_t user_data;
     uint8_t operation;
-    tb_packet_data_t* data;
+    uint8_t status;
+    uint32_t data_size;
+    void* data;
 } tb_packet_t;
 
 typedef struct tb_packet_list_t {
@@ -199,7 +187,7 @@ TB_STATUS tb_client_init(
     uint32_t address_len,
     uint32_t num_packets,
     uintptr_t on_completion_ctx,
-    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_list_t*)
+    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_T*, uint32_t)
 );
 
 void tb_client_submit(
