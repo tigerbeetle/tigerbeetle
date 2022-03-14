@@ -82,8 +82,6 @@ pub const SuperBlockFreeSet = struct {
         return set.blocks.capacity() - set.blocks.count();
     }
 
-    // TODO Add unit tests for count_released() and count_acquired().
-
     /// Marks a free block as allocated, and returns the address. Panics if no blocks are available.
     pub fn acquire(set: *SuperBlockFreeSet) ?u64 {
         const block = blk: {
@@ -175,10 +173,30 @@ pub const SuperBlockFreeSet = struct {
     }
 
     /// Returns the number of bytes written to `target`.
+    /// The encoded data does *not* incldue staged changes.
     pub fn encode(set: SuperBlockFreeSet, target: []align(@alignOf(usize)) u8) usize {
         assert(target.len == SuperBlockFreeSet.encode_size_max(set.blocks.bit_length));
 
         return ewah.encode(bitset_masks(set.blocks), target);
+    }
+
+    /// Returns the number of bytes written to `target`.
+    /// The encoded data *does* include staged changes.
+    pub fn encode_with_staging(set: *SuperBlockFreeSet, target: []align(@alignOf(usize)) u8) usize {
+        const count_free = set.count_released();
+        const count_staged = set.staging.count();
+        assert(target.len == SuperBlockFreeSet.encode_size_max(set.blocks.bit_length));
+
+        // Temporarily mark the staged blocks as free.
+        set.blocks.toggleSet(set.staging);
+        assert(set.blocks.count() == count_free + count_staged);
+
+        const encode_size = ewah.encode(bitset_masks(set.blocks), target);
+        // Restore the changes: mark the staged blocks as allocated again.
+        set.blocks.toggleSet(set.staging);
+        assert(set.blocks.count() == count_free);
+
+        return encode_size;
     }
 
     /// Returns `blocks_count` rounded down to the nearest multiple of shard and word bit count.
@@ -237,6 +255,10 @@ test "SuperBlockFreeSet checkpoint" {
         while (i < set.blocks.bit_length) : (i += 1) {
             try expectEqual(@as(?u64, i + 1), set.acquire());
             set.release_at_next_checkpoint(i + 1);
+
+            // These count functions treat staged blocks as allocated.
+            try expectEqual(@as(u64, i + 1), set.count_acquired());
+            try expectEqual(@as(u64, set.blocks.bit_length - i - 1), set.count_released());
         }
         // All blocks are still allocated, though staged to release at the next checkpoint.
         try expectEqual(@as(?u64, null), set.acquire());
@@ -245,6 +267,7 @@ test "SuperBlockFreeSet checkpoint" {
     // Free all the blocks.
     set.checkpoint();
     try expect_free_set_equal(empty, set);
+    try expectEqual(@as(usize, 0), set.staging.count());
 
     // Redundant checkpointing is a noop (but safe).
     set.checkpoint();
@@ -256,15 +279,25 @@ test "SuperBlockFreeSet checkpoint" {
         set.release_at_next_checkpoint(i + 1);
     }
 
-    {
-        // Staged blocks are encoded as if they were still acquired.
-        var set_encoded = try std.testing.allocator.alignedAlloc(
-            u8,
-            @alignOf(usize),
-            SuperBlockFreeSet.encode_size_max(set.blocks.bit_length),
-        );
-        defer std.testing.allocator.free(set_encoded);
+    var set_encoded = try std.testing.allocator.alignedAlloc(
+        u8,
+        @alignOf(usize),
+        SuperBlockFreeSet.encode_size_max(set.blocks.bit_length),
+    );
+    defer std.testing.allocator.free(set_encoded);
 
+    {
+        // `encode_with_staging` encodes staged blocks as free.
+        const set_encoded_length = set.encode_with_staging(set_encoded);
+        var set_decoded = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+        defer set_decoded.deinit(std.testing.allocator);
+
+        set_decoded.decode(set_encoded[0..set_encoded_length]);
+        try expect_free_set_equal(empty, set_decoded);
+    }
+
+    {
+        // `encode` encodes staged blocks as still allocated.
         const set_encoded_length = set.encode(set_encoded);
         var set_decoded = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
         defer set_decoded.deinit(std.testing.allocator);
@@ -287,9 +320,15 @@ fn test_acquire_release(blocks_count: usize) !void {
     while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire());
     try expectEqual(@as(?u64, null), set.acquire());
 
+    try expectEqual(@as(u64, set.blocks.bit_length), set.count_acquired());
+    try expectEqual(@as(u64, 0), set.count_released());
+
     i = 0;
     while (i < blocks_count) : (i += 1) set.release(@as(u64, i + 1));
     try expect_free_set_equal(empty, set);
+
+    try expectEqual(@as(u64, 0), set.count_acquired());
+    try expectEqual(@as(u64, set.blocks.bit_length), set.count_released());
 
     i = 0;
     while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire());
