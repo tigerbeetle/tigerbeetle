@@ -209,10 +209,13 @@ pub const superblock_copies = 4;
 /// * replicated storage overhead, since all data files are mirrored,
 /// * the size of the superblock storage zone, and
 /// * the static memory allocation required for tracking LSM forest metadata in memory.
+// TODO Remove, now that we have block_count_max.
 pub const size_max = 16 * 1024 * 1024 * 1024 * 1024;
 
 /// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
 pub const block_size = 64 * 1024;
+
+pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size);
 
 // TODO Document and tune these LSM options:
 pub const lsm_trees = 30;

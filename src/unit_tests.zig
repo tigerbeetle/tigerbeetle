@@ -14,5 +14,8 @@ test {
 
     _ = @import("ewah.zig");
     _ = @import("util.zig");
-    _ = @import("lsm/block_free_set.zig");
+    _ = @import("lsm/superblock_manifest.zig");
+    _ = @import("lsm/superblock_free_set.zig");
+
+    // TODO Add remaining unit tests from lsm namespace.
 }
