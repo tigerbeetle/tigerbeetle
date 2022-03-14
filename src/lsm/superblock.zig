@@ -9,6 +9,7 @@ const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const vsr = @import("../vsr.zig");
 
+const SuperBlockManifest = @import("superblock_manifest.zig").SuperBlockManifest;
 const SuperBlockFreeSet = @import("superblock_free_set.zig").SuperBlockFreeSet;
 
 const log = std.log.scoped(.superblock);
@@ -385,6 +386,8 @@ pub fn SuperBlock(comptime Storage: type) type {
         /// This also gives us confidence that our working superblock has sufficient redundancy.
         quorums: Quorums = Quorums{},
 
+        manifest: SuperBlockManifest,
+
         // The caller should encode into these buffers before calling checkpoint().
         // The caller should decode from these buffers after the open() callback fires.
         //
@@ -425,6 +428,11 @@ pub fn SuperBlock(comptime Storage: type) type {
             );
             errdefer allocator.free(reading);
 
+            // TODO How many manifest blocks do we get out of block_count_max?
+
+            var manifest = try SuperBlockManifest.init(allocator, config.block_count_max);
+            errdefer manifest.deinit(allocator);
+
             const manifest_buffer = try allocator.allocAdvanced(
                 u8,
                 config.sector_size,
@@ -447,6 +455,7 @@ pub fn SuperBlock(comptime Storage: type) type {
                 .writing = &b[0],
                 .staging = &c[0],
                 .reading = &reading[0],
+                .manifest = manifest,
                 .manifest_buffer = manifest_buffer,
                 .free_set_buffer = free_set_buffer,
             };
@@ -460,6 +469,9 @@ pub fn SuperBlock(comptime Storage: type) type {
             allocator.destroy(superblock.writing);
             allocator.destroy(superblock.staging);
             allocator.free(superblock.reading);
+
+            superblock.manifest.deinit(allocator);
+
             allocator.free(superblock.manifest_buffer);
             allocator.free(superblock.free_set_buffer);
         }
