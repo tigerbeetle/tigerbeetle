@@ -4,7 +4,7 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 
-const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
+const SuperBlockFreeSet = @import("superblock_free_set.zig").SuperBlockFreeSet;
 
 pub fn BlocksType(comptime Storage: type) type {
     const block_size = config.block_size;
@@ -14,15 +14,16 @@ pub fn BlocksType(comptime Storage: type) type {
     return struct {
         const Blocks = @This();
 
+        // TODO Replace `storage/cluster/free_set` fields with `superblock: *SuperBlock`:
+
         storage: *Storage,
         offset: u64,
         size: u64,
 
-        // TODO Perhaps access cluster and free set through *SuperBlock.
         cluster: u32,
 
         /// Owned by SuperBlock, shared with Blocks.
-        block_free_set: *BlockFreeSet,
+        free_set: *SuperBlockFreeSet,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -30,7 +31,7 @@ pub fn BlocksType(comptime Storage: type) type {
             offset: u64,
             size: u64,
             cluster: u32,
-            block_free_set: *BlockFreeSet,
+            free_set: *SuperBlockFreeSet,
         ) !Blocks {
             _ = allocator; // TODO
 
@@ -39,7 +40,7 @@ pub fn BlocksType(comptime Storage: type) type {
                 .offset = offset,
                 .size = size,
                 .cluster = cluster,
-                .block_free_set = block_free_set,
+                .free_set = free_set,
             };
         }
 
