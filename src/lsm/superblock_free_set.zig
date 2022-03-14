@@ -72,14 +72,29 @@ pub const SuperBlockFreeSet = struct {
 
     /// Returns the number of released blocks.
     /// Excludes blocks staged to be released.
-    pub fn count_released(set: *SuperBlockFreeSet) u64 {
+    pub fn count_released(set: SuperBlockFreeSet) u64 {
         return set.blocks.count();
     }
 
     /// Returns the number of acquired blocks.
     /// Includes blocks staged to be released.
-    pub fn count_acquired(set: *SuperBlockFreeSet) u64 {
+    pub fn count_acquired(set: SuperBlockFreeSet) u64 {
         return set.blocks.capacity() - set.blocks.count();
+    }
+
+    /// Returns the address of the highest allocated block.
+    pub fn last_acquired(set: SuperBlockFreeSet) ?u64 {
+        var it = set.blocks.iterator(.{
+            .kind = .unset,
+            .direction = .reverse,
+        });
+
+        if (it.next()) |block| {
+            const address = block + 1;
+            return address;
+        } else {
+            return null;
+        }
     }
 
     /// Marks a free block as allocated, and returns the address. Panics if no blocks are available.
@@ -217,6 +232,28 @@ pub const SuperBlockFreeSet = struct {
 fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
     const len = div_ceil(bitset.bit_length, @bitSizeOf(MaskInt));
     return bitset.masks[0..len];
+}
+
+test "SuperBlockFreeSet last_acquired" {
+    const expectEqual = std.testing.expectEqual;
+    const blocks_count = SuperBlockFreeSet.shard_size;
+    var set = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    defer set.deinit(std.testing.allocator);
+
+    try expectEqual(set.last_acquired(), null);
+    try expectEqual(set.acquire(), 1);
+    try expectEqual(set.acquire(), 2);
+    try expectEqual(set.acquire(), 3);
+
+    try expectEqual(set.last_acquired(), 3);
+    set.release(2);
+    try expectEqual(set.last_acquired(), 3);
+
+    set.release(3);
+    try expectEqual(set.last_acquired(), 1);
+
+    set.release(1);
+    try expectEqual(set.last_acquired(), null);
 }
 
 test "SuperBlockFreeSet acquire/release" {
