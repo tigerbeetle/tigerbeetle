@@ -187,7 +187,7 @@ TB_STATUS tb_client_init(
     uint32_t address_len,
     uint32_t num_packets,
     uintptr_t on_completion_ctx,
-    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_T*, uint32_t)
+    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
 );
 
 void tb_client_submit(
