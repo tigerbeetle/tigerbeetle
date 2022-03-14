@@ -824,7 +824,7 @@ pub fn TreeType(
             }
 
             // TODO(ifreund) This would be great to unit test.
-            fn get(table: *Table, key: Key) ?*const Value {
+            fn get(table: *Table, key: Key, fingerprint: bloom_filter.Fingerprint) ?*const Value {
                 assert(!table.free);
                 assert(table.info.address != 0);
                 assert(table.info.snapshot_max == math.maxInt(u64));
@@ -849,7 +849,17 @@ pub fn TreeType(
                     assert(index_data_addresses(index_block)[i] != 0);
                 }
 
-                // TODO(ifreund) Check the filter block before searching in the data block
+                {
+                    const filter_blocks =
+                        table.blocks[index_block_count..][0..table.filter_blocks_used()];
+                    const filter_block = @alignCast(
+                        config.sector_size,
+                        &filter_blocks[i / filter.data_block_count_max],
+                    );
+                    if (!bloom_filter.may_contain(fingerprint, filter_block_filter(filter_block))) {
+                        return null;
+                    }
+                }
 
                 assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
                 const key_layout_bytes = @alignCast(
@@ -923,7 +933,8 @@ pub fn TreeType(
                     values_max[builder.value] = value;
                     builder.value += 1;
 
-                    const fingerprint = bloom_filter.Fingerprint.create(key_from_value(value));
+                    const key = key_from_value(value);
+                    const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
                     bloom_filter.add(fingerprint, filter_block_filter(builder.filter_block));
                 }
 
@@ -2148,8 +2159,11 @@ pub fn TreeType(
                 }
             }
 
+            // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
+            const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
+
             if (!tree.table.free and tree.table.info.visible(snapshot)) {
-                if (tree.table.get(key)) |value| {
+                if (tree.table.get(key, fingerprint)) |value| {
                     callback(unwrap_tombstone(value));
                     return;
                 }
