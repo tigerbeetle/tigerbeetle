@@ -9,7 +9,7 @@ const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const vsr = @import("../vsr.zig");
 
-const BlockFreeSet = @import("block_free_set.zig").BlockFreeSet;
+const SuperBlockFreeSet = @import("superblock_free_set.zig").SuperBlockFreeSet;
 
 const log = std.log.scoped(.superblock);
 
@@ -276,7 +276,7 @@ comptime {
 const superblock_trailer_size_max = blk: {
     // To calculate the size of the superblock trailer we need to know:
     // 1. the maximum number of manifest blocks that should be able to be referenced, and
-    // 2. the maximum possible size of the EWAH-compressed bit set addressable by BlockFreeSet.
+    // 2. the maximum possible size of the EWAH-compressed bit set addressable by the free set.
 
     assert(superblock_trailer_manifest_size_max > 0);
     assert(superblock_trailer_manifest_size_max % config.sector_size == 0);
@@ -308,15 +308,15 @@ const superblock_trailer_free_set_size_max = blk: {
     // However, this padding is 20 KiB for a 10 GiB WAL and a few bytes for the superblock zone.
     //
     // This maximum blocks count enables us to calculate the maximum trailer size at comptime, and
-    // is not what we will pass to BlockFreeSet at runtime. We will instead pass a reduced count to
+    // is not what we will pass to the free set at runtime. We will instead pass a reduced count to
     // eventually take the WAL and superblock zones into account at runtime.
 
     const client_table_size = config.clients_max * config.message_size_max;
     const blocks_count = @divFloor(config.size_max - client_table_size, config.block_size);
 
-    // Further massage this blocks count into a value that is acceptable to BlockFreeSet:
-    const blocks_count_floor = BlockFreeSet.blocks_count_floor(blocks_count);
-    const encode_size_max = BlockFreeSet.encode_size_max(blocks_count_floor);
+    // Further massage this blocks count into a value that is acceptable to the free set:
+    const blocks_count_floor = SuperBlockFreeSet.blocks_count_floor(blocks_count);
+    const encode_size_max = SuperBlockFreeSet.encode_size_max(blocks_count_floor);
 
     // Round this up to the nearest sector:
     break :blk div_ceil(encode_size_max, config.sector_size) * config.sector_size;
