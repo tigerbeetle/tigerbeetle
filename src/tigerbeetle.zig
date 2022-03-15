@@ -58,17 +58,17 @@ pub const AccountFlags = packed struct {
 
 pub const Transfer = packed struct {
     id: u128,
-    debit_account_id: u128,
-    credit_account_id: u128,
+    debit_account_id: u128 = 0,
+    credit_account_id: u128 = 0,
     /// Opaque third-party identifier to link this transfer (many-to-one) to an external entity:
-    user_data: u128,
+    user_data: u128 = 0,
     /// Reserved for accounting policy primitives:
     reserved: [32]u8,
-    timeout: u64,
+    timeout: u64 = 0,
     /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement):
     code: u32,
     flags: TransferFlags,
-    amount: u64,
+    amount: u64 = 0,
     timestamp: u64 = 0,
 
     comptime {
@@ -129,7 +129,7 @@ pub const CreateTransferResult = enum(u32) {
     exceeds_debits,
     two_phase_commit_must_timeout,
     timeout_reserved_for_two_phase_commit,
-    //TODO @jason Fields from the Commit
+    // Fields for the 2-phase Transfer
     cannot_void_and_post_two_phase_commit,
     transfer_not_found,
     transfer_not_two_phase_commit,
