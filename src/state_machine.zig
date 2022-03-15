@@ -1110,7 +1110,7 @@ test "create/lookup/rollback transfers" {
     try testing.expect(state_machine.get_transfer(vectors[22].object.id) == null);
 }
 
-test "create/lookup/rollback commits" {
+test "create/lookup/rollback 2-phase transfers" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -1214,7 +1214,7 @@ test "create/lookup/rollback commits" {
         try testing.expectEqual(account, state_machine.get_account(account.id).?.*);
     }
 
-    // Transfers:
+    // Pending Transfers:
     const object_transfers = std.mem.asBytes(&transfers);
     const output_transfers = try allocator.alloc(u8, 4096);
 
@@ -1232,7 +1232,7 @@ test "create/lookup/rollback commits" {
         try testing.expectEqual(transfer, state_machine.get_transfer(transfer.id).?.*);
     }
 
-    // Commits:
+    // Post the [pending] Transfer:
     const Vector = struct { result: CreateTransferResult, object: Transfer };
     const timestamp: u64 = (state_machine.post_timestamp + 1);
     const vectors = [_]Vector{
@@ -1352,7 +1352,7 @@ test "create/lookup/rollback commits" {
         },
     };
 
-    // Test balances BEFORE commit
+    // Test balances BEFORE posting
     // Account 1:
     const account_1_before = state_machine.get_account(1).?.*;
     try testing.expectEqual(@as(u64, 15), account_1_before.debits_posted);
@@ -1373,7 +1373,7 @@ test "create/lookup/rollback commits" {
         }
     }
 
-    // Test balances AFTER commit
+    // Test balances AFTER posting
     // Account 1:
     const account_1_after = state_machine.get_account(1).?.*;
     try testing.expectEqual(@as(u64, 30), account_1_after.debits_posted);
@@ -1391,7 +1391,7 @@ test "create/lookup/rollback commits" {
     // -15 (reserved moved):
     try testing.expectEqual(@as(u64, 45), account_2_after.credits_pending);
 
-    // Test COMMIT with invalid debit/credit accounts
+    // Test posted Transfer with invalid debit/credit accounts
     state_machine.create_account_rollback(accounts[3]);
     try testing.expect(state_machine.get_account(accounts[3].id) == null);
     try testing.expectEqual(
@@ -1413,7 +1413,7 @@ test "create/lookup/rollback commits" {
         .debit_account_not_found,
     );
 
-    // Commit with pending Transfer amount 15 by setting the amount as [0]
+    // Post with pending Transfer amount 15 by setting the amount as [0]
     try testing.expectEqual(
         state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
             .id = 8,
