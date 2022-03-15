@@ -276,11 +276,6 @@ const TimedQueue = struct {
                     self.max_transfers_latency = latency;
                 }
             },
-            //.commit_transfers => {
-            //    if (latency > self.max_commits_latency) {
-            //        self.max_commits_latency = latency;
-            //    }
-            //},
             else => unreachable,
         }
 
