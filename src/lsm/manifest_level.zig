@@ -76,10 +76,10 @@ pub fn ManifestLevel(
 
             if (lsm.verify and tables.len > 1) {
                 var a = tables[0];
-                assert(compare_keys(a.key_min, a.key_max) == .lt);
+                assert(compare_keys(a.key_min, a.key_max) != .gt);
                 for (tables[1..]) |b| {
                     assert(compare_keys(a.key_max, b.key_min) == .lt);
-                    assert(compare_keys(b.key_min, b.key_max) == .lt);
+                    assert(compare_keys(b.key_min, b.key_max) != .gt);
                     a = b;
                 }
             }
@@ -204,7 +204,7 @@ pub fn ManifestLevel(
                     const table_node_key_min = level.tables.node_elements(table_node)[0].key_min;
                     const table_node_key_max = level.tables.node_last_element(table_node).key_max;
 
-                    assert(compare_keys(table_node_key_min, table_node_key_max) == .lt);
+                    assert(compare_keys(table_node_key_min, table_node_key_max) != .gt);
 
                     assert(compare_keys(key_node_first_key, table_node_key_min) != .lt);
                     assert(compare_keys(key_node_first_key, table_node_key_max) != .gt);
@@ -234,8 +234,9 @@ pub fn ManifestLevel(
                 // in the public API.
                 const table = @intToPtr(*TableInfo, @ptrToInt(table_const));
 
-                assert(compare_keys(key_min, table.key_min) == .lt);
-                assert(compare_keys(key_max, table.key_max) == .gt);
+                // Assert that the table overlaps with the given key range.
+                assert(compare_keys(key_min, table.key_max) != .gt);
+                assert(compare_keys(key_max, table.key_min) != .lt);
 
                 assert(table.snapshot_max == math.maxInt(u64));
                 table.snapshot_max = new_snapshot_max;
@@ -266,7 +267,7 @@ pub fn ManifestLevel(
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 while (it.next()) |table| : (absolute_index += 1) {
                     if (table.snapshot_max <= snapshot_max) {
-                        // We require the key_min/key_max to be exact, so the first table in the key
+                        // We require the key_min/key_max to be exact, so the first table
                         // matching the snapshot must have the provided key_min.
                         assert(compare_keys(key_min, table.key_min) == .eq);
                         break;
@@ -289,6 +290,8 @@ pub fn ManifestLevel(
                         switch (compare_keys(table.key_max, key_max)) {
                             .lt => break :inner,
                             .eq => break :outer,
+                            // We require the key_min/key_max to be exact, so the last table
+                            // matching the snapshot must have the provided key_max.
                             .gt => unreachable,
                         }
                     } else {
