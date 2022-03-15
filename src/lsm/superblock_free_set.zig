@@ -56,6 +56,10 @@ pub const SuperBlockFreeSet = struct {
         var staging = try DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
         errdefer staging.deinit(allocator);
 
+        assert(index.count() == shards_count);
+        assert(blocks.count() == blocks_count);
+        assert(staging.count() == 0);
+
         return SuperBlockFreeSet{
             .index = index,
             .blocks = blocks,
@@ -83,7 +87,8 @@ pub const SuperBlockFreeSet = struct {
     }
 
     /// Returns the address of the highest allocated block.
-    pub fn last_acquired(set: SuperBlockFreeSet) ?u64 {
+    /// Staged blocks are considered still allocated.
+    pub fn highest_allocated_block_address(set: SuperBlockFreeSet) ?u64 {
         var it = set.blocks.iterator(.{
             .kind = .unset,
             .direction = .reverse,
@@ -93,6 +98,8 @@ pub const SuperBlockFreeSet = struct {
             const address = block + 1;
             return address;
         } else {
+            // All blocks are free.
+            assert(set.blocks.count() == set.blocks.bit_length);
             return null;
         }
     }
@@ -188,7 +195,7 @@ pub const SuperBlockFreeSet = struct {
     }
 
     /// Returns the number of bytes written to `target`.
-    /// The encoded data does *not* incldue staged changes.
+    /// The encoded data does *not* include staged changes.
     pub fn encode(set: SuperBlockFreeSet, target: []align(@alignOf(usize)) u8) usize {
         assert(target.len == SuperBlockFreeSet.encode_size_max(set.blocks.bit_length));
 
@@ -198,20 +205,21 @@ pub const SuperBlockFreeSet = struct {
     /// Returns the number of bytes written to `target`.
     /// The encoded data *does* include staged changes.
     pub fn encode_with_staging(set: *SuperBlockFreeSet, target: []align(@alignOf(usize)) u8) usize {
+        assert(target.len == SuperBlockFreeSet.encode_size_max(set.blocks.bit_length));
+
         const count_free = set.count_released();
         const count_staged = set.staging.count();
-        assert(target.len == SuperBlockFreeSet.encode_size_max(set.blocks.bit_length));
 
         // Temporarily mark the staged blocks as free.
         set.blocks.toggleSet(set.staging);
-        assert(set.blocks.count() == count_free + count_staged);
-
-        const encode_size = ewah.encode(bitset_masks(set.blocks), target);
         // Restore the changes: mark the staged blocks as allocated again.
-        set.blocks.toggleSet(set.staging);
-        assert(set.blocks.count() == count_free);
+        defer {
+            set.blocks.toggleSet(set.staging);
+            assert(set.blocks.count() == count_free);
+        }
 
-        return encode_size;
+        assert(set.blocks.count() == count_free + count_staged);
+        return ewah.encode(bitset_masks(set.blocks), target);
     }
 
     /// Returns `blocks_count` rounded down to the nearest multiple of shard and word bit count.
@@ -234,26 +242,26 @@ fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
     return bitset.masks[0..len];
 }
 
-test "SuperBlockFreeSet last_acquired" {
+test "SuperBlockFreeSet highest_allocated_block_address" {
     const expectEqual = std.testing.expectEqual;
     const blocks_count = SuperBlockFreeSet.shard_size;
     var set = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
-    try expectEqual(set.last_acquired(), null);
+    try expectEqual(set.highest_allocated_block_address(), null);
     try expectEqual(set.acquire(), 1);
     try expectEqual(set.acquire(), 2);
     try expectEqual(set.acquire(), 3);
 
-    try expectEqual(set.last_acquired(), 3);
+    try expectEqual(set.highest_allocated_block_address(), 3);
     set.release(2);
-    try expectEqual(set.last_acquired(), 3);
+    try expectEqual(set.highest_allocated_block_address(), 3);
 
     set.release(3);
-    try expectEqual(set.last_acquired(), 1);
+    try expectEqual(set.highest_allocated_block_address(), 1);
 
     set.release(1);
-    try expectEqual(set.last_acquired(), null);
+    try expectEqual(set.highest_allocated_block_address(), null);
 }
 
 test "SuperBlockFreeSet acquire/release" {
