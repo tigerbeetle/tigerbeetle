@@ -19,7 +19,7 @@ const LookupAccountResult = tb.LookupAccountResult;
 
 const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);
-const HashMapCommits = std.AutoHashMap(u128, Transfer);
+const HashMapPosted = std.AutoHashMap(u128, Transfer);
 
 pub const StateMachine = struct {
     pub const Operation = enum(u8) {
@@ -40,7 +40,7 @@ pub const StateMachine = struct {
     post_timestamp: u64,
     accounts: HashMapAccounts,
     transfers: HashMapTransfers,
-    commits: HashMapCommits,
+    posted: HashMapPosted,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -56,9 +56,9 @@ pub const StateMachine = struct {
         errdefer transfers.deinit();
         try transfers.ensureTotalCapacity(@intCast(u32, transfers_max));
 
-        var commits = HashMapCommits.init(allocator);
-        errdefer commits.deinit();
-        try commits.ensureTotalCapacity(@intCast(u32, commits_max));
+        var posted = HashMapPosted.init(allocator);
+        errdefer posted.deinit();
+        try posted.ensureTotalCapacity(@intCast(u32, commits_max));
 
         // TODO After recovery, set pending_timestamp max(wall clock, op timestamp).
         // TODO After recovery, set post_timestamp max(wall clock, commit timestamp).
@@ -69,21 +69,20 @@ pub const StateMachine = struct {
             .post_timestamp = 0,
             .accounts = accounts,
             .transfers = transfers,
-            .commits = commits,
+            .posted = posted,
         };
     }
 
     pub fn deinit(self: *StateMachine) void {
         self.accounts.deinit();
         self.transfers.deinit();
-        self.commits.deinit();
+        self.posted.deinit();
     }
 
     pub fn Event(comptime operation: Operation) type {
         return switch (operation) {
             .create_accounts => Account,
             .create_transfers => Transfer,
-            //.commit_transfers => Transfer,
             .lookup_accounts => u128,
             .lookup_transfers => u128,
             else => unreachable,
@@ -94,7 +93,6 @@ pub const StateMachine = struct {
         return switch (operation) {
             .create_accounts => CreateAccountsResult,
             .create_transfers => CreateTransfersResult,
-            //.commit_transfers => CreateTransfersResult,
             .lookup_accounts => Account,
             .lookup_transfers => Transfer,
             else => unreachable,
@@ -107,7 +105,6 @@ pub const StateMachine = struct {
             .register => {},
             .create_accounts => self.prepare_timestamps(realtime, .create_accounts, input),
             .create_transfers => self.prepare_timestamps(realtime, .create_transfers, input),
-            //.commit_transfers => self.prepare_timestamps(realtime, .commit_transfers, input),
             .lookup_accounts => {},
             .lookup_transfers => {},
             else => unreachable,
@@ -155,7 +152,6 @@ pub const StateMachine = struct {
             .register => 0,
             .create_accounts => self.execute(.create_accounts, input, output),
             .create_transfers => self.execute(.create_transfers, input, output),
-            //.commit_transfers => self.execute(.commit_transfers, input, output),
             .lookup_accounts => self.execute_lookup_accounts(input, output),
             .lookup_transfers => self.execute_lookup_transfers(input, output),
             else => unreachable,
@@ -185,7 +181,6 @@ pub const StateMachine = struct {
             const result = if (chain_broken) .linked_event_failed else switch (operation) {
                 .create_accounts => self.create_account(event),
                 .create_transfers => self.create_transfer(event),
-                //.commit_transfers => self.commit_transfer(event),
                 else => unreachable,
             };
             log.debug("{s} {}/{}: {}: {}", .{
@@ -254,8 +249,13 @@ pub const StateMachine = struct {
 
             switch (operation) {
                 .create_accounts => self.create_account_rollback(event),
-                .create_transfers => self.create_transfer_rollback(event),
-                //.commit_transfers => self.commit_transfer_rollback(event),
+                .create_transfers => {
+                    if (event.flags.pending) {
+                        self.posted_transfer_rollback(event);
+                    } else {
+                        self.create_transfer_rollback(event);
+                    }
+                },
                 else => unreachable,
             }
             log.debug("{s} {}/{}: rollback(): {}", .{
@@ -374,7 +374,7 @@ pub const StateMachine = struct {
             assert(!cr.credits_exceed_debits(0));
 
             // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-            var insert = self.commits.getOrPutAssumeCapacity(t.id);
+            var insert = self.posted.getOrPutAssumeCapacity(t.id);
             if (insert.found_existing) {
                 unreachable;
             } else {
@@ -473,7 +473,7 @@ pub const StateMachine = struct {
         assert(self.transfers.remove(t.id));
     }
 
-    fn commit_transfer_rollback(self: *StateMachine, c: Transfer) void {
+    fn posted_transfer_rollback(self: *StateMachine, c: Transfer) void {
         assert(self.get_commit(c.id) != null);
 
         var t = self.get_transfer(c.id).?;
@@ -485,7 +485,7 @@ pub const StateMachine = struct {
             dr.debits_posted -= t.amount;
             cr.credits_posted -= t.amount;
         }
-        assert(self.commits.remove(c.id));
+        assert(self.posted.remove(c.id));
     }
 
     /// This is our core private method for changing balances.
@@ -505,12 +505,12 @@ pub const StateMachine = struct {
 
     /// See the comment for get_account().
     fn get_commit(self: *StateMachine, id: u128) ?*Transfer {
-        return self.commits.getPtr(id);
+        return self.posted.getPtr(id);
     }
 };
 
 // TODO Optimize this by precomputing hashes outside and before committing to the state machine.
-// If we see that a batch of commits contains commits with preimages, then we will:
+// If we see that a batch of posted contains posted with preimages, then we will:
 // Divide the batch into subsets, dispatch these to multiple threads, store the result in a bitset.
 // Then we can simply provide the result bitset to the state machine when committing.
 // This will improve crypto performance significantly by a factor of 8x.
@@ -1425,7 +1425,7 @@ test "create/lookup/rollback 2-phase transfers" {
     );
 
     // Rollback [id=2] not rejected:
-    state_machine.commit_transfer_rollback(vectors[4].object);
+    state_machine.posted_transfer_rollback(vectors[4].object);
 
     // Account 1:
     const account_1_rollback = state_machine.get_account(1).?.*;
@@ -1443,7 +1443,7 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expectEqual(@as(u64, 60), account_2_rollback.credits_pending);
 
     // Rollback [id=3] rejected:
-    state_machine.commit_transfer_rollback(vectors[7].object);
+    state_machine.posted_transfer_rollback(vectors[7].object);
     // Account 1:
     const account_1_rollback_reject = state_machine.get_account(1).?.*;
     try testing.expectEqual(@as(u64, 15), account_1_rollback_reject.debits_posted);
