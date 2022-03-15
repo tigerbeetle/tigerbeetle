@@ -590,8 +590,9 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                     .free, .accepting => unreachable,
                 }
                 if (connection.send_queue.full()) {
-                    log.info("message queue for peer {} full, dropping message", .{
+                    log.info("message queue for peer {} full, dropping {s} message", .{
                         connection.peer,
+                        @tagName(message.header.command),
                     });
                     return;
                 }
