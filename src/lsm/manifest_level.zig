@@ -95,7 +95,7 @@ pub fn ManifestLevel(
 
                 // Increment absolute_index until the key_max at absolute_index is greater than
                 // or equal to table.key_max. This is the index we want to insert the table at.
-                {
+                if (absolute_index < level.keys.len()) {
                     var it = level.keys.iterator(absolute_index, 0, .ascending);
                     while (it.next()) |key_max| : (absolute_index += 1) {
                         if (compare_keys(key_max.*, table.key_max) != .lt) break;
