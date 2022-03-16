@@ -645,20 +645,8 @@ pub fn SuperBlock(comptime Storage: type) type {
             assert(superblock.queue_head == context);
             assert(superblock.queue_tail == null);
 
-            {
-                const staging: *SuperBlockSector = superblock.staging;
-                const target = superblock.manifest_buffer;
-                staging.manifest_size = @intCast(u32, superblock.manifest.encode(target));
-                staging.manifest_checksum = vsr.checksum(target[0..staging.manifest_size]);
-            }
-
-            {
-                const staging: *SuperBlockSector = superblock.staging;
-                const target_size_max = SuperBlockFreeSet.encode_size_max(config.block_count_max);
-                const target = superblock.free_set_buffer[0..target_size_max];
-                staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
-                staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
-            }
+            superblock.write_staging_encode_manifest();
+            superblock.write_staging_encode_free_set();
 
             superblock.writing.* = superblock.staging.*;
             superblock.writing.set_checksum();
@@ -676,6 +664,23 @@ pub fn SuperBlock(comptime Storage: type) type {
 
             context.copy = starting_copy_for_sequence(superblock.writing.sequence);
             superblock.write_manifest(context);
+        }
+
+        fn write_staging_encode_manifest(superblock: *SuperBlockGeneric) void {
+            const staging: *SuperBlockSector = superblock.staging;
+            const target = superblock.manifest_buffer;
+
+            staging.manifest_size = @intCast(u32, superblock.manifest.encode(target));
+            staging.manifest_checksum = vsr.checksum(target[0..staging.manifest_size]);
+        }
+
+        fn write_staging_encode_free_set(superblock: *SuperBlockGeneric) void {
+            const staging: *SuperBlockSector = superblock.staging;
+            const encode_size_max = SuperBlockFreeSet.encode_size_max(config.block_count_max);
+            const target = superblock.free_set_buffer[0..encode_size_max];
+
+            staging.free_set_size = @intCast(u32, superblock.free_set.encode_with_staging(target));
+            staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
         }
 
         fn write_view_change(superblock: *SuperBlockGeneric, context: *Context) void {
@@ -716,7 +721,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             const buffer = superblock.manifest_buffer[0..size];
             const offset = offset_manifest(context.copy, superblock.writing.sequence);
 
-            mem.set(u8, buffer[superblock.writing.manifest_size..], 0); // Zero padding.
+            mem.set(u8, buffer[superblock.writing.manifest_size..], 0); // Zero sector padding.
 
             assert(superblock.writing.manifest_checksum == vsr.checksum(
                 superblock.manifest_buffer[0..superblock.writing.manifest_size],
@@ -758,7 +763,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             const buffer = superblock.free_set_buffer[0..size];
             const offset = offset_free_set(context.copy, superblock.writing.sequence);
 
-            mem.set(u8, buffer[superblock.writing.free_set_size..], 0); // Zero padding.
+            mem.set(u8, buffer[superblock.writing.free_set_size..], 0); // Zero sector padding.
 
             assert(superblock.writing.free_set_checksum == vsr.checksum(
                 superblock.free_set_buffer[0..superblock.writing.free_set_size],
@@ -932,6 +937,8 @@ pub fn SuperBlock(comptime Storage: type) type {
                         assert(working.vsr_state.commit_max == 0);
                         assert(working.vsr_state.view_normal == 0);
                         assert(working.vsr_state.view == 0);
+                    } else if (context.caller == .checkpoint) {
+                        superblock.free_set.checkpoint();
                     }
 
                     superblock.working.* = working.*;
@@ -972,6 +979,7 @@ pub fn SuperBlock(comptime Storage: type) type {
         }
 
         fn read_manifest(superblock: *SuperBlockGeneric, context: *Context) void {
+            assert(context.caller == .open);
             assert(superblock.queue_head == context);
             assert(context.copy < superblock_copies_max);
 
@@ -1002,21 +1010,19 @@ pub fn SuperBlock(comptime Storage: type) type {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
 
+            assert(context.caller == .open);
             assert(superblock.queue_head == context);
+            assert(!superblock.opened);
+            assert(superblock.manifest.count == 0);
 
             const slice = superblock.manifest_buffer[0..superblock.working.manifest_size];
             if (vsr.checksum(slice) == superblock.working.manifest_checksum) {
-                if (context.caller == .open) {
-                    assert(!superblock.opened);
-                    assert(superblock.manifest.count == 0);
+                superblock.manifest.decode(slice);
 
-                    superblock.manifest.decode(slice);
-
-                    log.debug("open: read_manifest: manifest blocks: {}/{}", .{
-                        superblock.manifest.count,
-                        superblock.manifest.count_max,
-                    });
-                }
+                log.debug("open: read_manifest: manifest blocks: {}/{}", .{
+                    superblock.manifest.count,
+                    superblock.manifest.count_max,
+                });
 
                 // TODO Repair any impaired copies before we continue.
                 // At present, we repair at the next checkpoint.
@@ -1032,6 +1038,7 @@ pub fn SuperBlock(comptime Storage: type) type {
         }
 
         fn read_free_set(superblock: *SuperBlockGeneric, context: *Context) void {
+            assert(context.caller == .open);
             assert(superblock.queue_head == context);
             assert(context.copy < superblock_copies_max);
 
@@ -1067,21 +1074,19 @@ pub fn SuperBlock(comptime Storage: type) type {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
 
+            assert(context.caller == .open);
             assert(superblock.queue_head == context);
+            assert(!superblock.opened);
+            assert(superblock.free_set.count_acquired() == 0);
 
             const slice = superblock.free_set_buffer[0..superblock.working.free_set_size];
             if (vsr.checksum(slice) == superblock.working.free_set_checksum) {
-                if (context.caller == .open) {
-                    assert(!superblock.opened);
-                    assert(superblock.free_set.count_acquired() == 0);
+                superblock.free_set.decode(slice);
 
-                    if (slice.len > 0) superblock.free_set.decode(slice);
-
-                    log.debug("open: read_free_set: acquired blocks: {}/{}", .{
-                        superblock.free_set.count_acquired(),
-                        config.block_count_max,
-                    });
-                }
+                log.debug("open: read_free_set: acquired blocks: {}/{}", .{
+                    superblock.free_set.count_acquired(),
+                    config.block_count_max,
+                });
 
                 // TODO Repair any impaired copies before we continue.
                 superblock.release(context);
