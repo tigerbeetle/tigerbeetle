@@ -513,8 +513,8 @@ pub fn ManifestLevel(
                 adjusted_next = reverse.cursor;
             } else {
                 switch (direction) {
-                    .ascending => assert(meta.eql(adjusted, level.keys.last())),
-                    .descending => assert(meta.eql(adjusted, level.keys.first())),
+                    .ascending => assert(meta.eql(adjusted, level.keys.first())),
+                    .descending => assert(meta.eql(adjusted, level.keys.last())),
                 }
             }
             assert(compare_keys(start_key, level.keys.element_at_cursor(adjusted)) == .eq);
