@@ -279,7 +279,7 @@ pub fn ManifestLevel(
 
             var removed: u32 = 0;
             var safety_counter: u32 = 0;
-            outer: while (safety_counter < cardinality + 1) : (safety_counter += 1) {
+            outer: while (safety_counter < cardinality) : (safety_counter += 1) {
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 inner: while (it.next()) |table| : (absolute_index += 1) {
                     if (table.snapshot_max <= snapshot_max) {
@@ -305,7 +305,7 @@ pub fn ManifestLevel(
                 }
             }
             assert(removed == cardinality);
-            assert(safety_counter == cardinality);
+            assert(safety_counter + 1 == cardinality);
 
             assert(level.keys.len() == level.tables.len());
 
