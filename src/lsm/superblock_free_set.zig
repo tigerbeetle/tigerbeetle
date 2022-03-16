@@ -1,14 +1,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
+
 const DynamicBitSetUnmanaged = std.bit_set.DynamicBitSetUnmanaged;
 const MaskInt = DynamicBitSetUnmanaged.MaskInt;
+
 const config = @import("../config.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer(
-    usize,
-    config.cache_line_size / @sizeOf(usize), // 1 cache line of recently-freed blocks
-    .array,
-);
+
 const ewah = @import("../ewah.zig").ewah(usize);
 const div_ceil = @import("../util.zig").div_ceil;
 
@@ -22,8 +20,6 @@ pub const SuperBlockFreeSet = struct {
     blocks: DynamicBitSetUnmanaged,
     /// Set bits indicate blocks to be released at the next checkpoint.
     staging: DynamicBitSetUnmanaged,
-    // A fast cache of the 0-indexed bits (not 1-indexed addresses) of recently freed blocks.
-    recent: RingBuffer,
 
     // Each shard is 8 cache lines because the CPU line fill buffer can fetch 10 lines in parallel.
     // And 8 is fast for division when computing the shard of a block.
@@ -64,7 +60,6 @@ pub const SuperBlockFreeSet = struct {
             .index = index,
             .blocks = blocks,
             .staging = staging,
-            .recent = .{},
         };
     }
 
@@ -74,21 +69,18 @@ pub const SuperBlockFreeSet = struct {
         set.staging.deinit(allocator);
     }
 
-    /// Returns the number of released blocks.
-    /// Excludes blocks staged to be released.
-    pub fn count_released(set: SuperBlockFreeSet) u64 {
+    /// Returns the number of free blocks.
+    pub fn count_free(set: SuperBlockFreeSet) u64 {
         return set.blocks.count();
     }
 
     /// Returns the number of acquired blocks.
-    /// Includes blocks staged to be released.
     pub fn count_acquired(set: SuperBlockFreeSet) u64 {
         return set.blocks.capacity() - set.blocks.count();
     }
 
-    /// Returns the address of the highest allocated block.
-    /// Staged blocks are considered still allocated.
-    pub fn highest_allocated_block_address(set: SuperBlockFreeSet) ?u64 {
+    /// Returns the address of the highest acquired block.
+    pub fn highest_address_acquired(set: SuperBlockFreeSet) ?u64 {
         var it = set.blocks.iterator(.{
             .kind = .unset,
             .direction = .reverse,
@@ -107,11 +99,11 @@ pub const SuperBlockFreeSet = struct {
     /// Marks a free block as allocated, and returns the address. Panics if no blocks are available.
     pub fn acquire(set: *SuperBlockFreeSet) ?u64 {
         const block = blk: {
-            if (set.recent.pop()) |block| {
-                break :blk block;
-            } else if (set.index.findFirstSet()) |shard| {
+            if (set.index.findFirstSet()) |shard| {
                 break :blk set.find_free_block_in_shard(shard) orelse unreachable;
-            } else return null;
+            } else {
+                return null;
+            }
         };
         const shard = block / shard_size;
         assert(set.index.isSet(shard));
@@ -147,11 +139,10 @@ pub const SuperBlockFreeSet = struct {
 
         set.index.set(block / shard_size);
         set.blocks.set(block);
-        set.recent.push(block) catch {}; // Ignore error.NoSpaceLeft if full.
     }
 
-    /// Leave the address allocated for now, but free it during the next checkpoint.
-    pub fn release_at_next_checkpoint(set: *SuperBlockFreeSet, address: u64) void {
+    /// Leave the address allocated for now, but free it at the next checkpoint.
+    pub fn release_at_checkpoint(set: *SuperBlockFreeSet, address: u64) void {
         const block = address - 1;
         assert(!set.blocks.isSet(block));
         assert(!set.staging.isSet(block));
@@ -168,6 +159,27 @@ pub const SuperBlockFreeSet = struct {
             set.release(address);
         }
         assert(set.staging.count() == 0);
+    }
+
+    /// Temporarily marks staged blocks as free.
+    /// Amortizes the cost of toggling staged blocks when encoding and getting the highest address.
+    /// Does not update the index and MUST therefore be paired immediately with exclude_staging().
+    pub fn include_staging(set: *SuperBlockFreeSet) void {
+        const free = set.blocks.count();
+
+        set.blocks.toggleSet(set.staging);
+
+        // We expect the free count to increase now that staging has been included:
+        assert(set.blocks.count() == free + set.staging.count());
+    }
+
+    pub fn exclude_staging(set: *SuperBlockFreeSet) void {
+        const free = set.blocks.count();
+
+        set.blocks.toggleSet(set.staging);
+
+        // We expect the free count to decrease now that staging has been excluded:
+        assert(set.blocks.count() == free - set.staging.count());
     }
 
     /// Decodes the compressed bitset in `source` into `set`.
@@ -202,26 +214,6 @@ pub const SuperBlockFreeSet = struct {
         return ewah.encode(bitset_masks(set.blocks), target);
     }
 
-    /// Returns the number of bytes written to `target`.
-    /// The encoded data *does* include staged changes.
-    pub fn encode_with_staging(set: *SuperBlockFreeSet, target: []align(@alignOf(usize)) u8) usize {
-        assert(target.len == SuperBlockFreeSet.encode_size_max(set.blocks.bit_length));
-
-        const count_free = set.count_released();
-        const count_staged = set.staging.count();
-
-        // Temporarily mark the staged blocks as free.
-        set.blocks.toggleSet(set.staging);
-        // Restore the changes: mark the staged blocks as allocated again.
-        defer {
-            set.blocks.toggleSet(set.staging);
-            assert(set.blocks.count() == count_free);
-        }
-
-        assert(set.blocks.count() == count_free + count_staged);
-        return ewah.encode(bitset_masks(set.blocks), target);
-    }
-
     /// Returns `blocks_count` rounded down to the nearest multiple of shard and word bit count.
     /// Ensures that the result is acceptable to `SuperBlockFreeSet.init()`.
     pub fn blocks_count_floor(blocks_count: usize) usize {
@@ -242,26 +234,43 @@ fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
     return bitset.masks[0..len];
 }
 
-test "SuperBlockFreeSet highest_allocated_block_address" {
+test "SuperBlockFreeSet highest_address_acquired" {
     const expectEqual = std.testing.expectEqual;
     const blocks_count = SuperBlockFreeSet.shard_size;
     var set = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
-    try expectEqual(set.highest_allocated_block_address(), null);
-    try expectEqual(set.acquire(), 1);
-    try expectEqual(set.acquire(), 2);
-    try expectEqual(set.acquire(), 3);
+    try expectEqual(@as(?u64, null), set.highest_address_acquired());
+    try expectEqual(@as(?u64, 1), set.acquire());
+    try expectEqual(@as(?u64, 2), set.acquire());
+    try expectEqual(@as(?u64, 3), set.acquire());
 
-    try expectEqual(set.highest_allocated_block_address(), 3);
+    try expectEqual(@as(?u64, 3), set.highest_address_acquired());
     set.release(2);
-    try expectEqual(set.highest_allocated_block_address(), 3);
+    try expectEqual(@as(?u64, 3), set.highest_address_acquired());
 
     set.release(3);
-    try expectEqual(set.highest_allocated_block_address(), 1);
+    try expectEqual(@as(?u64, 1), set.highest_address_acquired());
 
     set.release(1);
-    try expectEqual(set.highest_allocated_block_address(), null);
+    try expectEqual(@as(?u64, null), set.highest_address_acquired());
+
+    try expectEqual(@as(?u64, 1), set.acquire());
+    try expectEqual(@as(?u64, 2), set.acquire());
+    try expectEqual(@as(?u64, 3), set.acquire());
+
+    {
+        set.release_at_checkpoint(3);
+        try expectEqual(@as(?u64, 3), set.highest_address_acquired());
+
+        set.include_staging();
+        try expectEqual(@as(?u64, 2), set.highest_address_acquired());
+        set.exclude_staging();
+
+        try expectEqual(@as(?u64, 3), set.highest_address_acquired());
+        set.checkpoint();
+        try expectEqual(@as(?u64, 2), set.highest_address_acquired());
+    }
 }
 
 test "SuperBlockFreeSet acquire/release" {
@@ -299,11 +308,11 @@ test "SuperBlockFreeSet checkpoint" {
         i = 0;
         while (i < set.blocks.bit_length) : (i += 1) {
             try expectEqual(@as(?u64, i + 1), set.acquire());
-            set.release_at_next_checkpoint(i + 1);
+            set.release_at_checkpoint(i + 1);
 
             // These count functions treat staged blocks as allocated.
             try expectEqual(@as(u64, i + 1), set.count_acquired());
-            try expectEqual(@as(u64, set.blocks.bit_length - i - 1), set.count_released());
+            try expectEqual(@as(u64, set.blocks.bit_length - i - 1), set.count_free());
         }
         // All blocks are still allocated, though staged to release at the next checkpoint.
         try expectEqual(@as(?u64, null), set.acquire());
@@ -321,7 +330,7 @@ test "SuperBlockFreeSet checkpoint" {
     i = 0;
     while (i < set.blocks.bit_length) : (i += 1) {
         try expectEqual(@as(?u64, i + 1), set.acquire());
-        set.release_at_next_checkpoint(i + 1);
+        set.release_at_checkpoint(i + 1);
     }
 
     var set_encoded = try std.testing.allocator.alignedAlloc(
@@ -332,8 +341,11 @@ test "SuperBlockFreeSet checkpoint" {
     defer std.testing.allocator.free(set_encoded);
 
     {
-        // `encode_with_staging` encodes staged blocks as free.
-        const set_encoded_length = set.encode_with_staging(set_encoded);
+        // `encode` encodes staged blocks as free.
+        set.include_staging();
+        defer set.exclude_staging();
+
+        const set_encoded_length = set.encode(set_encoded);
         var set_decoded = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
         defer set_decoded.deinit(std.testing.allocator);
 
@@ -366,24 +378,17 @@ fn test_acquire_release(blocks_count: usize) !void {
     try expectEqual(@as(?u64, null), set.acquire());
 
     try expectEqual(@as(u64, set.blocks.bit_length), set.count_acquired());
-    try expectEqual(@as(u64, 0), set.count_released());
+    try expectEqual(@as(u64, 0), set.count_free());
 
     i = 0;
     while (i < blocks_count) : (i += 1) set.release(@as(u64, i + 1));
     try expect_free_set_equal(empty, set);
 
     try expectEqual(@as(u64, 0), set.count_acquired());
-    try expectEqual(@as(u64, set.blocks.bit_length), set.count_released());
+    try expectEqual(@as(u64, set.blocks.bit_length), set.count_free());
 
     i = 0;
     while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire());
-    try expectEqual(@as(?u64, null), set.acquire());
-
-    // Exercise the RingBuffer-index sync by de/re-allocating the last bit of a shard.
-    set.release(i);
-    try expectEqual(@as(usize, 1), set.recent.count);
-    try expectEqual(@as(?u64, i), set.acquire());
-    try expectEqual(@as(usize, 0), set.recent.count);
     try expectEqual(@as(?u64, null), set.acquire());
 }
 
