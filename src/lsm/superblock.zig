@@ -679,7 +679,19 @@ pub fn SuperBlock(comptime Storage: type) type {
             const encode_size_max = SuperBlockFreeSet.encode_size_max(config.block_count_max);
             const target = superblock.free_set_buffer[0..encode_size_max];
 
-            staging.free_set_size = @intCast(u32, superblock.free_set.encode_with_staging(target));
+            superblock.free_set.include_staging();
+            defer superblock.free_set.exclude_staging();
+
+            staging.size = 0;
+            staging.size += superblock_zone_size;
+            staging.size += 1024 * 1024 * 1024; // TODO Replace with WAL constants when they land.
+            staging.size += config.message_size_max * config.clients_max * 2;
+
+            if (superblock.free_set.highest_address_acquired()) |address| {
+                staging.size += address * config.block_size;
+            }
+
+            staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
         }
 
@@ -944,13 +956,14 @@ pub fn SuperBlock(comptime Storage: type) type {
                     superblock.working.* = working.*;
                     log.debug(
                         "{s}: installed working superblock: checksum={x} sequence={} cluster={} " ++
-                            "replica={} commit_min={} commit_max={} view_normal={} view={}",
+                            "replica={} size={} commit_min={} commit_max={} view_normal={} view={}",
                         .{
                             @tagName(context.caller),
                             superblock.working.checksum,
                             superblock.working.sequence,
                             superblock.working.cluster,
                             superblock.working.replica,
+                            superblock.working.size,
                             superblock.working.vsr_state.commit_min,
                             superblock.working.vsr_state.commit_max,
                             superblock.working.vsr_state.view_normal,
@@ -962,6 +975,7 @@ pub fn SuperBlock(comptime Storage: type) type {
                         context.copy = starting_copy_for_sequence(superblock.working.sequence);
                         superblock.read_manifest(context);
                     } else {
+                        // TODO Consider calling TRIM() on Blocks' free suffix after checkpointing.
                         superblock.release(context);
                     }
                 } else |err| switch (err) {
