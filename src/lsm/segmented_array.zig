@@ -80,7 +80,9 @@ pub fn SegmentedArray(
 
         pub fn deinit(array: Self, allocator: mem.Allocator, node_pool: ?*NodePool) void {
             for (array.nodes[0..array.node_count]) |node| {
-                node_pool.?.release(@ptrCast(NodePool.Node, node.?));
+                node_pool.?.release(
+                    @ptrCast(NodePool.Node, @alignCast(NodePool.node_alignment, node.?)),
+                );
             }
             allocator.free(array.nodes);
             allocator.free(array.indexes);
@@ -436,7 +438,9 @@ pub fn SegmentedArray(
             assert(node < array.node_count);
             assert(array.count(node) == 0);
 
-            node_pool.release(@ptrCast(NodePool.Node, array.nodes[node].?));
+            node_pool.release(
+                @ptrCast(NodePool.Node, @alignCast(NodePool.node_alignment, array.nodes[node].?)),
+            );
 
             assert(node <= array.node_count - 1);
             if (node < array.node_count - 1) {
@@ -692,7 +696,8 @@ fn TestContext(
 
         const NodePool = @import("node_pool.zig").NodePool;
 
-        const TestPool = NodePool(node_size, @alignOf(T));
+        // Test overaligned nodes to catch compile errors for missing @alignCast()
+        const TestPool = NodePool(node_size, 2 * @alignOf(T));
         const TestArray = SegmentedArray(T, TestPool, element_count_max);
 
         random: std.rand.Random,

@@ -4,11 +4,12 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
-pub fn NodePool(comptime _node_size: u32, comptime node_alignment: u13) type {
+pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
     return struct {
         const Self = @This();
 
         pub const node_size = _node_size;
+        pub const node_alignment = _node_alignment;
         pub const Node = *align(node_alignment) [node_size]u8;
 
         comptime {
