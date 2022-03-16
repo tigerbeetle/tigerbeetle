@@ -147,7 +147,7 @@ pub fn ManifestLevel(
             assert(level.keys.len() == level.tables.len());
 
             {
-                level.root_keys_array = undefined;
+                mem.set(Key, level.root_keys_array, undefined);
                 var key_node: u32 = 0;
                 while (key_node < level.keys.node_count) : (key_node += 1) {
                     level.root_keys_array[key_node] = level.keys.node_last_element(key_node);
@@ -163,7 +163,7 @@ pub fn ManifestLevel(
             }
 
             {
-                level.root_table_nodes_array = undefined;
+                mem.set(u32, level.root_table_nodes_array, undefined);
                 var key_node: u32 = 0;
                 var table_node: u32 = 0;
                 while (key_node < level.keys.node_count) : (key_node += 1) {
