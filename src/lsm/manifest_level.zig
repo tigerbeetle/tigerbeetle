@@ -283,11 +283,12 @@ pub fn ManifestLevel(
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 inner: while (it.next()) |table| : (absolute_index += 1) {
                     if (table.snapshot_max <= snapshot_max) {
+                        const table_key_max = table.key_max;
                         level.keys.remove_elements(node_pool, absolute_index, 1);
                         level.tables.remove_elements(node_pool, absolute_index, 1);
                         removed += 1;
 
-                        switch (compare_keys(table.key_max, key_max)) {
+                        switch (compare_keys(table_key_max, key_max)) {
                             .lt => break :inner,
                             .eq => break :outer,
                             // We require the key_min/key_max to be exact, so the last table
