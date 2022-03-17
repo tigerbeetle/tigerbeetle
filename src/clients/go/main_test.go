@@ -99,22 +99,16 @@ func toU128(value string) *types.Uint128 {
 func TestClient(s *testing.T) {
 	tbContainer, err := setupTigerBeetle(context.Background())
 	addresses := []string{tbContainer.URI}
-	client, err := NewClient(TIGERBEETLE_CLUSTER_ID, addresses)
+	maxConcurrency := uint(32)
+	client, err := NewClient(TIGERBEETLE_CLUSTER_ID, addresses, maxConcurrency)
 	if err != nil {
 		s.Fatal(err)
 	}
 
 	s.Cleanup(func() {
-		client.Deinit()
+		client.Close()
 		os.RemoveAll(tbContainer.DataDir)
 	})
-
-	go func() {
-		tick := time.Tick(20 * time.Millisecond)
-		for range tick {
-			client.Tick()
-		}
-	}()
 
 	accountA := types.Account{
 		ID:   *toU128("a"),

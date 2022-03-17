@@ -1,455 +1,320 @@
 package tigerbeetle_go
 
 /*
-#cgo LDFLAGS: -L./ -lclient_c
+#cgo LDFLAGS: -L. -ltb_client
 
-#include <stdint.h>
 #include <stdlib.h>
-#include "./internal/client_c/client.h"
+#include <string.h>
+#include "./internal/src/c/tb_client.h"
 
-void onResult(void* const user_data, uint8_t error, uint8_t operation, uint8_t* const results, const uint32_t results_length);
+typedef const uint8_t* tb_result_bytes_t;
+void onGoPacketCompletion(
+	uintptr_t ctx,
+	tb_client_t client,
+	tb_packet_t* packet,
+	tb_result_bytes_t result_ptr,
+	uint32_t result_len
+);
 */
 import "C"
 import (
-	"bytes"
-	"encoding/binary"
-	"errors"
-	"fmt"
-	"strings"
-	"sync"
 	"unsafe"
-
-	tberrors "github.com/coilhq/tigerbeetle_go/pkg/errors"
+	"strings"
 	"github.com/coilhq/tigerbeetle_go/pkg/types"
+	"github.com/coilhq/tigerbeetle_go/pkg/errors"
 )
 
-// Go may only pass a pointer to C provided that it does not point to memory that
-// contains Go pointers. https://pkg.go.dev/cmd/cgo#hdr-Passing_pointers.
-// We therefore keep a registry of user data here that can be accessed when we
-// receive a response from the C client.
-var userDataMap map[uint32]*UserData = make(map[uint32]*UserData)
-var userDataIndex uint32 = 0
+///////////////////////////////////////////////////////////////
 
-// We acquire a lock when accessing the userDataMap.
-var mutex sync.Mutex
-
-//export onResult
-func onResult(user_data_raw *C.void, error uint8, operation uint8, results *uint8, results_length uint32) {
-	index := *(*uint32)((unsafe.Pointer)(user_data_raw))
-	userData := getUserData(index)
-	cb := userData.Callback
-	ctx := userData.Ctx
-
-	// copy results as memory lifetime is not guaranteed.
-	result_slice := unsafe.Slice(results, results_length)
-	ret := make([]byte, results_length)
-	r := bytes.NewReader(result_slice)
-	err := binary.Read(r, binary.LittleEndian, &ret)
-	if err != nil {
-		fmt.Println("onResult: binary.Read failed:", err)
-	}
-
-	cb(ctx, err, types.Operation(operation), ret)
-}
-
-type UserData struct {
-	Ctx      interface{}
-	Callback ResultsCallback
-}
-
-type ResultsCallback func(ctx interface{}, err error, operation types.Operation, results []byte)
 type Client interface {
-	CreateAccounts(batch []types.Account) ([]types.EventResult, error)
-	LookupAccounts(batch []types.Uint128) ([]types.Account, error)
-	CreateTransfers(batch []types.Transfer) ([]types.EventResult, error)
-	CommitTransfers(batch []types.Commit) ([]types.EventResult, error)
-	LookupTransfers(batch []types.Uint128) ([]types.Transfer, error)
-	Request(userCtx interface{}, callback ResultsCallback, operation types.Operation, batch []byte) error
-	Tick()
-	Deinit()
+	CreateAccounts(accounts []types.Account) ([]types.EventResult, error)
+	CreateTransfers(transfers []types.Transfer) ([]types.EventResult, error)
+	CommitTransfers(commits []types.Commit) ([]types.EventResult, error)
+	LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
+	LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
+	Close()
 }
 
-type client struct {
-	ctx *C.TB_Context
+type request struct {
+	packet *C.tb_packet_t
+	result unsafe.Pointer
+	ready chan struct{}
 }
 
-func NewClient(clusterID uint32, addresses []string) (Client, error) {
-	tbCtx := &C.TB_Context{}
+type c_client struct {
+	tb_client C.tb_client_t
+	max_requests uint32
+	requests chan *request
+}
 
+func NewClient(
+	clusterID uint32, 
+	addresses []string, 
+	maxConcurrency uint,
+) (Client, error) {
+	// Cap the maximum amount of packets
+	if maxConcurrency > 4096 {
+		maxConcurrency = 4096
+	}
+	
+	// Allocate a cstring of the addresses joined with ","
 	addresses_raw := strings.Join(addresses[:], ",")
-	cstring := C.CString(addresses_raw)
-	defer C.free(unsafe.Pointer(cstring))
+	c_addresses := C.CString(addresses_raw)
+	defer C.free(unsafe.Pointer(c_addresses))
 
-	err := C.init(tbCtx, C.uint32_t(clusterID), cstring, C.uint32_t(len(addresses_raw)))
-	if err != 0 {
-		return nil, errors.New("Failed to create client.")
-	}
+	var tb_client C.tb_client_t
+	var packets C.tb_packet_list_t
 
-	return &client{ctx: tbCtx}, nil
-}
-
-// Raw request method based on callbacks for flexibility.
-func (s *client) Request(userCtx interface{}, callback ResultsCallback, operation types.Operation, batch []byte) error {
-	userData := &UserData{
-		Ctx:      userCtx,
-		Callback: callback,
-	}
-	index := storeUserData(userData)
-
-	cErr := C.request(
-		s.ctx,
-		unsafe.Pointer(&index),
-		(C.results_callback)(C.onResult),
-		(C.uchar)(operation),
-		(*C.uchar)(&batch[0]),
-		(C.uint32_t)(len(batch)),
+	// Create the tb_client
+	status := C.tb_client_init(
+		&tb_client,
+		&packets,
+		C.uint32_t(clusterID),
+		c_addresses,
+		C.uint32_t(len(addresses_raw)),
+		C.uint32_t(maxConcurrency),
+		C.uintptr_t(0), // on_completion_ctx
+		(*[0]byte)(C.onGoPacketCompletion),
 	)
-	if cErr != 0 {
-		return tberrors.ErrorCast(int(cErr), "Failed to create accounts")
-	}
 
-	return nil
-}
-
-func (s *client) Tick() {
-	C.tick(s.ctx)
-}
-
-func (s *client) Deinit() {
-	C.deinit(s.ctx)
-}
-
-func storeUserData(userData *UserData) uint32 {
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	userDataIndex++
-	userDataMap[userDataIndex] = userData
-
-	return userDataIndex
-}
-
-func getUserData(index uint32) *UserData {
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	userData, found := userDataMap[index]
-	if !found {
-		return nil
-	}
-
-	delete(userDataMap, index)
-
-	return userData
-}
-
-// From here on are wrappers that provide typings and use channels to block until the reponse is received from the
-// server.
-
-type resultsOrError struct {
-	results []types.EventResult
-	err     error
-}
-
-func onCreateAccounts(ctx interface{}, err error, operation types.Operation, results []byte) {
-	responseChannel := ctx.(chan resultsOrError)
-	defer close(responseChannel)
-
-	if operation != types.CREATE_ACCOUNT || len(results)%8 != 0 {
-		responseChannel <- resultsOrError{
-			results: nil,
-			err:     errors.New("Did not receive a create account result."),
-		}
-		return
-	}
-
-	// TODO: convert to EventResults without copying
-	events := len(results) / 8 // event result { index: u32, code: u32 }
-	ret := make([]types.EventResult, events)
-	r := bytes.NewReader(results)
-	err = binary.Read(r, binary.LittleEndian, &ret)
-	if err != nil {
-		responseChannel <- resultsOrError{
-			results: nil,
-			err:     err,
-		}
-		return
-	}
-
-	responseChannel <- resultsOrError{
-		results: ret,
-		err:     nil,
-	}
-}
-
-func (s *client) CreateAccounts(batch []types.Account) ([]types.EventResult, error) {
-	// TODO: convert to []byte without copying
-	buf := new(bytes.Buffer)
-	for _, account := range batch {
-		err := binary.Write(buf, binary.LittleEndian, account)
-		if err != nil {
-			return nil, err
+	if status != C.TB_STATUS_SUCCESS {
+		switch (status) {
+		case C.TB_STATUS_UNEXPECTED:
+			return nil, errors.ErrUnexpected{}
+		case C.TB_STATUS_OUT_OF_MEMORY:
+			return nil, errors.ErrOutOfMemory{}
+		case C.TB_STATUS_INVALID_ADDRESS:
+			return nil, errors.ErrInvalidAddress{}
+		case C.TB_STATUS_SYSTEM_RESOURCES:
+			return nil, errors.ErrSystemResources{}
+		case C.TB_STATUS_NETWORK_SUBSYSTEM:
+			return nil, errors.ErrNetworkSubsystem{}
+		default:
+			panic("tb_client_init(): invalid error code")
 		}
 	}
 
-	responseChannel := make(chan resultsOrError)
-
-	err := s.Request(responseChannel, onCreateAccounts, types.CREATE_ACCOUNT, buf.Bytes())
-	if err != nil {
-		return nil, err
+	c := &c_client{
+		tb_client: tb_client,
+		max_requests: maxConcurrency,
+		requests: make(chan *request, int(maxConcurrency)),
 	}
 
-	for {
-		select {
-		case res := <-responseChannel:
-			if res.err != nil {
-				return nil, res.err
-			}
-			return res.results, nil
+	// Fill the client requests with available packets we received on creation
+	for packet := packets.head; packet != nil; packet = packet.next {
+		c.requests <- &request{
+			packet: packet,
+			ready: make(chan struct{}),
 		}
 	}
+	
+	return c, nil
 }
 
-type accountLookupsOrError struct {
-	accounts []types.Account
-	err      error
+func (c *c_client) Close() {
+	// Consume all requests available (waits for pending ones to complete)
+	for i := 0; i < int(c.max_requests); i++ {
+		req := <- c.requests
+		_ = req
+	}
+
+	// Now that there can be no active requests,
+	// destroy the tb_client and ensure no future requests can procceed
+	C.tb_client_deinit(c.tb_client)
+	close(c.requests)
 }
 
-func onAccountLookupResults(ctx interface{}, err error, operation types.Operation, results []byte) {
-	responseChannel := ctx.(chan accountLookupsOrError)
-	defer close(responseChannel)
-
-	if operation != types.ACCOUNT_LOOKUP || len(results)%128 != 0 {
-		responseChannel <- accountLookupsOrError{
-			accounts: nil,
-			err:      errors.New("Did not receive account lookup results."),
-		}
-		return
+func getEventSize(op C.TB_OPERATION) uintptr {
+	switch (op) {
+	case C.TB_OP_CREATE_ACCOUNTS:
+		return unsafe.Sizeof(Account{})
+	case C.TB_OP_CREATE_TRANSFERS:
+		return unsafe.Sizeof(Transfer{})
+	case C.TB_OP_COMMIT_TRANSFERS:
+		return unsafe.Sizeof(Commit{})
+	case C.TB_OP_LOOKUP_ACCOUNTS:
+		return unsafe.Sizeof(Uint128{})
+	case C.TB_OP_LOOKUP_TRANSFERS:
+		return unsafe.Sizeof(Uint128{})
 	}
-
-	// TODO: convert to Account without copying
-	accounts := make([]types.Account, len(results)/128)
-	r := bytes.NewReader(results)
-	err = binary.Read(r, binary.LittleEndian, &accounts)
-	if err != nil {
-		responseChannel <- accountLookupsOrError{
-			accounts: nil,
-			err:      err,
-		}
-		return
-	}
-
-	responseChannel <- accountLookupsOrError{
-		accounts: accounts,
-		err:      nil,
-	}
+	panic("invalid tigerbeetle operation")
 }
 
-func (s *client) LookupAccounts(batch []types.Uint128) ([]types.Account, error) {
-	// TODO: convert to []byte without copying
-	buf := new(bytes.Buffer)
-	for _, accountID := range batch {
-		err := binary.Write(buf, binary.LittleEndian, accountID)
-		if err != nil {
-			return nil, err
-		}
+func getResultSize(op C.TB_OPERATION) uintptr {
+	switch (op) {
+	case C.TB_OP_CREATE_ACCOUNTS:
+		return unsafe.Sizeof(CreateAccountsResult{})
+	case C.TB_OP_CREATE_TRANSFERS:
+		return unsafe.Sizeof(CreateTransfersResult{})
+	case C.TB_OP_COMMIT_TRANSFERS:
+		return unsafe.Sizeof(CommitTransfersResult{})
+	case C.TB_OP_LOOKUP_ACCOUNTS:
+		return unsafe.Sizeof(Account{})
+	case C.TB_OP_LOOKUP_TRANSFERS:
+		return unsafe.Sizeof(Transfer{})
 	}
-
-	responseChannel := make(chan accountLookupsOrError)
-
-	err := s.Request(responseChannel, onAccountLookupResults, types.ACCOUNT_LOOKUP, buf.Bytes())
-	if err != nil {
-		return nil, err
-	}
-
-	for {
-		select {
-		case res := <-responseChannel:
-			if res.err != nil {
-				return nil, res.err
-			}
-			return res.accounts, nil
-		}
-	}
+	panic("invalid tigerbeetle operation")
 }
 
-func onCreateTransfer(ctx interface{}, err error, operation types.Operation, results []byte) {
-	responseChannel := ctx.(chan resultsOrError)
-	defer close(responseChannel)
+func (c *c_client) doRequest(
+	op C.TB_OPERATION,
+	count int,
+	data unsafe.Pointer,
+	result unsafe.Pointer,
+) (int, error) {
+	if count == 0 {
+		return 0, errors.ErrEmptyBatch{}
+	}
 
-	if operation != types.CREATE_TRANSFER || len(results)%8 != 0 {
-		responseChannel <- resultsOrError{
-			results: nil,
-			err:     errors.New("Did not receive a create transfer result."),
+	// Get (and possibly wait) for a request to use.
+	// Returns false if the client was Close()'d.
+	req, isOpen := <- c.requests
+	if !isOpen {
+		return 0, errors.ErrClientClosed{}
+	}
+
+	// Setup the packet.
+	req.packet.next = nil
+	req.packet.user_data = C.uintptr_t((uintptr)((unsafe.Pointer)(req)))
+	req.packet.operation = C.uint8_t(op)
+	req.packet.status = C.TB_PACKET_OK
+	req.packet.data_size = C.uint32_t(count * int(getEventSize(op)))
+	req.packet.data = data
+
+	// Set where to write the result bytes.
+	req.result = result
+
+	// Submit the request.
+	var list C.tb_packet_list_t
+	list.head = req.packet
+	list.tail = req.packet
+	C.tb_client_submit(c.tb_client, &list)
+
+	// Wait for the request to complete.
+	<- req.ready
+	status := C.TB_PACKET_STATUS(req.packet.status)
+	wrote := int(req.packet.data_size)
+
+	// Free the request for other goroutines to use.
+	c.requests <- req
+	
+	// Handle packet error
+	if status != C.TB_PACKET_OK {
+		switch (status) {
+		case C.TB_PACKET_TOO_MUCH_DATA:
+			return 0, errors.ErrMaximumBatchSizeExceeded{}
+		case C.TB_PACKET_INVALID_OPERATION:
+			panic("unreachable") // we control what C.TB_OPERATION is given
+		case C.TB_PACKET_INVALID_DATA_SIZE:
+			panic("unreachable") // we contorl what type of data is given
+		default:
+			panic("tb_client_submit(): returned packet with invalid status")
 		}
-		return
 	}
 
-	// TODO: convert to EventResults without copying
-	events := len(results) / 8 // event result { index: u32, code: u32 }
-	ret := make([]types.EventResult, events)
-	r := bytes.NewReader(results)
-	err = binary.Read(r, binary.LittleEndian, &ret)
-	if err != nil {
-		responseChannel <- resultsOrError{
-			results: nil,
-			err:     err,
-		}
-		return
-	}
-
-	responseChannel <- resultsOrError{
-		results: ret,
-		err:     nil,
-	}
+	// Return the amount of bytes written into result
+	return wrote, nil
 }
 
-func (s *client) CreateTransfers(batch []types.Transfer) ([]types.EventResult, error) {
-	// TODO: convert to []byte without copying
-	buf := new(bytes.Buffer)
-	for _, transfer := range batch {
-		err := binary.Write(buf, binary.LittleEndian, transfer)
-		if err != nil {
-			return nil, err
+//export onGoPacketCompletion
+func onGoPacketCompletion(
+	_context C.uintptr_t,
+	client C.tb_client_t,
+	packet *C.tb_packet_t,
+	result_ptr C.tb_result_bytes_t,
+	result_len C.uint32_t,
+) {
+	// Get the request from the packet user data
+	req := (*request)((unsafe.Pointer)((uintptr)(packet.user_data)))
+	op := C.TB_OPERATION(packet.operation)
+
+	var wrote C.uint32_t
+	if result_len > 0 && result_ptr != nil {
+		// Make sure the completion handler is giving us valid data
+		resultSize := C.uint32_t(getResultSize(op))
+		if result_len % resultSize != 0 {
+			panic("invalid result_len:  misaligned for the event")
+		}
+
+		// Make sure the amount of results at least matches the amount of requests
+		count := packet.data_size / C.uint32_t(getEventSize(op))
+		if count * resultSize < result_len {
+			panic("invalid result_len: implied multiple results per event")
+		}
+		
+		// Write the result data into the request's result
+		if req.result != nil {
+			wrote = result_len
+			C.memcpy(req.result, unsafe.Pointer(result_ptr), C.size_t(result_len))
 		}
 	}
 
-	responseChannel := make(chan resultsOrError)
+	// Signal to the goroutine which owns this request that it's ready
+	req.packet.data_size = wrote
+	req.ready <- struct{}{}
+}
 
-	err := s.Request(responseChannel, onCreateTransfer, types.CREATE_TRANSFER, buf.Bytes())
+func (c *c_client) doCreate(
+	op C.TB_OPERATION,
+	data unsafe.Pointer,
+	count int,
+) ([]types.EventResult, error) {
+	results := make([]types.EventResult, count)
+	resultData = unsafe.Pointer(&results[0])
+
+	wrote, err := c.doRequest(op, count, data, resultData)
 	if err != nil {
 		return nil, err
 	}
 
-	for {
-		select {
-		case res := <-responseChannel:
-			if res.err != nil {
-				return nil, res.err
-			}
-			return res.results, nil
-		}
-	}
+	resultCount := wrote / int(unsafe.Sizeof(types.EventResult{}))
+	return results[0:resultCount], nil
 }
 
-func onCommitTransfer(ctx interface{}, err error, operation types.Operation, results []byte) {
-	responseChannel := ctx.(chan resultsOrError)
-	defer close(responseChannel)
-
-	if operation != types.COMMIT_TRANSFER || len(results)%8 != 0 {
-		responseChannel <- resultsOrError{
-			results: nil,
-			err:     errors.New("Did not receive a commit transfer result."),
-		}
-		return
-	}
-
-	// TODO: convert to EventResults without copying
-	events := len(results) / 8 // event result { index: u32, code: u32 }
-	ret := make([]types.EventResult, events)
-	r := bytes.NewReader(results)
-	err = binary.Read(r, binary.LittleEndian, &ret)
-	if err != nil {
-		responseChannel <- resultsOrError{
-			results: nil,
-			err:     err,
-		}
-		return
-	}
-
-	responseChannel <- resultsOrError{
-		results: ret,
-		err:     nil,
-	}
+func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.EventResult, error)  {
+	return c.doCreate(C.TB_OP_CREATE_ACCOUNTS, accounts, len(accounts))
 }
 
-func (s *client) CommitTransfers(batch []types.Commit) ([]types.EventResult, error) {
-	// TODO: convert to []byte without copying
-	buf := new(bytes.Buffer)
-	for _, commit := range batch {
-		err := binary.Write(buf, binary.LittleEndian, commit)
-		if err != nil {
-			return nil, err
-		}
-	}
+func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.EventResult, error) {
+	return c.doCreate(C.TB_OP_CREATE_TRANSFERS, transfers, len(transfers))
+}
 
-	responseChannel := make(chan resultsOrError)
+func (c *c_client) CommitTransfers(commits []types.Commit) ([]types.EventResult, error) {
+	return c.doCreate(C.TB_OP_COMMIT_TRANSFERS, commits, len(commits))
+}
 
-	err := s.Request(responseChannel, onCommitTransfer, types.COMMIT_TRANSFER, buf.Bytes())
+func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error) {
+	count := len(accountIDs)
+	results := make([]types.Account, count)
+	wrote, err := c.doRequest(
+		C.TB_OP_LOOKUP_ACCOUNTS,
+		count,
+		unsafe.Pointer(&accountIDs[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
 	if err != nil {
 		return nil, err
 	}
 
-	for {
-		select {
-		case res := <-responseChannel:
-			if res.err != nil {
-				return nil, res.err
-			}
-			return res.results, nil
-		}
-	}
+	resultCount := wrote / int(unsafe.Sizeof(types.Account{}))
+	return results[0:resultCount], nil
 }
 
-type transferLookupsOrError struct {
-	transfers []types.Transfer
-	err       error
-}
+func (c *c_client) LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error) {
+	count := len(transferIDs)
+	results := make([]types.Transfer, count)
+	wrote, err := c.doRequest(
+		C.TB_OP_LOOKUP_TRANSFERS,
+		count,
+		unsafe.Pointer(&transferIDs[0]),
+		unsafe.Pointer(&results[0]),
+	)
 
-func onTransferLookup(ctx interface{}, err error, operation types.Operation, results []byte) {
-	responseChannel := ctx.(chan transferLookupsOrError)
-	defer close(responseChannel)
-
-	if operation != types.TRANSFER_LOOKUP || len(results)%128 != 0 {
-		responseChannel <- transferLookupsOrError{
-			transfers: nil,
-			err:       errors.New("Did not receive transfer lookup results."),
-		}
-		return
-	}
-
-	// TODO: convert to Account without copying
-	transfers := make([]types.Transfer, len(results)/128)
-	r := bytes.NewReader(results)
-	err = binary.Read(r, binary.LittleEndian, &transfers)
-	if err != nil {
-		responseChannel <- transferLookupsOrError{
-			transfers: nil,
-			err:       err,
-		}
-		return
-	}
-
-	responseChannel <- transferLookupsOrError{
-		transfers: transfers,
-		err:       nil,
-	}
-}
-
-func (s *client) LookupTransfers(batch []types.Uint128) ([]types.Transfer, error) {
-	// TODO: convert to []byte without copying
-	buf := new(bytes.Buffer)
-	for _, transferID := range batch {
-		err := binary.Write(buf, binary.LittleEndian, transferID)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	responseChannel := make(chan transferLookupsOrError)
-
-	err := s.Request(responseChannel, onTransferLookup, types.TRANSFER_LOOKUP, buf.Bytes())
 	if err != nil {
 		return nil, err
 	}
 
-	for {
-		select {
-		case res := <-responseChannel:
-			if res.err != nil {
-				return nil, res.err
-			}
-			return res.transfers, nil
-		}
-	}
+	resultCount := wrote / int(unsafe.Sizeof(types.Transfer{}))
+	return results[0:resultCount], nil
 }
