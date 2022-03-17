@@ -18,6 +18,7 @@ void onGoPacketCompletion(
 */
 import "C"
 import (
+	"log"
 	"unsafe"
 	"strings"
 	"errors"
@@ -293,5 +294,21 @@ func (c *c_client) CreateAccounts(accounts []Account) ([]CreateAccountsResult, e
 
 
 func main() {
+	cluster := uint32(0)
+	addresses := []string{"127.0.0.1:3001"}
 
+	client, err := NewClient(cluster, addresses, 32)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer client.Close()
+
+	_, err = client.CreateAccounts([]Account{
+		Account{},
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
 }
