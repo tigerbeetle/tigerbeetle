@@ -5,9 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef struct tb_uint128_t {
-    uint8_t __bytes[16];
-} tb_uint128_t;
+typedef uint8_t tb_uint128_t[16];
+
 
 typedef enum TB_ACCOUNT_FLAGS {
     TB_ACCOUNT_LINKED = 1 << 0,
