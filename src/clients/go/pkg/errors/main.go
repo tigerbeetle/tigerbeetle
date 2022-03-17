@@ -1,7 +1,5 @@
 package errors
 
-import "errors"
-
 type ErrUnexpected struct {}
 
 func (s ErrUnexpected) Error() string { return "Unexpected internal error." }
