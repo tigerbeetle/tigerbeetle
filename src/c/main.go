@@ -18,6 +18,7 @@ void onGoPacketCompletion(
 */
 import "C"
 import (
+	"fmt"
 	"log"
 	"unsafe"
 	"strings"
@@ -249,11 +250,11 @@ func onGoPacketCompletion(
 	op := C.TB_OPERATION(packet.operation)
 
 	var wrote C.uint32_t
-	if result_ptr != nil {
+	if result_len > 0 && result_ptr != nil {
 		// Make sure the completion handler is giving us valid data
 		resultSize := C.uint32_t(getResultSize(op))
-		if result_len == 0 || (result_len % resultSize != 0) {
-			panic("invalid result_len: zero or misaligned for the event")
+		if result_len % resultSize != 0 {
+			panic("invalid result_len:  misaligned for the event")
 		}
 
 		// Make sure the amount of results at least matches the amount of requests
@@ -301,12 +302,50 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	defer client.Close()
 
-	_, err = client.CreateAccounts([]Account{
-		Account{},
+	toID := func(id uint32) C.tb_uint128_t {
+		var tb_id C.tb_uint128_t
+		tb_id[0] = C.uint8_t(id >> 0)
+		tb_id[1] = C.uint8_t(id >> 8)
+		tb_id[2] = C.uint8_t(id >> 16)
+		tb_id[3] = C.uint8_t(id >> 24)
+		return tb_id
+	}
+
+	results, err := client.CreateAccounts([]Account{
+		Account{
+			id: toID(42),
+			user_data: toID(69),
+			reserved: [48]C.uint8_t{},
+			unit: 1,
+			code: 718,
+			flags: 0,
+			timestamp: 0,
+		},
+		Account{
+			id: toID(1337),
+			user_data: toID(69),
+			reserved: [48]C.uint8_t{},
+			unit: 1,
+			code: 718,
+			flags: 0,
+			timestamp: 0,
+		},
+		Account{
+			id: toID(1000),
+			user_data: toID(69),
+			reserved: [48]C.uint8_t{},
+			unit: 1,
+			code: 718,
+			flags: 0,
+			timestamp: 0,
+		},
 	})
+
+	for _, r := range results {
+		fmt.Println("result error:", int(r.index), r.result)
+	}
 
 	if err != nil {
 		log.Fatal(err)
