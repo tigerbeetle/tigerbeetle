@@ -305,8 +305,13 @@ pub fn ManifestLevel(
                 } else {
                     unreachable;
                 }
+            } else {
+                unreachable;
             }
             assert(removed == cardinality);
+            // The loop will never terminate naturally, only through the `break :outer`, which
+            // means the +1 here is required as the continue safety_counter += 1 continue
+            // expression isn't run on the last iteration of the loop.
             assert(safety_counter + 1 == cardinality);
 
             assert(level.keys.len() == level.tables.len());
