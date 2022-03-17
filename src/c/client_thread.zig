@@ -222,6 +222,8 @@ pub fn ClientThread(
             };
             errdefer self.client.deinit();
 
+            self.message_bus.set_on_message(*Client, &self.client, Client.on_message);
+
             self.retry = .{};
             self.submitted = .{};
             self.available_messages = message_pool.messages_max_client;
@@ -318,7 +320,6 @@ pub fn ClientThread(
 
             // Make sure the packet.data wouldn't overflow a message.
             const writable = message.buffer[@sizeOf(Header)..];
-            assert(writable.len <= config.message_size_max);
             if (readable.len > writable.len) {
                 return self.on_complete(packet, message, error.TooMuchData);
             }
@@ -491,7 +492,7 @@ const Signal = struct {
         
         // Wait for the connect_socket to connect to the server_socket.
         self.accept_socket = IO.INVALID_SOCKET;
-        while (!do_connect.is_connected) {
+        while (!do_connect.is_connected or self.accept_socket == IO.INVALID_SOCKET) {
             self.io.tick() catch |err| {
                 log.err("failed to tick IO when setting up signal: {}", .{err});
                 return error.Unexpected;
