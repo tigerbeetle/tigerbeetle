@@ -1,94 +1,21 @@
 package tigerbeetle_go
 
 import (
-	"context"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"os"
+	"bytes"
+	"os/exec"
 	"testing"
-	"time"
 
 	"github.com/coilhq/tigerbeetle_go/pkg/types"
 	"github.com/stretchr/testify/assert"
-	testcontainers "github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 const (
 	TIGERBEETLE_PORT              = "3000"
 	TIGERBEETLE_CLUSTER_ID uint32 = 0
-	TIGERBEETLE_DIR               = "/var/lib/tigerbeetle"
 )
-
-type TigerBeetleContainer struct {
-	testcontainers.Container
-	URI     string
-	DataDir string
-}
-
-func setupTigerBeetle(ctx context.Context) (*TigerBeetleContainer, error) {
-	tigerbeetleImage := "tigerbeetle"
-
-	dataDir, err := ioutil.TempDir("", "tb")
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Println("Initializing TigerBeetle temporary data dir:" + dataDir)
-	initReq := testcontainers.ContainerRequest{
-		Image:        tigerbeetleImage, // TODO: host image
-		ExposedPorts: []string{TIGERBEETLE_PORT},
-		WaitingFor:   wait.ForLog("info: initialized data file").WithPollInterval(1 * time.Second),
-		BindMounts: map[string]string{
-			TIGERBEETLE_DIR: dataDir,
-		},
-		Cmd: []string{
-			"init",
-			fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID),
-			"--replica=0",
-			"--directory=" + TIGERBEETLE_DIR,
-		},
-	}
-	_, err = testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: initReq,
-		Started:          true,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Println("Starting TigerBeetle test container.")
-	req := testcontainers.ContainerRequest{
-		Image:        tigerbeetleImage, // TODO: host image
-		ExposedPorts: []string{TIGERBEETLE_PORT},
-		BindMounts: map[string]string{
-			TIGERBEETLE_DIR: dataDir,
-		},
-		WaitingFor: wait.ForLog("info: cluster=0 replica=0: listening on 0.0.0.0:3000").WithPollInterval(1 * time.Second),
-		Cmd: []string{
-			"start",
-			fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID),
-			"--replica=0",
-			"--addresses=0.0.0.0:" + TIGERBEETLE_PORT,
-			"--directory=" + TIGERBEETLE_DIR,
-		},
-	}
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	mappedPort, err := container.MappedPort(ctx, TIGERBEETLE_PORT)
-	if err != nil {
-		return nil, err
-	}
-
-	return &TigerBeetleContainer{Container: container, URI: fmt.Sprintf("0.0.0.0:%s", mappedPort.Port()), DataDir: dataDir}, nil
-}
 
 func toU128(value string) *types.Uint128 {
 	src := []byte(value)
@@ -99,12 +26,39 @@ func toU128(value string) *types.Uint128 {
 }
 
 func TestClient(s *testing.T) {
-	tbContainer, err := setupTigerBeetle(context.Background())
-	if err != nil {
+	replicaArg := "--replica=0"
+	directoryArg := "--directory=."
+	addressArg := "--addresses=" + TIGERBEETLE_PORT
+	clusterArg := fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID)
+
+	fileName := "./cluster_0000000000_replica_000.tigerbeetle"
+	_ = os.Remove(fileName)
+
+	tbInit := exec.Command("./tb", "init", clusterArg, replicaArg, directoryArg)
+	var tbErr bytes.Buffer
+	tbInit.Stdout = &tbErr
+	tbInit.Stderr = &tbErr
+	if err := tbInit.Run(); err != nil {
+		fmt.Println(fmt.Sprint(err) + ": " + tbErr.String())
 		s.Fatal(err)
 	}
 
-	addresses := []string{tbContainer.URI}
+	s.Cleanup(func() {
+		_ = os.Remove(fileName)
+	})
+
+	tbStart := exec.Command("./tb", "start", clusterArg, replicaArg, addressArg, directoryArg)
+	if err := tbStart.Start(); err != nil {
+		s.Fatal(err)
+	}
+
+	s.Cleanup(func() {
+		if err := tbStart.Process.Kill(); err != nil {
+			s.Fatal(err)
+		}
+	})
+
+	addresses := []string{"127.0.0.1:" + TIGERBEETLE_PORT}
 	maxConcurrency := uint(32)
 	client, err := NewClient(TIGERBEETLE_CLUSTER_ID, addresses, maxConcurrency)
 	if err != nil {
@@ -113,7 +67,6 @@ func TestClient(s *testing.T) {
 
 	s.Cleanup(func() {
 		client.Close()
-		os.RemoveAll(tbContainer.DataDir)
 	})
 
 	accountA := types.Account{
