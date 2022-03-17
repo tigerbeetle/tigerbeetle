@@ -59,10 +59,10 @@ const account = {
     unit: 1,   // u16, unit of value
     code: 718, // u16, a chart of accounts code describing the type of account (e.g. clearing, settlement)
     flags: 0,  // u32
-    debits_reserved: 0n,  // u64
-    debits_accepted: 0n,  // u64
-    credits_reserved: 0n, // u64
-    credits_accepted: 0n, // u64
+    debits_pending: 0n,  // u64
+    debits_posted: 0n,  // u64
+    credits_pending: 0n, // u64
+    credits_posted: 0n, // u64
     timestamp: 0n, // u64, Reserved: This will be set by the server.
 }
 
@@ -87,7 +87,7 @@ The `flags` on an account provide a way for you to enforce policies by toggling 
 |----------|----------------------------------|-----------------------------------------|
 | `linked` | `debits_must_not_exceed_credits` | `credits_must_not_exceed_debits` |
 
-The creation of an account can be linked to the successful creation of another by setting the `linked` flag (see [linked events](#linked-events)). By setting `debits_must_not_exceed_credits`, then any transfer such that `debits_accepted + debits_reserved + amount > credit_accepted` will fail. Similarly for `credits_must_not_exceed_debits`.
+The creation of an account can be linked to the successful creation of another by setting the `linked` flag (see [linked events](#linked-events)). By setting `debits_must_not_exceed_credits`, then any transfer such that `debits_posted + debits_pending + amount > credit_posted` will fail. Similarly for `credits_must_not_exceed_debits`.
 ```js
   enum CreateAccountFlags {
     linked = (1 << 0),
@@ -114,10 +114,10 @@ The `id` of the account is used for lookups. Only matched accounts are returned.
    *   unit: 1,
    *   code: 718,
    *   flags: 0,
-   *   debits_reserved: 0n,
-   *   debits_accepted: 0n,
-   *   credits_reserved: 0n,
-   *   credits_accepted: 0n,
+   *   debits_pending: 0n,
+   *   debits_posted: 0n,
+   *   credits_pending: 0n,
+   *   credits_posted: 0n,
    *   timestamp: 1623062009212508993n,
    * }]
    */
@@ -142,7 +142,7 @@ const transfer = {
 
 const errors = await client.createTransfers([transfer])
 ```
-Two-phase transfers are supported natively by toggling the appropriate flag. TigerBeetle will then adjust the `credits_reserved` and `debits_reserved` fields of the appropriate accounts. A corresponding commit transfer then needs to be sent to accept or reject the transfer.
+Two-phase transfers are supported natively by toggling the appropriate flag. TigerBeetle will then adjust the `credits_pending` and `debits_pending` fields of the appropriate accounts. A corresponding commit transfer then needs to be sent to accept or reject the transfer.
 | bit 0    | bit 1              | bit 2            |
 |----------|--------------------|------------------|
 | `linked` | `posting`          | `condition`      |
@@ -172,7 +172,7 @@ This is used to commit a two-phase transfer.
 |----------|----------|------------|
 | `linked` | `reject` | `preimage` |
 
-By default (`flags = 0`), it will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_reserved` and `credits_reserved` of the appropriate accounts and apply them to the `debits_accepted` and `credits_accepted` balances. If the `preimage` bit is set then TigerBeetle will look for it in the `reserved` field and validate it against the `condition` from the associated transfer. If this validation fails, or `reject` is set, then the changes to the `reserved` balances are atomically rolled back.
+By default (`flags = 0`), it will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_pending` and `credits_pending` of the appropriate accounts and apply them to the `debits_posted` and `credits_posted` balances. If the `preimage` bit is set then TigerBeetle will look for it in the `reserved` field and validate it against the `condition` from the associated transfer. If this validation fails, or `reject` is set, then the changes to the `reserved` balances are atomically rolled back.
 ```js
 const commit = {
     id: 1n,   // u128, must correspond to the transfer id

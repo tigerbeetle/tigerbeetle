@@ -1,12 +1,10 @@
 import assert from 'assert'
 import {
-  Commit,
   Account,
   createClient,
   Transfer,
   TransferFlags,
   CreateTransfersError,
-  CommitTransfersError,
   Operation
 } from '.'
 
@@ -35,10 +33,10 @@ const accountA: Account = {
   code: 0,
   flags: 0,
   unit: 1,
-  debits_accepted: 0n,
-  debits_reserved: 0n,
-  credits_accepted: 0n,
-  credits_reserved: 0n,
+  debits_posted: 0n,
+  debits_pending: 0n,
+  credits_posted: 0n,
+  credits_pending: 0n,
   timestamp: 0n,
 }
 
@@ -49,10 +47,10 @@ const accountB: Account = {
   code: 0,
   flags: 0,
   unit: 1,
-  debits_accepted: 0n,
-  debits_reserved: 0n,
-  credits_accepted: 0n,
-  credits_reserved: 0n,
+  debits_posted: 0n,
+  debits_pending: 0n,
+  credits_posted: 0n,
+  credits_pending: 0n,
   timestamp: 0n,
 }
 
@@ -68,24 +66,6 @@ const rawCreateTransfers = async (batch: Buffer): Promise<CreateTransfersError[]
 
       try {
         client.rawRequest(Operation.CREATE_TRANSFER, batch, callback)
-      } catch (error) {
-        reject(error)
-      }
-    })
-}
-
-// helper function to promisify the raw_request
-const rawCommitTransfers = async (batch: Buffer): Promise<CommitTransfersError[]> => {
-  return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CommitTransfersError[]) => {
-        if (error) {
-          reject(error)
-        }
-        resolve(results)
-      }
-
-      try {
-        client.rawRequest(Operation.COMMIT_TRANSFER, batch, callback)
       } catch (error) {
         reject(error)
       }
@@ -119,13 +99,6 @@ const encodeTransfer = (transfer: Transfer, offset: number, output: Buffer): voi
    output.writeBigUInt64LE(transfer.timestamp, offset + 120)
 }
 
-// This encoding function is only for this benchmark script.
-const encodeCommit = (commit: Commit, offset: number, output: Buffer): void => {
-  assert(offset + COMMIT_SIZE <= output.length)
-
-  output.writeBigUInt64LE(commit.id, offset)
-}
-
 const runBenchmarkRawReqeust = async () => {
   assert(
     MAX_TRANSFERS % MAX_REQUEST_BATCH_SIZE === 0,
@@ -151,7 +124,7 @@ const runBenchmarkRawReqeust = async () => {
           code: 0,
           reserved: Zeroed32Bytes,
           user_data: 0n,
-          flags: IS_TWO_PHASE_COMMIT ? TransferFlags.two_phase_commit : 0,
+          flags: IS_TWO_PHASE_COMMIT ? TransferFlags.pending : 0,
           amount: 1n,
           timeout: IS_TWO_PHASE_COMMIT ? BigInt(2e9) : 0n,
           timestamp: 0n,
@@ -161,16 +134,21 @@ const runBenchmarkRawReqeust = async () => {
       )
     
       if (IS_TWO_PHASE_COMMIT) {
-        encodeCommit(
+        encodeTransfer(
           {
             id: BigInt(count),
-            reserved: Buffer.alloc(32, 0),
+            debit_account_id: accountA.id,
+            credit_account_id: accountB.id,
             code: 0,
-            flags: 0,
+            reserved: Zeroed32Bytes,
+            user_data: 0n,
+            flags: TransferFlags.post_pending_transfer,
+            amount: 1n,
+            timeout: 0n,
             timestamp: 0n,
           },
           i * COMMIT_SIZE,
-          commitBatch 
+          commitBatch
         )
       }
     }
@@ -198,7 +176,7 @@ const runBenchmarkRawReqeust = async () => {
     }
 
     if (IS_TWO_PHASE_COMMIT) {
-      const commitResults = await rawCommitTransfers(commits[i])
+      const commitResults = await rawCreateTransfers(commits[i])
       assert(commitResults.length === 0)
 
       const ms3 = Date.now()
@@ -221,12 +199,12 @@ const runBenchmarkRawReqeust = async () => {
 const runBenchmark = async () => {
   console.log(`pre-allocating ${MAX_TRANSFERS} transfers and commits...`)
   const transfers: Transfer[][] = []
-  const commits: Commit[][] = []
+  const commits: Transfer[][] = []
 
   let count = 0
   while (count < MAX_TRANSFERS) {
     const transferBatch: Transfer[] = []
-    const commitBatch: Commit[] = []
+    const commitBatch: Transfer[] = []
     for (let i = 0; i < MAX_REQUEST_BATCH_SIZE; i++) {
       if (count === MAX_TRANSFERS) break
 
@@ -238,7 +216,7 @@ const runBenchmark = async () => {
         code: 0,
         reserved: Zeroed32Bytes,
         user_data: 0n,
-        flags: IS_TWO_PHASE_COMMIT ? TransferFlags.two_phase_commit : 0,
+        flags: IS_TWO_PHASE_COMMIT ? TransferFlags.pending : 0,
         amount: 1n,
         timeout: IS_TWO_PHASE_COMMIT ? BigInt(2e9) : 0n,
         timestamp: 0n,
@@ -247,9 +225,14 @@ const runBenchmark = async () => {
       if (IS_TWO_PHASE_COMMIT) {
         commitBatch.push({
           id: BigInt(count),
-          reserved: Buffer.alloc(32, 0),
+          debit_account_id: accountA.id,
+          credit_account_id: accountB.id,
           code: 0,
-          flags: 0,
+          reserved: Zeroed32Bytes,
+          user_data: 0n,
+          flags: IS_TWO_PHASE_COMMIT ? TransferFlags.post_pending_transfer : 0,
+          amount: 1n,
+          timeout: IS_TWO_PHASE_COMMIT ? BigInt(2e9) : 0n,
           timestamp: 0n,
         })
       }
@@ -278,7 +261,7 @@ const runBenchmark = async () => {
     }
 
     if (IS_TWO_PHASE_COMMIT) {
-      const commitResults = await client.commitTransfers(commits[i])
+      const commitResults = await client.createTransfers(commits[i])
       assert(commitResults.length === 0)
 
       const ms3 = Date.now()
@@ -303,8 +286,8 @@ const main = async () => {
   await client.createAccounts([accountA, accountB])
   const accountResults = await client.lookupAccounts([accountA.id, accountB.id])
   assert(accountResults.length === 2)
-  assert(accountResults[0].debits_accepted === 0n)
-  assert(accountResults[1].debits_accepted === 0n)
+  assert(accountResults[0].debits_posted === 0n)
+  assert(accountResults[1].debits_posted === 0n)
 
   const benchmark = IS_RAW_REQUEST ? await runBenchmarkRawReqeust() : await runBenchmark() 
   
@@ -315,8 +298,8 @@ const main = async () => {
   console.log(`create transfers max p100 latency per 10 000 transfers = ${benchmark.maxCreateTransfersLatency}ms`)
   console.log(`commit transfers max p100 latency per 10 000 transfers = ${benchmark.maxCommitTransfersLatency}ms`)
   assert(accounts.length === 2)
-  assert(accounts[0].debits_accepted === BigInt(MAX_TRANSFERS))
-  assert(accounts[1].credits_accepted === BigInt(MAX_TRANSFERS))
+  assert(accounts[0].debits_posted === BigInt(MAX_TRANSFERS))
+  assert(accounts[1].credits_posted === BigInt(MAX_TRANSFERS))
 
   if (result < PREVIOUS_BENCHMARK * (100 - TOLERANCE)/100) {
     console.warn(`There has been a performance regression. Previous benchmark=${PREVIOUS_BENCHMARK}`)
