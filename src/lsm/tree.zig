@@ -1253,7 +1253,7 @@ pub fn TreeType(
                 const Callback = fn (tree: *Tree) void;
 
                 storage: *Blocks,
-                write: Storage.Write = undefined,
+                write: Blocks.Write = undefined,
                 writing: bool = false,
 
                 /// The index of the block that is being written or will be written next.
@@ -1306,7 +1306,7 @@ pub fn TreeType(
                     it.storage.write_block(write_block_callback, &it.write, block, address);
                 }
 
-                fn write_block_callback(write: *Storage.Write) void {
+                fn write_block_callback(write: *Blocks.Write) void {
                     const it = @fieldParentPtr(FlushIterator, "write", write);
                     const table = @fieldParentPtr(Table, "flush", it);
                     assert(it.block < table.blocks_used());
@@ -1363,7 +1363,7 @@ pub fn TreeType(
             const BlockWrite = struct {
                 block: BlockPtr,
                 submit: bool,
-                write: Storage.Write,
+                write: Blocks.Write,
             };
 
             storage: *Blocks,
@@ -1532,7 +1532,7 @@ pub fn TreeType(
             fn maybe_submit_write(
                 compaction: *Compaction,
                 block_write: *BlockWrite,
-                callback: fn (*Storage.Write) void,
+                callback: fn (*Blocks.Write) void,
             ) void {
                 if (block_write.submit) {
                     block_write.submit = false;
@@ -1547,9 +1547,9 @@ pub fn TreeType(
                 }
             }
 
-            fn on_block_write(comptime field: []const u8) fn (*Storage.Write) void {
+            fn on_block_write(comptime field: []const u8) fn (*Blocks.Write) void {
                 return struct {
-                    fn callback(write: *Storage.Write) void {
+                    fn callback(write: *Blocks.Write) void {
                         const block_write = @fieldParentPtr(BlockWrite, "write", write);
                         const compaction = @fieldParentPtr(Compaction, field, block_write);
                         on_io_done(compaction);
@@ -1810,7 +1810,7 @@ pub fn TreeType(
                 /// The index of the current value in the head of the blocks ring buffer.
                 value: u32,
 
-                read: Storage.Read = undefined,
+                read: Blocks.Read = undefined,
                 /// This field is only used for safety checks, it does not affect the behavior.
                 read_pending: bool = false,
 
@@ -1932,7 +1932,7 @@ pub fn TreeType(
                     it.storage.read_block(on_read, &it.read, block, address, checksum);
                 }
 
-                fn on_read_table_index(read: *Storage.Read) void {
+                fn on_read_table_index(read: *Blocks.Read) void {
                     const it = @fieldParentPtr(TableIterator, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
@@ -1945,7 +1945,7 @@ pub fn TreeType(
                     assert(read_pending);
                 }
 
-                fn on_read(read: *Storage.Read) void {
+                fn on_read(read: *Blocks.Read) void {
                     const it = @fieldParentPtr(TableIterator, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
@@ -2414,14 +2414,13 @@ test {
     const blocks_offset = 0; // TODO Take other zones into account.
     const blocks_size = 1024 * 1024;
     var blocks = try Blocks.init(
-        allocator,
         &storage,
         blocks_offset,
         blocks_size,
         cluster,
         &free_set,
     );
-    defer blocks.deinit(allocator);
+    defer blocks.deinit();
 
     var tree = try Tree.init(
         allocator,
