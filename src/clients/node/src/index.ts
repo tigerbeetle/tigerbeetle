@@ -27,10 +27,10 @@ export type Account = {
   unit: number // u16, unit of value
   code: number // u16, A chart of accounts code describing the type of account (e.g. clearing, settlement)
   flags: number // u32
-  debits_reserved: bigint // u64
-  debits_accepted: bigint // u64
-  credits_reserved: bigint // u64
-  credits_accepted: bigint // u64
+  debits_pending: bigint // u64
+  debits_posted: bigint // u64
+  credits_pending: bigint // u64
+  credits_posted: bigint // u64
   timestamp: bigint // u64, Set this to 0n - the actual value will be set by TigerBeetle server
 }
 
@@ -74,8 +74,10 @@ export type Transfer = {
 
 export enum TransferFlags {
   linked = (1 << 0),
-  two_phase_commit = (1 << 1),
-  condition = (1 << 2) // whether or not a condition will be supplied
+  pending = (1 << 1),
+  post_pending_transfer = (1 << 2),
+  void_pending_transfer = (1 << 3),
+  hashlock = (1 << 4)// whether or not a condition will be supplied
 }
 
 export enum CreateTransferError {
@@ -102,6 +104,19 @@ export enum CreateTransferError {
   exceeds_debits,
   two_phase_commit_must_timeout,
   timeout_reserved_for_two_phase_commit,
+  // Fields for the 2-phase Transfer
+  cannot_void_and_post_two_phase_commit,
+  transfer_not_found,
+  transfer_not_two_phase_commit,
+  already_committed_but_accepted,
+  already_committed_but_rejected,
+  already_committed,
+  transfer_expired,
+  condition_requires_preimage,
+  preimage_invalid,
+  preimage_requires_condition,
+  debit_amount_was_not_reserved,
+  credit_amount_was_not_reserved
 }
 
 export type CreateTransfersError = {
@@ -109,57 +124,16 @@ export type CreateTransfersError = {
   code: CreateTransferError,
 }
 
-export type Commit = {
-  id: bigint, // u128
-  reserved: Buffer, // [32]u8
-  code: number, // u32 accounting system code describing the reason for accept/reject
-  flags: number, // u32
-  timestamp: bigint, // u64, Set this to 0n - the actual value will be set by TigerBeetle server
-}
-
-export enum CommitFlags {
-  linked = (1 << 0),
-  reject = (1 << 1),
-  preimage = (1 << 2) // whether or not a pre-image will be supplied
-}
-
-export enum CommitTransferError {
-  linked_event_failed = 1,
-  reserved_field,
-  reserved_flag_padding,
-  transfer_not_found,
-  transfer_not_two_phase_commit,
-  transfer_expired,
-  already_committed,
-  already_committed_but_accepted,
-  already_committed_but_rejected,
-  debit_account_not_found,
-  credit_account_not_found,
-  debit_amount_was_not_reserved,
-  credit_amount_was_not_reserved,
-  exceeds_credits,
-  exceeds_debits,
-  condition_requires_preimage,
-  preimage_requires_condition,
-  preimage_invalid,
-}
-
-export type CommitTransfersError = {
-  index: number,
-  code: CommitTransferError,
-}
-
 export type AccountID = bigint // u128
 export type TransferID = bigint // u128
 
-export type Event = Account | Transfer | Commit | AccountID | TransferID
-export type Result = CreateAccountsError | CreateTransfersError | CommitTransfersError | Account | Transfer
+export type Event = Account | Transfer | AccountID | TransferID
+export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export enum Operation {
   CREATE_ACCOUNT = 3,
   CREATE_TRANSFER,
-  COMMIT_TRANSFER,
   ACCOUNT_LOOKUP,
   TRANSFER_LOOKUP
 }
@@ -167,7 +141,6 @@ export enum Operation {
 export interface Client {
   createAccounts: (batch: Account[]) => Promise<CreateAccountsError[]>
   createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
-  commitTransfers: (batch: Commit[]) => Promise<CommitTransfersError[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
   request: (operation: Operation, batch: Event[], callback: ResultCallback) => void
@@ -192,8 +165,7 @@ const isSameArgs = (args: InitArgs): boolean => {
     }
   })
 
-  return args.cluster_id === _args.cluster_id &&
-          isSameReplicas
+  return args.cluster_id === _args.cluster_id && isSameReplicas
 }
 
 let _client: Client | undefined = undefined
@@ -279,33 +251,6 @@ export function createClient (args: InitArgs): Client {
     })
   }
 
-  const commitTransfers = async (batch: Commit[]): Promise<CommitTransfersError[]> => {
-    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
-    if (!_pinged) {
-      await new Promise<void>(resolve => {
-        setTimeout(() => {
-          _pinged = true
-          resolve()
-        }, 600)
-      })
-    }
-    return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CommitTransfersError[]) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve(results)
-      }
-
-      try {
-        binding.request(context, Operation.COMMIT_TRANSFER, batch, callback)
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
   const lookupAccounts = async (batch: AccountID[]): Promise<Account[]> => {
     return new Promise((resolve, reject) => {
       const callback = (error: undefined | Error, results: Account[]) => {
@@ -353,7 +298,6 @@ export function createClient (args: InitArgs): Client {
   _client = {
     createAccounts,
     createTransfers,
-    commitTransfers,
     lookupAccounts,
     lookupTransfers,
     request,

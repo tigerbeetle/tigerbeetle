@@ -1,7 +1,6 @@
 import assert, { AssertionError } from 'assert'
-import { CommitFlags,
+import {
   createClient,
-  Commit,
   Account,
   Transfer,
   TransferFlags,
@@ -24,10 +23,10 @@ const accountA: Account = {
   code: 718,
   unit: 1,
   flags: 0,
-  credits_accepted: 0n,
-  credits_reserved: 0n,
-  debits_accepted: 0n,
-  debits_reserved: 0n,
+  credits_posted: 0n,
+  credits_pending: 0n,
+  debits_posted: 0n,
+  debits_pending: 0n,
   timestamp: 0n // this will be set correctly by the TigerBeetle server
 }
 const accountB: Account = {
@@ -37,10 +36,10 @@ const accountB: Account = {
   code: 719,
   unit: 1,
   flags: 0,
-  credits_accepted: 0n,
-  credits_reserved: 0n,
-  debits_accepted: 0n,
-  debits_reserved: 0n,
+  credits_posted: 0n,
+  credits_pending: 0n,
+  debits_posted: 0n,
+  debits_pending: 0n,
   timestamp: 0n // this will be set correctly by the TigerBeetle server
 }
 
@@ -96,10 +95,10 @@ test('can lookup accounts', async (): Promise<void> => {
   assert.strictEqual(account1.code, 718)
   assert.strictEqual(account1.unit, 1)
   assert.strictEqual(account1.flags, 0)
-  assert.strictEqual(account1.credits_accepted, 0n)
-  assert.strictEqual(account1.credits_reserved, 0n)
-  assert.strictEqual(account1.debits_accepted, 0n)
-  assert.strictEqual(account1.debits_reserved, 0n)
+  assert.strictEqual(account1.credits_posted, 0n)
+  assert.strictEqual(account1.credits_pending, 0n)
+  assert.strictEqual(account1.debits_posted, 0n)
+  assert.strictEqual(account1.debits_pending, 0n)
   assert.ok(account1.timestamp > 0n)
 
   const account2 = accounts[1]
@@ -109,10 +108,10 @@ test('can lookup accounts', async (): Promise<void> => {
   assert.strictEqual(account2.code, 719)
   assert.strictEqual(account2.unit, 1)
   assert.strictEqual(account2.flags, 0)
-  assert.strictEqual(account2.credits_accepted, 0n)
-  assert.strictEqual(account2.credits_reserved, 0n)
-  assert.strictEqual(account2.debits_accepted, 0n)
-  assert.strictEqual(account2.debits_reserved, 0n)
+  assert.strictEqual(account2.credits_posted, 0n)
+  assert.strictEqual(account2.credits_pending, 0n)
+  assert.strictEqual(account2.debits_posted, 0n)
+  assert.strictEqual(account2.debits_pending, 0n)
   assert.ok(account2.timestamp > 0n)
 })
 
@@ -135,20 +134,20 @@ test('can create a transfer', async (): Promise<void> => {
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
-  assert.strictEqual(accounts[0].credits_accepted, 100n)
-  assert.strictEqual(accounts[0].credits_reserved, 0n)
-  assert.strictEqual(accounts[0].debits_accepted, 0n)
-  assert.strictEqual(accounts[0].debits_reserved, 0n)
+  assert.strictEqual(accounts[0].credits_posted, 100n)
+  assert.strictEqual(accounts[0].credits_pending, 0n)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].debits_pending, 0n)
 
-  assert.strictEqual(accounts[1].credits_accepted, 0n)
-  assert.strictEqual(accounts[1].credits_reserved, 0n)
-  assert.strictEqual(accounts[1].debits_accepted, 100n)
-  assert.strictEqual(accounts[1].debits_reserved, 0n)
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_pending, 0n)
+  assert.strictEqual(accounts[1].debits_posted, 100n)
+  assert.strictEqual(accounts[1].debits_pending, 0n)
 })
 
 test('can create a two-phase transfer', async (): Promise<void> => {
   let flags = 0
-  flags |= TransferFlags.two_phase_commit
+  flags |= TransferFlags.pending
   const transfer: Transfer = {
     id: 1n,
     amount: 50n,
@@ -167,15 +166,15 @@ test('can create a two-phase transfer', async (): Promise<void> => {
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
-  assert.strictEqual(accounts[0].credits_accepted, 100n)
-  assert.strictEqual(accounts[0].credits_reserved, 50n)
-  assert.strictEqual(accounts[0].debits_accepted, 0n)
-  assert.strictEqual(accounts[0].debits_reserved, 0n)
+  assert.strictEqual(accounts[0].credits_posted, 100n)
+  assert.strictEqual(accounts[0].credits_pending, 50n)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].debits_pending, 0n)
 
-  assert.strictEqual(accounts[1].credits_accepted, 0n)
-  assert.strictEqual(accounts[1].credits_reserved, 0n)
-  assert.strictEqual(accounts[1].debits_accepted, 100n)
-  assert.strictEqual(accounts[1].debits_reserved, 50n)
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_pending, 0n)
+  assert.strictEqual(accounts[1].debits_posted, 100n)
+  assert.strictEqual(accounts[1].debits_pending, 50n)
 
   // Lookup the transfer
   const transfers = await client.lookupTransfers([transfer.id])
@@ -193,28 +192,36 @@ test('can create a two-phase transfer', async (): Promise<void> => {
 })
 
 test('can commit a two-phase transfer', async (): Promise<void> => {
-  const commit: Commit = {
+  let flags = 0
+  flags |= TransferFlags.post_pending_transfer
+
+  const commit: Transfer = {
     id: 1n, // must match the id of the create transfer
+    amount: 0n,
     code: 1,
-    flags: 0, // defaults to accept
+    credit_account_id: BigInt(0),
+    debit_account_id: BigInt(0),
+    flags: flags,
+    user_data: 0n,
     reserved: Zeroed32Bytes,
+    timeout: 0n,
     timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
-  const errors = await client.commitTransfers([commit])
+  const errors = await client.createTransfers([commit])
   assert.strictEqual(errors.length, 0)
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
-  assert.strictEqual(accounts[0].credits_accepted, 150n)
-  assert.strictEqual(accounts[0].credits_reserved, 0n)
-  assert.strictEqual(accounts[0].debits_accepted, 0n)
-  assert.strictEqual(accounts[0].debits_reserved, 0n)
+  assert.strictEqual(accounts[0].credits_posted, 150n)
+  assert.strictEqual(accounts[0].credits_pending, 0n)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].debits_pending, 0n)
 
-  assert.strictEqual(accounts[1].credits_accepted, 0n)
-  assert.strictEqual(accounts[1].credits_reserved, 0n)
-  assert.strictEqual(accounts[1].debits_accepted, 150n)
-  assert.strictEqual(accounts[1].debits_reserved, 0n)
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_pending, 0n)
+  assert.strictEqual(accounts[1].debits_posted, 150n)
+  assert.strictEqual(accounts[1].debits_pending, 0n)
 })
 
 test('can reject a two-phase transfer', async (): Promise<void> => {
@@ -225,7 +232,7 @@ test('can reject a two-phase transfer', async (): Promise<void> => {
     code: 1,
     credit_account_id: accountA.id,
     debit_account_id: accountB.id,
-    flags: TransferFlags.two_phase_commit,
+    flags: TransferFlags.pending,
     user_data: 0n,
     reserved: Zeroed32Bytes,
     timeout: BigInt(1e9),
@@ -235,28 +242,33 @@ test('can reject a two-phase transfer', async (): Promise<void> => {
   assert.strictEqual(transferErrors.length, 0)
 
   // send in the reject
-  const reject: Commit = {
-    id: 3n,
+  const reject: Transfer = {
+    id: 3n, // must match the id of the create transfer
+    amount: 0n,
     code: 1,
-    flags: CommitFlags.reject,
+    credit_account_id: BigInt(0),
+    debit_account_id: BigInt(0),
+    flags: TransferFlags.void_pending_transfer,
+    user_data: 0n,
     reserved: Zeroed32Bytes,
-    timestamp: 0n,// this will be set correctly by the TigerBeetle server
+    timeout: 0n,
+    timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
-  const errors = await client.commitTransfers([reject])
+  const errors = await client.createTransfers([reject])
   assert.strictEqual(errors.length, 0)
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
-  assert.strictEqual(accounts[0].credits_accepted, 150n)
-  assert.strictEqual(accounts[0].credits_reserved, 0n)
-  assert.strictEqual(accounts[0].debits_accepted, 0n)
-  assert.strictEqual(accounts[0].debits_reserved, 0n)
+  assert.strictEqual(accounts[0].credits_posted, 150n)
+  assert.strictEqual(accounts[0].credits_pending, 0n)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].debits_pending, 0n)
 
-  assert.strictEqual(accounts[1].credits_accepted, 0n)
-  assert.strictEqual(accounts[1].credits_reserved, 0n)
-  assert.strictEqual(accounts[1].debits_accepted, 150n)
-  assert.strictEqual(accounts[1].debits_reserved, 0n)
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_pending, 0n)
+  assert.strictEqual(accounts[1].debits_posted, 150n)
+  assert.strictEqual(accounts[1].debits_pending, 0n)
 })
 
 test('can link transfers', async (): Promise<void> => {
@@ -294,15 +306,15 @@ test('can link transfers', async (): Promise<void> => {
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
-  assert.strictEqual(accounts[0].credits_accepted, 150n)
-  assert.strictEqual(accounts[0].credits_reserved, 0n)
-  assert.strictEqual(accounts[0].debits_accepted, 0n)
-  assert.strictEqual(accounts[0].debits_reserved, 0n)
+  assert.strictEqual(accounts[0].credits_posted, 150n)
+  assert.strictEqual(accounts[0].credits_pending, 0n)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].debits_pending, 0n)
 
-  assert.strictEqual(accounts[1].credits_accepted, 0n)
-  assert.strictEqual(accounts[1].credits_reserved, 0n)
-  assert.strictEqual(accounts[1].debits_accepted, 150n)
-  assert.strictEqual(accounts[1].debits_reserved, 0n)
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_pending, 0n)
+  assert.strictEqual(accounts[1].debits_posted, 150n)
+  assert.strictEqual(accounts[1].debits_pending, 0n)
 })
 
 async function main () {
