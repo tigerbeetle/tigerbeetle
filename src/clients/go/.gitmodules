@@ -1,3 +1,4 @@
-[submodule "internal/tigerbeetle"]
-	path = internal/tigerbeetle
-	url = https://github.com/kprotty/tb_client
+[submodule "tigerbeetle"]
+	path = tigerbeetle
+	url = https://github.com/kprotty/tigerbeetle.git
+	branch = tb_client
