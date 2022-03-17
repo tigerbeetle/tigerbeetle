@@ -28,6 +28,8 @@ type TigerBeetleContainer struct {
 }
 
 func setupTigerBeetle(ctx context.Context) (*TigerBeetleContainer, error) {
+	tigerbeetleImage := "tigerbeetle"
+
 	dataDir, err := ioutil.TempDir("", "tb")
 	if err != nil {
 		return nil, err
@@ -35,7 +37,7 @@ func setupTigerBeetle(ctx context.Context) (*TigerBeetleContainer, error) {
 
 	fmt.Println("Initializing TigerBeetle temporary data dir:" + dataDir)
 	initReq := testcontainers.ContainerRequest{
-		Image:        "tigerbeetle", // TODO: host image
+		Image:        tigerbeetleImage, // TODO: host image
 		ExposedPorts: []string{TIGERBEETLE_PORT},
 		WaitingFor:   wait.ForLog("info: initialized data file").WithPollInterval(1 * time.Second),
 		BindMounts: map[string]string{
@@ -58,7 +60,7 @@ func setupTigerBeetle(ctx context.Context) (*TigerBeetleContainer, error) {
 
 	fmt.Println("Starting TigerBeetle test container.")
 	req := testcontainers.ContainerRequest{
-		Image:        "tigerbeetle", // TODO: host image
+		Image:        tigerbeetleImage, // TODO: host image
 		ExposedPorts: []string{TIGERBEETLE_PORT},
 		BindMounts: map[string]string{
 			TIGERBEETLE_DIR: dataDir,
@@ -98,6 +100,10 @@ func toU128(value string) *types.Uint128 {
 
 func TestClient(s *testing.T) {
 	tbContainer, err := setupTigerBeetle(context.Background())
+	if err != nil {
+		s.Fatal(err)
+	}
+
 	addresses := []string{tbContainer.URI}
 	maxConcurrency := uint(32)
 	client, err := NewClient(TIGERBEETLE_CLUSTER_ID, addresses, maxConcurrency)

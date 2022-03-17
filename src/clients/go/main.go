@@ -5,7 +5,7 @@ package tigerbeetle_go
 
 #include <stdlib.h>
 #include <string.h>
-#include "./internal/src/c/tb_client.h"
+#include "./tigerbeetle/src/c/tb_client.h"
 
 typedef const uint8_t* tb_result_bytes_t;
 void onGoPacketCompletion(
@@ -96,7 +96,7 @@ func NewClient(
 
 	c := &c_client{
 		tb_client: tb_client,
-		max_requests: maxConcurrency,
+		max_requests: uint32(maxConcurrency),
 		requests: make(chan *request, int(maxConcurrency)),
 	}
 
@@ -127,15 +127,15 @@ func (c *c_client) Close() {
 func getEventSize(op C.TB_OPERATION) uintptr {
 	switch (op) {
 	case C.TB_OP_CREATE_ACCOUNTS:
-		return unsafe.Sizeof(Account{})
+		return unsafe.Sizeof(types.Account{})
 	case C.TB_OP_CREATE_TRANSFERS:
-		return unsafe.Sizeof(Transfer{})
+		return unsafe.Sizeof(types.Transfer{})
 	case C.TB_OP_COMMIT_TRANSFERS:
-		return unsafe.Sizeof(Commit{})
+		return unsafe.Sizeof(types.Commit{})
 	case C.TB_OP_LOOKUP_ACCOUNTS:
-		return unsafe.Sizeof(Uint128{})
+		fallthrough
 	case C.TB_OP_LOOKUP_TRANSFERS:
-		return unsafe.Sizeof(Uint128{})
+		return unsafe.Sizeof(types.Uint128{})
 	}
 	panic("invalid tigerbeetle operation")
 }
@@ -143,15 +143,15 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 func getResultSize(op C.TB_OPERATION) uintptr {
 	switch (op) {
 	case C.TB_OP_CREATE_ACCOUNTS:
-		return unsafe.Sizeof(CreateAccountsResult{})
+		fallthrough
 	case C.TB_OP_CREATE_TRANSFERS:
-		return unsafe.Sizeof(CreateTransfersResult{})
+		fallthrough
 	case C.TB_OP_COMMIT_TRANSFERS:
-		return unsafe.Sizeof(CommitTransfersResult{})
+		return unsafe.Sizeof(types.EventResult{})
 	case C.TB_OP_LOOKUP_ACCOUNTS:
-		return unsafe.Sizeof(Account{})
+		return unsafe.Sizeof(types.Account{})
 	case C.TB_OP_LOOKUP_TRANSFERS:
-		return unsafe.Sizeof(Transfer{})
+		return unsafe.Sizeof(types.Transfer{})
 	}
 	panic("invalid tigerbeetle operation")
 }
@@ -260,7 +260,7 @@ func (c *c_client) doCreate(
 	count int,
 ) ([]types.EventResult, error) {
 	results := make([]types.EventResult, count)
-	resultData = unsafe.Pointer(&results[0])
+	resultData := unsafe.Pointer(&results[0])
 
 	wrote, err := c.doRequest(op, count, data, resultData)
 	if err != nil {
@@ -272,15 +272,15 @@ func (c *c_client) doCreate(
 }
 
 func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.EventResult, error)  {
-	return c.doCreate(C.TB_OP_CREATE_ACCOUNTS, accounts, len(accounts))
+	return c.doCreate(C.TB_OP_CREATE_ACCOUNTS, unsafe.Pointer(&accounts[0]), len(accounts))
 }
 
 func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.EventResult, error) {
-	return c.doCreate(C.TB_OP_CREATE_TRANSFERS, transfers, len(transfers))
+	return c.doCreate(C.TB_OP_CREATE_TRANSFERS, unsafe.Pointer(&transfers[0]), len(transfers))
 }
 
 func (c *c_client) CommitTransfers(commits []types.Commit) ([]types.EventResult, error) {
-	return c.doCreate(C.TB_OP_COMMIT_TRANSFERS, commits, len(commits))
+	return c.doCreate(C.TB_OP_COMMIT_TRANSFERS, unsafe.Pointer(&commits[0]), len(commits))
 }
 
 func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error) {
