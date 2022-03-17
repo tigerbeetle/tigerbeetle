@@ -2,17 +2,29 @@ package errors
 
 import "errors"
 
-type ErrInvalidOperation struct{}
+type ErrUnexpected struct {}
 
-func (s ErrInvalidOperation) Error() string { return "Invalid operation." }
+func (s ErrUnexpected) Error() string { return "Unexpected internal error." }
 
-type ErrInvalidBatchSize struct{}
+type ErrOutOfMemory struct {}
 
-func (s ErrInvalidBatchSize) Error() string { return "Invalid batch size." }
+func (s ErrOutOfMemory) Error() string { return "Internal client ran out of memory." }
 
-type ErrTooManyOutstandingRequests struct{}
+type ErrSystemResources struct {}
 
-func (s ErrTooManyOutstandingRequests) Error() string { return "Too many outstanding requests." }
+func (s ErrSystemResources) Error() string { return "Internal client ran out of system resources." }
+
+type ErrNetworkSubsystem struct {}
+
+func (s ErrNetworkSubsystem) Error() string { return "Internal client had unexpected networking issues." }
+
+type ErrInvalidAddress struct {}
+
+func (s ErrInvalidAddress) Error() string { return "Invalid client cluster address." }
+
+type ErrClientClosed struct {}
+
+func (s ErrClientClosed) Error() string { return "Client was closed." }
 
 type ErrEmptyBatch struct{}
 
@@ -21,26 +33,3 @@ func (s ErrEmptyBatch) Error() string { return "Empty batch." }
 type ErrMaximumBatchSizeExceeded struct{}
 
 func (s ErrMaximumBatchSizeExceeded) Error() string { return "Maximum batch size exceeded." }
-
-type ErrFailedToTickIO struct{}
-
-func (s ErrFailedToTickIO) Error() string { return "Failed to tick IO." }
-
-func ErrorCast(error int, defaultMessage string) error {
-	switch error {
-	case 2:
-		return ErrInvalidOperation{}
-	case 3:
-		return ErrTooManyOutstandingRequests{}
-	case 4:
-		return ErrEmptyBatch{}
-	case 5:
-		return ErrMaximumBatchSizeExceeded{}
-	case 6:
-		return ErrInvalidBatchSize{}
-	case 7:
-		return ErrFailedToTickIO{}
-	default:
-		return errors.New(defaultMessage)
-	}
-}
