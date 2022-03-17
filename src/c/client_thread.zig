@@ -324,6 +324,11 @@ pub fn ClientThread(
                 return self.on_complete(packet, message, error.TooMuchData);
             }
 
+            // Write the packet data to the message
+            std.mem.copy(u8, writable, readable);
+            const wrote = readable.len;
+            
+            // .. and submit the message for processing
             self.client.request(
                 @bitCast(u128, UserData{
                     .self = self,
@@ -332,7 +337,7 @@ pub fn ClientThread(
                 Self.on_result,
                 packet.operation,
                 message,
-                readable.len,
+                wrote,
             );
         }
 
