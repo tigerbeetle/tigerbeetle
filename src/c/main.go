@@ -42,6 +42,10 @@ type CommitTransfersResult = C.tb_commit_transfers_result_t
 
 type Client interface {
 	CreateAccounts([]Account) ([]CreateAccountsResult, error)
+	CreateTransfers([]Transfer) ([]CreateTransfersResult, error)
+	CommitTransfers([]Commit) ([]CommitTransfersResult, error)
+	LookupAccounts([]Uint128) ([]Account, error)
+	LookupTransfers([]Uint128) ([]Transfer, error)
 	Close()
 }
 
@@ -168,6 +172,7 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 	case C.TB_OP_COMMIT_TRANSFERS:
 		return unsafe.Sizeof(Commit{})
 	case C.TB_OP_LOOKUP_ACCOUNTS:
+		return unsafe.Sizeof(Uint128{})
 	case C.TB_OP_LOOKUP_TRANSFERS:
 		return unsafe.Sizeof(Uint128{})
 	}
@@ -293,6 +298,78 @@ func (c *c_client) CreateAccounts(accounts []Account) ([]CreateAccountsResult, e
 	return results[0:resultCount], nil
 }
 
+func (c *c_client) CreateTransfers(transfers []Transfer) ([]CreateTransfersResult, error) {
+	count := len(transfers)
+	results := make([]CreateTransfersResult, count)
+	wrote, err := c.doRequest(
+		C.TB_OP_CREATE_TRANSFERS,
+		count,
+		unsafe.Pointer(&transfers[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resultCount := wrote / int(unsafe.Sizeof(CreateTransfersResult{}))
+	return results[0:resultCount], nil
+}
+
+func (c *c_client) CommitTransfers(commits []Commit) ([]CommitTransfersResult, error) {
+	count := len(commits)
+	results := make([]CommitTransfersResult, count)
+	wrote, err := c.doRequest(
+		C.TB_OP_COMMIT_TRANSFERS,
+		count,
+		unsafe.Pointer(&commits[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resultCount := wrote / int(unsafe.Sizeof(CommitTransfersResult{}))
+	return results[0:resultCount], nil
+}
+
+func (c *c_client) LookupAccounts(accountIDs []Uint128) ([]Account, error) {
+	count := len(accountIDs)
+	results := make([]Account, count)
+	wrote, err := c.doRequest(
+		C.TB_OP_LOOKUP_ACCOUNTS,
+		count,
+		unsafe.Pointer(&accountIDs[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resultCount := wrote / int(unsafe.Sizeof(Account{}))
+	return results[0:resultCount], nil
+}
+
+func (c *c_client) LookupTransfers(transferIDs []Uint128) ([]Transfer, error) {
+	count := len(transferIDs)
+	results := make([]Transfer, count)
+	wrote, err := c.doRequest(
+		C.TB_OP_LOOKUP_TRANSFERS,
+		count,
+		unsafe.Pointer(&transferIDs[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resultCount := wrote / int(unsafe.Sizeof(Transfer{}))
+	return results[0:resultCount], nil
+}
+
 
 func main() {
 	cluster := uint32(0)
@@ -343,11 +420,22 @@ func main() {
 		},
 	})
 
+	if err != nil {
+		log.Fatal(err)
+	}
 	for _, r := range results {
 		fmt.Println("result error:", int(r.index), r.result)
 	}
+	
+	accounts, err := client.LookupAccounts([]Uint128{
+		toID(42),
+		toID(1337),
+	})
 
 	if err != nil {
 		log.Fatal(err)
+	}
+	for _, a := range accounts {
+		fmt.Println("account:", a)
 	}
 }
