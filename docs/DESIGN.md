@@ -135,9 +135,9 @@ Events are **immutable data structures** that **instantiate or mutate state data
 **create_account**: Create an account.
 
 * We use the terms `credit` and `debit` instead of "payable" or "receivable" since the meaning of a credit balance depends on whether the account is an asset or liability or equity, income or expense.
-* An `accepted` amount refers to an amount posted by a committed transfer.
-* A `reserved` amount refers to an inflight amount posted by a two-phace commit transfer only, where the commit is still outstanding, and where the transfer timeout has not yet fired. In other words, the transfer amount has been reserved in the account balance (to avoid double-spending) but not yet committed. The reserved amount will rollback if the transfer ultimately fails.
-* The total debit balance of an account is given by adding `debits_accepted` plus `debits_reserved`. Likewise for the total credit balance of an account.
+* An `posted` amount refers to an amount posted by a committed transfer.
+* A `pending` amount refers to an inflight amount posted by a two-phace commit transfer only, where the commit is still outstanding, and where the transfer timeout has not yet fired. In other words, the transfer amount has been reserved in the account balance (to avoid double-spending) but not yet committed. The reserved amount will rollback if the transfer ultimately fails.
+* The total debit balance of an account is given by adding `debits_posted` plus `debits_pending`. Likewise for the total credit balance of an account.
 * The total balance of an account can be derived by subtracting the total credit balance from the total debit balance.
 * We keep both sides of the ledger (debit and credit) separate to avoid dealing with signed numbers, and to preserve more information about the nature of an account. For example, two accounts could have the same balance of 0, but one account could have 1,000,000 units on both sides of the ledger, whereas another account could have 1 unit on both sides, both balancing out to 0.
 * Once created, an account may be changed only through transfer events, to keep an immutable paper trail for auditing.
@@ -150,10 +150,10 @@ Events are **immutable data structures** that **instantiate or mutate state data
                     unit:  2 bytes ( 16-bit) [optional, opaque unit of value, e.g. a currency code, or even something exotic like gold bars]
                     code:  2 bytes ( 16-bit) [optional, opaque chart of accounts code to describe the type of account, e.g. a clearing account]
                    flags:  4 bytes ( 32-bit) [optional, net balance limits: e.g. debits_must_not_exceed_credits or credits_must_not_exceed_debits]
-         debits_reserved:  8 bytes ( 64-bit)
-         debits_accepted:  8 bytes ( 64-bit)
-        credits_reserved:  8 bytes ( 64-bit)
-        credits_accepted:  8 bytes ( 64-bit)
+          debits_pending:  8 bytes ( 64-bit)
+           debits_posted:  8 bytes ( 64-bit)
+         credits_pending:  8 bytes ( 64-bit)
+          credits_posted:  8 bytes ( 64-bit)
                timestamp:  8 bytes ( 64-bit) [reserved]
 } = 128 bytes (2 CPU cache lines)
 ```
