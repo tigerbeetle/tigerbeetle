@@ -579,12 +579,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
         translate.throw(env, "Unknown operation.") catch return null;
     }
 
-    const message = context.client.get_message() orelse {
-        translate.throw(
-            env,
-            "Too many requests outstanding.",
-        ) catch return null;
-    };
+    const message = context.client.get_message();
     defer context.client.unref(message);
 
     const operation = @intToEnum(Operation, @intCast(u8, operation_int));
@@ -634,12 +629,7 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     }
     const operation = @intToEnum(Operation, @intCast(u8, operation_int));
 
-    const message = context.client.get_message() orelse {
-        translate.throw(
-            env,
-            "Too many requests outstanding.",
-        ) catch return null;
-    };
+    const message = context.client.get_message();
     defer context.client.unref(message);
 
     const body_length = translate.bytes_from_buffer(
