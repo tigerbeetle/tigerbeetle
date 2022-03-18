@@ -124,7 +124,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// A faulty bit is used then only to qualify the severity of the dirty bit.
         faulty: BitSet,
 
-        recovered: bool = true, // TODO default to false
+        /// The checksum of the prepare in the corresponding slot.
+        /// This is used to respond to `request_prepare` messages even when the slot is faulty
+        /// (for example, due to a broken redundant header).
+        ///
+        /// `null` indicates either:
+        /// * the prepare in the slot is corrupt
+        /// * the message in the slot is reserved
+        prepare_checksums: []?u128,
+
+        recovered: bool = false,
         recovering: bool = false,
 
         pub fn init(
@@ -151,11 +160,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             errdefer allocator.free(headers);
             std.mem.set(Header, headers, Header.reserved());
 
-            var dirty = try BitSet.init(allocator, headers.len);
+            var dirty = try BitSet.init(allocator, slot_count);
             errdefer dirty.deinit(allocator);
 
-            var faulty = try BitSet.init(allocator, headers.len);
+            var faulty = try BitSet.init(allocator, slot_count);
             errdefer faulty.deinit(allocator);
+
+            var prepare_checksums = try allocator.alloc(u128, slot_count);
+            errdefer allocator.free(prepare_checksums);
+            std.mem.set(?u128, prepare_checksums, null);
 
             const headers_iops = (try allocator.allocAdvanced(
                 [config.sector_size]u8,
@@ -165,8 +178,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             ))[0..config.io_depth_write];
             errdefer allocator.free(headers_iops);
 
-            const size_headers_ring = headers.len * @sizeOf(Header);
-            const size_prepare_ring = headers.len * config.message_size_max;
+            const size_headers_ring = slot_count * @sizeOf(Header);
+            const size_prepare_ring = slot_count * config.message_size_max;
             assert(size_headers_ring + size_prepare_ring <= storage.size);
 
             log.debug("{}: size={} slot_count={} headers_ring={} prepare_ring={}", .{
@@ -185,6 +198,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .headers = headers,
                 .dirty = dirty,
                 .faulty = faulty,
+                .prepare_checksums = prepare_checksums,
                 .headers_iops = headers_iops,
             };
 
@@ -194,6 +208,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(@mod(@ptrToInt(&self.headers[0]), config.sector_size) == 0);
             assert(self.dirty.bits.bit_length == self.headers.len);
             assert(self.faulty.bits.bit_length == self.headers.len);
+            assert(self.prepare_checksums.len == self.headers.len);
 
             // Op 0 is always the cluster initialization op.
             // TODO This will change when we implement synchronized incremental snapshots.
@@ -210,6 +225,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             self.dirty.deinit(allocator);
             self.faulty.deinit(allocator);
+            allocator.free(self.prepare_checksums);
             allocator.free(self.headers);
             allocator.free(self.headers_iops);
 
@@ -229,6 +245,20 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             for (self.headers) |header| {
                 assert(header.command == .reserved or header.op < op_min);
             }
+        }
+
+        /// Returns whether this is a fresh database WAL; no prepares have ever been written.
+        pub fn is_empty() bool {
+            if (self.dirty.len != 0) return false;
+            assert(self.faulty.len == 0);
+
+            // Verify that the initial prepare is present in the ring.
+            if (self.header_with_op(0) == null) return false;
+
+            for (self.headers[1..]) |header| {
+                if (header.command == .prepare) return false;
+            }
+            return true;
         }
 
         pub fn slot_for_op(self: *Self, op: u64) Slot {
@@ -621,6 +651,18 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
+            if (read.message.header.cluster != replica.cluster) {
+                // This could be caused by a misdirected read or write.
+                // Though when a prepare spans multiple sectors, a misdirected read/write will
+                // likely trigger as a checksum failure instead.
+                self.faulty.set(slot);
+                self.dirty.set(slot);
+
+                self.read_prepare_log(op, checksum, "read wrong cluster");
+                read.callback(replica, null, null);
+                return;
+            }
+
             if (read.message.header.op != op) {
                 self.read_prepare_log(op, checksum, "op changed during read");
                 read.callback(replica, null, null);
@@ -748,19 +790,30 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         //
                         // The dirty/faulty bits are left clear. There is no way to distinguish
                         // these cases until the Prepare is also read.
-                    } else if (header.command != .prepare) {
-                        // All journalled headers should reserved or prepares. A misdirected
-                        // read/write to/from the block zone may return the wrong type of message.
-                        self.dirty.set(slot);
-                        self.faulty.set(slot);
-                    } else if (self.slot_for_header(header).index == slot.index) {
-                        // The header is in the correct slot.
+                        continue;
+                    }
+
+                    // All journalled headers should reserved or prepares. A misdirected
+                    // read/write to/from the block zone may return the wrong type of message.
+                    const ok_prepare = header.command == .prepare
+                    // The header belongs to the correct cluster.
+                    const ok_cluster = header.cluster == replica.cluster;
+                    // The header is in the correct slot.
+                    const ok_slot = self.slot_for_header(header).index == slot.index;
+
+                    if (ok_prepare and ok_cluster and ok_slot) {
                         self.headers[slot.index] = header.*;
                     } else {
-                        // Misdirected read or write: the header doesn't belong in this slot.
-                        // We may recover from this later using the message log.
+                        // Unexpected cluster, slot, or message type is due to a misdirected read or write.
                         self.dirty.set(slot);
                         self.faulty.set(slot);
+                        log.warn("{}: recover_headers: invalid header in slot={} (command={} cluster={} op={})", .{
+                            self.replica,
+                            slot.index,
+                            header.command,
+                            header.cluster,
+                            header.op,
+                        });
                     }
                 } else {
                     // This header is corrupt. Or this may be the result of a faulty/misdirected read.
@@ -820,6 +873,84 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             );
         }
 
+        /// When in doubt about whether a particular message was received, it must be marked as
+        /// faulty to avoid nacking a prepare which was received then lost/misdirected/corrupted.
+        ///
+        ///
+        /// During recovery, the in-memory header of a faulty slot must be left reserved.
+        /// The recovery process must be conservative about which headers are stored in
+        /// `journal.headers`. To understand why this is important, consider what happens if it
+        /// did load the faulty header into `journal.headers`:
+        ///
+        /// 1. Suppose slot 8 is in case @E or @F. Per the table below, mark slot 8 faulty.
+        /// 2. Suppose slot 9 is also loaded as faulty.
+        /// 3. Journal recovery finishes. The replica beings to repair its missing/broken messages.
+        /// 4. VSR recovery protocol fetches the true prepare for slot 9.
+        /// 5. The message from step 4 is written to slot 9 of the prepares.
+        /// 6. The header from step 4 is written to slot 9 of the redundant headers.
+        ///    But writes to the redundant headers are done in batches of `headers_per_sector`!
+        ///    So if step 1 loaded slot 8's prepare header into `journal.headers`, slot 8's
+        ///    redundant header would be updated at the same time (in the same right) as slot 9.
+        /// 7! Immediately after step 6's write finishes, suppose the replica crashes (e.g. due to
+        ///    power failure.
+        /// 8! Journal recovery again — but this time slot 8 is loaded *without* being marked faulty.
+        ///
+        /// Therefore, recovery will never load a header into a slot *and* mark that slot faulty.
+        ///
+        ///
+        /// When replica_count=1, repairing broken/lost prepares over VSR is not an option, so
+        /// if a message is faulty the replica will abort.
+        ///
+        ///
+        /// Recovery decision table:
+        ///
+        ///   label                   @A  @B  @C  @D  @E  @F  @G  @H  @I  @J  @K  @L
+        ///   header valid             0   1   1   0   0   1   1   1   1   1   1   1
+        ///   header reserved          _   1   0   _   _   1   0   1   0   0   0   0
+        ///   prepare valid            0   0   0   1   1   1   1   1   1   1   1   1
+        ///   prepare reserved         _   _   _   1   0   0   1   1   0   0   0   0
+        ///   match checksum           _   _   _   _   _   _   _  !1   0   0   0   1
+        ///   match op                 _   _   _   _   _   _   _  !1   <   >   1  !1
+        ///   match view               _   _   _   _   _   _   _  !1   _   _  !0  !1
+        ///   decision (replicas>1)  vsr vsr vsr vsr vsr vsr vsr nil fix vsr vsr eql
+        ///   decision (replicas=1)                  fix fix
+        ///
+        /// Legend:
+        ///
+        ///    0  false
+        ///    1  true
+        ///   !0  assert false
+        ///   !1  assert true
+        ///    _  ignore
+        ///    <  header.op < prepare.op
+        ///    >  header.op > prepare.op
+        ///
+        /// A "valid" header/prepare:
+        /// 1. has a correct checksum, AND
+        /// 2. one of the following:
+        ///   * command=reserved
+        ///   * command=prepare AND correct cluster AND is in its proper slot (op % slot_count).
+        ///
+        ///
+        /// Regarding cases @E and @F for *single-replica clusters*:
+        ///
+        /// Most likely the redundant header write was corrupted/lost (respectively).
+        /// Since single-replica clusters never rewrite ops, it can be locally repaired by copying
+        /// over the prepare's header.
+        ///
+        /// However, another (astronomically low) possibility is this:
+        ///
+        /// 1. A prepare is written to slot 12.
+        /// 2. A redundant header is written to slot 12.
+        /// 3. Continue normal operation; wrap around the WAL.
+        /// 4. A prepare is written to slot 12, but lost.
+        /// 5. A redundant header is written to slot 12.
+        /// 6. Replica crash.
+        /// 7. On recovery, the old prepare (from step 1) is read and used to "repair" the corrupt
+        ///    redundant header.
+        ///
+        /// This would be a safety violation — we assume that the likelihood of this event is
+        /// negligible.
         fn recover_prepares_on_read(completion: *Storage.Read) void {
             const read = @fieldParentPtr(Self.Read, "completion", completion);
             const self = read.self;
@@ -840,40 +971,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(self.faulty.bit(slot));
             }
 
-            // When in doubt about whether a particular message was received, it must be marked as
-            // faulty to avoid nacking a prepare which was received then lost/misdirected/corrupted.
-            //
-            // When replica_count=1, repairing broken/lost prepares over VSR is not an option, so
-            // if a message is faulty the replica will abort.
-            //
-            // Recovery decision table:
-            //
-            //   label                 @A  @B  @C  @D  @E  @F  @G  @H  @I  @J  @K  @L
-            //   header valid           0   1   1   0   0   1   1   1   1   1   1   1
-            //   header reserved        _   1   0   _   _   1   0   1   0   0   0   0
-            //   prepare valid          0   0   0   1   1   1   1   1   1   1   1   1
-            //   prepare reserved       _   _   _   1   0   0   1   1   0   0   0   0
-            //   match checksum         _   _   _   _   _   _   _  !1   0   0   0   1
-            //   match op               _   _   _   _   _   _   _  !1   <   >   1  !1
-            //   match view             _   _   _   _   _   _   _  !1   _   _  !0  !1
-            //   decision             vsr vsr vsr vsr fix fix vsr nil fix vsr vsr eql
-            //
-            // Legend:
-            //
-            //    0  false
-            //    1  true
-            //   !0  assert false
-            //   !1  assert true
-            //    _  ignore
-            //    <  header.op < prepare.op
-            //    >  header.op > prepare.op
-            //
-            // A "valid" header/prepare:
-            // 1. has a correct checksum, AND
-            // 2. one of the following:
-            //   - command=reserved
-            //   - command=prepare AND is in its proper slot (op % slot_count).
-            //
             const Decision = enum {
                 eql, // The header and prepare are identical; no repair necessary.
                 nil, // Reserved; clear dirty/faulty, no repair necessary.
@@ -890,10 +987,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // All journalled messages should reserved or prepares.
             // A misdirected read/write to/from the block zone may return the wrong type of message.
             const prepare_reserved = prepare.command == .reserved;
-            // A prepare in the wrong slot indicates a misdirected read or write.
+            // A prepare in the wrong cluster/slot indicates a misdirected read or write.
+            const prepare_cluster = prepare.cluster == replica.cluster;
             const prepare_slot = self.slot_for_header(prepare) == slot;
-            const prepare_prepare = prepare.command == .prepare and prepare_slot;
-            const prepare_valid = prepare_checksum and (prepare_reserved or prepare_prepare);
+            const prepare_prepare = prepare.command == .prepare and prepare_cluster and prepare_slot;
+            const prepare_valid = prepare_checksum and (prepare_reserved or prepare_prepare)
 
             const match_checksum = header.?.checksum == prepare.checksum;
             const match_op = header.?.op == prepare.op;
@@ -917,7 +1015,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     if (prepare_reserved) {
                         break :decision .vsr; // @D
                     } else {
-                        break :decision .fix; // @E
+                        if (replica.replica_count == 1) {
+                            break :decision .fix; // @E
+                        } else {
+                            break :decision .vsr; // @E
+                        }
                     }
                 }
 
@@ -932,7 +1034,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 //
                 // The redundant header can be repaired using the prepare's header; it does not
                 // need to be retrieved remotely.
-                if (header_reserved and !prepare_reserved) break :decision .fix; // @F
+                if (header_reserved and !prepare_reserved) {
+                    if (replica.replica_count == 1) {
+                        break :decision .fix; // @F
+                    } else {
+                        break :decision .vsr; // @F
+                    }
+                }
 
                 // The redundant header is present & valid, but the corresponding prepare was a lost
                 // or misdirected read or write.
@@ -962,6 +1070,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
                     if (header.?.op < prepare.op) {
                         // When the higher op belongs to the prepare, repair locally.
+                        // The most likely cause for this case is that the log wrapped, but the
+                        // redundant header write was lost.
                         break :decision .fix; // @I
                     } else {
                         // When the higher op belongs to the header, mark faulty.
@@ -973,7 +1083,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
                 if (!match_checksum) {
                     // The message was rewritten due to a view change.
-                    // A single-replica cluster doesn't every change views.
+                    // A single-replica cluster doesn't ever change views.
                     assert(!match_view);
                     assert(replica.replica_count > 1);
                     break :decision .vsr; // @K
@@ -989,8 +1099,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             switch (decision) {
                 .eql => {
-                    assert(header.?.checksum == prepare.checksum);
                     assert(header.?.command == .prepare);
+                    assert(prepare.?.command == .prepare);
+                    assert(header.?.checksum == prepare.checksum);
                     assert(!self.dirty.bit(slot));
                     assert(!self.faulty.bit(slot));
                 },
@@ -1001,7 +1112,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(!self.faulty.bit(slot));
                 },
                 .fix => {
-                    // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty). This is tricky because the redundant headers are written in batches.
+                    // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty). This is tricky because the redundant headers are written in batches. At a minimum this needs to repair replica_count=1 clusters locally, which is easier.
                     assert(prepare.command == .reserved);
                     self.set_header_as_dirty(prepare);
                     assert(!self.faulty.bit(slot));
@@ -1014,12 +1125,17 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 },
             }
 
+            if (prepare_prepare and prepare_checksum) {
+                self.prepare_checksums[slot.index] = prepare.checksum;
+            }
+
             self.read_header = undefined;
             self.reads.release(read);
             self.recover_prepares(Slot{ .index = slot.index + 1 });
         }
 
         fn recover_done(self: *Self) void {
+            assert(self.dirty.len == self.faulty.len);
             // TODO panic if all headers are corrupt.
             self.recovered = true;
             self.recovering = false;
@@ -1097,6 +1213,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // Otherwise, concurrent writes may modify the memory of the pointer while we write.
             assert(@ptrToInt(message.header) == @ptrToInt(message.buffer.ptr));
 
+            // TODO can this be slot_with_header(message.header).? (to assert that the message's header is already in-memory)
             const slot = self.slot_for_header(message.header);
             if (!self.dirty.bit(slot)) {
                 // Any function that sets the faulty bit should also set the dirty bit:
@@ -1138,6 +1255,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(sum_of_sector_padding_bytes == 0);
             }
 
+            self.prepare_checksums[slot.index] = null;
             self.write_sectors(write_prepare_header, write, sectors, offset_physical);
         }
 
@@ -1146,6 +1264,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn write_prepare_header(write: *Self.Write) void {
             const self = write.self;
             const message = write.message;
+
+            const slot = self.slot_for_header(write.message.header);
+            self.prepare_checksums[slot.index] = write.message.checksum;
 
             if (!self.has(message.header)) {
                 self.write_prepare_debug(message.header, "entry changed while writing sectors");
