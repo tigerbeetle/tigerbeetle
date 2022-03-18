@@ -214,38 +214,56 @@ pub fn ManifestLevel(
             }
         }
 
-        /// Set snapshot_max to new_snapshot_max for tables with snapshot_max of math.maxInt(u64)
-        /// and matching the given key range.
-        /// Asserts that exactly cardinality tables are modified.
+        /// Set snapshot_max to new_snapshot_max for the given tables in the ManifestLevel.
+        /// The tables slice must be sorted by table min/max key.
+        /// Asserts that the tables currently have snapshot_max of math.maxInt(u64).
+        /// Asserts that all tables in the ManifestLevel in the key range tables[0].key_min
+        /// to tables[tables.len - 1].key_max are present in the tables slice.
         pub fn set_snapshot_max(
             level: Self,
             new_snapshot_max: u64,
-            key_min: Key,
-            key_max: Key,
-            cardinality: u32,
+            tables: []const TableInfo,
         ) void {
             assert(new_snapshot_max <= lsm.snapshot_latest);
+            assert(tables.len > 0);
+
+            if (lsm.verify and tables.len > 1) {
+                var a = tables[0];
+                assert(compare_keys(a.key_min, a.key_max) != .gt);
+                for (tables[1..]) |b| {
+                    assert(compare_keys(a.key_max, b.key_min) == .lt);
+                    assert(compare_keys(b.key_min, b.key_max) != .gt);
+                    a = b;
+                }
+            }
+
+            const key_min = tables[0].key_min;
+            const key_max = tables[tables.len - 1].key_max;
             assert(compare_keys(key_min, key_max) != .gt);
 
+            var i: u32 = 0;
             var it = level.iterator(lsm.snapshot_latest, key_min, key_max, .ascending);
-            var modified: u32 = 0;
-            while (it.next()) |table_const| {
+            while (it.next()) |table_const| : (i += 1) {
                 // This const cast is safe as we know that the memory pointed to is in fact
                 // mutable. That is, the table is not in the .text or .rodata section. We do this
                 // to avoid duplicating the iterator code in order to expose only a const iterator
                 // in the public API.
                 const table = @intToPtr(*TableInfo, @ptrToInt(table_const));
 
-                // Assert that the table overlaps with the given key range.
-                assert(compare_keys(key_min, table.key_max) != .gt);
-                assert(compare_keys(key_max, table.key_min) != .lt);
+                // Assert that the table matches the corresponding table in the tables slice.
+                assert(table.checksum == tables[i].checksum);
+                assert(table.address == tables[i].address);
+                assert(table.flags == tables[i].flags);
+                assert(table.snapshot_min == tables[i].snapshot_min);
+                assert(table.snapshot_max == tables[i].snapshot_max);
+                assert(compare_keys(table.key_min, tables[i].key_min) == .eq);
+                assert(compare_keys(table.key_max, tables[i].key_max) == .eq);
 
                 assert(table.snapshot_max == math.maxInt(u64));
                 table.snapshot_max = new_snapshot_max;
-                modified += 1;
             }
 
-            assert(modified == cardinality);
+            assert(i == tables.len);
         }
 
         /// Remove tables matching the given key range with table.snapshot_max <= snapshot_max.
