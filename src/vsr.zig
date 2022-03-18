@@ -443,13 +443,26 @@ pub const Header = packed struct {
 
     fn invalid_recovery(self: *const Header) ?[]const u8 {
         assert(self.command == .recovery);
-        // TODO implement validation once the message is actually used.
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
 
     fn invalid_recovery_response(self: *const Header) ?[]const u8 {
         assert(self.command == .recovery_response);
-        // TODO implement validation once the message is actually used.
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op == 0) return "op == 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.offset != 0) return "offset != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
 
