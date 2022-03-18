@@ -141,6 +141,27 @@ pub fn TreeType(
 
                     return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
                 }
+
+                pub fn visible_by_any(table: *const TableInfo, snapshots: []const u64) bool {
+                    for (snapshots) |snapshot| {
+                        if (table.visible(snapshot)) return true;
+                    }
+                    return table.visible(snapshot_latest);
+                }
+
+                pub fn eql(table: *const TableInfo, other: *const TableInfo) bool {
+                    // TODO since the layout of TableInfo is well defined, a direct memcmp might
+                    // be faster here. However, it's not clear if we can make the assumption that
+                    // compare_keys() will return .eq exactly when the memory of the keys are
+                    // equal. Consider defining the API to allow this and check the generated code.
+                    return table.checksum == other.checksum and
+                        table.address == other.address and
+                        table.flags == other.flags and
+                        table.snapshot_min == other.snapshot_min and
+                        table.snapshot_max == other.snapshot_max and
+                        compare_keys(table.key_min, other.key_min) == .eq and
+                        compare_keys(table.key_max, other.key_max) == .eq;
+                }
             };
 
             /// Level 0 is special since tables can overlap the same key range.
