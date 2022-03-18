@@ -694,8 +694,12 @@ pub fn TestContext(
 
         pool: TestPool,
         level: TestLevel,
-        snapshot_tick: u64 = 0,
 
+        snapshot_max: u64 = 1,
+        snapshots: std.BoundedArray(u64, 8) = .{ .buffer = undefined },
+        snapshot_tables: std.BoundedArray(std.ArrayList(TableInfo), 8) = .{ .buffer = undefined },
+
+        /// Contains only tables with snapshot_max == lsm.snapshot_latest
         reference: std.ArrayList(TableInfo),
 
         inserts: u64 = 0,
@@ -711,10 +715,7 @@ pub fn TestContext(
             var level = try TestLevel.init(testing.allocator);
             errdefer level.deinit(testing.allocator, &pool);
 
-            var reference = try std.ArrayList(TableInfo).initCapacity(
-                testing.allocator,
-                table_count_max,
-            );
+            var reference = std.ArrayList(TableInfo).init(testing.allocator);
             errdefer reference.deinit();
 
             return Self{
@@ -729,6 +730,8 @@ pub fn TestContext(
             context.level.deinit(testing.allocator, &context.pool);
             context.pool.deinit(testing.allocator);
 
+            for (context.snapshot_tables.slice()) |tables| tables.deinit();
+
             context.reference.deinit();
         }
 
@@ -739,8 +742,10 @@ pub fn TestContext(
                 var i: usize = 0;
                 while (i < table_count_max * 2) : (i += 1) {
                     switch (context.random.uintLessThanBiased(u32, 100)) {
-                        0...59 => try context.insert(),
-                        60...99 => try context.remove(),
+                        0...59 => try context.insert_tables(),
+                        60...69 => try context.create_snapshot(),
+                        70...94 => try context.delete_tables(),
+                        95...99 => try context.drop_snapshot(),
                         else => unreachable,
                     }
                 }
@@ -750,8 +755,10 @@ pub fn TestContext(
                 var i: usize = 0;
                 while (i < table_count_max * 2) : (i += 1) {
                     switch (context.random.uintLessThanBiased(u32, 100)) {
-                        0...39 => try context.insert(),
-                        40...99 => try context.remove(),
+                        0...34 => try context.insert_tables(),
+                        35...39 => try context.create_snapshot(),
+                        40...89 => try context.delete_tables(),
+                        90...99 => try context.drop_snapshot(),
                         else => unreachable,
                     }
                 }
@@ -760,9 +767,8 @@ pub fn TestContext(
             try context.remove_all();
         }
 
-        fn insert(context: *Self) !void {
-            const reference_len = @intCast(u32, context.reference.items.len);
-            const count_free = table_count_max - reference_len;
+        fn insert_tables(context: *Self) !void {
+            const count_free = table_count_max - context.level.keys.len();
 
             if (count_free == 0) return;
 
@@ -809,7 +815,7 @@ pub fn TestContext(
             try context.verify();
         }
 
-        fn random_greater_non_overlapping_table(context: Self, key: Key) TableInfo {
+        fn random_greater_non_overlapping_table(context: *Self, key: Key) TableInfo {
             var new_key_min = key + context.random.uintLessThanBiased(Key, 31) + 1;
 
             assert(compare_keys(new_key_min, key) == .gt);
@@ -849,13 +855,64 @@ pub fn TestContext(
             return .{
                 .checksum = context.random.int(u128),
                 .address = context.random.int(u64),
-                .snapshot_min = context.snapshot_tick,
+                .snapshot_min = context.take_snapshot(),
                 .key_min = new_key_min,
                 .key_max = new_key_max,
             };
         }
 
-        fn remove(context: *Self) !void {
+        /// See Manifest.take_snapshot()
+        fn take_snapshot(context: *Self) u64 {
+            // A snapshot cannot be 0 as this is a reserved value in the superblock.
+            assert(context.snapshot_max > 0);
+            // The constant snapshot_latest must compare greater than any issued snapshot.
+            // This also ensures that we are not about to overflow the u64 counter.
+            assert(context.snapshot_max < lsm.snapshot_latest - 1);
+
+            context.snapshot_max += 1;
+
+            return context.snapshot_max;
+        }
+
+        fn create_snapshot(context: *Self) !void {
+            if (context.snapshots.len == context.snapshots.capacity()) return;
+
+            context.snapshots.appendAssumeCapacity(context.take_snapshot());
+
+            const tables = context.snapshot_tables.addOneAssumeCapacity();
+            tables.* = std.ArrayList(TableInfo).init(testing.allocator);
+            try tables.insertSlice(0, context.reference.items);
+        }
+
+        fn drop_snapshot(context: *Self) !void {
+            if (context.snapshots.len == 0) return;
+
+            const index = context.random.uintLessThanBiased(usize, context.snapshots.len);
+
+            _ = context.snapshots.swapRemove(index);
+            var tables = context.snapshot_tables.swapRemove(index);
+            defer tables.deinit();
+
+            // Use this memory as a scratch buffer since it's conveniently already allocated.
+            tables.clearRetainingCapacity();
+
+            {
+                var it = context.level.non_visible_iterator(context.snapshots.slice());
+                while (it.next()) |table| {
+                    try tables.append(table.*);
+                }
+            }
+
+            if (tables.items.len > 0) {
+                context.level.remove_tables(
+                    &context.pool,
+                    context.snapshots.slice(),
+                    tables.items,
+                );
+            }
+        }
+
+        fn delete_tables(context: *Self) !void {
             const reference_len = @intCast(u32, context.reference.items.len);
             if (reference_len == 0) return;
 
@@ -873,17 +930,44 @@ pub fn TestContext(
                 std.debug.print("\n", .{});
             }
 
-            // TODO properly test snapshots
-            context.level.set_snapshot_max(1, context.reference.items[index..][0..count]);
-            for (context.reference.items[index..][0..count]) |*table| {
-                table.snapshot_max = 1;
-            }
+            const new_snapshot_max = context.take_snapshot();
 
-            context.level.remove_tables(
-                &context.pool,
-                &[_]u64{},
+            context.level.set_snapshot_max(
+                new_snapshot_max,
                 context.reference.items[index..][0..count],
             );
+            for (context.reference.items[index..][0..count]) |*table| {
+                table.snapshot_max = new_snapshot_max;
+            }
+            for (context.snapshot_tables.slice()) |tables| {
+                for (tables.items) |*table| {
+                    for (context.reference.items[index..][0..count]) |modified| {
+                        if (table.address == modified.address) {
+                            table.snapshot_max = new_snapshot_max;
+                            assert(table.eql(&modified));
+                        }
+                    }
+                }
+            }
+
+            {
+                var to_remove = std.ArrayList(TableInfo).init(testing.allocator);
+                defer to_remove.deinit();
+
+                for (context.reference.items[index..][0..count]) |table| {
+                    if (!table.visible_by_any(context.snapshots.slice())) {
+                        try to_remove.append(table);
+                    }
+                }
+
+                if (to_remove.items.len > 0) {
+                    context.level.remove_tables(
+                        &context.pool,
+                        context.snapshots.slice(),
+                        to_remove.items,
+                    );
+                }
+            }
 
             context.reference.replaceRange(index, count, &[0]TableInfo{}) catch unreachable;
 
@@ -893,7 +977,8 @@ pub fn TestContext(
         }
 
         fn remove_all(context: *Self) !void {
-            while (context.reference.items.len > 0) try context.remove();
+            while (context.snapshots.len > 0) try context.drop_snapshot();
+            while (context.reference.items.len > 0) try context.delete_tables();
 
             try testing.expectEqual(@as(u32, 0), context.level.keys.len());
             try testing.expectEqual(@as(u32, 0), context.level.tables.len());
@@ -911,13 +996,22 @@ pub fn TestContext(
         }
 
         fn verify(context: *Self) !void {
+            try context.verify_snapshot(lsm.snapshot_latest, context.reference.items);
+
+            for (context.snapshots.slice()) |snapshot, i| {
+                try context.verify_snapshot(snapshot, context.snapshot_tables.get(i).items);
+            }
+        }
+
+        fn verify_snapshot(context: *Self, snapshot: u64, reference: []const TableInfo) !void {
             if (log) {
+                std.debug.print("\nsnapshot: {}\n", .{snapshot});
                 std.debug.print("expect: ", .{});
-                for (context.reference.items) |t| std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
+                for (reference) |t| std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
 
                 std.debug.print("\nactual: ", .{});
                 var it = context.level.iterator(
-                    lsm.snapshot_latest,
+                    snapshot,
                     0,
                     math.maxInt(Key),
                     .ascending,
@@ -926,18 +1020,15 @@ pub fn TestContext(
                 std.debug.print("\n", .{});
             }
 
-            try testing.expectEqual(context.reference.items.len, context.level.keys.len());
-            try testing.expectEqual(context.reference.items.len, context.level.tables.len());
-
             {
                 var it = context.level.iterator(
-                    lsm.snapshot_latest,
+                    snapshot,
                     0,
                     math.maxInt(Key),
                     .ascending,
                 );
 
-                for (context.reference.items) |expect| {
+                for (reference) |expect| {
                     const actual = it.next() orelse return error.TestUnexpectedResult;
                     try testing.expectEqual(expect, actual.*);
                 }
@@ -946,43 +1037,40 @@ pub fn TestContext(
 
             {
                 var it = context.level.iterator(
-                    lsm.snapshot_latest,
+                    snapshot,
                     0,
                     math.maxInt(Key),
                     .descending,
                 );
 
-                var i = context.reference.items.len;
+                var i = reference.len;
                 while (i > 0) {
                     i -= 1;
 
-                    const expect = context.reference.items[i];
+                    const expect = reference[i];
                     const actual = it.next() orelse return error.TestUnexpectedResult;
                     try testing.expectEqual(expect, actual.*);
                 }
                 try testing.expectEqual(@as(?*const TableInfo, null), it.next());
             }
 
-            try testing.expectEqual(context.reference.items.len, context.level.keys.len());
-            try testing.expectEqual(context.reference.items.len, context.level.tables.len());
-
-            if (context.reference.items.len > 0) {
-                const reference_len = @intCast(u32, context.reference.items.len);
+            if (reference.len > 0) {
+                const reference_len = @intCast(u32, reference.len);
                 const start = context.random.uintLessThanBiased(u32, reference_len);
                 const end = context.random.uintLessThanBiased(u32, reference_len - start) + start;
 
-                const key_min = context.reference.items[start].key_min;
-                const key_max = context.reference.items[end].key_max;
+                const key_min = reference[start].key_min;
+                const key_max = reference[end].key_max;
 
                 {
                     var it = context.level.iterator(
-                        lsm.snapshot_latest,
+                        snapshot,
                         key_min,
                         key_max,
                         .ascending,
                     );
 
-                    for (context.reference.items[start .. end + 1]) |expect| {
+                    for (reference[start .. end + 1]) |expect| {
                         const actual = it.next() orelse return error.TestUnexpectedResult;
                         try testing.expectEqual(expect, actual.*);
                     }
@@ -991,7 +1079,7 @@ pub fn TestContext(
 
                 {
                     var it = context.level.iterator(
-                        lsm.snapshot_latest,
+                        snapshot,
                         key_min,
                         key_max,
                         .descending,
@@ -1001,7 +1089,7 @@ pub fn TestContext(
                     while (i > start) {
                         i -= 1;
 
-                        const expect = context.reference.items[i];
+                        const expect = reference[i];
                         const actual = it.next() orelse return error.TestUnexpectedResult;
                         try testing.expectEqual(expect, actual.*);
                     }
