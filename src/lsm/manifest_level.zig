@@ -250,14 +250,7 @@ pub fn ManifestLevel(
                 // in the public API.
                 const table = @intToPtr(*TableInfo, @ptrToInt(table_const));
 
-                // Assert that the table matches the corresponding table in the tables slice.
-                assert(table.checksum == tables[i].checksum);
-                assert(table.address == tables[i].address);
-                assert(table.flags == tables[i].flags);
-                assert(table.snapshot_min == tables[i].snapshot_min);
-                assert(table.snapshot_max == tables[i].snapshot_max);
-                assert(compare_keys(table.key_min, tables[i].key_min) == .eq);
-                assert(compare_keys(table.key_max, tables[i].key_max) == .eq);
+                assert(table.eql(&tables[i]));
 
                 assert(table.snapshot_max == math.maxInt(u64));
                 table.snapshot_max = new_snapshot_max;
@@ -266,30 +259,43 @@ pub fn ManifestLevel(
             assert(i == tables.len);
         }
 
-        /// Remove tables matching the given key range with table.snapshot_max <= snapshot_max.
-        /// Asserts that the key_min/key_max bounds exactly match the first/last table to be removed.
-        /// Asserts that exactly cardinality tables are removed.
+        /// Remove the given tables from the ManifestLevel, asserting that they are not visible
+        /// by any snapshot in snapshots or by lsm.snapshot_latest.
+        /// The tables slice must be sorted by table min/max key.
+        /// Asserts that all tables in the ManifestLevel in the key range tables[0].key_min
+        /// to tables[tables.len - 1].key_max and not visible by any snapshot are present in
+        /// the tables slice.
         pub fn remove_tables(
             level: *Self,
             node_pool: *NodePool,
-            snapshot_max: u64,
-            key_min: Key,
-            key_max: Key,
-            cardinality: u32,
+            snapshots: []const u64,
+            tables: []const TableInfo,
         ) void {
-            assert(cardinality > 0);
+            assert(tables.len > 0);
             assert(level.keys.len() == level.tables.len());
-            assert(level.keys.len() >= cardinality);
+            assert(level.keys.len() >= tables.len);
+
+            if (lsm.verify and tables.len > 1) {
+                var a = tables[0];
+                assert(compare_keys(a.key_min, a.key_max) != .gt);
+                for (tables[1..]) |b| {
+                    assert(compare_keys(a.key_max, b.key_min) == .lt);
+                    assert(compare_keys(b.key_min, b.key_max) != .gt);
+                    a = b;
+                }
+            }
+
+            const key_min = tables[0].key_min;
+            const key_max = tables[tables.len - 1].key_max;
+            assert(compare_keys(key_min, key_max) != .gt);
 
             var absolute_index = level.absolute_index_for_remove(key_min);
 
             {
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 while (it.next()) |table| : (absolute_index += 1) {
-                    if (table.snapshot_max <= snapshot_max) {
-                        // We require the key_min/key_max to be exact, so the first table
-                        // matching the snapshot must have the provided key_min.
-                        assert(compare_keys(key_min, table.key_min) == .eq);
+                    if (!table.visible_by_any(snapshots)) {
+                        assert(table.eql(&tables[0]));
                         break;
                     }
                 } else {
@@ -297,16 +303,18 @@ pub fn ManifestLevel(
                 }
             }
 
-            var removed: u32 = 0;
+            var i: u32 = 0;
             var safety_counter: u32 = 0;
-            outer: while (safety_counter < cardinality) : (safety_counter += 1) {
+            outer: while (safety_counter < tables.len) : (safety_counter += 1) {
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 inner: while (it.next()) |table| : (absolute_index += 1) {
-                    if (table.snapshot_max <= snapshot_max) {
+                    if (!table.visible_by_any(snapshots)) {
+                        assert(table.eql(&tables[i]));
+
                         const table_key_max = table.key_max;
                         level.keys.remove_elements(node_pool, absolute_index, 1);
                         level.tables.remove_elements(node_pool, absolute_index, 1);
-                        removed += 1;
+                        i += 1;
 
                         switch (compare_keys(table_key_max, key_max)) {
                             .lt => break :inner,
@@ -318,7 +326,7 @@ pub fn ManifestLevel(
                     } else {
                         // We handle the first table to be removed specially before this main loop
                         // in order to check for an exact key_min match.
-                        assert(removed > 0);
+                        assert(i > 0);
                     }
                 } else {
                     unreachable;
@@ -326,11 +334,11 @@ pub fn ManifestLevel(
             } else {
                 unreachable;
             }
-            assert(removed == cardinality);
+            assert(i == tables.len);
             // The loop will never terminate naturally, only through the `break :outer`, which
             // means the +1 here is required as the continue safety_counter += 1 continue
             // expression isn't run on the last iteration of the loop.
-            assert(safety_counter + 1 == cardinality);
+            assert(safety_counter + 1 == tables.len);
 
             assert(level.keys.len() == level.tables.len());
 
@@ -623,6 +631,27 @@ pub fn TestContext(
 
                 return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
             }
+
+            pub fn visible_by_any(table: *const TableInfo, snapshots: []const u64) bool {
+                for (snapshots) |snapshot| {
+                    if (table.visible(snapshot)) return true;
+                }
+                return table.visible(lsm.snapshot_latest);
+            }
+
+            pub fn eql(table: *const TableInfo, other: *const TableInfo) bool {
+                // TODO since the layout of TableInfo is well defined, a direct memcmp might
+                // be faster here. However, it's not clear if we can make the assumption that
+                // compare_keys() will return .eq exactly when the memory of the keys are
+                // equal. Consider defining the API to allow this and check the generated code.
+                return table.checksum == other.checksum and
+                    table.address == other.address and
+                    table.flags == other.flags and
+                    table.snapshot_min == other.snapshot_min and
+                    table.snapshot_max == other.snapshot_max and
+                    compare_keys(table.key_min, other.key_min) == .eq and
+                    compare_keys(table.key_max, other.key_max) == .eq;
+            }
         };
 
         const NodePool = @import("node_pool.zig").NodePool;
@@ -805,12 +834,25 @@ pub fn TestContext(
             assert(context.reference.items.len <= table_count_max);
             const index = context.random.uintAtMostBiased(u32, reference_len - count);
 
-            const key_min = context.reference.items[index].key_min;
-            const key_max = context.reference.items[index + count - 1].key_max;
+            if (log) {
+                std.debug.print("Removing tables: ", .{});
+                for (context.reference.items[index..][0..count]) |t| {
+                    std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
+                }
+                std.debug.print("\n", .{});
+            }
 
-            if (log) std.debug.print("Removing {} to {}, cardinality {}\n", .{ key_min, key_max, count });
+            // TODO properly test snapshots
+            context.level.set_snapshot_max(1, context.reference.items[index..][0..count]);
+            for (context.reference.items[index..][0..count]) |*table| {
+                table.snapshot_max = 1;
+            }
 
-            context.level.remove_tables(&context.pool, math.maxInt(u64), key_min, key_max, count);
+            context.level.remove_tables(
+                &context.pool,
+                &[_]u64{},
+                context.reference.items[index..][0..count],
+            );
 
             context.reference.replaceRange(index, count, &[0]TableInfo{}) catch unreachable;
 
@@ -840,7 +882,7 @@ pub fn TestContext(
         fn verify(context: *Self) !void {
             if (log) {
                 std.debug.print("expect: ", .{});
-                for (context.reference.items) |i| std.debug.print("[{},{}], ", .{ i.key_min, i.key_max });
+                for (context.reference.items) |t| std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
 
                 std.debug.print("\nactual: ", .{});
                 var it = context.level.iterator(
@@ -849,7 +891,7 @@ pub fn TestContext(
                     math.maxInt(Key),
                     .ascending,
                 );
-                while (it.next()) |i| std.debug.print("[{},{}], ", .{ i.key_min, i.key_max });
+                while (it.next()) |t| std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
                 std.debug.print("\n", .{});
             }
 
