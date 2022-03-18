@@ -1,7 +1,7 @@
 /*
-Note: The Vopr Hub should not be run from within the tigerbeetle directory
-However, to parse the output correctly the Vopr must run from within the tigerbeetle directory
-To run the Vopr Hub Zig must be installed and five environmental variables are required:
+Note: The VOPR Hub should not be run from within the tigerbeetle directory
+However, to parse the output correctly the VOPR must run from within the tigerbeetle directory
+To run the VOPR Hub Zig must be installed and five environmental variables are required:
 1. TIGERBEETLE_DIRECTORY where TigerBeetle is stored.
 2. ISSUE_DIRECTORY where issues are stored on disk
 3. DEVELOPER_TOKEN for access to GitHub
@@ -31,6 +31,7 @@ import (
 const MAX_CONCURRENT_CONNECTIONS = 4
 const MAX_QUEUING_MESSAGES = 100
 const LENGTH_OF_VOPR_MESSAGE = 29
+
 // GitHub's hard character limit for issues is 65536
 const MAX_GITHUB_ISSUE_SIZE = 60000
 
@@ -45,7 +46,7 @@ var repository_url string
 // An alias for the vopr_message's byte array
 type vopr_message_byte_array [LENGTH_OF_VOPR_MESSAGE]byte
 
-// Struct for decoded Vopr message
+// Struct for decoded VOPR message
 // bug type 1 - correctness
 // bug type 2 - liveness
 // bug type 3 - crash
@@ -56,7 +57,7 @@ type vopr_message struct {
 	hash   [32]byte
 }
 
-// The Vopr's output is stored in a vopr_output struct where certain elements can be extracted and
+// The VOPR's output is stored in a vopr_output struct where certain elements can be extracted and
 // processed.
 // parameters includes information about the conditions under which TigerBeetle is run.
 type vopr_output struct {
@@ -83,7 +84,7 @@ func (output *vopr_output) extract_stack_trace(message *vopr_message) {
 	}
 }
 
-// The Vopr's parameters are moved from output.logs into output.parameters.
+// The VOPR's parameters are moved from output.logs into output.parameters.
 func (output *vopr_output) extract_parameters(message *vopr_message) {
 	state_regexpr := regexp.MustCompile(`\[info\] \(state_checker\):[^\[]+`)
 	index := state_regexpr.FindIndex(output.logs)
@@ -93,10 +94,10 @@ func (output *vopr_output) extract_parameters(message *vopr_message) {
 		output.parameters = string(output.logs[index[0]:index[1]])
 		output.parameters = strings.TrimSpace(output.parameters)
 		output.logs = append(output.logs[:index[0]], output.logs[index[1]:]...)
-		log_debug("The Vopr's parameters have been extracted", message.hash[:])
+		log_debug("The VOPR's parameters have been extracted", message.hash[:])
 	} else {
 		output.parameters = ""
-		log_debug("No Vopr parameters were found", message.hash[:])
+		log_debug("No VOPR parameters were found", message.hash[:])
 	}
 }
 
@@ -136,7 +137,7 @@ type size_limited_buffer struct {
 	byte_budget int
 	// The buffer being wrapped
 	buffer *bytes.Buffer
-	// This channel is used to keep track of when the Vopr reaches its maximum allowed output
+	// This channel is used to keep track of when the VOPR reaches its maximum allowed output
 	size_reached chan bool
 }
 
@@ -164,10 +165,11 @@ func (limited_buffer *size_limited_buffer) Write(byte_array []byte) (int, error)
 // Reads incoming messages (ensuring that only the correct number of bytes are read), decodes and
 // validates them before adding the messages to the vopr_message_channel.
 func handle_connection(track_connections chan bool, connection net.Conn, vopr_message_channel chan vopr_message) {
-	// When this function completes, close the connection and decrement the number of current connections
+	// When this function completes, close the connection and decrement the connections count.
 	defer func() {
 		connection.Close()
 		<-track_connections
+		log_debug("Connection closed", nil)
 	}()
 
 	var input vopr_message_byte_array
@@ -185,11 +187,9 @@ func handle_connection(track_connections chan bool, connection net.Conn, vopr_me
 	}
 
 	// Decodes the byte array into a vopr_message
-	message := decode_input(input)
-	// Checks if there is capacity to process the message
-	space_in_vopr_message_channel := len(vopr_message_channel) < MAX_QUEUING_MESSAGES
+	message, decoding_error := decode_message(input)
 
-	if is_input_valid(message) {
+	if decoding_error == nil {
 		log_message := fmt.Sprintf(
 			"bug: %d commit: %x seed: %d",
 			message.bug,
@@ -198,7 +198,8 @@ func handle_connection(track_connections chan bool, connection net.Conn, vopr_me
 		)
 		log_info(log_message, message.hash[:])
 
-		if space_in_vopr_message_channel {
+		// Checks if there is capacity to process the message
+		if len(vopr_message_channel) < MAX_QUEUING_MESSAGES {
 			// Reply to client
 			_, error = connection.Write([]byte("1"))
 			if error != nil {
@@ -209,7 +210,7 @@ func handle_connection(track_connections chan bool, connection net.Conn, vopr_me
 			// Using a separate Goroutine means that the connection can close without delay.
 			go write_to_vopr_message_channel(message, vopr_message_channel)
 		} else {
-			log_info("Connection closed. Too many messages are awaiting processing", message.hash[:])
+			log_info("Too many messages already queued, dropping message", message.hash[:])
 		}
 	} else {
 		log_info("The input received is invalid", nil)
@@ -217,37 +218,37 @@ func handle_connection(track_connections chan bool, connection net.Conn, vopr_me
 }
 
 // Decodes the vopr_message_byte_array into a vopr_message struct.
-func decode_input(input vopr_message_byte_array) vopr_message {
+func decode_message(input vopr_message_byte_array) (vopr_message, error) {
 	var message vopr_message
-	// The bug type (1, 2, or 3) is encoded as a uint8
+	error := fmt.Errorf("Invalid input")
+
+	if len(input) != LENGTH_OF_VOPR_MESSAGE {
+		log_error(error.Error(), nil)
+		return message, error
+	}
+
+	// Ensure the bug and seed are valid.
+	if !(input[0] == 1 || input[0] == 2 || input[0] == 3) {
+		log_error(error.Error(), nil)
+		return message, error
+	}
+	seed := uint64(binary.BigEndian.Uint64(input[1:9]))
+	if seed < 0 {
+		log_error(error.Error(), nil)
+		return message, error
+	}
+
+	// The bug type (1, 2, or 3) is encoded as a uint8.
 	message.bug = input[0]
 	// The seed is encoded as a uint64
-	message.seed = uint64(binary.BigEndian.Uint64(input[1:9]))
+	message.seed = seed
 	// The GitHub commit hash is remains as a 20 byte array
 	copy(message.commit[:], input[9:29])
 	// Sha256 hash of the vopr_message_byte_array is used as a unique identifier of this message
 	// throughout the logs.
 	message.hash = sha256.Sum256(input[:])
 
-	return message
-}
-
-// Checks the vopr_message meets basic expectations.
-func is_input_valid(input vopr_message) bool {
-	if !(input.bug == 1 || input.bug == 2 || input.bug == 3) {
-		return false
-	}
-
-	if input.seed < 0 {
-		return false
-	}
-
-	commit_string := hex.EncodeToString(input.commit[:])
-	commit_valid, _ := regexp.MatchString(`([0-9a-f]){20}`, commit_string)
-	if !commit_valid {
-		return false
-	}
-	return true
+	return message, nil
 }
 
 // The write functionality is in its own function so it can run in its own Goroutine to allow the
@@ -266,7 +267,7 @@ func worker(vopr_message_channel chan vopr_message) {
 	}
 }
 
-// Responsable for running the Vopr, capturing the output, processing it, writing it to file and
+// Responsable for running the VOPR, capturing the output, processing it, writing it to file and
 // making the GitHub issue.
 // It also checks for duplicate issues and ensures the specified commit is available.
 func process(message vopr_message) {
@@ -319,7 +320,7 @@ func dedupe(issue_file_name string, message_hash []byte) string {
 	}
 }
 
-// Bugs 1 and 2 don't require a stack trace for deduping and so they can be deduped before the Vopr
+// Bugs 1 and 2 don't require a stack trace for deduping and so they can be deduped before the VOPR
 // is run.
 func dedupe_bug_1_and_2(message vopr_message) string {
 	// If bug type 1 or 2 first check if file exists before parsing and hashing the stack trace
@@ -361,10 +362,22 @@ func generate_file_name(message vopr_message, stack_trace_hash string) string {
 
 // Fetch available branches from GitHub and checkout the correct commit if it exists.
 func checkout_commit(commit string, message_hash []byte) error {
+	// Ensures commit is all hexidecimal.
+	commit_valid, error := regexp.MatchString(`^([0-9a-f]){40}$`, commit)
+	if error != nil {
+		error_message := fmt.Sprintf("Regex failed to run on the GitHub commit %s", error.Error())
+		log_error(error_message, message_hash)
+		return error
+	} else if !commit_valid {
+		error = fmt.Errorf("The GitHub commit contained unexpected characters")
+		log_error(error.Error(), message_hash)
+		return error
+	}
+
 	// Git commands need to be run with the TigerBeetle directory as their working_directory
 	fetch_command := exec.Command("git", "fetch", "--all")
 	fetch_command.Dir = tigerbeetle_directory
-	error := fetch_command.Run()
+	error = fetch_command.Run()
 	if error != nil {
 		error_message := fmt.Sprintf("Failed to run git fetch: %s", error.Error())
 		log_error(error_message, message_hash)
@@ -412,9 +425,9 @@ func checkout_commit(commit string, message_hash []byte) error {
 	return nil
 }
 
-// The Vopr is run from the TigerBeetle directory and its output is captured.
+// The VOPR is run from the TigerBeetle directory and its output is captured.
 func run_vopr(seed uint64, output *vopr_output, message_hash []byte) {
-	// Create a limited_buffer to read the vopr output
+	// Create a limited_buffer to read the VOPR output
 	var vopr_std_err_buffer bytes.Buffer
 	limited_buffer := size_limited_buffer{
 		buffer:       &vopr_std_err_buffer,
@@ -422,17 +435,17 @@ func run_vopr(seed uint64, output *vopr_output, message_hash []byte) {
 		size_reached: make(chan bool),
 	}
 
-	// The channel monitors if the Vopr completes before the maximum output is reached.
+	// The channel monitors if the VOPR completes before the maximum output is reached.
 	vopr_completed := make(chan bool)
 
 	vopr_path := tigerbeetle_directory + "/scripts/vopr.sh"
 
 	// Runs in debug mode
-	log_info("Running the Vopr...", message_hash)
+	log_info("Running the VOPR...", message_hash)
 	cmd := exec.Command(
 		"/bin/bash",
 		vopr_path,
-		fmt.Sprint(seed),
+		fmt.Sprintf("%d", seed),
 	)
 	cmd.Dir = tigerbeetle_directory
 	cmd.Stderr = &limited_buffer
@@ -440,7 +453,7 @@ func run_vopr(seed uint64, output *vopr_output, message_hash []byte) {
 	error := cmd.Start()
 
 	// Wait() runs synchronously. A separate Goroutine is needed to prevent the code from blocking.
-	// The Vopr might end prematurely instead if its output exceeds the maximum space.
+	// The VOPR might end prematurely instead if its output exceeds the maximum space.
 	go func() {
 		result := cmd.Wait()
 		if result == nil {
@@ -454,16 +467,16 @@ func run_vopr(seed uint64, output *vopr_output, message_hash []byte) {
 	select {
 	case result := <-vopr_completed:
 		if result {
-			log_message := fmt.Sprintf("The Vopr has completed with error: %v", error)
+			log_message := fmt.Sprintf("The VOPR has completed with error: %v", error)
 			log_info(log_message, message_hash)
 		} else {
-			log_info("The Vopr completed", message_hash)
+			log_info("The VOPR completed", message_hash)
 		}
 	case max_size := <-limited_buffer.size_reached:
 		if max_size {
 			cmd.Process.Kill()
 		}
-		log_info("The Vopr has completed", message_hash)
+		log_info("The VOPR has completed", message_hash)
 	}
 
 	// All results are stored in the output.logs byte array
@@ -487,6 +500,8 @@ func create_issue_file(issue_file_name string, output *vopr_output, message_hash
 // Submits a GitHub issue that includes the debug logs and parsed stack trace.
 func create_github_issue(message vopr_message, output *vopr_output, issue_file_name string) {
 	body := create_issue_markdown(message, output)
+	// Removes the file path from the name.
+	issue_file_name = strings.Replace(issue_file_name, issue_directory+"/", "", 1)
 	issue_contents := fmt.Sprintf(
 		"{ \"title\": \"%s\", \"body\": \"%s\", \"labels\":[] }",
 		issue_file_name,
@@ -518,7 +533,7 @@ func create_issue_markdown(message vopr_message, output *vopr_output) string {
 	// Limit set here to avoid writing only a few characters for any particular section.
 	const min_useful_length = 100
 
-	// Extract the information about the conditions under which the Vopr runs TigerBeetle.
+	// Extract the information about the conditions under which the VOPR runs TigerBeetle.
 	output.extract_parameters(&message)
 
 	length_of_stack_trace := len(output.stack_trace)
@@ -617,14 +632,15 @@ func make_markdown_compatible(text string) string {
 	return text
 }
 
-// Retrieve all the required environmental variables up front.
-func set_environmental_variables() {
+// Retrieve all the required environment variables up front.
+func set_environment_variables() {
 	var found bool
 	tigerbeetle_directory, found = os.LookupEnv("TIGERBEETLE_DIRECTORY")
 	if !found {
 		log_error("Could not find TIGERBEETLE_DIRECTORY environmental variable", nil)
 		os.Exit(1)
 	} else if not_empty(&tigerbeetle_directory) {
+		// Ensure there is no trailing slash
 		tigerbeetle_directory = strings.TrimRight(tigerbeetle_directory, "/\\")
 		log_debug("tigerbeetle_directory set as "+tigerbeetle_directory, nil)
 	} else {
@@ -718,16 +734,16 @@ func log_message(log_level string, message string, vopr_message_hash []byte) {
 }
 
 func main() {
-	// Determine the mode in which to run the Vopr Hub
+	// Determine the mode in which to run the VOPR Hub
 	flag.BoolVar(&debug_mode, "debug", false, "runs with debugging logs enabled")
 	flag.Parse()
 
-	set_environmental_variables()
+	set_environment_variables()
 
 	// This channel ensures no more than MAX_CONCURRENT_CONNECTIONS are being handled at one time.
 	track_connections := make(chan bool, MAX_CONCURRENT_CONNECTIONS)
 
-	// The channel will receieve fixed-size byte arrays from a Vopr.
+	// The channel will receieve fixed-size byte arrays from a VOPR.
 	vopr_message_channel := make(chan vopr_message, MAX_QUEUING_MESSAGES)
 
 	// Create a worker Goroutine to call process on each item as it appears in the channel.
