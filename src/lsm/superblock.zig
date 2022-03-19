@@ -975,7 +975,7 @@ pub fn SuperBlock(comptime Storage: type) type {
                         context.copy = starting_copy_for_sequence(superblock.working.sequence);
                         superblock.read_manifest(context);
                     } else {
-                        // TODO Consider calling TRIM() on Blocks' free suffix after checkpointing.
+                        // TODO Consider calling TRIM() on Grid's free suffix after checkpointing.
                         superblock.release(context);
                     }
                 } else |err| switch (err) {

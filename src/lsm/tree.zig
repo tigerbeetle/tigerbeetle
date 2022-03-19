@@ -74,8 +74,8 @@ pub fn TreeType(
     /// Returns a tombstone value representation for a key.
     comptime tombstone_from_key: fn (Key) callconv(.Inline) Value,
 ) type {
-    const Blocks = @import("blocks.zig").BlocksType(Storage);
-    _ = Blocks;
+    const Grid = @import("grid.zig").GridType(Storage);
+    _ = Grid;
 
     const block_size = config.block_size;
     const BlockPtr = *align(config.sector_size) [block_size]u8;
@@ -769,7 +769,7 @@ pub fn TreeType(
 
             pub fn create_from_sorted_values(
                 table: *Table,
-                storage: *Blocks,
+                grid: *Grid,
                 snapshot_min: u64,
                 sorted_values: []const Value,
             ) void {
@@ -791,7 +791,7 @@ pub fn TreeType(
                 const data_blocks = table.blocks[1 + filter_blocks.len ..][0..data_block_count];
 
                 var builder: Builder = .{
-                    .storage = storage,
+                    .grid = grid,
                     .index_block = &table.blocks[0],
                     .filter_block = &filter_blocks[0],
                     .data_block = &data_blocks[0],
@@ -830,7 +830,7 @@ pub fn TreeType(
                     .blocks = table.blocks,
                     .free = false,
                     .info = builder.index_block_finish(snapshot_min),
-                    .flush = .{ .storage = storage },
+                    .flush = .{ .grid = grid },
                 };
             }
 
@@ -920,7 +920,7 @@ pub fn TreeType(
             }
 
             const Builder = struct {
-                storage: *Blocks,
+                grid: *Grid,
                 key_min: Key = undefined,
                 key_max: Key = undefined,
 
@@ -1025,10 +1025,10 @@ pub fn TreeType(
                     const header_bytes = block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.storage.free_set.acquire().?;
+                    const address = builder.grid.free_set.acquire().?;
 
                     header.* = .{
-                        .cluster = builder.storage.cluster,
+                        .cluster = builder.grid.cluster,
                         .op = address,
                         .request = @intCast(u32, values.len),
                         .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
@@ -1067,12 +1067,12 @@ pub fn TreeType(
                 }
 
                 pub fn filter_block_finish(builder: *Builder) void {
-                    const address = builder.storage.free_set.acquire().?;
+                    const address = builder.grid.free_set.acquire().?;
 
                     const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
                     header.* = .{
-                        .cluster = builder.storage.cluster,
+                        .cluster = builder.grid.cluster,
                         .op = address,
                         .size = block_size - filter.padding_size,
                         .command = .block,
@@ -1118,10 +1118,10 @@ pub fn TreeType(
                     const header_bytes = index_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.storage.free_set.acquire().?;
+                    const address = builder.grid.free_set.acquire().?;
 
                     header.* = .{
-                        .cluster = builder.storage.cluster,
+                        .cluster = builder.grid.cluster,
                         .op = address,
                         .commit = builder.filter_block_count,
                         .request = builder.data_block_count,
@@ -1144,7 +1144,7 @@ pub fn TreeType(
 
                     // Reset the builder to its initial state, leaving the buffers untouched.
                     builder.* = .{
-                        .storage = builder.storage,
+                        .grid = builder.grid,
                         .key_min = undefined,
                         .key_max = undefined,
                         .index_block = builder.index_block,
@@ -1273,8 +1273,8 @@ pub fn TreeType(
             pub const FlushIterator = struct {
                 const Callback = fn (tree: *Tree) void;
 
-                storage: *Blocks,
-                write: Blocks.Write = undefined,
+                grid: *Grid,
+                write: Grid.Write = undefined,
                 writing: bool = false,
 
                 /// The index of the block that is being written or will be written next.
@@ -1324,10 +1324,10 @@ pub fn TreeType(
                     const block: BlockPtr = @alignCast(config.sector_size, &table.blocks[it.block]);
                     const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                     const address = header.op;
-                    it.storage.write_block(write_block_callback, &it.write, block, address);
+                    it.grid.write_block(write_block_callback, &it.write, block, address);
                 }
 
-                fn write_block_callback(write: *Blocks.Write) void {
+                fn write_block_callback(write: *Grid.Write) void {
                     const it = @fieldParentPtr(FlushIterator, "write", write);
                     const table = @fieldParentPtr(Table, "flush", it);
                     assert(it.block < table.blocks_used());
@@ -1384,10 +1384,10 @@ pub fn TreeType(
             const BlockWrite = struct {
                 block: BlockPtr,
                 submit: bool,
-                write: Blocks.Write,
+                write: Grid.Write,
             };
 
-            storage: *Blocks,
+            grid: *Grid,
             ticks: u32 = 0,
             io_pending: u32 = 0,
             callback: ?Callback = null,
@@ -1553,13 +1553,13 @@ pub fn TreeType(
             fn maybe_submit_write(
                 compaction: *Compaction,
                 block_write: *BlockWrite,
-                callback: fn (*Blocks.Write) void,
+                callback: fn (*Grid.Write) void,
             ) void {
                 if (block_write.submit) {
                     block_write.submit = false;
 
                     compaction.io_pending += 1;
-                    compaction.storage.write_block(
+                    compaction.grid.write_block(
                         callback,
                         &block_write.write,
                         block_write.block,
@@ -1568,9 +1568,9 @@ pub fn TreeType(
                 }
             }
 
-            fn on_block_write(comptime field: []const u8) fn (*Blocks.Write) void {
+            fn on_block_write(comptime field: []const u8) fn (*Grid.Write) void {
                 return struct {
-                    fn callback(write: *Blocks.Write) void {
+                    fn callback(write: *Grid.Write) void {
                         const block_write = @fieldParentPtr(BlockWrite, "write", write);
                         const compaction = @fieldParentPtr(Compaction, field, block_write);
                         on_io_done(compaction);
@@ -1646,7 +1646,7 @@ pub fn TreeType(
                 const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
                 const TablesRingBuffer = RingBuffer(TableIterator, 2, .array);
 
-                storage: *Blocks,
+                grid: *Grid,
                 parent: *Parent,
                 level: u32,
                 key_min: Key,
@@ -1665,7 +1665,7 @@ pub fn TreeType(
                     errdefer table_b.deinit(allocator);
 
                     return LevelIterator{
-                        .storage = undefined,
+                        .grid = undefined,
                         .parent = undefined,
                         .level = undefined,
                         .key_min = undefined,
@@ -1688,14 +1688,14 @@ pub fn TreeType(
 
                 fn reset(
                     it: *LevelIterator,
-                    storage: *Blocks,
+                    grid: *Grid,
                     parent: *Parent,
                     level: u32,
                     key_min: Key,
                     key_max: Key,
                 ) void {
                     it.* = .{
-                        .storage = storage,
+                        .grid = grid,
                         .parent = parent,
                         .level = level,
                         .key_min = key_min,
@@ -1808,7 +1808,7 @@ pub fn TreeType(
 
                 const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
 
-                storage: *Blocks,
+                grid: *Grid,
                 parent: *Parent,
                 read_table_index: bool,
                 address: u64,
@@ -1831,7 +1831,7 @@ pub fn TreeType(
                 /// The index of the current value in the head of the blocks ring buffer.
                 value: u32,
 
-                read: Blocks.Read = undefined,
+                read: Grid.Read = undefined,
                 /// This field is only used for safety checks, it does not affect the behavior.
                 read_pending: bool = false,
 
@@ -1849,7 +1849,7 @@ pub fn TreeType(
                     errdefer allocator.free(block_b);
 
                     return .{
-                        .storage = undefined,
+                        .grid = undefined,
                         .parent = undefined,
                         .read_table_index = undefined,
                         // Use 0 so that we can assert(address != 0) in tick().
@@ -1879,14 +1879,14 @@ pub fn TreeType(
 
                 fn reset(
                     it: *TableIterator,
-                    storage: *Blocks,
+                    grid: *Grid,
                     parent: *Parent,
                     address: u64,
                     checksum: u128,
                 ) void {
                     assert(!it.read_pending);
                     it.* = .{
-                        .storage = storage,
+                        .grid = grid,
                         .parent = parent,
                         .read_table_index = true,
                         .address = address,
@@ -1913,7 +1913,7 @@ pub fn TreeType(
                     if (it.read_table_index) {
                         assert(!it.read_pending);
                         it.read_pending = true;
-                        it.storage.read_block(
+                        it.grid.read_block(
                             on_read_table_index,
                             &it.read,
                             it.index,
@@ -1950,10 +1950,10 @@ pub fn TreeType(
 
                     assert(!it.read_pending);
                     it.read_pending = true;
-                    it.storage.read_block(on_read, &it.read, block, address, checksum);
+                    it.grid.read_block(on_read, &it.read, block, address, checksum);
                 }
 
-                fn on_read_table_index(read: *Blocks.Read) void {
+                fn on_read_table_index(read: *Grid.Read) void {
                     const it = @fieldParentPtr(TableIterator, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
@@ -1966,7 +1966,7 @@ pub fn TreeType(
                     assert(read_pending);
                 }
 
-                fn on_read(read: *Blocks.Read) void {
+                fn on_read(read: *Grid.Read) void {
                     const it = @fieldParentPtr(TableIterator, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
@@ -2055,7 +2055,7 @@ pub fn TreeType(
 
         pub const ValueCache = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
 
-        storage: *Blocks,
+        grid: *Grid,
         options: Options,
 
         /// Keys enqueued to be prefetched.
@@ -2092,7 +2092,7 @@ pub fn TreeType(
 
         pub fn init(
             allocator: mem.Allocator,
-            storage: *Blocks,
+            grid: *Grid,
             node_pool: *NodePool,
             value_cache: ?*ValueCache,
             options: Options,
@@ -2121,7 +2121,7 @@ pub fn TreeType(
             errdefer manifest.deinit(allocator);
 
             return Tree{
-                .storage = storage,
+                .grid = grid,
                 .options = options,
                 .prefetch_keys = prefetch_keys,
                 .prefetch_values = prefetch_values,
@@ -2133,7 +2133,7 @@ pub fn TreeType(
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            // TODO Consider whether we should release blocks acquired from Blocks.block_free_set.
+            // TODO Consider whether we should release blocks acquired from Grid.block_free_set.
             tree.prefetch_keys.deinit(allocator);
             tree.prefetch_values.deinit(allocator);
             tree.mutable_table.deinit(allocator);
@@ -2217,7 +2217,7 @@ pub fn TreeType(
                 assert(tree.table.free);
 
                 tree.table.create_from_sorted_values(
-                    tree.storage,
+                    tree.grid,
                     tree.manifest.take_snapshot(),
                     tree.mutable_table.as_sorted_values(sort_buffer),
                 );
@@ -2372,7 +2372,7 @@ test {
 
     const IO = @import("../io.zig").IO;
     const Storage = @import("../storage.zig").Storage;
-    const Blocks = @import("blocks.zig").BlocksType(Storage);
+    const Grid = @import("grid.zig").GridType(Storage);
 
     const dir_path = ".";
     const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err| {
@@ -2380,12 +2380,8 @@ test {
         return;
     };
 
-    const storage_fd = try Storage.open(
-        dir_fd,
-        "lsm",
-        config.journal_size_max,
-        false, // Set this to true the first time to create the data file.
-    );
+    const storage_fd = try Storage.open(dir_fd, "test_tree", config.journal_size_max, true);
+    defer std.fs.cwd().deleteFile("test_tree") catch {};
 
     var io = try IO.init(128, 0);
     defer io.deinit();
@@ -2432,20 +2428,20 @@ test {
     var free_set = try SuperBlockFreeSet.init(allocator, 1024 * 1024);
     defer free_set.deinit(allocator);
 
-    const blocks_offset = 0; // TODO Take other zones into account.
-    const blocks_size = 1024 * 1024;
-    var blocks = try Blocks.init(
+    const grid_offset = 0; // TODO Take other zones into account.
+    const grid_size = 1024 * 1024;
+    var grid = try Grid.init(
         &storage,
-        blocks_offset,
-        blocks_size,
+        grid_offset,
+        grid_size,
         cluster,
         &free_set,
     );
-    defer blocks.deinit();
+    defer grid.deinit();
 
     var tree = try Tree.init(
         allocator,
-        &blocks,
+        &grid,
         &node_pool,
         &value_cache,
         .{
