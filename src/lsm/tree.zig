@@ -24,7 +24,7 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
-const SuperBlock = @import("superblock.zig").SuperBlock;
+const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const SuperBlockFreeSet = @import("superblock_free_set.zig").SuperBlockFreeSet;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
