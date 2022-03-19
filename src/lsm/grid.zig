@@ -8,19 +8,19 @@ const vsr = @import("../vsr.zig");
 const SuperBlockFreeSet = @import("superblock_free_set.zig").SuperBlockFreeSet;
 const FIFO = @import("../fifo.zig").FIFO;
 
-pub fn BlocksType(comptime Storage: type) type {
+pub fn GridType(comptime Storage: type) type {
     const block_size = config.block_size;
     const BlockPtr = *align(config.sector_size) [block_size]u8;
     const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
     return struct {
-        const Blocks = @This();
+        const Grid = @This();
 
         pub const Write = Storage.Write;
 
         pub const Read = struct {
-            blocks: *Blocks,
-            callback: fn (*Blocks.Read) void,
+            grid: *Grid,
+            callback: fn (*Grid.Read) void,
             completion: Storage.Read,
             block: BlockPtr,
             address: u64,
@@ -46,7 +46,7 @@ pub fn BlocksType(comptime Storage: type) type {
 
         cluster: u32,
 
-        /// Owned by SuperBlock, shared with Blocks.
+        /// Owned by SuperBlock, shared with Grid.
         free_set: *SuperBlockFreeSet,
 
         // TODO interrogate this list and do recovery in Replica.tick().
@@ -58,8 +58,8 @@ pub fn BlocksType(comptime Storage: type) type {
             size: u64,
             cluster: u32,
             free_set: *SuperBlockFreeSet,
-        ) !Blocks {
-            return Blocks{
+        ) !Grid {
+            return Grid{
                 .storage = storage,
                 .offset = offset,
                 .size = size,
@@ -68,20 +68,20 @@ pub fn BlocksType(comptime Storage: type) type {
             };
         }
 
-        pub fn deinit(blocks: *Blocks) void {
-            blocks.* = undefined;
+        pub fn deinit(grid: *Grid) void {
+            grid.* = undefined;
         }
 
         pub fn write_block(
-            blocks: *Blocks,
-            callback: fn (*Blocks.Write) void,
-            write: *Blocks.Write,
+            grid: *Grid,
+            callback: fn (*Grid.Write) void,
+            write: *Grid.Write,
             block: BlockPtrConst,
             address: u64,
         ) void {
             assert(address != 0);
 
-            blocks.storage.write_sectors(callback, write, block, blocks.block_offset(address));
+            grid.storage.write_sectors(callback, write, block, grid.block_offset(address));
         }
 
         /// This function transparently handles recovery if the checksum fails.
@@ -89,9 +89,9 @@ pub fn BlocksType(comptime Storage: type) type {
         /// interrogate each tick(). The callback passed to this function won't be called until the
         /// block has been recovered.
         pub fn read_block(
-            blocks: *Blocks,
-            callback: fn (*Blocks.Read) void,
-            read: *Blocks.Read,
+            grid: *Grid,
+            callback: fn (*Grid.Read) void,
+            read: *Grid.Read,
             block: BlockPtr,
             address: u64,
             checksum: u128,
@@ -99,7 +99,7 @@ pub fn BlocksType(comptime Storage: type) type {
             assert(address != 0);
 
             read.* = .{
-                .blocks = blocks,
+                .grid = grid,
                 .callback = callback,
                 .completion = undefined,
                 .block = block,
@@ -107,11 +107,11 @@ pub fn BlocksType(comptime Storage: type) type {
                 .checksum = checksum,
             };
 
-            blocks.storage.read_sectors(
+            grid.storage.read_sectors(
                 on_read_sectors,
                 &read.completion,
                 block,
-                blocks.block_offset(address),
+                grid.block_offset(address),
             );
         }
 
@@ -128,13 +128,13 @@ pub fn BlocksType(comptime Storage: type) type {
             {
                 read.finish();
             } else {
-                read.blocks.to_recover.push(read);
+                read.grid.to_recover.push(read);
             }
         }
 
-        fn block_offset(blocks: Blocks, address: u64) u64 {
+        fn block_offset(grid: Grid, address: u64) u64 {
             assert(address != 0);
-            return blocks.offset + (address - 1) * block_size;
+            return grid.offset + (address - 1) * block_size;
         }
     };
 }
