@@ -2428,15 +2428,10 @@ test {
     var free_set = try SuperBlockFreeSet.init(allocator, 1024 * 1024);
     defer free_set.deinit(allocator);
 
+    // TODO Initialize SuperBlock:
     const grid_offset = 0; // TODO Take other zones into account.
     const grid_size = 1024 * 1024;
-    var grid = try Grid.init(
-        &storage,
-        grid_offset,
-        grid_size,
-        cluster,
-        &free_set,
-    );
+    var grid = try Grid.init(&allocator, &superblock);
     defer grid.deinit();
 
     var tree = try Tree.init(

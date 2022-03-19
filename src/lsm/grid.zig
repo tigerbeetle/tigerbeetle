@@ -5,13 +5,15 @@ const mem = std.mem;
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
 
-const SuperBlockFreeSet = @import("superblock_free_set.zig").SuperBlockFreeSet;
+const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 
 pub fn GridType(comptime Storage: type) type {
     const block_size = config.block_size;
     const BlockPtr = *align(config.sector_size) [block_size]u8;
     const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
+
+    const SuperBlock = SuperBlockType(Storage);
 
     return struct {
         const Grid = @This();
@@ -26,7 +28,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
 
-            /// Link for to_recover linked list.
+            /// Link for read_recovery_queue linked list.
             next: ?*Read = null,
 
             /// Call the user's callback, finishing the read.
@@ -38,38 +40,25 @@ pub fn GridType(comptime Storage: type) type {
             }
         };
 
-        // TODO Replace `storage/cluster/free_set` fields with `superblock: *SuperBlock`:
-
-        storage: *Storage,
-        offset: u64,
-        size: u64,
-
-        cluster: u32,
-
-        /// Owned by SuperBlock, shared with Grid.
-        free_set: *SuperBlockFreeSet,
+        superblock: *SuperBlock,
 
         // TODO interrogate this list and do recovery in Replica.tick().
-        to_recover: FIFO(Read) = .{},
+        read_recovery_queue: FIFO(Read) = .{},
 
-        pub fn init(
-            storage: *Storage,
-            offset: u64,
-            size: u64,
-            cluster: u32,
-            free_set: *SuperBlockFreeSet,
-        ) !Grid {
+        pub fn init(allocator: mem.Allocator, superblock: *SuperBlock) !Grid {
+            // TODO SetAssociativeCache.init(allocator):
+            _ = allocator;
+
             return Grid{
-                .storage = storage,
-                .offset = offset,
-                .size = size,
-                .cluster = cluster,
-                .free_set = free_set,
+                .superblock = superblock,
             };
         }
 
-        pub fn deinit(grid: *Grid) void {
+        pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
             grid.* = undefined;
+
+            // TODO cache.deinit(allocator):
+            _ = allocator;
         }
 
         pub fn write_block(
@@ -79,9 +68,18 @@ pub fn GridType(comptime Storage: type) type {
             block: BlockPtrConst,
             address: u64,
         ) void {
+            assert(grid.superblock.opened);
             assert(address != 0);
+            // TODO Assert that address is acquired in the free set.
+            // TODO Assert that the block ptr is not being used for another I/O (read or write).
+            // TODO Assert that block is not already writing.
 
-            grid.storage.write_sectors(callback, write, block, grid.block_offset(address));
+            grid.superblock.storage.write_sectors(
+                callback,
+                write,
+                block,
+                grid.block_offset(address),
+            );
         }
 
         /// This function transparently handles recovery if the checksum fails.
@@ -92,11 +90,15 @@ pub fn GridType(comptime Storage: type) type {
             grid: *Grid,
             callback: fn (*Grid.Read) void,
             read: *Grid.Read,
-            block: BlockPtr,
+            block: BlockPtr, // TODO Instead, provide this to the callback to eliminate the copy.
             address: u64,
             checksum: u128,
         ) void {
+            assert(grid.superblock.opened);
             assert(address != 0);
+            // TODO Assert that address is acquired in the free set.
+            // TODO Assert that the block ptr is not being used for another I/O (read or write).
+            // TODO Queue concurrent reads to the same address.
 
             read.* = .{
                 .grid = grid,
@@ -107,7 +109,7 @@ pub fn GridType(comptime Storage: type) type {
                 .checksum = checksum,
             };
 
-            grid.storage.read_sectors(
+            grid.superblock.storage.read_sectors(
                 on_read_sectors,
                 &read.completion,
                 block,
@@ -128,7 +130,7 @@ pub fn GridType(comptime Storage: type) type {
             {
                 read.finish();
             } else {
-                read.grid.to_recover.push(read);
+                read.grid.read_recovery_queue.push(read);
             }
         }
 
