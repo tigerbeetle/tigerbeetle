@@ -314,9 +314,9 @@ const superblock_trailer_free_set_size_max = blk: {
     break :blk div_ceil(encode_size_max, config.sector_size) * config.sector_size;
 };
 
-pub fn SuperBlock(comptime Storage: type) type {
+pub fn SuperBlockType(comptime Storage: type) type {
     return struct {
-        const SuperBlockGeneric = @This();
+        const SuperBlock = @This();
 
         pub const Context = struct {
             pub const Caller = enum {
@@ -326,7 +326,7 @@ pub fn SuperBlock(comptime Storage: type) type {
                 view_change,
             };
 
-            superblock: *SuperBlockGeneric,
+            superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             caller: Caller,
 
@@ -396,7 +396,7 @@ pub fn SuperBlock(comptime Storage: type) type {
         queue_head: ?*Context = null,
         queue_tail: ?*Context = null,
 
-        pub fn init(allocator: mem.Allocator, storage: *Storage) !SuperBlockGeneric {
+        pub fn init(allocator: mem.Allocator, storage: *Storage) !SuperBlock {
             const a = try allocator.allocAdvanced(SuperBlockSector, config.sector_size, 1, .exact);
             errdefer allocator.free(a);
 
@@ -439,7 +439,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             );
             errdefer allocator.free(free_set_buffer);
 
-            return SuperBlockGeneric{
+            return SuperBlock{
                 .storage = storage,
                 .working = &a[0],
                 .writing = &b[0],
@@ -452,7 +452,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             };
         }
 
-        pub fn deinit(superblock: *SuperBlockGeneric, allocator: mem.Allocator) void {
+        pub fn deinit(superblock: *SuperBlock, allocator: mem.Allocator) void {
             assert(superblock.queue_head == null);
             assert(superblock.queue_tail == null);
 
@@ -477,13 +477,14 @@ pub fn SuperBlock(comptime Storage: type) type {
         };
 
         pub fn format(
-            superblock: *SuperBlockGeneric,
+            superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             context: *Context,
             options: FormatOptions,
         ) void {
             assert(!superblock.opened);
 
+            assert(options.replica < config.replicas_max);
             assert(options.size_max > superblock_zone_size);
             assert(options.size_max % config.sector_size == 0);
 
@@ -544,7 +545,7 @@ pub fn SuperBlock(comptime Storage: type) type {
         }
 
         pub fn open(
-            superblock: *SuperBlockGeneric,
+            superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             context: *Context,
         ) void {
@@ -560,7 +561,7 @@ pub fn SuperBlock(comptime Storage: type) type {
         }
 
         pub fn checkpoint(
-            superblock: *SuperBlockGeneric,
+            superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             context: *Context,
         ) void {
@@ -577,7 +578,7 @@ pub fn SuperBlock(comptime Storage: type) type {
         }
 
         pub fn view_change(
-            superblock: *SuperBlockGeneric,
+            superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             context: *Context,
             vsr_state: SuperBlockSector.VSRState,
@@ -623,7 +624,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             superblock.acquire(context);
         }
 
-        pub fn view_change_in_progress(superblock: *SuperBlockGeneric) bool {
+        pub fn view_change_in_progress(superblock: *SuperBlock) bool {
             assert(superblock.opened);
 
             if (superblock.queue_head) |head| {
@@ -639,7 +640,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             return false;
         }
 
-        fn write_staging(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn write_staging(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .format or context.caller == .checkpoint);
             assert(context.caller == .format or superblock.opened);
             assert(superblock.queue_head == context);
@@ -666,7 +667,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             superblock.write_manifest(context);
         }
 
-        fn write_staging_encode_manifest(superblock: *SuperBlockGeneric) void {
+        fn write_staging_encode_manifest(superblock: *SuperBlock) void {
             const staging: *SuperBlockSector = superblock.staging;
             const target = superblock.manifest_buffer;
 
@@ -674,7 +675,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             staging.manifest_checksum = vsr.checksum(target[0..staging.manifest_size]);
         }
 
-        fn write_staging_encode_free_set(superblock: *SuperBlockGeneric) void {
+        fn write_staging_encode_free_set(superblock: *SuperBlock) void {
             const staging: *SuperBlockSector = superblock.staging;
             const encode_size_max = SuperBlockFreeSet.encode_size_max(config.block_count_max);
             const target = superblock.free_set_buffer[0..encode_size_max];
@@ -695,7 +696,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
         }
 
-        fn write_view_change(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn write_view_change(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .view_change);
             assert(superblock.opened);
             assert(superblock.queue_head == context);
@@ -724,7 +725,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             superblock.write_sector(context);
         }
 
-        fn write_manifest(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn write_manifest(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
             const size = vsr.sector_ceil(superblock.writing.manifest_size);
@@ -766,7 +767,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             context.superblock.write_free_set(context);
         }
 
-        fn write_free_set(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn write_free_set(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
             const size = vsr.sector_ceil(superblock.writing.free_set_size);
@@ -808,7 +809,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             context.superblock.write_sector(context);
         }
 
-        fn write_sector(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn write_sector(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
             // We either update the working superblock for a checkpoint (+1) or a view change (+2):
@@ -882,7 +883,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             }
         }
 
-        fn read_working(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn read_working(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
             // We do not submit reads in parallel, as while this would shave off 1ms, it would also
@@ -895,7 +896,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             superblock.read_sector(context);
         }
 
-        fn read_sector(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn read_sector(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
             assert(context.copy < superblock_copies_max);
 
@@ -992,7 +993,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             }
         }
 
-        fn read_manifest(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn read_manifest(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
             assert(context.copy < superblock_copies_max);
@@ -1051,7 +1052,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             }
         }
 
-        fn read_free_set(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn read_free_set(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
             assert(context.copy < superblock_copies_max);
@@ -1112,7 +1113,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             }
         }
 
-        fn acquire(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn acquire(superblock: *SuperBlock, context: *Context) void {
             if (superblock.queue_head) |head| {
                 // There should be nothing else happening when we format() or open():
                 assert(context.caller != .format and context.caller != .open);
@@ -1143,7 +1144,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             }
         }
 
-        fn release(superblock: *SuperBlockGeneric, context: *Context) void {
+        fn release(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
             log.debug("{s}: complete", .{@tagName(context.caller)});
@@ -1171,7 +1172,7 @@ pub fn SuperBlock(comptime Storage: type) type {
             context.callback(context);
         }
 
-        fn assert_bounds(superblock: *SuperBlockGeneric, offset: u64, size: u64) void {
+        fn assert_bounds(superblock: *SuperBlock, offset: u64, size: u64) void {
             assert(offset >= superblock.storage_offset);
             assert(offset + size <= superblock.storage_offset + superblock.storage_size);
         }
@@ -1465,7 +1466,7 @@ test "SuperBlockSector" {
 // TODO Test invariants and transitions across TestRunner functions.
 // TODO Add a pristine in-memory test storage shim (we currently use real disk).
 const TestStorage = @import("../storage.zig").Storage;
-const TestSuperBlock = SuperBlock(TestStorage);
+const TestSuperBlock = SuperBlockType(TestStorage);
 
 const TestRunner = struct {
     superblock: *TestSuperBlock,
@@ -1529,7 +1530,7 @@ const TestRunner = struct {
     }
 };
 
-pub fn test_main() !void {
+pub fn main() !void {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -1543,7 +1544,7 @@ pub fn test_main() !void {
     };
 
     const cluster = 32;
-    const replica = 41;
+    const replica = 4;
     const size_max = 512 * 1024 * 1024;
 
     const storage_fd = try Storage.open(dir_fd, "test_superblock", size_max, true);
