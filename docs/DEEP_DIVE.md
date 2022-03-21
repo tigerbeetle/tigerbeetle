@@ -86,7 +86,7 @@ Let's try full two-phase commit transfers (create, and then commit):
 You will see the second transfer is rejected with an error for tripping the debit reserved limit.
 
 ```
-zig/zig run src/demo_04_create_transfers_two_phase_commit.zig
+zig/zig run src/demo_04_create_pending_transfers.zig
 zig/zig run src/demo_02_lookup_accounts.zig
 ```
 
@@ -97,14 +97,14 @@ Let's commit (and accept):
 Again, the second transfer is rejected because it was never created.
 
 ```
-zig/zig run src/demo_05_accept_transfers.zig
+zig/zig run src/demo_05_post_pending_transfers.zig
 zig/zig run src/demo_02_lookup_accounts.zig
 ```
 
 Let's also pretend someone else tried to commit (but reject) concurrently:
 
 ```
-zig/zig run src/demo_06_reject_transfers.zig
+zig/zig run src/demo_06_void_pending_transfers.zig
 ```
 
 **From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state_machine.zig` by grepping the source for `fn create_account`, `fn create_transfer`, and `fn commit_transfer`.**

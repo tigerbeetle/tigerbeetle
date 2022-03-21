@@ -376,21 +376,20 @@ pub const StateMachine = struct {
             // TODO We can combine this lookup with the previous lookup if we return `error!void`:
             const insert = self.posted.getOrPutAssumeCapacity(t.id);
             assert(!insert.found_existing);
-                insert.value_ptr.* = t;
-                dr.debits_pending -= lookup.amount;
-                cr.credits_pending -= lookup.amount;
-                if (!t.flags.void_pending_transfer) {
-                    if (t.amount == 0) {
-                        dr.debits_posted += lookup.amount;
-                        cr.credits_posted += lookup.amount;
-                    } else {
-                        dr.debits_posted += t.amount;
-                        cr.credits_posted += t.amount;
-                    }
+            insert.value_ptr.* = t;
+            dr.debits_pending -= lookup.amount;
+            cr.credits_pending -= lookup.amount;
+            if (!t.flags.void_pending_transfer) {
+                if (t.amount == 0) {
+                    dr.debits_posted += lookup.amount;
+                    cr.credits_posted += lookup.amount;
+                } else {
+                    dr.debits_posted += t.amount;
+                    cr.credits_posted += t.amount;
                 }
-                self.post_timestamp = t.timestamp;
-                return .ok;
             }
+            self.post_timestamp = t.timestamp;
+            return .ok;
         } else {
             if (t.flags.padding != 0) return .reserved_flag_padding;
             if (t.flags.pending) {
