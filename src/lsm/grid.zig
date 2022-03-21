@@ -8,12 +8,20 @@ const vsr = @import("../vsr.zig");
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 
+const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
+const write_ahead_log_zone_size = config.message_size_max * 1024; // TODO Use journal_slot_count.
+const client_table_zone_size = config.message_size_max * config.clients_max * 2;
+
 pub fn GridType(comptime Storage: type) type {
     const block_size = config.block_size;
     const BlockPtr = *align(config.sector_size) [block_size]u8;
     const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
     const SuperBlock = SuperBlockType(Storage);
+
+    const grid_offset: u64 = superblock_zone_size +
+        write_ahead_log_zone_size +
+        client_table_zone_size;
 
     return struct {
         const Grid = @This();
@@ -69,17 +77,12 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
         ) void {
             assert(grid.superblock.opened);
-            assert(address != 0);
+            assert(address > 0);
             // TODO Assert that address is acquired in the free set.
             // TODO Assert that the block ptr is not being used for another I/O (read or write).
             // TODO Assert that block is not already writing.
 
-            grid.superblock.storage.write_sectors(
-                callback,
-                write,
-                block,
-                grid.block_offset(address),
-            );
+            grid.superblock.storage.write_sectors(callback, write, block, block_offset(address));
         }
 
         /// This function transparently handles recovery if the checksum fails.
@@ -95,7 +98,7 @@ pub fn GridType(comptime Storage: type) type {
             checksum: u128,
         ) void {
             assert(grid.superblock.opened);
-            assert(address != 0);
+            assert(address > 0);
             // TODO Assert that address is acquired in the free set.
             // TODO Assert that the block ptr is not being used for another I/O (read or write).
             // TODO Queue concurrent reads to the same address.
@@ -110,14 +113,14 @@ pub fn GridType(comptime Storage: type) type {
             };
 
             grid.superblock.storage.read_sectors(
-                on_read_sectors,
+                read_block_callback,
                 &read.completion,
                 block,
-                grid.block_offset(address),
+                block_offset(address),
             );
         }
 
-        fn on_read_sectors(completion: *Storage.Read) void {
+        fn read_block_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(Read, "completion", completion);
 
             const header_bytes = read.block[0..@sizeOf(vsr.Header)];
@@ -134,9 +137,10 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        fn block_offset(grid: Grid, address: u64) u64 {
-            assert(address != 0);
-            return grid.offset + (address - 1) * block_size;
+        fn block_offset(address: u64) u64 {
+            assert(address > 0);
+
+            return grid_offset + (address - 1) * block_size;
         }
     };
 }
