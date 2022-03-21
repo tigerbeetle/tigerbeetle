@@ -100,7 +100,7 @@ pub fn main() !void {
             .user_data = 0,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = if (IS_TWO_PHASE_COMMIT) .{ .posting = true } else .{},
+            .flags = if (IS_TWO_PHASE_COMMIT) .{ .pending = true } else .{},
             .amount = 1,
             .timeout = if (IS_TWO_PHASE_COMMIT) std.time.ns_per_hour else 0,
         };
