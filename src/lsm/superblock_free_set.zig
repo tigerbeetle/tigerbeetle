@@ -13,7 +13,7 @@ const div_ceil = @import("../util.zig").div_ceil;
 /// The 0 address is reserved for usage as a sentinel and will never be returned by acquire().
 ///
 /// Set bits indicate free blocks, unset bits are allocated.
-pub const SuperBlockFreeSet = struct {
+pub const FreeSet = struct {
     // Each bit of `index` is the OR of `shard_size` bits of `blocks`.
     // That is, if a shard has any free blocks, the corresponding index bit is set.
     index: DynamicBitSetUnmanaged,
@@ -36,7 +36,7 @@ pub const SuperBlockFreeSet = struct {
         assert(shard_size % @bitSizeOf(MaskInt) == 0);
     }
 
-    pub fn init(allocator: mem.Allocator, blocks_count: usize) !SuperBlockFreeSet {
+    pub fn init(allocator: mem.Allocator, blocks_count: usize) !FreeSet {
         assert(shard_size <= blocks_count);
         assert(blocks_count % shard_size == 0);
         assert(blocks_count % @bitSizeOf(usize) == 0);
@@ -56,31 +56,31 @@ pub const SuperBlockFreeSet = struct {
         assert(blocks.count() == blocks_count);
         assert(staging.count() == 0);
 
-        return SuperBlockFreeSet{
+        return FreeSet{
             .index = index,
             .blocks = blocks,
             .staging = staging,
         };
     }
 
-    pub fn deinit(set: *SuperBlockFreeSet, allocator: mem.Allocator) void {
+    pub fn deinit(set: *FreeSet, allocator: mem.Allocator) void {
         set.index.deinit(allocator);
         set.blocks.deinit(allocator);
         set.staging.deinit(allocator);
     }
 
     /// Returns the number of free blocks.
-    pub fn count_free(set: SuperBlockFreeSet) u64 {
+    pub fn count_free(set: FreeSet) u64 {
         return set.blocks.count();
     }
 
     /// Returns the number of acquired blocks.
-    pub fn count_acquired(set: SuperBlockFreeSet) u64 {
+    pub fn count_acquired(set: FreeSet) u64 {
         return set.blocks.capacity() - set.blocks.count();
     }
 
     /// Returns the address of the highest acquired block.
-    pub fn highest_address_acquired(set: SuperBlockFreeSet) ?u64 {
+    pub fn highest_address_acquired(set: FreeSet) ?u64 {
         var it = set.blocks.iterator(.{
             .kind = .unset,
             .direction = .reverse,
@@ -97,7 +97,7 @@ pub const SuperBlockFreeSet = struct {
     }
 
     /// Marks a free block as allocated, and returns the address. Panics if no blocks are available.
-    pub fn acquire(set: *SuperBlockFreeSet) ?u64 {
+    pub fn acquire(set: *FreeSet) ?u64 {
         const block = blk: {
             if (set.index.findFirstSet()) |shard| {
                 break :blk set.find_free_block_in_shard(shard) orelse unreachable;
@@ -118,7 +118,7 @@ pub const SuperBlockFreeSet = struct {
         return @intCast(u64, address);
     }
 
-    fn find_free_block_in_shard(set: *SuperBlockFreeSet, shard: usize) ?usize {
+    fn find_free_block_in_shard(set: *FreeSet, shard: usize) ?usize {
         const shard_start = shard * shard_size;
         const shard_end = shard_start + shard_size;
         assert(shard_start < set.blocks.bit_length);
@@ -126,13 +126,13 @@ pub const SuperBlockFreeSet = struct {
         return find_first_set_bit(set.blocks, shard_start, shard_end);
     }
 
-    fn is_free(set: *SuperBlockFreeSet, address: u64) bool {
+    fn is_free(set: *FreeSet, address: u64) bool {
         const block = address - 1;
         return set.blocks.isSet(block);
     }
 
     /// Given the address, marks an allocated block as free.
-    pub fn release(set: *SuperBlockFreeSet, address: u64) void {
+    pub fn release(set: *FreeSet, address: u64) void {
         const block = address - 1;
         assert(!set.blocks.isSet(block));
         assert(!set.staging.isSet(block));
@@ -142,7 +142,7 @@ pub const SuperBlockFreeSet = struct {
     }
 
     /// Leave the address allocated for now, but free it at the next checkpoint.
-    pub fn release_at_checkpoint(set: *SuperBlockFreeSet, address: u64) void {
+    pub fn release_at_checkpoint(set: *FreeSet, address: u64) void {
         const block = address - 1;
         assert(!set.blocks.isSet(block));
         assert(!set.staging.isSet(block));
@@ -151,7 +151,7 @@ pub const SuperBlockFreeSet = struct {
     }
 
     /// Free all staged blocks.
-    pub fn checkpoint(set: *SuperBlockFreeSet) void {
+    pub fn checkpoint(set: *FreeSet) void {
         var it = set.staging.iterator(.{ .kind = .set });
         while (it.next()) |block| {
             set.staging.unset(block);
@@ -164,7 +164,7 @@ pub const SuperBlockFreeSet = struct {
     /// Temporarily marks staged blocks as free.
     /// Amortizes the cost of toggling staged blocks when encoding and getting the highest address.
     /// Does not update the index and MUST therefore be paired immediately with exclude_staging().
-    pub fn include_staging(set: *SuperBlockFreeSet) void {
+    pub fn include_staging(set: *FreeSet) void {
         const free = set.blocks.count();
 
         set.blocks.toggleSet(set.staging);
@@ -173,7 +173,7 @@ pub const SuperBlockFreeSet = struct {
         assert(set.blocks.count() == free + set.staging.count());
     }
 
-    pub fn exclude_staging(set: *SuperBlockFreeSet) void {
+    pub fn exclude_staging(set: *FreeSet) void {
         const free = set.blocks.count();
 
         set.blocks.toggleSet(set.staging);
@@ -184,8 +184,8 @@ pub const SuperBlockFreeSet = struct {
 
     /// Decodes the compressed bitset in `source` into `set`.
     /// Panics if the `source` encoding is invalid.
-    pub fn decode(set: *SuperBlockFreeSet, source: []align(@alignOf(usize)) const u8) void {
-        // Verify that this SuperBlockFreeSet is entirely unallocated.
+    pub fn decode(set: *FreeSet, source: []align(@alignOf(usize)) const u8) void {
+        // Verify that this FreeSet is entirely unallocated.
         assert(set.index.count() == set.index.bit_length);
 
         const words_decoded = ewah.decode(source, bitset_masks(set.blocks));
@@ -208,14 +208,14 @@ pub const SuperBlockFreeSet = struct {
 
     /// Returns the number of bytes written to `target`.
     /// The encoded data does *not* include staged changes.
-    pub fn encode(set: SuperBlockFreeSet, target: []align(@alignOf(usize)) u8) usize {
-        assert(target.len == SuperBlockFreeSet.encode_size_max(set.blocks.bit_length));
+    pub fn encode(set: FreeSet, target: []align(@alignOf(usize)) u8) usize {
+        assert(target.len == FreeSet.encode_size_max(set.blocks.bit_length));
 
         return ewah.encode(bitset_masks(set.blocks), target);
     }
 
     /// Returns `blocks_count` rounded down to the nearest multiple of shard and word bit count.
-    /// Ensures that the result is acceptable to `SuperBlockFreeSet.init()`.
+    /// Ensures that the result is acceptable to `FreeSet.init()`.
     pub fn blocks_count_floor(blocks_count: usize) usize {
         assert(blocks_count > 0);
         assert(blocks_count >= shard_size);
@@ -234,10 +234,10 @@ fn bitset_masks(bitset: DynamicBitSetUnmanaged) []usize {
     return bitset.masks[0..len];
 }
 
-test "SuperBlockFreeSet highest_address_acquired" {
+test "FreeSet highest_address_acquired" {
     const expectEqual = std.testing.expectEqual;
-    const blocks_count = SuperBlockFreeSet.shard_size;
-    var set = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    const blocks_count = FreeSet.shard_size;
+    var set = try FreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
     try expectEqual(@as(?u64, null), set.highest_address_acquired());
@@ -273,29 +273,29 @@ test "SuperBlockFreeSet highest_address_acquired" {
     }
 }
 
-test "SuperBlockFreeSet acquire/release" {
+test "FreeSet acquire/release" {
     const blocks_in_tb = (1 << 40) / config.block_size;
     try test_block_shards_count(5120 * 8, 10 * blocks_in_tb);
-    try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - SuperBlockFreeSet.shard_size);
-    try test_block_shards_count(1, SuperBlockFreeSet.shard_size); // Must be at least one index bit.
+    try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - FreeSet.shard_size);
+    try test_block_shards_count(1, FreeSet.shard_size); // Must be at least one index bit.
 
-    try test_acquire_release(SuperBlockFreeSet.shard_size);
-    try test_acquire_release(2 * SuperBlockFreeSet.shard_size);
-    try test_acquire_release(63 * SuperBlockFreeSet.shard_size);
-    try test_acquire_release(64 * SuperBlockFreeSet.shard_size);
-    try test_acquire_release(65 * SuperBlockFreeSet.shard_size);
+    try test_acquire_release(FreeSet.shard_size);
+    try test_acquire_release(2 * FreeSet.shard_size);
+    try test_acquire_release(63 * FreeSet.shard_size);
+    try test_acquire_release(64 * FreeSet.shard_size);
+    try test_acquire_release(65 * FreeSet.shard_size);
 }
 
-test "SuperBlockFreeSet checkpoint" {
+test "FreeSet checkpoint" {
     const expectEqual = std.testing.expectEqual;
-    const blocks_count = SuperBlockFreeSet.shard_size;
-    var set = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    const blocks_count = FreeSet.shard_size;
+    var set = try FreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
-    var empty = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    var empty = try FreeSet.init(std.testing.allocator, blocks_count);
     defer empty.deinit(std.testing.allocator);
 
-    var full = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    var full = try FreeSet.init(std.testing.allocator, blocks_count);
     defer full.deinit(std.testing.allocator);
 
     var i: usize = 0;
@@ -336,7 +336,7 @@ test "SuperBlockFreeSet checkpoint" {
     var set_encoded = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
-        SuperBlockFreeSet.encode_size_max(set.blocks.bit_length),
+        FreeSet.encode_size_max(set.blocks.bit_length),
     );
     defer std.testing.allocator.free(set_encoded);
 
@@ -346,7 +346,7 @@ test "SuperBlockFreeSet checkpoint" {
         defer set.exclude_staging();
 
         const set_encoded_length = set.encode(set_encoded);
-        var set_decoded = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+        var set_decoded = try FreeSet.init(std.testing.allocator, blocks_count);
         defer set_decoded.deinit(std.testing.allocator);
 
         set_decoded.decode(set_encoded[0..set_encoded_length]);
@@ -356,7 +356,7 @@ test "SuperBlockFreeSet checkpoint" {
     {
         // `encode` encodes staged blocks as still allocated.
         const set_encoded_length = set.encode(set_encoded);
-        var set_decoded = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+        var set_decoded = try FreeSet.init(std.testing.allocator, blocks_count);
         defer set_decoded.deinit(std.testing.allocator);
 
         set_decoded.decode(set_encoded[0..set_encoded_length]);
@@ -367,10 +367,10 @@ test "SuperBlockFreeSet checkpoint" {
 fn test_acquire_release(blocks_count: usize) !void {
     const expectEqual = std.testing.expectEqual;
     // Acquire everything, then release, then acquire again.
-    var set = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    var set = try FreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
-    var empty = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    var empty = try FreeSet.init(std.testing.allocator, blocks_count);
     defer empty.deinit(std.testing.allocator);
 
     var i: usize = 0;
@@ -393,14 +393,14 @@ fn test_acquire_release(blocks_count: usize) !void {
 }
 
 fn test_block_shards_count(expect_shards_count: usize, blocks_count: usize) !void {
-    var set = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    var set = try FreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(expect_shards_count, set.index.bit_length);
 }
 
-test "SuperBlockFreeSet encode, decode, encode" {
-    const shard_size = SuperBlockFreeSet.shard_size / @bitSizeOf(usize);
+test "FreeSet encode, decode, encode" {
+    const shard_size = FreeSet.shard_size / @bitSizeOf(usize);
     // Uniform.
     try test_encode(&.{.{ .fill = .uniform_ones, .words = shard_size }});
     try test_encode(&.{.{ .fill = .uniform_zeros, .words = shard_size }});
@@ -456,7 +456,7 @@ fn test_encode(patterns: []const TestPattern) !void {
     var blocks_count: usize = 0;
     for (patterns) |pattern| blocks_count += pattern.words * @bitSizeOf(usize);
 
-    var decoded_expect = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    var decoded_expect = try FreeSet.init(std.testing.allocator, blocks_count);
     defer decoded_expect.deinit(std.testing.allocator);
 
     {
@@ -476,7 +476,7 @@ fn test_encode(patterns: []const TestPattern) !void {
                     .uniform_zeros => 0,
                     .literal => random.intRangeLessThan(usize, 1, std.math.maxInt(usize)),
                 };
-                const index_bit = blocks_offset * @bitSizeOf(usize) / SuperBlockFreeSet.shard_size;
+                const index_bit = blocks_offset * @bitSizeOf(usize) / FreeSet.shard_size;
                 if (pattern.fill != .uniform_zeros) decoded_expect.index.set(index_bit);
                 blocks_offset += 1;
             }
@@ -487,20 +487,20 @@ fn test_encode(patterns: []const TestPattern) !void {
     var encoded = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
-        SuperBlockFreeSet.encode_size_max(decoded_expect.blocks.bit_length),
+        FreeSet.encode_size_max(decoded_expect.blocks.bit_length),
     );
     defer std.testing.allocator.free(encoded);
 
     try std.testing.expectEqual(encoded.len % 8, 0);
     const encoded_length = decoded_expect.encode(encoded);
-    var decoded_actual = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    var decoded_actual = try FreeSet.init(std.testing.allocator, blocks_count);
     defer decoded_actual.deinit(std.testing.allocator);
 
     decoded_actual.decode(encoded[0..encoded_length]);
     try expect_free_set_equal(decoded_expect, decoded_actual);
 }
 
-fn expect_free_set_equal(a: SuperBlockFreeSet, b: SuperBlockFreeSet) !void {
+fn expect_free_set_equal(a: FreeSet, b: FreeSet) !void {
     try expect_bitset_equal(a.blocks, b.blocks);
     try expect_bitset_equal(a.index, b.index);
     try expect_bitset_equal(a.staging, b.staging);
@@ -513,9 +513,9 @@ fn expect_bitset_equal(a: DynamicBitSetUnmanaged, b: DynamicBitSetUnmanaged) !vo
     for (a_masks) |aw, i| try std.testing.expectEqual(aw, b_masks[i]);
 }
 
-test "SuperBlockFreeSet decode small bitset into large bitset" {
-    const shard_size = SuperBlockFreeSet.shard_size;
-    var small_set = try SuperBlockFreeSet.init(std.testing.allocator, shard_size);
+test "FreeSet decode small bitset into large bitset" {
+    const shard_size = FreeSet.shard_size;
+    var small_set = try FreeSet.init(std.testing.allocator, shard_size);
     defer small_set.deinit(std.testing.allocator);
 
     // Set up a small bitset (with blocks_count==shard_size) with no free blocks.
@@ -524,13 +524,13 @@ test "SuperBlockFreeSet decode small bitset into large bitset" {
     var small_buffer = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
-        SuperBlockFreeSet.encode_size_max(small_set.blocks.bit_length),
+        FreeSet.encode_size_max(small_set.blocks.bit_length),
     );
     defer std.testing.allocator.free(small_buffer);
 
     const small_buffer_written = small_set.encode(small_buffer);
     // Decode the serialized small bitset into a larger bitset (with blocks_count==2*shard_size).
-    var big_set = try SuperBlockFreeSet.init(std.testing.allocator, 2 * shard_size);
+    var big_set = try FreeSet.init(std.testing.allocator, 2 * shard_size);
     defer big_set.deinit(std.testing.allocator);
 
     big_set.decode(small_buffer[0..small_buffer_written]);
@@ -542,7 +542,7 @@ test "SuperBlockFreeSet decode small bitset into large bitset" {
     }
 }
 
-test "SuperBlockFreeSet encode/decode manual" {
+test "FreeSet encode/decode manual" {
     const encoded_expect = mem.sliceAsBytes(&[_]usize{
         // Mask 1: run of 2 words of 0s, then 3 literals
         0 | (2 << 1) | (3 << 32),
@@ -565,7 +565,7 @@ test "SuperBlockFreeSet encode/decode manual" {
     const blocks_count = decoded_expect.len * @bitSizeOf(usize);
 
     // Test decode.
-    var decoded_actual = try SuperBlockFreeSet.init(std.testing.allocator, blocks_count);
+    var decoded_actual = try FreeSet.init(std.testing.allocator, blocks_count);
     defer decoded_actual.deinit(std.testing.allocator);
 
     decoded_actual.decode(encoded_expect);
@@ -576,7 +576,7 @@ test "SuperBlockFreeSet encode/decode manual" {
     var encoded_actual = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
-        SuperBlockFreeSet.encode_size_max(decoded_actual.blocks.bit_length),
+        FreeSet.encode_size_max(decoded_actual.blocks.bit_length),
     );
     defer std.testing.allocator.free(encoded_actual);
 
