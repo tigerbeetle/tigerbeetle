@@ -1024,10 +1024,10 @@ pub fn TreeType(
                     const header_bytes = block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.grid.free_set.acquire().?;
+                    const address = builder.grid.superblock.free_set.acquire().?;
 
                     header.* = .{
-                        .cluster = builder.grid.cluster,
+                        .cluster = builder.grid.superblock.working.cluster,
                         .op = address,
                         .request = @intCast(u32, values.len),
                         .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
@@ -1066,12 +1066,12 @@ pub fn TreeType(
                 }
 
                 pub fn filter_block_finish(builder: *Builder) void {
-                    const address = builder.grid.free_set.acquire().?;
+                    const address = builder.grid.superblock.free_set.acquire().?;
 
                     const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
                     header.* = .{
-                        .cluster = builder.grid.cluster,
+                        .cluster = builder.grid.superblock.working.cluster,
                         .op = address,
                         .size = block_size - filter.padding_size,
                         .command = .block,
@@ -1117,10 +1117,10 @@ pub fn TreeType(
                     const header_bytes = index_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.grid.free_set.acquire().?;
+                    const address = builder.grid.superblock.free_set.acquire().?;
 
                     header.* = .{
-                        .cluster = builder.grid.cluster,
+                        .cluster = builder.grid.superblock.working.cluster,
                         .op = address,
                         .commit = builder.filter_block_count,
                         .request = builder.data_block_count,
@@ -2385,8 +2385,6 @@ test {
     var io = try IO.init(128, 0);
     defer io.deinit();
 
-    const cluster = 32;
-
     var storage = try Storage.init(&io, config.journal_size_max, storage_fd);
     defer storage.deinit();
 
@@ -2425,10 +2423,10 @@ test {
     defer allocator.free(sort_buffer);
 
     // TODO Initialize SuperBlock:
-    const grid_offset = 0; // TODO Take other zones into account.
-    const grid_size = 1024 * 1024;
-    var grid = try Grid.init(&allocator, &superblock);
-    defer grid.deinit();
+    var superblock: SuperBlockType(Storage) = undefined;
+
+    var grid = try Grid.init(allocator, &superblock);
+    defer grid.deinit(allocator);
 
     var tree = try Tree.init(
         allocator,
