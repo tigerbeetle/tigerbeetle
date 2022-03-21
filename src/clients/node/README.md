@@ -145,7 +145,7 @@ const errors = await client.createTransfers([transfer])
 Two-phase transfers are supported natively by toggling the appropriate flag. TigerBeetle will then adjust the `credits_pending` and `debits_pending` fields of the appropriate accounts. A corresponding commit transfer then needs to be sent to accept or reject the transfer.
 | bit 0    | bit 1              | bit 2            |
 |----------|--------------------|------------------|
-| `linked` | `posting`          | `condition`      |
+| `linked` | `pending`          | `condition`      |
 
 The `condition` flag signals to TigerBeetle that a 256-bit cryptographic condition will be supplied in the `reserved` field. This will be validated against a supplied pre-image when the transfer is committed. Transfers within a batch may also be linked (see [linked events](#linked-events)).
 ```js
