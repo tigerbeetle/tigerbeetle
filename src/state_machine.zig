@@ -340,7 +340,7 @@ pub const StateMachine = struct {
             if (!t.flags.hashlock and !zeroed_32_bytes(t.reserved)) return .reserved_field;
             if (t.flags.padding != 0) return .reserved_flag_padding;
 
-            var lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
+            const lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
             assert(t.timestamp > lookup.timestamp);
 
             if (!lookup.flags.pending) return .transfer_not_two_phase_commit;
@@ -360,8 +360,8 @@ pub const StateMachine = struct {
                 return .preimage_requires_condition;
             }
 
-            var dr = self.get_account(lookup.debit_account_id) orelse return .debit_account_not_found;
-            var cr = self.get_account(lookup.credit_account_id) orelse return .credit_account_not_found;
+            const dr = self.get_account(lookup.debit_account_id) orelse return .debit_account_not_found;
+            const cr = self.get_account(lookup.credit_account_id) orelse return .credit_account_not_found;
             assert(lookup.timestamp > dr.timestamp);
             assert(lookup.timestamp > cr.timestamp);
 
@@ -374,10 +374,8 @@ pub const StateMachine = struct {
             assert(!cr.credits_exceed_debits(0));
 
             // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-            var insert = self.posted.getOrPutAssumeCapacity(t.id);
-            if (insert.found_existing) {
-                unreachable;
-            } else {
+            const insert = self.posted.getOrPutAssumeCapacity(t.id);
+            assert(!insert.found_existing);
                 insert.value_ptr.* = t;
                 dr.debits_pending -= lookup.amount;
                 cr.credits_pending -= lookup.amount;
@@ -412,14 +410,14 @@ pub const StateMachine = struct {
             // 2. standing for debit record and credit record, or
             // 3. relating to debtor and creditor.
             // We use them to distinguish between `cr` (credit account), and `c` (commit).
-            var dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
-            var cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
+            const dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
+            const cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
             assert(t.timestamp > dr.timestamp);
             assert(t.timestamp > cr.timestamp);
 
             if (dr.unit != cr.unit) return .accounts_have_different_units;
 
-            var insert = self.transfers.getOrPutAssumeCapacity(t.id);
+            const insert = self.transfers.getOrPutAssumeCapacity(t.id);
             if (insert.found_existing) {
                 const exists = insert.value_ptr.*;
                 if (exists.debit_account_id != t.debit_account_id) {

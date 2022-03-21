@@ -129,7 +129,7 @@ pub const CreateTransferResult = enum(u32) {
     exceeds_debits,
     two_phase_commit_must_timeout,
     timeout_reserved_for_two_phase_commit,
-    // Fields for the 2-phase Transfer
+    // For two-phase transfers:
     cannot_void_and_post_two_phase_commit,
     transfer_not_found,
     transfer_not_two_phase_commit,
