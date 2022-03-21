@@ -25,7 +25,6 @@ const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
-const SuperBlockFreeSet = @import("superblock_free_set.zig").SuperBlockFreeSet;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
@@ -2424,9 +2423,6 @@ test {
         .exact,
     );
     defer allocator.free(sort_buffer);
-
-    var free_set = try SuperBlockFreeSet.init(allocator, 1024 * 1024);
-    defer free_set.deinit(allocator);
 
     // TODO Initialize SuperBlock:
     const grid_offset = 0; // TODO Take other zones into account.
