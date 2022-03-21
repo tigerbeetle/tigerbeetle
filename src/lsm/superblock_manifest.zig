@@ -111,7 +111,7 @@ pub const Manifest = struct {
 
         manifest.count += 1;
 
-        log.debug("append: tree={} checksum={} address={} count={}/{}", .{
+        log.debug("append: tree={} checksum={x} address={} count={}/{}", .{
             tree,
             checksum,
             address,
@@ -153,7 +153,7 @@ pub const Manifest = struct {
             manifest.addresses[manifest.count] = 0;
             manifest.trees[manifest.count] = 0;
 
-            log.debug("remove: tree={} checksum={} address={} count={}/{}", .{
+            log.debug("remove: tree={} checksum={x} address={} count={}/{}", .{
                 tree,
                 checksum,
                 address,
