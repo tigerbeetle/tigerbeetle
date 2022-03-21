@@ -5,7 +5,7 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 
-pub const SuperBlockManifest = struct {
+pub const Manifest = struct {
     checksums: []u128,
     addresses: []u64,
     trees: []u8,
@@ -13,7 +13,7 @@ pub const SuperBlockManifest = struct {
     count: u32,
     count_max: u32,
 
-    pub fn init(allocator: mem.Allocator, count_max: u32) !SuperBlockManifest {
+    pub fn init(allocator: mem.Allocator, count_max: u32) !Manifest {
         const checksums = try allocator.alloc(u128, count_max);
         errdefer allocator.free(checksums);
 
@@ -27,7 +27,7 @@ pub const SuperBlockManifest = struct {
         mem.set(u64, addresses, 0);
         mem.set(u8, trees, 0);
 
-        return SuperBlockManifest{
+        return Manifest{
             .checksums = checksums,
             .addresses = addresses,
             .trees = trees,
@@ -36,13 +36,13 @@ pub const SuperBlockManifest = struct {
         };
     }
 
-    pub fn deinit(manifest: *SuperBlockManifest, allocator: mem.Allocator) void {
+    pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
         allocator.free(manifest.checksums);
         allocator.free(manifest.addresses);
         allocator.free(manifest.trees);
     }
 
-    pub fn encode(manifest: *const SuperBlockManifest, target: []align(@alignOf(u128)) u8) u64 {
+    pub fn encode(manifest: *const Manifest, target: []align(@alignOf(u128)) u8) u64 {
         assert(target.len > 0);
         assert(target.len % @sizeOf(u128) == 0);
 
@@ -67,7 +67,7 @@ pub const SuperBlockManifest = struct {
         return size;
     }
 
-    pub fn decode(manifest: *SuperBlockManifest, source: []align(@alignOf(u128)) const u8) void {
+    pub fn decode(manifest: *Manifest, source: []align(@alignOf(u128)) const u8) void {
         manifest.count = @intCast(u32, @divExact(source.len, BlockReferenceSize));
         assert(manifest.count <= manifest.count_max);
 
@@ -94,7 +94,7 @@ pub const SuperBlockManifest = struct {
         if (config.verify) manifest.verify();
     }
 
-    pub fn append(manifest: *SuperBlockManifest, tree: u8, checksum: u128, address: u64) void {
+    pub fn append(manifest: *Manifest, tree: u8, checksum: u128, address: u64) void {
         assert(address > 0);
 
         if (config.verify) {
@@ -133,7 +133,7 @@ pub const SuperBlockManifest = struct {
         }
     }
 
-    pub fn remove(manifest: *SuperBlockManifest, tree: u8, checksum: u128, address: u64) void {
+    pub fn remove(manifest: *Manifest, tree: u8, checksum: u128, address: u64) void {
         assert(address > 0);
 
         if (manifest.find(tree, checksum, address)) |index| {
@@ -170,7 +170,7 @@ pub const SuperBlockManifest = struct {
         }
     }
 
-    pub fn find(manifest: *const SuperBlockManifest, tree: u8, checksum: u128, address: u64) ?u32 {
+    pub fn find(manifest: *const Manifest, tree: u8, checksum: u128, address: u64) ?u32 {
         assert(address > 0);
 
         var index: u32 = 0;
@@ -194,7 +194,7 @@ pub const SuperBlockManifest = struct {
     pub const BlockReferenceSize = @sizeOf(u128) + @sizeOf(u64) + @sizeOf(u8);
 
     pub const IteratorReverse = struct {
-        manifest: *const SuperBlockManifest,
+        manifest: *const Manifest,
         tree: u8,
         count: u32,
 
@@ -220,7 +220,7 @@ pub const SuperBlockManifest = struct {
 
     /// Return all block references for a given tree in reverse order, latest-appended-first-out.
     /// Using a reverse iterator is an optimization to avoid redundant updates to tree manifests.
-    pub fn iterator_reverse(manifest: *const SuperBlockManifest, tree: u8) IteratorReverse {
+    pub fn iterator_reverse(manifest: *const Manifest, tree: u8) IteratorReverse {
         return IteratorReverse{
             .manifest = manifest,
             .tree = tree,
@@ -228,7 +228,7 @@ pub const SuperBlockManifest = struct {
         };
     }
 
-    pub fn verify(manifest: *const SuperBlockManifest) void {
+    pub fn verify(manifest: *const Manifest) void {
         assert(manifest.count <= manifest.count_max);
         assert(manifest.count <= manifest.count_max);
         assert(manifest.count <= manifest.count_max);
@@ -247,13 +247,13 @@ pub const SuperBlockManifest = struct {
 };
 
 fn test_iterator_reverse(
-    manifest: *SuperBlockManifest,
+    manifest: *Manifest,
     tree: u8,
-    expect: []const SuperBlockManifest.BlockReference,
+    expect: []const Manifest.BlockReference,
 ) !void {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    var reverse: [3]SuperBlockManifest.BlockReference = undefined;
+    var reverse: [3]Manifest.BlockReference = undefined;
     var reverse_count: usize = 0;
 
     var it = manifest.iterator_reverse(tree);
@@ -262,10 +262,10 @@ fn test_iterator_reverse(
         reverse_count += 1;
     }
 
-    try expectEqualSlices(SuperBlockManifest.BlockReference, expect, reverse[0..reverse_count]);
+    try expectEqualSlices(Manifest.BlockReference, expect, reverse[0..reverse_count]);
 }
 
-fn test_codec(manifest: *SuperBlockManifest) !void {
+fn test_codec(manifest: *Manifest) !void {
     const testing = std.testing;
     const expectEqual = testing.expectEqual;
     const expectEqualSlices = testing.expectEqualSlices;
@@ -278,7 +278,7 @@ fn test_codec(manifest: *SuperBlockManifest) !void {
     );
 
     // Test that the decoded instance matches the original instance:
-    var decoded = try SuperBlockManifest.init(testing.allocator, manifest.count_max);
+    var decoded = try Manifest.init(testing.allocator, manifest.count_max);
     defer decoded.deinit(testing.allocator);
 
     decoded.decode(mem.sliceAsBytes(&target_a)[0..size_a]);
@@ -304,7 +304,7 @@ test {
     const testing = std.testing;
     const expectEqual = testing.expectEqual;
 
-    var manifest = try SuperBlockManifest.init(testing.allocator, 3);
+    var manifest = try Manifest.init(testing.allocator, 3);
     defer manifest.deinit(testing.allocator);
 
     for (manifest.checksums) |checksum| try expectEqual(@as(u128, 0), checksum);
@@ -325,7 +325,7 @@ test {
     try test_iterator_reverse(
         &manifest,
         1,
-        &[_]SuperBlockManifest.BlockReference{
+        &[_]Manifest.BlockReference{
             .{ .checksum = 4, .address = 5, .tree = 1 },
             .{ .checksum = 2, .address = 3, .tree = 1 },
         },
@@ -334,7 +334,7 @@ test {
     try test_iterator_reverse(
         &manifest,
         2,
-        &[_]SuperBlockManifest.BlockReference{
+        &[_]Manifest.BlockReference{
             .{ .checksum = 3, .address = 4, .tree = 2 },
         },
     );

@@ -9,8 +9,8 @@ const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const vsr = @import("../vsr.zig");
 
-pub const SuperBlockManifest = @import("superblock_manifest.zig").SuperBlockManifest;
-pub const SuperBlockFreeSet = @import("superblock_free_set.zig").SuperBlockFreeSet;
+pub const SuperBlockManifest = @import("superblock_manifest.zig").Manifest;
+pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
 
 const log = std.log.scoped(.superblock);
 
@@ -274,7 +274,7 @@ comptime {
 }
 
 /// The maximum possible size of the superblock trailer, following the superblock sector.
-const superblock_trailer_size_max = blk: {
+pub const superblock_trailer_size_max = blk: {
     // To calculate the size of the superblock trailer we need to know:
     // 1. the maximum number of manifest blocks that should be able to be referenced, and
     // 2. the maximum possible size of the EWAH-compressed bit set addressable by the free set.
@@ -298,7 +298,7 @@ const superblock_trailer_size_max = blk: {
 // Therefore a 1126400 byte manifest trailer equates to 45056 manifest blocks or 23 million tables.
 // This allows room for switching from 64 KiB to a smaller block size without limiting table count.
 // It is also not material in comparison to the size of the trailer's encoded block free set.
-const superblock_trailer_manifest_size_max = blk: {
+pub const superblock_trailer_manifest_size_max = blk: {
     assert(SuperBlockManifest.BlockReferenceSize == 25);
 
     // Use a common multiple so that the maximum size is exactly divisible without padding:
@@ -306,7 +306,7 @@ const superblock_trailer_manifest_size_max = blk: {
     break :blk div_ceil(1024 * 1024, multiple) * multiple;
 };
 
-const superblock_trailer_free_set_size_max = blk: {
+pub const superblock_trailer_free_set_size_max = blk: {
     const encode_size_max = SuperBlockFreeSet.encode_size_max(config.block_count_max);
     assert(encode_size_max > 0);
 
@@ -317,6 +317,9 @@ const superblock_trailer_free_set_size_max = blk: {
 pub fn SuperBlockType(comptime Storage: type) type {
     return struct {
         const SuperBlock = @This();
+
+        pub const Manifest = SuperBlockManifest;
+        pub const FreeSet = SuperBlockFreeSet;
 
         pub const Context = struct {
             pub const Caller = enum {
@@ -377,8 +380,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// This also gives us confidence that our working superblock has sufficient redundancy.
         quorums: Quorums = Quorums{},
 
-        manifest: SuperBlockManifest,
-        free_set: SuperBlockFreeSet,
+        manifest: Manifest,
+        free_set: FreeSet,
 
         manifest_buffer: []align(config.sector_size) u8,
         free_set_buffer: []align(config.sector_size) u8,
@@ -414,13 +417,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
             errdefer allocator.free(reading);
 
-            var manifest = try SuperBlockManifest.init(allocator, @divExact(
+            var manifest = try Manifest.init(allocator, @divExact(
                 superblock_trailer_manifest_size_max,
-                SuperBlockManifest.BlockReferenceSize,
+                Manifest.BlockReferenceSize,
             ));
             errdefer manifest.deinit(allocator);
 
-            var free_set = try SuperBlockFreeSet.init(allocator, config.block_count_max);
+            var free_set = try FreeSet.init(allocator, config.block_count_max);
             errdefer free_set.deinit(allocator);
 
             const manifest_buffer = try allocator.allocAdvanced(
@@ -677,7 +680,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn write_staging_encode_free_set(superblock: *SuperBlock) void {
             const staging: *SuperBlockSector = superblock.staging;
-            const encode_size_max = SuperBlockFreeSet.encode_size_max(config.block_count_max);
+            const encode_size_max = FreeSet.encode_size_max(config.block_count_max);
             const target = superblock.free_set_buffer[0..encode_size_max];
 
             superblock.free_set.include_staging();
