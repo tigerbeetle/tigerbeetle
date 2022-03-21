@@ -187,13 +187,14 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(!manifest_log.writing);
 
             const block = manifest_log.blocks.buffer[0]; // TODO Grid will provide a BlockPtr.
-
-            // TODO block_valid(checksum, address)
-            assert(block_address(block) == manifest_log.open_block_reference.?.address);
-            assert(block_checksum(block) == manifest_log.open_block_reference.?.checksum);
+            verify_block(
+                block,
+                manifest_log.open_block_reference.?.checksum,
+                manifest_log.open_block_reference.?.address,
+            );
 
             const entry_count = block_entry_count(block);
-            log.debug("entry_count={}", .{entry_count});
+            assert(entry_count > 0);
 
             const labels_used = labels(block)[0..entry_count];
             const tables_used = tables(block)[0..entry_count];
@@ -298,7 +299,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
             header.set_checksum();
 
-            assert(block_address(block) == address);
+            verify_block(block, null, address);
             assert(block_entry_count(block) == entry_count);
 
             log.debug("close_block: checksum={x} address={} entry_count={}", .{
@@ -332,20 +333,24 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
 
             const block = manifest_log.blocks.head().?;
+            verify_block(block, null, null);
 
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            assert(header.valid_checksum());
-            assert(header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size]));
-
             const address = block_address(block);
             assert(address > 0);
 
-            // TODO Verify that block padding is zeroed.
+            const entry_count = block_entry_count(block);
+
+            if (manifest_log.blocks_closed == 1 and manifest_log.blocks.count == 1) {
+                assert(entry_count > 0);
+            } else {
+                assert(entry_count == entry_count_max);
+            }
 
             log.debug("write_block: checksum={x} address={} entry_count={}", .{
                 header.checksum,
                 address,
-                block_entry_count(block),
+                entry_count,
             });
 
             manifest_log.grid.write_block(
@@ -361,11 +366,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.writing);
 
             const block = manifest_log.blocks.head().?;
+            verify_block(block, null, null);
 
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            assert(header.valid_checksum());
-            assert(header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size]));
-
             const address = block_address(block);
             assert(address > 0);
 
@@ -376,6 +379,23 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.blocks_closed <= manifest_log.blocks.count);
 
             manifest_log.write_block();
+        }
+
+        fn verify_block(block: BlockPtrConst, checksum: ?u128, address: ?u64) void {
+            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+
+            if (config.verify) {
+                assert(header.valid_checksum());
+                assert(header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size]));
+            }
+
+            assert(checksum == null or header.checksum == checksum);
+
+            assert(block_address(block) > 0);
+            assert(address == null or block_address(block) == address);
+
+            const entry_count = block_entry_count(block);
+            assert(entry_count > 0);
         }
 
         fn block_address(block: BlockPtrConst) u64 {
