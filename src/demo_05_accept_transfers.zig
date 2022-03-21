@@ -9,13 +9,13 @@ pub fn main() !void {
             .id = 1001,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = .{ .post_pending_transfer = true },// Post the pending 2-phase Transfer.
+            .flags = .{ .post_pending_transfer = true }, // Post the pending two-phase transfer.
         },
         Transfer{
             .id = 1002,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = .{ .post_pending_transfer = true },// Post the pending 2-phase Transfer.
+            .flags = .{ .post_pending_transfer = true },
         },
     };
 
