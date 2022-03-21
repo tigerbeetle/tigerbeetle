@@ -36,8 +36,8 @@ pub const StateMachine = struct {
     };
 
     allocator: std.mem.Allocator,
-    pending_timestamp: u64,
-    post_timestamp: u64,
+    prepare_timestamp: u64,
+    commit_timestamp: u64,
     accounts: HashMapAccounts,
     transfers: HashMapTransfers,
     posted: HashMapPosted,
@@ -60,13 +60,13 @@ pub const StateMachine = struct {
         errdefer posted.deinit();
         try posted.ensureTotalCapacity(@intCast(u32, commits_max));
 
-        // TODO After recovery, set pending_timestamp max(wall clock, op timestamp).
-        // TODO After recovery, set post_timestamp max(wall clock, commit timestamp).
+        // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
+        // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
 
         return StateMachine{
             .allocator = allocator,
-            .pending_timestamp = 0,
-            .post_timestamp = 0,
+            .prepare_timestamp = 0,
+            .commit_timestamp = 0,
             .accounts = accounts,
             .transfers = transfers,
             .posted = posted,
@@ -118,19 +118,19 @@ pub const StateMachine = struct {
         input: []u8,
     ) void {
         // Guard against the wall clock going backwards by taking the max with timestamps issued:
-        self.pending_timestamp = std.math.max(
-            // The cluster `post_timestamp` may be ahead of our `pending_timestamp` because this
+        self.prepare_timestamp = std.math.max(
+            // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
             // may be our first prepare as a recently elected leader:
-            std.math.max(self.pending_timestamp, self.post_timestamp) + 1,
+            std.math.max(self.prepare_timestamp, self.commit_timestamp) + 1,
             @intCast(u64, realtime),
         );
-        assert(self.pending_timestamp > self.post_timestamp);
+        assert(self.prepare_timestamp > self.commit_timestamp);
         var sum_reserved_timestamps: usize = 0;
         var events = std.mem.bytesAsSlice(Event(operation), input);
         for (events) |*event| {
             sum_reserved_timestamps += event.timestamp;
-            self.pending_timestamp += 1;
-            event.timestamp = self.pending_timestamp;
+            self.prepare_timestamp += 1;
+            event.timestamp = self.prepare_timestamp;
         }
         // The client is responsible for ensuring that timestamps are reserved:
         // Use a single branch condition to detect non-zero reserved timestamps.
@@ -236,7 +236,7 @@ pub const StateMachine = struct {
 
         // We commit events in FIFO order.
         // We must therefore rollback events in LIFO order with a reverse loop.
-        // We do not rollback `self.post_timestamp` to ensure that subsequent events are
+        // We do not rollback `self.commit_timestamp` to ensure that subsequent events are
         // timestamped correctly.
         var index = chain_error_index;
         while (index > chain_start_index) {
@@ -245,7 +245,7 @@ pub const StateMachine = struct {
             assert(index >= chain_start_index);
             assert(index < chain_error_index);
             const event = events[index];
-            assert(event.timestamp <= self.post_timestamp);
+            assert(event.timestamp <= self.commit_timestamp);
 
             switch (operation) {
                 .create_accounts => self.create_account_rollback(event),
@@ -297,7 +297,7 @@ pub const StateMachine = struct {
     }
 
     fn create_account(self: *StateMachine, a: Account) CreateAccountResult {
-        assert(a.timestamp > self.post_timestamp);
+        assert(a.timestamp > self.commit_timestamp);
 
         if (!zeroed_48_bytes(a.reserved)) return .reserved_field;
         if (a.flags.padding != 0) return .reserved_flag_padding;
@@ -321,7 +321,7 @@ pub const StateMachine = struct {
             return .exists;
         } else {
             insert.value_ptr.* = a;
-            self.post_timestamp = a.timestamp;
+            self.commit_timestamp = a.timestamp;
             return .ok;
         }
     }
@@ -331,7 +331,7 @@ pub const StateMachine = struct {
     }
 
     fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
-        assert(t.timestamp > self.post_timestamp);
+        assert(t.timestamp > self.commit_timestamp);
 
         // Either a 2-phase transfer post/void
         if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
@@ -388,7 +388,7 @@ pub const StateMachine = struct {
                     cr.credits_posted += t.amount;
                 }
             }
-            self.post_timestamp = t.timestamp;
+            self.commit_timestamp = t.timestamp;
             return .ok;
         } else {
             if (t.flags.padding != 0) return .reserved_flag_padding;
@@ -452,7 +452,7 @@ pub const StateMachine = struct {
                 dr.debits_posted += t.amount;
                 cr.credits_posted += t.amount;
             }
-            self.post_timestamp = t.timestamp;
+            self.commit_timestamp = t.timestamp;
             return .ok;
         }
     }
@@ -825,7 +825,7 @@ test "create/lookup/rollback transfers" {
 
     const Vector = struct { result: CreateTransferResult, object: Transfer };
 
-    const timestamp: u64 = (state_machine.post_timestamp + 1);
+    const timestamp: u64 = (state_machine.commit_timestamp + 1);
     const vectors = [_]Vector{
         Vector{
             .result = .amount_is_zero,
@@ -1231,7 +1231,7 @@ test "create/lookup/rollback 2-phase transfers" {
 
     // Post the [pending] Transfer:
     const Vector = struct { result: CreateTransferResult, object: Transfer };
-    const timestamp: u64 = (state_machine.post_timestamp + 1);
+    const timestamp: u64 = (state_machine.commit_timestamp + 1);
     const vectors = [_]Vector{
         Vector{
             .result = .reserved_field,
