@@ -120,9 +120,6 @@ pub fn SetAssociativeCache(
             const clocks = try allocator.alloc(u64, @divExact(counts_size, @sizeOf(u64)));
             errdefer allocator.free(clocks);
 
-            _ = Clocks;
-            _ = Counts;
-
             var self = Self{
                 .sets = sets,
                 .tags = tags,
@@ -157,31 +154,52 @@ pub fn SetAssociativeCache(
             return self.search(set, key);
         }
 
-        pub fn put(self: *Self, value: Value) void {
-            const key = key_from_value(value);
+        pub const GetOrPutResult = struct {
+            value_ptr: *Value,
+            found_existing: bool,
+        };
+
+        pub fn get_or_put(self: *Self, key: Key) GetOrPutResult {
             const set = self.associate(key);
 
-            if (self.search(set, key)) |exists| {
-                exists.* = value;
-                return;
+            if (self.search(set, key)) |existing| {
+                return .{
+                    .value_ptr = existing,
+                    .found_existing = true,
+                };
             }
 
-            // TODO Find free way.
-            // TODO Evict if necessary.
-            const way = 0;
+            var way = Clocks.get(self.clocks, set.index);
+            while (true) : (way +%= 1) {
+                const count = Counts.get(self.counts, set.offset + way);
+
+                // Free way found
+                if (count == 0) break;
+
+                Counts.set(self.counts, set.offset + way, count - 1);
+            }
+            Clocks.set(self.clocks, set.index, way +% 1);
 
             set.tags[way] = set.tag;
-            set.values[way] = value;
 
             Counts.set(self.counts, set.offset + way, 1);
+
+            return .{
+                .value_ptr = &set.values[way],
+                .found_existing = false,
+            };
         }
 
         fn search(self: *Self, set: Set, key: Key) ?*Value {
             for (set.tags) |tag, way| {
                 // TODO self.counts.get()
-                if (tag == set.tag and Counts.get(self.counts, set.offset + way) > 0) {
-                    var value_ptr = &set.values[way];
-                    if (equal(key_from_value(value_ptr.*), key)) return value_ptr;
+                const count = Counts.get(self.counts, set.offset + way);
+                if (tag == set.tag and count > 0) {
+                    const value_ptr = &set.values[way];
+                    if (equal(key_from_value(value_ptr.*), key)) {
+                        Counts.set(self.counts, set.offset + way, count +| 1);
+                        return value_ptr;
+                    }
                 }
             }
             return null;
@@ -196,7 +214,7 @@ pub fn SetAssociativeCache(
 
         inline fn associate(self: *Self, key: Key) Set {
             const entropy = hash(key);
-            
+
             const tag = @truncate(Tag, entropy >> math.log2_int(u64, self.sets));
             const index = entropy % self.sets;
             const offset = index * layout.ways;
@@ -315,7 +333,9 @@ test "PackedUnsignedIntegerArray" {
     defer sac.deinit(std.testing.allocator);
 
     std.debug.print("get() = {}\n", .{sac.get(123)});
-    sac.put(123);
+    const result = sac.get_or_put(123);
+    assert(!result.found_existing);
+    result.value_ptr.* = 123;
     std.debug.print("get() = {}\n", .{sac.get(123).?.*});
 
     var words = [8]u64{ 0, 0b10110010, 0, 0, 0, 0, 0, 0 };
@@ -344,9 +364,4 @@ test "PackedUnsignedIntegerArray" {
     try testing.expectEqual(@as(u64, 0b0000000000000000000000000000000000000000000000000000001100111001), words[0]);
     p.set(&words, 31, 0b11);
     try testing.expectEqual(@as(u64, 0b1100000000000000000000000000000000000000000000000000001100111001), words[0]);
-
-    //const before = 0b10110010;
-    //const result = get_bits(u2, before, 0);
-    //std.debug.print("\nbefore={b}\nresult={b}\n", .{ before, result});
-
 }
