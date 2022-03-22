@@ -230,6 +230,9 @@ pub const lsm_key_size_max = 32;
 
 pub const lsm_table_size_max = 64 * 1024 * 1024;
 
+/// The maximum number of tables across all trees.
+pub const lsm_tables_max = 2 * 1024 * 1024;
+
 /// Size of nodes used by the LSM tree manifest implementation.
 /// TODO Double-check this with our "LSM Manifest" spreadsheet.
 pub const lsm_manifest_node_size = 16 * 1024;

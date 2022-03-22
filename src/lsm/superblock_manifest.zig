@@ -16,6 +16,11 @@ pub const Manifest = struct {
     count: u32,
     count_max: u32,
 
+    /// A mapping from table address to manifest block address.
+    /// Used to track fragmentation.
+    /// Shared by all trees and sized to accommodate all possible tables.
+    manifest_block_for_table: std.AutoHashMapUnmanaged(u64, u64),
+
     pub fn init(allocator: mem.Allocator, count_max: u32) !Manifest {
         const checksums = try allocator.alloc(u128, count_max);
         errdefer allocator.free(checksums);
@@ -29,6 +34,10 @@ pub const Manifest = struct {
         const frees = try allocator.alloc(u32, count_max);
         errdefer allocator.free(frees);
 
+        var manifest_block_for_table = std.AutoHashMapUnmanaged(u64, u64){};
+        try manifest_block_for_table.ensureTotalCapacity(allocator, config.lsm_tables_max);
+        errdefer manifest_block_for_table.deinit(allocator);
+
         mem.set(u128, checksums, 0);
         mem.set(u64, addresses, 0);
         mem.set(u8, trees, 0);
@@ -41,6 +50,7 @@ pub const Manifest = struct {
             .frees = frees,
             .count = 0,
             .count_max = count_max,
+            .manifest_block_for_table = manifest_block_for_table,
         };
     }
 
@@ -49,6 +59,7 @@ pub const Manifest = struct {
         allocator.free(manifest.addresses);
         allocator.free(manifest.trees);
         allocator.free(manifest.frees);
+        manifest.manifest_block_for_table.deinit(allocator);
     }
 
     pub fn encode(manifest: *const Manifest, target: []align(@alignOf(u128)) u8) u64 {
@@ -204,12 +215,13 @@ pub const Manifest = struct {
         }
     }
 
-    pub fn block_with_most_frees(manifest: *const Manifest) ?BlockReference {
+    pub fn block_with_most_frees(manifest: *const Manifest, tree: u8) ?BlockReference {
         var index_max: ?u32 = null;
 
         {
             var index: u32 = 0;
             while (index < manifest.count) : (index += 1) {
+                if (manifest.trees[index] != tree) continue;
                 if (manifest.frees[index] == 0) continue;
                 if (index_max == null or manifest.frees[index] > manifest.frees[index_max.?]) {
                     index_max = index;
@@ -220,6 +232,7 @@ pub const Manifest = struct {
         if (index_max) |index| {
             assert(index < manifest.count);
             assert(manifest.frees[index] > 0);
+            assert(manifest.trees[index] == tree);
 
             return BlockReference{
                 .checksum = manifest.checksums[index],
@@ -390,33 +403,35 @@ test {
     manifest.append(1, 4, 5);
     try expectEqual(@as(?u32, 2), manifest.index_for_address(5));
 
-    try expectEqual(@as(?BlockReference, null), manifest.block_with_most_frees());
+    try expectEqual(@as(?BlockReference, null), manifest.block_with_most_frees(1));
+    try expectEqual(@as(?BlockReference, null), manifest.block_with_most_frees(2));
 
     manifest.increment_frees_for_address_by(3, 1);
     try expectEqual(@as(u32, 1), manifest.frees[0]);
     try expectEqual(
         @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 2, .address = 3 }),
-        manifest.block_with_most_frees(),
+        manifest.block_with_most_frees(1),
     );
 
     manifest.increment_frees_for_address_by(4, 2);
     try expectEqual(@as(u32, 2), manifest.frees[1]);
     try expectEqual(
         @as(?BlockReference, BlockReference{ .tree = 2, .checksum = 3, .address = 4 }),
-        manifest.block_with_most_frees(),
-    );
-
-    manifest.increment_frees_for_address_by(5, 2);
-    try expectEqual(@as(u32, 2), manifest.frees[2]);
-    try expectEqual(
-        @as(?BlockReference, BlockReference{ .tree = 2, .checksum = 3, .address = 4 }),
-        manifest.block_with_most_frees(),
+        manifest.block_with_most_frees(2),
     );
 
     manifest.increment_frees_for_address_by(5, 1);
+    try expectEqual(@as(u32, 1), manifest.frees[2]);
+    try expectEqual(
+        @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 2, .address = 3 }),
+        manifest.block_with_most_frees(1),
+    );
+
+    manifest.increment_frees_for_address_by(5, 1);
+    try expectEqual(@as(u32, 2), manifest.frees[2]);
     try expectEqual(
         @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 4, .address = 5 }),
-        manifest.block_with_most_frees(),
+        manifest.block_with_most_frees(1),
     );
 
     try test_iterator_reverse(
