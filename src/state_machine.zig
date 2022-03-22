@@ -46,7 +46,7 @@ pub const StateMachine = struct {
         allocator: std.mem.Allocator,
         accounts_max: usize,
         transfers_max: usize,
-        commits_max: usize,
+        pending_max: usize,
     ) !StateMachine {
         var accounts = HashMapAccounts.init(allocator);
         errdefer accounts.deinit();
@@ -58,7 +58,7 @@ pub const StateMachine = struct {
 
         var posted = HashMapPosted.init(allocator);
         errdefer posted.deinit();
-        try posted.ensureTotalCapacity(@intCast(u32, commits_max));
+        try posted.ensureTotalCapacity(@intCast(u32, pending_max));
 
         // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
         // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
@@ -470,19 +470,19 @@ pub const StateMachine = struct {
         assert(self.transfers.remove(t.id));
     }
 
-    fn posted_transfer_rollback(self: *StateMachine, c: Transfer) void {
-        assert(self.get_commit(c.id) != null);
+    fn posted_transfer_rollback(self: *StateMachine, ptr: Transfer) void {
+        assert(self.get_commit(ptr.id) != null);
 
-        var t = self.get_transfer(c.id).?;
+        var t = self.get_transfer(ptr.id).?;
         var dr = self.get_account(t.debit_account_id).?;
         var cr = self.get_account(t.credit_account_id).?;
         dr.debits_pending += t.amount;
         cr.credits_pending += t.amount;
-        if (!c.flags.void_pending_transfer) {
+        if (!ptr.flags.void_pending_transfer) {
             dr.debits_posted -= t.amount;
             cr.credits_posted -= t.amount;
         }
-        assert(self.posted.remove(c.id));
+        assert(self.posted.remove(ptr.id));
     }
 
     /// This is our core private method for changing balances.
@@ -716,7 +716,7 @@ test "linked accounts" {
 
     const accounts_max = 5;
     const transfers_max = 0;
-    const commits_max = 0;
+    const pending_max = 0;
 
     var accounts = [_]Account{
         // An individual event (successful):
@@ -752,7 +752,7 @@ test "linked accounts" {
         std.mem.zeroInit(Account, .{ .id = 3 }),
     };
 
-    var state_machine = try StateMachine.init(allocator, accounts_max, transfers_max, commits_max);
+    var state_machine = try StateMachine.init(allocator, accounts_max, transfers_max, pending_max);
     defer state_machine.deinit();
 
     const input = std.mem.asBytes(&accounts);
