@@ -148,6 +148,7 @@ pub const Manifest = struct {
         assert(address > 0);
 
         if (manifest.index_for_address(address)) |index| {
+            assert(index < manifest.count);
             manifest.verify_index_tree_checksum_address(index, tree, checksum, address);
 
             const tail = manifest.count - (index + 1);
