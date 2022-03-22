@@ -7,15 +7,13 @@ const mem = std.mem;
 const meta = std.meta;
 const Vector = meta.Vector;
 
-//const block_size = config.lsm_table_block_size;
-//const BlockPtr = *align(config.sector_size) [block_size]u8;
-//const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
-
 pub const Layout = struct {
     ways: u64 = 16,
     tag_bits: u64 = 8,
     clock_bits: u64 = 2,
     cache_line_size: u64 = 64,
+    /// Set this to a non-null value to override the alignment of the stored values.
+    value_alignment: ?u29 = null,
 };
 
 pub fn SetAssociativeCache(
@@ -42,6 +40,12 @@ pub fn SetAssociativeCache(
         1, 2, 4 => {},
         else => @compileError("clock_bits must be 1, 2 or 4."),
     }
+
+    if (layout.value_alignment) |alignment| {
+        assert(alignment > @alignOf(Value));
+        assert(@sizeOf(Value) % alignment == 0);
+    }
+    const value_alignment = layout.value_alignment orelse @alignOf(Value);
 
     assert(math.isPowerOfTwo(layout.ways));
     assert(math.isPowerOfTwo(layout.tag_bits));
@@ -83,7 +87,7 @@ pub fn SetAssociativeCache(
 
         sets: u64,
         tags: []Tag,
-        values: []Value,
+        values: []align(value_alignment) Value,
         counts: []u64,
         clocks: []u64,
 
@@ -111,7 +115,12 @@ pub fn SetAssociativeCache(
             const tags = try allocator.alloc(Tag, value_count_max);
             errdefer allocator.free(tags);
 
-            const values = try allocator.alloc(Value, value_count_max);
+            const values = try allocator.allocAdvanced(
+                Value,
+                value_alignment,
+                value_count_max,
+                .exact,
+            );
             errdefer allocator.free(values);
 
             const counts = try allocator.alloc(u64, @divExact(counts_size, @sizeOf(u64)));
@@ -149,13 +158,13 @@ pub fn SetAssociativeCache(
             mem.set(u64, self.clocks, 0);
         }
 
-        pub fn get(self: *Self, key: Key) ?*Value {
+        pub fn get(self: *Self, key: Key) ?*align(value_alignment) Value {
             const set = self.associate(key);
             return self.search(set, key);
         }
 
         pub const GetOrPutResult = struct {
-            value_ptr: *Value,
+            value_ptr: *align(value_alignment) Value,
             found_existing: bool,
         };
 
@@ -185,17 +194,17 @@ pub fn SetAssociativeCache(
             Counts.set(self.counts, set.offset + way, 1);
 
             return .{
-                .value_ptr = &set.values[way],
+                .value_ptr = @alignCast(value_alignment, &set.values[way]),
                 .found_existing = false,
             };
         }
 
-        fn search(self: *Self, set: Set, key: Key) ?*Value {
+        fn search(self: *Self, set: Set, key: Key) ?*align(value_alignment) Value {
             for (set.tags) |tag, way| {
                 // TODO self.counts.get()
                 const count = Counts.get(self.counts, set.offset + way);
                 if (tag == set.tag and count > 0) {
-                    const value_ptr = &set.values[way];
+                    const value_ptr = @alignCast(value_alignment, &set.values[way]);
                     if (equal(key_from_value(value_ptr.*), key)) {
                         Counts.set(self.counts, set.offset + way, count +| 1);
                         return value_ptr;
