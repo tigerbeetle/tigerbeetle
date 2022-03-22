@@ -488,9 +488,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(!superblock.opened);
 
             assert(options.replica < config.replicas_max);
+            // TODO Assert that size_max exceeds the minimum comptime size of storage zones.
             assert(options.size_max > superblock_zone_size);
             assert(options.size_max % config.sector_size == 0);
 
+            // This working copy provides the parent checksum, and will not be written to disk.
+            // We therefore use zero values to make this parent checksum as stable as possible.
             superblock.working.* = .{
                 .copy = 0,
                 .magic = .superblock,
@@ -498,7 +501,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .sequence = 0,
                 .replica = options.replica,
                 .cluster = options.cluster,
-                .size = options.size_max, // TODO Derive this from the highest acquired block.
+                .size = 0,
                 .size_max = options.size_max,
                 .parent = 0,
                 .manifest_checksum = 0,
@@ -949,6 +952,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                     if (context.caller == .format) {
                         assert(working.sequence == 2);
+                        // TODO Assert working.size.
                         assert(working.manifest_size == 0);
                         assert(working.free_set_size == 8);
                         assert(working.vsr_state.commit_min == 0);
