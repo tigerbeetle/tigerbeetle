@@ -10,6 +10,9 @@ pub const Manifest = struct {
     addresses: []u64,
     trees: []u8,
 
+    /// A count of how many tables have been updated/removed within the manifest block.
+    frees: []u32,
+
     count: u32,
     count_max: u32,
 
@@ -23,14 +26,19 @@ pub const Manifest = struct {
         const trees = try allocator.alloc(u8, count_max);
         errdefer allocator.free(trees);
 
+        const frees = try allocator.alloc(u32, count_max);
+        errdefer allocator.free(frees);
+
         mem.set(u128, checksums, 0);
         mem.set(u64, addresses, 0);
         mem.set(u8, trees, 0);
+        mem.set(u32, frees, 0);
 
         return Manifest{
             .checksums = checksums,
             .addresses = addresses,
             .trees = trees,
+            .frees = frees,
             .count = 0,
             .count_max = count_max,
         };
@@ -40,6 +48,7 @@ pub const Manifest = struct {
         allocator.free(manifest.checksums);
         allocator.free(manifest.addresses);
         allocator.free(manifest.trees);
+        allocator.free(manifest.frees);
     }
 
     pub fn encode(manifest: *const Manifest, target: []align(@alignOf(u128)) u8) u64 {
@@ -91,15 +100,17 @@ pub const Manifest = struct {
         mem.set(u64, manifest.addresses[manifest.count..], 0);
         mem.set(u8, manifest.trees[manifest.count..], 0);
 
+        // Reset all free counts, which will be updated as the manifest is opened.
+        mem.set(u32, manifest.frees, 0);
+
         if (config.verify) manifest.verify();
     }
 
+    /// Addresses must be unique across all appends, or remove() must be called first.
     pub fn append(manifest: *Manifest, tree: u8, checksum: u128, address: u64) void {
         assert(address > 0);
 
-        if (config.verify) {
-            assert(manifest.find(tree, checksum, address) == null);
-        }
+        assert(manifest.index_for_address(address) == null);
 
         if (manifest.count == manifest.count_max) {
             @panic("superblock manifest: out of space");
@@ -108,6 +119,7 @@ pub const Manifest = struct {
         manifest.checksums[manifest.count] = checksum;
         manifest.addresses[manifest.count] = address;
         manifest.trees[manifest.count] = tree;
+        assert(manifest.frees[manifest.count] == 0);
 
         manifest.count += 1;
 
@@ -120,11 +132,10 @@ pub const Manifest = struct {
         });
 
         if (config.verify) {
-            if (manifest.find(tree, checksum, address)) |index| {
+            if (manifest.index_for_address(address)) |index| {
                 assert(index == manifest.count - 1);
-                assert(manifest.checksums[index] == checksum);
-                assert(manifest.addresses[index] == address);
-                assert(manifest.trees[index] == tree);
+                manifest.verify_index_tree_checksum_address(index, tree, checksum, address);
+                assert(manifest.frees[index] == 0);
             } else {
                 unreachable;
             }
@@ -136,22 +147,21 @@ pub const Manifest = struct {
     pub fn remove(manifest: *Manifest, tree: u8, checksum: u128, address: u64) void {
         assert(address > 0);
 
-        if (manifest.find(tree, checksum, address)) |index| {
-            assert(index < manifest.count);
-            assert(manifest.checksums[index] == checksum);
-            assert(manifest.addresses[index] == address);
-            assert(manifest.trees[index] == tree);
+        if (manifest.index_for_address(address)) |index| {
+            manifest.verify_index_tree_checksum_address(index, tree, checksum, address);
 
             const tail = manifest.count - (index + 1);
             mem.copy(u128, manifest.checksums[index..], manifest.checksums[index + 1 ..][0..tail]);
             mem.copy(u64, manifest.addresses[index..], manifest.addresses[index + 1 ..][0..tail]);
             mem.copy(u8, manifest.trees[index..], manifest.trees[index + 1 ..][0..tail]);
+            mem.copy(u32, manifest.frees[index..], manifest.frees[index + 1 ..][0..tail]);
 
             manifest.count -= 1;
 
             manifest.checksums[manifest.count] = 0;
             manifest.addresses[manifest.count] = 0;
             manifest.trees[manifest.count] = 0;
+            manifest.frees[manifest.count] = 0;
 
             log.debug("remove: tree={} checksum={x} address={} count={}/{}", .{
                 tree,
@@ -162,7 +172,7 @@ pub const Manifest = struct {
             });
 
             if (config.verify) {
-                assert(manifest.find(tree, checksum, address) == null);
+                assert(manifest.index_for_address(address) == null);
                 manifest.verify();
             }
         } else {
@@ -170,16 +180,51 @@ pub const Manifest = struct {
         }
     }
 
-    pub fn find(manifest: *const Manifest, tree: u8, checksum: u128, address: u64) ?u32 {
+    pub fn index_for_address(manifest: *const Manifest, address: u64) ?u32 {
         assert(address > 0);
 
         var index: u32 = 0;
         while (index < manifest.count) : (index += 1) {
-            if (manifest.checksums[index] != checksum) continue;
-            if (manifest.addresses[index] != address) continue;
-            if (manifest.trees[index] != tree) continue;
+            if (manifest.addresses[index] == address) return index;
+        }
 
-            return index;
+        return null;
+    }
+
+    pub fn increment_frees_for_address_by(manifest: *Manifest, address: u64, count: u32) void {
+        assert(count > 0);
+
+        if (manifest.index_for_address(address)) |index| {
+            assert(index < manifest.count);
+
+            manifest.frees[index] += count;
+        } else {
+            unreachable;
+        }
+    }
+
+    pub fn block_with_most_frees(manifest: *const Manifest) ?BlockReference {
+        var index_max: ?u32 = null;
+
+        {
+            var index: u32 = 0;
+            while (index < manifest.count) : (index += 1) {
+                if (manifest.frees[index] == 0) continue;
+                if (index_max == null or manifest.frees[index] > manifest.frees[index_max.?]) {
+                    index_max = index;
+                }
+            }
+        }
+
+        if (index_max) |index| {
+            assert(index < manifest.count);
+            assert(manifest.frees[index] > 0);
+
+            return BlockReference{
+                .checksum = manifest.checksums[index],
+                .address = manifest.addresses[index],
+                .tree = manifest.trees[index],
+            };
         }
 
         return null;
@@ -230,12 +275,11 @@ pub const Manifest = struct {
 
     pub fn verify(manifest: *const Manifest) void {
         assert(manifest.count <= manifest.count_max);
-        assert(manifest.count <= manifest.count_max);
-        assert(manifest.count <= manifest.count_max);
 
         assert(manifest.checksums.len == manifest.count_max);
         assert(manifest.addresses.len == manifest.count_max);
         assert(manifest.trees.len == manifest.count_max);
+        assert(manifest.frees.len == manifest.count_max);
 
         for (manifest.checksums[manifest.count..]) |checksum| assert(checksum == 0);
 
@@ -243,6 +287,23 @@ pub const Manifest = struct {
         for (manifest.addresses[manifest.count..]) |address| assert(address == 0);
 
         for (manifest.trees[manifest.count..]) |tree| assert(tree == 0);
+
+        for (manifest.frees[manifest.count..]) |free| assert(free == 0);
+    }
+
+    pub fn verify_index_tree_checksum_address(
+        manifest: *const Manifest,
+        index: u32,
+        tree: u8,
+        checksum: u128,
+        address: u64,
+    ) void {
+        assert(index < manifest.count);
+        assert(address > 0);
+
+        assert(manifest.checksums[index] == checksum);
+        assert(manifest.addresses[index] == address);
+        assert(manifest.trees[index] == tree);
     }
 };
 
@@ -277,9 +338,12 @@ fn test_codec(manifest: *Manifest) !void {
         size_a,
     );
 
-    // Test that the decoded instance matches the original instance:
+    // The decoded instance must match the original instance:
     var decoded = try Manifest.init(testing.allocator, manifest.count_max);
     defer decoded.deinit(testing.allocator);
+
+    // Free counts are in-memory only, do not propagate, and must be reset after a decode:
+    mem.set(u32, decoded.frees, 255);
 
     decoded.decode(mem.sliceAsBytes(&target_a)[0..size_a]);
 
@@ -289,7 +353,9 @@ fn test_codec(manifest: *Manifest) !void {
     try expectEqual(manifest.count_max, decoded.count_max);
     try expectEqual(manifest.count, decoded.count);
 
-    // Test that the decoded instance encodes correctly:
+    for (decoded.frees) |free| try expectEqual(@as(u32, 0), free);
+
+    // The decoded instance must encode correctly:
     var target_b: [32]u128 = undefined;
     const size_b = decoded.encode(mem.sliceAsBytes(&target_b));
     try expectEqual(size_a, size_b);
@@ -303,6 +369,7 @@ fn test_codec(manifest: *Manifest) !void {
 test {
     const testing = std.testing;
     const expectEqual = testing.expectEqual;
+    const BlockReference = Manifest.BlockReference;
 
     var manifest = try Manifest.init(testing.allocator, 3);
     defer manifest.deinit(testing.allocator);
@@ -312,20 +379,49 @@ test {
     for (manifest.trees) |tree| try expectEqual(@as(u8, 0), tree);
 
     // The arguments to append()/remove() are: tree, checksum, address
-    // These will be named variables and should be clear where we use them for real.
+    // These will be named variables and should be clear at call sites where they are used for real.
     manifest.append(1, 2, 3);
-    try expectEqual(@as(?u32, 0), manifest.find(1, 2, 3));
+    try expectEqual(@as(?u32, 0), manifest.index_for_address(3));
 
     manifest.append(2, 3, 4);
-    try expectEqual(@as(?u32, 1), manifest.find(2, 3, 4));
+    try expectEqual(@as(?u32, 1), manifest.index_for_address(4));
 
     manifest.append(1, 4, 5);
-    try expectEqual(@as(?u32, 2), manifest.find(1, 4, 5));
+    try expectEqual(@as(?u32, 2), manifest.index_for_address(5));
+
+    try expectEqual(@as(?BlockReference, null), manifest.block_with_most_frees());
+
+    manifest.increment_frees_for_address_by(3, 1);
+    try expectEqual(@as(u32, 1), manifest.frees[0]);
+    try expectEqual(
+        @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 2, .address = 3 }),
+        manifest.block_with_most_frees(),
+    );
+
+    manifest.increment_frees_for_address_by(4, 2);
+    try expectEqual(@as(u32, 2), manifest.frees[1]);
+    try expectEqual(
+        @as(?BlockReference, BlockReference{ .tree = 2, .checksum = 3, .address = 4 }),
+        manifest.block_with_most_frees(),
+    );
+
+    manifest.increment_frees_for_address_by(5, 2);
+    try expectEqual(@as(u32, 2), manifest.frees[2]);
+    try expectEqual(
+        @as(?BlockReference, BlockReference{ .tree = 2, .checksum = 3, .address = 4 }),
+        manifest.block_with_most_frees(),
+    );
+
+    manifest.increment_frees_for_address_by(5, 1);
+    try expectEqual(
+        @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 4, .address = 5 }),
+        manifest.block_with_most_frees(),
+    );
 
     try test_iterator_reverse(
         &manifest,
         1,
-        &[_]Manifest.BlockReference{
+        &[_]BlockReference{
             .{ .checksum = 4, .address = 5, .tree = 1 },
             .{ .checksum = 2, .address = 3, .tree = 1 },
         },
@@ -334,7 +430,7 @@ test {
     try test_iterator_reverse(
         &manifest,
         2,
-        &[_]Manifest.BlockReference{
+        &[_]BlockReference{
             .{ .checksum = 3, .address = 4, .tree = 2 },
         },
     );
@@ -342,33 +438,35 @@ test {
     try test_codec(&manifest);
 
     manifest.remove(1, 2, 3);
-    try expectEqual(@as(?u32, null), manifest.find(1, 2, 3));
-    try expectEqual(@as(?u32, 0), manifest.find(2, 3, 4));
-    try expectEqual(@as(?u32, 1), manifest.find(1, 4, 5));
+    try expectEqual(@as(?u32, null), manifest.index_for_address(3));
+    try expectEqual(@as(?u32, 0), manifest.index_for_address(4));
+    try expectEqual(@as(?u32, 1), manifest.index_for_address(5));
 
     try expectEqual(@as(u128, 0), manifest.checksums[2]);
     try expectEqual(@as(u64, 0), manifest.addresses[2]);
     try expectEqual(@as(u8, 0), manifest.trees[2]);
+    try expectEqual(@as(u32, 0), manifest.frees[2]);
 
     manifest.append(1, 2, 3);
-    try expectEqual(@as(?u32, 2), manifest.find(1, 2, 3));
+    try expectEqual(@as(?u32, 2), manifest.index_for_address(3));
 
     manifest.remove(1, 4, 5);
-    try expectEqual(@as(?u32, null), manifest.find(1, 4, 5));
-    try expectEqual(@as(?u32, 1), manifest.find(1, 2, 3));
+    try expectEqual(@as(?u32, null), manifest.index_for_address(5));
+    try expectEqual(@as(?u32, 1), manifest.index_for_address(3));
 
     manifest.remove(2, 3, 4);
-    try expectEqual(@as(?u32, null), manifest.find(2, 3, 4));
-    try expectEqual(@as(?u32, 0), manifest.find(1, 2, 3));
+    try expectEqual(@as(?u32, null), manifest.index_for_address(4));
+    try expectEqual(@as(?u32, 0), manifest.index_for_address(3));
 
     manifest.remove(1, 2, 3);
-    try expectEqual(@as(?u32, null), manifest.find(1, 2, 3));
-    try expectEqual(@as(?u32, null), manifest.find(2, 3, 4));
-    try expectEqual(@as(?u32, null), manifest.find(1, 4, 5));
+    try expectEqual(@as(?u32, null), manifest.index_for_address(3));
+    try expectEqual(@as(?u32, null), manifest.index_for_address(4));
+    try expectEqual(@as(?u32, null), manifest.index_for_address(5));
 
     for (manifest.checksums) |checksum| try expectEqual(@as(u128, 0), checksum);
     for (manifest.addresses) |address| try expectEqual(@as(u64, 0), address);
     for (manifest.trees) |tree| try expectEqual(@as(u8, 0), tree);
+    for (manifest.frees) |free| try expectEqual(@as(u32, 0), free);
 
     try expectEqual(@as(u32, 0), manifest.count);
     try expectEqual(@as(u32, 3), manifest.count_max);
