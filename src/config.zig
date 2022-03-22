@@ -53,9 +53,9 @@ pub const transfers_max = switch (deployment_environment) {
     else => 1_000_000,
 };
 
-/// The maximum number of two-phase commits to store in memory:
+/// The maximum number of two-phase Transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const commits_max = transfers_max;
+pub const pending_max = transfers_max;
 
 /// The maximum size of the journal file:
 /// This is pre-allocated and zeroed for performance when initialized.
