@@ -470,19 +470,19 @@ pub const StateMachine = struct {
         assert(self.transfers.remove(t.id));
     }
 
-    fn posted_transfer_rollback(self: *StateMachine, ptr: Transfer) void {
-        assert(self.get_commit(ptr.id) != null);
+    fn posted_transfer_rollback(self: *StateMachine, pt: Transfer) void {
+        assert(self.get_commit(pt.id) != null);
 
-        var t = self.get_transfer(ptr.id).?;
-        var dr = self.get_account(t.debit_account_id).?;
-        var cr = self.get_account(t.credit_account_id).?;
+        const t = self.get_transfer(pt.id).?;
+        const dr = self.get_account(t.debit_account_id).?;
+        const cr = self.get_account(t.credit_account_id).?;
         dr.debits_pending += t.amount;
         cr.credits_pending += t.amount;
-        if (!ptr.flags.void_pending_transfer) {
+        if (!pt.flags.void_pending_transfer) {
             dr.debits_posted -= t.amount;
             cr.credits_posted -= t.amount;
         }
-        assert(self.posted.remove(ptr.id));
+        assert(self.posted.remove(pt.id));
     }
 
     /// This is our core private method for changing balances.
