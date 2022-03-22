@@ -126,7 +126,7 @@ pub const FreeSet = struct {
         return find_first_set_bit(set.blocks, shard_start, shard_end);
     }
 
-    fn is_free(set: *FreeSet, address: u64) bool {
+    pub fn is_free(set: *FreeSet, address: u64) bool {
         const block = address - 1;
         return set.blocks.isSet(block);
     }

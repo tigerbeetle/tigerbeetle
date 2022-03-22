@@ -686,6 +686,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.free_set.include_staging();
             defer superblock.free_set.exclude_staging();
 
+            superblock.verify_manifest_blocks_are_acquired_in_free_set();
+
             staging.size = 0;
             staging.size += superblock_zone_size;
             staging.size += 1024 * 1024 * 1024; // TODO Replace with WAL constants when they land.
@@ -1106,6 +1108,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     config.block_count_max,
                 });
 
+                superblock.verify_manifest_blocks_are_acquired_in_free_set();
+
                 // TODO Repair any impaired copies before we continue.
                 superblock.release(context);
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
@@ -1113,6 +1117,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else {
                 context.copy += 1;
                 superblock.read_free_set(context);
+            }
+        }
+
+        fn verify_manifest_blocks_are_acquired_in_free_set(superblock: *SuperBlock) void {
+            assert(superblock.manifest.count <= superblock.free_set.count_acquired());
+            for (superblock.manifest.addresses[0..superblock.manifest.count]) |address| {
+                assert(!superblock.free_set.is_free(address));
             }
         }
 
