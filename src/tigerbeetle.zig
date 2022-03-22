@@ -58,17 +58,17 @@ pub const AccountFlags = packed struct {
 
 pub const Transfer = packed struct {
     id: u128,
-    debit_account_id: u128 = 0,
-    credit_account_id: u128 = 0,
+    debit_account_id: u128,
+    credit_account_id: u128,
     /// Opaque third-party identifier to link this transfer (many-to-one) to an external entity:
-    user_data: u128 = 0,
+    user_data: u128,
     /// Reserved for accounting policy primitives:
     reserved: [32]u8,
-    timeout: u64 = 0,
+    timeout: u64,
     /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement):
     code: u32,
     flags: TransferFlags,
-    amount: u64 = 0,
+    amount: u64,
     timestamp: u64 = 0,
 
     comptime {
@@ -116,8 +116,6 @@ pub const CreateTransferResult = enum(u32) {
     exists_with_different_amount,
     exists_with_different_timeout,
     exists_with_different_flags,
-    exists_and_already_committed_and_accepted,
-    exists_and_already_committed_and_rejected,
     reserved_field,
     reserved_flag_padding,
     debit_account_not_found,
@@ -127,21 +125,20 @@ pub const CreateTransferResult = enum(u32) {
     amount_is_zero,
     exceeds_credits,
     exceeds_debits,
-    two_phase_commit_must_timeout,
-    timeout_reserved_for_two_phase_commit,
+    pending_transfer_must_timeout,
+    timeout_reserved_for_pending_transfer,
     // For two-phase transfers:
-    cannot_void_and_post_two_phase_commit,
+    cannot_post_and_void_pending_transfer,
     transfer_not_found,
-    transfer_not_two_phase_commit,
-    already_committed_but_accepted,
-    already_committed_but_rejected,
-    already_committed,
+    transfer_not_pending,
+    transfer_already_posted,
+    transfer_already_voided,
     transfer_expired,
     condition_requires_preimage,
     preimage_invalid,
     preimage_requires_condition,
-    debit_amount_was_not_reserved,
-    credit_amount_was_not_reserved,
+    debit_amount_not_pending,
+    credit_amount_not_pending,
 };
 
 pub const CreateAccountsResult = packed struct {

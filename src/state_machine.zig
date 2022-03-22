@@ -335,7 +335,7 @@ pub const StateMachine = struct {
 
         // Either a 2-phase transfer post/void
         if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
-            return .cannot_void_and_post_two_phase_commit;
+            return .cannot_post_and_void_pending_transfer;
         } else if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
             if (!t.flags.hashlock and !zeroed_32_bytes(t.reserved)) return .reserved_field;
             if (t.flags.padding != 0) return .reserved_flag_padding;
@@ -343,12 +343,12 @@ pub const StateMachine = struct {
             const lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
             assert(t.timestamp > lookup.timestamp);
 
-            if (!lookup.flags.pending) return .transfer_not_two_phase_commit;
+            if (!lookup.flags.pending) return .transfer_not_pending;
 
             if (self.get_commit(t.id)) |exists| {
-                if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .already_committed_but_accepted;
-                if (exists.flags.void_pending_transfer and !t.flags.void_pending_transfer) return .already_committed_but_rejected;
-                return .already_committed;
+                if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .transfer_already_posted;
+                if (exists.flags.void_pending_transfer and !t.flags.void_pending_transfer) return .transfer_already_voided;
+                return .transfer_already_posted;
             }
 
             if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
@@ -366,8 +366,8 @@ pub const StateMachine = struct {
             assert(lookup.timestamp > cr.timestamp);
 
             assert(lookup.flags.pending);
-            if (dr.debits_pending < lookup.amount) return .debit_amount_was_not_reserved;
-            if (cr.credits_pending < lookup.amount) return .credit_amount_was_not_reserved;
+            if (dr.debits_pending < lookup.amount) return .debit_amount_not_pending;
+            if (cr.credits_pending < lookup.amount) return .credit_amount_not_pending;
 
             // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
             assert(!dr.debits_exceed_credits(0));
@@ -394,9 +394,9 @@ pub const StateMachine = struct {
             if (t.flags.padding != 0) return .reserved_flag_padding;
             if (t.flags.pending) {
                 // Otherwise reserved amounts may never be released:
-                if (t.timeout == 0) return .two_phase_commit_must_timeout;
+                if (t.timeout == 0) return .pending_transfer_must_timeout;
             } else if (t.timeout != 0) {
-                return .timeout_reserved_for_two_phase_commit;
+                return .timeout_reserved_for_pending_transfer;
             }
             if (!t.flags.hashlock and !zeroed_32_bytes(t.reserved)) return .reserved_field;
 
@@ -843,7 +843,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         Vector{
-            .result = .two_phase_commit_must_timeout,
+            .result = .pending_transfer_must_timeout,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 3,
                 .timestamp = timestamp,
@@ -851,7 +851,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         Vector{
-            .result = .timeout_reserved_for_two_phase_commit,
+            .result = .timeout_reserved_for_pending_transfer,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 4,
                 .timestamp = timestamp,
@@ -1024,7 +1024,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         Vector{
-            .result = .timeout_reserved_for_two_phase_commit,
+            .result = .timeout_reserved_for_pending_transfer,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 13,
                 .timestamp = timestamp + 2,
@@ -1037,7 +1037,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         Vector{
-            .result = .two_phase_commit_must_timeout,
+            .result = .pending_transfer_must_timeout,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 14,
                 .timestamp = timestamp + 2,
@@ -1259,7 +1259,7 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         Vector{
-            .result = .transfer_not_two_phase_commit,
+            .result = .transfer_not_pending,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 1,
                 .timestamp = timestamp,
@@ -1275,7 +1275,7 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         Vector{
-            .result = .already_committed_but_accepted,
+            .result = .transfer_already_posted,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 2,
                 .timestamp = timestamp + 1,
@@ -1283,7 +1283,7 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         Vector{
-            .result = .already_committed,
+            .result = .transfer_already_posted,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 2,
                 .timestamp = timestamp + 1,
@@ -1299,7 +1299,7 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         Vector{
-            .result = .already_committed_but_rejected,
+            .result = .transfer_already_voided,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 3,
                 .timestamp = timestamp + 2,
@@ -1340,7 +1340,7 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         Vector{
-            .result = .cannot_void_and_post_two_phase_commit,
+            .result = .cannot_post_and_void_pending_transfer,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 6,
                 .timestamp = timestamp + 2,
