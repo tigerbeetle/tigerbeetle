@@ -389,10 +389,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 assert(header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size]));
             }
 
-            assert(checksum == null or header.checksum == checksum);
+            assert(checksum == null or header.checksum == checksum.?);
 
             assert(block_address(block) > 0);
-            assert(address == null or block_address(block) == address);
+            assert(address == null or block_address(block) == address.?);
 
             const entry_count = block_entry_count(block);
             assert(entry_count > 0);
