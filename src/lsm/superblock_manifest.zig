@@ -231,6 +231,23 @@ pub const Manifest = struct {
         return null;
     }
 
+    /// Inserts the table extent if it does not yet exist, and returns true.
+    /// Otherwise, returns false.
+    pub fn insert_table_extent(manifest: *Manifest, table: u64, block: u64, entry: u32) bool {
+        assert(table > 0);
+        assert(block > 0);
+
+        var extent = manifest.tables.getOrPutAssumeCapacity(table);
+        if (extent.found_existing) return false;
+
+        extent.value_ptr.* = .{
+            .block = block,
+            .entry = entry,
+        };
+
+        return true;
+    }
+
     /// The table extent must be updated immediately when appending, without delay.
     /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
     /// For this reason, manifest.frees allows frees in unflushed blocks to be tracked.
