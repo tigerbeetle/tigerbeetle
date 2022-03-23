@@ -24,14 +24,20 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         pub const Callback = fn (manifest_log: *ManifestLog) void;
 
+        pub const OpenEvent = fn (
+            manifest_log: *ManifestLog,
+            level: u6,
+            table: *const TableInfo,
+        ) void;
+
         pub const Label = packed struct {
-            level: u5,
-            event: enum(u3) { insert, update, remove },
+            level: u6,
+            event: enum(u2) { insert, remove },
         };
 
         comptime {
-            // Bits { 5, 6, 7 } are reserved to indicate { insert, update, remove } respectively.
-            assert(config.lsm_levels <= math.maxInt(u5));
+            // Bits { 6, 7 } are reserved to indicate { insert, remove } respectively.
+            assert(config.lsm_levels <= math.maxInt(u6));
 
             assert(@sizeOf(Label) == @sizeOf(u8));
 
@@ -43,31 +49,35 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         const block_body_size = config.block_size - @sizeOf(vsr.Header);
         const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);
         const entry_count_max_unaligned = @divFloor(block_body_size, entry_size);
-        const entry_count_max = 16; // TODO @divFloor(entry_count_max_unaligned, alignment) * alignment;
+        const entry_count_max = @divFloor(entry_count_max_unaligned, alignment) * alignment;
 
         superblock: *SuperBlock,
         grid: *Grid,
         tree: u8,
 
-        // TODO Assert that one spare block is enough for all manifest updates for a tree.
-        // It should be, provided block_size >= 16384 for 8 levels.
-        blocks: RingBuffer(BlockPtr, 2, .array),
+        /// The head block is used to accumulate a full block, to be written at the next flush.
+        /// The remaining blocks must accommodate all further appends.
+        // TODO Assert the relation between the number of blocks, and flush/compact/append.
+        blocks: RingBuffer(BlockPtr, 3, .array),
 
         /// The number of blocks that have been appended to, filled up, and then closed.
         blocks_closed: u8 = 0,
 
+        /// The number of entries in the open block.
         entry_count: u32 = 0,
+
+        opened: bool = false,
+        open_event: OpenEvent = undefined,
+        open_iterator: SuperBlock.Manifest.IteratorReverse = undefined,
 
         reading: bool = false,
         read: Grid.Read = undefined,
         read_callback: Callback = undefined,
+        read_block_reference: ?SuperBlock.Manifest.BlockReference = null,
 
         writing: bool = false,
         write: Grid.Write = undefined,
         write_callback: Callback = undefined,
-
-        open_iterator: SuperBlock.Manifest.IteratorReverse = undefined,
-        open_block_reference: ?SuperBlock.Manifest.BlockReference = null,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -83,6 +93,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const b = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
             errdefer allocator.free(b);
 
+            const c = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
+            errdefer allocator.free(b);
+
             return ManifestLog{
                 .superblock = superblock,
                 .grid = grid,
@@ -91,6 +104,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     .buffer = .{
                         a[0..config.block_size],
                         b[0..config.block_size],
+                        c[0..config.block_size],
                     },
                 },
             };
@@ -100,147 +114,129 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             for (manifest_log.blocks.buffer) |block| allocator.free(block);
         }
 
-        pub fn insert(manifest_log: *ManifestLog, level: u5, table: *const TableInfo) void {
-            manifest_log.append(.{ .level = level, .event = .insert }, table);
-        }
-
-        pub fn update(manifest_log: *ManifestLog, level: u5, table: *const TableInfo) void {
-            manifest_log.append(.{ .level = level, .event = .update }, table);
-        }
-
-        pub fn remove(manifest_log: *ManifestLog, level: u5, table: *const TableInfo) void {
-            manifest_log.append(.{ .level = level, .event = .remove }, table);
-        }
-
-        pub fn flush(manifest_log: *ManifestLog, callback: Callback) void {
-            assert(!manifest_log.writing);
-            manifest_log.writing = true;
-            manifest_log.write_callback = callback;
-
-            log.debug("flush: writing {} block(s)", .{manifest_log.blocks_closed});
-            manifest_log.write_block();
-        }
-
-        pub fn checkpoint(manifest_log: *ManifestLog, callback: Callback) void {
-            assert(!manifest_log.writing);
-            manifest_log.writing = true;
-            manifest_log.write_callback = callback;
-
-            if (manifest_log.entry_count > 0) {
-                manifest_log.close_block();
-                assert(manifest_log.entry_count == 0);
-                assert(manifest_log.blocks_closed > 0);
-                assert(manifest_log.blocks_closed == manifest_log.blocks.count);
-            }
-
-            log.debug("checkpoint: writing {} block(s)", .{manifest_log.blocks_closed});
-            manifest_log.write_block();
-        }
-
-        pub fn open(manifest_log: *ManifestLog, callback: Callback) void {
+        /// Opens the manifest log.
+        /// Reads the manifest blocks in reverse order and passes extent table inserts to event().
+        pub fn open(manifest_log: *ManifestLog, event: OpenEvent, callback: Callback) void {
+            assert(!manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
 
-            manifest_log.reading = true;
-            manifest_log.read_callback = callback;
+            manifest_log.open_event = event;
             manifest_log.open_iterator = manifest_log.superblock.manifest.iterator_reverse(
                 manifest_log.tree,
             );
+
+            manifest_log.reading = true;
+            manifest_log.read_callback = callback;
 
             manifest_log.open_read_block();
         }
 
         fn open_read_block(manifest_log: *ManifestLog) void {
+            assert(!manifest_log.opened);
             assert(manifest_log.reading);
             assert(!manifest_log.writing);
 
-            manifest_log.open_block_reference = manifest_log.open_iterator.next();
+            manifest_log.read_block_reference = manifest_log.open_iterator.next();
 
-            if (manifest_log.open_block_reference) |block_reference| {
-                assert(block_reference.tree == manifest_log.tree);
-                assert(block_reference.address > 0);
-
-                log.debug("open_read_block: checksum={x} address={}", .{
-                    block_reference.checksum,
-                    block_reference.address,
-                });
+            if (manifest_log.read_block_reference) |block| {
+                assert(block.tree == manifest_log.tree);
+                assert(block.address > 0);
 
                 manifest_log.grid.read_block(
                     open_read_block_callback,
                     &manifest_log.read,
-                    manifest_log.blocks.buffer[0], // TODO Grid will provide a BlockPtr.
-                    block_reference.address,
-                    block_reference.checksum,
+                    manifest_log.blocks.buffer[0], // TODO Grid to provide BlockPtr.
+                    block.address,
+                    block.checksum,
                 );
             } else {
+                manifest_log.opened = true;
+                manifest_log.open_event = undefined;
+                manifest_log.open_iterator = undefined;
+
                 const callback = manifest_log.read_callback;
                 manifest_log.reading = false;
                 manifest_log.read_callback = undefined;
-                manifest_log.open_iterator = undefined;
+                assert(manifest_log.read_block_reference == null);
+
                 callback(manifest_log);
             }
         }
 
         fn open_read_block_callback(read: *Grid.Read) void {
             const manifest_log = @fieldParentPtr(ManifestLog, "read", read);
+            assert(!manifest_log.opened);
             assert(manifest_log.reading);
             assert(!manifest_log.writing);
 
-            const block = manifest_log.blocks.buffer[0]; // TODO Grid will provide a BlockPtr.
-            verify_block(
-                block,
-                manifest_log.open_block_reference.?.checksum,
-                manifest_log.open_block_reference.?.address,
-            );
+            const block: BlockPtr = manifest_log.blocks.buffer[0]; // TODO Grid to provide BlockPtr.
+            const block_reference = manifest_log.read_block_reference.?;
+
+            verify_block(block, block_reference.checksum, block_reference.address);
 
             const entry_count = block_entry_count(block);
-            assert(entry_count > 0);
-
             const labels_used = labels(block)[0..entry_count];
             const tables_used = tables(block)[0..entry_count];
 
-            var index = entry_count;
-            while (index > 0) {
-                index -= 1;
+            const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
-                const label = labels_used[index];
-                const table = tables_used[index];
+            var frees: u32 = 0;
+            var entry = entry_count;
+            while (entry > 0) {
+                entry -= 1;
 
-                log.debug(
-                    "{s}: tree={} level={} checksum={x} address={} flags={} snapshot={}..{}",
-                    .{
-                        @tagName(label.event),
-                        manifest_log.tree,
-                        label.level,
-                        table.checksum,
-                        table.address,
-                        table.flags,
-                        table.snapshot_min,
-                        table.snapshot_max,
-                    },
-                );
+                const label = labels_used[entry];
+                const table = &tables_used[entry];
+
+                if (manifest.insert_table_extent(table.address, block_reference.address, entry)) {
+                    switch (label.event) {
+                        .insert => manifest_log.open_event(manifest_log, label.level, table),
+                        .remove => frees += 1,
+                    }
+                } else {
+                    frees += 1;
+                }
+            }
+
+            log.debug("opened: checksum={x} address={} frees={}/{}", .{
+                block_reference.checksum,
+                block_reference.address,
+                frees,
+                entry_count,
+            });
+
+            if (frees > 0) {
+                assert(frees <= entry_count);
+                manifest_log.superblock.manifest.queue_for_compaction(block_reference.address);
             }
 
             manifest_log.open_read_block();
         }
 
+        /// Appends an insert, an update, or a direct move to a lower level.
+        pub fn insert(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
+            manifest_log.append(.{ .level = level, .event = .insert }, table);
+        }
+
+        /// Appends a remove, not accompanied by any insert.
+        pub fn remove(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
+            manifest_log.append(.{ .level = level, .event = .remove }, table);
+        }
+
         fn append(manifest_log: *ManifestLog, label: Label, table: *const TableInfo) void {
+            assert(manifest_log.opened);
             assert(label.level < config.lsm_levels);
             assert(table.address > 0);
             assert(table.snapshot_min > 0);
             assert(table.snapshot_max > table.snapshot_min);
-            // TODO Assert label.event in relation to table.snapshot_max.
 
             if (manifest_log.blocks.empty()) {
-                assert(manifest_log.entry_count == 0);
-
-                manifest_log.open_block();
+                manifest_log.acquire_block();
             } else if (manifest_log.entry_count == entry_count_max) {
                 assert(manifest_log.blocks.count > 0);
                 manifest_log.close_block();
-                assert(manifest_log.entry_count == 0);
-
-                manifest_log.open_block();
+                manifest_log.acquire_block();
             } else if (manifest_log.entry_count > 0) {
                 assert(manifest_log.blocks.count > 0);
             }
@@ -263,59 +259,33 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const block: BlockPtr = manifest_log.blocks.tail().?;
             labels(block)[manifest_log.entry_count] = label;
             tables(block)[manifest_log.entry_count] = table.*;
+
+            manifest_log.superblock.manifest.update_table_extent(
+                table.address,
+                block_address(block),
+                manifest_log.entry_count,
+            );
+
             manifest_log.entry_count += 1;
         }
 
-        fn open_block(manifest_log: *ManifestLog) void {
-            assert(!manifest_log.blocks.full());
-            assert(manifest_log.entry_count == 0);
+        pub fn flush(manifest_log: *ManifestLog, callback: Callback) void {
+            assert(manifest_log.opened);
+            assert(!manifest_log.reading);
+            assert(!manifest_log.writing);
 
-            manifest_log.blocks.advance_tail();
-        }
+            manifest_log.writing = true;
+            manifest_log.write_callback = callback;
 
-        fn close_block(manifest_log: *ManifestLog) void {
-            const block: BlockPtr = manifest_log.blocks.tail().?;
-
-            const entry_count = manifest_log.entry_count;
-            assert(entry_count > 0);
-            assert(entry_count <= entry_count_max);
-
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            const address = manifest_log.superblock.free_set.acquire().?;
-
-            header.* = .{
-                .cluster = manifest_log.superblock.working.cluster,
-                .op = address,
-                .size = block_size(entry_count),
-                .command = .block,
-            };
-
-            // Zero unused labels:
-            mem.set(u8, mem.sliceAsBytes(labels(block)[entry_count..]), 0);
-
-            // Zero unused tables and padding:
-            mem.set(u8, block[header.size..], 0);
-
-            header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
-            header.set_checksum();
-
-            verify_block(block, null, address);
-            assert(block_entry_count(block) == entry_count);
-
-            log.debug("close_block: checksum={x} address={} entry_count={}", .{
-                header.checksum,
-                address,
-                entry_count,
-            });
-
-            manifest_log.blocks_closed += 1;
-            manifest_log.entry_count = 0;
+            log.debug("flush: writing {} block(s)", .{manifest_log.blocks_closed});
+            manifest_log.write_block();
         }
 
         fn write_block(manifest_log: *ManifestLog) void {
+            assert(manifest_log.opened);
             assert(manifest_log.writing);
-
             assert(manifest_log.blocks_closed <= manifest_log.blocks.count);
+
             if (manifest_log.blocks_closed == 0) {
                 if (manifest_log.blocks.count == 0) {
                     assert(manifest_log.entry_count == 0);
@@ -363,6 +333,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         fn write_block_callback(write: *Grid.Write) void {
             const manifest_log = @fieldParentPtr(ManifestLog, "write", write);
+            assert(manifest_log.opened);
             assert(manifest_log.writing);
 
             const block = manifest_log.blocks.head().?;
@@ -379,6 +350,169 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.blocks_closed <= manifest_log.blocks.count);
 
             manifest_log.write_block();
+        }
+
+        pub fn compact(manifest_log: *ManifestLog, callback: Callback) void {
+            assert(manifest_log.opened);
+            assert(!manifest_log.reading);
+            assert(!manifest_log.writing);
+
+            const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
+
+            if (manifest.oldest_block_queued_for_compaction(manifest_log.tree)) |block| {
+                assert(block.tree == manifest_log.tree);
+                assert(block.address > 0);
+
+                manifest_log.reading = true;
+                manifest_log.read_callback = callback;
+                manifest_log.read_block_reference = block;
+
+                manifest_log.grid.read_block(
+                    compact_callback,
+                    &manifest_log.read,
+                    manifest_log.blocks.buffer[0], // TODO Grid to provide BlockPtr.
+                    block.address,
+                    block.checksum,
+                );
+            } else {
+                callback(manifest_log);
+            }
+        }
+
+        fn compact_callback(read: *Grid.Read) void {
+            const manifest_log = @fieldParentPtr(ManifestLog, "read", read);
+            assert(manifest_log.opened);
+            assert(manifest_log.reading);
+            assert(!manifest_log.writing);
+
+            const block: BlockPtr = manifest_log.blocks.buffer[0]; // TODO Grid to provide BlockPtr.
+            const block_reference = manifest_log.read_block_reference.?;
+
+            verify_block(block, block_reference.checksum, block_reference.address);
+
+            const entry_count = block_entry_count(block);
+            const labels_used = labels(block)[0..entry_count];
+            const tables_used = tables(block)[0..entry_count];
+
+            const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
+            assert(manifest.tables.count() > 0);
+
+            var frees: u32 = 0;
+            var entry: u32 = 0;
+            while (entry < entry_count) : (entry += 1) {
+                const label = labels_used[entry];
+                const table = &tables_used[entry];
+
+                // Remove the extent if the table is the latest version.
+                // We must iterate entries in forward order to drop the extent here.
+                // Otherwise, stale versions earlier in the block may reappear.
+                if (manifest.remove_table_extent(table.address, block_reference.address, entry)) {
+                    switch (label.event) {
+                        // Append the table, updating the table extent:
+                        .insert => manifest_log.append(label, table),
+                        // Since we compact oldest blocks first, we know that we have already
+                        // compacted all inserts that were eclipsed by this remove, so this remove
+                        // can now be safely dropped.
+                        .remove => frees += 1,
+                    }
+                } else {
+                    // The table is not the latest version and can dropped.
+                    frees += 1;
+                }
+            }
+
+            log.debug("compacted: checksum={x} address={} frees={}/{}", .{
+                block_reference.checksum,
+                block_reference.address,
+                frees,
+                entry_count,
+            });
+
+            assert(frees > 0);
+
+            assert(manifest.queued_for_compaction(block_reference.address));
+            manifest.remove(manifest_log.tree, block_reference.checksum, block_reference.address);
+            assert(!manifest.queued_for_compaction(block_reference.address));
+
+            manifest_log.superblock.free_set.release_at_checkpoint(block_reference.address);
+
+            const callback = manifest_log.read_callback;
+            manifest_log.reading = false;
+            manifest_log.read_callback = undefined;
+            manifest_log.read_block_reference = null;
+
+            callback(manifest_log);
+        }
+
+        pub fn checkpoint(manifest_log: *ManifestLog, callback: Callback) void {
+            assert(manifest_log.opened);
+            assert(!manifest_log.reading);
+            assert(!manifest_log.writing);
+
+            manifest_log.writing = true;
+            manifest_log.write_callback = callback;
+
+            if (manifest_log.entry_count > 0) {
+                manifest_log.close_block();
+                assert(manifest_log.entry_count == 0);
+                assert(manifest_log.blocks_closed > 0);
+                assert(manifest_log.blocks_closed == manifest_log.blocks.count);
+            }
+
+            log.debug("checkpoint: writing {} block(s)", .{manifest_log.blocks_closed});
+            manifest_log.write_block();
+        }
+
+        fn acquire_block(manifest_log: *ManifestLog) void {
+            assert(manifest_log.entry_count == 0);
+            assert(!manifest_log.blocks.full());
+
+            manifest_log.blocks.advance_tail();
+
+            const block: BlockPtr = manifest_log.blocks.tail().?;
+
+            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            header.* = .{
+                .cluster = manifest_log.superblock.working.cluster,
+                .op = manifest_log.superblock.free_set.acquire().?,
+                .size = undefined,
+                .command = .block,
+            };
+        }
+
+        fn close_block(manifest_log: *ManifestLog) void {
+            const block: BlockPtr = manifest_log.blocks.tail().?;
+
+            const entry_count = manifest_log.entry_count;
+            assert(entry_count > 0);
+            assert(entry_count <= entry_count_max);
+
+            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            assert(header.cluster == manifest_log.superblock.working.cluster);
+            assert(header.op > 0);
+            header.size = block_size(entry_count);
+            assert(header.command == .block);
+
+            // Zero unused labels:
+            mem.set(u8, mem.sliceAsBytes(labels(block)[entry_count..]), 0);
+
+            // Zero unused tables and padding:
+            mem.set(u8, block[header.size..], 0);
+
+            header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
+            header.set_checksum();
+
+            verify_block(block, null, null);
+            assert(block_entry_count(block) == entry_count);
+
+            log.debug("close_block: checksum={x} address={} entry_count={}", .{
+                header.checksum,
+                block_address(block),
+                entry_count,
+            });
+
+            manifest_log.blocks_closed += 1;
+            manifest_log.entry_count = 0;
         }
 
         fn verify_block(block: BlockPtrConst, checksum: ?u128, address: ?u64) void {
@@ -457,6 +591,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
     };
 }
 
+// TODO This is a manual runner to be replaced with a fuzz test.
 fn ManifestLogTestType(
     comptime Storage: type,
     comptime TableInfo: type,
@@ -489,16 +624,16 @@ fn ManifestLogTestType(
             t.manifest_log.deinit(allocator);
         }
 
-        fn format(t: *ManifestLogTest) void {
+        fn format_superblock(t: *ManifestLogTest) void {
             t.pending += 1;
-            t.superblock.format(format_callback, &t.superblock_context, .{
+            t.superblock.format(format_superblock_callback, &t.superblock_context, .{
                 .cluster = 10,
                 .replica = 0,
                 .size_max = 512 * 1024 * 1024,
             });
         }
 
-        fn format_callback(context: *SuperBlock.Context) void {
+        fn format_superblock_callback(context: *SuperBlock.Context) void {
             const t = @fieldParentPtr(ManifestLogTest, "superblock_context", context);
             t.pending -= 1;
             t.open_superblock();
@@ -513,10 +648,33 @@ fn ManifestLogTestType(
             const t = @fieldParentPtr(ManifestLogTest, "superblock_context", context);
             t.pending -= 1;
 
-            t.append();
+            t.open();
         }
 
-        fn append(t: *ManifestLogTest) void {
+        fn open(t: *ManifestLogTest) void {
+            t.pending += 1;
+            t.manifest_log.open(open_event, open_callback);
+        }
+
+        fn open_event(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
+            log.debug(
+                "open_event: tree={} level={} checksum={x} address={} flags={} snapshot={}..{}",
+                .{
+                    manifest_log.tree,
+                    level,
+                    table.checksum,
+                    table.address,
+                    table.flags,
+                    table.snapshot_min,
+                    table.snapshot_max,
+                },
+            );
+        }
+
+        fn open_callback(manifest_log: *ManifestLog) void {
+            const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
+            t.pending -= 1;
+
             t.manifest_log.insert(2, &TableInfo{
                 .checksum = 123,
                 .address = 7,
@@ -525,29 +683,6 @@ fn ManifestLogTestType(
                 .key_min = 50,
                 .key_max = 100,
             });
-
-            t.manifest_log.update(2, &TableInfo{
-                .checksum = 123,
-                .address = 7,
-                .flags = 0,
-                .snapshot_min = 42,
-                .snapshot_max = 50,
-                .key_min = 50,
-                .key_max = 100,
-            });
-
-            var i: usize = 0;
-            while (i < 16) : (i += 1) {
-                t.manifest_log.remove(2, &TableInfo{
-                    .checksum = i,
-                    .address = 7,
-                    .flags = 0,
-                    .snapshot_min = 42,
-                    .snapshot_max = 50,
-                    .key_min = 50,
-                    .key_max = 100,
-                });
-            }
 
             t.flush();
         }
@@ -571,27 +706,65 @@ fn ManifestLogTestType(
         fn checkpoint_callback(manifest_log: *ManifestLog) void {
             const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
             t.pending -= 1;
-            t.checkpoint_nothing();
+
+            t.manifest_log.insert(2, &TableInfo{
+                .checksum = 123,
+                .address = 7,
+                .flags = 0,
+                .snapshot_min = 42,
+                .snapshot_max = 50,
+                .key_min = 50,
+                .key_max = 100,
+            });
+
+            t.manifest_log.remove(2, &TableInfo{
+                .checksum = 123,
+                .address = 7,
+                .flags = 0,
+                .snapshot_min = 42,
+                .snapshot_max = 50,
+                .key_min = 50,
+                .key_max = 100,
+            });
+
+            t.checkpoint_again();
         }
 
-        fn checkpoint_nothing(t: *ManifestLogTest) void {
+        fn checkpoint_again(t: *ManifestLogTest) void {
             t.pending += 1;
-            t.manifest_log.checkpoint(checkpoint_nothing_callback);
+            t.manifest_log.checkpoint(checkpoint_again_callback);
         }
 
-        fn checkpoint_nothing_callback(manifest_log: *ManifestLog) void {
+        fn checkpoint_again_callback(manifest_log: *ManifestLog) void {
             const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
             t.pending -= 1;
-            t.open();
+            t.compact();
         }
 
-        fn open(t: *ManifestLogTest) void {
+        fn compact(t: *ManifestLogTest) void {
             t.pending += 1;
-            t.manifest_log.open(open_callback);
+            t.manifest_log.compact(compact_callback);
         }
 
-        fn open_callback(manifest_log: *ManifestLog) void {
+        fn compact_callback(manifest_log: *ManifestLog) void {
             const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
+            t.pending -= 1;
+
+            const tree = t.manifest_log.tree;
+            if (t.manifest_log.superblock.manifest.oldest_block_queued_for_compaction(tree)) |_| {
+                t.compact();
+            } else {
+                t.checkpoint_superblock();
+            }
+        }
+
+        fn checkpoint_superblock(t: *ManifestLogTest) void {
+            t.pending += 1;
+            t.superblock.checkpoint(checkpoint_superblock_callback, &t.superblock_context);
+        }
+
+        fn checkpoint_superblock_callback(context: *SuperBlock.Context) void {
+            const t = @fieldParentPtr(ManifestLogTest, "superblock_context", context);
             t.pending -= 1;
         }
     };
@@ -655,6 +828,6 @@ pub fn main() !void {
     var t = try ManifestLogTest.init(allocator, &superblock, &grid);
     defer t.deinit(allocator);
 
-    t.format();
+    t.format_superblock();
     while (t.pending > 0) try io.run_for_ns(100);
 }

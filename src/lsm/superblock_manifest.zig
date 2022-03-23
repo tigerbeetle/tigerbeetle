@@ -18,11 +18,11 @@ pub const Manifest = struct {
     /// Shared by all trees and sized to accommodate all possible tables.
     tables: std.AutoHashMapUnmanaged(u64, TableExtent),
 
-    /// A map of block addresses that have free entries.
+    /// A set of block addresses that have free entries.
     /// Used to determine whether a block should be compacted.
     /// Note: Some of these block addresses may yet to be appended to the manifest through a flush.
     /// This enables us to track fragmentation even in unflushed blocks.
-    frees: std.AutoHashMapUnmanaged(u64, u32),
+    compaction_set: std.AutoHashMapUnmanaged(u64, void),
 
     pub const TableExtent = struct {
         block: u64,
@@ -43,9 +43,9 @@ pub const Manifest = struct {
         try tables.ensureTotalCapacity(allocator, config.lsm_tables_max);
         errdefer tables.deinit(allocator);
 
-        var frees = std.AutoHashMapUnmanaged(u64, u32){};
-        try frees.ensureTotalCapacity(allocator, count_max);
-        errdefer free.deinit(allocator);
+        var compaction_set = std.AutoHashMapUnmanaged(u64, void){};
+        try compaction_set.ensureTotalCapacity(allocator, count_max);
+        errdefer compaction_set.deinit(allocator);
 
         mem.set(u128, checksums, 0);
         mem.set(u64, addresses, 0);
@@ -58,7 +58,7 @@ pub const Manifest = struct {
             .count = 0,
             .count_max = count_max,
             .tables = tables,
-            .frees = frees,
+            .compaction_set = compaction_set,
         };
     }
 
@@ -67,7 +67,7 @@ pub const Manifest = struct {
         allocator.free(manifest.addresses);
         allocator.free(manifest.trees);
         manifest.tables.deinit(allocator);
-        manifest.frees.deinit(allocator);
+        manifest.compaction_set.deinit(allocator);
     }
 
     pub fn encode(manifest: *const Manifest, target: []align(@alignOf(u128)) u8) u64 {
@@ -137,6 +137,10 @@ pub const Manifest = struct {
         manifest.trees[manifest.count] = tree;
         manifest.count += 1;
 
+        // A newly appended manifest block may already be queued for compaction.
+        // For example, if a table is inserted and then removed before the block was flushed.
+        // TODO Optimize ManifestLog.close_block() to compact blocks internally.
+
         log.debug("append: tree={} checksum={x} address={} count={}/{}", .{
             tree,
             checksum,
@@ -170,7 +174,7 @@ pub const Manifest = struct {
         manifest.addresses[manifest.count] = 0;
         manifest.trees[manifest.count] = 0;
 
-        _ = manifest.frees.remove(address);
+        _ = manifest.compaction_set.remove(address);
 
         log.debug("remove: tree={} checksum={x} address={} count={}/{}", .{
             tree,
@@ -197,29 +201,23 @@ pub const Manifest = struct {
         return null;
     }
 
-    pub fn frees_for_address(manifest: *const Manifest, address: u64) u32 {
+    pub fn queue_for_compaction(manifest: *Manifest, address: u64) void {
         assert(address > 0);
 
-        return manifest.frees.get(address) orelse 0;
+        manifest.compaction_set.putAssumeCapacity(address, {});
     }
 
-    pub fn increment_frees_for_address_by(manifest: *Manifest, address: u64, count: u32) void {
+    pub fn queued_for_compaction(manifest: *const Manifest, address: u64) bool {
         assert(address > 0);
-        assert(count > 0);
 
-        var frees = manifest.frees.getOrPutAssumeCapacity(address);
-        if (frees.found_existing) {
-            frees.value_ptr.* += count;
-        } else {
-            frees.value_ptr.* = count;
-        }
+        return manifest.compaction_set.contains(address);
     }
 
-    pub fn oldest_block_with_frees(manifest: *const Manifest, tree: u8) ?BlockReference {
+    pub fn oldest_block_queued_for_compaction(manifest: *const Manifest, tree: u8) ?BlockReference {
         var index: u32 = 0;
         while (index < manifest.count) : (index += 1) {
             if (manifest.trees[index] != tree) continue;
-            if (manifest.frees_for_address(manifest.addresses[index]) == 0) continue;
+            if (!manifest.queued_for_compaction(manifest.addresses[index])) continue;
 
             return BlockReference{
                 .checksum = manifest.checksums[index],
@@ -250,15 +248,12 @@ pub const Manifest = struct {
 
     /// The table extent must be updated immediately when appending, without delay.
     /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
-    /// For this reason, manifest.frees allows frees in unflushed blocks to be tracked.
     pub fn update_table_extent(manifest: *Manifest, table: u64, block: u64, entry: u32) void {
         assert(table > 0);
         assert(block > 0);
 
         var extent = manifest.tables.getOrPutAssumeCapacity(table);
-        if (extent.found_existing) {
-            manifest.increment_frees_for_address_by(extent.value_ptr.block, 1);
-        }
+        if (extent.found_existing) manifest.queue_for_compaction(extent.value_ptr.block);
         extent.value_ptr.* = .{
             .block = block,
             .entry = entry,
@@ -271,9 +266,10 @@ pub const Manifest = struct {
         assert(table > 0);
         assert(block > 0);
 
-        const extent = manifest.tables.getPtr(table.address).?;
+        const extent = manifest.tables.getPtr(table).?;
         if (extent.block == block and extent.entry == entry) {
-            assert(manifest.tables.remove(table.address));
+            assert(manifest.tables.remove(table));
+
             return true;
         } else {
             return false;
@@ -431,28 +427,28 @@ test {
     manifest.append(1, 4, 5);
     try expectEqual(@as(?u32, 2), manifest.index_for_address(5));
 
-    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_with_frees(1));
-    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_with_frees(2));
+    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction(1));
+    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction(2));
 
-    manifest.increment_frees_for_address_by(3, 1);
-    try expectEqual(@as(u32, 1), manifest.frees_for_address(3));
+    manifest.queue_for_compaction(3);
+    try expectEqual(true, manifest.queued_for_compaction(3));
     try expectEqual(
         @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 2, .address = 3 }),
-        manifest.oldest_block_with_frees(1),
+        manifest.oldest_block_queued_for_compaction(1),
     );
 
-    manifest.increment_frees_for_address_by(4, 2);
-    try expectEqual(@as(u32, 2), manifest.frees_for_address(4));
+    manifest.queue_for_compaction(4);
+    try expectEqual(true, manifest.queued_for_compaction(4));
     try expectEqual(
         @as(?BlockReference, BlockReference{ .tree = 2, .checksum = 3, .address = 4 }),
-        manifest.oldest_block_with_frees(2),
+        manifest.oldest_block_queued_for_compaction(2),
     );
 
-    manifest.increment_frees_for_address_by(5, 2);
-    try expectEqual(@as(u32, 2), manifest.frees_for_address(5));
+    manifest.queue_for_compaction(5);
+    try expectEqual(true, manifest.queued_for_compaction(5));
     try expectEqual(
         @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 2, .address = 3 }),
-        manifest.oldest_block_with_frees(1),
+        manifest.oldest_block_queued_for_compaction(1),
     );
 
     try test_iterator_reverse(
@@ -475,13 +471,13 @@ test {
     try test_codec(&manifest);
 
     manifest.remove(1, 2, 3);
-    try expectEqual(@as(u32, 0), manifest.frees_for_address(3));
+    try expectEqual(false, manifest.queued_for_compaction(3));
     try expectEqual(@as(?u32, null), manifest.index_for_address(3));
     try expectEqual(@as(?u32, 0), manifest.index_for_address(4));
     try expectEqual(@as(?u32, 1), manifest.index_for_address(5));
     try expectEqual(
         @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 4, .address = 5 }),
-        manifest.oldest_block_with_frees(1),
+        manifest.oldest_block_queued_for_compaction(1),
     );
 
     try expectEqual(@as(u128, 0), manifest.checksums[2]);
@@ -492,17 +488,17 @@ test {
     try expectEqual(@as(?u32, 2), manifest.index_for_address(3));
 
     manifest.remove(1, 4, 5);
-    try expectEqual(@as(u32, 0), manifest.frees_for_address(5));
+    try expectEqual(false, manifest.queued_for_compaction(5));
     try expectEqual(@as(?u32, null), manifest.index_for_address(5));
     try expectEqual(@as(?u32, 1), manifest.index_for_address(3));
 
     manifest.remove(2, 3, 4);
-    try expectEqual(@as(u32, 0), manifest.frees_for_address(4));
+    try expectEqual(false, manifest.queued_for_compaction(4));
     try expectEqual(@as(?u32, null), manifest.index_for_address(4));
     try expectEqual(@as(?u32, 0), manifest.index_for_address(3));
 
     manifest.remove(1, 2, 3);
-    try expectEqual(@as(u32, 0), manifest.frees_for_address(3));
+    try expectEqual(false, manifest.queued_for_compaction(3));
     try expectEqual(@as(?u32, null), manifest.index_for_address(3));
     try expectEqual(@as(?u32, null), manifest.index_for_address(4));
     try expectEqual(@as(?u32, null), manifest.index_for_address(5));
@@ -511,11 +507,11 @@ test {
     for (manifest.addresses) |address| try expectEqual(@as(u64, 0), address);
     for (manifest.trees) |tree| try expectEqual(@as(u8, 0), tree);
 
-    try expectEqual(@as(usize, 0), manifest.frees.count());
+    try expectEqual(@as(usize, 0), manifest.compaction_set.count());
 
     try expectEqual(@as(u32, 0), manifest.count);
     try expectEqual(@as(u32, 3), manifest.count_max);
 
-    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_with_frees(1));
-    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_with_frees(2));
+    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction(1));
+    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction(2));
 }
