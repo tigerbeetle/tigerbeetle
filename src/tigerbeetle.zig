@@ -26,12 +26,12 @@ pub const Account = packed struct {
 
     pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
         return (self.flags.debits_must_not_exceed_credits and
-            self.debits_pending + self.debits_posted + amount > self.credits_posted);
+            (@as(u66, self.debits_pending) + @as(u66, self.debits_posted) + @as(u66, amount)) > self.credits_posted);
     }
 
     pub fn credits_exceed_debits(self: *const Account, amount: u64) bool {
         return (self.flags.credits_must_not_exceed_debits and
-            self.credits_pending + self.credits_posted + amount > self.debits_posted);
+            (@as(u66, self.credits_pending) + @as(u66, self.credits_posted) + @as(u66, amount)) > self.debits_posted);
     }
 };
 

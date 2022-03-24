@@ -1458,6 +1458,37 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expectEqual(@as(u64, 75), account_2_rollback_reject.credits_pending);
 }
 
+test "exceed credit/debit limits panic" {
+    const acc_debit_not_exceed_credit = Account{
+        .id = 1,
+        .user_data = 0,
+        .reserved = [_]u8{0} ** 48,
+        .unit = 710,
+        .code = 1000,
+        .flags = .{ .debits_must_not_exceed_credits = true },
+        .debits_pending = std.math.maxInt(u64),
+        .debits_posted = std.math.maxInt(u64),
+        .credits_pending = std.math.maxInt(u64),
+        .credits_posted = std.math.maxInt(u64),
+    };
+
+    const acc_credit_not_exceed_debit = Account{
+        .id = 1,
+        .user_data = 0,
+        .reserved = [_]u8{0} ** 48,
+        .unit = 710,
+        .code = 1000,
+        .flags = .{ .credits_must_not_exceed_debits = true },
+        .debits_pending = std.math.maxInt(u64),
+        .debits_posted = std.math.maxInt(u64),
+        .credits_pending = std.math.maxInt(u64),
+        .credits_posted = std.math.maxInt(u64),
+    };
+
+    try testing.expect(acc_debit_not_exceed_credit.debits_exceed_credits(std.math.maxInt(u64)));
+    try testing.expect(acc_credit_not_exceed_debit.credits_exceed_debits(std.math.maxInt(u64)));
+}
+
 fn test_routine_zeroed(comptime len: usize) !void {
     const routine = switch (len) {
         32 => zeroed_32_bytes,
