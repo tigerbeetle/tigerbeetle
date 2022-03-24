@@ -13,14 +13,15 @@ The following steps will install the `tigerbeetle-node` module to your current w
 ### YARN Package Manager
 
 ```sh
-# Run the following from this directory
+# Run the following from this directory:
 yarn add
 ```
 or
 
-### NPM Package Manager 
+### NPM Package Manager
+Run the following command from this directory:
 ```sh
-npm install tigerbeetle-node
+npm install .
 ```
 
 **Development**
