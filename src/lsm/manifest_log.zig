@@ -26,18 +26,18 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         pub const OpenEvent = fn (
             manifest_log: *ManifestLog,
-            level: u6,
+            level: u7,
             table: *const TableInfo,
         ) void;
 
         pub const Label = packed struct {
-            level: u6,
-            event: enum(u2) { insert, remove },
+            level: u7,
+            event: enum(u1) { insert, remove },
         };
 
         comptime {
-            // Bits { 6, 7 } are reserved to indicate { insert, remove } respectively.
-            assert(config.lsm_levels <= math.maxInt(u6));
+            // Bit 7 is reserved to indicate whether the event is an insert or remove.
+            assert(config.lsm_levels <= math.maxInt(u7) + 1);
 
             assert(@sizeOf(Label) == @sizeOf(u8));
 
@@ -116,6 +116,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         /// Opens the manifest log.
         /// Reads the manifest blocks in reverse order and passes extent table inserts to event().
+        /// Therefore, only the latest version of a table will be emitted by event() for insertion
+        /// into the in-memory manifest. Older versions of a table in older manifest blocks will not
+        /// be emitted, as an optimization to not replay all table mutations.
+        /// SuperBlock.Manifest.tables is used to track the latest version of a table.
         pub fn open(manifest_log: *ManifestLog, event: OpenEvent, callback: Callback) void {
             assert(!manifest_log.opened);
             assert(!manifest_log.reading);
@@ -215,12 +219,12 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         /// Appends an insert, an update, or a direct move to a lower level.
-        pub fn insert(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
+        pub fn insert(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
             manifest_log.append(.{ .level = level, .event = .insert }, table);
         }
 
         /// Appends a remove, not accompanied by any insert.
-        pub fn remove(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
+        pub fn remove(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
             manifest_log.append(.{ .level = level, .event = .remove }, table);
         }
 
@@ -656,7 +660,7 @@ fn ManifestLogTestType(
             t.manifest_log.open(open_event, open_callback);
         }
 
-        fn open_event(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
+        fn open_event(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
             log.debug(
                 "open_event: tree={} level={} checksum={x} address={} flags={} snapshot={}..{}",
                 .{
