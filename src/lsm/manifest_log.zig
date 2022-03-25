@@ -438,7 +438,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             // Blocks may be compacted if they contain frees, or are not completely full.
             // For example, a partial block may be flushed as part of a checkpoint.
-            assert(frees >= 0);
+            assert(frees > 0 or entry_count < entry_count_max);
 
             assert(manifest.queued_for_compaction(block_reference.address));
             manifest.remove(manifest_log.tree, block_reference.checksum, block_reference.address);
