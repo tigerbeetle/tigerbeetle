@@ -5,6 +5,11 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 
+// The maximum number of tables in a tree when fully loaded.
+// We use the same number as the upper bound for all tables across the forest since many are small.
+// For example, this would be 2,396,752 tables for a tree with 8 levels and a growth factor of 8.
+const table_count_max = @import("tree.zig").table_count_max;
+
 pub const Manifest = struct {
     checksums: []u128,
     addresses: []u64,
@@ -40,7 +45,7 @@ pub const Manifest = struct {
         errdefer allocator.free(trees);
 
         var tables = std.AutoHashMapUnmanaged(u64, TableExtent){};
-        try tables.ensureTotalCapacity(allocator, config.lsm_tables_max);
+        try tables.ensureTotalCapacity(allocator, table_count_max);
         errdefer tables.deinit(allocator);
 
         var compaction_set = std.AutoHashMapUnmanaged(u64, void){};
