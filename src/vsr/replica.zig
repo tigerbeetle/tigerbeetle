@@ -2724,7 +2724,7 @@ pub fn Replica(
 
             var op = self.commit_max + 1;
             var parent = self.journal.entry_for_op_exact(self.commit_max).?.checksum;
-            var iterator = self.pipeline.iterator();
+            var iterator = self.pipeline.iterator_mutable();
             while (iterator.next_ptr()) |prepare| {
                 assert(prepare.message.header.command == .prepare);
                 assert(prepare.message.header.op == op);

@@ -41,7 +41,7 @@ pub fn RingBuffer(
             },
         };
 
-        // TODO add doc comments to these functions:
+        // TODO Add doc comments to these functions:
         pub inline fn head(self: Self) ?T {
             if (self.empty()) return null;
             return self.buffer[self.index];
@@ -150,6 +150,7 @@ pub fn RingBuffer(
             count: usize = 0,
 
             pub fn next(it: *Iterator) ?T {
+                // TODO Use next_ptr() internally to avoid duplicating this code.
                 assert(it.count <= it.ring.count);
                 if (it.count == it.ring.count) return null;
                 defer it.count += 1;
@@ -165,8 +166,25 @@ pub fn RingBuffer(
         };
 
         /// Returns an iterator to iterate through all `count` items in the ring buffer.
-        /// The iterator is invalidated and unsafe if the ring buffer is modified.
+        /// The iterator is invalidated if the ring buffer is advanced.
         pub fn iterator(self: *const Self) Iterator {
+            return .{ .ring = self };
+        }
+
+        pub const IteratorMutable = struct {
+            ring: *Self,
+            count: usize = 0,
+
+            pub fn next_ptr(it: *IteratorMutable) ?*T {
+                assert(it.count <= it.ring.count);
+                if (it.count == it.ring.count) return null;
+                defer it.count += 1;
+                return &it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
+            }
+        };
+
+        // TODO Add to tests.
+        pub fn iterator_mutable(self: *Self) IteratorMutable {
             return .{ .ring = self };
         }
     };
