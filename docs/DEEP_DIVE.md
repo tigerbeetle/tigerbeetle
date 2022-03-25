@@ -107,6 +107,6 @@ Let's also pretend someone else tried to commit (but reject) concurrently:
 zig/zig run src/demo_06_void_pending_transfers.zig
 ```
 
-**From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state_machine.zig` by grepping the source for `fn create_account`, `fn create_transfer`, and `fn commit_transfer`.**
+**From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state_machine.zig` by grepping the source for `fn create_account` or `fn create_transfer`.**
 
 **Enjoy...**

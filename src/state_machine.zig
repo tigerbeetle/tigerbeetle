@@ -333,7 +333,6 @@ pub const StateMachine = struct {
     fn create_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
         assert(t.timestamp > self.commit_timestamp);
 
-        // Either a 2-phase transfer post/void
         if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
             return .cannot_post_and_void_pending_transfer;
         } else if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
@@ -404,8 +403,8 @@ pub const StateMachine = struct {
 
             if (t.debit_account_id == t.credit_account_id) return .accounts_are_the_same;
 
-            // The etymology of the DR and CR abbreviations for debit and credit is interesting, either:
-            // 1. derived from the Latin past participles of debitum and creditum, debere and credere,
+            // The etymology of the DR and CR abbreviations for debit/credit is interesting, either:
+            // 1. derived from the Latin past participles of debitum/creditum, i.e. debere/credere,
             // 2. standing for debit record and credit record, or
             // 3. relating to debtor and creditor.
             // We use them to distinguish between `cr` (credit account), and `c` (commit).
@@ -1458,7 +1457,7 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expectEqual(@as(u64, 75), account_2_rollback_reject.credits_pending);
 }
 
-test "exceed credit/debit limits panic" {
+test "credit/debit limit overflows " {
     const acc_debit_not_exceed_credit = Account{
         .id = 1,
         .user_data = 0,

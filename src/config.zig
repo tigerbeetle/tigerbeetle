@@ -53,7 +53,7 @@ pub const transfers_max = switch (deployment_environment) {
     else => 1_000_000,
 };
 
-/// The maximum number of two-phase Transfers to store in memory:
+/// The maximum number of two-phase transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const pending_max = transfers_max;
 

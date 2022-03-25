@@ -13,8 +13,8 @@ pub fn main() !void {
             .reserved = [_]u8{0} ** 32,
             .timeout = 0,
             .code = 0,
-            .flags = .{ .post_pending_transfer = true }, // Post the pending 2-phase Transfer.
-            .amount = 0, // Amount from pending Transfer.
+            .flags = .{ .post_pending_transfer = true }, // Post the pending two-phase transfer.
+            .amount = 0, // Inherit the amount from the pending transfer.
         },
         Transfer{
             .id = 1002,
@@ -24,8 +24,8 @@ pub fn main() !void {
             .reserved = [_]u8{0} ** 32,
             .timeout = 0,
             .code = 0,
-            .flags = .{ .post_pending_transfer = true }, // Post the pending 2-phase Transfer.
-            .amount = 0, // Amount from pending Transfer.
+            .flags = .{ .post_pending_transfer = true }, // Post the pending two-phase transfer.
+            .amount = 0, // Inherit the amount from the pending transfer.
         },
     };
 
