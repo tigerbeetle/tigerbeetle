@@ -243,9 +243,11 @@ pub const Header = packed struct {
             .request_start_view => self.invalid_request_start_view(),
             .request_headers => self.invalid_request_headers(),
             .request_prepare => self.invalid_request_prepare(),
+            .request_block => null, // TODO
             .headers => self.invalid_headers(),
             .nack_prepare => self.invalid_nack_prepare(),
             .eviction => self.invalid_eviction(),
+            .block => null, // TODO
         };
     }
 

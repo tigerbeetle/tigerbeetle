@@ -486,6 +486,7 @@ pub fn Replica(
                 .request_start_view => self.on_request_start_view(message),
                 .request_prepare => self.on_request_prepare(message),
                 .request_headers => self.on_request_headers(message),
+                .request_block => unreachable, // TODO
                 .headers => self.on_headers(message),
                 .nack_prepare => self.on_nack_prepare(message),
                 // A replica should never handle misdirected messages intended for a client:
@@ -496,6 +497,7 @@ pub fn Replica(
                     });
                     return;
                 },
+                .block => unreachable, // TODO
                 .reserved => unreachable,
             }
 
