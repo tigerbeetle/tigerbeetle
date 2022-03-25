@@ -67,6 +67,18 @@ fn start(
     addresses: []std.net.Address,
     dir_fd: os.fd_t,
 ) !void {
+    // TODO Change filename format to "{cluster}_{replica}.tb" for brevity.
+    // TODO Drop directory arg in favor of taking path directly to data file or volume.
+    //
+    // e.g.
+    //     ./tigerbeetle start --addresses=3003,3001,3002 1_0.tb
+    //     ./tigerbeetle start --addresses=3003,3001,3002 1_1.tb
+    //     ./tigerbeetle start --addresses=3003,3001,3002 1_2.tb
+    //
+    //     ./tigerbeetle start --addresses=3003,3001,3002 /dev/sda
+    //     ./tigerbeetle start --addresses=3003,3001,3002 /dev/sdb
+    //     ./tigerbeetle start --addresses=3003,3001,3002 /dev/sdc
+
     // Add 1 for the terminating null byte
     var buffer: [filename_len + 1]u8 = undefined;
     const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica_index }) catch {
@@ -88,7 +100,7 @@ fn start(
         config.transfers_max,
         config.transfers_pending_max,
     );
-    var storage = try Storage.init(config.journal_size_max, storage_fd, io);
+    var storage = try Storage.init(&io, config.journal_size_max, storage_fd);
     var message_bus = try MessageBus.init(
         allocator,
         cluster,
