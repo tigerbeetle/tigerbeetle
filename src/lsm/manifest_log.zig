@@ -1,3 +1,24 @@
+//! Maintains an on-disk manifest log of the latest TableInfo's in an LSM tree's in-memory manifest.
+//!
+//! Invariants:
+//!
+//! * Checkpointing the manifest log must flush all buffered log blocks.
+//!
+//! * Opening the manifest log must emit only the latest TableInfo's to be inserted.
+//!
+//! * Opening the manifest log after a crash must result in exactly the same `compaction_set` in
+//!   `SuperBlock.Manifest` as before the crash assuming that the crash was exactly at a checkpoint.
+//!
+//! * The latest version of a table must never be dropped from the log through a compaction, unless
+//!   the table was removed.
+//!
+//! * Removes that are recorded in a log block must also queue that log block for compaction.
+//!
+//! * Compaction must compact partially full blocks, even where it must rewrite all entries to the
+//!   tail end of the log.
+//!
+//! * If a remove is dropped from the log, then all prior inserts must already have been dropped.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
