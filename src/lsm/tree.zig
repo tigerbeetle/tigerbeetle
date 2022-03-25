@@ -2209,7 +2209,11 @@ pub fn TreeType(
             return if (value == null or tombstone(value.?.*)) null else value.?;
         }
 
-        pub fn flush(tree: *Tree, sort_buffer: []align(@alignOf(Value)) u8, callback: fn (tree: *Tree) void) void {
+        pub fn flush(
+            tree: *Tree,
+            sort_buffer: []align(@alignOf(Value)) u8,
+            callback: fn (*Tree) void,
+        ) void {
             // Convert the mutable table to an immutable table if necessary:
             if (tree.mutable_table.cannot_commit_batch(tree.options.commit_count_max)) {
                 assert(tree.mutable_table.count() > 0);
@@ -2231,6 +2235,20 @@ pub fn TreeType(
             } else {
                 callback(tree);
             }
+
+            // TODO Call tree.manifest.flush() in parallel.
+        }
+
+        pub fn compact(tree: *Tree, callback: fn (*Tree) void) void {
+            // TODO Call tree.manifest.compact() in parallel.
+            _ = tree;
+            _ = callback;
+        }
+
+        pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
+            // TODO Call tree.manifest.checkpoint() in parallel.
+            _ = tree;
+            _ = callback;
         }
 
         /// This should be called by the state machine for every key that must be prefetched.
@@ -2365,7 +2383,7 @@ test "table count max" {
     try expectEqual(@as(u32, 299600 + 2097152), table_count_max_for_tree(8, 8));
 }
 
-test {
+pub fn main() !void {
     const testing = std.testing;
     const allocator = testing.allocator;
 
