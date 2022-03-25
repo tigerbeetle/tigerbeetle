@@ -141,7 +141,7 @@ pub const Manifest = struct {
         // For example, if a table is inserted and then removed before the block was flushed.
         // TODO Optimize ManifestLog.close_block() to compact blocks internally.
 
-        log.debug("append: tree={} checksum={x} address={} count={}/{}", .{
+        log.debug("append: tree={} checksum={x} address={} blocks={}/{}", .{
             tree,
             checksum,
             address,
@@ -176,7 +176,7 @@ pub const Manifest = struct {
 
         _ = manifest.compaction_set.remove(address);
 
-        log.debug("remove: tree={} checksum={x} address={} count={}/{}", .{
+        log.debug("remove: tree={} checksum={x} address={} blocks={}/{}", .{
             tree,
             checksum,
             address,
@@ -246,18 +246,22 @@ pub const Manifest = struct {
         return true;
     }
 
+    /// Inserts or updates the table extent, and returns the previous block address if any.
     /// The table extent must be updated immediately when appending, without delay.
     /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
-    pub fn update_table_extent(manifest: *Manifest, table: u64, block: u64, entry: u32) void {
+    pub fn update_table_extent(manifest: *Manifest, table: u64, block: u64, entry: u32) ?u64 {
         assert(table > 0);
         assert(block > 0);
 
         var extent = manifest.tables.getOrPutAssumeCapacity(table);
-        if (extent.found_existing) manifest.queue_for_compaction(extent.value_ptr.block);
+        const previous_block = if (extent.found_existing) extent.value_ptr.block else null;
+
         extent.value_ptr.* = .{
             .block = block,
             .entry = entry,
         };
+
+        return previous_block;
     }
 
     /// Removes the table extent if { block, entry } is the latest version, and returns true.

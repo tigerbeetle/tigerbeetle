@@ -185,7 +185,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
-            var frees: u32 = 0;
             var entry = entry_count;
             while (entry > 0) {
                 entry -= 1;
@@ -196,34 +195,31 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 if (manifest.insert_table_extent(table.address, block_reference.address, entry)) {
                     switch (label.event) {
                         .insert => manifest_log.open_event(manifest_log, label.level, table),
-                        .remove => frees += 1,
+                        .remove => manifest.queue_for_compaction(block_reference.address),
                     }
                 } else {
-                    frees += 1;
+                    manifest.queue_for_compaction(block_reference.address);
                 }
             }
 
-            log.debug("opened: checksum={x} address={} frees={}/{}", .{
+            log.debug("opened: checksum={x} address={} entries={}", .{
                 block_reference.checksum,
                 block_reference.address,
-                frees,
                 entry_count,
             });
-
-            if (frees > 0) {
-                assert(frees <= entry_count);
-                manifest_log.superblock.manifest.queue_for_compaction(block_reference.address);
-            }
 
             manifest_log.open_read_block();
         }
 
-        /// Appends an insert, an update, or a direct move to a lower level.
+        /// Appends an insert, an update, or a direct move of a table to a level.
+        /// A move is only recorded as an insert, there is no remove from the previous level, since
+        /// this is safer (no potential to get the event order wrong) and reduces fragmentation.
         pub fn insert(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
             manifest_log.append(.{ .level = level, .event = .insert }, table);
         }
 
-        /// Appends a remove, not accompanied by any insert.
+        /// Appends the removal of a table from a level.
+        /// The table must have previously been inserted to the manifest log.
         pub fn remove(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
             manifest_log.append(.{ .level = level, .event = .remove }, table);
         }
@@ -261,14 +257,19 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             });
 
             const block: BlockPtr = manifest_log.blocks.tail().?;
-            labels(block)[manifest_log.entry_count] = label;
-            tables(block)[manifest_log.entry_count] = table.*;
+            const entry = manifest_log.entry_count;
+            labels(block)[entry] = label;
+            tables(block)[entry] = table.*;
 
-            manifest_log.superblock.manifest.update_table_extent(
-                table.address,
-                block_address(block),
-                manifest_log.entry_count,
-            );
+            const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
+            const address = block_address(block);
+            if (manifest.update_table_extent(table.address, address, entry)) |previous_block| {
+                manifest.queue_for_compaction(previous_block);
+                if (label.event == .remove) manifest.queue_for_compaction(address);
+            } else {
+                // A remove must remove a insert, which implies that it must update the extent.
+                assert(label.event != .remove);
+            }
 
             manifest_log.entry_count += 1;
         }
@@ -321,7 +322,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 assert(entry_count == entry_count_max);
             }
 
-            log.debug("write_block: checksum={x} address={} entry_count={}", .{
+            log.debug("write_block: checksum={x} address={} entries={}", .{
                 header.checksum,
                 address,
                 entry_count,
@@ -347,7 +348,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const address = block_address(block);
             assert(address > 0);
 
-            manifest_log.superblock.manifest.append(manifest_log.tree, header.checksum, address);
+            const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
+
+            manifest.append(manifest_log.tree, header.checksum, address);
+            if (block_entry_count(block) < entry_count_max) manifest.queue_for_compaction(address);
 
             manifest_log.blocks_closed -= 1;
             manifest_log.blocks.advance_head();
@@ -432,7 +436,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 entry_count,
             });
 
-            assert(frees > 0);
+            // Blocks may be compacted if they contain frees, or are not completely full.
+            // For example, a partial block may be flushed as part of a checkpoint.
+            assert(frees >= 0);
 
             assert(manifest.queued_for_compaction(block_reference.address));
             manifest.remove(manifest_log.tree, block_reference.checksum, block_reference.address);
@@ -509,7 +515,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             verify_block(block, null, null);
             assert(block_entry_count(block) == entry_count);
 
-            log.debug("close_block: checksum={x} address={} entry_count={}", .{
+            log.debug("close_block: checksum={x} address={} entries={}", .{
                 header.checksum,
                 block_address(block),
                 entry_count,
