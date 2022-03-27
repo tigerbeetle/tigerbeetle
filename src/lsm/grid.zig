@@ -67,7 +67,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
 
-            /// Link for reads_pending/read_recovery_queue linked lists.
+            /// Link for reads_pending/read_recovery_queue/ReadIOP.reads linked lists.
             next: ?*Read = null,
 
             /// Call the user's callback, finishing the read.
@@ -82,7 +82,7 @@ pub fn GridType(comptime Storage: type) type {
         pub const ReadIOP = struct {
             grid: *Grid,
             completion: Storage.Read,
-            read: *Read,
+            reads: FIFO(Read) = .{},
             /// This is a pointer to a value in the block cache.
             block: BlockPtr,
         };
@@ -125,7 +125,7 @@ pub fn GridType(comptime Storage: type) type {
         ) void {
             assert(grid.superblock.opened);
             assert(address > 0);
-            // TODO Assert that address is acquired in the free set.
+            assert(!grid.superblock.free_set.is_free(address));
             // TODO Assert that the block ptr is not being used for another I/O (read or write).
             // TODO Assert that block is not already writing.
 
@@ -145,9 +145,8 @@ pub fn GridType(comptime Storage: type) type {
         ) void {
             assert(grid.superblock.opened);
             assert(address > 0);
-            // TODO Assert that address is acquired in the free set.
+            assert(!grid.superblock.free_set.is_free(address));
             // TODO Assert that the block ptr is not being used for another I/O (read or write).
-            // TODO Queue concurrent reads to the same address.
 
             read.* = .{
                 .callback = callback,
@@ -155,14 +154,27 @@ pub fn GridType(comptime Storage: type) type {
                 .checksum = checksum,
             };
 
-            if (grid.reads.available() > 0) {
-                grid.start_read(read);
-            } else {
-                grid.reads_pending.push(read);
-            }
+            grid.start_read(read);
         }
 
         fn start_read(grid: *Grid, read: *Grid.Read) void {
+            // Check if a read is already in progress for the target address.
+            {
+                var it = grid.reads.iterate();
+                while (it.next()) |iop| {
+                    if (iop.reads.peek().?.address == read.address) {
+                        assert(iop.reads.peek().?.checksum == read.checksum);
+                        iop.reads.push(read);
+                        return;
+                    }
+                }
+            }
+
+            const iop = grid.reads.acquire() orelse {
+                grid.reads_pending.push(read);
+                return;
+            };
+
             const result = grid.cache.get_or_put_preserve_locked(
                 *Grid,
                 block_locked,
@@ -170,13 +182,12 @@ pub fn GridType(comptime Storage: type) type {
                 read.address,
             );
 
-            const iop = grid.reads.acquire().?;
             iop.* = .{
                 .grid = grid,
                 .completion = undefined,
-                .read = read,
                 .block = result.value_ptr,
             };
+            iop.reads.push(read);
 
             grid.superblock.storage.read_sectors(
                 read_block_callback,
@@ -201,19 +212,33 @@ pub fn GridType(comptime Storage: type) type {
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
             const body = iop.block[@sizeOf(vsr.Header)..header.size];
 
-            if (header.checksum == iop.read.checksum and
+            const address = iop.reads.peek().?.address;
+            const checksum = iop.reads.peek().?.checksum;
+
+            if (header.checksum == checksum and
                 header.valid_checksum() and
                 header.valid_checksum_body(body))
             {
-                iop.read.finish(iop.block);
+                while (iop.reads.pop()) |read| {
+                    assert(read.address == address);
+                    assert(read.checksum == checksum);
+                    read.finish(iop.block);
+                }
             } else {
-                iop.grid.read_recovery_queue.push(iop.read);
+                while (iop.reads.pop()) |read| {
+                    iop.grid.read_recovery_queue.push(read);
+                }
             }
 
             const grid = iop.grid;
             grid.reads.release(iop);
 
-            if (grid.reads_pending.pop()) |read| {
+            // Always iterate through the full list of pending reads here to ensure that all
+            // possible reads in the list are started, even in the presence of concurrent reads
+            // targeting the same block address.
+            var copy = grid.reads_pending;
+            grid.reads_pending = .{};
+            while (copy.pop()) |read| {
                 grid.start_read(read);
             }
         }
