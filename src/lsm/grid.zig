@@ -7,6 +7,8 @@ const vsr = @import("../vsr.zig");
 
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
+const IOPS = @import("../iops.zig").IOPS;
+const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
 const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
 const write_ahead_log_zone_size = config.message_size_max * 1024; // TODO Use journal_slot_count.
@@ -19,6 +21,38 @@ pub fn GridType(comptime Storage: type) type {
 
     const SuperBlock = SuperBlockType(Storage);
 
+    const cache_interface = struct {
+        inline fn address_from_block(block: [block_size]u8) u64 {
+            const header_bytes = block[0..@sizeOf(vsr.Header)];
+            const header = mem.bytesAsValue(vsr.Header, header_bytes);
+            return header.op;
+        }
+
+        inline fn hash_address(address: u64) u64 {
+            return std.hash.Wyhash.hash(0, mem.asBytes(&address));
+        }
+
+        inline fn equal_addresses(a: u64, b: u64) bool {
+            return a == b;
+        }
+    };
+
+    const set_associative_cache_ways = 16;
+    const Cache = SetAssociativeCache(
+        u64,
+        [block_size]u8,
+        cache_interface.address_from_block,
+        cache_interface.hash_address,
+        cache_interface.equal_addresses,
+        .{
+            .ways = set_associative_cache_ways,
+            .value_alignment = config.sector_size,
+        },
+    );
+
+    const read_iops_max = 16;
+    assert(read_iops_max <= set_associative_cache_ways);
+
     const grid_offset: u64 = superblock_zone_size +
         write_ahead_log_zone_size +
         client_table_zone_size;
@@ -29,44 +63,57 @@ pub fn GridType(comptime Storage: type) type {
         pub const Write = Storage.Write;
 
         pub const Read = struct {
-            grid: *Grid,
-            callback: fn (*Grid.Read) void,
-            completion: Storage.Read,
-            block: BlockPtr,
+            callback: fn (*Grid.Read, BlockPtrConst) void,
             address: u64,
             checksum: u128,
 
-            /// Link for read_recovery_queue linked list.
+            /// Link for reads_pending/read_recovery_queue linked lists.
             next: ?*Read = null,
 
             /// Call the user's callback, finishing the read.
             /// May be called by Replica after recovering the block over the network.
-            pub fn finish(read: *Read) void {
+            pub fn finish(read: *Read, block: BlockPtrConst) void {
                 const callback = read.callback;
                 read.* = undefined;
-                callback(read);
+                callback(read, block);
             }
         };
 
+        pub const ReadIOP = struct {
+            grid: *Grid,
+            completion: Storage.Read,
+            read: *Read,
+            /// This is a pointer to a value in the block cache.
+            block: BlockPtr,
+        };
+
         superblock: *SuperBlock,
+        cache: Cache,
+
+        reads_pending: FIFO(Read) = .{},
+        reads: IOPS(ReadIOP, read_iops_max) = .{},
 
         // TODO interrogate this list and do recovery in Replica.tick().
         read_recovery_queue: FIFO(Read) = .{},
 
         pub fn init(allocator: mem.Allocator, superblock: *SuperBlock) !Grid {
-            // TODO SetAssociativeCache.init(allocator):
-            _ = allocator;
+            // TODO Determine this at runtime based on runtime configured maximum
+            // memory usage of tigerbeetle.
+            const blocks_in_cache = 2048;
+
+            var cache = try Cache.init(allocator, blocks_in_cache);
+            errdefer cache.deinit(allocator);
 
             return Grid{
                 .superblock = superblock,
+                .cache = cache,
             };
         }
 
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
-            grid.* = undefined;
+            grid.cache.deinit(allocator);
 
-            // TODO cache.deinit(allocator):
-            _ = allocator;
+            grid.* = undefined;
         }
 
         pub fn write_block(
@@ -91,9 +138,8 @@ pub fn GridType(comptime Storage: type) type {
         /// block has been recovered.
         pub fn read_block(
             grid: *Grid,
-            callback: fn (*Grid.Read) void,
+            callback: fn (*Grid.Read, BlockPtrConst) void,
             read: *Grid.Read,
-            block: BlockPtr, // TODO Instead, provide this to the callback to eliminate the copy.
             address: u64,
             checksum: u128,
         ) void {
@@ -104,36 +150,71 @@ pub fn GridType(comptime Storage: type) type {
             // TODO Queue concurrent reads to the same address.
 
             read.* = .{
-                .grid = grid,
                 .callback = callback,
-                .completion = undefined,
-                .block = block,
                 .address = address,
                 .checksum = checksum,
             };
 
+            if (grid.reads.available() > 0) {
+                grid.start_read(read);
+            } else {
+                grid.reads_pending.push(read);
+            }
+        }
+
+        fn start_read(grid: *Grid, read: *Grid.Read) void {
+            const result = grid.cache.get_or_put_preserve_locked(
+                *Grid,
+                block_locked,
+                grid,
+                read.address,
+            );
+
+            const iop = grid.reads.acquire().?;
+            iop.* = .{
+                .grid = grid,
+                .completion = undefined,
+                .read = read,
+                .block = result.value_ptr,
+            };
+
             grid.superblock.storage.read_sectors(
                 read_block_callback,
-                &read.completion,
-                block,
-                block_offset(address),
+                &iop.completion,
+                iop.block,
+                block_offset(read.address),
             );
         }
 
+        inline fn block_locked(grid: *Grid, block: BlockPtrConst) bool {
+            var it = grid.reads.iterate();
+            while (it.next()) |iop| {
+                if (block == iop.block) return true;
+            }
+            return false;
+        }
+
         fn read_block_callback(completion: *Storage.Read) void {
-            const read = @fieldParentPtr(Read, "completion", completion);
+            const iop = @fieldParentPtr(ReadIOP, "completion", completion);
 
-            const header_bytes = read.block[0..@sizeOf(vsr.Header)];
+            const header_bytes = iop.block[0..@sizeOf(vsr.Header)];
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
-            const body = read.block[@sizeOf(vsr.Header)..header.size];
+            const body = iop.block[@sizeOf(vsr.Header)..header.size];
 
-            if (header.checksum == read.checksum and
+            if (header.checksum == iop.read.checksum and
                 header.valid_checksum() and
                 header.valid_checksum_body(body))
             {
-                read.finish();
+                iop.read.finish(iop.block);
             } else {
-                read.grid.read_recovery_queue.push(read);
+                iop.grid.read_recovery_queue.push(iop.read);
+            }
+
+            const grid = iop.grid;
+            grid.reads.release(iop);
+
+            if (grid.reads_pending.pop()) |read| {
+                grid.start_read(read);
             }
         }
 

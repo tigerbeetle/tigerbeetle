@@ -169,17 +169,48 @@ pub fn SetAssociativeCache(
         };
 
         pub fn get_or_put(self: *Self, key: Key) GetOrPutResult {
+            return self.get_or_put_preserve_locked(
+                void,
+                struct {
+                    inline fn locked(_: void, _: *const Value) bool {
+                        return false;
+                    }
+                }.locked,
+                {},
+                key,
+            );
+        }
+
+        /// Get a pointer to an existing value with the given key if the key is in the cache.
+        /// If the key is not in the cache, add it to the cache, evicting older entries if needed.
+        /// Never evicts keys for which locked() returns true.
+        /// The caller must guarantee that locked() returns true for less than layout.ways keys.
+        pub fn get_or_put_preserve_locked(
+            self: *Self,
+            comptime Context: type,
+            comptime locked: fn (Context, *align(value_alignment) const Value) callconv(.Inline) bool,
+            context: Context,
+            key: Key,
+        ) GetOrPutResult {
             const set = self.associate(key);
 
             if (self.search(set, key)) |existing| {
+                assert(!locked(context, existing));
                 return .{
                     .value_ptr = existing,
                     .found_existing = true,
                 };
             }
 
-            var way = Clocks.get(self.clocks, set.index);
+            const clock_index = @divExact(set.offset, layout.ways);
+
+            var way = Clocks.get(self.clocks, clock_index);
             while (true) : (way +%= 1) {
+                // We pass a value pointer to the callback here so that a cache miss
+                // can be avoided if the caller is able to determine if the value is
+                // locked by comparing pointers directly.
+                if (locked(context, @alignCast(value_alignment, &set.values[way]))) continue;
+
                 const count = Counts.get(self.counts, set.offset + way);
 
                 // Free way found
@@ -187,7 +218,7 @@ pub fn SetAssociativeCache(
 
                 Counts.set(self.counts, set.offset + way, count - 1);
             }
-            Clocks.set(self.clocks, set.index, way +% 1);
+            Clocks.set(self.clocks, clock_index, way +% 1);
 
             set.tags[way] = set.tag;
 
