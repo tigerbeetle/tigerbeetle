@@ -1928,7 +1928,7 @@ pub fn TreeType(
 
                 index: BlockPtr,
                 /// The index of the current block in the table index block.
-                block: u32,
+                block_index: u32,
 
                 /// This ring buffer is used to hold not yet popped values in the case that we run
                 /// out of blocks in the blocks ring buffer but haven't buffered a full block of
@@ -2004,7 +2004,7 @@ pub fn TreeType(
                         .address = address,
                         .checksum = checksum,
                         .index = it.index,
-                        .block = 0,
+                        .block_index = 0,
                         .values = .{ .buffer = it.values.buffer },
                         .blocks = .{ .buffer = it.blocks.buffer },
                         .value = 0,
@@ -2028,44 +2028,35 @@ pub fn TreeType(
                         it.grid.read_block(
                             on_read_table_index,
                             &it.read,
-                            it.index,
                             it.address,
                             it.checksum,
                         );
                         return true;
                     }
 
-                    if (it.buffered_enough_values()) return false;
-
-                    if (it.blocks.next_tail()) |next_tail| {
-                        it.read_next_data_block(next_tail);
-                        return true;
+                    if (it.buffered_enough_values()) {
+                        return false;
                     } else {
-                        const values = Table.data_block_values_used(it.blocks.head().?);
-                        const values_remaining = values[it.value..];
-                        it.values.push_slice(values_remaining) catch unreachable;
-                        it.value = 0;
-                        it.blocks.advance_head();
-                        it.read_next_data_block(it.blocks.next_tail().?);
+                        it.read_next_data_block();
                         return true;
                     }
                 }
 
-                fn read_next_data_block(it: *TableIterator, block: BlockPtr) void {
+                fn read_next_data_block(it: *TableIterator) void {
                     assert(!it.read_table_index);
-                    assert(it.block < Table.index_data_blocks_used(it.index));
+                    assert(it.block_index < Table.index_data_blocks_used(it.index));
 
                     const addresses = Table.index_data_addresses(it.index);
                     const checksums = Table.index_data_checksums(it.index);
-                    const address = addresses[it.block];
-                    const checksum = checksums[it.block];
+                    const address = addresses[it.block_index];
+                    const checksum = checksums[it.block_index];
 
                     assert(!it.read_pending);
                     it.read_pending = true;
-                    it.grid.read_block(on_read, &it.read, block, address, checksum);
+                    it.grid.read_block(on_read, &it.read, address, checksum);
                 }
 
-                fn on_read_table_index(read: *Grid.Read) void {
+                fn on_read_table_index(read: *Grid.Read, block: BlockPtrConst) void {
                     const it = @fieldParentPtr(TableIterator, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
@@ -2073,20 +2064,37 @@ pub fn TreeType(
                     assert(it.read_table_index);
                     it.read_table_index = false;
 
+                    // Copy the bytes read into a buffer owned by the iterator since the Grid
+                    // only guarantees the provided pointer to be valid in this callback.
+                    mem.copy(u8, it.index, block);
+
                     const read_pending = it.tick();
                     // After reading the table index, we always read at least one data block.
                     assert(read_pending);
                 }
 
-                fn on_read(read: *Grid.Read) void {
+                fn on_read(read: *Grid.Read, block: BlockPtrConst) void {
                     const it = @fieldParentPtr(TableIterator, "read", read);
                     assert(it.read_pending);
                     it.read_pending = false;
 
                     assert(!it.read_table_index);
 
+                    // If there is not currently a buffer available, copy remaining values to
+                    // an overflow ring buffer to make space.
+                    if (it.blocks.next_tail() == null) {
+                        const values = Table.data_block_values_used(it.blocks.head().?);
+                        const values_remaining = values[it.value..];
+                        it.values.push_slice(values_remaining) catch unreachable;
+                        it.value = 0;
+                        it.blocks.advance_head();
+                    }
+
+                    // Copy the bytes read into a buffer owned by the iterator since the Grid
+                    // only guarantees the provided pointer to be valid in this callback.
+                    mem.copy(u8, it.blocks.next_tail().?, block);
                     it.blocks.advance_tail();
-                    it.block += 1;
+                    it.block_index += 1;
 
                     if (!it.tick()) {
                         assert(it.buffered_enough_values());
@@ -2099,8 +2107,8 @@ pub fn TreeType(
                     assert(!it.read_pending);
 
                     const data_blocks_used = Table.index_data_blocks_used(it.index);
-                    assert(it.block <= data_blocks_used);
-                    return it.block == data_blocks_used;
+                    assert(it.block_index <= data_blocks_used);
+                    return it.block_index == data_blocks_used;
                 }
 
                 fn buffered_value_count(it: TableIterator) u32 {
@@ -2131,7 +2139,7 @@ pub fn TreeType(
                     if (it.values.head()) |value| return key_from_value(value);
 
                     const block = it.blocks.head() orelse {
-                        assert(it.block == Table.index_data_blocks_used(it.index));
+                        assert(it.block_index == Table.index_data_blocks_used(it.index));
                         return null;
                     };
 
