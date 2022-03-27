@@ -204,8 +204,17 @@ pub fn SetAssociativeCache(
 
             const clock_index = @divExact(set.offset, layout.ways);
 
+            const clock_iterations_max = layout.ways * math.maxInt(Count);
+            var safety_count: usize = 1;
+
             var way = Clocks.get(self.clocks, clock_index);
-            while (true) : (way +%= 1) {
+            comptime assert(math.maxInt(@TypeOf(way)) == layout.ways - 1);
+            comptime assert(@as(@TypeOf(way), math.maxInt(@TypeOf(way))) +% 1 == 0);
+
+            while (safety_count <= clock_iterations_max + 1) : ({
+                way +%= 1;
+                safety_count += 1;
+            }) {
                 // We pass a value pointer to the callback here so that a cache miss
                 // can be avoided if the caller is able to determine if the value is
                 // locked by comparing pointers directly.
@@ -218,6 +227,8 @@ pub fn SetAssociativeCache(
 
                 Counts.set(self.counts, set.offset + way, count - 1);
             }
+            assert(safety_count <= clock_iterations_max);
+
             Clocks.set(self.clocks, clock_index, way +% 1);
 
             set.tags[way] = set.tag;
