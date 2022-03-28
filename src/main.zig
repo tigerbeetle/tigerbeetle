@@ -32,7 +32,7 @@ pub fn main() !void {
 
     switch (cli.parse_args(allocator)) {
         .format => |args| try Command.format(allocator, args.cluster, args.replica, args.path),
-        .start => |args| try Command.start(allocator, args.addresses, args.path),
+        .start => |args| try Command.start(allocator, args.addresses, args.memory, args.path),
     }
 }
 
@@ -60,7 +60,14 @@ const Command = struct {
         try command.run();
     }
 
-    pub fn start(allocator: mem.Allocator, addresses: []std.net.Address, path: [:0]const u8) !void {
+    pub fn start(
+        allocator: mem.Allocator,
+        addresses: []std.net.Address,
+        memory: u64,
+        path: [:0]const u8,
+    ) !void {
+        _ = memory; // TODO
+
         const fd = try Storage.open(path, data_file_size_min, false);
 
         var command: Command = undefined;
