@@ -35,8 +35,8 @@ pub const port = 3001;
 /// Bind to the "127.0.0.1" loopback address to accept local connections as a safe default only.
 pub const address = "127.0.0.1";
 
-/// Where data files should be persisted by default:
-pub const directory = "/var/lib/tigerbeetle";
+/// The default maximum amount of memory to use.
+pub const memory_size_max_default = 1024 * 1024 * 1024;
 
 /// The maximum number of accounts to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.

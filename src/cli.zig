@@ -71,6 +71,7 @@ pub const Command = union(enum) {
     },
     start: struct {
         addresses: []net.Address,
+        memory: u64,
         path: [:0]const u8,
     },
 };
@@ -82,6 +83,7 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     var cluster: ?[]const u8 = null;
     var replica: ?[]const u8 = null;
     var addresses: ?[]const u8 = null;
+    var memory: ?[]const u8 = null;
 
     var args = std.process.args();
 
@@ -107,6 +109,8 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
             replica = parse_flag("--replica", arg);
         } else if (mem.startsWith(u8, arg, "--addresses")) {
             addresses = parse_flag("--addresses", arg);
+        } else if (mem.startsWith(u8, arg, "--memory")) {
+            memory = parse_flag("--memory", arg);
         } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
             os.exit(0);
@@ -122,6 +126,7 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     switch (command) {
         .format => {
             if (addresses != null) fatal("--addresses: supported only by 'start' command", .{});
+            if (memory != null) fatal("--memory: supported only by 'start' command", .{});
 
             return .{
                 .format = .{
@@ -141,6 +146,7 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
                         allocator,
                         addresses orelse fatal("required: --addresses", .{}),
                     ),
+                    .memory = if (memory) |m| parse_size(m) else config.memory_size_max_default,
                     .path = path orelse fatal("required: <path>", .{}),
                 },
             };
@@ -156,7 +162,7 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     os.exit(1);
 }
 
-/// Parse e.g. `--cluster=1a2b3c` into `1a2b3c` with error handling.
+/// Parse e.g. `--cluster=123` into `123` with error handling.
 fn parse_flag(comptime flag: []const u8, arg: [:0]const u8) [:0]const u8 {
     const value = arg[flag.len..];
     if (value.len < 2) {
@@ -193,6 +199,75 @@ fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []ne
         error.AddressInvalid => fatal("--addresses: invalid IPv4 address", .{}),
         error.OutOfMemory => fatal("--addresses: out of memory", .{}),
     };
+}
+
+fn parse_size(string: []const u8) u64 {
+    var value = mem.trim(u8, string, " ");
+
+    const unit: u64 = blk: {
+        if (parse_size_unit(&value, &[_][]const u8{ "TiB", "tib", "TB", "tb" })) {
+            break :blk 1024 * 1024 * 1024 * 1024;
+        } else if (parse_size_unit(&value, &[_][]const u8{ "GiB", "gib", "GB", "gb" })) {
+            break :blk 1024 * 1024 * 1024;
+        } else if (parse_size_unit(&value, &[_][]const u8{ "MiB", "mib", "MB", "mb" })) {
+            break :blk 1024 * 1024;
+        } else if (parse_size_unit(&value, &[_][]const u8{ "KiB", "kib", "KB", "kb" })) {
+            break :blk 1024;
+        } else {
+            break :blk 1;
+        }
+    };
+
+    const size = fmt.parseUnsigned(u64, value, 10) catch |err| switch (err) {
+        error.Overflow => fatal("size value exceeds a 64-bit unsigned integer", .{}),
+        error.InvalidCharacter => fatal("size value contains an invalid character", .{}),
+    };
+
+    return size * unit;
+}
+
+fn parse_size_unit(value: *[]const u8, suffixes: []const []const u8) bool {
+    for (suffixes) |suffix| {
+        if (mem.endsWith(u8, value.*, suffix)) {
+            value.* = mem.trim(u8, value.*[0 .. value.*.len - suffix.len], " ");
+            return true;
+        }
+    }
+    return false;
+}
+
+test "parse_size" {
+    const expectEqual = std.testing.expectEqual;
+
+    const tib = 1024 * 1024 * 1024 * 1024;
+    const gib = 1024 * 1024 * 1024;
+    const mib = 1024 * 1024;
+    const kib = 1024;
+
+    try expectEqual(@as(u64, 0), parse_size("0"));
+    try expectEqual(@as(u64, 1), parse_size("  1  "));
+    try expectEqual(@as(u64, 140737488355328), parse_size(" 140737488355328 "));
+    try expectEqual(@as(u64, 140737488355328), parse_size(" 128TiB "));
+
+    try expectEqual(@as(u64, 1 * tib), parse_size("  1TiB "));
+    try expectEqual(@as(u64, 10 * tib), parse_size("  10  tib "));
+    try expectEqual(@as(u64, 100 * tib), parse_size("  100  TB "));
+    try expectEqual(@as(u64, 1000 * tib), parse_size("  1000  tb "));
+
+    try expectEqual(@as(u64, 1 * gib), parse_size("  1GiB "));
+    try expectEqual(@as(u64, 10 * gib), parse_size("  10  gib "));
+    try expectEqual(@as(u64, 100 * gib), parse_size("  100  GB "));
+    try expectEqual(@as(u64, 1000 * gib), parse_size("  1000  gb "));
+
+    try expectEqual(@as(u64, 1 * mib), parse_size("  1MiB "));
+    try expectEqual(@as(u64, 10 * mib), parse_size("  10  mib "));
+    try expectEqual(@as(u64, 100 * mib), parse_size("  100  MB "));
+    try expectEqual(@as(u64, 1000 * mib), parse_size("  1000  mb "));
+
+    try expectEqual(@as(u64, 1 * kib), parse_size("  1KiB "));
+    try expectEqual(@as(u64, 10 * kib), parse_size("  10  kib "));
+    try expectEqual(@as(u64, 100 * kib), parse_size("  100  KB "));
+    try expectEqual(@as(u64, 1000 * kib), parse_size("  1000  kb "));
 }
 
 fn parse_replica(raw_replica: []const u8) u8 {
