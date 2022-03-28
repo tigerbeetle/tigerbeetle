@@ -14,7 +14,8 @@ The following steps will install the `tigerbeetle-node` module to your current w
 
 ```sh
 # Run the following from this directory:
-yarn add
+yarn set version latest
+yarn && yarn build && yarn add
 ```
 or
 
