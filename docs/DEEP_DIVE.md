@@ -47,10 +47,10 @@ Let's turn up the log level some more (and your favorite album) so you can see e
 * Open `src/config.zig` in your editor and change `log_level` to `3` (debug).
 
 * Start a single replica cluster:
-Init:
-`./tigerbeetle init --cluster=0 --replica=0 --directory=.`
-Run:
-`./tigerbeetle start --cluster=0 --replica=0 --addresses=3001 --directory=. &`
+Format the data file:
+`./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle`
+Start the replica from the data file:
+`./tigerbeetle start --addresses=3001 0_0.tigerbeetle &`
 
 ### Demo 1, 2: Create and lookup accounts
 
