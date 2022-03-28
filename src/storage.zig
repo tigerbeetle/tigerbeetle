@@ -10,6 +10,7 @@ const IO = @import("io.zig").IO;
 const is_darwin = builtin.target.isDarwin();
 
 const config = @import("config.zig");
+const fatal = @import("cli.zig").fatal;
 const vsr = @import("vsr.zig");
 
 pub const Storage = struct {
@@ -72,13 +73,11 @@ pub const Storage = struct {
     };
 
     io: *IO,
-    size: u64,
     fd: os.fd_t,
 
-    pub fn init(io: *IO, size: u64, fd: os.fd_t) !Storage {
+    pub fn init(io: *IO, fd: os.fd_t) !Storage {
         return Storage{
             .io = io,
-            .size = size,
             .fd = fd,
         };
     }
@@ -315,8 +314,10 @@ pub const Storage = struct {
 
     /// Ensures that the read or write is within bounds and intends to read or write some bytes.
     fn assert_bounds(self: *Storage, buffer: []const u8, offset: u64) void {
+        _ = self;
+        _ = offset;
+
         assert(buffer.len > 0);
-        assert(offset + buffer.len <= self.size);
     }
 
     // Static helper functions to handle data file creation/opening/allocation:
@@ -329,15 +330,20 @@ pub const Storage = struct {
     /// - Ensures that the file data (and file inode in the parent directory) is durable on disk.
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
-    pub fn open(
-        dir_fd: os.fd_t,
-        relative_path: [:0]const u8,
-        size: u64,
-        must_create: bool,
-    ) !os.fd_t {
-        assert(relative_path.len > 0);
-        assert(size >= config.sector_size);
-        assert(size % config.sector_size == 0);
+    pub fn open(path: [:0]const u8, size_min: u64, must_create: bool) !os.fd_t {
+        assert(path.len > 0);
+        assert(size_min >= config.sector_size);
+        assert(size_min % config.sector_size == 0);
+
+        // TODO Handle null for root path.
+        // TODO Handle physical volumes where there is no directory to fsync.
+        const dir_path = std.fs.path.dirname(path) orelse ".";
+        const dir_fd = std.os.open(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch {
+            fatal("unable to open the parent directory of the data file", .{});
+        };
+
+        const base_name = std.fs.path.basename(path);
+        assert(base_name.len > 0);
 
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
@@ -358,26 +364,29 @@ pub const Storage = struct {
             } else {
                 // We require Direct I/O for safety to handle fsync failure correctly, and therefore
                 // panic in production if it is not supported.
-                @panic("file system does not support Direct I/O");
+                fatal("file system does not support Direct I/O", .{});
             }
         }
 
         if (must_create) {
-            log.info("creating \"{s}\"...", .{relative_path});
+            log.debug("creating \"{s}\"...", .{path});
             flags |= os.O.CREAT;
             flags |= os.O.EXCL;
             mode = 0o666;
         } else {
-            log.info("opening \"{s}\"...", .{relative_path});
+            log.debug("opening \"{s}\"...", .{path});
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
         assert((flags & os.O.DSYNC) > 0);
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
-        assert(!std.fs.path.isAbsolute(relative_path));
-        const fd = try os.openatZ(dir_fd, relative_path, flags, mode);
-        // TODO Return a proper error message when the path exists or does not exist (init/start).
+        assert(!std.fs.path.isAbsolute(base_name));
+        const fd = os.openat(dir_fd, base_name, flags, mode) catch |err| switch (err) {
+            error.PathAlreadyExists => fatal("data file already exists: {s}", .{path}),
+            error.FileNotFound => fatal("data file does not exist, run format first: {s}", .{path}),
+            else => return err,
+        };
         errdefer os.close(fd);
 
         // TODO Check that the file is actually a file.
@@ -390,14 +399,14 @@ pub const Storage = struct {
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
         os.flock(fd, os.LOCK.EX | os.LOCK.NB) catch |err| switch (err) {
-            error.WouldBlock => @panic("another process holds the data file lock"),
+            error.WouldBlock => fatal("another process holds the data file lock", .{}),
             else => return err,
         };
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
         // panic if we run out of disk space (ENOSPC).
-        if (must_create) try Storage.allocate(fd, size);
+        if (must_create) try Storage.allocate(fd, size_min);
 
         // The best fsync strategy is always to fsync before reading because this prevents us from
         // making decisions on data that was never durably written by a previously crashed process.
@@ -411,19 +420,20 @@ pub const Storage = struct {
         try os.fsync(dir_fd);
 
         const stat = try os.fstat(fd);
-        if (stat.size != size) @panic("data file inode size was truncated or corrupted");
+        if (stat.size < size_min) @panic("data file inode size was truncated or corrupted");
 
         return fd;
     }
 
     /// Allocates a file contiguously using fallocate() if supported.
     /// Alternatively, writes to the last sector so that at least the file size is correct.
+    // TODO This must ensure that all sectors are zeroed for determinism across the cluster.
     pub fn allocate(fd: os.fd_t, size: u64) !void {
-        log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
+        log.debug("allocating {} bytes...", .{size});
         Storage.fallocate(fd, 0, 0, @intCast(i64, size)) catch |err| switch (err) {
             error.OperationNotSupported => {
                 log.warn("file system does not support fallocate(), an ENOSPC will panic", .{});
-                log.info("allocating by writing to the last sector of the file instead...", .{});
+                log.debug("allocating by writing to the last sector of the file instead...", .{});
 
                 const sector_size = config.sector_size;
                 const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
