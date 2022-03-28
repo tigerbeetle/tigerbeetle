@@ -33,17 +33,21 @@ trap onerror EXIT
 for I in 0
 do
     echo "Formatting replica $I..."
-    FILE="./cluster_0000000000_replica_00${I}.tigerbeetle"
+
+    # Be careful to use a benchmark-specific filename so that we don't erase a real data file:
+    FILE="./0_${I}.tigerbeetle.benchmark"
     if [ -f $FILE ]; then
         rm $FILE
     fi
-    ./tigerbeetle format --cluster=0 --replica=$I 0_$I.tigerbeetle > benchmark.log 2>&1
+
+    ./tigerbeetle format --cluster=0 --replica=$I $FILE > benchmark.log 2>&1
 done
 
 for I in 0
 do
     echo "Starting replica $I..."
-    ./tigerbeetle start --addresses=3001 0_$I.tigerbeetle > benchmark.log 2>&1 &
+    FILE="./0_${I}.tigerbeetle.benchmark"
+    ./tigerbeetle start --addresses=3001 $FILE > benchmark.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:
@@ -53,3 +57,11 @@ echo ""
 echo "Benchmarking..."
 zig/zig run -OReleaseSafe src/benchmark.zig
 echo ""
+
+for I in 0
+do
+    FILE="./0_${I}.tigerbeetle.benchmark"
+    if [ -f $FILE ]; then
+        rm $FILE
+    fi
+done
