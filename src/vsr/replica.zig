@@ -492,6 +492,7 @@ pub fn Replica(
                 .request_start_view => self.on_request_start_view(message),
                 .request_prepare => self.on_request_prepare(message),
                 .request_headers => self.on_request_headers(message),
+                .request_block => unreachable, // TODO
                 .headers => self.on_headers(message),
                 .nack_prepare => self.on_nack_prepare(message),
                 // A replica should never handle misdirected messages intended for a client:
@@ -502,6 +503,7 @@ pub fn Replica(
                     });
                     return;
                 },
+                .block => unreachable, // TODO
                 .reserved => unreachable,
             }
 
@@ -2718,7 +2720,7 @@ pub fn Replica(
 
             var op = self.commit_max + 1;
             var parent = self.journal.entry_for_op_exact(self.commit_max).?.checksum;
-            var iterator = self.pipeline.iterator();
+            var iterator = self.pipeline.iterator_mutable();
             while (iterator.next_ptr()) |prepare| {
                 assert(prepare.message.header.command == .prepare);
                 assert(prepare.message.header.op == op);
