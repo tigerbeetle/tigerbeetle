@@ -32,18 +32,18 @@ trap onerror EXIT
 
 for I in 0
 do
-    echo "Initializing replica $I..."
+    echo "Formatting replica $I..."
     FILE="./cluster_0000000000_replica_00${I}.tigerbeetle"
     if [ -f $FILE ]; then
         rm $FILE
     fi
-    ./tigerbeetle init --directory=. --cluster=0 --replica=$I > benchmark.log 2>&1
+    ./tigerbeetle format --cluster=0 --replica=$I 0_$I.tigerbeetle > benchmark.log 2>&1
 done
 
 for I in 0
 do
     echo "Starting replica $I..."
-    ./tigerbeetle start --directory=. --cluster=0 --addresses=3001 --replica=$I > benchmark.log 2>&1 &
+    ./tigerbeetle start --addresses=3001 0_$I.tigerbeetle > benchmark.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:

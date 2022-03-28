@@ -105,13 +105,13 @@ Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com
 Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
 
 ```
-./tigerbeetle init --cluster=0 --replica=0 --directory=.
-./tigerbeetle init --cluster=0 --replica=1 --directory=.
-./tigerbeetle init --cluster=0 --replica=2 --directory=.
+./tigerbeetle format --cluster=1 --replica=0 0_0.tigerbeetle
+./tigerbeetle format --cluster=1 --replica=1 0_1.tigerbeetle
+./tigerbeetle format --cluster=1 --replica=2 0_2.tigerbeetle
 
-./tigerbeetle start --cluster=0 --replica=0 --directory=. --addresses=3001,3002,3003
-./tigerbeetle start --cluster=0 --replica=1 --directory=. --addresses=3001,3002,3003
-./tigerbeetle start --cluster=0 --replica=2 --directory=. --addresses=3001,3002,3003
+./tigerbeetle start --addresses=3001,3002,3003 0_0.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 0_1.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 0_2.tigerbeetle
 ```
 
 Run the TigerBeetle binary to see all command line arguments:

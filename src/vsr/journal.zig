@@ -130,7 +130,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ) !Self {
             if (@mod(size, config.sector_size) != 0) return error.SizeMustBeAMultipleOfSectorSize;
             if (!math.isPowerOfTwo(headers_count)) return error.HeadersCountMustBeAPowerOfTwo;
-            assert(storage.size == size);
 
             const headers_per_sector = @divExact(config.sector_size, @sizeOf(Header));
             assert(headers_per_sector > 0);

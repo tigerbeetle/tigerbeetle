@@ -8,6 +8,7 @@ const log = std.log.scoped(.storage);
 
 const IO = @import("io.zig").IO;
 const config = @import("config.zig");
+const fatal = @import("cli.zig").fatal;
 const vsr = @import("vsr.zig");
 
 pub const Storage = struct {
@@ -70,13 +71,11 @@ pub const Storage = struct {
     };
 
     io: *IO,
-    size: u64,
     fd: os.fd_t,
 
-    pub fn init(io: *IO, size: u64, fd: os.fd_t) !Storage {
+    pub fn init(io: *IO, fd: os.fd_t) !Storage {
         return Storage{
             .io = io,
-            .size = size,
             .fd = fd,
         };
     }
@@ -313,7 +312,9 @@ pub const Storage = struct {
 
     /// Ensures that the read or write is within bounds and intends to read or write some bytes.
     fn assert_bounds(self: *Storage, buffer: []const u8, offset: u64) void {
+        _ = self;
+        _ = offset;
+
         assert(buffer.len > 0);
-        assert(offset + buffer.len <= self.size);
     }
 };

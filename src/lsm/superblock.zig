@@ -314,6 +314,13 @@ pub const superblock_trailer_free_set_size_max = blk: {
     break :blk div_ceil(encode_size_max, config.sector_size) * config.sector_size;
 };
 
+pub const data_file_size_min = blk: {
+    const wal_zone_size = 1024 * 1024 * 1024; // TODO Replace with WAL constants when they land.
+    const client_table_zone_size = config.message_size_max * config.clients_max * 2;
+
+    break :blk superblock_zone_size + wal_zone_size + client_table_zone_size;
+};
+
 pub fn SuperBlockType(comptime Storage: type) type {
     return struct {
         const SuperBlock = @This();
@@ -691,10 +698,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.verify_manifest_blocks_are_acquired_in_free_set();
 
-            staging.size = 0;
-            staging.size += superblock_zone_size;
-            staging.size += 1024 * 1024 * 1024; // TODO Replace with WAL constants when they land.
-            staging.size += config.message_size_max * config.clients_max * 2;
+            staging.size = data_file_size_min;
 
             if (superblock.free_set.highest_address_acquired()) |address| {
                 staging.size += address * config.block_size;
