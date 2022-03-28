@@ -20,6 +20,7 @@ const LookupAccountResult = tb.LookupAccountResult;
 const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);
 const HashMapPosted = std.AutoHashMap(u128, Transfer);
+const HashMapUserDataToId = std.AutoHashMap(u128, u128);
 
 pub const StateMachine = struct {
     pub const Operation = enum(u8) {
@@ -41,12 +42,13 @@ pub const StateMachine = struct {
     accounts: HashMapAccounts,
     transfers: HashMapTransfers,
     posted: HashMapPosted,
+    user_data_to_id: HashMapUserDataToId,
 
     pub fn init(
         allocator: std.mem.Allocator,
         accounts_max: usize,
         transfers_max: usize,
-        pending_max: usize,
+        transfers_pending_max: usize,
     ) !StateMachine {
         var accounts = HashMapAccounts.init(allocator);
         errdefer accounts.deinit();
@@ -58,7 +60,11 @@ pub const StateMachine = struct {
 
         var posted = HashMapPosted.init(allocator);
         errdefer posted.deinit();
-        try posted.ensureTotalCapacity(@intCast(u32, pending_max));
+        try posted.ensureTotalCapacity(@intCast(u32, transfers_pending_max));
+
+        var user_data_to_id = HashMapUserDataToId.init(allocator);
+        errdefer user_data_to_id.deinit();
+        try user_data_to_id.ensureTotalCapacity(@intCast(u32, transfers_max));
 
         // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
         // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
@@ -70,6 +76,7 @@ pub const StateMachine = struct {
             .accounts = accounts,
             .transfers = transfers,
             .posted = posted,
+            .user_data_to_id = user_data_to_id,
         };
     }
 
@@ -77,6 +84,7 @@ pub const StateMachine = struct {
         self.accounts.deinit();
         self.transfers.deinit();
         self.posted.deinit();
+        self.user_data_to_id.deinit();
     }
 
     pub fn Event(comptime operation: Operation) type {
@@ -309,7 +317,7 @@ pub const StateMachine = struct {
         var insert = self.accounts.getOrPutAssumeCapacity(a.id);
         if (insert.found_existing) {
             const exists = insert.value_ptr.*;
-            if (exists.unit != a.unit) return .exists_with_different_unit;
+            if (exists.ledger != a.ledger) return .exists_with_different_ledger;
             if (exists.code != a.code) return .exists_with_different_code;
             if (@bitCast(u32, exists.flags) != @bitCast(u32, a.flags)) {
                 return .exists_with_different_flags;
@@ -388,6 +396,10 @@ pub const StateMachine = struct {
                 }
             }
             self.commit_timestamp = t.timestamp;
+
+            //TODO @jason, need to assert...
+            _ = self.user_data_to_id.remove(t.user_data);
+
             return .ok;
         } else {
             if (t.flags.padding != 0) return .reserved_flag_padding;
@@ -413,7 +425,7 @@ pub const StateMachine = struct {
             assert(t.timestamp > dr.timestamp);
             assert(t.timestamp > cr.timestamp);
 
-            if (dr.unit != cr.unit) return .accounts_have_different_units;
+            if (dr.ledger != cr.ledger) return .accounts_have_different_ledgers;
 
             const insert = self.transfers.getOrPutAssumeCapacity(t.id);
             if (insert.found_existing) {
@@ -447,6 +459,10 @@ pub const StateMachine = struct {
             if (t.flags.pending) {
                 dr.debits_pending += t.amount;
                 cr.credits_pending += t.amount;
+                const ud_to_id = self.user_data_to_id.getOrPutAssumeCapacity(t.user_data);
+                if (ud_to_id.found_existing) {
+                    //TODO return .exists;
+                } else ud_to_id.value_ptr.* = t.id;
             } else {
                 dr.debits_posted += t.amount;
                 cr.credits_posted += t.amount;
@@ -497,6 +513,11 @@ pub const StateMachine = struct {
     /// See the comment for get_account().
     fn get_transfer(self: *StateMachine, id: u128) ?*Transfer {
         return self.transfers.getPtr(id);
+    }
+
+    fn get_transfer_by_user_data(self: *StateMachine, user_data: u128) ?*Transfer {
+        const ud_to_id = self.user_data_to_id.getPtr(user_data) orelse return null;
+        return self.transfers.getPtr(ud_to_id.value_ptr.*);
     }
 
     /// See the comment for get_account().
@@ -632,16 +653,16 @@ test "create/lookup accounts" {
                 .id = 8,
                 .timestamp = 2,
                 .user_data = 'U',
-                .unit = 9,
+                .ledger = 9,
             }),
         },
         Vector{
-            .result = .exists_with_different_unit,
+            .result = .exists_with_different_ledger,
             .object = std.mem.zeroInit(Account, .{
                 .id = 8,
                 .timestamp = 3,
                 .user_data = 'U',
-                .unit = 10,
+                .ledger = 10,
             }),
         },
         Vector{
@@ -715,7 +736,7 @@ test "linked accounts" {
 
     const accounts_max = 5;
     const transfers_max = 0;
-    const pending_max = 0;
+    const transfers_pending_max = 0;
 
     var accounts = [_]Account{
         // An individual event (successful):
@@ -751,7 +772,7 @@ test "linked accounts" {
         std.mem.zeroInit(Account, .{ .id = 3 }),
     };
 
-    var state_machine = try StateMachine.init(allocator, accounts_max, transfers_max, pending_max);
+    var state_machine = try StateMachine.init(allocator, accounts_max, transfers_max, transfers_pending_max);
     defer state_machine.deinit();
 
     const input = std.mem.asBytes(&accounts);
@@ -798,8 +819,8 @@ test "create/lookup/rollback transfers" {
     var accounts = [_]Account{
         std.mem.zeroInit(Account, .{ .id = 1 }),
         std.mem.zeroInit(Account, .{ .id = 2 }),
-        std.mem.zeroInit(Account, .{ .id = 3, .unit = 1 }),
-        std.mem.zeroInit(Account, .{ .id = 4, .unit = 2 }),
+        std.mem.zeroInit(Account, .{ .id = 3, .ledger = 1 }),
+        std.mem.zeroInit(Account, .{ .id = 4, .ledger = 2 }),
         std.mem.zeroInit(Account, .{ .id = 5, .flags = .{ .debits_must_not_exceed_credits = true } }),
         std.mem.zeroInit(Account, .{ .id = 6, .flags = .{ .credits_must_not_exceed_debits = true } }),
         std.mem.zeroInit(Account, .{ .id = 7 }),
@@ -897,7 +918,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         Vector{
-            .result = .accounts_have_different_units,
+            .result = .accounts_have_different_ledgers,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 9,
                 .timestamp = timestamp,
@@ -1460,9 +1481,9 @@ test "create/lookup/rollback 2-phase transfers" {
 test "credit/debit limit overflows " {
     const acc_debit_not_exceed_credit = Account{
         .id = 1,
-        .user_data = 0,
+        .user_data = 1,
         .reserved = [_]u8{0} ** 48,
-        .unit = 710,
+        .ledger = 710,
         .code = 1000,
         .flags = .{ .debits_must_not_exceed_credits = true },
         .debits_pending = std.math.maxInt(u64),
@@ -1473,9 +1494,9 @@ test "credit/debit limit overflows " {
 
     const acc_credit_not_exceed_debit = Account{
         .id = 1,
-        .user_data = 0,
+        .user_data = 1,
         .reserved = [_]u8{0} ** 48,
-        .unit = 710,
+        .ledger = 710,
         .code = 1000,
         .flags = .{ .credits_must_not_exceed_debits = true },
         .debits_pending = std.math.maxInt(u64),

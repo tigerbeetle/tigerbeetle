@@ -10,7 +10,7 @@ pub const Account = packed struct {
     user_data: u128,
     /// Reserved for accounting policy primitives:
     reserved: [48]u8,
-    unit: u16,
+    ledger: u16,
     /// A chart of accounts code describing the type of account (e.g. clearing, settlement):
     code: u16,
     flags: AccountFlags,
@@ -95,7 +95,7 @@ pub const CreateAccountResult = enum(u32) {
     exists,
     exists_with_different_user_data,
     exists_with_different_reserved_field,
-    exists_with_different_unit,
+    exists_with_different_ledger,
     exists_with_different_code,
     exists_with_different_flags,
     exceeds_credits,
@@ -121,7 +121,7 @@ pub const CreateTransferResult = enum(u32) {
     debit_account_not_found,
     credit_account_not_found,
     accounts_are_the_same,
-    accounts_have_different_units,
+    accounts_have_different_ledgers,
     amount_is_zero,
     exceeds_credits,
     exceeds_debits,
