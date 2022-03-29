@@ -175,7 +175,7 @@ pub fn GridType(comptime Storage: type) type {
                 return;
             };
 
-            const result = grid.cache.get_or_put_preserve_locked(
+            const block = grid.cache.put_no_clobber_preserve_locked(
                 *Grid,
                 block_locked,
                 grid,
@@ -185,7 +185,7 @@ pub fn GridType(comptime Storage: type) type {
             iop.* = .{
                 .grid = grid,
                 .completion = undefined,
-                .block = result.value_ptr,
+                .block = block,
             };
             iop.reads.push(read);
 
