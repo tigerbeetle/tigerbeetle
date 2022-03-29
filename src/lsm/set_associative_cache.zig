@@ -7,6 +7,8 @@ const mem = std.mem;
 const meta = std.meta;
 const Vector = meta.Vector;
 
+const verify = @import("tree.zig").verify;
+
 pub const Layout = struct {
     ways: u64 = 16,
     tag_bits: u64 = 8,
@@ -163,13 +165,8 @@ pub fn SetAssociativeCache(
             return self.search(set, key);
         }
 
-        pub const GetOrPutResult = struct {
-            value_ptr: *align(value_alignment) Value,
-            found_existing: bool,
-        };
-
-        pub fn get_or_put(self: *Self, key: Key) GetOrPutResult {
-            return self.get_or_put_preserve_locked(
+        pub fn put_no_clobber(self: *Self, key: Key) *align(value_alignment) Value {
+            return self.put_no_clobber_preserve_locked(
                 void,
                 struct {
                     inline fn locked(_: void, _: *const Value) bool {
@@ -181,25 +178,21 @@ pub fn SetAssociativeCache(
             );
         }
 
-        /// Get a pointer to an existing value with the given key if the key is in the cache.
-        /// If the key is not in the cache, add it to the cache, evicting older entries if needed.
+        /// Add a key, evicting older entires if needed, and return a pointer to the value.
+        /// The key must not already be in the cache.
         /// Never evicts keys for which locked() returns true.
         /// The caller must guarantee that locked() returns true for less than layout.ways keys.
-        pub fn get_or_put_preserve_locked(
+        pub fn put_no_clobber_preserve_locked(
             self: *Self,
             comptime Context: type,
             comptime locked: fn (Context, *align(value_alignment) const Value) callconv(.Inline) bool,
             context: Context,
             key: Key,
-        ) GetOrPutResult {
+        ) *align(value_alignment) Value {
             const set = self.associate(key);
 
-            if (self.search(set, key)) |existing| {
-                assert(!locked(context, existing));
-                return .{
-                    .value_ptr = existing,
-                    .found_existing = true,
-                };
+            if (verify) {
+                assert(self.search(set, key) == null);
             }
 
             const clock_index = @divExact(set.offset, layout.ways);
@@ -235,10 +228,7 @@ pub fn SetAssociativeCache(
 
             Counts.set(self.counts, set.offset + way, 1);
 
-            return .{
-                .value_ptr = @alignCast(value_alignment, &set.values[way]),
-                .found_existing = false,
-            };
+            return @alignCast(value_alignment, &set.values[way]);
         }
 
         fn search(self: *Self, set: Set, key: Key) ?*align(value_alignment) Value {
@@ -387,9 +377,8 @@ test "PackedUnsignedIntegerArray" {
     defer sac.deinit(std.testing.allocator);
 
     std.debug.print("get() = {}\n", .{sac.get(123)});
-    const result = sac.get_or_put(123);
-    assert(!result.found_existing);
-    result.value_ptr.* = 123;
+    const value_ptr = sac.put_no_clobber(123);
+    value_ptr.* = 123;
     std.debug.print("get() = {}\n", .{sac.get(123).?.*});
 
     var words = [8]u64{ 0, 0b10110010, 0, 0, 0, 0, 0, 0 };
