@@ -243,13 +243,16 @@ pub fn SetAssociativeCache(
 
         fn search(self: *Self, set: Set, key: Key) ?*align(value_alignment) Value {
             for (set.tags) |tag, way| {
-                // TODO self.counts.get()
-                const count = Counts.get(self.counts, set.offset + way);
-                if (tag == set.tag and count > 0) {
-                    const value_ptr = @alignCast(value_alignment, &set.values[way]);
-                    if (equal(key_from_value(value_ptr.*), key)) {
-                        Counts.set(self.counts, set.offset + way, count +| 1);
-                        return value_ptr;
+                if (tag == set.tag) {
+                    // TODO improve the PackedUnsignedIntegerArray API so that we can do
+                    // self.counts.get() instead of Counts.get(self.counts).
+                    const count = Counts.get(self.counts, set.offset + way);
+                    if (count > 0) {
+                        const value_ptr = @alignCast(value_alignment, &set.values[way]);
+                        if (equal(key_from_value(value_ptr.*), key)) {
+                            Counts.set(self.counts, set.offset + way, count +| 1);
+                            return value_ptr;
+                        }
                     }
                 }
             }
