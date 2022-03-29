@@ -346,17 +346,24 @@ pub const StateMachine = struct {
         } else if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
             if (!t.flags.hashlock and !zeroed_32_bytes(t.reserved)) return .reserved_field;
             if (t.flags.padding != 0) return .reserved_flag_padding;
+            if (t.user_data == 0) return .user_data_is_zero; //TODO @jason, add test case for this...
 
-            const lookup = self.get_transfer(t.id) orelse return .transfer_not_found;
-            assert(t.timestamp > lookup.timestamp);
+            // TODO need to perform a transfer lookup here.
+            // TODO self.get_transfer(t.id)
+            if (self.get_transfer(t.id)) |_| return .exists;
 
-            if (!lookup.flags.pending) return .transfer_not_pending;
-
-            if (self.get_commit(t.id)) |exists| {
+            if (self.get_posted(t.user_data)) |exists| {
                 if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .transfer_already_posted;
                 if (exists.flags.void_pending_transfer and !t.flags.void_pending_transfer) return .transfer_already_voided;
                 return .transfer_already_posted;
             }
+
+            //const transfer_id = self.user_data_to_id.getPtr(t.user_data) orelse return .transfer_not_pending;
+            const lookup = self.get_transfer_by_user_data(t.user_data) orelse return .transfer_not_found;
+            if (!lookup.flags.pending) return .transfer_not_pending;
+
+            //const lookup = self.get_transfer(transfer_id.*) orelse return .transfer_not_found;
+            assert(t.timestamp > lookup.timestamp);
 
             if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
 
@@ -381,7 +388,7 @@ pub const StateMachine = struct {
             assert(!cr.credits_exceed_debits(0));
 
             // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-            const insert = self.posted.getOrPutAssumeCapacity(t.id);
+            const insert = self.posted.getOrPutAssumeCapacity(t.user_data);
             assert(!insert.found_existing);
             insert.value_ptr.* = t;
             dr.debits_pending -= lookup.amount;
@@ -397,8 +404,8 @@ pub const StateMachine = struct {
             }
             self.commit_timestamp = t.timestamp;
 
-            //TODO @jason, need to assert...
-            _ = self.user_data_to_id.remove(t.user_data);
+            //TODO @jason, need to revisit this...
+            //TODO assert(self.user_data_to_id.remove(t.user_data));
 
             return .ok;
         } else {
@@ -459,9 +466,16 @@ pub const StateMachine = struct {
             if (t.flags.pending) {
                 dr.debits_pending += t.amount;
                 cr.credits_pending += t.amount;
+
+                if (t.user_data == 0) {
+                    assert(self.transfers.remove(t.id));
+                    return .user_data_is_zero; //TODO @jason, add test case for this...
+                }
+
+                //std.debug.print("\nJason-> ud_to_id 2-Phase-Adding Mapping [{any},{any}]\n\n", .{ t.user_data, t.id });
                 const ud_to_id = self.user_data_to_id.getOrPutAssumeCapacity(t.user_data);
                 if (ud_to_id.found_existing) {
-                    //TODO return .exists;
+                    return .exists_user_data;
                 } else ud_to_id.value_ptr.* = t.id;
             } else {
                 dr.debits_posted += t.amount;
@@ -478,6 +492,7 @@ pub const StateMachine = struct {
         if (t.flags.pending) {
             dr.debits_pending -= t.amount;
             cr.credits_pending -= t.amount;
+            assert(self.user_data_to_id.remove(t.user_data));
         } else {
             dr.debits_posted -= t.amount;
             cr.credits_posted -= t.amount;
@@ -486,9 +501,12 @@ pub const StateMachine = struct {
     }
 
     fn posted_transfer_rollback(self: *StateMachine, pt: Transfer) void {
-        assert(self.get_commit(pt.id) != null);
+        assert(self.get_posted(pt.user_data) != null);
 
-        const t = self.get_transfer(pt.id).?;
+        //TODO replace below with get_posted.
+        //TODO const t = self.get_posted(pt.user_data).?;
+        const t = self.get_transfer_by_user_data(pt.user_data).?;
+
         const dr = self.get_account(t.debit_account_id).?;
         const cr = self.get_account(t.credit_account_id).?;
         dr.debits_pending += t.amount;
@@ -497,7 +515,7 @@ pub const StateMachine = struct {
             dr.debits_posted -= t.amount;
             cr.credits_posted -= t.amount;
         }
-        assert(self.posted.remove(pt.id));
+        assert(self.posted.remove(pt.user_data));
     }
 
     /// This is our core private method for changing balances.
@@ -517,12 +535,12 @@ pub const StateMachine = struct {
 
     fn get_transfer_by_user_data(self: *StateMachine, user_data: u128) ?*Transfer {
         const ud_to_id = self.user_data_to_id.getPtr(user_data) orelse return null;
-        return self.transfers.getPtr(ud_to_id.value_ptr.*);
+        return self.transfers.getPtr(ud_to_id.*);
     }
 
     /// See the comment for get_account().
-    fn get_commit(self: *StateMachine, id: u128) ?*Transfer {
-        return self.posted.getPtr(id);
+    fn get_posted(self: *StateMachine, user_data: u128) ?*Transfer {
+        return self.posted.getPtr(user_data);
     }
 };
 
@@ -1060,6 +1078,7 @@ test "create/lookup/rollback transfers" {
             .result = .pending_transfer_must_timeout,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 14,
+                .user_data = 14,
                 .timestamp = timestamp + 2,
                 .amount = 10,
                 .debit_account_id = 7,
@@ -1072,6 +1091,7 @@ test "create/lookup/rollback transfers" {
             .result = .ok,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 15,
+                .user_data = 15,
                 .timestamp = timestamp + 2,
                 .amount = 10,
                 .debit_account_id = 7,
@@ -1084,6 +1104,7 @@ test "create/lookup/rollback transfers" {
             .result = .exists_with_different_timeout,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 15,
+                .user_data = 15,
                 .timestamp = timestamp + 3,
                 .amount = 10,
                 .debit_account_id = 7,
@@ -1151,6 +1172,7 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
         std.mem.zeroInit(Transfer, .{
             .id = 2,
+            .user_data = 2,
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
@@ -1159,6 +1181,7 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
         std.mem.zeroInit(Transfer, .{
             .id = 3,
+            .user_data = 3,
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
@@ -1167,6 +1190,7 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
         std.mem.zeroInit(Transfer, .{
             .id = 4,
+            .user_data = 4,
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
@@ -1175,6 +1199,7 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
         std.mem.zeroInit(Transfer, .{
             .id = 5,
+            .user_data = 5,
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
@@ -1186,6 +1211,7 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
         std.mem.zeroInit(Transfer, .{
             .id = 6,
+            .user_data = 6,
             .amount = 15,
             .debit_account_id = 1,
             .credit_account_id = 2,
@@ -1197,6 +1223,7 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
         std.mem.zeroInit(Transfer, .{
             .id = 7,
+            .user_data = 7,
             .amount = 15,
             .debit_account_id = 3,
             .credit_account_id = 4,
@@ -1205,6 +1232,7 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
         std.mem.zeroInit(Transfer, .{
             .id = 8,
+            .user_data = 8,
             .amount = 15,
             .debit_account_id = 11,
             .credit_account_id = 12,
@@ -1256,7 +1284,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .reserved_field,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 1,
+                .id = 9,
+                .user_data = 1,
                 .timestamp = timestamp,
                 .reserved = [_]u8{1} ** 32,
                 .flags = .{ .post_pending_transfer = true },
@@ -1265,7 +1294,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .reserved_flag_padding,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 1,
+                .id = 10,
+                .user_data = 1,
                 .timestamp = timestamp,
                 .flags = .{ .padding = 1, .post_pending_transfer = true },
             }),
@@ -1273,15 +1303,18 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .transfer_not_found,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 777,
+                .id = 11,
+                .user_data = 777,
                 .timestamp = timestamp,
                 .flags = .{ .post_pending_transfer = true },
             }),
         },
         Vector{
-            .result = .transfer_not_pending,
+            //TODO @jason -> .result = .transfer_not_pending,
+            .result = .transfer_not_found,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 1,
+                .id = 12,
+                .user_data = 1,
                 .timestamp = timestamp,
                 .flags = .{ .post_pending_transfer = true },
             }),
@@ -1289,7 +1322,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .ok,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 2,
+                .id = 13,
+                .user_data = 2,
                 .timestamp = timestamp,
                 .flags = .{ .post_pending_transfer = true },
             }),
@@ -1297,7 +1331,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .transfer_already_posted,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 2,
+                .id = 14,
+                .user_data = 2,
                 .timestamp = timestamp + 1,
                 .flags = .{ .void_pending_transfer = true },
             }),
@@ -1305,7 +1340,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .transfer_already_posted,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 2,
+                .id = 15,
+                .user_data = 2,
                 .timestamp = timestamp + 1,
                 .flags = .{ .post_pending_transfer = true },
             }),
@@ -1313,7 +1349,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .ok,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 3,
+                .id = 16,
+                .user_data = 3,
                 .timestamp = timestamp + 1,
                 .flags = .{ .void_pending_transfer = true },
             }),
@@ -1321,7 +1358,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .transfer_already_voided,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 3,
+                .id = 17,
+                .user_data = 3,
                 .timestamp = timestamp + 2,
                 .flags = .{ .post_pending_transfer = true },
             }),
@@ -1329,7 +1367,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .transfer_expired,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 4,
+                .id = 18,
+                .user_data = 4,
                 .timestamp = timestamp + 2,
                 .flags = .{ .post_pending_transfer = true },
             }),
@@ -1337,7 +1376,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .condition_requires_preimage,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 5,
+                .id = 19,
+                .user_data = 5,
                 .timestamp = timestamp + 2,
                 .flags = .{ .post_pending_transfer = true },
             }),
@@ -1345,7 +1385,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .preimage_invalid,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 5,
+                .id = 20,
+                .user_data = 5,
                 .timestamp = timestamp + 2,
                 .flags = .{ .hashlock = true, .post_pending_transfer = true },
                 .reserved = [_]u8{1} ** 32,
@@ -1354,7 +1395,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .preimage_requires_condition,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 6,
+                .id = 21,
+                .user_data = 6,
                 .timestamp = timestamp + 2,
                 .flags = .{ .hashlock = true, .post_pending_transfer = true },
             }),
@@ -1362,7 +1404,8 @@ test "create/lookup/rollback 2-phase transfers" {
         Vector{
             .result = .cannot_post_and_void_pending_transfer,
             .object = std.mem.zeroInit(Transfer, .{
-                .id = 6,
+                .id = 22,
+                .user_data = 6,
                 .timestamp = timestamp + 2,
                 .flags = .{ .void_pending_transfer = true, .post_pending_transfer = true },
             }),
@@ -1386,7 +1429,7 @@ test "create/lookup/rollback 2-phase transfers" {
     for (vectors) |vector| {
         try testing.expectEqual(vector.result, state_machine.create_transfer(vector.object)); //2-phase commit
         if (vector.result == .ok) {
-            try testing.expectEqual(vector.object, state_machine.get_commit(vector.object.id).?.*);
+            try testing.expectEqual(vector.object, state_machine.get_posted(vector.object.user_data).?.*);
         }
     }
 
@@ -1413,7 +1456,8 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expect(state_machine.get_account(accounts[3].id) == null);
     try testing.expectEqual(
         state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
-            .id = 7,
+            .id = 23,
+            .user_data = 7,
             .timestamp = timestamp + 2,
             .flags = .{ .post_pending_transfer = true },
         })),
@@ -1423,7 +1467,8 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expect(state_machine.get_account(accounts[2].id) == null);
     try testing.expectEqual(
         state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
-            .id = 7,
+            .id = 24,
+            .user_data = 7,
             .timestamp = timestamp + 2,
             .flags = .{ .post_pending_transfer = true },
         })),
@@ -1433,7 +1478,8 @@ test "create/lookup/rollback 2-phase transfers" {
     // Post with pending Transfer amount 15 by setting the amount as [0]
     try testing.expectEqual(
         state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
-            .id = 8,
+            .id = 25,
+            .user_data = 8,
             .amount = 0,
             .timestamp = timestamp + 2,
             .flags = .{ .post_pending_transfer = true },

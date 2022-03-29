@@ -101,7 +101,7 @@ zig/zig run src/demo_05_post_pending_transfers.zig
 zig/zig run src/demo_02_lookup_accounts.zig
 ```
 
-Let's also pretend someone else tried to post (but reject) concurrently:
+Let's also pretend someone else tried to void the pending transfer concurrently:
 
 ```bash
 zig/zig run src/demo_06_void_pending_transfers.zig
