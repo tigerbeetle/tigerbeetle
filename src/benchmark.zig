@@ -157,7 +157,7 @@ pub fn main() !void {
     assert(queue.batches.empty());
 
     var ms = queue.end.? - queue.start.?;
-    const transfer_type = if (IS_TWO_PHASE_COMMIT) "two-phase commit " else "";
+    const transfer_type = if (IS_TWO_PHASE_COMMIT) "two-phase transfer " else "";
     const result: i64 = @divFloor(@intCast(i64, transfers.len * 1000), ms);
     try stdout.print("============================================\n", .{});
     try stdout.print("{} {s}transfers per second\n\n", .{

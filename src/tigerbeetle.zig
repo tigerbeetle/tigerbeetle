@@ -25,6 +25,8 @@ pub const Account = packed struct {
     }
 
     pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
+        if (!self.flags.debits_must_not_exceed_credits) return false;
+
         return (self.flags.debits_must_not_exceed_credits and
             (@as(u66, self.debits_pending) + @as(u66, self.debits_posted) + @as(u66, amount)) > self.credits_posted);
     }
@@ -89,6 +91,13 @@ pub const TransferFlags = packed struct {
     }
 };
 
+pub const LimitExceedResult = enum(u32) {
+    ok,
+    int_overflow,
+    debits_exceed_credits,
+    credits_exceed_debits,
+};
+
 pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
@@ -108,6 +117,7 @@ pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
     exists,
+    exists_user_data,
     exists_with_different_debit_account_id,
     exists_with_different_credit_account_id,
     exists_with_different_user_data,
@@ -139,6 +149,7 @@ pub const CreateTransferResult = enum(u32) {
     preimage_requires_condition,
     debit_amount_not_pending,
     credit_amount_not_pending,
+    user_data_is_zero,
 };
 
 pub const CreateAccountsResult = packed struct {
