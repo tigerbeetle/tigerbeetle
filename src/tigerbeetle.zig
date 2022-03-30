@@ -71,10 +71,14 @@ pub const Transfer = packed struct {
     /// Opaque third-party identifier to link this transfer (many-to-one) to an external entity:
     user_data: u128,
     /// Reserved for accounting policy primitives:
-    reserved: [32]u8,
+    //reserved: [32]u8,
+    reserved: u128,
+    //2 phase transfer:
+    pending_id: u128,
     timeout: u64,
     /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement):
-    code: u32,
+    ledger: u32,
+    code: u16,
     flags: TransferFlags,
     amount: u64,
     timestamp: u64 = 0,
@@ -89,11 +93,10 @@ pub const TransferFlags = packed struct {
     pending: bool = false,
     post_pending_transfer: bool = false,
     void_pending_transfer: bool = false,
-    hashlock: bool = false,
-    padding: u27 = 0,
+    padding: u12 = 0,
 
     comptime {
-        assert(@sizeOf(TransferFlags) == @sizeOf(u32));
+        assert(@sizeOf(TransferFlags) == @sizeOf(u16));
     }
 };
 
@@ -155,7 +158,8 @@ pub const CreateTransferResult = enum(u32) {
     preimage_requires_condition,
     debit_amount_not_pending,
     credit_amount_not_pending,
-    user_data_is_zero,
+    pending_id_should_be_zero,
+    pending_id_is_zero
 };
 
 pub const CreateAccountsResult = packed struct {
