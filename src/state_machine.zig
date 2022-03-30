@@ -311,8 +311,17 @@ pub const StateMachine = struct {
         if (a.flags.padding != 0) return .reserved_flag_padding;
 
         // Opening balances may never exceed limits:
-        if (a.debits_exceed_credits(0)) return .exceeds_credits;
-        if (a.credits_exceed_debits(0)) return .exceeds_debits;
+        switch (a.debits_exceed_credits(0)) {
+            .debits_exceed_credits => return .exceeds_credits,
+            .amount_overflow => return .exceeds_credits,
+            else => {},
+        }
+
+        switch (a.credits_exceed_debits(0)) {
+            .credits_exceed_debits => return .exceeds_debits,
+            .amount_overflow => return .exceeds_debits,
+            else => {},
+        }
 
         var insert = self.accounts.getOrPutAssumeCapacity(a.id);
         if (insert.found_existing) {
@@ -384,8 +393,8 @@ pub const StateMachine = struct {
             if (cr.credits_pending < lookup.amount) return .credit_amount_not_pending;
 
             // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
-            assert(!dr.debits_exceed_credits(0));
-            assert(!cr.credits_exceed_debits(0));
+            assert(dr.debits_exceed_credits(0) == .ok);
+            assert(cr.credits_exceed_debits(0) == .ok);
 
             // TODO We can combine this lookup with the previous lookup if we return `error!void`:
             const insert = self.posted.getOrPutAssumeCapacity(t.user_data);
@@ -454,10 +463,10 @@ pub const StateMachine = struct {
                 return .exists;
             }
 
-            if (dr.debits_exceed_credits(t.amount)) {
+            if (dr.debits_exceed_credits(t.amount) != .ok) {
                 assert(self.transfers.remove(t.id));
                 return .exceeds_credits;
-            } else if (cr.credits_exceed_debits(t.amount)) {
+            } else if (cr.credits_exceed_debits(t.amount) != .ok) {
                 assert(self.transfers.remove(t.id));
                 return .exceeds_debits;
             }
@@ -1551,8 +1560,8 @@ test "credit/debit limit overflows " {
         .credits_posted = std.math.maxInt(u64),
     };
 
-    try testing.expect(acc_debit_not_exceed_credit.debits_exceed_credits(std.math.maxInt(u64)));
-    try testing.expect(acc_credit_not_exceed_debit.credits_exceed_debits(std.math.maxInt(u64)));
+    try testing.expect(acc_debit_not_exceed_credit.debits_exceed_credits(std.math.maxInt(u64)) == .amount_overflow);
+    try testing.expect(acc_credit_not_exceed_debit.credits_exceed_debits(std.math.maxInt(u64)) == .amount_overflow);
 }
 
 fn test_routine_zeroed(comptime len: usize) !void {

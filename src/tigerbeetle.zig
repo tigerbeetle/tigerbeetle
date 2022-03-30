@@ -24,16 +24,22 @@ pub const Account = packed struct {
         assert(@sizeOf(Account) == 128);
     }
 
-    pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
-        if (!self.flags.debits_must_not_exceed_credits) return false;
+    pub fn debits_exceed_credits(self: *const Account, amount: u64) LimitExceedResult {
+        if (!self.flags.debits_must_not_exceed_credits) return .ok;
 
-        return (self.flags.debits_must_not_exceed_credits and
-            (@as(u66, self.debits_pending) + @as(u66, self.debits_posted) + @as(u66, amount)) > self.credits_posted);
+        const limit_amount: u66 = (@as(u66, self.debits_pending) + @as(u66, self.debits_posted) + @as(u66, amount));
+        if (limit_amount > std.math.maxInt(u64)) return .amount_overflow;
+        if (limit_amount > self.credits_posted) return .debits_exceed_credits;
+        return .ok;
     }
 
-    pub fn credits_exceed_debits(self: *const Account, amount: u64) bool {
-        return (self.flags.credits_must_not_exceed_debits and
-            (@as(u66, self.credits_pending) + @as(u66, self.credits_posted) + @as(u66, amount)) > self.debits_posted);
+    pub fn credits_exceed_debits(self: *const Account, amount: u64) LimitExceedResult {
+        if (!self.flags.credits_must_not_exceed_debits) return .ok;
+
+        const limit_amount: u66 = (@as(u66, self.credits_pending) + @as(u66, self.credits_posted) + @as(u66, amount));
+        if (limit_amount > std.math.maxInt(u64)) return .amount_overflow;
+        if (limit_amount > self.debits_posted) return .credits_exceed_debits;
+        return .ok;
     }
 };
 
@@ -93,7 +99,7 @@ pub const TransferFlags = packed struct {
 
 pub const LimitExceedResult = enum(u32) {
     ok,
-    int_overflow,
+    amount_overflow,
     debits_exceed_credits,
     credits_exceed_debits,
 };
