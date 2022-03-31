@@ -933,10 +933,11 @@ pub fn TreeType(
                 filter_block_count: u32 = 0,
                 data_blocks_in_filter: u32 = 0,
 
-                pub fn init(allocator: mem.Allocator) Builder {
+                pub fn init(allocator: mem.Allocator) !Builder {
                     _ = allocator;
 
                     // TODO
+                    return error.ToDo;
                 }
 
                 pub fn deinit(builder: *Builder, allocator: mem.Allocator) void {
@@ -975,7 +976,13 @@ pub fn TreeType(
                     }
                 }
 
+                pub fn data_block_empty(builder: Builder) bool {
+                    assert(builder.value <= data.value_count_max);
+                    return builder.value == 0;
+                }
+
                 pub fn data_block_full(builder: Builder) bool {
+                    assert(builder.value <= data.value_count_max);
                     return builder.value == data.value_count_max;
                 }
 
@@ -1059,13 +1066,19 @@ pub fn TreeType(
                     builder.data_blocks_in_filter += 1;
                 }
 
-                /// Returns true if there is space for at least one more data block in the filter.
+                pub fn filter_block_empty(builder: Builder) bool {
+                    assert(builder.data_blocks_in_filter <= filter.data_block_count_max);
+                    return builder.data_blocks_in_filter == 0;
+                }
+
                 pub fn filter_block_full(builder: Builder) bool {
                     assert(builder.data_blocks_in_filter <= filter.data_block_count_max);
                     return builder.data_blocks_in_filter == filter.data_block_count_max;
                 }
 
                 pub fn filter_block_finish(builder: *Builder) void {
+                    assert(!builder.filter_block_empty());
+
                     const address = builder.grid.superblock.free_set.acquire().?;
 
                     const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
@@ -1077,7 +1090,8 @@ pub fn TreeType(
                         .command = .block,
                     };
 
-                    header.set_checksum_body(builder.filter_block[@sizeOf(vsr.Header)..header.size]);
+                    const body = builder.filter_block[@sizeOf(vsr.Header)..header.size];
+                    header.set_checksum_body(body);
                     header.set_checksum();
 
                     const current = builder.filter_block_count;
@@ -1088,7 +1102,13 @@ pub fn TreeType(
                     builder.data_blocks_in_filter = 0;
                 }
 
+                pub fn index_block_empty(builder: Builder) bool {
+                    assert(builder.data_block_count <= data_block_count_max);
+                    return builder.data_block_count == 0;
+                }
+
                 pub fn index_block_full(builder: Builder) bool {
+                    assert(builder.data_block_count <= data_block_count_max);
                     return builder.data_block_count == data_block_count_max;
                 }
 
@@ -1357,24 +1377,21 @@ pub fn TreeType(
             };
         };
 
-        /// Compact tables in level A with overlapping tables in level B.
+        /// Compact a table in level A with overlapping tables in level B.
         pub const Compaction = struct {
             pub const Callback = fn (it: *Compaction, done: bool) void;
 
-            const level_0_table_count_max = table_count_max_for_level(config.lsm_growth_factor, 0);
-            const level_a_table_count_max = level_0_table_count_max;
+            const LevelAIterator = TableIteratorType(Compaction, io_callback);
+            const LevelBIterator = LevelIteratorType(Compaction, io_callback);
 
-            const LevelAIterator = TableIteratorType(Compaction, on_io_done);
-            const LevelBIterator = LevelIteratorType(Compaction, on_io_done);
-
+            const k = 2;
             const MergeIterator = KWayMergeIterator(
                 Compaction,
                 Key,
                 Value,
                 key_from_value,
                 compare_keys,
-                // Add one for the level B iterator:
-                level_a_table_count_max + 1,
+                k,
                 stream_peek,
                 stream_pop,
                 stream_precedence,
@@ -1382,40 +1399,78 @@ pub fn TreeType(
 
             const BlockWrite = struct {
                 block: BlockPtr,
-                submit: bool,
-                write: Grid.Write,
+                write: Grid.Write = undefined,
+                ready: bool = false,
             };
 
+            manifest: *Manifest,
             grid: *Grid,
+
             ticks: u32 = 0,
             io_pending: u32 = 0,
+            drop_tombstones: bool = false,
             callback: ?Callback = null,
-            /// This is an implementation detail, the caller should use the done
-            /// argument of the Callback to know when the compaction has finished.
-            last_tick: bool = false,
 
-            /// Addresses of all source tables in level A:
-            level_a_table_count: u32,
-            level_a_iterators_max: [level_a_table_count_max]LevelAIterator,
+            /// Private:
+            /// The caller must use the Callback's `done` argument to know when compaction is done,
+            /// because a write I/O may yet follow even after the merge is done.
+            merge_done: bool = false,
 
+            level_a_iterator: LevelAIterator,
             level_b_iterator: LevelBIterator,
-
             merge_iterator: MergeIterator,
-
             table_builder: Table.Builder,
 
             index: BlockWrite,
             filter: BlockWrite,
             data: BlockWrite,
 
-            pub fn init(allocator: mem.Allocator) Compaction {
-                // TODO
-                _ = allocator;
+            pub fn init(allocator: mem.Allocator, manifest: *Manifest, grid: *Grid) !Compaction {
+                var level_a_iterator = try LevelAIterator.init(allocator);
+                errdefer level_a_iterator.deinit(allocator);
+
+                var level_b_iterator = try LevelBIterator.init(allocator);
+                errdefer level_b_iterator.deinit(allocator);
+
+                var table_builder = try Table.Builder.init(allocator);
+                errdefer table_builder.deinit(allocator);
+
+                const index = BlockWrite{ .block = try allocate_block(allocator) };
+                errdefer allocator.free(index.block);
+
+                const filter = BlockWrite{ .block = try allocate_block(allocator) };
+                errdefer allocator.free(filter.block);
+
+                const data = BlockWrite{ .block = try allocate_block(allocator) };
+                errdefer allocator.free(data.block);
+
+                return Compaction{
+                    .manifest = manifest,
+                    .grid = grid,
+
+                    .level_a_iterator = level_a_iterator,
+                    .level_b_iterator = level_b_iterator,
+                    .merge_iterator = undefined, // This must be initialized at tick 1.
+                    .table_builder = table_builder,
+
+                    .index = index,
+                    .filter = filter,
+                    .data = data,
+                };
             }
 
-            pub fn deinit(compaction: *Compaction) void {
-                // TODO
-                _ = compaction;
+            fn allocate_block(allocator: mem.Allocator) !BlockPtr {
+                return allocator.alignedAlloc(u8, config.sector_size, config.block_size);
+            }
+
+            pub fn deinit(compaction: *Compaction, allocator: mem.Allocator) void {
+                compaction.level_a_iterator.deinit(allocator);
+                compaction.level_b_iterator.deinit(allocator);
+                compaction.table_builder.deinit(allocator);
+
+                allocator.free(compaction.index.block);
+                allocator.free(compaction.filter.block);
+                allocator.free(compaction.data.block);
             }
 
             pub fn start(
@@ -1424,138 +1479,202 @@ pub fn TreeType(
                 level_b: u32,
                 level_b_key_min: Key,
                 level_b_key_max: Key,
+                drop_tombstones: bool,
             ) void {
+                // There are at least 2 table inputs to the compaction.
+                assert(level_a_tables.len + 1 >= 2);
+
                 _ = level_b;
                 _ = level_b_key_min;
                 _ = level_b_key_max;
+                _ = drop_tombstones;
 
+                // TODO Add `level_a: u32` because a compaction may occur all within a single level.
+                // TODO Think through compacting within level 0 while flushing to level 0.
+
+                compaction.ticks = 0;
                 assert(compaction.io_pending == 0);
-                // There are at least 2 table inputs to the compaction.
-                assert(level_a_tables.len + 1 >= 2);
+                compaction.drop_tombstones = drop_tombstones;
+                assert(compaction.callback == null);
+                compaction.merge_done = false;
+
+                // TODO Reset iterators and builder.
+                compaction.merge_iterator = undefined;
+
+                assert(!compaction.data.ready);
+                assert(!compaction.filter.ready);
+                assert(!compaction.index.ready);
             }
 
-            pub fn tick(compaction: *Compaction, callback: Callback) void {
-                assert(!compaction.last_tick);
+            /// Submits all read/write I/O before starting the CPU-intensive k-way merge.
+            /// This allows the I/O to happen in parallel with the merge.
+            ///
+            /// The caller must call:
+            ///
+            /// 1. tick_io() across all trees,
+            /// 2. io.submit() to submit these I/O operations to the kernel,
+            /// 3. tick_cpu() across all trees.
+            pub fn tick_io(compaction: *Compaction, callback: Callback) void {
+                assert(!compaction.merge_done);
                 assert(compaction.io_pending == 0);
                 assert(compaction.callback == null);
+
                 compaction.callback = callback;
 
-                // Submit all read/write I/O before starting the CPU intensive k way merge.
-                // This allows the I/O to happen in parallel with the CPU work.
-                if (compaction.ticks >= 0) compaction.tick_read();
-                if (compaction.ticks >= 2) compaction.tick_write();
+                if (compaction.ticks >= 0) compaction.tick_io_read();
+                if (compaction.ticks >= 2) compaction.tick_io_write();
+
+                // All values may be eclipsed by tombstones, with no write I/O pending here.
+            }
+
+            pub fn tick_cpu(compaction: *Compaction) void {
+                assert(!compaction.merge_done);
+                assert(compaction.io_pending >= 0);
+                assert(compaction.callback != null);
 
                 if (compaction.ticks == 1) {
-                    // We can't initialize the k way merge until we have at least one
-                    // value to peek() from each read stream.
-                    const k = compaction.level_a_table_count + 1;
-                    assert(k >= 2);
+                    // We cannot initialize the merge until we can peek() a value from each stream,
+                    // which depends on tick 0 (to read blocks) having happened.
                     compaction.merge_iterator = MergeIterator.init(compaction, k, .ascending);
                 }
 
                 if (compaction.ticks >= 1) {
                     if (compaction.merge_iterator.empty()) {
-                        assert(compaction.ticks >= 2);
-                        assert(!compaction.last_tick);
-                        compaction.last_tick = true;
+                        assert(!compaction.merge_done);
+
+                        // We must distinguish between merge_iterator.empty() and merge_done.
+                        // The former cannot be accessed before MergeIterator.init() on tick 1.
+                        compaction.merge_done = true;
                     } else {
-                        compaction.tick_merge();
+                        compaction.tick_cpu_merge();
                     }
                 }
 
                 compaction.ticks += 1;
 
-                // We will always start I/O if the compaction has not yet been completed.
-                // The callbacks for this I/O must fire asynchronously.
-                assert(compaction.io_pending > 0);
+                // Normally, a tick completes only after a read/write I/O.
+                // However, the compaction may drop only tombstones, resulting in no write I/O.
+                if (compaction.io_pending == 0) compaction.tick_done();
             }
 
-            fn tick_read(compaction: *Compaction) void {
-                for (compaction.level_a_iterators()) |*it| {
-                    if (it.tick()) compaction.io_pending += 1;
-                }
+            fn tick_done(compaction: *Compaction) void {
+                assert(compaction.io_pending == 0);
+
+                const callback = compaction.callback.?;
+                compaction.callback = null;
+
+                callback(compaction, compaction.merge_done);
+            }
+
+            fn tick_io_read(compaction: *Compaction) void {
+                assert(compaction.callback != null);
+
+                if (compaction.level_a_iterator.tick()) compaction.io_pending += 1;
                 if (compaction.level_b_iterator.tick()) compaction.io_pending += 1;
 
-                if (compaction.last_tick) assert(compaction.io_pending == 0);
+                if (compaction.merge_done) assert(compaction.io_pending == 0);
             }
 
-            fn tick_write(compaction: *Compaction) void {
+            fn tick_io_write(compaction: *Compaction) void {
+                assert(compaction.callback != null);
                 assert(compaction.ticks >= 2);
-                assert(compaction.data.submit);
+                // There may be no data block to write if all values are eclipsed by tombstones.
+                assert(compaction.data.ready or !compaction.data.ready);
 
-                compaction.maybe_submit_write(compaction.data, on_block_write("data"));
-                compaction.maybe_submit_write(compaction.filter, on_block_write("filter"));
-                compaction.maybe_submit_write(compaction.index, on_block_write("index"));
+                compaction.write_block_if_ready(&compaction.data, write_block_callback("data"));
+                compaction.write_block_if_ready(&compaction.filter, write_block_callback("filter"));
+                compaction.write_block_if_ready(&compaction.index, write_block_callback("index"));
 
-                assert(compaction.io_pending > 0);
-                assert(!compaction.data.submit);
-                assert(!compaction.filter.submit);
-                assert(!compaction.index.submit);
+                assert(!compaction.data.ready);
+                assert(!compaction.filter.ready);
+                assert(!compaction.index.ready);
             }
 
-            fn tick_merge(compaction: *Compaction) void {
-                assert(!compaction.last_tick);
+            fn tick_cpu_merge(compaction: *Compaction) void {
+                assert(compaction.callback != null);
                 assert(compaction.ticks >= 1);
+                assert(!compaction.merge_done);
                 assert(!compaction.merge_iterator.empty());
 
-                assert(!compaction.data.submit);
-                assert(!compaction.filter.submit);
-                assert(!compaction.index.submit);
+                assert(!compaction.data.ready);
+                assert(!compaction.filter.ready);
+                assert(!compaction.index.ready);
 
+                var tombstones_dropped: u32 = 0;
                 while (!compaction.table_builder.data_block_full()) {
                     const value = compaction.merge_iterator.pop() orelse {
                         compaction.assert_read_iterators_empty();
                         break;
                     };
-                    compaction.table_builder.data_block_append(value);
+                    if (compaction.drop_tombstones and tombstone(value)) {
+                        tombstones_dropped += 1;
+                    } else {
+                        compaction.table_builder.data_block_append(value);
+                    }
                 }
-                compaction.table_builder.data_block_finish();
-                swap_buffers(&compaction.data, &compaction.table_builder.data_block);
 
-                if (!compaction.merge_iterator.empty()) {
-                    const values_used = Table.data_block_values_used(compaction.data.block).len;
-                    assert(values_used == Table.data.value_count_max);
+                if (compaction.table_builder.data_block_empty()) {
+                    assert(compaction.drop_tombstones);
+                    assert(tombstones_dropped > 0);
+                } else {
+                    compaction.table_builder.data_block_finish();
+                    swap_buffers(&compaction.data, &compaction.table_builder.data_block);
+                    assert(compaction.data.ready);
+
+                    if (!compaction.merge_iterator.empty()) {
+                        // Ensure that the block was filled completely.
+                        const values_used = Table.data_block_values_used(compaction.data.block).len;
+                        assert(values_used == Table.data.value_count_max);
+                    }
                 }
 
                 if (compaction.table_builder.filter_block_full() or
                     compaction.table_builder.index_block_full() or
                     compaction.merge_iterator.empty())
                 {
-                    compaction.table_builder.filter_block_finish();
-                    swap_buffers(&compaction.filter, &compaction.table_builder.filter_block);
+                    if (compaction.table_builder.filter_block_empty()) {
+                        assert(compaction.drop_tombstones);
+                        assert(tombstones_dropped > 0);
+                    } else {
+                        compaction.table_builder.filter_block_finish();
+                        swap_buffers(&compaction.filter, &compaction.table_builder.filter_block);
+                        assert(compaction.filter.ready);
+                    }
                 }
 
                 if (compaction.table_builder.index_block_full() or
                     compaction.merge_iterator.empty())
                 {
-                    const info = compaction.table_builder.index_block_finish();
-                    swap_buffers(&compaction.index, &compaction.table_builder.index_block);
+                    if (compaction.table_builder.index_block_empty()) {
+                        assert(compaction.drop_tombstones);
+                        assert(tombstones_dropped > 0);
+                    } else {
+                        const snapshot_min = compaction.manifest.take_snapshot();
+                        const info = compaction.table_builder.index_block_finish(snapshot_min);
+                        swap_buffers(&compaction.index, &compaction.table_builder.index_block);
+                        assert(compaction.index.ready);
 
-                    // TODO store info in the manifest at some point. We may need to wait
-                    // until the table has been fully written to disk, or until the
-                    // compaction finishes. Figure this out when implementing the Manifest.
-                    _ = info;
+                        // TODO Push to an array as we must wait until the compaction has finished
+                        // so that we can update the manifest atomically.
+                        // Otherwise, interleaved state machine operations will see side-effects.
+                        _ = info;
+                    }
                 }
-
-                assert(compaction.data.submit);
             }
 
-            fn on_io_done(compaction: *Compaction) void {
+            fn io_callback(compaction: *Compaction) void {
                 compaction.io_pending -= 1;
-                if (compaction.io_pending == 0) {
-                    const callback = compaction.callback.?;
-                    compaction.callback = null;
-                    callback(compaction, compaction.last_tick);
-                }
+
+                if (compaction.io_pending == 0) compaction.tick_done();
             }
 
-            fn maybe_submit_write(
+            fn write_block_if_ready(
                 compaction: *Compaction,
                 block_write: *BlockWrite,
                 callback: fn (*Grid.Write) void,
             ) void {
-                if (block_write.submit) {
-                    block_write.submit = false;
+                if (block_write.ready) {
+                    block_write.ready = false;
 
                     compaction.io_pending += 1;
                     compaction.grid.write_block(
@@ -1567,52 +1686,53 @@ pub fn TreeType(
                 }
             }
 
-            fn on_block_write(comptime field: []const u8) fn (*Grid.Write) void {
+            fn write_block_callback(comptime field: []const u8) fn (*Grid.Write) void {
                 return struct {
                     fn callback(write: *Grid.Write) void {
                         const block_write = @fieldParentPtr(BlockWrite, "write", write);
                         const compaction = @fieldParentPtr(Compaction, field, block_write);
-                        on_io_done(compaction);
+
+                        io_callback(compaction);
                     }
                 }.callback;
             }
 
-            fn swap_buffers(block_write: *BlockWrite, filled_block: *BlockPtr) void {
-                mem.swap(*BlockPtr, &block_write.block, filled_block);
-                assert(!block_write.submit);
-                block_write.submit = true;
-            }
+            fn swap_buffers(block_write: *BlockWrite, block_ready: *BlockPtr) void {
+                mem.swap(BlockPtr, &block_write.block, block_ready);
 
-            fn level_a_iterators(compaction: *Compaction) []LevelAIterator {
-                return compaction.level_a_iterators_max[0..compaction.level_a_table_count];
+                assert(!block_write.ready);
+                block_write.ready = true;
             }
 
             fn assert_read_iterators_empty(compaction: Compaction) void {
-                for (compaction.level_a_iterators()) |it| {
-                    assert(it.buffered_all_values());
-                    assert(it.peek() == null);
-                }
+                assert(compaction.level_a_iterator.buffered_all_values());
+                assert(compaction.level_a_iterator.peek() == null);
+
                 assert(compaction.level_b_iterator.buffered_all_values());
                 assert(compaction.level_b_iterator.peek() == null);
             }
 
             fn stream_peek(compaction: *Compaction, stream_id: u32) ?Key {
+                assert(stream_id <= 1);
+
                 if (stream_id == 0) {
-                    return compaction.level_b_iterator.peek();
+                    return compaction.level_a_iterator.peek();
                 } else {
-                    return compaction.level_a_iterators()[stream_id + 1].peek();
+                    return compaction.level_b_iterator.peek();
                 }
             }
 
             fn stream_pop(compaction: *Compaction, stream_id: u32) Value {
+                assert(stream_id <= 1);
+
                 if (stream_id == 0) {
-                    return compaction.level_b_iterator.pop();
+                    return compaction.level_a_iterator.pop();
                 } else {
-                    return compaction.level_a_iterators()[stream_id + 1].pop();
+                    return compaction.level_b_iterator.pop();
                 }
             }
 
-            /// Returns true if stream a has higher precedence than stream b.
+            /// Returns true if stream A has higher precedence than stream B.
             /// This is used to deduplicate values across streams.
             ///
             /// This assumes that all overlapping tables in level A at the time the compaction was
@@ -1620,20 +1740,13 @@ pub fn TreeType(
             /// in a pair of overlapping tables could be left in level A and shadow the newer table
             /// in level B, resulting in data loss/invalid data.
             fn stream_precedence(compaction: *Compaction, a: u32, b: u32) bool {
-                assert(a != b);
-                // A stream_id of 0 indicates the level B iterator.
+                _ = compaction;
+
+                assert(a + b == 1);
+
+                // A stream_id of 0 indicates the level A iterator.
                 // All tables in level A have higher precedence.
-                if (a == 0) return false;
-                if (b == 0) return true;
-
-                const it_a = compaction.level_a_iterators()[a + 1];
-                const it_b = compaction.level_a_iterators()[b + 1];
-
-                const snapshot_min_a = Table.index_snapshot_min(it_a.index);
-                const snapshot_min_b = Table.index_snapshot_min(it_b.index);
-
-                assert(snapshot_min_a != snapshot_min_b);
-                return snapshot_min_a > snapshot_min_b;
+                return a == 0;
             }
         };
 
@@ -2391,19 +2504,15 @@ pub fn main() !void {
     const Storage = @import("../storage.zig").Storage;
     const Grid = @import("grid.zig").GridType(Storage);
 
-    const dir_path = ".";
-    const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err| {
-        std.debug.print("failed to open directory '{s}': {}", .{ dir_path, err });
-        return;
-    };
+    const data_file_size_min = @import("superblock.zig").data_file_size_min;
 
-    const storage_fd = try Storage.open(dir_fd, "test_tree", config.journal_size_max, true);
+    const storage_fd = try Storage.open("test_tree", data_file_size_min, true);
     defer std.fs.cwd().deleteFile("test_tree") catch {};
 
     var io = try IO.init(128, 0);
     defer io.deinit();
 
-    var storage = try Storage.init(&io, config.journal_size_max, storage_fd);
+    var storage = try Storage.init(&io, storage_fd);
     defer storage.deinit();
 
     const Key = CompositeKey(u128);
@@ -2481,6 +2590,10 @@ pub fn main() !void {
     _ = tree.manifest.lookup;
     _ = tree.flush;
     _ = Tree.Table.filter_blocks_used;
+    _ = tree.manifest.insert_tables;
+    _ = Tree.Compaction.tick_io;
+    _ = Tree.Compaction.tick_cpu;
+    _ = Tree.Compaction.tick_cpu_merge;
 
     std.debug.print("table_count_max={}\n", .{table_count_max});
 }
