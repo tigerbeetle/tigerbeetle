@@ -22,6 +22,7 @@ void onGoPacketCompletion(
 */
 import "C"
 import (
+	e "errors"
 	"github.com/coilhq/tigerbeetle_go/pkg/errors"
 	"github.com/coilhq/tigerbeetle_go/pkg/types"
 	"strings"
@@ -36,6 +37,7 @@ type Client interface {
 	CommitTransfers(commits []types.Commit) ([]types.EventResult, error)
 	LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
 	LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
+	Nop() error
 	Close()
 }
 
@@ -140,8 +142,9 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 		fallthrough
 	case C.TB_OP_LOOKUP_TRANSFERS:
 		return unsafe.Sizeof(types.Uint128{})
+	default:
+		return 0
 	}
-	panic("invalid tigerbeetle operation")
 }
 
 func getResultSize(op C.TB_OPERATION) uintptr {
@@ -156,8 +159,9 @@ func getResultSize(op C.TB_OPERATION) uintptr {
 		return unsafe.Sizeof(types.Account{})
 	case C.TB_OP_LOOKUP_TRANSFERS:
 		return unsafe.Sizeof(types.Transfer{})
+	default:
+		return 0
 	}
-	panic("invalid tigerbeetle operation")
 }
 
 func (c *c_client) doRequest(
@@ -208,7 +212,9 @@ func (c *c_client) doRequest(
 		case C.TB_PACKET_TOO_MUCH_DATA:
 			return 0, errors.ErrMaximumBatchSizeExceeded{}
 		case C.TB_PACKET_INVALID_OPERATION:
-			panic("unreachable") // we control what C.TB_OPERATION is given
+			// we control what C.TB_OPERATION is given
+			// but allow an invalid opcode to be passed to emulate a client nop
+			return 0, errors.ErrInvalidOperation{}
 		case C.TB_PACKET_INVALID_DATA_SIZE:
 			panic("unreachable") // we contorl what type of data is given
 		default:
@@ -321,4 +327,20 @@ func (c *c_client) LookupTransfers(transferIDs []types.Uint128) ([]types.Transfe
 
 	resultCount := wrote / int(unsafe.Sizeof(types.Transfer{}))
 	return results[0:resultCount], nil
+}
+
+func (c *c_client) Nop() error {
+	const dataSize = 256
+	var dummyData [dataSize]C.uint8_t
+	ptr := unsafe.Pointer(&dummyData)
+
+	reservedOp := C.TB_OPERATION(0)
+	wrote, err := c.doRequest(reservedOp, 1, ptr, ptr)
+
+	if !e.Is(err, errors.ErrInvalidOperation{}) {
+		return err
+	}
+
+	_ = wrote
+	return nil
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"time"
 	"os/exec"
 	"testing"
 	"runtime"
@@ -71,9 +70,6 @@ func WithClient(s testing.TB, withClient func(Client)) {
 			s.Fatal(err)
 		}
 	})
-
-	// Wait a bit for the tigerbeetle cluster to start
-	time.Sleep(500 * time.Millisecond)
 
 	addresses := []string{"127.0.0.1:" + TIGERBEETLE_PORT}
 	maxConcurrency := uint(32)
@@ -362,5 +358,16 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, uint64(0), accountB.CreditsReserved)
 		assert.Equal(t, uint64(150), accountB.DebitsAccepted)
 		assert.Equal(t, uint64(0), accountB.DebitsReserved)
+	})
+}
+
+func BenchmarkNop(b *testing.B) {
+	WithClient(b, func(client Client) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if err := client.Nop(); err != nil {
+				b.Fatal(err)
+			}
+		}
 	})
 }
