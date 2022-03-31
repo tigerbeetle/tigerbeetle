@@ -1,12 +1,13 @@
 package tigerbeetle_go
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"os"
-	"bytes"
 	"os/exec"
 	"testing"
+	"runtime"
 
 	"github.com/coilhq/tigerbeetle_go/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -26,6 +27,19 @@ func toU128(value string) *types.Uint128 {
 }
 
 func TestClient(s *testing.T) {
+	var tigerbeetlePath string
+	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" {
+		tigerbeetlePath = "./pkg/native/x86_64-windows/tigerbeetle.exe"
+	} else if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		tigerbeetlePath = "./pkg/native/x86_64-linux/tigerbeetle"
+	} else if runtime.GOOS == "darwin" && runtime.GOARCH == "amd64" {
+		tigerbeetlePath = "./pkg/native/x86_64-macos/tigerbeetle"
+	} else if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		tigerbeetlePath = "./pkg/native/aarch64-macos/tigerbeetle"
+	} else {
+		panic("tigerbeetle was not built for your platform")
+	}
+
 	replicaArg := "--replica=0"
 	directoryArg := "--directory=."
 	addressArg := "--addresses=" + TIGERBEETLE_PORT
@@ -34,7 +48,7 @@ func TestClient(s *testing.T) {
 	fileName := "./cluster_0000000000_replica_000.tigerbeetle"
 	_ = os.Remove(fileName)
 
-	tbInit := exec.Command("./tb", "init", clusterArg, replicaArg, directoryArg)
+	tbInit := exec.Command(tigerbeetlePath, "init", clusterArg, replicaArg, directoryArg)
 	var tbErr bytes.Buffer
 	tbInit.Stdout = &tbErr
 	tbInit.Stderr = &tbErr
@@ -47,7 +61,7 @@ func TestClient(s *testing.T) {
 		_ = os.Remove(fileName)
 	})
 
-	tbStart := exec.Command("./tb", "start", clusterArg, replicaArg, addressArg, directoryArg)
+	tbStart := exec.Command(tigerbeetlePath, "start", clusterArg, replicaArg, addressArg, directoryArg)
 	if err := tbStart.Start(); err != nil {
 		s.Fatal(err)
 	}
