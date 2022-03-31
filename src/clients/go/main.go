@@ -2,14 +2,14 @@ package tigerbeetle_go
 
 /*
 #cgo CFLAGS: -g -Wall
-#cgo darwin,arm64 LDFLAGS: ${SRCDIR}/pkg/tb_client/aarch64-macos/libtb_client.a -ldl -lm
-#cgo darwin,amd64 LDFLAGS: ${SRCDIR}/pkg/tb_client/x86_64-macos/libtb_client.a -ldl -lm
-#cgo linux,amd64 LDFLAGS: ${SRCDIR}/pkg/tb_client/x86_64-linux/libtb_client.a -ldl -lm
-#cgo windows,amd64 LDFLAGS: ${SRCDIR}/pkg/tb_client/x86_64-windows/libtb_client.lib -lm -lws2_32
+#cgo darwin,arm64 LDFLAGS: ${SRCDIR}/pkg/native/aarch64-macos/libtb_client.a -ldl -lm
+#cgo darwin,amd64 LDFLAGS: ${SRCDIR}/pkg/native/x86_64-macos/libtb_client.a -ldl -lm
+#cgo linux,amd64 LDFLAGS: ${SRCDIR}/pkg/native/x86_64-linux/libtb_client.a -ldl -lm
+#cgo windows,amd64 LDFLAGS: ${SRCDIR}/pkg/native/x86_64-windows/libtb_client.lib -lm -lws2_32
 
 #include <stdlib.h>
 #include <string.h>
-#include "./tigerbeetle/src/c/tb_client.h"
+#include "./pkg/native/tb_client.h"
 
 typedef const uint8_t* tb_result_bytes_t;
 void onGoPacketCompletion(
@@ -22,10 +22,10 @@ void onGoPacketCompletion(
 */
 import "C"
 import (
-	"unsafe"
-	"strings"
-	"github.com/coilhq/tigerbeetle_go/pkg/types"
 	"github.com/coilhq/tigerbeetle_go/pkg/errors"
+	"github.com/coilhq/tigerbeetle_go/pkg/types"
+	"strings"
+	"unsafe"
 )
 
 ///////////////////////////////////////////////////////////////
@@ -42,25 +42,25 @@ type Client interface {
 type request struct {
 	packet *C.tb_packet_t
 	result unsafe.Pointer
-	ready chan struct{}
+	ready  chan struct{}
 }
 
 type c_client struct {
-	tb_client C.tb_client_t
+	tb_client    C.tb_client_t
 	max_requests uint32
-	requests chan *request
+	requests     chan *request
 }
 
 func NewClient(
-	clusterID uint32, 
-	addresses []string, 
+	clusterID uint32,
+	addresses []string,
 	maxConcurrency uint,
 ) (Client, error) {
 	// Cap the maximum amount of packets
 	if maxConcurrency > 4096 {
 		maxConcurrency = 4096
 	}
-	
+
 	// Allocate a cstring of the addresses joined with ","
 	addresses_raw := strings.Join(addresses[:], ",")
 	c_addresses := C.CString(addresses_raw)
@@ -82,7 +82,7 @@ func NewClient(
 	)
 
 	if status != C.TB_STATUS_SUCCESS {
-		switch (status) {
+		switch status {
 		case C.TB_STATUS_UNEXPECTED:
 			return nil, errors.ErrUnexpected{}
 		case C.TB_STATUS_OUT_OF_MEMORY:
@@ -99,26 +99,26 @@ func NewClient(
 	}
 
 	c := &c_client{
-		tb_client: tb_client,
+		tb_client:    tb_client,
 		max_requests: uint32(maxConcurrency),
-		requests: make(chan *request, int(maxConcurrency)),
+		requests:     make(chan *request, int(maxConcurrency)),
 	}
 
 	// Fill the client requests with available packets we received on creation
 	for packet := packets.head; packet != nil; packet = packet.next {
 		c.requests <- &request{
 			packet: packet,
-			ready: make(chan struct{}),
+			ready:  make(chan struct{}),
 		}
 	}
-	
+
 	return c, nil
 }
 
 func (c *c_client) Close() {
 	// Consume all requests available (waits for pending ones to complete)
 	for i := 0; i < int(c.max_requests); i++ {
-		req := <- c.requests
+		req := <-c.requests
 		_ = req
 	}
 
@@ -129,7 +129,7 @@ func (c *c_client) Close() {
 }
 
 func getEventSize(op C.TB_OPERATION) uintptr {
-	switch (op) {
+	switch op {
 	case C.TB_OP_CREATE_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
 	case C.TB_OP_CREATE_TRANSFERS:
@@ -145,7 +145,7 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 }
 
 func getResultSize(op C.TB_OPERATION) uintptr {
-	switch (op) {
+	switch op {
 	case C.TB_OP_CREATE_ACCOUNTS:
 		fallthrough
 	case C.TB_OP_CREATE_TRANSFERS:
@@ -172,7 +172,7 @@ func (c *c_client) doRequest(
 
 	// Get (and possibly wait) for a request to use.
 	// Returns false if the client was Close()'d.
-	req, isOpen := <- c.requests
+	req, isOpen := <-c.requests
 	if !isOpen {
 		return 0, errors.ErrClientClosed{}
 	}
@@ -195,16 +195,16 @@ func (c *c_client) doRequest(
 	C.tb_client_submit(c.tb_client, &list)
 
 	// Wait for the request to complete.
-	<- req.ready
+	<-req.ready
 	status := C.TB_PACKET_STATUS(req.packet.status)
 	wrote := int(req.packet.data_size)
 
 	// Free the request for other goroutines to use.
 	c.requests <- req
-	
+
 	// Handle packet error
 	if status != C.TB_PACKET_OK {
-		switch (status) {
+		switch status {
 		case C.TB_PACKET_TOO_MUCH_DATA:
 			return 0, errors.ErrMaximumBatchSizeExceeded{}
 		case C.TB_PACKET_INVALID_OPERATION:
@@ -236,16 +236,16 @@ func onGoPacketCompletion(
 	if result_len > 0 && result_ptr != nil {
 		// Make sure the completion handler is giving us valid data
 		resultSize := C.uint32_t(getResultSize(op))
-		if result_len % resultSize != 0 {
+		if result_len%resultSize != 0 {
 			panic("invalid result_len:  misaligned for the event")
 		}
 
 		// Make sure the amount of results at least matches the amount of requests
 		count := packet.data_size / C.uint32_t(getEventSize(op))
-		if count * resultSize < result_len {
+		if count*resultSize < result_len {
 			panic("invalid result_len: implied multiple results per event")
 		}
-		
+
 		// Write the result data into the request's result
 		if req.result != nil {
 			wrote = result_len
@@ -275,7 +275,7 @@ func (c *c_client) doCreate(
 	return results[0:resultCount], nil
 }
 
-func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.EventResult, error)  {
+func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.EventResult, error) {
 	return c.doCreate(C.TB_OP_CREATE_ACCOUNTS, unsafe.Pointer(&accounts[0]), len(accounts))
 }
 
