@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"time"
 	"os/exec"
 	"testing"
 	"runtime"
@@ -22,11 +23,10 @@ func toU128(value string) *types.Uint128 {
 	src := []byte(value)
 	dst := new(types.Uint128)
 	hex.Encode(dst[:], src)
-
 	return dst
 }
 
-func TestClient(s *testing.T) {
+func WithClient(s testing.TB, withClient func(Client)) {
 	var tigerbeetlePath string
 	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" {
 		tigerbeetlePath = "./pkg/native/x86_64-windows/tigerbeetle.exe"
@@ -72,6 +72,9 @@ func TestClient(s *testing.T) {
 		}
 	})
 
+	// Wait a bit for the tigerbeetle cluster to start
+	time.Sleep(500 * time.Millisecond)
+
 	addresses := []string{"127.0.0.1:" + TIGERBEETLE_PORT}
 	maxConcurrency := uint(32)
 	client, err := NewClient(TIGERBEETLE_CLUSTER_ID, addresses, maxConcurrency)
@@ -83,6 +86,16 @@ func TestClient(s *testing.T) {
 		client.Close()
 	})
 
+	withClient(client)
+}
+
+func TestClient(s *testing.T) {
+	WithClient(s, func(client Client) {
+		doTestClient(s, client)
+	})
+}
+
+func doTestClient(s *testing.T, client Client) {
 	accountA := types.Account{
 		ID:   *toU128("a"),
 		Unit: 1,
