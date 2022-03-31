@@ -1,7 +1,11 @@
 package tigerbeetle_go
 
 /*
-#cgo LDFLAGS: -L. -ltb_client
+#cgo CFLAGS: -g -Wall
+#cgo linux,amd64 LDFLAGS: ${SRCDIR}/tb_client/x86_64-linux/libtb_client.a -ldl -lm
+#cgo darwin,amd64 LDFLAGS: ${SRCDIR}/tb_client/aarch64-macos/libtb_client.a -ldl -lm
+#cgo darwin,arm64 LDFLAGS: ${SRCDIR}/tb_client/x86_64-macos/libtb_client.a -ldl -lm
+#cgo windows,amd64 LDFLAGS: ${SRCDIR}/native/x86_64-windows/libtb_client.a -lm -lws2_32
 
 #include <stdlib.h>
 #include <string.h>
