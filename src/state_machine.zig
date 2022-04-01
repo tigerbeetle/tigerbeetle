@@ -244,10 +244,10 @@ pub const StateMachine = struct {
             switch (operation) {
                 .create_accounts => self.create_account_rollback(event),
                 .create_transfers => {
-                    if (event.flags.pending) {
+                    if (event.pending_id > 0) {
                         self.posted_transfer_rollback(event);
                     } else {
-                        self.create_transfer_rollback(event);
+                        self.transfer_rollback(event);
                     }
                 },
                 else => unreachable,
@@ -374,10 +374,34 @@ pub const StateMachine = struct {
             assert(dr.debits_exceed_credits(0) == .ok);
             assert(cr.credits_exceed_debits(0) == .ok);
 
+            const d_acc_id = if (t.debit_account_id == 0) lookup.debit_account_id else t.debit_account_id;
+            if (t.debit_account_id != d_acc_id) return .exists_with_different_debit_account_id;
+
+            const c_acc_id = if (t.credit_account_id == 0) lookup.credit_account_id else t.credit_account_id;
+            if (t.credit_account_id != c_acc_id) return .exists_with_different_credit_account_id;
+
+            const amnt = if (t.amount == 0) lookup.amount else t.amount;
+            if (amnt > lookup.amount) return .post_amount_exceeds_pending_amount; //TODO @jason, test for this
+
             // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-            const insert = self.posted.getOrPutAssumeCapacity(t.id);
+            const insert = self.posted.getOrPutAssumeCapacity(t.pending_id);
             assert(!insert.found_existing);
-            insert.value_ptr.* = t;
+
+            insert.value_ptr.* = Transfer{
+                .id = t.id,
+                .debit_account_id = d_acc_id,
+                .credit_account_id = c_acc_id,
+                .user_data = t.user_data,
+                .reserved = t.reserved,
+                .ledger = t.ledger,
+                .code = t.code,
+                .pending_id = t.pending_id,
+                .timeout = t.timeout,
+                .timestamp = t.timestamp,
+                .flags = t.flags,
+                .amount = amnt,
+            };
+
             dr.debits_pending -= lookup.amount;
             cr.credits_pending -= lookup.amount;
             if (!t.flags.void_pending_transfer) {
@@ -458,13 +482,12 @@ pub const StateMachine = struct {
         }
     }
 
-    fn create_transfer_rollback(self: *StateMachine, t: Transfer) void {
+    fn transfer_rollback(self: *StateMachine, t: Transfer) void {
         var dr = self.get_account(t.debit_account_id).?;
         var cr = self.get_account(t.credit_account_id).?;
         if (t.flags.pending) {
             dr.debits_pending -= t.amount;
             cr.credits_pending -= t.amount;
-            //TODO @jason Confirm: assert(self.pending_id_to_id.remove(t.user_data));
         } else {
             dr.debits_posted -= t.amount;
             cr.credits_posted -= t.amount;
@@ -473,18 +496,17 @@ pub const StateMachine = struct {
     }
 
     fn posted_transfer_rollback(self: *StateMachine, pt: Transfer) void {
-        assert(self.get_posted(pt.id) != null);
+        //TODO @jason remove std.debug.print("ROLLING-BACK -> {any}.", .{pt});
 
-        const t = self.get_transfer(pt.pending_id).?;
-        const dr = self.get_account(t.debit_account_id).?;
-        const cr = self.get_account(t.credit_account_id).?;
-        dr.debits_pending += t.amount;
-        cr.credits_pending += t.amount;
+        const dr = self.get_account(pt.debit_account_id).?;
+        const cr = self.get_account(pt.credit_account_id).?;
+        dr.debits_pending += pt.amount;
+        cr.credits_pending += pt.amount;
         if (!pt.flags.void_pending_transfer) {
-            dr.debits_posted -= t.amount;
-            cr.credits_posted -= t.amount;
+            dr.debits_posted -= pt.amount;
+            cr.credits_posted -= pt.amount;
         }
-        assert(self.posted.remove(pt.id));
+        assert(self.posted.remove(pt.pending_id));
     }
 
     /// This is our core private method for changing balances.
@@ -502,14 +524,9 @@ pub const StateMachine = struct {
         return self.transfers.getPtr(id);
     }
 
-    fn get_transfer_by_user_data(self: *StateMachine, user_data: u128) ?*Transfer {
-        const ud_to_id = self.pending_id_to_id.getPtr(user_data) orelse return null;
-        return self.transfers.getPtr(ud_to_id.*);
-    }
-
     /// See the comment for get_account().
-    fn get_posted(self: *StateMachine, user_data: u128) ?*Transfer {
-        return self.posted.getPtr(user_data);
+    fn get_posted(self: *StateMachine, pending_id: u128) ?*Transfer {
+        return self.posted.getPtr(pending_id);
     }
 };
 
@@ -1077,15 +1094,7 @@ test "create/lookup/rollback transfers" {
     for (vectors) |vector, i| {
         const create_result = state_machine.create_transfer(vector.object);
         testing.expectEqual(vector.result, create_result) catch |err| {
-            std.debug.print("VECTOR-FAILURE-> Index[{d}] Expected[{s}:{s}] -> \n\n-----\n{any}\n----- \n ERR({d}:{d}): -> \n\n\t{any}.", .{
-                i,
-                vector.result,
-                create_result,
-                vector.object,
-                i,
-                vector.object.id,
-                err,
-            });
+            test_debug_vector_create(Vector, CreateTransferResult, i, vector, create_result, err);
             return err;
         };
         // Fetch the successfully created transfer to ensure it is persisted correctly:
@@ -1106,7 +1115,7 @@ test "create/lookup/rollback transfers" {
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_posted);
 
     // Rollback transfer with id [12], amount of 10:
-    state_machine.create_transfer_rollback(state_machine.get_transfer(vectors[11].object.id).?.*);
+    state_machine.transfer_rollback(state_machine.get_transfer(vectors[11].object.id).?.*);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_posted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_posted);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_posted);
@@ -1114,7 +1123,7 @@ test "create/lookup/rollback transfers" {
     try testing.expect(state_machine.get_transfer(vectors[11].object.id) == null);
 
     // Rollback transfer with id [15], amount of 10:
-    state_machine.create_transfer_rollback(state_machine.get_transfer(vectors[22].object.id).?.*);
+    state_machine.transfer_rollback(state_machine.get_transfer(vectors[22].object.id).?.*);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.debits_pending);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.credits_pending);
     try testing.expect(state_machine.get_transfer(vectors[22].object.id) == null);
@@ -1245,7 +1254,7 @@ test "create/lookup/rollback 2-phase transfers" {
     const timestamp: u64 = (state_machine.commit_timestamp + 1);
     const vectors = [_]Vector{
         Vector{
-            .result = .reserved_field,
+            .result = .transfer_not_pending,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 9,
                 .pending_id = 1,
@@ -1273,8 +1282,7 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         Vector{
-            //TODO @jason -> .result = .transfer_not_pending,
-            .result = .transfer_not_found,
+            .result = .transfer_not_pending,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 12,
                 .pending_id = 1,
@@ -1287,6 +1295,9 @@ test "create/lookup/rollback 2-phase transfers" {
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 13,
                 .pending_id = 2,
+                .debit_account_id = 1,
+                .credit_account_id = 2,
+                .amount = 15,
                 .timestamp = timestamp,
                 .flags = .{ .post_pending_transfer = true },
             }),
@@ -1314,6 +1325,9 @@ test "create/lookup/rollback 2-phase transfers" {
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 16,
                 .pending_id = 3,
+                .amount = 15,
+                .debit_account_id = 1,
+                .credit_account_id = 2,
                 .timestamp = timestamp + 1,
                 .flags = .{ .void_pending_transfer = true },
             }),
@@ -1334,38 +1348,6 @@ test "create/lookup/rollback 2-phase transfers" {
                 .pending_id = 4,
                 .timestamp = timestamp + 2,
                 .flags = .{ .post_pending_transfer = true },
-            }),
-        },
-        Vector{
-            .result = .condition_requires_preimage,
-            .object = std.mem.zeroInit(Transfer, .{
-                .id = 19,
-                .pending_id = 5,
-                .timestamp = timestamp + 2,
-                .flags = .{ .post_pending_transfer = true },
-            }),
-        },
-        Vector{
-            .result = .preimage_invalid,
-            .object = std.mem.zeroInit(Transfer, .{
-                .id = 20,
-                .pending_id = 5,
-                .timestamp = timestamp + 2,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
-                .reserved = 0,
-            }),
-        },
-        Vector{
-            .result = .preimage_requires_condition,
-            .object = std.mem.zeroInit(Transfer, .{
-                .id = 21,
-                .pending_id = 6,
-                .timestamp = timestamp + 2,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
             }),
         },
         Vector{
@@ -1393,10 +1375,20 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expectEqual(@as(u64, 15), account_2_before.credits_posted);
     try testing.expectEqual(@as(u64, 75), account_2_before.credits_pending);
 
-    for (vectors) |vector| {
-        try testing.expectEqual(vector.result, state_machine.create_transfer(vector.object)); //2-phase commit
+    for (vectors) |vector, i| {
+        const create_result = state_machine.create_transfer(vector.object); //2-phase post(commit)
+        testing.expectEqual(vector.result, create_result) catch |err| {
+            test_debug_vector_create(Vector, CreateTransferResult, i, vector, create_result, err);
+            return err;
+        };
+
         if (vector.result == .ok) {
-            try testing.expectEqual(vector.object, state_machine.get_posted(vector.object.user_data).?.*);
+            const fetched_posted = state_machine.get_posted(vector.object.pending_id).?.*;
+            testing.expectEqual(vector.object, fetched_posted) catch |err| {
+                test_debug_vector_create(Vector, Transfer, i, vector, fetched_posted, err);
+                return err;
+            };
+            //try testing.expectEqual(vector.object, fetched_posted);
         }
     }
 
@@ -1424,7 +1416,7 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expectEqual(
         state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
             .id = 23,
-            .user_data = 7,
+            .pending_id = 7,
             .timestamp = timestamp + 2,
             .flags = .{ .post_pending_transfer = true },
         })),
@@ -1435,7 +1427,7 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expectEqual(
         state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
             .id = 24,
-            .user_data = 7,
+            .pending_id = 7,
             .timestamp = timestamp + 2,
             .flags = .{ .post_pending_transfer = true },
         })),
@@ -1446,15 +1438,17 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expectEqual(
         state_machine.create_transfer(std.mem.zeroInit(Transfer, .{ //2-phase commit
             .id = 25,
-            .user_data = 8,
+            .pending_id = 8,
             .amount = 0,
+            .debit_account_id = 11,
+            .credit_account_id = 12,
             .timestamp = timestamp + 2,
             .flags = .{ .post_pending_transfer = true },
         })),
         .ok,
     );
 
-    // Rollback [id=2] not rejected:
+    // Rollback [id=13,pending_id=2] not rejected:
     state_machine.posted_transfer_rollback(vectors[4].object);
 
     // Account 1:
@@ -1520,6 +1514,18 @@ test "credit/debit limit overflows " {
 
     try testing.expect(acc_debit_not_exceed_credit.debits_exceed_credits(std.math.maxInt(u64)) == .amount_overflow);
     try testing.expect(acc_credit_not_exceed_debit.credits_exceed_debits(std.math.maxInt(u64)) == .amount_overflow);
+}
+
+fn test_debug_vector_create(comptime vector_type: type, comptime create_result_type: type, i: usize, vector: vector_type, create_result: create_result_type, err: anyerror) void {
+    std.debug.print("VECTOR-FAILURE-> Index[{d}] Expected[{s}:{s}] -> \n\n-----\n{any}\n----- \n ERR({d}:{d}): -> \n\n\t{any}.", .{
+        i,
+        vector.result,
+        create_result,
+        vector.object,
+        i,
+        vector.object.id,
+        err,
+    });
 }
 
 fn test_routine_zeroed(comptime len: usize) !void {
