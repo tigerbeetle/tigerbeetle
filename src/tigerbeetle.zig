@@ -159,7 +159,8 @@ pub const CreateTransferResult = enum(u32) {
     debit_amount_not_pending,
     credit_amount_not_pending,
     pending_id_should_be_zero,
-    pending_id_is_zero
+    pending_id_is_zero,
+    post_amount_exceeds_pending_amount
 };
 
 pub const CreateAccountsResult = packed struct {
