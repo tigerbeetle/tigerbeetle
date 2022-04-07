@@ -590,7 +590,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                     .free, .accepting => unreachable,
                 }
                 if (connection.send_queue.full()) {
-                    log.info("message queue for peer {} full, dropping {s} message operation={s} client={} op={} checksum={} parent={} context={}", .{
+                    log.info("message queue for peer {} full, dropping {s} message operation={s} client={} op={} checksum={} parent={} context={} connection.state={s}", .{
                         connection.peer,
                         @tagName(message.header.command),
                         @tagName(message.header.operation),
@@ -599,6 +599,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                         message.header.checksum,
                         message.header.parent,
                         message.header.context,
+                        @tagName(connection.state),
                     });
                     {
                         var iterator = connection.send_queue.iterator();
