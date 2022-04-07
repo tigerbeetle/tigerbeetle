@@ -590,10 +590,30 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                     .free, .accepting => unreachable,
                 }
                 if (connection.send_queue.full()) {
-                    log.info("message queue for peer {} full, dropping {s} message", .{
+                    log.info("message queue for peer {} full, dropping {s} message operation={s} client={} op={} checksum={} parent={} context={}", .{
                         connection.peer,
                         @tagName(message.header.command),
+                        @tagName(message.header.operation),
+                        message.header.client,
+                        message.header.op,
+                        message.header.checksum,
+                        message.header.parent,
+                        message.header.context,
                     });
+                    {
+                        var iterator = connection.send_queue.iterator();
+                        while (iterator.next()) |m| {
+                            log.info("queued: command={s} operation={s} client={} op={} checksum={} parent={} context={}", .{
+                                @tagName(m.header.command),
+                                @tagName(m.header.operation),
+                                m.header.client,
+                                m.header.op,
+                                m.header.checksum,
+                                m.header.parent,
+                                m.header.context,
+                            });
+                        }
+                    }
                     return;
                 }
                 connection.send_queue.push_assume_capacity(message.ref());
