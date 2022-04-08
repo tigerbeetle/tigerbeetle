@@ -18,21 +18,22 @@ const log = std.log.scoped(.replica);
 pub const Status = enum {
     normal,
     view_change,
-    // Recovery:
+    // Recovery (for replica_count≠1):
     //
     // 1. At replica start: `status=recovering` and `journal.recovered=false`
     // 2. Load the WAL. Mark questionable entries as faulty.
     // 3. If the WAL has no entries (besides the initial commit), skip to step 5 with view 0.
     // 4. Run VSR recovery protocol:
-    //   a. Send a `recovery` message to every replica (except self).
-    //   b. Wait for f+1 `recovery_response` messages.
-    //      Each `recovery_response` includes the current view number.
-    //      Each `recovery_response` must include a nonce matching the `recovery` message.
-    //   c. Wait for a `recovery_response` from the leader of the highest known view.
+    //    a. Send a `recovery` message to every replica (except self).
+    //    b. Wait for f+1 `recovery_response` messages.
+    //       Each `recovery_response` includes the current view number.
+    //       Each `recovery_response` must include a nonce matching the `recovery` message.
+    //    c. Wait for a `recovery_response` from the leader of the highest known view.
     // 5. Transition to `status=normal` with the discovered view number.
-    //    * Set `op` to the highest op in the WAL.
+    //    * Set `op` to the highest op in the leader's recovery response.
+    //    * Repair faulty messages.
     //    * Commit to the discovered `commit_max`.
-    //    * Repair any faulty messages.
+    //    * Set `state_machine.{prepare,commit}_timeout` to TODO.
     //
     // TODO document snapshot recovery in this progression
     recovering,
@@ -63,6 +64,8 @@ const ClientTableEntry = struct {
     /// The reply sent to the client's latest committed request.
     reply: *Message,
 };
+
+const Nonce = u128;
 
 const Prepare = struct {
     /// The current prepare message (used to cross-check prepare_ok messages, and for resending).
@@ -136,6 +139,35 @@ pub fn Replica(
         /// The op number assigned to the most recently prepared operation:
         op: u64,
 
+        /// The op of the highest checkpointed message.
+        // TODO Update this to use LSM storage.
+        // TODO Refuse to store/ack any op>op_checkpoint+journal_slot_count.
+        // TODO enforce invariant op≥op_checkpoint
+        op_checkpoint: u64 = 0,
+
+        /// After recovering the WAL, there are 2 possible outcomes:
+        ///
+        /// * All entries valid. The highest op is certain, and safe to set as `replica.op`.
+        /// * One or more entries are faulty. The highest op isn't certain — it may be one of the
+        ///   broken entries.
+        ///
+        /// The replica must refrain from repairing any faulty slots until the highest op is known.
+        /// Otherwise, if we were to repair a slot while uncertain of `replica.op`:
+        ///
+        /// * we may nack an op that we shouldn't, or
+        /// * we may replace a prepared op that we were guaranteeing for the primary, potentially
+        ///   forking the log.
+        ///
+        /// The replica may learn its op (set `op_known` to true) by any of the following
+        /// (in approximate descending order of likelihood):
+        ///
+        /// * recovering an intact journal (faulty.count=0)
+        /// * receiving a `prepare` that advances the op
+        /// * participating in a view change
+        /// * the `recovery_response`'s headers repaired all faulty slots
+        /// * receiving a `commit` with an `op` we have
+        op_known: bool = false,
+
         /// The op number of the latest committed and executed operation (according to the replica):
         /// The replica may have to wait for repairs to complete before commit_min reaches commit_max.
         commit_min: u64,
@@ -152,6 +184,9 @@ pub fn Replica(
 
         /// The leader's pipeline of inflight prepares waiting to commit in FIFO order.
         /// This allows us to pipeline without the complexity of out-of-order commits.
+        ///
+        /// After a view change, the old leader's pipeline is left untouched so that it is able to
+        /// help the new leader repair.
         pipeline: RingBuffer(Prepare, config.pipeline_max) = .{},
 
         /// In some cases, a replica may send a message to itself. We do not submit these messages
@@ -208,11 +243,11 @@ pub fn Replica(
         /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
         repair_timeout: Timeout,
 
-        /// The number of ticks before attempting to send another set of "recovery" messages.
+        /// The number of ticks before attempting to send another set of `recovery` messages.
         recovery_timeout: Timeout,
 
-        /// The nonce of the latest batch of "recovery" messages.
-        recovery_nonce: ?u64 = null,
+        /// The nonce of the `recovery` messages.
+        recovery_nonce: Nonce,
 
         /// Used to provide deterministic entropy to `choose_any_other_replica()`.
         /// Incremented whenever `choose_any_other_replica()` is called.
@@ -290,25 +325,31 @@ pub fn Replica(
             init_prepare.set_checksum_body(&[0]u8{});
             init_prepare.set_checksum();
 
+            var clock = try Clock.init(
+                allocator,
+                replica_count,
+                replica,
+                time,
+            );
+            errdefer clock.deinit(allocator);
+
+            const recovery_nonce = blk: {
+                var nonce: [@sizeOf(Nonce)]u8 = undefined;
+                var hasher = std.crypto.hash.Blake3.init(.{});
+                hasher.update(std.mem.asBytes(&clock.monotonic()));
+                hasher.update(&[_]u8{replica});
+                hasher.final(nonce[0..nonce.len]);
+                break :blk @bitCast(Nonce, nonce);
+            };
+
             var self = Self{
                 .cluster = cluster,
                 .replica_count = replica_count,
                 .replica = replica,
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
-                .clock = try Clock.init(
-                    allocator,
-                    replica_count,
-                    replica,
-                    time,
-                ),
-                .journal = try Journal.init(
-                    allocator,
-                    storage,
-                    replica,
-                    config.journal_slot_count,
-                    &init_prepare,
-                ),
+                .clock = clock,
+                .journal = try Journal.init(allocator, storage, replica),
                 .message_bus = message_bus,
                 .state_machine = state_machine,
                 .client_table = client_table,
@@ -355,8 +396,9 @@ pub fn Replica(
                 .recovery_timeout = Timeout{
                     .name = "recovery_timeout",
                     .id = replica,
-                    .after = 500,
+                    .after = 200,
                 },
+                .recovery_nonce = recovery_nonce,
                 .prng = std.rand.DefaultPrng.init(replica),
             };
 
@@ -378,7 +420,6 @@ pub fn Replica(
             // We must initialize timeouts here, not in tick() on the first tick, because on_message()
             // can race with tick()... before timeouts have been initialized:
             assert(self.status == .recovering);
-            self.recovery_timeout.start();
 
             return self;
         }
@@ -413,6 +454,10 @@ pub fn Replica(
             for (self.do_view_change_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
             }
+
+            for (self.recovery_response_from_other_replicas) |message| {
+                if (message) |m| self.message_bus.unref(m);
+            }
         }
 
         /// Time is measured in logical ticks that are incremented on every call to tick().
@@ -441,6 +486,7 @@ pub fn Replica(
                 } else if (self.journal.is_empty()) {
                     // The database is brand-new — no messages have ever been written.
                     // Transition immediately to normal mode; no need to run VSR recovery protocol.
+                    self.op_known = true;
                     self.transition_from_recovering_status(0);
                     assert(self.status == .normal);
                 } else {
@@ -475,11 +521,12 @@ pub fn Replica(
         /// Called by the MessageBus to deliver a message to the replica.
         pub fn on_message(self: *Self, message: *Message) void {
             assert(self.loopback_queue == null);
+            assert(message.references > 0);
 
-            log.debug("{}: on_message: view={} status={s} {}", .{
+            log.debug("{}: on_message: view={} status={} {}", .{
                 self.replica,
                 self.view,
-                @tagName(self.status),
+                self.status,
                 message.header,
             });
 
@@ -738,6 +785,7 @@ pub fn Replica(
             });
             assert(message.header.op == self.op + 1);
             self.op = message.header.op;
+            self.op_known = true;
             self.journal.set_header_as_dirty(message.header);
 
             self.replicate(message);
@@ -1053,6 +1101,9 @@ pub fn Replica(
             assert(self.op >= self.commit_max);
             assert(self.journal.header_with_op(self.op) != null);
 
+            // TODO Don't drop every message in the pipeline; some of them are useful.
+            self.reset_pipeline();
+
             // Start repairs according to the CTRL protocol:
             assert(!self.repair_timeout.ticking);
             self.repair_timeout.start();
@@ -1130,9 +1181,14 @@ pub fn Replica(
         /// TODO This is a work in progress (out of scope for the bounty)
         fn on_recovery(self: *Self, message: *const Message) void {
             if (self.status != .normal) {
-                log.debug("{}: on_recovery: ignoring ({})", .{ self.replica, self.status });
+                log.debug("{}: on_recovery: ignoring ({})", .{
+                    self.replica,
+                    self.status,
+                });
                 return;
             }
+
+            // TODO Do we need to check op_known here?
 
             if (message.header.replica == self.replica) {
                 log.warn("{}: on_recovery: ignoring (self)", .{self.replica});
@@ -1142,10 +1198,18 @@ pub fn Replica(
             const response = self.message_bus.get_message();
             defer self.message_bus.unref(response);
 
+            log.debug("{}: on_recovery (view={} op={} commit={} nonce={})", .{
+                self.replica,
+                self.view,
+                self.op,
+                self.commit_max,
+                message.header.context,
+            });
+
             response.header.* = .{
                 .command = .recovery_response,
                 .cluster = self.cluster,
-                .context = message.header.context,
+                .context = message.header.context, // Echo the request's nonce.
                 .replica = self.replica,
                 .view = self.view,
                 .op = self.op,
@@ -1184,27 +1248,84 @@ pub fn Replica(
         /// TODO This is a work in progress (out of scope for the bounty)
         fn on_recovery_response(self: *Self, message: *Message) void {
             if (self.status != .recovering) {
-                log.debug("{}: on_recovery_response: ignoring ({})", .{ self.replica, self.status });
+                log.debug("{}: on_recovery_response: ignoring ({})", .{
+                    self.replica,
+                    self.status,
+                });
                 return;
             }
 
             if (message.header.replica == self.replica) {
-                log.warn("{}: on_recovery: ignoring (self)", .{self.replica});
+                log.warn("{}: on_recovery_response: ignoring (self)", .{self.replica});
                 return;
             }
 
             if (message.header.context != self.recovery_nonce) {
-                log.warn("{}: on_recovery: ignoring incorrect nonce", .{self.replica});
+                log.warn("{}: on_recovery_response: ignoring incorrect nonce", .{self.replica});
                 return;
             }
+            // Recovery messages (with our nonce) aren't sent until after the journal is recovered.
+            assert(self.journal.recovered);
 
-            self.recovery_response_from_other_replicas[message.header.replica] = message.ref();
+            var responses: *QuorumMessages = &self.recovery_response_from_other_replicas;
+            if (responses[message.header.replica]) |existing| {
+                assert(message.header.replica == existing.header.replica);
+                if (existing.header.checksum == message.header.checksum) {
+                    // The response packet was repeated by the network; ignore it.
+                    log.debug("{}: on_recovery_response: ignoring (duplicate message)", .{ self.replica });
+                    return;
+                }
+
+                // We received a second (distinct) response from a replica. Possible causes:
+                // * We retried the `recovery` message, because we haven't receive a quorum yet.
+                // * The `recovery` message was duplicated/misdirected by the network, and the
+                //   receiver's state changed in the mean time.
+
+                if (message.header.view < existing.header.view or
+                    (message.header.view == existing.header.view and
+                     message.header.op < existing.header.op) or
+                    (message.header.view == existing.header.view and
+                     message.header.op == existing.header.op and
+                     message.header.commit < existing.header.commit))
+                {
+                    // The second message is actually older (reordered packets), so we can ignore it.
+                    log.debug("{}: on_recovery_response: ignoring outdated replica={} view={} op={} commit={}", .{
+                        self.replica,
+                        message.header.replica,
+                        message.header.view,
+                        message.header.op,
+                        message.header.commit,
+                    });
+                    return;
+                }
+
+                // The second message is newer than the first one.
+                assert(message.header.view >= existing.header.view);
+                assert(message.header.commit >= existing.header.commit);
+
+                log.debug("{}: on_recovery_response: replace replica={} view={}..{} op={}..{} commit={}..{}", .{
+                    self.replica,
+                    existing.header.replica,
+                    existing.header.view,
+                    message.header.view,
+                    existing.header.op,
+                    message.header.op,
+                    existing.header.commit,
+                    message.header.commit,
+                });
+                self.message_bus.unref(existing);
+                responses[message.header.replica] = null;
+            }
+
+            assert(responses[message.header.replica] == null);
+            responses[message.header.replica] = message.ref();
 
             // Await both:
             // * at least `f + 1` messages for quorum (not including ourself), and
             // * a response from the leader of the highest discovered view
-            const count = self.count_quorum(self.recovery_response_from_other_replicas,
-                .recovery_response, self.recovery_nonce.?);
+            const count = self.count_quorum(responses, .recovery_response, self.recovery_nonce);
+            assert(count <= self.replica_count - 1);
+
             const threshold = self.quorum_replication;
             if (count < threshold) {
                 log.debug("{}: on_recovery_response: waiting for quorum count={}",
@@ -1217,62 +1338,78 @@ pub fn Replica(
                 for (self.recovery_response_from_other_replicas) |response, replica| {
                     if (response == null) continue;
                     assert(replica != self.replica);
+                    assert(response.?.header.replica == replica);
+                    assert(response.?.header.context == self.recovery_nonce);
+
                     view = std.math.max(view, response.?.header.view);
                 }
                 break :blk view;
             };
 
-            const leader = self.leader_index(view);
-            const leader_response = self.recovery_response_from_other_replicas[leader];
+            const leader_replica = self.leader_index(view);
+            const leader_response = responses[leader_replica];
             if (leader_response == null) {
                 log.debug("{}: on_recovery_response: ignoring (awaiting response from leader of view={})",
                     .{ self.replica, view });
                 return;
             }
 
-            if (leader_response.?.view != view) {
+            if (leader_response.?.header.view != view) {
                 // The leader (according to the view quorum) isn't the leader (according to itself).
                 // The `recovery_timeout` will retry shortly with another round.
                 log.debug("{}: on_recovery_response: ignoring (leader has wrong view actual={} expect={})",
-                    .{ self.replica, leader_response.?.view, view });
+                    .{ self.replica, leader_response.?.header.view, view });
                 return;
             }
 
-            const op = blk: {
-                var op_max: u64 = 0;
-                for (self.journal.headers) |header| {
-                    if (header.command == .prepare) {
-                        op_max = std.math.max(op_max, header.op);
-                    }
-                }
-                break :blk op_max;
-            };
+            // This recovering→normal status transition occurs exactly once.
+            // All further `recovery_response` messages are ignored.
+
+            // TODO When the view number is recovered from the superblock (instead of VSR recovery
+            //   protocol), if the view number indicates that this replica is a leader, it must
+            //   transition to status=view_change instead of status=normal.
+
             const leader_headers = self.message_body_as_headers(leader_response.?);
             assert(leader_headers.len > 0);
 
-            // TODO if the view's primary is >1 WAL ahead of us, these headers could cause problems. We don't want to jump this far ahead to repair, but we still need to use the hash chain to figure out which headers to request. Maybe include our commit_min in the recovery (request) message so that the response can give more useful (i.e. older) headers.
-            for (leader_headers) |header| {
-                assert(header.command == .prepare);
-                if (self.journal.has(header)) {
-                    // We already know about this exact header.
-                } else {
-                    self.journal.set_header_as_dirty(header);
-                }
+            const commit = leader_response.?.header.commit;
+            {
+                var latest = Header.reserved();
+                set_latest_op(leader_headers, &latest);
+                assert(latest.op == leader_response.?.header.op);
+
+                self.set_latest_op_and_k(&latest, commit, "on_recovery_response");
+                assert(self.journal.header_with_op(self.op) != null);
             }
 
-            // This recovering→normal status transition occurs exactly once.
-            // Further `recovery_response` messages are ignored.
-            self.recovery_timeout.stop();
+            assert(self.status == .recovering);
             self.transition_from_recovering_status(view);
             assert(self.status == .normal);
             assert(self.follower());
 
-            self.op = op;
-            self.commit_ops(leader_response.?.header.commit_max);
+            // TODO if the view's primary is >1 WAL ahead of us, these headers could cause problems. We don't want to jump this far ahead to repair, but we still need to use the hash chain to figure out which headers to request. Maybe include our commit_min in the recovery (request) message so that the response can give more useful (i.e. older) headers.
+            for (leader_headers) |*header| {
+                _ = self.repair_header(header);
+            }
+            self.op_known = self.journal.faulty.count == 0;
+
+            log.debug("{}: on_recovery_response: responses={} view={} headers={}..{} commit={} dirty={} faulty={}", .{
+                self.replica,
+                count,
+                view,
+                leader_headers[leader_headers.len - 1].op,
+                leader_headers[0].op,
+                commit,
+                self.journal.dirty.count,
+                self.journal.faulty.count,
+            });
+
+            // TODO Set state machine timestamps.
+
+            self.commit_ops(commit);
             self.repair();
 
             self.reset_quorum_recovery_response();
-            self.recovery_nonce = null;
         }
 
         /// If the requested prepare has been guaranteed by this replica:
@@ -1289,48 +1426,69 @@ pub fn Replica(
 
             assert(self.status == .normal or self.status == .view_change);
             assert(message.header.view == self.view);
+            assert(self.replica_count > 1);
             assert(message.header.replica != self.replica);
 
             const op = message.header.op;
-            const slot = self.journal.slot_for_op(op).?;
+            const slot = self.journal.slot_for_op(op);
             var checksum: ?u128 = message.header.context;
             if (self.leader_index(self.view) == self.replica) {
                 if (checksum.? == 0) checksum = null;
-
-                // Try to serve the message directly from the pipeline.
-                // This saves us from going to disk. And we don't need to worry that the WAL's copy
-                // of an uncommitted prepare is lost/corrupted.
-                var it = self.pipeline.iterator();
-                while (it.next()) |prepare| {
-                    if (prepare.message.header.op != op) continue;
-                    self.send_message_to_replica(message.header.replica, prepare.message);
-                    return;
-                }
             } else {
                 // Only the leader may respond to `request_prepare` messages without a checksum.
                 if (checksum.? == 0) return;
             }
 
-            if (self.journal.prepare_checksums[slot.index]) |prepare_checksum| {
+            // Try to serve the message directly from the pipeline.
+            // This saves us from going to disk. And we don't need to worry that the WAL's copy
+            // of an uncommitted prepare is lost/corrupted.
+            var it = self.pipeline.iterator();
+            while (it.next()) |prepare| {
+                if (prepare.message.header.op == op and
+                    (checksum == null or checksum.? == prepare.message.header.checksum))
+                {
+                    log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
+                        self.replica,
+                        op,
+                        checksum,
+                    });
+                    self.send_message_to_replica(message.header.replica, prepare.message);
+                    return;
+                }
+            }
+
+            const prepare_checksum = self.journal.prepare_checksums[slot.index];
+            if (prepare_checksum != 0) {
                 // Consult `journal.prepare_checksums` (rather than `journal.headers`):
                 // the former may have the prepare we want — even if journal recovery marked the
                 // slot as faulty and left the in-memory header as reserved.
-                if (checksum == null || checksum == prepare_checksum) {
-
+                if (checksum == null or checksum.? == prepare_checksum) {
                     log.debug("{}: on_request_prepare: op={} checksum={} reading", .{
                         self.replica,
                         op,
-                        checksum_value,
+                        checksum,
                     });
 
-                    // TODO Do not reissue the read if we are already reading in order to send to
-                    // this particular destination replica.
-                    self.journal.read_prepare( // TODO right now this checks _exact_
-                        on_request_prepare_read,
-                        op,
-                        checksum_value,
-                        message.header.replica,
-                    );
+                    if (self.journal.header_with_op_and_checksum(op, checksum)) |_| {
+                        // Main path: the header for the target prepare is already in-memory.
+                        // This is preferrable to the `else` case since we have the prepare's
+                        // `header.size` in-memory, so the read can be (potentially) shorter.
+                        // TODO Do not reissue the read if we are already reading in order to send to
+                        // this particular destination replica.
+                        self.journal.read_prepare(
+                            on_request_prepare_read,
+                            op,
+                            prepare_checksum,
+                            message.header.replica,
+                        );
+                    } else {
+                        self.journal.read_prepare_without_header(
+                            on_request_prepare_read,
+                            op,
+                            prepare_checksum,
+                            message.header.replica,
+                        );
+                    }
 
                     // We have guaranteed the prepare (not safe to nack).
                     // Our copy may or may not be valid, but we will try to read & forward it.
@@ -1341,10 +1499,11 @@ pub fn Replica(
             {
                 const slot_clean = !self.journal.dirty.bit(slot);
                 const slot_faulty = self.journal.faulty.bit(slot);
-                if (self.journal.has(message.header)) {
+                if (self.journal.header_with_op_and_checksum(message.header.op, checksum)) |_| {
                     // Either:
                     // * We have guaranteed the prepare and our copy is clean (not safe to nack).
-                    // * We have guaranteed the prepare but our copy is faulty (not safe to nack).
+                    // * We have guaranteed the prepare but our copy is faulty (not safe to nack —
+                    //   we don't know what op we prepared in this slot).
                     if (slot_clean or slot_faulty) return;
                     // We know of the prepare but we have yet to write or guarantee it (safe to nack).
                     // Continue through below...
@@ -1365,11 +1524,10 @@ pub fn Replica(
             // they should also be in view change status, waiting for the new primary to start
             // the view.
             if (self.status == .view_change) {
-                // TODO should a replica be allowed to nack messages from status=recovering when journal.recovered=true?
                 assert(message.header.replica == self.leader_index(self.view));
                 assert(checksum != null);
 
-                if (self.journal.header_with_op_and_checksum(op, checksum)) |entry| {
+                if (self.journal.header_with_op_and_checksum(op, checksum)) |_| {
                     assert(self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot));
                 }
 
@@ -1531,10 +1689,11 @@ pub fn Replica(
                 return;
             }
 
-            log.debug("{}: on_nack_prepare: quorum_replication={} threshold={}", .{
+            log.debug("{}: on_nack_prepare: quorum_replication={} threshold={} op={}", .{
                 self.replica,
                 self.quorum_replication,
                 threshold,
+                op,
             });
 
             // We should never expect to receive a nack from ourselves:
@@ -1550,7 +1709,7 @@ pub fn Replica(
 
             assert(count == threshold);
             assert(!self.nack_prepare_from_other_replicas.isSet(self.replica));
-            log.debug("{}: on_nack_prepare: quorum received", .{self.replica});
+            log.debug("{}: on_nack_prepare: quorum received op={}", .{ self.replica, op });
 
             self.discard_uncommitted_ops_from(op, checksum);
             self.reset_quorum_nack_prepare();
@@ -1739,7 +1898,11 @@ pub fn Replica(
         fn on_recovery_timeout(self: *Self) void {
             assert(self.status == .recovering);
             self.recovery_timeout.reset();
-            self.recover();
+            if (self.replica_count == 1) {
+                // A single-replica cluster doesn't run recovery protocol.
+            } else {
+                self.recover();
+            }
         }
 
         fn reference_message_and_receive_quorum_exactly_once(
@@ -1934,7 +2097,8 @@ pub fn Replica(
         fn commit_ops(self: *Self, commit: u64) void {
             // TODO Restrict `view_change` status only to the leader purely as defense-in-depth.
             // Be careful of concurrency when doing this, as successive view changes can happen quickly.
-            assert(self.status == .normal or self.status == .view_change);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.replica_count == 1));
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
             assert(self.commit_max <= self.op or self.commit_max > self.op);
@@ -1978,7 +2142,8 @@ pub fn Replica(
 
         fn commit_ops_read(self: *Self) void {
             assert(self.committing);
-            assert(self.status == .normal or self.status == .view_change);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.replica_count == 1));
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
@@ -1998,6 +2163,11 @@ pub fn Replica(
                 self.committing = false;
                 // This is an optimization to expedite the view change before the `repair_timeout`:
                 if (self.status == .view_change and self.repairs_allowed()) self.repair();
+
+                if (self.status == .recovering) {
+                    assert(self.replica_count == 1);
+                    self.transition_from_recovering_status(0);
+                }
             }
         }
 
@@ -2012,17 +2182,21 @@ pub fn Replica(
                 return;
             }
 
-            if (self.status == .view_change) {
-                if (self.leader_index(self.view) != self.replica) {
-                    log.debug("{}: commit_ops_commit: no longer leader", .{self.replica});
-                    return;
-                }
+            switch (self.status) {
+                .normal => {},
+                .view_change => {
+                    if (self.leader_index(self.view) != self.replica) {
+                        log.debug("{}: commit_ops_commit: no longer leader", .{self.replica});
+                        return;
+                    }
 
-                // Only the leader may commit during a view change before starting the new view.
-                // Fall through if this is indeed the case.
-            } else if (self.status != .normal) {
-                log.debug("{}: commit_ops_commit: no longer in normal status", .{self.replica});
-                return;
+                    // Only the leader may commit during a view change before starting the new view.
+                    // Fall through if this is indeed the case.
+                },
+                .recovering => {
+                    assert(self.replica_count == 1);
+                    assert(self.leader_index(self.view) == self.replica);
+                },
             }
 
             const op = self.commit_min + 1;
@@ -2049,7 +2223,8 @@ pub fn Replica(
 
         fn commit_op(self: *Self, prepare: *const Message) void {
             // TODO Can we add more checks around allowing commit_op() during a view change?
-            assert(self.status == .normal or self.status == .view_change);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.replica_count == 1));
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .init);
             assert(prepare.header.op == self.commit_min + 1);
@@ -2177,6 +2352,7 @@ pub fn Replica(
                             assert(m.header.view == self.view);
                         },
                         .do_view_change => assert(m.header.view == self.view),
+                        .recovery_response => assert(m.header.replica != self.replica),
                         .nack_prepare => {
                             // TODO See if we can restrict this branch further.
                             assert(m.header.replica != self.replica);
@@ -2373,7 +2549,7 @@ pub fn Replica(
 
             var op = self.op;
             while (op > self.commit_max) : (op -= 1) {
-               if (self.journal.header_with_op(op) != null) continue;
+                if (self.journal.header_with_op(op) != null) continue;
 
                 log.debug("{}: discard_uncommitted_headers: op={} gap", .{ self.replica, op });
 
@@ -2384,15 +2560,23 @@ pub fn Replica(
                         assert(m.header.cluster == self.cluster);
                         assert(m.header.replica == replica);
                         assert(m.header.view == self.view);
+                        assert(m.header.commit <= self.commit_max);
 
                         if (replica != self.replica) {
-                            if (m.header.op < op) nacks += 1;
+                            // Check for a gap in the uncommitted headers from this replica.
+                            var nack: bool = true;
+                            // TODO This can be optimized by tracking the last index in each do_view_change.
+                            for (self.message_body_as_headers(m)) |*h| {
+                                // TODO Check hash chain on the left (maybe change op iteration direction to guarantee it exists).
+                                if (h.op == op) {
+                                    nack = false;
+                                    break;
+                                }
+                            }
 
-                            log.debug("{}: discard_uncommitted_headers: replica={} op={}", .{
-                                self.replica,
-                                m.header.replica,
-                                m.header.op,
-                            });
+                            if (nack) nacks += 1;
+                            log.debug("{}: discard_uncommitted_headers: replica={} op={} nack={}",
+                                .{ self.replica, m.header.replica, op, nack });
                         }
                     }
                 }
@@ -2817,6 +3001,44 @@ pub fn Replica(
                 else => unreachable,
             }
 
+            // Don't participate in view change if the true op is not known and there is a fault to
+            // the right of the current op. The fault might be our true op, and sharing our current
+            // `replica.op` might cause the cluster's op to likewise regress.
+            //
+            // Note that for our purposes here, we only care about entries that were faulty after
+            // WAL recovery, not ones that were found to be faulty after the fact (e.g. due to
+            // `request_prepare`).
+            //
+            // Cases (`✓`: checkpoint, `✗`: faulty, `o`: `replica.op`):
+            // * ` ✓ o ✗ `: View change is unsafe.
+            // * ` ✗ ✓ o `: View change is unsafe.
+            // * ` ✓ ✗ o `: View change is safe.
+            // * ✓=o:       View change is unsafe.
+            //
+            // (But always allow the `start_view` — it will result in `op_known` being set to `true`).
+            if (!self.op_known and message.header.command != .start_view) {
+                assert(self.journal.recovered);
+                assert(self.journal.faulty.count > 0);
+
+                const end = self.journal.slot_for_op(self.op_checkpoint);
+                var slot = self.journal.slot_with_op(self.op).?;
+                while (true) {
+                    // The command=reserved when the entry was found faulty during WAL recovery.
+                    if (self.journal.faulty.bit(slot) and
+                        self.journal.headers[slot.index].command == .reserved)
+                    {
+                        log.warn("{}: on_{s}: ignoring (op not known, faulty_slot={})", .{
+                            self.replica,
+                            command,
+                            slot.index,
+                        });
+                        return true;
+                    }
+                    slot.index = (slot.index + 1) % config.journal_slot_count;
+                    if (slot.index == end.index) break;
+                }
+            }
+
             return false;
         }
 
@@ -2962,23 +3184,37 @@ pub fn Replica(
 
         fn recover(self: *Self) void {
             assert(self.status == .recovering);
+            assert(self.journal.recovered);
 
-            log.debug("{}: recover: sending recovery messages", .{ self.replica });
-            self.reset_quorum_recovery_response();
-            self.recovery_nonce = blk: {
-                var nonce: [@sizeOf(u64)]u8 = undefined;
-                var hasher = std.crypto.hash.Blake3.init(.{});
-                hasher.update(std.mem.asBytes(self.clock.monotonic()));
-                hasher.update([]u8{self.replica});
-                hasher.final(nonce[:nonce.len]);
-                break :blk @bitCast(u64, nonce)].*);
-            };
-            self.send_header_to_other_replicas(.{
-                .command = .recovery,
-                .cluster = self.cluster,
-                .context = self.recovery_nonce,
-                .replica = self.replica,
-            });
+            if (self.replica_count == 1) {
+                // Cluster-of-1 doesn't run recovery protocol.
+                if (self.journal.faulty.count != 0) {
+                    @panic("journal is corrupt");
+                }
+
+                assert(self.op == 0);
+                assert(!self.op_known);
+                var op: u64 = 0;
+                for (self.journal.headers) |*h| op = std.math.max(op, h.op);
+                self.op = op;
+                self.set_op_known();
+
+                self.commit_ops(op);
+                // This is a cluster-of-1 (we are always the leader), so the actual recovering→normal
+                // status transition is deferred until all ops are committed.
+            } else {
+                log.debug("{}: recover: sending recovery messages nonce={}", .{
+                    self.replica,
+                    self.recovery_nonce,
+                });
+
+                self.send_header_to_other_replicas(.{
+                    .command = .recovery,
+                    .cluster = self.cluster,
+                    .context = self.recovery_nonce,
+                    .replica = self.replica,
+                });
+            }
         }
 
         /// Starting from the latest journal entry, backfill any missing or disconnected headers.
@@ -2995,6 +3231,18 @@ pub fn Replica(
 
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
+
+            if (!self.op_known) {
+                assert(self.journal.faulty.count > 0);
+
+                log.debug("{}: repair: ignoring (replica op not known) op={} faulty={}", .{
+                    self.replica,
+                    self.op,
+                    self.journal.faulty.count,
+                });
+                return;
+            }
+
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
 
@@ -3004,7 +3252,7 @@ pub fn Replica(
 
             // The replica repairs backwards from `commit_max`. But if the `commit_max` is too high
             // (>1 WAL ahead) bound it such that uncommitted WAL entries are not overwritten.
-            const commit_max_limit = std.math.min(self.commit_max, self.commit_min + config.journal_slot_count);
+            const commit_max_limit = std.math.min(self.commit_max, self.op_checkpoint + config.journal_slot_count);
 
             // Request outstanding committed prepares to advance our op number:
             // This handles the case of an idle cluster, where a follower will not otherwise advance.
@@ -3031,7 +3279,7 @@ pub fn Replica(
                     .cluster = self.cluster,
                     .replica = self.replica,
                     .view = self.view,
-                    .op = self.commit_max_limit,
+                    .op = commit_max_limit,
                 });
                 return;
             }
@@ -3055,6 +3303,7 @@ pub fn Replica(
                 // This is the init op that is prepared when the cluster is initialized.
                 assert(range.op_min > 0);
                 assert(range.op_max > 0);
+
                 if (self.choose_any_other_replica()) |replica| {
                     self.send_header_to_replica(replica, .{
                         .command = .request_headers,
@@ -3073,7 +3322,7 @@ pub fn Replica(
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
             // Request and repair any dirty or faulty prepares:
-            if (self.journal.dirty.len > 0) return self.repair_prepares();
+            if (self.journal.dirty.count > 0) return self.repair_prepares();
 
             // Commit ops, which may in turn discover faulty prepares and drive more repairs:
             if (self.commit_min < self.commit_max) return self.commit_ops(self.commit_max);
@@ -3131,7 +3380,10 @@ pub fn Replica(
             }
 
             if (header.op > self.op) {
-                log.debug("{}: repair_header: false (advances self.op)", .{self.replica});
+                log.debug("{}: repair_header: false (advances self.op={})", .{
+                    self.replica,
+                    self.op,
+                });
                 return false;
             } else if (header.op == self.op) {
                 if (self.journal.header_with_op_and_checksum(self.op, header.checksum)) |_| {
@@ -3154,22 +3406,34 @@ pub fn Replica(
                 if (existing.checksum == header.checksum) {
                     const slot = self.journal.slot_with_header(header).?;
                     if (!self.journal.dirty.bit(slot)) {
-                        log.debug("{}: repair_header: false (checksum clean)", .{self.replica});
+                        log.debug("{}: repair_header: op={} false (checksum clean)", .{
+                            self.replica,
+                            header.op,
+                        });
                         return false;
                     }
 
-                    log.debug("{}: repair_header: exists, checksum dirty", .{self.replica});
+                    log.debug("{}: repair_header: op={} exists, checksum dirty", .{
+                        self.replica,
+                        header.op,
+                    });
                 } else if (existing.view == header.view) {
                     // The journal must have wrapped:
                     // We expect that the same view and op will have the same checksum.
                     assert(existing.op != header.op);
 
                     if (existing.op > header.op) {
-                        log.debug("{}: repair_header: false (view has newer op)", .{self.replica});
+                        log.debug("{}: repair_header: op={} false (view has newer op)", .{
+                            self.replica,
+                            header.op,
+                        });
                         return false;
                     }
 
-                    log.debug("{}: repair_header: exists, view has older op", .{self.replica});
+                    log.debug("{}: repair_header: op={} exists, view has older op", .{
+                        self.replica,
+                        header.op,
+                    });
                 } else {
                     assert(existing.view != header.view);
                     assert(existing.op == header.op or existing.op != header.op);
@@ -3177,19 +3441,25 @@ pub fn Replica(
                     if (!self.repair_header_would_connect_hash_chain(header)) {
                         // We cannot replace this op until we are sure that doing so would not
                         // violate any prior commitments made to the leader.
-                        log.debug("{}: repair_header: false (exists)", .{self.replica});
+                        log.debug("{}: repair_header: op={} false (exists)", .{
+                            self.replica,
+                            header.op,
+                        });
                         return false;
                     }
 
-                    log.debug("{}: repair_header: exists, connects hash chain", .{self.replica});
+                    log.debug("{}: repair_header: op={} exists, connects hash chain", .{
+                        self.replica,
+                        header.op,
+                    });
                 }
             } else {
-                log.debug("{}: repair_header: gap", .{self.replica});
+                log.debug("{}: repair_header: op={} gap", .{self.replica, header.op});
             }
 
             // Caveat: Do not repair an existing op or gap if doing so would break the hash chain:
             if (self.repair_header_would_break_hash_chain_with_next_entry(header)) {
-                log.debug("{}: repair_header: false (breaks hash chain)", .{self.replica});
+                log.debug("{}: repair_header: op={} false (breaks hash chain)", .{self.replica, header.op});
                 return false;
             }
 
@@ -3389,13 +3659,35 @@ pub fn Replica(
         fn repair_prepares(self: *Self) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
-            assert(self.journal.dirty.len > 0);
+            assert(self.journal.dirty.count > 0);
+            assert(self.op_known);
 
             // Request enough prepares to utilize our max IO depth:
             var budget = self.journal.writes.available();
             if (budget == 0) {
                 log.debug("{}: repair_prepares: waiting for IOP", .{self.replica});
                 return;
+            }
+
+            if (self.op < self.journal.headers.len) {
+                // The op is known, and this is the first WAL cycle.
+                // Therefore, any faulty ops to the right of `replica.op` are corrupt reserved
+                // entries from the initial format.
+                var op: usize = self.op + 1;
+                while (op < self.journal.headers.len) : (op += 1) {
+                    const slot = self.journal.slot_for_op(op);
+                    assert(slot.index == op);
+
+                    if (self.journal.faulty.bit(slot)) {
+                        assert(self.journal.headers[op].command == .reserved);
+                        self.journal.dirty.clear(slot);
+                        self.journal.faulty.clear(slot);
+                        log.debug("{}: repair_prepares: op={} (op known, first cycle)", .{
+                            self.replica,
+                            op,
+                        });
+                    }
+                }
             }
 
             var op = self.op + 1;
@@ -3449,12 +3741,11 @@ pub fn Replica(
         /// resources of many replicas, for faster recovery.
         fn repair_prepare(self: *Self, op: u64) bool {
             const slot = self.journal.slot_with_op(op).?;
+            const checksum = self.journal.header_with_op(op).?.checksum;
 
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.bit(slot));
-
-            const checksum = self.journal.header_with_op(op).?.checksum;
 
             // We may be appending to or repairing the journal concurrently.
             // We do not want to re-request any of these prepares unnecessarily.
@@ -3589,16 +3880,11 @@ pub fn Replica(
         }
 
         /// Empties the prepare pipeline, unreffing all prepare and prepare_ok messages.
-        /// Stops the prepare timeout and resets the timeouts counter.
         fn reset_pipeline(self: *Self) void {
             while (self.pipeline.pop()) |prepare| {
                 self.message_bus.unref(prepare.message);
             }
-
-            self.prepare_timeout.stop();
-
             assert(self.pipeline.count == 0);
-            assert(self.prepare_timeout.ticking == false);
 
             // Do not reset `repairing_pipeline` here as this must be reset by the read callback.
             // Otherwise, we would be making `repair_pipeline()` reentrant.
@@ -3628,7 +3914,8 @@ pub fn Replica(
                 received.* = null;
             }
             assert(count <= self.replica_count);
-            log.debug("{}: reset {} {s} message(s)", .{ self.replica, count, @tagName(command) });
+            log.debug("{}: reset {} {s} message(s) from view={}",
+                .{ self.replica, count, @tagName(command), view });
         }
 
         fn reset_quorum_counter(self: *Self, counter: *QuorumCounter) void {
@@ -3662,7 +3949,13 @@ pub fn Replica(
         }
 
         fn reset_quorum_recovery_response(self: *Self) void {
-            self.reset_quorum_messages(&self.recovery_response_from_other_replicas, .recovery_response);
+            for (self.recovery_response_from_other_replicas) |*message, replica| {
+                if (message.*) |m| {
+                    self.message_bus.unref(m);
+                    message.* = null;
+                    assert(replica != self.replica);
+                }
+            }
         }
 
         fn send_prepare_ok(self: *Self, header: *const Header) void {
@@ -3854,6 +4147,7 @@ pub fn Replica(
 
             // TODO According to message.header.command, assert on the destination replica.
             switch (message.header.command) {
+                .reserved => unreachable,
                 .request => {
                     // Do not assert message.header.replica because we forward .request messages.
                     assert(self.status == .normal);
@@ -3906,6 +4200,16 @@ pub fn Replica(
                     },
                     else => unreachable,
                 },
+                .recovery => {
+                    assert(self.status == .recovering);
+                    assert(message.header.replica == self.replica);
+                    assert(message.header.context == self.recovery_nonce);
+                },
+                .recovery_response => {
+                    assert(self.status == .normal);
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
+                },
                 .headers => {
                     assert(self.status == .normal or self.status == .view_change);
                     assert(message.header.view == self.view);
@@ -3932,7 +4236,7 @@ pub fn Replica(
                 .nack_prepare => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
-                    assert(replica == self.leader_index(self.view));
+                    assert(self.leader_index(self.view) == replica);
                 },
                 else => {
                     log.info("{}: send_message_to_replica: TODO {s}", .{
@@ -3951,8 +4255,8 @@ pub fn Replica(
         }
 
         /// Finds the header with the highest op number in a slice of headers from a replica.
-        /// Searches only by op number to find the highest `self.op for the replica.
-        fn set_latest_op(headers: []Header, latest: *Header) void {
+        /// Searches only by op number to find the highest `self.op` for the replica.
+        fn set_latest_op(headers: []const Header, latest: *Header) void {
             switch (latest.command) {
                 .reserved, .prepare => assert(latest.valid_checksum()),
                 else => unreachable,
@@ -3977,15 +4281,26 @@ pub fn Replica(
             k: u64,
             method: []const u8,
         ) void {
-            assert(self.status == .view_change);
-
+            assert(self.status == .view_change or self.status == .recovering);
+            assert(self.journal.recovered);
             assert(latest.valid_checksum());
             assert(latest.invalid() == null);
             assert(latest.command == .prepare);
             assert(latest.cluster == self.cluster);
 
-            // The view may have started already, so we can have a prepare in the same view:
-            assert(latest.view <= self.view);
+            switch (self.status) {
+                .normal => unreachable,
+                .view_change => {
+                    // The view may have started already, so we can have a prepare in the same view:
+                    assert(latest.view <= self.view);
+                },
+                .recovering => {
+                    // The replica's view hasn't been set yet.
+                    // It will be set shortly, when we transition to normal status.
+                    assert(self.view == 0);
+                },
+            }
+
 
             log.debug("{}: {s}: view={} op={}..{} commit={}..{} checksum={} offset={}", .{
                 self.replica,
@@ -4028,6 +4343,14 @@ pub fn Replica(
             assert(self.op >= self.commit_max or self.op < self.commit_max);
 
             self.op = latest.op;
+            // When status=recovering, `op_known` can't be set yet; it will be set after the
+            // `recovery_response` headers are loaded with `repair_header` (since some faulty
+            // bits may be repaired).
+            switch (self.status) {
+                .normal => unreachable,
+                .view_change => self.op_known = true,
+                .recovering => assert(!self.op_known),
+            }
             // Crucially, we must never rewind `commit_max` (and then `commit_min`) because
             // `commit_min` represents what we have already applied to our state machine:
             self.commit_max = std.math.max(self.commit_max, k);
@@ -4038,7 +4361,7 @@ pub fn Replica(
             // Do not set the latest op as dirty if we already have it exactly:
             // Otherwise, this would trigger a repair and delay the view change, or worse, it would
             // prevent us from assisting another replica to recover when we do in fact have the op.
-            if (self.journal.header_with_op_and_checksum(latest.op, latest.checksum)) |_| {
+            if (self.journal.has(latest)) {
                 log.debug("{}: {s}: latest op exists exactly", .{ self.replica, method });
             } else {
                 self.journal.set_header_as_dirty(latest);
@@ -4047,6 +4370,28 @@ pub fn Replica(
             assert(self.op == latest.op);
             self.journal.remove_entries_from(self.op + 1);
             assert(self.journal.header_with_op(self.op).?.checksum == latest.checksum);
+        }
+
+        fn set_op_known(self: *Self) void {
+            if (self.op_known) return;
+            self.op_known = true;
+
+            if (self.op < self.journal.headers.len) {
+                if (self.journal.header_with_op(0)) |header| {
+                    assert(header.command == .prepare);
+                    assert(header.operation == .init);
+                } else {
+                    // Both:
+                    // * this is the first wrap of the log
+                    // * op=0 (the init prepare) is corrupt on journal recovery
+                    //
+                    // The op is known, so we can safely repair the initial prepare.
+                    // This is required to maintain the invariant that the op=commit_min exists in-memory.
+                    const header = Journal.init_prepare(self.cluster);
+                    self.journal.set_header_as_dirty(&header);
+                    log.debug("{}: set_op_known: repair initial op", .{ self.replica });
+                }
+            }
         }
 
         fn start_view_as_the_new_leader(self: *Self) void {
@@ -4076,8 +4421,8 @@ pub fn Replica(
             assert(self.pipeline.count <= config.pipeline_max);
             assert(self.commit_max + self.pipeline.count == pipeline_op - 1);
 
-            assert(self.journal.dirty.len == 0);
-            assert(self.journal.faulty.len == 0);
+            assert(self.journal.dirty.count == 0);
+            assert(self.journal.faulty.count == 0);
             assert(self.nack_prepare_op == null);
 
             const start_view = self.create_view_change_message(.start_view);
@@ -4108,8 +4453,12 @@ pub fn Replica(
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
+            self.recovery_timeout.stop();
 
             if (self.leader()) {
+                assert(self.journal.is_empty() or self.replica_count == 1);
+                assert(self.op_known);
+
                 log.debug("{}: transition_from_recovering_status: leader view={}", .{ self.replica, new_view });
                 self.ping_timeout.start();
                 self.commit_timeout.start();
@@ -4155,8 +4504,7 @@ pub fn Replica(
                 self.view_change_status_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
-
-                self.reset_pipeline();
+                self.prepare_timeout.stop();
             }
 
             self.reset_quorum_start_view_change();
@@ -4189,13 +4537,13 @@ pub fn Replica(
             self.view_change_status_timeout.start();
             self.view_change_message_timeout.start();
             self.repair_timeout.stop();
+            self.prepare_timeout.stop();
 
             // Do not reset quorum counters only on entering a view, assuming that the view will be
             // followed only by a single subsequent view change to the next view, because multiple
             // successive view changes can fail, e.g. after a view change timeout.
             // We must therefore reset our counters here to avoid counting messages from an older view,
             // which would violate the quorum intersection property essential for correctness.
-            self.reset_pipeline();
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();

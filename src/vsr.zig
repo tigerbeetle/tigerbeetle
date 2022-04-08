@@ -11,6 +11,7 @@ const config = @import("config.zig");
 pub const Version: u8 = 0;
 
 pub const Replica = @import("vsr/replica.zig").Replica;
+pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
 pub const Clock = @import("vsr/clock.zig").Clock;
 pub const Journal = @import("vsr/journal.zig").Journal;
@@ -132,6 +133,7 @@ pub const Header = packed struct {
     /// * A `commit` sets this to the checksum of the latest committed prepare.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `nack_prepare` sets this to the checksum of the prepare being nacked.
+    /// * A `recovery` and `recovery_response` sets this to the nonce.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
@@ -168,6 +170,7 @@ pub const Header = packed struct {
     ///
     /// * A `pong` sets this to the sender's wall clock value.
     /// * A `do_view_change` sets this to the latest normal view number.
+    // TODO remove/rename this; the WAL doesn't need it anymore
     offset: u64 = 0,
 
     /// The size of the Header structure (always), plus any associated body.
@@ -445,9 +448,10 @@ pub const Header = packed struct {
         assert(self.command == .recovery);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view != 0) return "view != 0";
         if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
         if (self.offset != 0) return "offset != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -457,10 +461,7 @@ pub const Header = packed struct {
         assert(self.command == .recovery_response);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.op == 0) return "op == 0";
-        if (self.commit != 0) return "commit != 0";
         if (self.offset != 0) return "offset != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;

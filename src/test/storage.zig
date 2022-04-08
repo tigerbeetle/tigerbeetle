@@ -93,7 +93,7 @@ pub const Storage = struct {
 
     // We can't allow storage faults for the same message in a majority of
     // the replicas as that would make recovery impossible. Instead, we only
-    // allow faults in certian areas which differ between replicas.
+    // allow faults in certain areas which differ between replicas.
     faulty_areas: FaultyAreas,
 
     reads: std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
@@ -185,8 +185,17 @@ pub const Storage = struct {
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
+        // At startup, f+1 replicas must have a non-faulty initial prepare to allow the cluster
+        // to start. (If the initial prepare is broken on a fresh-formatted WAL, op_known=false).
+        // TODO This is a hack. Rather than just always protecting this one offset,
+        // it should only protect f+1 replicas. At time of writing, seed 2432231839409258639
+        // corrupts 2/4 replicas' initial prepares.
+        const initial_prepare_offset = config.journal_slot_count * @sizeOf(vsr.Header);
+
         const faulty = storage.faulty_sectors(read.offset, read.buffer.len);
-        if (faulty.len > 0 and storage.x_in_100(storage.options.read_fault_probability)) {
+        if (faulty.len > 0 and storage.x_in_100(storage.options.read_fault_probability) and
+            read.offset != initial_prepare_offset)
+        {
             // Randomly corrupt one of the faulty sectors the read targeted
             // TODO: inject more realistic and varied storage faults as described above.
             const sector_count = @divExact(faulty.len, config.sector_size);
@@ -353,6 +362,21 @@ pub const Storage = struct {
                 out[5] = .{ .first_offset = 4 * message_size_max, .period = 6 * message_size_max };
             },
             else => unreachable,
+        }
+
+        {
+            // Allow at most `f` faulty replicas to ensure the view change can succeed.
+            // TODO Allow more than `f` faulty replicas when the fault is to the right of the highest known replica.op (and to the left of the last checkpointed op).
+            const majority = (replica_count / 2) + 1;
+            const quorum_replication = std.math.min(config.quorum_replication_max, majority);
+            const quorum_view_change = std.math.max(
+                replica_count - quorum_replication + 1,
+                majority,
+            );
+            var i: usize = quorum_view_change;
+            while (i < replica_count) : (i += 1) {
+                out[i].first_offset = size;
+            }
         }
 
         prng.shuffle(FaultyAreas, out[0..replica_count]);
