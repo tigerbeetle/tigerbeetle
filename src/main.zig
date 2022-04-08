@@ -59,6 +59,7 @@ fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
         config.journal_size_max, // TODO Double-check that we have space for redundant headers.
         true,
     );
+    // TODO: Format the initial file.
 
     log.info("initialized data file", .{});
 }

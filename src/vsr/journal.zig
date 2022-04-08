@@ -26,6 +26,26 @@ comptime { assert(headers_per_sector > 0); }
 /// A slot is `op % slot_count`.
 const Slot = struct { index: u64 };
 
+const slot_count = config.journal_slot_count;
+
+const size_headers_ring = slot_count * @sizeOf(Header);
+const size_prepare_ring = slot_count * config.message_size_max;
+pub const write_ahead_log_zone_size = size_headers_ring + size_prepare_ring;
+
+comptime {
+    assert(slot_count > 0);
+    assert(slot_count % 2 == 0);
+    assert(slot_count % headers_per_sector == 0);
+    assert(slot_count >= headers_per_sector);
+    // The length of the prepare pipeline is the upper bound on how many ops can be
+    // reordered during a view change. See `recover_prepares_on_read` for more detail.
+    assert(slot_count > config.pipelining_max);
+
+    assert(@mod(size_headers_ring, config.sector_size) == 0);
+    assert(@mod(size_prepare_ring, config.sector_size) == 0);
+    assert(@mod(size_prepare_ring, config.message_size_max) == 0);
+}
+
 pub fn Journal(comptime Replica: type, comptime Storage: type) type {
     return struct {
         const Self = @This();
@@ -94,16 +114,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         storage: *Storage,
         replica: u8,
-        size_headers_ring: u64,
-        size_prepare_ring: u64,
 
         /// A header is located at `header.op % headers.len`.
         headers: []align(config.sector_size) Header,
         /// We copy-on-write to these buffers when writing, as in-memory headers may change concurrently.
         /// The buffers belong to the IOP at the corresponding index in IOPS.
         headers_iops: *align(config.sector_size) [config.io_depth_write][config.sector_size]u8,
-        /// Recovering from messages reads the Prepare's header into this memory.
-        read_header: Header = undefined,
 
         /// Statically allocated read IO operation context data.
         reads: IOPS(Read, config.io_depth_read) = .{},
@@ -128,28 +144,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// This is used to respond to `request_prepare` messages even when the slot is faulty
         /// (for example, due to a broken redundant header).
         ///
-        /// `null` indicates either:
-        /// * the prepare in the slot is corrupt
+        /// `0` indicates either:
+        /// * the message in the slot is corrupt
         /// * the message in the slot is reserved
-        prepare_checksums: []?u128,
+        prepare_checksums: []u128,
 
         recovered: bool = false,
         recovering: bool = false,
 
-        pub fn init(
-            allocator: Allocator,
-            storage: *Storage,
-            replica: u8,
-            slot_count: usize,
-            init_prepare: *Header,
-        ) !Self {
-            if (slot_count == 0) return error.SlotsTooLow;
-            if (slot_count % headers_per_sector != 0) return error.SlotsMustBeMultipleOfHeaders;
-            assert(slot_count % 2 == 0);
-            assert(slot_count >= headers_per_sector);
-            // The length of the prepare pipeline is the upper bound on how many ops can be
-            // reordered during a view change. See `recover_prepares_on_read` for more detail.
-            assert(slot_count > config.pipelining_max);
+        pub fn init(allocator: Allocator, storage: *Storage, replica: u8) !Self {
+            assert(write_ahead_log_zone_size <= storage.size);
 
             var headers = try allocator.allocAdvanced(
                 Header,
@@ -168,7 +172,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             var prepare_checksums = try allocator.alloc(u128, slot_count);
             errdefer allocator.free(prepare_checksums);
-            std.mem.set(?u128, prepare_checksums, null);
+            std.mem.set(u128, prepare_checksums, 0);
 
             const headers_iops = (try allocator.allocAdvanced(
                 [config.sector_size]u8,
@@ -177,10 +181,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .exact,
             ))[0..config.io_depth_write];
             errdefer allocator.free(headers_iops);
-
-            const size_headers_ring = slot_count * @sizeOf(Header);
-            const size_prepare_ring = slot_count * config.message_size_max;
-            assert(size_headers_ring + size_prepare_ring <= storage.size);
 
             log.debug("{}: size={} slot_count={} headers_ring={} prepare_ring={}", .{
                 replica,
@@ -193,8 +193,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             var self = Self{
                 .storage = storage,
                 .replica = replica,
-                .size_headers_ring = size_headers_ring,
-                .size_prepare_ring = size_prepare_ring,
                 .headers = headers,
                 .dirty = dirty,
                 .faulty = faulty,
@@ -202,20 +200,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .headers_iops = headers_iops,
             };
 
-            assert(@mod(self.size_headers_ring, config.sector_size) == 0);
-            assert(@mod(self.size_prepare_ring, config.sector_size) == 0);
-            assert(@mod(self.size_prepare_ring, config.message_size_max) == 0);
             assert(@mod(@ptrToInt(&self.headers[0]), config.sector_size) == 0);
             assert(self.dirty.bits.bit_length == self.headers.len);
             assert(self.faulty.bits.bit_length == self.headers.len);
             assert(self.prepare_checksums.len == self.headers.len);
-
-            // Op 0 is always the cluster initialization op.
-            // TODO This will change when we implement synchronized incremental snapshots.
-            assert(init_prepare.valid_checksum());
-            assert(init_prepare.invalid() == null);
-            self.headers[0] = init_prepare.*;
-            self.assert_headers_reserved_from(init_prepare.op + 1);
+            self.assert_headers_reserved_from(0);
 
             return self;
         }
@@ -240,32 +229,37 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         /// Asserts that headers are .reserved (zeroed) from `op_min` (inclusive).
-        pub fn assert_headers_reserved_from(self: *Self, op_min: u64) void {
+        pub fn assert_headers_reserved_from(self: *const Self, op_min: u64) void {
             // TODO Snapshots
-            for (self.headers) |header| {
+            for (self.headers) |*header| {
                 assert(header.command == .reserved or header.op < op_min);
             }
         }
 
-        /// Returns whether this is a fresh database WAL; no prepares have ever been written.
-        pub fn is_empty() bool {
-            if (self.dirty.len != 0) return false;
-            assert(self.faulty.len == 0);
+        /// Returns whether this is a fresh database WAL; no prepares (except the init) have ever
+        /// been written.
+        pub fn is_empty(self: *const Self) bool {
+            if (self.headers[0].operation != .init) return false;
 
-            // Verify that the initial prepare is present in the ring.
-            if (self.header_with_op(0) == null) return false;
+            // If the message immediately following the initial prepare is damaged, we must fall
+            // back to VSR recovery protocol (i.e. treat this as a non-empty WAL) since that
+            // message may have been a prepare.
+            if (self.faulty.bit(Slot{ .index = 1 })) return false;
 
-            for (self.headers[1..]) |header| {
+            // Other headers are allowed to be damaged (they will be repaired from status=normal)
+            // but there shouldn't be any prepares.
+            for (self.headers[1..]) |*header| {
                 if (header.command == .prepare) return false;
             }
+
             return true;
         }
 
-        pub fn slot_for_op(self: *Self, op: u64) Slot {
+        pub fn slot_for_op(self: *const Self, op: u64) Slot {
             return Slot{ .index = op % self.headers.len };
         }
 
-        pub fn slot_with_op(self: *Self, op: u64) ?Slot {
+        pub fn slot_with_op(self: *const Self, op: u64) ?Slot {
             if (self.header_with_op(op)) |_| {
                 return self.slot_for_op(op);
             } else {
@@ -273,25 +267,33 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        pub fn slot_for_header(self: *Self, header: *const Header) Slot {
+        pub fn slot_with_op_and_checksum(self: *Self, op: u64, checksum: u128) ?Slot {
+            if (self.header_with_op_and_checksum(op, checksum)) |_| {
+                return self.slot_for_op(op);
+            } else {
+                return null;
+            }
+        }
+
+        pub fn slot_for_header(self: *const Self, header: *const Header) Slot {
             assert(header.command == .prepare);
             return self.slot_for_op(header.op);
         }
 
-        pub fn slot_with_header(self: *Self, header: *const Header) ?Slot {
+        pub fn slot_with_header(self: *const Self, header: *const Header) ?Slot {
             assert(header.command == .prepare);
             return self.slot_with_op(header.op);
         }
 
         /// Returns any existing entry at the location indicated by header.op.
         /// This existing entry may have an older or newer op number.
-        pub fn header_for_entry(self: *Self, header: *const Header) ?*const Header {
+        pub fn header_for_entry(self: *const Self, header: *const Header) ?*const Header {
             assert(header.command == .prepare);
             return self.header_for_op(header.op);
         }
 
         /// We use the op number directly to index into the headers array and locate ops without a scan.
-        pub fn header_for_op(self: *Self, op: u64) ?*const Header {
+        pub fn header_for_op(self: *const Self, op: u64) ?*const Header {
             // TODO Snapshots
             const slot = self.slot_for_op(op);
             const existing = &self.headers[slot.index];
@@ -303,7 +305,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         /// Returns the entry at `@mod(op)` location, but only if `entry.op == op`, else `null`.
         /// Be careful of using this without considering that there may still be an existing op.
-        pub fn header_with_op(self: *Self, op: u64) ?*const Header {
+        pub fn header_with_op(self: *const Self, op: u64) ?*const Header {
             if (self.header_for_op(op)) |existing| {
                 if (existing.op == op) return existing;
             }
@@ -312,7 +314,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         /// As per `header_with_op()`, but only if there is an optional checksum match.
         pub fn header_with_op_and_checksum(
-            self: *Self,
+            self: *const Self,
             op: u64,
             checksum: ?u128,
         ) ?*const Header {
@@ -323,19 +325,20 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return null;
         }
 
-        pub fn previous_entry(self: *Self, header: *const Header) ?*const Header {
+        pub fn previous_entry(self: *const Self, header: *const Header) ?*const Header {
             // TODO Snapshots
             if (header.op == 0) return null;
             return self.header_for_op(header.op - 1);
         }
 
-        pub fn next_entry(self: *Self, header: *const Header) ?*const Header {
+        pub fn next_entry(self: *const Self, header: *const Header) ?*const Header {
             // TODO Snapshots
             if (header.op + 1 == self.headers.len) return null;
             return self.header_for_op(header.op + 1);
         }
 
-        pub fn has(self: *Self, header: *const Header) bool {
+        pub fn has(self: *const Self, header: *const Header) bool {
+            assert(header.command == .prepare);
             // TODO Snapshots
             const slot = self.slot_for_op(header.op);
             const existing = &self.headers[slot.index];
@@ -352,12 +355,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        pub fn has_clean(self: *Self, header: *const Header) bool {
+        pub fn has_clean(self: *const Self, header: *const Header) bool {
             // TODO Snapshots
             return self.has(header) and !self.dirty.bit(self.slot_with_header(header).?);
         }
 
-        pub fn has_dirty(self: *Self, header: *const Header) bool {
+        pub fn has_dirty(self: *const Self, header: *const Header) bool {
             // TODO Snapshots
             return self.has(header) and self.dirty.bit(self.slot_with_header(header).?);
         }
@@ -393,7 +396,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 }
             }
 
-            log.debug("copy_latest_headers_between: op_min={} op_max={} dest.len={} copied={}", .{
+            log.debug("{}: copy_latest_headers_between: op_min={} op_max={} dest.len={} copied={}", .{
+                self.replica,
                 op_min,
                 op_max,
                 dest.len,
@@ -544,7 +548,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             };
 
-            const slot = self.slot_with_op(op).?;
+            const slot = self.slot_with_op_and_checksum(op, checksum).?;
             if (self.faulty.bit(slot)) {
                 assert(self.dirty.bit(slot));
 
@@ -589,14 +593,64 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
 
             const buffer = message.buffer[0..physical_size];
-            const offset_logical = self.offset_in_prepare_ring(self.slot_with_op(op).?);
-            assert(offset_logical + physical_size <= self.size_prepare_ring);
+            const offset_logical = self.offset_in_prepare_ring(slot);
+            assert(offset_logical + physical_size <= size_prepare_ring);
 
-            const offset_physical = self.offset_physical_for_logical(.prepare_ring, offset_logical);
+            const offset_physical = offset_physical_for_logical(.prepare_ring, offset_logical);
 
             // Memory must not be owned by `self.headers` as these may be modified concurrently:
             assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
-                @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + self.size_headers_ring);
+                @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + size_headers_ring);
+
+            log.debug(
+                "{}: read_sectors: offset={} len={}",
+                .{ replica.replica, offset_physical, buffer.len },
+            );
+
+            self.storage.read_sectors(on_read, &read.completion, buffer, offset_physical);
+        }
+
+        /// Read a prepare from disk, but there is no in-memory header.
+        pub fn read_prepare_without_header(
+            self: *Self,
+            callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            op: u64,
+            checksum: u128,
+            destination_replica: ?u8,
+        ) void {
+            const replica = @fieldParentPtr(Replica, "journal", self);
+            const slot = self.slot_for_op(op);
+            assert(self.prepare_checksums[slot.index] == checksum);
+            assert(self.slot_with_op_and_checksum(op, checksum) == null);
+
+            const message = replica.message_bus.get_message();
+            defer replica.message_bus.unref(message);
+
+            const read = self.reads.acquire() orelse {
+                self.read_prepare_log(op, checksum, "waiting for IOP");
+                callback(replica, null, null);
+                return;
+            };
+
+            read.* = .{
+                .self = self,
+                .completion = undefined,
+                .message = message.ref(),
+                .callback = callback,
+                .op = op,
+                .checksum = checksum,
+                .destination_replica = destination_replica,
+            };
+
+            const buffer: []u8 = message.buffer[0..config.message_size_max];
+            const offset_logical = self.offset_in_prepare_ring(slot);
+            assert(offset_logical + buffer.len <= size_prepare_ring);
+
+            const offset_physical = offset_physical_for_logical(.prepare_ring, offset_logical);
+
+            // Memory must not be owned by `self.headers` as these may be modified concurrently:
+            assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
+                @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + size_headers_ring);
 
             log.debug(
                 "{}: read_sectors: offset={} len={}",
@@ -625,16 +679,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             // Check that the `headers` slot belongs to the same op that it did when the read began.
-            _ = self.header_with_op_and_checksum(op, checksum) orelse {
-                self.read_prepare_log(op, checksum, "no entry exactly");
-                read.callback(replica, null, null);
-                return;
-            };
+            // The slot may not match the Read's op/checksum due to either:
+            // * The in-memory header changed since the read began.
+            // * The in-memory header is reserved+faulty; the read was via `prepare_checksums`
+            const slot = self.slot_with_op_and_checksum(op, checksum);
 
-            const slot = self.slot_with_op(op).?;
             if (!read.message.header.valid_checksum()) {
-                self.faulty.set(slot);
-                self.dirty.set(slot);
+                if (slot) |s| {
+                    self.faulty.set(s);
+                    self.dirty.set(s);
+                }
 
                 self.read_prepare_log(op, checksum, "corrupt header after read");
                 read.callback(replica, null, null);
@@ -643,8 +697,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             const body = read.message.buffer[@sizeOf(Header)..read.message.header.size];
             if (!read.message.header.valid_checksum_body(body)) {
-                self.faulty.set(slot);
-                self.dirty.set(slot);
+                if (slot) |s| {
+                    self.faulty.set(s);
+                    self.dirty.set(s);
+                }
 
                 self.read_prepare_log(op, checksum, "corrupt body after read");
                 read.callback(replica, null, null);
@@ -655,8 +711,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 // This could be caused by a misdirected read or write.
                 // Though when a prepare spans multiple sectors, a misdirected read/write will
                 // likely trigger as a checksum failure instead.
-                self.faulty.set(slot);
-                self.dirty.set(slot);
+                if (slot) |s| {
+                    self.faulty.set(s);
+                    self.dirty.set(s);
+                }
 
                 self.read_prepare_log(op, checksum, "read wrong cluster");
                 read.callback(replica, null, null);
@@ -664,12 +722,28 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             if (read.message.header.op != op) {
+                // Possible causes:
+                // * The prepare was rewritten since the read began.
+                // * Misdirected read/write.
+                // * The combination of:
+                //   * The leader is responding to a `request_prepare`.
+                //   * The `request_prepare` did not include a checksum.
+                //   * The requested op's slot is faulty, but the prepare is valid. Since the
+                //     prepare is valid, WAL recovery set `prepare_checksums[slot]`. But on reading
+                //     this entry it turns out not to have the right op.
+                //   (This case (and the accompanying unnessary read) could be prevented by storing
+                //   the op along with the checksum in `prepare_checksums`.)
+                assert(slot == null);
+
                 self.read_prepare_log(op, checksum, "op changed during read");
                 read.callback(replica, null, null);
                 return;
             }
 
             if (read.message.header.checksum != checksum) {
+                // This can also be caused by a misdirected read/write.
+                assert(slot == null);
+
                 self.read_prepare_log(op, checksum, "checksum changed during read");
                 read.callback(replica, null, null);
                 return;
@@ -702,12 +776,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(!self.recovered);
             assert(self.recovering);
 
-            if (offset == self.size_headers_ring) {
+            if (offset == size_headers_ring) {
                 log.debug("{}: recover_headers: complete", .{self.replica});
                 self.recover_prepares(Slot{ .index = 0 });
                 return;
             }
-            assert(offset < self.size_headers_ring);
+            assert(offset < size_headers_ring);
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
@@ -726,7 +800,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .destination_replica = undefined,
             };
 
-            const buffer = self.recover_headers_buffer(message, offset);
+            const buffer = recover_headers_buffer(message, offset);
             assert(buffer.len > 0);
 
             log.debug("{}: recover_headers: offset={} size={} recovering", .{
@@ -739,12 +813,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 recover_headers_on_read,
                 &read.completion,
                 buffer,
-                self.offset_physical_for_logical(.headers_ring, offset),
+                offset_physical_for_logical(.headers_ring, offset),
             );
         }
 
-        fn recover_headers_buffer(self: *Self, message: *Message, offset: u64) []u8 {
-            const max = std.math.min(message.buffer.len, self.size_headers_ring - offset);
+        fn recover_headers_buffer(message: *Message, offset: u64) []u8 {
+            const max = std.math.min(message.buffer.len, size_headers_ring - offset);
             assert(max % config.sector_size == 0);
             assert(max % @sizeOf(Header) == 0);
             return message.buffer[0..max];
@@ -757,7 +831,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const message = read.message;
 
             const offset = @intCast(u64, read.checksum);
-            const buffer = self.recover_headers_buffer(message, offset);
+            const buffer = recover_headers_buffer(message, offset);
 
             log.debug("{}: recover_headers: offset={} size={} recovered", .{
                 self.replica,
@@ -773,8 +847,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             for (std.mem.bytesAsSlice(Header, buffer)) |*header, index| {
                 const slot = Slot{ .index = offset / @sizeOf(Header) + index };
-                // This is the first recovery pass, so no headers are loaded yet.
-                assert(self.headers[slot.index].command == .reserved);
+                if (slot.index != 0 or self.headers[slot.index].op != 0) {
+                    // This is the first recovery pass, so no headers (except the initial prepare)
+                    // are loaded yet.
+                    assert(self.headers[slot.index].command == .reserved);
+                }
+
                 assert(!self.dirty.bit(slot));
                 assert(!self.faulty.bit(slot));
 
@@ -795,7 +873,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
                     // All journalled headers should reserved or prepares. A misdirected
                     // read/write to/from the block zone may return the wrong type of message.
-                    const ok_prepare = header.command == .prepare
+                    const ok_prepare = header.command == .prepare;
                     // The header belongs to the correct cluster.
                     const ok_cluster = header.cluster == replica.cluster;
                     // The header is in the correct slot.
@@ -831,45 +909,48 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_prepares(self: *Self, slot: Slot) void {
+            const replica = @fieldParentPtr(Replica, "journal", self);
             assert(!self.recovered);
             assert(self.recovering);
             // We expect that no other process is issuing reads while we are recovering.
             assert(self.reads.executing() == 0);
 
             if (slot.index == self.headers.len) {
-                log.debug("{}: recover_prepares: recovered", .{self.replica});
                 self.recover_done();
                 return;
             }
             assert(slot.index < self.headers.len);
 
+            // Only the header of the message needs to be read (128B) but the minimum read is a
+            // 4KB sector.
+            const message = replica.message_bus.get_message();
+            defer replica.message_bus.unref(message);
+
             const read = self.reads.acquire() orelse unreachable;
             read.* = .{
                 .self = self,
                 .completion = undefined,
-                // Message is not used when recovering headers from Prepares. The prepares are
-                // padded to `config.message_size_max` but recovery only reads the header.
-                .message = undefined,
+                .message = message.ref(),
                 .callback = undefined,
                 .op = undefined,
                 .checksum = slot.index,
                 .destination_replica = undefined,
             };
 
-            log.debug("{}: recover_prepares: slot={} recovering", .{
+            log.debug("{}: recover_prepares: recovering slot={}", .{
                 self.replica,
                 slot.index,
             });
 
             const offset_logical = self.offset_in_prepare_ring(slot);
             assert(offset_logical % config.message_size_max == 0);
-            assert(offset_logical < self.size_prepare_ring);
+            assert(offset_logical < size_prepare_ring);
 
             self.storage.read_sectors(
-                recover_headers_on_read,
+                recover_prepares_on_read,
                 &read.completion,
-                std.mem.asBytes(&self.read_header),
-                self.offset_physical_for_logical(.prepare_ring, offset_logical),
+                message.buffer[0..config.sector_size],
+                offset_physical_for_logical(.prepare_ring, offset_logical),
             );
         }
 
@@ -961,11 +1042,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const slot = Slot{ .index = @intCast(u64, read.checksum) };
             assert(slot.index < self.headers.len);
 
-            log.debug("{}: recover_headers: slot={} recovered", .{
-                self.replica,
-                slot.index,
-            });
-
             // `recover_headers_on_read` either sets both dirty+faulty, or neither.
             if (self.dirty.bit(slot)) {
                 assert(self.faulty.bit(slot));
@@ -974,28 +1050,30 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const Decision = enum {
                 eql, // The header and prepare are identical; no repair necessary.
                 nil, // Reserved; clear dirty/faulty, no repair necessary.
-                fix, // Repair redundant header using the local prepare. Clear dirty and faulty.
+                fix, // Repair using VSR `request_prepare`. Set dirty, clear faulty.
                 vsr, // Repair using VSR `request_prepare`. Mark dirty and faulty.
             };
 
             const header = &self.headers[slot.index];
-            const header_reserved = header.?.command == .reserved;
+            const header_reserved = header.command == .reserved;
             const header_valid = !self.faulty.bit(slot);
+            assert(header.invalid() == null);
 
-            const prepare = &self.read_header;
+            const prepare = read.message.header;
             const prepare_checksum = prepare.valid_checksum();
             // All journalled messages should reserved or prepares.
             // A misdirected read/write to/from the block zone may return the wrong type of message.
             const prepare_reserved = prepare.command == .reserved;
             // A prepare in the wrong cluster/slot indicates a misdirected read or write.
             const prepare_cluster = prepare.cluster == replica.cluster;
-            const prepare_slot = self.slot_for_header(prepare) == slot;
+            const prepare_slot = self.slot_for_op(prepare.op).index == slot.index;
             const prepare_prepare = prepare.command == .prepare and prepare_cluster and prepare_slot;
-            const prepare_valid = prepare_checksum and (prepare_reserved or prepare_prepare)
+            const prepare_valid = prepare_checksum and (prepare_reserved or prepare_prepare);
+            if (prepare_valid) assert(prepare.invalid() == null);
 
-            const match_checksum = header.?.checksum == prepare.checksum;
-            const match_op = header.?.op == prepare.op;
-            const match_view = header.?.view == prepare.view;
+            const match_checksum = header.checksum == prepare.checksum;
+            const match_op = header.op == prepare.op;
+            const match_view = header.view == prepare.view;
 
             // TODO Add logging for the uncommon error paths here.
             const decision: Decision = decision: {
@@ -1068,14 +1146,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     // reordered during a view change.
                     assert(self.headers.len > config.pipelining_max);
 
-                    if (header.?.op < prepare.op) {
+                    if (header.op < prepare.op) {
                         // When the higher op belongs to the prepare, repair locally.
                         // The most likely cause for this case is that the log wrapped, but the
                         // redundant header write was lost.
                         break :decision .fix; // @I
                     } else {
                         // When the higher op belongs to the header, mark faulty.
-                        assert(header.?.op > prepare.op);
+                        assert(header.op > prepare.op);
                         break :decision .vsr; // @J
                     }
                 }
@@ -1093,50 +1171,95 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 // This is the usual case: both the prepare and header are correct and equivalent.
                 assert(match_checksum);
                 assert(match_view);
-                assert(header.?.checksum_body == prepare.checksum_body);
+                assert(header.checksum_body == prepare.checksum_body);
                 break :decision .eql; // @L
             };
 
+            if (prepare_prepare and prepare_checksum) {
+                assert(self.prepare_checksums[slot.index] == 0);
+
+                self.prepare_checksums[slot.index] = prepare.checksum;
+            }
+
             switch (decision) {
                 .eql => {
-                    assert(header.?.command == .prepare);
-                    assert(prepare.?.command == .prepare);
-                    assert(header.?.checksum == prepare.checksum);
+                    assert(header.command == .prepare);
+                    assert(prepare.command == .prepare);
+                    assert(header.checksum == prepare.checksum);
                     assert(!self.dirty.bit(slot));
                     assert(!self.faulty.bit(slot));
+                    assert(self.prepare_checksums[slot.index] != 0);
                 },
                 .nil => {
-                    assert(header.?.command == .reserved);
+                    assert(header.command == .reserved);
                     assert(prepare.command == .reserved);
                     assert(!self.dirty.bit(slot));
                     assert(!self.faulty.bit(slot));
+                    assert(self.prepare_checksums[slot.index] == 0);
                 },
                 .fix => {
                     // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty). This is tricky because the redundant headers are written in batches. At a minimum this needs to repair replica_count=1 clusters locally, which is easier.
-                    assert(prepare.command == .reserved);
+                    assert(prepare.command == .prepare);
                     self.set_header_as_dirty(prepare);
-                    assert(!self.faulty.bit(slot));
+                    self.faulty.clear(slot);
+                    assert(self.prepare_checksums[slot.index] != 0);
                 },
                 .vsr => {
-                    // By clearing this, the header won't be requested with an included checksum.
+                    // Faulty headers are loaded as reserved to prevent unsafe batch updates the
+                    // redundant headers. (See `recover_prepares_on_read`'s comment for more detail).
                     self.headers[slot.index] = Header.reserved();
                     self.dirty.set(slot);
                     self.faulty.set(slot);
                 },
             }
 
-            if (prepare_prepare and prepare_checksum) {
-                self.prepare_checksums[slot.index] = prepare.checksum;
-            }
+            log.debug("{}: recover_prepares: recovered slot={} decision={s}", .{
+                self.replica,
+                slot.index,
+                @tagName(decision),
+            });
 
-            self.read_header = undefined;
+            replica.message_bus.unref(read.message);
             self.reads.release(read);
             self.recover_prepares(Slot{ .index = slot.index + 1 });
         }
 
         fn recover_done(self: *Self) void {
-            assert(self.dirty.len == self.faulty.len);
-            // TODO panic if all headers are corrupt.
+            const replica = @fieldParentPtr(Replica, "journal", self);
+
+            log.debug("{}: recover_done: dirty={} faulty={}", .{
+                self.replica,
+                self.dirty.count,
+                self.faulty.count,
+            });
+
+            assert(self.faulty.count >= self.dirty.count);
+            assert(self.faulty.count < slot_count);
+            if (self.headers[0].op == 0 and self.headers[0].command == .prepare) {
+                assert(self.headers[0].checksum == init_prepare(replica.cluster).checksum);
+            }
+
+            {
+                var min_op: u64 = std.math.maxInt(u64);
+                var max_op: u64 = 0;
+                for (self.headers) |*header, i| {
+                    if (header.command == .reserved) continue;
+
+                    assert(header.command == .prepare);
+                    assert(header.op % slot_count == i);
+                    assert(!self.dirty.bit(Slot{ .index = i }));
+                    assert(!self.faulty.bit(Slot{ .index = i }));
+
+                    if (min_op > header.op) min_op = header.op;
+                    if (max_op < header.op) max_op = header.op;
+                }
+
+                if (max_op != 0) {
+                    // Only committed ops are ever overwritten by a WAL wrap.
+                    assert(max_op - min_op < 2 * slot_count - config.pipelining_max);
+                }
+            }
+
             self.recovered = true;
             self.recovering = false;
             // From here it's over to the Recovery protocol from VRR 2012.
@@ -1174,6 +1297,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 }
             }
             self.assert_headers_reserved_from(op_min);
+
             // TODO At startup we need to handle entries that may have been removed but now reappear.
             // This is because we do not call `write_headers_between()` here.
         }
@@ -1185,16 +1309,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 header.checksum,
             });
             const slot = self.slot_for_header(header);
-            if (self.header_for_entry(header)) |existing| {
-                if (existing.checksum != header.checksum) {
-                    self.faulty.clear(slot);
-                }
+
+            if (self.has(header)) {
+                assert(self.dirty.bit(slot));
+                // Do not clear any faulty bit for the same entry.
             } else {
-                assert(!self.faulty.bit(slot));
+                self.headers[slot.index] = header.*;
+                self.dirty.set(slot);
+                self.faulty.clear(slot);
             }
-            self.headers[slot.index] = header.*;
-            self.dirty.set(slot);
-            // Do not clear any faulty bit for the same entry.
         }
 
         pub fn write_prepare(
@@ -1244,9 +1367,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
             const sectors = message.buffer[0..vsr.sector_ceil(message.header.size)];
             const offset_logical = self.offset_in_prepare_ring(self.slot_with_header(message.header).?);
-            assert(offset_logical + sectors.len <= self.size_prepare_ring);
+            assert(offset_logical + sectors.len <= size_prepare_ring);
 
-            const offset_physical = self.offset_physical_for_logical(.prepare_ring, offset_logical);
+            const offset_physical = offset_physical_for_logical(.prepare_ring, offset_logical);
 
             if (builtin.mode == .Debug) {
                 // Assert that any sector padding has already been zeroed:
@@ -1255,7 +1378,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(sum_of_sector_padding_bytes == 0);
             }
 
-            self.prepare_checksums[slot.index] = null;
+            self.prepare_checksums[slot.index] = 0;
             self.write_sectors(write_prepare_header, write, sectors, offset_physical);
         }
 
@@ -1265,10 +1388,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const self = write.self;
             const message = write.message;
 
-            const slot = self.slot_for_header(write.message.header);
-            self.prepare_checksums[slot.index] = write.message.checksum;
-
-            if (!self.has(message.header)) {
+            if (self.slot_with_op_and_checksum(message.header.op, message.header.checksum)) |slot| {
+                self.prepare_checksums[slot.index] = message.header.checksum;
+            } else {
                 self.write_prepare_debug(message.header, "entry changed while writing sectors");
                 self.write_prepare_release(write, null);
                 return;
@@ -1277,7 +1399,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(!write.header_sector_locked);
             assert(write.header_sector_next == null);
 
-            const write_offset = self.offset_in_headers_ring_for_message(write.message);
+            const write_offset = self.offset_in_headers_ring_for_message(message);
             var it = self.writes.iterate();
             while (it.next()) |other| {
                 if (other == write) continue;
@@ -1306,9 +1428,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // At present, we don't return early here simply because it doesn't yet do that.
 
             const message = write.message;
-            const offset_logical = self.offset_in_headers_ring_for_message(write.message);
+            const offset_logical = self.offset_in_headers_ring_for_message(message);
             assert(offset_logical % config.sector_size == 0);
-            assert(offset_logical < self.size_headers_ring);
+            assert(offset_logical < size_headers_ring);
 
             std.mem.copy(
                 u8,
@@ -1316,7 +1438,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 std.mem.sliceAsBytes(self.headers)[offset_logical..][0..config.sector_size],
             );
 
-            const offset_physical = self.offset_physical_for_logical(.headers_ring, offset_logical);
+            const offset_physical = offset_physical_for_logical(.headers_ring, offset_logical);
 
             log.debug("{}: write_header: op={} sectors[{}..{}]", .{
                 self.replica,
@@ -1326,10 +1448,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
 
             const buffer: []const u8 = write.header_sector(self);
-            assert(offset_logical + buffer.len <= self.size_headers_ring);
+            assert(offset_logical + buffer.len <= size_headers_ring);
             // Memory must not be owned by self.headers as self.headers may be modified concurrently:
             assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
-                @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + self.size_headers_ring);
+                @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + size_headers_ring);
 
             self.write_sectors(
                 write_prepare_on_write_header,
@@ -1401,15 +1523,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         /// `offset_logical` is an offset relative to the start of the zone.
-        fn offset_physical_for_logical(self: *Self, zone: Zone, offset_logical: u64) u64 {
+        fn offset_physical_for_logical(zone: Zone, offset_logical: u64) u64 {
             return switch (zone) {
                 .headers_ring => {
-                    assert(offset_logical < self.size_headers_ring);
+                    assert(offset_logical < size_headers_ring);
                     return offset_logical;
                 },
                 .prepare_ring => {
-                    assert(offset_logical < self.size_prepare_ring);
-                    return offset_logical + self.size_headers_ring;
+                    assert(offset_logical < size_prepare_ring);
+                    return offset_logical + size_headers_ring;
                 },
             };
         }
@@ -1427,7 +1549,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn offset_in_prepare_ring(self: *Self, slot: Slot) u64 {
             const message_offset = config.message_size_max * slot.index;
             assert(slot.index < self.headers.len);
-            assert(message_offset < self.size_prepare_ring);
+            assert(message_offset < size_prepare_ring);
             return message_offset;
         }
 
@@ -1538,7 +1660,60 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
             return false;
         }
+
+        // TODO clean this up
+        pub fn format(cluster: u32, sector: u64) [config.sector_size]u8 {
+            var sector_data: [config.sector_size]u8 = undefined;
+            var sector_headers = std.mem.bytesAsSlice(Header, &sector_data);
+
+            if (sector * headers_per_sector < slot_count) {
+                std.mem.set(Header, sector_headers, Header.reserved());
+                if (sector == 0) sector_headers[0] = init_prepare(cluster);
+                return sector_data;
+            }
+
+            const message_sectors = config.message_size_max / config.sector_size;
+            const sector_in_prepares = sector - slot_count / headers_per_sector;
+            const message_slot = sector_in_prepares / message_sectors;
+            if (message_slot < slot_count) {
+                std.mem.set(u8, &sector_data, 0);
+                if (sector_in_prepares % message_sectors == 0) {
+                    // First sector of the message.
+                    if (sector_in_prepares == 0) {
+                        sector_headers[0] = init_prepare(cluster);
+                    } else {
+                        sector_headers[0] = Header.reserved();
+                    }
+                }
+                return sector_data;
+            }
+
+            unreachable;
+        }
     };
+}
+
+fn init_prepare(cluster: u32) Header {
+    var header = Header{
+        .parent = 0,
+        .client = 0,
+        .context = 0,
+        .request = 0,
+        .cluster = cluster,
+        .epoch = 0,
+        .view = 0,
+        .op = 0,
+        .commit = 0,
+        .offset = 0,
+        .size = @sizeOf(Header),
+        .replica = 0,
+        .command = .prepare,
+        .operation = .init,
+        .version = vsr.Version,
+    };
+    header.set_checksum_body(&[0]u8{});
+    header.set_checksum();
+    return header;
 }
 
 // TODO Snapshots
@@ -1546,7 +1721,7 @@ pub const BitSet = struct {
     bits: std.DynamicBitSetUnmanaged,
 
     /// The number of bits set (updated incrementally as bits are set or cleared):
-    len: u64 = 0,
+    count: u64 = 0,
 
     fn init(allocator: Allocator, count: usize) !BitSet {
         const bits = try std.DynamicBitSetUnmanaged.initEmpty(allocator, count);
@@ -1563,12 +1738,12 @@ pub const BitSet = struct {
     pub fn clear(self: *BitSet, slot: Slot) void {
         if (self.bits.isSet(slot.index)) {
             self.bits.unset(slot.index);
-            self.len -= 1;
+            self.count -= 1;
         }
     }
 
     /// Whether the bit for a slot is set:
-    pub fn bit(self: *BitSet, slot: Slot) bool {
+    pub fn bit(self: *const BitSet, slot: Slot) bool {
         return self.bits.isSet(slot.index);
     }
 
@@ -1576,8 +1751,8 @@ pub const BitSet = struct {
     pub fn set(self: *BitSet, slot: Slot) void {
         if (!self.bits.isSet(slot.index)) {
             self.bits.set(slot.index);
-            self.len += 1;
-            assert(self.len <= self.bits.bit_length);
+            self.count += 1;
+            assert(self.count <= self.bits.bit_length);
         }
     }
 };
@@ -1608,12 +1783,12 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
             self.free |= (@as(Map, 1) << @intCast(MapLog2, i));
         }
 
-        /// Returns true if there is at least one IOP available
+        /// Returns the count of IOPs available.
         pub fn available(self: *const Self) math.Log2IntCeil(Map) {
             return @popCount(Map, self.free);
         }
 
-        /// Returns true if there is at least one IOP in use
+        /// Returns the coutn of IOPs in use.
         pub fn executing(self: *const Self) math.Log2IntCeil(Map) {
             return @popCount(Map, math.maxInt(Map)) - @popCount(Map, self.free);
         }

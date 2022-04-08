@@ -61,7 +61,10 @@ pub const commits_max = transfers_max;
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
 /// We need this limit to allocate space for copies of batch headers at the start of the journal.
 /// These header copies enable us to disentangle corruption from crashes and recover accordingly.
-pub const journal_slot_count = 1024;
+pub const journal_slot_count = switch (deployment_environment) {
+    .production => 1024,
+    else => 128,
+};
 
 /// The maximum size of the journal file:
 /// This is pre-allocated and zeroed for performance when initialized.

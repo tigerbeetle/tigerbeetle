@@ -12,6 +12,7 @@ const Message = MessagePool.Message;
 
 const Network = @import("network.zig").Network;
 const NetworkOptions = @import("network.zig").NetworkOptions;
+const ClusterHealthOptions = @import("cluster_health.zig").ClusterHealthOptions;
 
 pub const StateMachine = @import("state_machine.zig").StateMachine;
 const MessageBus = @import("message_bus.zig").MessageBus;
@@ -21,6 +22,7 @@ const Time = @import("time.zig").Time;
 const vsr = @import("../vsr.zig");
 pub const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
 pub const Client = vsr.Client(StateMachine, MessageBus);
+const Journal = vsr.Journal(Replica, Storage);
 
 pub const ClusterOptions = struct {
     cluster: u32,
@@ -54,41 +56,39 @@ pub const Cluster = struct {
         const cluster = try allocator.create(Cluster);
         errdefer allocator.destroy(cluster);
 
-        {
-            const state_machines = try allocator.alloc(StateMachine, options.replica_count);
-            errdefer allocator.free(state_machines);
+        const state_machines = try allocator.alloc(StateMachine, options.replica_count);
+        errdefer allocator.free(state_machines);
 
-            const storages = try allocator.alloc(Storage, options.replica_count);
-            errdefer allocator.free(storages);
+        const storages = try allocator.alloc(Storage, options.replica_count);
+        errdefer allocator.free(storages);
 
-            const times = try allocator.alloc(Time, options.replica_count);
-            errdefer allocator.free(times);
+        const times = try allocator.alloc(Time, options.replica_count);
+        errdefer allocator.free(times);
 
-            const replicas = try allocator.alloc(Replica, options.replica_count);
-            errdefer allocator.free(replicas);
+        const replicas = try allocator.alloc(Replica, options.replica_count);
+        errdefer allocator.free(replicas);
 
-            const clients = try allocator.alloc(Client, options.client_count);
-            errdefer allocator.free(clients);
+        const clients = try allocator.alloc(Client, options.client_count);
+        errdefer allocator.free(clients);
 
-            const network = try Network.init(
-                allocator,
-                options.replica_count,
-                options.client_count,
-                options.network_options,
-            );
-            errdefer network.deinit();
+        var network = try Network.init(
+            allocator,
+            options.replica_count,
+            options.client_count,
+            options.network_options,
+        );
+        errdefer network.deinit();
 
-            cluster.* = .{
-                .allocator = allocator,
-                .options = options,
-                .state_machines = state_machines,
-                .storages = storages,
-                .times = times,
-                .replicas = replicas,
-                .clients = clients,
-                .network = network,
-            };
-        }
+        cluster.* = .{
+            .allocator = allocator,
+            .options = options,
+            .state_machines = state_machines,
+            .storages = storages,
+            .times = times,
+            .replicas = replicas,
+            .clients = clients,
+            .network = network,
+        };
 
         var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
         const faulty_areas = Storage.generate_faulty_areas(prng, config.journal_size_max, options.replica_count, &buffer);
@@ -124,6 +124,19 @@ pub const Cluster = struct {
                 &cluster.state_machines[replica_index],
             );
             message_bus.set_on_message(*Replica, replica, Replica.on_message);
+        }
+
+        {
+            // Format the WAL (equivalent to "tigerbeetle init ...").
+            for (cluster.storages) |storage| {
+                const sectors = storage.size / config.sector_size;
+                var sector: usize = 0;
+                while (sector < sectors) : (sector += 1) {
+                    const offset = sector * config.sector_size;
+                    mem.copy(u8, storage.memory[offset .. offset + config.sector_size],
+                        Journal.format(options.cluster, sector)[0..]);
+                }
+            }
         }
 
         for (cluster.clients) |*client| {
@@ -214,5 +227,24 @@ pub const Cluster = struct {
         );
         message_bus.set_on_message(*Replica, replica, Replica.on_message);
         replica.on_change_state = cluster.on_change_state;
+    }
+
+    /// Returns the number of replicas capable of helping a crashed node recover.
+    /// That is, a "healthy" replica has:
+    ///
+    /// * replica.status=normal
+    /// * replica.op_known=true
+    pub fn count_healthy(cluster: *Cluster) u8 {
+        var count: u8 = 0;
+        for (cluster.replicas) |*replica| {
+            switch (replica.status) {
+                .normal => {
+                    if (replica.op_known) count += 1;
+                },
+                .view_change => {},
+                .recovering => {},
+            }
+        }
+        return count;
     }
 };
