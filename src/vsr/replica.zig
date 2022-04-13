@@ -785,7 +785,7 @@ pub fn Replica(
             });
             assert(message.header.op == self.op + 1);
             self.op = message.header.op;
-            self.op_known = true;
+            self.set_op_known();
             self.journal.set_header_as_dirty(message.header);
 
             self.replicate(message);
@@ -864,6 +864,31 @@ pub fn Replica(
             assert(self.follower());
             assert(message.header.view == self.view);
             assert(message.header.replica == self.leader_index(message.header.view));
+
+            if (!self.op_known) {
+                const op_leader = message.header.op;
+                if (self.journal.header_with_op(op_leader)) |_| {
+                    // Usually the op is learned via `prepare` or view change.
+                    // But if no prepares are arriving and the view is stable, we can learn the
+                    // current op from a `commit`. This only works if we already have the op's
+                    // header in memory, due to `replica.op`'s invariant.
+                    //
+                    // In particular, this is useful when a crash occurs at the very end of a VOPR
+                    // run, since no additional prepares will arrive.
+                    log.debug("{}: on_commit: learn op={}", .{self.replica, op_leader});
+                    assert(self.op >= op_leader);
+
+                    self.journal.remove_entries_from(op_leader + 1);
+                    self.op = op_leader;
+                    self.set_op_known();
+                    assert(self.journal.header_with_op(self.op) != null);
+                } else {
+                    log.debug("{}: on_commit: cannot learn op={}", .{
+                        self.replica,
+                        message.header.op,
+                    });
+                }
+            }
 
             // We may not always have the latest commit entry but if we do our checksum must match:
             if (self.journal.header_with_op(message.header.commit)) |commit_entry| {
@@ -1391,7 +1416,7 @@ pub fn Replica(
             for (leader_headers) |*header| {
                 _ = self.repair_header(header);
             }
-            self.op_known = self.journal.faulty.count == 0;
+            if (self.journal.faulty.count == 0) self.set_op_known();
 
             log.debug("{}: on_recovery_response: responses={} view={} headers={}..{} commit={} dirty={} faulty={}", .{
                 self.replica,
@@ -1858,6 +1883,7 @@ pub fn Replica(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
+                .op = self.op, // Help the other replica set op_known=true.
                 .commit = self.commit_max,
             });
         }
@@ -3246,7 +3272,6 @@ pub fn Replica(
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
 
-            // We expect these always to exist:
             assert(self.journal.header_with_op(self.commit_min) != null);
             assert(self.journal.header_with_op(self.op) != null);
 
@@ -4224,6 +4249,7 @@ pub fn Replica(
                     assert(self.leader());
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.op == self.op);
                 },
                 .request_headers => {
                     assert(message.header.view == self.view);
@@ -4348,7 +4374,7 @@ pub fn Replica(
             // bits may be repaired).
             switch (self.status) {
                 .normal => unreachable,
-                .view_change => self.op_known = true,
+                .view_change => self.set_op_known(),
                 .recovering => assert(!self.op_known),
             }
             // Crucially, we must never rewind `commit_max` (and then `commit_min`) because
