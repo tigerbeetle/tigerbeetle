@@ -1,4 +1,4 @@
-module github.com/coilhq/tigerbeetle_go
+module github.com/coilhq/tigerbeetle-go
 
 go 1.17
 

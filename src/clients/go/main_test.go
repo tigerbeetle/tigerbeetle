@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"testing"
 	"runtime"
+	"testing"
 
-	"github.com/coilhq/tigerbeetle_go/pkg/types"
+	"github.com/coilhq/tigerbeetle-go/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
 
