@@ -1690,30 +1690,30 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             unreachable;
         }
-    };
-}
 
-fn init_prepare(cluster: u32) Header {
-    var header = Header{
-        .parent = 0,
-        .client = 0,
-        .context = 0,
-        .request = 0,
-        .cluster = cluster,
-        .epoch = 0,
-        .view = 0,
-        .op = 0,
-        .commit = 0,
-        .offset = 0,
-        .size = @sizeOf(Header),
-        .replica = 0,
-        .command = .prepare,
-        .operation = .init,
-        .version = vsr.Version,
+        pub fn init_prepare(cluster: u32) Header {
+            var header = Header{
+                .parent = 0,
+                .client = 0,
+                .context = 0,
+                .request = 0,
+                .cluster = cluster,
+                .epoch = 0,
+                .view = 0,
+                .op = 0,
+                .commit = 0,
+                .offset = 0,
+                .size = @sizeOf(Header),
+                .replica = 0,
+                .command = .prepare,
+                .operation = .init,
+                .version = vsr.Version,
+            };
+            header.set_checksum_body(&[0]u8{});
+            header.set_checksum();
+            return header;
+        }
     };
-    header.set_checksum_body(&[0]u8{});
-    header.set_checksum();
-    return header;
 }
 
 // TODO Snapshots
