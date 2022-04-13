@@ -46,11 +46,13 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     { 
-        const tb_client = b.addSharedLibrary("tb_client", "src/c/tb_client.zig", .unversioned);
+        const tb_client = b.addStaticLibrary("tb_client", "src/c/tb_client.zig");
         tb_client.setMainPkgPath("src");
         tb_client.setTarget(target);
         tb_client.setBuildMode(mode);
         tb_client.setOutputDir("zig-out");
+        tb_client.pie = true;
+        tb_client.bundle_compiler_rt = true;
 
         const os_tag = target.os_tag orelse builtin.target.os.tag;
         if (os_tag != .windows) {
