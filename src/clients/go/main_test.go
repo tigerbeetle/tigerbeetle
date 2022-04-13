@@ -31,6 +31,8 @@ func WithClient(s testing.TB, withClient func(Client)) {
 		tigerbeetlePath = "./pkg/native/x86_64-windows/tigerbeetle.exe"
 	} else if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
 		tigerbeetlePath = "./pkg/native/x86_64-linux/tigerbeetle"
+	} else if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+		tigerbeetlePath = "./pkg/native/aarch64-linux/tigerbeetle"
 	} else if runtime.GOOS == "darwin" && runtime.GOARCH == "amd64" {
 		tigerbeetlePath = "./pkg/native/x86_64-macos/tigerbeetle"
 	} else if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
