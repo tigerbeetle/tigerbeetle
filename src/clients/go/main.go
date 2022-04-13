@@ -24,8 +24,8 @@ void onGoPacketCompletion(
 import "C"
 import (
 	e "errors"
-	"github.com/coilhq/tigerbeetle_go/pkg/errors"
-	"github.com/coilhq/tigerbeetle_go/pkg/types"
+	"github.com/coilhq/tigerbeetle-go/pkg/errors"
+	"github.com/coilhq/tigerbeetle-go/pkg/types"
 	"strings"
 	"unsafe"
 )
