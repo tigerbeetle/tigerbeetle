@@ -1,3 +1,5 @@
-tigerbeetle
 zig/
 zig-cache/
+zig-out/
+
+tb
