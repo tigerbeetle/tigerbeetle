@@ -81,17 +81,14 @@ pub fn SetAssociativeCache(
     const Count = meta.Int(.unsigned, layout.clock_bits);
     const Clock = meta.Int(.unsigned, clock_hand_bits);
 
-    const Counts = PackedUnsignedIntegerArray(Count);
-    const Clocks = PackedUnsignedIntegerArray(Clock);
-
     return struct {
         const Self = @This();
 
         sets: u64,
         tags: []Tag,
         values: []align(value_alignment) Value,
-        counts: []u64,
-        clocks: []u64,
+        counts: PackedUnsignedIntegerArray(Count),
+        clocks: PackedUnsignedIntegerArray(Clock),
 
         pub fn init(allocator: mem.Allocator, value_count_max: u64) !Self {
             assert(math.isPowerOfTwo(value_count_max));
@@ -135,8 +132,8 @@ pub fn SetAssociativeCache(
                 .sets = sets,
                 .tags = tags,
                 .values = values,
-                .counts = counts,
-                .clocks = clocks,
+                .counts = .{ .words = counts },
+                .clocks = .{ .words = clocks },
             };
 
             self.reset();
@@ -150,14 +147,14 @@ pub fn SetAssociativeCache(
 
             allocator.free(self.tags);
             allocator.free(self.values);
-            allocator.free(self.counts);
-            allocator.free(self.clocks);
+            allocator.free(self.counts.words);
+            allocator.free(self.clocks.words);
         }
 
         pub fn reset(self: *Self) void {
             mem.set(Tag, self.tags, 0);
-            mem.set(u64, self.counts, 0);
-            mem.set(u64, self.clocks, 0);
+            mem.set(u64, self.counts.words, 0);
+            mem.set(u64, self.clocks.words, 0);
         }
 
         pub fn get(self: *Self, key: Key) ?*align(value_alignment) Value {
@@ -200,7 +197,7 @@ pub fn SetAssociativeCache(
             const clock_iterations_max = layout.ways * math.maxInt(Count);
             var safety_count: usize = 1;
 
-            var way = Clocks.get(self.clocks, clock_index);
+            var way = self.clocks.get(clock_index);
             comptime assert(math.maxInt(@TypeOf(way)) == layout.ways - 1);
             comptime assert(@as(@TypeOf(way), math.maxInt(@TypeOf(way))) +% 1 == 0);
 
@@ -213,20 +210,20 @@ pub fn SetAssociativeCache(
                 // locked by comparing pointers directly.
                 if (locked(context, @alignCast(value_alignment, &set.values[way]))) continue;
 
-                const count = Counts.get(self.counts, set.offset + way);
+                const count = self.counts.get(set.offset + way);
 
                 // Free way found
                 if (count == 0) break;
 
-                Counts.set(self.counts, set.offset + way, count - 1);
+                self.counts.set(set.offset + way, count - 1);
             }
             assert(safety_count <= clock_iterations_max);
 
-            Clocks.set(self.clocks, clock_index, way +% 1);
+            self.clocks.set(clock_index, way +% 1);
 
             set.tags[way] = set.tag;
 
-            Counts.set(self.counts, set.offset + way, 1);
+            self.counts.set(set.offset + way, 1);
 
             return @alignCast(value_alignment, &set.values[way]);
         }
@@ -234,13 +231,11 @@ pub fn SetAssociativeCache(
         fn search(self: *Self, set: Set, key: Key) ?*align(value_alignment) Value {
             for (set.tags) |tag, way| {
                 if (tag == set.tag) {
-                    // TODO improve the PackedUnsignedIntegerArray API so that we can do
-                    // self.counts.get() instead of Counts.get(self.counts).
-                    const count = Counts.get(self.counts, set.offset + way);
+                    const count = self.counts.get(set.offset + way);
                     if (count > 0) {
                         const value_ptr = @alignCast(value_alignment, &set.values[way]);
                         if (equal(key_from_value(value_ptr.*), key)) {
-                            Counts.set(self.counts, set.offset + way, count +| 1);
+                            self.counts.set(set.offset + way, count +| 1);
                             return value_ptr;
                         }
                     }
@@ -312,15 +307,19 @@ fn PackedUnsignedIntegerArray(comptime UInt: type) type {
     assert(math.maxInt(BitsIndex) == uint_bits * (math.maxInt(WordIndex) + 1) - 1);
 
     return struct {
+        const Self = @This();
+
+        words: []Word,
+
         /// Returns the unsigned integer at `index`.
-        pub inline fn get(words: []Word, index: u64) UInt {
+        pub inline fn get(self: Self, index: u64) UInt {
             // This truncate is safe since we want to mask the right-shifted word by exactly a UInt:
-            return @truncate(UInt, word(words, index).* >> bits_index(index));
+            return @truncate(UInt, self.word(index).* >> bits_index(index));
         }
 
         /// Sets the unsigned integer at `index` to `value`.
-        pub inline fn set(words: []Word, index: u64, value: UInt) void {
-            const w = word(words, index);
+        pub inline fn set(self: Self, index: u64, value: UInt) void {
+            const w = self.word(index);
             w.* &= ~mask(index);
             w.* |= @as(Word, value) << bits_index(index);
         }
@@ -329,8 +328,8 @@ fn PackedUnsignedIntegerArray(comptime UInt: type) type {
             return @as(Word, math.maxInt(Word)) << bits_index(index);
         }
 
-        inline fn word(words: []Word, index: u64) *Word {
-            return &words[@divFloor(index, uints_per_word)];
+        inline fn word(self: Self, index: u64) *Word {
+            return &self.words[@divFloor(index, uints_per_word)];
         }
 
         inline fn bits_index(index: u64) BitsIndex {
@@ -383,28 +382,30 @@ test "PackedUnsignedIntegerArray" {
 
     var words = [8]u64{ 0, 0b10110010, 0, 0, 0, 0, 0, 0 };
 
-    const p = PackedUnsignedIntegerArray(u2);
+    var p: PackedUnsignedIntegerArray(u2) = .{
+        .words = &words,
+    };
 
-    try testing.expectEqual(@as(u2, 0b10), p.get(&words, 32 + 0));
-    try testing.expectEqual(@as(u2, 0b00), p.get(&words, 32 + 1));
-    try testing.expectEqual(@as(u2, 0b11), p.get(&words, 32 + 2));
-    try testing.expectEqual(@as(u2, 0b10), p.get(&words, 32 + 3));
+    try testing.expectEqual(@as(u2, 0b10), p.get(32 + 0));
+    try testing.expectEqual(@as(u2, 0b00), p.get(32 + 1));
+    try testing.expectEqual(@as(u2, 0b11), p.get(32 + 2));
+    try testing.expectEqual(@as(u2, 0b10), p.get(32 + 3));
 
-    p.set(&words, 0, 0b01);
+    p.set(0, 0b01);
     try testing.expectEqual(@as(u64, 0b00000001), words[0]);
-    p.set(&words, 1, 0b10);
+    p.set(1, 0b10);
     try testing.expectEqual(@as(u64, 0b00001001), words[0]);
-    p.set(&words, 2, 0b11);
+    p.set(2, 0b11);
     try testing.expectEqual(@as(u64, 0b00111001), words[0]);
-    p.set(&words, 3, 0b11);
+    p.set(3, 0b11);
     try testing.expectEqual(@as(u64, 0b11111001), words[0]);
-    p.set(&words, 3, 0b01);
+    p.set(3, 0b01);
     try testing.expectEqual(@as(u64, 0b01111001), words[0]);
-    p.set(&words, 3, 0b00);
+    p.set(3, 0b00);
     try testing.expectEqual(@as(u64, 0b00111001), words[0]);
 
-    p.set(&words, 4, 0b11);
+    p.set(4, 0b11);
     try testing.expectEqual(@as(u64, 0b0000000000000000000000000000000000000000000000000000001100111001), words[0]);
-    p.set(&words, 31, 0b11);
+    p.set(31, 0b11);
     try testing.expectEqual(@as(u64, 0b1100000000000000000000000000000000000000000000000000001100111001), words[0]);
 }
