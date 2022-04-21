@@ -128,7 +128,7 @@ pub fn SetAssociativeCache(
             const counts = try allocator.alloc(u64, @divExact(counts_size, @sizeOf(u64)));
             errdefer allocator.free(counts);
 
-            const clocks = try allocator.alloc(u64, @divExact(counts_size, @sizeOf(u64)));
+            const clocks = try allocator.alloc(u64, @divExact(clocks_size, @sizeOf(u64)));
             errdefer allocator.free(clocks);
 
             var self = Self{
