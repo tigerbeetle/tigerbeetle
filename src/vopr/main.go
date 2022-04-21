@@ -149,10 +149,12 @@ func (limited_buffer *size_limited_buffer) Write(byte_array []byte) (int, error)
 	space_left := limited_buffer.byte_budget
 	limited_buffer.byte_budget -= len(byte_array)
 	if limited_buffer.byte_budget <= 0 {
-		limited_buffer.size_reached <- true
 		if space_left > 0 {
-			return limited_buffer.buffer.Write(byte_array[0 : space_left-1])
+			bytes_written, err := limited_buffer.buffer.Write(byte_array[0 : space_left-1])
+			limited_buffer.size_reached <- true
+			return bytes_written, err
 		} else {
+			limited_buffer.size_reached <- true
 			return 0, nil
 		}
 	} else if space_left > 0 {
@@ -174,14 +176,19 @@ func handle_connection(track_connections chan bool, connection net.Conn, vopr_me
 
 	var input vopr_message_byte_array
 
-	// Only reply if everything is as expected.
-	bytes_read, error := connection.Read(input[:])
-	if error != nil {
-		error_message := fmt.Sprintf("Client closed unexpectedly: %s", error.Error())
-		log_error(error_message, nil)
-		return
+	// If too few bytes were sent the read will timeout because a read deadline was set on the connection.
+	total_bytes_read := 0
+	for total_bytes_read < LENGTH_OF_VOPR_MESSAGE {
+		bytes_read, error := connection.Read(input[:])
+		if error != nil {
+			error_message := fmt.Sprintf("Client closed unexpectedly: %s", error.Error())
+			log_error(error_message, nil)
+			return
+		}
+		total_bytes_read += bytes_read
 	}
-	if bytes_read != LENGTH_OF_VOPR_MESSAGE {
+
+	if total_bytes_read != LENGTH_OF_VOPR_MESSAGE {
 		log_error("The input was longer or shorter than expected", nil)
 		return
 	}
@@ -199,17 +206,16 @@ func handle_connection(track_connections chan bool, connection net.Conn, vopr_me
 		log_info(log_message, message.hash[:])
 
 		// Checks if there is capacity to process the message
-		if len(vopr_message_channel) < MAX_QUEUING_MESSAGES {
-			// Reply to client
-			_, error = connection.Write([]byte("1"))
+		select {
+		case vopr_message_channel <- message:
+			// Reply to client only reply if everything is as expected.
+			_, error := connection.Write([]byte("1"))
 			if error != nil {
 				error_message := fmt.Sprintf("Unable to reply to client: %s", error.Error())
 				log_error(error_message, message.hash[:])
 				return
 			}
-			// Using a separate Goroutine means that the connection can close without delay.
-			go write_to_vopr_message_channel(message, vopr_message_channel)
-		} else {
+		default:
 			log_info("Too many messages already queued, dropping message", message.hash[:])
 		}
 	} else {
@@ -767,14 +773,14 @@ func main() {
 				error.Error(),
 			)
 			log_error(error_message, nil)
-			panic(error.Error())
+			connection.Close();
+			continue;
 		}
 
-		number_open_connections := len(track_connections)
-		if number_open_connections < MAX_CONCURRENT_CONNECTIONS {
-			track_connections <- true
+		select {
+		case track_connections <- true:
 			go handle_connection(track_connections, connection, vopr_message_channel)
-		} else {
+		default:
 			log_info("Connection closed because there are currently too many open connections", nil)
 			connection.Close()
 		}
