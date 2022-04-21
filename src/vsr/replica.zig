@@ -305,25 +305,7 @@ pub fn Replica(
             try client_table.ensureTotalCapacity(allocator, @intCast(u32, config.clients_max));
             assert(client_table.capacity() >= config.clients_max);
 
-            var init_prepare = Header{
-                .parent = 0,
-                .client = 0,
-                .context = 0,
-                .request = 0,
-                .cluster = cluster,
-                .epoch = 0,
-                .view = 0,
-                .op = 0,
-                .commit = 0,
-                .offset = 0,
-                .size = @sizeOf(Header),
-                .replica = 0,
-                .command = .prepare,
-                .operation = .init,
-                .version = Version,
-            };
-            init_prepare.set_checksum_body(&[0]u8{});
-            init_prepare.set_checksum();
+            const init_prepare = Header.init_prepare(cluster);
 
             var clock = try Clock.init(
                 allocator,
@@ -349,7 +331,7 @@ pub fn Replica(
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
                 .clock = clock,
-                .journal = try Journal.init(allocator, storage, replica),
+                .journal = try Journal.init(allocator, storage, cluster, replica),
                 .message_bus = message_bus,
                 .state_machine = state_machine,
                 .client_table = client_table,
@@ -1062,7 +1044,7 @@ pub fn Replica(
 
             var v: ?u32 = null;
             var k: ?u64 = null;
-            var latest = Header.reserved();
+            var latest = Header.reserved(self.cluster, 0);
 
             for (self.do_view_change_from_all_replicas) |received, replica| {
                 if (received) |m| {
@@ -1076,7 +1058,7 @@ pub fn Replica(
                     var replica_view_normal = @intCast(u32, m.header.offset);
                     assert(replica_view_normal < m.header.view);
 
-                    var replica_latest = Header.reserved();
+                    var replica_latest = Header.reserved(self.cluster, 0);
                     set_latest_op(self.message_body_as_headers(m), &replica_latest);
                     assert(replica_latest.op == m.header.op);
 
@@ -1155,7 +1137,7 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(message.header.view == self.view);
 
-            var latest = Header.reserved();
+            var latest = Header.reserved(self.cluster, 0);
             set_latest_op(self.message_body_as_headers(message), &latest);
             assert(latest.op == message.header.op);
 
@@ -1399,7 +1381,7 @@ pub fn Replica(
 
             const commit = leader_response.?.header.commit;
             {
-                var latest = Header.reserved();
+                var latest = Header.reserved(self.cluster, 0);
                 set_latest_op(leader_headers, &latest);
                 assert(latest.op == leader_response.?.header.op);
 
@@ -3220,12 +3202,16 @@ pub fn Replica(
 
                 assert(self.op == 0);
                 assert(!self.op_known);
-                var op: u64 = 0;
-                for (self.journal.headers) |*h| op = std.math.max(op, h.op);
-                self.op = op;
+                self.op = op_max: {
+                    var op: u64 = 0;
+                    for (self.journal.headers) |*h| {
+                        if (h.command == .prepare and op < h.op) op = h.op;
+                    }
+                    break :op_max op;
+                };
                 self.set_op_known();
 
-                self.commit_ops(op);
+                self.commit_ops(self.op);
                 // This is a cluster-of-1 (we are always the leader), so the actual recovering→normal
                 // status transition is deferred until all ops are committed.
             } else {
@@ -4413,7 +4399,7 @@ pub fn Replica(
                     //
                     // The op is known, so we can safely repair the initial prepare.
                     // This is required to maintain the invariant that the op=commit_min exists in-memory.
-                    const header = Journal.init_prepare(self.cluster);
+                    const header = Header.init_prepare(self.cluster);
                     self.journal.set_header_as_dirty(&header);
                     log.debug("{}: set_op_known: repair initial op", .{ self.replica });
                 }

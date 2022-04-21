@@ -194,8 +194,11 @@ pub fn main() !void {
     var requests_sent: u64 = 0;
     var idle = false;
 
+    // The minimum number of healthy replicas that can allow crashed a node to recover.
     const replica_healthy_min = replicas: {
         if (replica_count == 1) {
+            // A cluster of 1 can crash safely (as long as there is no disk corruption) since it
+            // does not run recovery protocol.
             break :replicas 0;
         } else {
             break :replicas cluster.replicas[0].quorum_view_change;
