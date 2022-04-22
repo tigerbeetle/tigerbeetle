@@ -1062,12 +1062,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             const Decision = enum {
-                eql, // The header and prepare are identical; no repair necessary.
-                nil, // Reserved; clear dirty/faulty, no repair necessary.
-                // For replica_count>1: Repair using VSR `request_prepare`. Set dirty, clear faulty.
-                // For replica_count=1: Use intact prepare. Clear dirty, clear faulty.
+                /// The header and prepare are identical; no repair necessary.
+                eql,
+                /// Reserved; clear dirty/faulty, no repair necessary.
+                nil,
+                /// If replica_count>1: Repair using VSR `request_prepare`. Mark dirty, clear faulty.
+                /// If replica_count=1: Use intact prepare. Clear dirty, clear faulty.
                 fix,
-                vsr, // Repair using VSR `request_prepare`. Mark dirty and faulty.
+                /// If replica_count>1: Repair using VSR `request_prepare`. Mark dirty and faulty.
+                /// If replica_count=1: Fail; cannot recover safely.
+                vsr,
             };
 
             const header = &self.headers[slot.index];
@@ -1184,7 +1188,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     // The message was rewritten due to a view change.
                     // A single-replica cluster doesn't ever change views.
                     assert(!match_view);
-                    assert(replica.replica_count > 1);
+                    assert(replica.replica_count != 1);
                     break :decision .vsr; // @K
                 }
 
@@ -1259,6 +1263,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.faulty.count,
             });
 
+            assert(self.faulty.count == 0 or replica.replica_count != 1);
             assert(self.faulty.count >= self.dirty.count);
             assert(self.faulty.count < slot_count);
             if (self.headers[0].op == 0 and self.headers[0].command == .prepare) {
