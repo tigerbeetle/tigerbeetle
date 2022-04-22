@@ -33,7 +33,7 @@ pub const Status = enum {
     //    * Set `op` to the highest op in the leader's recovery response.
     //    * Repair faulty messages.
     //    * Commit to the discovered `commit_max`.
-    //    * Set `state_machine.{prepare,commit}_timeout` to TODO.
+    //    * Set `state_machine.prepare_timeout` to the current op's timestamp.
     //
     // TODO document snapshot recovery in this progression
     recovering,
@@ -609,7 +609,7 @@ pub fn Replica(
             } else {
                 // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
                 pong.op = message.header.op;
-                pong.offset = @bitCast(u64, self.clock.realtime());
+                pong.timestamp = @bitCast(u64, self.clock.realtime());
                 self.send_header_to_replica(message.header.replica, pong);
             }
         }
@@ -619,7 +619,7 @@ pub fn Replica(
             if (message.header.replica == self.replica) return;
 
             const m0 = message.header.op;
-            const t1 = @bitCast(i64, message.header.offset);
+            const t1 = @bitCast(i64, message.header.timestamp);
             const m2 = self.clock.monotonic();
 
             self.clock.learn(message.header.replica, m0, t1, m2);
@@ -648,7 +648,7 @@ pub fn Replica(
 
             log.debug("{}: on_request: request {}", .{ self.replica, message.header.checksum });
 
-            self.state_machine.prepare(
+            const prepare_timestamp = self.state_machine.prepare(
                 realtime,
                 message.header.operation.cast(StateMachine),
                 message.body(),
@@ -660,9 +660,9 @@ pub fn Replica(
             message.header.view = self.view;
             message.header.op = self.op + 1;
             message.header.commit = self.commit_max;
+            message.header.timestamp = prepare_timestamp;
             message.header.replica = self.replica;
             message.header.command = .prepare;
-            // TODO set header.timestamp?
 
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
@@ -752,7 +752,7 @@ pub fn Replica(
 
             if (self.journal.previous_entry(message.header)) |previous| {
                 // Any previous entry may be a whole journal's worth of ops behind due to wrapping.
-                // We therefore do not do any further op, offset or checksum assertions beyond this:
+                // We therefore do not do any further op or checksum assertions beyond this:
                 self.panic_if_hash_chain_would_break_in_the_same_view(previous, message.header);
             }
 
@@ -1055,7 +1055,7 @@ pub fn Replica(
 
                     // The latest normal view experienced by this replica:
                     // This may be higher than the view in any of the prepare headers.
-                    var replica_view_normal = @intCast(u32, m.header.offset);
+                    var replica_view_normal = @intCast(u32, m.header.timestamp);
                     assert(replica_view_normal < m.header.view);
 
                     var replica_latest = Header.reserved(self.cluster, 0);
@@ -1107,6 +1107,11 @@ pub fn Replica(
             self.discard_uncommitted_headers();
             assert(self.op >= self.commit_max);
             assert(self.journal.header_with_op(self.op) != null);
+
+            const prepare_timestamp = self.journal.header_with_op(self.op).?.timestamp;
+            if (self.state_machine.prepare_timestamp < prepare_timestamp) {
+                self.state_machine.prepare_timestamp = prepare_timestamp;
+            }
 
             // TODO Don't drop every message in the pipeline; some of them are useful.
             self.reset_pipeline();
@@ -1411,8 +1416,8 @@ pub fn Replica(
                 self.journal.faulty.count,
             });
 
-            // TODO Set state machine timestamps.
-
+            self.state_machine.prepare_timestamp = self.journal.header_with_op(self.op).?.timestamp;
+            // `state_machine.commit_timestamp` is updated as messages are committed.
             self.commit_ops(commit);
             self.repair();
 
@@ -2260,6 +2265,7 @@ pub fn Replica(
             const reply_body_size = @intCast(u32, self.state_machine.commit(
                 prepare.header.client,
                 prepare.header.operation.cast(StateMachine),
+                prepare.header.timestamp,
                 prepare.buffer[@sizeOf(Header)..prepare.header.size],
                 reply.buffer[@sizeOf(Header)..],
             ));
@@ -2283,7 +2289,7 @@ pub fn Replica(
                 .commit = prepare.header.op,
                 .size = @sizeOf(Header) + reply_body_size,
             };
-            assert(reply.header.offset == 0);
+            assert(reply.header.timestamp == 0);
             assert(reply.header.epoch == 0);
 
             reply.header.set_checksum_body(reply.buffer[@sizeOf(Header)..reply.header.size]);
@@ -2470,8 +2476,8 @@ pub fn Replica(
                 // The latest normal view (as specified in the 2012 paper) is different to the view
                 // number contained in the prepare headers we include in the body. The former shows
                 // how recent a view change the replica participated in, which may be much higher.
-                // We use the `offset` field to send this in addition to the current view number:
-                .offset = if (command == .do_view_change) self.view_normal else 0,
+                // We use the `timestamp` field to send this in addition to the current view number:
+                .timestamp = if (command == .do_view_change) self.view_normal else 0,
                 .op = self.op,
                 .commit = self.commit_max,
             };
@@ -3184,7 +3190,7 @@ pub fn Replica(
             assert(prepare.message.header.view <= ok.header.view);
             assert(prepare.message.header.op == ok.header.op);
             assert(prepare.message.header.commit == ok.header.commit);
-            assert(prepare.message.header.offset == ok.header.offset);
+            assert(prepare.message.header.timestamp == ok.header.timestamp);
             assert(prepare.message.header.operation == ok.header.operation);
 
             return prepare;
@@ -4028,7 +4034,7 @@ pub fn Replica(
                     .view = self.view,
                     .op = header.op,
                     .commit = header.commit,
-                    .offset = header.offset,
+                    .timestamp = header.timestamp,
                     .operation = header.operation,
                 });
             } else {
@@ -4314,7 +4320,7 @@ pub fn Replica(
             }
 
 
-            log.debug("{}: {s}: view={} op={}..{} commit={}..{} checksum={} offset={}", .{
+            log.debug("{}: {s}: view={} op={}..{} commit={}..{} checksum={}", .{
                 self.replica,
                 method,
                 self.view,
@@ -4323,7 +4329,6 @@ pub fn Replica(
                 self.commit_max,
                 k,
                 latest.checksum,
-                latest.offset,
             });
 
             // Uncommitted ops may not survive a view change so we must assert `latest.op` against

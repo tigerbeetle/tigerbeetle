@@ -66,9 +66,6 @@ pub const StateMachine = struct {
         errdefer commits.deinit();
         try commits.ensureTotalCapacity(@intCast(u32, commits_max));
 
-        // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
-        // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
-
         return StateMachine{
             .allocator = allocator,
             .prepare_timestamp = 0,
@@ -107,25 +104,8 @@ pub const StateMachine = struct {
         };
     }
 
-    pub fn prepare(self: *StateMachine, realtime: i64, operation: Operation, input: []u8) void {
-        switch (operation) {
-            .init => unreachable,
-            .register => {},
-            .create_accounts => self.prepare_timestamps(realtime, .create_accounts, input),
-            .create_transfers => self.prepare_timestamps(realtime, .create_transfers, input),
-            .commit_transfers => self.prepare_timestamps(realtime, .commit_transfers, input),
-            .lookup_accounts => {},
-            .lookup_transfers => {},
-            else => unreachable,
-        }
-    }
-
-    fn prepare_timestamps(
-        self: *StateMachine,
-        realtime: i64,
-        comptime operation: Operation,
-        input: []u8,
-    ) void {
+    /// Returns the header's timestamp.
+    pub fn prepare(self: *StateMachine, realtime: i64, operation: Operation, input: []u8) u64 {
         // Guard against the wall clock going backwards by taking the max with timestamps issued:
         self.prepare_timestamp = std.math.max(
             // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
@@ -134,6 +114,28 @@ pub const StateMachine = struct {
             @intCast(u64, realtime),
         );
         assert(self.prepare_timestamp > self.commit_timestamp);
+
+        switch (operation) {
+            .init => unreachable,
+            .register => {},
+            .create_accounts => self.prepare_timestamps(.create_accounts, input),
+            .create_transfers => self.prepare_timestamps(.create_transfers, input),
+            .commit_transfers => self.prepare_timestamps(.commit_transfers, input),
+            .lookup_accounts => {},
+            .lookup_transfers => {},
+            else => unreachable,
+        }
+        return self.prepare_timestamp;
+    }
+
+    /// Returns the header's timestamp.
+    fn prepare_timestamps(
+        self: *StateMachine,
+        comptime operation: Operation,
+        input: []u8,
+    ) void {
+        assert(self.prepare_timestamp > self.commit_timestamp);
+
         var sum_reserved_timestamps: usize = 0;
         var events = std.mem.bytesAsSlice(Event(operation), input);
         for (events) |*event| {
@@ -151,11 +153,16 @@ pub const StateMachine = struct {
         self: *StateMachine,
         client: u128,
         operation: Operation,
+        timestamp: u64,
         input: []const u8,
         output: []u8,
     ) usize {
         _ = client;
 
+        defer {
+            assert(self.commit_timestamp <= timestamp);
+            self.commit_timestamp = timestamp;
+        }
         return switch (operation) {
             .init => unreachable,
             .register => 0,
@@ -757,8 +764,8 @@ test "linked accounts" {
     const input = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, input, output);
+    const prepare_timestamp = state_machine.prepare(0, .create_accounts, input);
+    const size = state_machine.commit(0, .create_accounts, prepare_timestamp, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try testing.expectEqualSlices(
@@ -812,8 +819,8 @@ test "create/lookup/rollback transfers" {
     const input = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, input, output);
+    const prepare_timestamp = state_machine.prepare(0, .create_accounts, input);
+    const size = state_machine.commit(0, .create_accounts, prepare_timestamp, input, output);
 
     const errors = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
     try testing.expectEqual(@as(usize, 0), errors.len);
@@ -1191,8 +1198,8 @@ test "create/lookup/rollback commits" {
     const output = try allocator.alloc(u8, 4096);
 
     // Accounts:
-    state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, input, output);
+    const accounts_timestamp = state_machine.prepare(0, .create_accounts, input);
+    const size = state_machine.commit(0, .create_accounts, accounts_timestamp, input, output);
     {
         const errors = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
         try testing.expectEqual(@as(usize, 0), errors.len);
@@ -1206,10 +1213,12 @@ test "create/lookup/rollback commits" {
     const object_transfers = std.mem.asBytes(&transfers);
     const output_transfers = try allocator.alloc(u8, 4096);
 
-    state_machine.prepare(0, .create_transfers, object_transfers);
+    const transfers_timestamp = state_machine.prepare(0, .create_transfers, object_transfers);
+    try testing.expect(transfers_timestamp > accounts_timestamp);
     const size_transfers = state_machine.commit(
         0,
         .create_transfers,
+        transfers_timestamp,
         object_transfers,
         output_transfers,
     );
