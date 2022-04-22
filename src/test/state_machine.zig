@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 
 const log = std.log.scoped(.state_machine);
 
@@ -13,6 +14,8 @@ pub const StateMachine = struct {
     };
 
     state: u128,
+    prepare_timestamp: u64 = 0,
+    commit_timestamp: u64 = 0,
 
     pub fn init(seed: u64) StateMachine {
         return .{ .state = hash(0, std.mem.asBytes(&seed)) };
@@ -23,21 +26,29 @@ pub const StateMachine = struct {
         realtime: i64,
         operation: Operation,
         input: []u8,
-    ) void {
-        _ = state_machine;
-        _ = realtime;
+    ) u64 {
         _ = operation;
         _ = input;
+
         // TODO: use realtime in some way to test the system
+        state_machine.prepare_timestamp = std.math.max(
+            std.math.max(state_machine.prepare_timestamp, state_machine.commit_timestamp) + 1,
+            @intCast(u64, realtime));
+        return state_machine.prepare_timestamp;
     }
 
     pub fn commit(
         state_machine: *StateMachine,
         client: u128,
         operation: Operation,
+        timestamp: u64,
         input: []const u8,
         output: []u8,
     ) usize {
+        defer {
+            assert(state_machine.commit_timestamp <= timestamp);
+            state_machine.commit_timestamp = timestamp;
+        }
         switch (operation) {
             .reserved, .init => unreachable,
             .register => return 0,

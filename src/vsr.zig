@@ -164,14 +164,13 @@ pub const Header = packed struct {
     /// The commit number of the latest committed prepare. Committed ops are immutable.
     commit: u64 = 0,
 
-    /// The journal offset to which this message relates. This enables direct access to a prepare in
-    /// storage, without yet having any previous prepares. All prepares are of variable size, since
-    /// a prepare may contain any number of data structures (even if these are of fixed size).
+    /// This field is used in various ways:
     ///
-    /// * A `pong` sets this to the sender's wall clock value.
+    /// * A `prepare` sets this to the leader's state machine `prepare_timestamp`.
+    ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
     /// * A `do_view_change` sets this to the latest normal view number.
-    // TODO remove/rename this; the WAL doesn't need it anymore
-    offset: u64 = 0,
+    /// * A `pong` sets this to the sender's wall clock value.
+    timestamp: u64 = 0,
 
     /// The size of the Header structure (always), plus any associated body.
     size: u32 = @sizeOf(Header),
@@ -260,7 +259,7 @@ pub const Header = packed struct {
         if (self.request != 0) return "request != 0";
         if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.replica != 0) return "replica != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -272,7 +271,7 @@ pub const Header = packed struct {
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -293,7 +292,7 @@ pub const Header = packed struct {
         if (self.client == 0) return "client == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.replica != 0) return "replica != 0";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
@@ -328,7 +327,7 @@ pub const Header = packed struct {
                 if (self.view != 0) return "init: view != 0";
                 if (self.op != 0) return "init: op != 0";
                 if (self.commit != 0) return "init: commit != 0";
-                if (self.offset != 0) return "init: offset != 0";
+                if (self.timestamp != 0) return "init: timestamp != 0";
                 if (self.size != @sizeOf(Header)) return "init: size != @sizeOf(Header)";
                 if (self.replica != 0) return "init: replica != 0";
             },
@@ -336,6 +335,7 @@ pub const Header = packed struct {
                 if (self.client == 0) return "client == 0";
                 if (self.op == 0) return "op == 0";
                 if (self.op <= self.commit) return "op <= commit";
+                if (self.timestamp == 0) return "timestamp == 0";
                 if (self.operation == .register) {
                     // Client session numbers are replaced by the reference to the previous prepare.
                     if (self.request != 0) return "request != 0";
@@ -361,7 +361,7 @@ pub const Header = packed struct {
                 if (self.view != 0) return "init: view != 0";
                 if (self.op != 0) return "init: op != 0";
                 if (self.commit != 0) return "init: commit != 0";
-                if (self.offset != 0) return "init: offset != 0";
+                if (self.timestamp != 0) return "init: timestamp != 0";
                 if (self.replica != 0) return "init: replica != 0";
             },
             else => {
@@ -384,7 +384,7 @@ pub const Header = packed struct {
         if (self.client == 0) return "client == 0";
         if (self.context != 0) return "context != 0";
         if (self.op != self.commit) return "op != commit";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation == .register) {
             // In this context, the commit number is the newly registered session number.
             // The `0` commit number is reserved for cluster initialization.
@@ -402,7 +402,7 @@ pub const Header = packed struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -415,7 +415,7 @@ pub const Header = packed struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -436,7 +436,7 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -449,7 +449,7 @@ pub const Header = packed struct {
         if (self.view != 0) return "view != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -459,7 +459,7 @@ pub const Header = packed struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -472,7 +472,7 @@ pub const Header = packed struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -483,9 +483,7 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.offset != 0) return "offset != 0";
-        // TODO Add local recovery mechanism for repairing the cluster initialization "zero" op.
-        if (self.op == 0) return "op == 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.commit > self.op) return "op_min > op_max";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -497,7 +495,7 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -509,7 +507,7 @@ pub const Header = packed struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -520,7 +518,7 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -532,7 +530,7 @@ pub const Header = packed struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
