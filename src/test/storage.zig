@@ -224,6 +224,13 @@ pub const Storage = struct {
     ) void {
         storage.assert_bounds_and_alignment(buffer, offset);
 
+        // Verify that there are no concurrent overlapping writes.
+        var iterator = storage.writes.iterator();
+        while (iterator.next()) |other| {
+            assert(offset + buffer.len <= other.offset or
+                other.offset + other.buffer.len <= offset);
+        }
+
         write.* = .{
             .callback = callback,
             .buffer = buffer,
