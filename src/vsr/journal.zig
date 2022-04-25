@@ -1100,33 +1100,39 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const match_op = header.op == prepare.op;
             const match_view = header.view == prepare.view;
 
-            // TODO Add logging for the uncommon error paths here.
-            const decision: Decision = decision: {
-                if (!header_valid and !prepare_valid) break :decision .vsr; // @A
+            const action: struct {
+                label: []const u8,
+                decision: Decision,
+            } = action: {
+                if (!header_valid and !prepare_valid) {
+                    break :action .{ .label = "@A", .decision = .vsr };
+                }
 
                 // This prepare header is corrupt.
                 // We may have a valid redundant header, but need to recover the full message.
                 if (header_valid and !prepare_valid) {
                     if (header_reserved) {
-                        break :decision .vsr; // @B
+                        break :action .{ .label = "@B", .decision = .vsr };
                     } else {
-                        break :decision .vsr; // @C
+                        break :action .{ .label = "@C", .decision = .vsr };
                     }
                 }
 
                 if (prepare_valid and !header_valid) {
                     if (prepare_reserved) {
-                        break :decision .vsr; // @D
+                        break :action .{ .label = "@D", .decision = .vsr };
                     } else {
                         if (replica.replica_count == 1) {
-                            break :decision .fix; // @E
+                            break :action .{ .label = "@E", .decision = .fix };
                         } else {
-                            break :decision .vsr; // @E
+                            break :action .{ .label = "@E", .decision = .vsr };
                         }
                     }
                 }
 
-                assert(header_valid and prepare_valid);
+                assert(header_valid);
+                assert(prepare_valid);
+                assert(prepare_reserved or prepare_prepare);
 
                 // One of:
                 //
@@ -1139,24 +1145,28 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 // need to be retrieved remotely.
                 if (header_reserved and !prepare_reserved) {
                     if (replica.replica_count == 1) {
-                        break :decision .fix; // @F
+                        break :action .{ .label = "@F", .decision = .fix };
                     } else {
-                        break :decision .vsr; // @F
+                        break :action .{ .label = "@F", .decision = .vsr };
                     }
                 }
 
                 // The redundant header is present & valid, but the corresponding prepare was a lost
                 // or misdirected read or write.
-                if (prepare_reserved and !header_reserved) break :decision .vsr; // @G
+                if (prepare_reserved and !header_reserved) {
+                    break :action .{ .label = "@G", .decision = .vsr };
+                }
 
                 if (header_reserved and prepare_reserved) {
                     // This slot is legitimately reserved — perhaps this is the first fill of the log.
                     assert(match_checksum);
                     assert(match_op);
                     assert(match_view);
-                    break :decision .nil; // @H
+                    break :action .{ .label = "@H", .decision = .nil };
                 }
-                assert(!header_reserved and !prepare_reserved);
+                assert(!header_reserved);
+                assert(!prepare_reserved);
+                assert(prepare_prepare);
 
                 if (!match_op) {
                     // When the redundant header & prepare header are both valid but distinct ops,
@@ -1175,11 +1185,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         // When the higher op belongs to the prepare, repair locally.
                         // The most likely cause for this case is that the log wrapped, but the
                         // redundant header write was lost.
-                        break :decision .fix; // @I
+                        break :action .{ .label = "@I", .decision = .fix };
                     } else {
                         // When the higher op belongs to the header, mark faulty.
                         assert(header.op > prepare.op);
-                        break :decision .vsr; // @J
+                        break :action .{ .label = "@J", .decision = .vsr };
                     }
                 }
                 assert(match_op);
@@ -1189,7 +1199,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     // A single-replica cluster doesn't ever change views.
                     assert(!match_view);
                     assert(replica.replica_count != 1);
-                    break :decision .vsr; // @K
+                    break :action .{ .label = "@K", .decision = .vsr };
                 }
 
                 // The redundant header matches the message's header.
@@ -1197,7 +1207,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(match_checksum);
                 assert(match_view);
                 assert(header.checksum_body == prepare.checksum_body);
-                break :decision .eql; // @L
+                break :action .{ .label = "@L", .decision = .eql };
             };
 
             if (prepare_prepare and prepare_checksum) {
@@ -1206,7 +1216,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.prepare_checksums[slot.index] = prepare.checksum;
             }
 
-            switch (decision) {
+            switch (action.decision) {
                 .eql => {
                     assert(header.command == .prepare);
                     assert(prepare.command == .prepare);
@@ -1223,13 +1233,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(self.prepare_checksums[slot.index] == 0);
                 },
                 .fix => {
-                    // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty). This is tricky because the redundant headers are written in batches. At a minimum this needs to repair replica_count=1 clusters locally, which is easier.
                     assert(prepare.command == .prepare);
                     assert(self.prepare_checksums[slot.index] == prepare.checksum);
                     if (replica.replica_count == 1) {
                         self.headers[slot.index] = prepare.*;
                         self.dirty.clear(slot);
                     } else {
+                        // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty). This is tricky because the redundant headers are written in batches.
                         self.set_header_as_dirty(prepare);
                     }
                     self.faulty.clear(slot);
@@ -1243,11 +1253,26 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 },
             }
 
-            log.debug("{}: recover_prepares: recovered slot={} decision={s}", .{
-                self.replica,
-                slot.index,
-                @tagName(decision),
-            });
+            switch (action.decision) {
+                .eql,
+                .nil => {
+                    log.debug("{}: recover_prepares: recovered slot={} label={s} decision={s}", .{
+                        self.replica,
+                        slot.index,
+                        action.label,
+                        @tagName(action.decision),
+                    });
+                },
+                .fix,
+                .vsr => {
+                    log.warn("{}: recover_prepares: recovered slot={} label={s} decision={s}", .{
+                        self.replica,
+                        slot.index,
+                        action.label,
+                        @tagName(action.decision),
+                    });
+                },
+            }
 
             replica.message_bus.unref(read.message);
             self.reads.release(read);
