@@ -736,6 +736,12 @@ pub fn Replica(
                 return;
             }
 
+            if (message.header.op >= self.op_checkpoint + self.journal.headers.len) {
+                log.debug("{}: on_prepare: ignoring op={} (too far ahead)",
+                    .{ self.replica, message.header.op, self.journal.headers.len });
+                return;
+            }
+
             assert(self.status == .normal);
             assert(message.header.view == self.view);
             assert(self.leader() or self.follower());
@@ -1200,8 +1206,6 @@ pub fn Replica(
                 return;
             }
 
-            // TODO Do we need to check op_known here?
-
             if (message.header.replica == self.replica) {
                 log.warn("{}: on_recovery: ignoring (self)", .{self.replica});
                 return;
@@ -1251,6 +1255,9 @@ pub fn Replica(
             response.header.set_checksum();
 
             assert(self.status == .normal);
+            // The leader has a known op.
+            // Followers don't need a known op — their  headers aren't used in `on_recovery_response`.
+            assert(self.follower() or self.op_known);
             // The checksum for a recovery message is deterministic, and cannot be used as a nonce:
             assert(response.header.context != message.header.checksum);
 
@@ -1399,7 +1406,7 @@ pub fn Replica(
             assert(self.status == .normal);
             assert(self.follower());
 
-            // TODO if the view's primary is >1 WAL ahead of us, these headers could cause problems. We don't want to jump this far ahead to repair, but we still need to use the hash chain to figure out which headers to request. Maybe include our commit_min in the recovery (request) message so that the response can give more useful (i.e. older) headers.
+            // TODO if the view's primary is >1 WAL ahead of us, these headers could cause problems. We don't want to jump this far ahead to repair, but we still need to use the hash chain to figure out which headers to request. Maybe include our op_checkpoint in the recovery (request) message so that the response can give more useful (i.e. older) headers.
             for (leader_headers) |*header| {
                 _ = self.repair_header(header);
             }
@@ -2579,9 +2586,7 @@ pub fn Replica(
                         if (replica != self.replica) {
                             // Check for a gap in the uncommitted headers from this replica.
                             var nack: bool = true;
-                            // TODO This can be optimized by tracking the last index in each do_view_change.
                             for (self.message_body_as_headers(m)) |*h| {
-                                // TODO Check hash chain on the left (maybe change op iteration direction to guarantee it exists).
                                 if (h.op == op) {
                                     nack = false;
                                     break;
@@ -3091,6 +3096,8 @@ pub fn Replica(
             // We may have learned of a higher `commit_max` through a commit message before jumping to a
             // newer op that is less than `commit_max` but greater than `commit_min`:
             assert(header.op > self.commit_min);
+            // Never overwrite an op that still needs to be checkpointed.
+            assert(header.op - self.op_checkpoint < self.journal.headers.len);
 
             log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
                 self.replica,
@@ -4415,6 +4422,7 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
+            assert(self.op_known);
 
             assert(!self.committing);
             assert(!self.repairing_pipeline);
@@ -4493,6 +4501,7 @@ pub fn Replica(
             // In the VRR paper it's possible to transition from normal to normal for the same view.
             // For example, this could happen after a state transfer triggered by an op jump.
             assert(new_view >= self.view);
+            assert(self.op_known);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;

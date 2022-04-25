@@ -1210,7 +1210,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 break :action .{ .label = "@L", .decision = .eql };
             };
 
-            if (prepare_prepare and prepare_checksum) {
+            if (prepare.command == .prepare and prepare.valid_checksum()) {
                 assert(self.prepare_checksums[slot.index] == 0);
 
                 self.prepare_checksums[slot.index] = prepare.checksum;
@@ -1392,13 +1392,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(message.header.command == .prepare);
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= message.buffer.len);
+            assert(self.has(message.header));
 
             // The underlying header memory must be owned by the buffer and not by self.headers:
             // Otherwise, concurrent writes may modify the memory of the pointer while we write.
             assert(@ptrToInt(message.header) == @ptrToInt(message.buffer.ptr));
 
-            // TODO can this be slot_with_header(message.header).? (to assert that the message's header is already in-memory)
-            const slot = self.slot_for_header(message.header);
+            const slot = self.slot_with_header(message.header).?;
             if (!self.dirty.bit(slot)) {
                 // Any function that sets the faulty bit should also set the dirty bit:
                 assert(!self.faulty.bit(slot));
