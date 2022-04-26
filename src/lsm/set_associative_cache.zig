@@ -249,6 +249,30 @@ pub fn SetAssociativeCache(
             offset: u64,
             tags: *[layout.ways]Tag,
             values: *[layout.ways]Value,
+
+            fn inspect(set: Set, sac: Self) void {
+                const clock_index = @divExact(set.offset, layout.ways);
+                std.debug.print(
+                    \\{{
+                    \\  tag={}
+                    \\  offset={}
+                    \\  clock_hand={}
+                , .{
+                    set.tag,
+                    set.offset,
+                    sac.clocks.get(clock_index),
+                });
+                std.debug.print("\n  tags={}", .{set.tags[0]});
+                for (set.tags[1..]) |tag| std.debug.print(", {}", .{tag});
+                std.debug.print("\n  values={}", .{set.values[0]});
+                for (set.values[1..]) |value| std.debug.print(", {}", .{value});
+                std.debug.print("\n  counts={}", .{sac.counts.get(set.offset)});
+                var i: usize = 1;
+                while (i < layout.ways) : (i += 1) {
+                    std.debug.print(", {}", .{sac.counts.get(set.offset + i)});
+                }
+                std.debug.print("\n}}\n", .{});
+            }
         };
 
         inline fn associate(self: *Self, key: Key) Set {
@@ -280,6 +304,77 @@ pub fn SetAssociativeCache(
             });
         }
     };
+}
+
+test "SetAssociativeCache eviction" {
+    const testing = std.testing;
+
+    const log = true;
+
+    const Key = u64;
+    const Value = u64;
+
+    const context = struct {
+        inline fn key_from_value(value: Value) Key {
+            return value;
+        }
+        inline fn hash(key: Key) u64 {
+            return key;
+        }
+        inline fn equal(a: Key, b: Key) bool {
+            return a == b;
+        }
+    };
+
+    const layout: Layout = .{};
+    const SAC = SetAssociativeCache(
+        Key,
+        Value,
+        context.key_from_value,
+        context.hash,
+        context.equal,
+        layout,
+    );
+    if (log) SAC.inspect();
+
+    // TODO Add a nice calculator method to help solve the minimum value_count_max required:
+    var sac = try SAC.init(std.testing.allocator, 16 * 16 * 8);
+    defer sac.deinit(std.testing.allocator);
+
+    try testing.expectEqual(@as(?*Value, null), sac.get(123));
+    const value_ptr = sac.put_no_clobber(123);
+    value_ptr.* = 123;
+    try testing.expectEqual(@as(Value, 123), sac.get(123).?.*);
+
+    // Fill up the first set entirely.
+    {
+        var i: usize = 0;
+        while (i < layout.ways) : (i += 1) {
+            try testing.expectEqual(i, sac.clocks.get(0));
+
+            const key = i * sac.sets;
+            sac.put_no_clobber(key).* = key;
+            try testing.expect(sac.counts.get(i) == 1);
+            try testing.expectEqual(key, sac.get(key).?.*);
+            try testing.expect(sac.counts.get(i) == 2);
+        }
+        try testing.expect(sac.clocks.get(0) == 0);
+    }
+
+    sac.associate(0).inspect(sac);
+
+    // insert another element into the first set, causing key 0 to be evicted
+    {
+        const key = layout.ways * sac.sets;
+        sac.put_no_clobber(key).* = key;
+        sac.associate(0).inspect(sac);
+        try testing.expect(sac.counts.get(0) == 1);
+        try testing.expectEqual(key, sac.get(key).?.*);
+        std.debug.print("{}\n", .{sac.counts.get(0)});
+        try testing.expect(sac.counts.get(0) == 2);
+
+        try testing.expectEqual(@as(?*Value, null), sac.get(0));
+    }
 }
 
 /// A little simpler than PackedIntArray in the std lib, restricted to little endian 64-bit words,
@@ -325,7 +420,7 @@ fn PackedUnsignedIntegerArray(comptime UInt: type) type {
         }
 
         inline fn mask(index: u64) Word {
-            return @as(Word, math.maxInt(Word)) << bits_index(index);
+            return @as(Word, math.maxInt(UInt)) << bits_index(index);
         }
 
         inline fn word(self: Self, index: u64) *Word {
@@ -343,42 +438,62 @@ fn PackedUnsignedIntegerArray(comptime UInt: type) type {
     };
 }
 
-test "PackedUnsignedIntegerArray" {
+fn ArrayTestContext(comptime UInt: type) type {
     const testing = std.testing;
+    return struct {
+        const Self = @This();
 
-    const Key = u64;
-    const Value = u64;
+        const Array = PackedUnsignedIntegerArray(UInt);
+        random: std.rand.Random,
 
-    const context = struct {
-        inline fn key_from_value(value: Value) Key {
-            return value;
+        array: Array,
+        reference: []UInt,
+
+        fn init(random: std.rand.Random, len: usize) !Self {
+            const words = try testing.allocator.alloc(u64, @divExact(len * @bitSizeOf(UInt), 64));
+            errdefer testing.allocator.free(words);
+
+            const reference = try testing.allocator.alloc(UInt, len);
+            errdefer testing.allocator.free(reference);
+
+            mem.set(u64, words, 0);
+            mem.set(UInt, reference, 0);
+
+            return Self{
+                .random = random,
+                .array = Array{ .words = words },
+                .reference = reference,
+            };
         }
-        inline fn hash(key: Key) u64 {
-            return key;
+
+        fn deinit(context: *Self) void {
+            testing.allocator.free(context.array.words);
+            testing.allocator.free(context.reference);
         }
-        inline fn equal(a: Key, b: Key) bool {
-            return a == b;
+
+        fn run(context: *Self) !void {
+            var iterations: usize = 0;
+            while (iterations < 10_000) : (iterations += 1) {
+                const index = context.random.uintLessThanBiased(usize, context.reference.len);
+                const value = context.random.int(UInt);
+
+                context.array.set(index, value);
+                context.reference[index] = value;
+
+                try context.verify();
+            }
+        }
+
+        fn verify(context: *Self) !void {
+            for (context.reference) |value, index| {
+                try testing.expectEqual(value, context.array.get(index));
+            }
         }
     };
+}
 
-    const SAC = SetAssociativeCache(
-        Key,
-        Value,
-        context.key_from_value,
-        context.hash,
-        context.equal,
-        .{ .ways = 16 },
-    );
-    SAC.inspect();
-
-    // TODO Add a nice calculator method to help solve the minimum value_count_max required:
-    var sac = try SAC.init(std.testing.allocator, 16 * 16 * 8);
-    defer sac.deinit(std.testing.allocator);
-
-    std.debug.print("get() = {}\n", .{sac.get(123)});
-    const value_ptr = sac.put_no_clobber(123);
-    value_ptr.* = 123;
-    std.debug.print("get() = {}\n", .{sac.get(123).?.*});
+test "PackedUnsignedIntegerArray: unit" {
+    const testing = std.testing;
 
     var words = [8]u64{ 0, 0b10110010, 0, 0, 0, 0, 0, 0 };
 
@@ -393,19 +508,41 @@ test "PackedUnsignedIntegerArray" {
 
     p.set(0, 0b01);
     try testing.expectEqual(@as(u64, 0b00000001), words[0]);
+    try testing.expectEqual(@as(u2, 0b01), p.get(0));
     p.set(1, 0b10);
     try testing.expectEqual(@as(u64, 0b00001001), words[0]);
+    try testing.expectEqual(@as(u2, 0b10), p.get(1));
     p.set(2, 0b11);
     try testing.expectEqual(@as(u64, 0b00111001), words[0]);
+    try testing.expectEqual(@as(u2, 0b11), p.get(2));
     p.set(3, 0b11);
     try testing.expectEqual(@as(u64, 0b11111001), words[0]);
+    try testing.expectEqual(@as(u2, 0b11), p.get(3));
     p.set(3, 0b01);
     try testing.expectEqual(@as(u64, 0b01111001), words[0]);
+    try testing.expectEqual(@as(u2, 0b01), p.get(3));
     p.set(3, 0b00);
     try testing.expectEqual(@as(u64, 0b00111001), words[0]);
+    try testing.expectEqual(@as(u2, 0b00), p.get(3));
 
     p.set(4, 0b11);
     try testing.expectEqual(@as(u64, 0b0000000000000000000000000000000000000000000000000000001100111001), words[0]);
     p.set(31, 0b11);
     try testing.expectEqual(@as(u64, 0b1100000000000000000000000000000000000000000000000000001100111001), words[0]);
+}
+
+test "PackedUnsignedIntegerArray: fuzz" {
+    const seed = 42;
+
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    inline for (.{ u1, u2, u4 }) |UInt| {
+        const Context = ArrayTestContext(UInt);
+
+        var context = try Context.init(random, 1024);
+        defer context.deinit();
+
+        try context.run();
+    }
 }
