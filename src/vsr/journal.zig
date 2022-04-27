@@ -65,7 +65,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         };
 
         pub const Write = struct {
-            pub const Trigger = enum { append, repair };
+            pub const Trigger = enum { append, repair, pipeline };
 
             self: *Self,
             callback: fn (self: *Replica, wrote: ?*Message, trigger: Trigger) void,
@@ -1402,6 +1402,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (!self.dirty.bit(slot)) {
                 // Any function that sets the faulty bit should also set the dirty bit:
                 assert(!self.faulty.bit(slot));
+                assert(self.prepare_checksums[slot.index] == message.header.checksum);
                 self.write_prepare_debug(message.header, "skipping (clean)");
                 callback(replica, message, trigger);
                 return;
