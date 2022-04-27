@@ -420,11 +420,8 @@ pub fn Replica(
                 self.client_table.deinit(allocator);
             }
 
-            {
-                var it = self.pipeline.iterator();
-                while (it.next()) |prepare| {
-                    self.message_bus.unref(prepare.message);
-                }
+            while (self.pipeline.pop()) |prepare| {
+                self.message_bus.unref(prepare.message);
             }
 
             if (self.loopback_queue) |loopback_message| {
@@ -737,8 +734,8 @@ pub fn Replica(
             }
 
             if (message.header.op >= self.op_checkpoint + self.journal.headers.len) {
-                log.debug("{}: on_prepare: ignoring op={} (too far ahead)",
-                    .{ self.replica, message.header.op, self.journal.headers.len });
+                log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})",
+                    .{ self.replica, message.header.op, self.op_checkpoint });
                 return;
             }
 
@@ -1119,9 +1116,7 @@ pub fn Replica(
                 self.state_machine.prepare_timestamp = prepare_timestamp;
             }
 
-            // TODO Don't drop every message in the pipeline; some of them are useful.
             self.reset_pipeline();
-
             // Start repairs according to the CTRL protocol:
             assert(!self.repair_timeout.ticking);
             self.repair_timeout.start();
@@ -2199,6 +2194,9 @@ pub fn Replica(
 
             if (prepare == null) {
                 log.debug("{}: commit_ops_commit: prepare == null", .{self.replica});
+                if (self.replica_count == 1) {
+                    @panic("cannot recover corrupt prepare");
+                }
                 return;
             }
 
@@ -3564,6 +3562,7 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
             assert(self.commit_max < self.op);
+            assert(self.journal.dirty.count == 0);
 
             if (self.repairing_pipeline) {
                 log.debug("{}: repair_pipeline: already repairing...", .{self.replica});
@@ -3782,6 +3781,26 @@ pub fn Replica(
                 return false;
             }
 
+            // The message may be available in the local pipeline.
+            // For example (replica_count=3):
+            // 1. View=1: Replica 1 is leader, and prepares op 5. The local write fails.
+            // 2. Time passes. The view changes (e.g. due to a timeout)…
+            // 3. View=4: Replica 1 is leader again, and is repairing op 5
+            //    (which is still in the pipeline).
+            //
+            // Using the pipeline to repair is faster than a `request_prepare`.
+            // Also, messages in the pipeline are never corrupt.
+            if (self.commit_max < op) {
+                if (self.pipeline.get(op - self.commit_max - 1)) |prepare| {
+                    if (prepare.message.header.checksum == checksum) {
+                        log.debug("{}: repair_prepare: in pipeline op={} checksum={}",
+                            .{ self.replica, op, checksum });
+                        self.write_prepare(prepare.message, .pipeline);
+                        return true;
+                    }
+                }
+            }
+
             const request_prepare = Header{
                 .command = .request_prepare,
                 // If we request a prepare from a follower, as below, it is critical to pass a checksum:
@@ -3903,12 +3922,37 @@ pub fn Replica(
             self.send_message_to_replica(next, message);
         }
 
-        /// Empties the prepare pipeline, unreffing all prepare and prepare_ok messages.
+        /// Discard messages from the prepare pipeline.
+        /// Retain uncommitted messages that belong in the current view.
         fn reset_pipeline(self: *Self) void {
-            while (self.pipeline.pop()) |prepare| {
+            assert(self.status == .view_change);
+            assert(self.leader_index(self.view) == self.replica);
+
+            // Discard messages from the front of the pipeline that have been committed by the
+            // cluster since the last time we were leader.
+            while (self.pipeline.head()) |prepare| {
+                if (prepare.message.header.op > self.commit_max) break;
                 self.message_bus.unref(prepare.message);
+                assert(self.pipeline.pop() != null);
             }
-            assert(self.pipeline.count == 0);
+
+            if (self.pipeline.head()) |prepare| {
+                assert(prepare.message.header.op == self.commit_max + 1);
+            }
+
+            // Discard messages from back of the pipeline that aren't part of this view.
+            while (self.pipeline.tail()) |prepare| {
+                const pipeline_header = prepare.message.header;
+                if (self.journal.header_with_op(pipeline_header.op)) |journal_header| {
+                    if (journal_header.checksum == pipeline_header.checksum) {
+                        break;
+                    }
+                }
+                self.message_bus.unref(prepare.message);
+                assert(self.pipeline.pop_tail() != null);
+            }
+            log.debug("{}: reset_pipeline: retain messages (count={})",
+                .{ self.replica, self.pipeline.count });
 
             // Do not reset `repairing_pipeline` here as this must be reset by the read callback.
             // Otherwise, we would be making `repair_pipeline()` reentrant.
@@ -4791,6 +4835,7 @@ pub fn Replica(
                 // If this was a repair, continue immediately to repair the next prepare:
                 // This is an optimization to eliminate waiting until the next repair timeout.
                 .repair => self.repair(),
+                .pipeline => self.repair(),
             }
         }
     };

@@ -35,6 +35,15 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
             return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
+        pub inline fn get(self: *Self, index: usize) ?T {
+            if (index < self.count) {
+                return self.buffer[(self.index + index) % self.buffer.len];
+            } else {
+                assert(index < size);
+                return null;
+            }
+        }
+
         pub inline fn next_tail(self: Self) ?T {
             if (self.full()) return null;
             return self.buffer[(self.index + self.count) % self.buffer.len];
@@ -87,6 +96,13 @@ pub fn RingBuffer(comptime T: type, comptime size: usize) type {
         pub fn pop(self: *Self) ?T {
             const result = self.head() orelse return null;
             self.advance_head();
+            return result;
+        }
+
+        /// Remove and return the last item, if any.
+        pub fn pop_tail(self: *Self) ?T {
+            const result = self.tail() orelse return null;
+            self.count -= 1;
             return result;
         }
 
@@ -210,15 +226,21 @@ test "RingBuffer: push/pop high level interface" {
 
     try testing.expect(!fifo.full());
     try testing.expect(fifo.empty());
+    try testing.expectEqual(@as(?u32, null), fifo.get(0));
+    try testing.expectEqual(@as(?u32, null), fifo.get(1));
+    try testing.expectEqual(@as(?u32, null), fifo.get(2));
 
     try fifo.push(1);
     try testing.expectEqual(@as(?u32, 1), fifo.head());
+    try testing.expectEqual(@as(?u32, 1), fifo.get(0));
+    try testing.expectEqual(@as(?u32, null), fifo.get(1));
 
     try testing.expect(!fifo.full());
     try testing.expect(!fifo.empty());
 
     try fifo.push(2);
     try testing.expectEqual(@as(?u32, 1), fifo.head());
+    try testing.expectEqual(@as(?u32, 2), fifo.get(1));
 
     try fifo.push(3);
     try testing.expectError(error.NoSpaceLeft, fifo.push(4));
@@ -228,6 +250,9 @@ test "RingBuffer: push/pop high level interface" {
 
     try testing.expectEqual(@as(?u32, 1), fifo.head());
     try testing.expectEqual(@as(?u32, 1), fifo.pop());
+    try testing.expectEqual(@as(?u32, 2), fifo.get(0));
+    try testing.expectEqual(@as(?u32, 3), fifo.get(1));
+    try testing.expectEqual(@as(?u32, null), fifo.get(2));
 
     try testing.expect(!fifo.full());
     try testing.expect(!fifo.empty());
@@ -241,4 +266,18 @@ test "RingBuffer: push/pop high level interface" {
 
     try testing.expect(!fifo.full());
     try testing.expect(fifo.empty());
+}
+
+test "RingBuffer: pop_tail" {
+    var lifo = RingBuffer(u32, 3){};
+    try lifo.push(1);
+    try lifo.push(2);
+    try lifo.push(3);
+    try testing.expect(lifo.full());
+
+    try testing.expectEqual(@as(?u32, 3), lifo.pop_tail());
+    try testing.expectEqual(@as(?u32, 2), lifo.pop_tail());
+    try testing.expectEqual(@as(?u32, 1), lifo.pop_tail());
+    try testing.expectEqual(@as(?u32, null), lifo.pop_tail());
+    try testing.expect(lifo.empty());
 }
