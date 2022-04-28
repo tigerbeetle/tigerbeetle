@@ -179,7 +179,7 @@ func handle_connection(track_connections chan bool, connection net.Conn, vopr_me
 	// If too few bytes were sent the read will timeout because a read deadline was set on the connection.
 	total_bytes_read := 0
 	for total_bytes_read < LENGTH_OF_VOPR_MESSAGE {
-		bytes_read, error := connection.Read(input[:])
+		bytes_read, error := connection.Read(input[total_bytes_read:])
 		if error != nil {
 			error_message := fmt.Sprintf("Client closed unexpectedly: %s", error.Error())
 			log_error(error_message, nil)
@@ -401,7 +401,7 @@ func checkout_commit(commit string, message_hash []byte) error {
 	}
 
 	// Inspect the git logs.
-	log_command := exec.Command("git", "log")
+	log_command := exec.Command("git", "log", "-1")
 	log_command.Dir = tigerbeetle_directory
 	log_output := make([]byte, 47)
 	log_output, error = log_command.Output()
