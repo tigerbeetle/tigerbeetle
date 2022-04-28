@@ -222,6 +222,10 @@ pub const clock_synchronization_window_min_ms = 2000;
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = 20000;
 
+// TODO Move these to a separate "internal computed constants" file.
+pub const journal_size_headers = journal_slot_count * 128; // 128 == @sizeOf(Header)
+pub const journal_size_prepares = journal_slot_count * message_size_max;
+
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
@@ -230,4 +234,6 @@ comptime {
     // Avoid latency issues from setting sndbuf too high:
     assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
     assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
+
+    assert(journal_size_max == journal_size_headers + journal_size_prepares);
 }

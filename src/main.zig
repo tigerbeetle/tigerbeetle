@@ -18,7 +18,6 @@ const StateMachine = @import("state_machine.zig").StateMachine;
 
 const vsr = @import("vsr.zig");
 const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
-const Journal = vsr.Journal(Replica, Storage);
 
 pub fn main() !void {
     var io = try IO.init(128, 0);
@@ -54,18 +53,20 @@ fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
     assert(filename.len == filename_len);
 
     // TODO Expose data file size on the CLI.
-    const file = try io.open_file(
+    const fd = try io.open_file(
         dir_fd,
         filename,
         config.journal_size_max,
         true,
     );
-    defer std.os.close(file);
+    std.os.close(fd);
+
+    const file = try (std.fs.Dir{ .fd = dir_fd }).openFile(filename, .{ .write = true });
+    defer file.close();
 
     var sector: usize = 0;
     while (sector * config.sector_size < config.journal_size_max) : (sector += 1) {
-        const write_size = try std.os.write(file, &Journal.format(cluster, sector));
-        assert(write_size == config.sector_size);
+        try file.writeAll(&vsr.format_journal_sector(cluster, sector));
     }
 
     log.info("initialized data file", .{});

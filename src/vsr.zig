@@ -893,3 +893,80 @@ pub fn sector_ceil(offset: u64) u64 {
     const sectors = math.divCeil(u64, offset, config.sector_size) catch unreachable;
     return sectors * config.sector_size;
 }
+
+pub fn format_journal_sector(cluster: u32, sector: usize) [config.sector_size]u8 {
+    const headers_per_sector = @divExact(config.sector_size, @sizeOf(Header));
+    const slot_count = config.journal_slot_count;
+    var sector_data: [config.sector_size]u8 = undefined;
+    var sector_headers = std.mem.bytesAsSlice(Header, &sector_data);
+
+    if (sector * headers_per_sector < slot_count) {
+        for (sector_headers) |*header, i| {
+            const slot = sector * headers_per_sector + i;
+            if (sector == 0 and i == 0) {
+                header.* = Header.init_prepare(cluster);
+            } else {
+                header.* = Header.reserved(cluster, slot);
+            }
+        }
+        return sector_data;
+    }
+
+    const sectors_per_message = config.message_size_max / config.sector_size;
+    const sector_in_prepares = sector - slot_count / headers_per_sector;
+    const message_slot = sector_in_prepares / sectors_per_message;
+    if (message_slot < slot_count) {
+        std.mem.set(u8, &sector_data, 0);
+        if (sector_in_prepares % sectors_per_message == 0) {
+            // First sector of the message.
+            if (message_slot == 0) {
+                sector_headers[0] = Header.init_prepare(cluster);
+            } else {
+                sector_headers[0] = Header.reserved(cluster, message_slot);
+            }
+        }
+        return sector_data;
+    }
+
+    unreachable;
+}
+
+test "format_journal_sector" {
+    var bytes = try std.testing.allocator.alloc(u8,
+        config.journal_size_headers+ config.journal_size_prepares);
+    defer std.testing.allocator.free(bytes);
+
+    var sectors = std.mem.bytesAsSlice([config.sector_size]u8, bytes);
+    var headers_ring = std.mem.bytesAsSlice(Header, bytes[0..config.journal_size_headers]);
+    var prepare_ring = std.mem.bytesAsSlice([config.message_size_max]u8, bytes[config.journal_size_headers..]);
+    try std.testing.expectEqual(@as(usize, config.journal_slot_count), headers_ring.len);
+    try std.testing.expectEqual(@as(usize, config.journal_slot_count), prepare_ring.len);
+
+    const cluster = 123;
+    var sector: u64 = 0;
+    while (sector < sectors.len) : (sector += 1) {
+        sectors[sector] = format_journal_sector(cluster, sector);
+    }
+
+    for (headers_ring) |*header, slot| {
+        try std.testing.expect(header.valid_checksum());
+        try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
+        try std.testing.expectEqual(header.invalid(), null);
+        try std.testing.expectEqual(header.cluster, cluster);
+        try std.testing.expectEqual(header.op, slot);
+        try std.testing.expectEqual(header.size, @sizeOf(Header));
+        if (slot == 0) {
+            try std.testing.expectEqual(header.command, .prepare);
+            try std.testing.expectEqual(header.operation, .init);
+        } else {
+            try std.testing.expectEqual(header.command, .reserved);
+        }
+
+        const prepare_bytes = prepare_ring[slot];
+        const prepare_header = std.mem.bytesAsValue(Header, prepare_bytes[0..@sizeOf(Header)]);
+        const prepare_body = prepare_bytes[@sizeOf(Header)..];
+
+        try std.testing.expectEqual(header.*, prepare_header.*);
+        for (prepare_body) |byte| try std.testing.expectEqual(byte, 0);
+    }
+}
