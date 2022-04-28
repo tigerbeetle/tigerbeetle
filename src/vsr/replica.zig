@@ -166,6 +166,7 @@ pub fn Replica(
         /// * participating in a view change
         /// * the `recovery_response`'s headers repaired all faulty slots
         /// * receiving a `commit` with an `op` we have
+        /// * receiving a header/prepare that repairs the last faulty entry
         op_known: bool = false,
 
         /// The op number of the latest committed and executed operation (according to the replica):
@@ -3256,14 +3257,19 @@ pub fn Replica(
             assert(self.repairs_allowed());
 
             if (!self.op_known) {
-                assert(self.journal.faulty.count > 0);
-
-                log.debug("{}: repair: ignoring (replica op not known) op={} faulty={}", .{
-                    self.replica,
-                    self.op,
-                    self.journal.faulty.count,
-                });
-                return;
+                if (self.journal.faulty.count == 0) {
+                    // We learned the last unknown op in our WAL, either from replacing a header
+                    // (`repair_header`) or repairing a prepare (`write_prepare`).
+                    self.set_op_known();
+                } else {
+                    assert(self.journal.faulty.count > 0);
+                    log.debug("{}: repair: ignoring (replica op not known) op={} faulty={}", .{
+                        self.replica,
+                        self.op,
+                        self.journal.faulty.count,
+                    });
+                    return;
+                }
             }
 
             assert(self.commit_min <= self.op);
