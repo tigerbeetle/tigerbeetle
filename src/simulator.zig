@@ -12,7 +12,6 @@ const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StateMachine = @import("test/cluster.zig").StateMachine;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
-const ClusterHealth = @import("test/cluster_health.zig").ClusterHealth;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
 const output = std.log.scoped(.state_checker);
@@ -20,6 +19,8 @@ const output = std.log.scoped(.state_checker);
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
 const log_state_transitions_only = builtin.mode != .Debug;
+
+const log_health = std.log.scoped(.health);
 
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
@@ -105,18 +106,14 @@ pub fn main() !void {
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
         },
+        .health_options = .{
+            .crash_probability = 0.0001,
+            .crash_stability = random.uintLessThan(u32, 1_000),
+            .restart_probability = 0.01,
+            .restart_stability = random.uintLessThan(u32, 1_000),
+        },
     });
     defer cluster.destroy();
-
-    var cluster_health = try ClusterHealth.init(allocator, .{
-        .replica_count = replica_count,
-        .seed = random.int(u64),
-        .crash_probability = 0.0001,
-        .crash_stability = random.uintLessThan(u32, 1_000),
-        .restart_probability = 0.01,
-        .restart_stability = random.uintLessThan(u32, 1_000),
-    });
-    defer cluster_health.deinit(allocator);
 
     cluster.state_checker = try StateChecker.init(allocator, cluster);
     defer cluster.state_checker.deinit();
@@ -185,10 +182,10 @@ pub fn main() !void {
         cluster.options.storage_options.write_latency_mean,
         cluster.options.storage_options.read_fault_probability,
         cluster.options.storage_options.write_fault_probability,
-        cluster_health.options.crash_probability * 100,
-        cluster_health.options.crash_stability,
-        cluster_health.options.restart_probability * 100,
-        cluster_health.options.restart_stability,
+        cluster.options.health_options.crash_probability * 100,
+        cluster.options.health_options.crash_stability,
+        cluster.options.health_options.restart_probability * 100,
+        cluster.options.health_options.restart_stability,
     });
 
     var requests_sent: u64 = 0;
@@ -209,35 +206,46 @@ pub fn main() !void {
     while (tick < ticks_max) : (tick += 1) {
         for (cluster.storages) |*storage| storage.tick();
 
-        cluster_health.tick();
-
+        const health_options = &cluster.options.health_options;
         // The maximum the number of replicas that can be safely crashed, while ensuring that the
         // cluster can eventually recover.
         var crashes = cluster.count_healthy() -| replica_healthy_min;
         for (cluster.replicas) |*replica| {
-            if (cluster_health.up(replica.replica)) {
-                // Test `replica.op > 0` — an empty WAL would skip recovery after a crash.
-                if (crashes > 0 and replica.op > 0 and
-                    cluster_health.maybe_crash_replica(replica.replica))
-                {
-                    try cluster.simulate_replica_crash(replica.replica);
-                    crashes -= 1;
-                } else {
-                    replica.tick();
-                    cluster.state_checker.check_state(replica.replica);
+            switch (cluster.health[replica.replica]) {
+                .up => |*ticks| {
+                    ticks.* -|= 1;
+                    // Test `replica.op > 0` — an empty WAL would skip recovery after a crash.
+                    if (ticks.* == 0 and crashes > 0 and replica.op > 0 and
+                        prng.random().float(f64) < health_options.crash_probability)
+                    {
+                        log_health.debug("crash replica={}", .{replica.replica});
+                        try cluster.simulate_replica_crash(replica.replica);
+                        crashes -= 1;
+                    } else {
+                        replica.tick();
+                        cluster.state_checker.check_state(replica.replica);
+                    }
+                },
+                .down => |*ticks| {
+                    ticks.* -|= 1;
+                    assert(replica.status == .recovering);
+                    if (ticks.* == 0 and
+                        prng.random().float(f64) < health_options.restart_probability)
+                    {
+                        cluster.health[replica.replica] = .{.up = health_options.restart_stability};
+                        log_health.debug("restart replica={}", .{replica.replica});
+                    }
                 }
-            } else {
-                assert(replica.status == .recovering);
             }
         }
 
-        cluster.network.packet_simulator.tick(&cluster_health);
+        cluster.network.packet_simulator.tick(cluster.health);
 
         for (cluster.clients) |*client| client.tick();
 
         if (cluster.state_checker.transitions == transitions_max) {
             if (cluster.state_checker.convergence() and
-                cluster_health.up_count() == replica_count)
+                cluster.up_count() == replica_count)
             {
                 break;
             }

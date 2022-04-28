@@ -12,7 +12,6 @@ const Message = MessagePool.Message;
 
 const Network = @import("network.zig").Network;
 const NetworkOptions = @import("network.zig").NetworkOptions;
-const ClusterHealthOptions = @import("cluster_health.zig").ClusterHealthOptions;
 
 pub const StateMachine = @import("state_machine.zig").StateMachine;
 const MessageBus = @import("message_bus.zig").MessageBus;
@@ -34,6 +33,27 @@ pub const ClusterOptions = struct {
 
     network_options: NetworkOptions,
     storage_options: Storage.Options,
+    health_options: HealthOptions,
+};
+
+pub const HealthOptions = struct {
+    /// Probability per tick that a crash will occur.
+    crash_probability: f64,
+    /// Minimum duration of a crash.
+    crash_stability: u32,
+    /// Probability per tick that a crashed replica will recovery.
+    restart_probability: f64,
+    /// Minimum time a replica is up until it is crashed again.
+    restart_stability: u32,
+};
+
+pub const ReplicaHealth = union(enum) {
+    /// When >0, the replica cannot crash.
+    /// When =0, the replica may crash.
+    up: u32,
+    /// When >0, this is the ticks remaining until recovery is possible.
+    /// When =0, the replica may recover.
+    down: u32,
 };
 
 pub const Cluster = struct {
@@ -44,6 +64,7 @@ pub const Cluster = struct {
     storages: []Storage,
     times: []Time,
     replicas: []Replica,
+    health: []ReplicaHealth,
 
     clients: []Client,
     network: Network,
@@ -53,6 +74,12 @@ pub const Cluster = struct {
     on_change_state: fn (replica: *Replica) void = undefined,
 
     pub fn create(allocator: mem.Allocator, prng: std.rand.Random, options: ClusterOptions) !*Cluster {
+        assert(options.replica_count > 0);
+        assert(options.health_options.crash_probability < 1.0);
+        assert(options.health_options.crash_probability >= 0.0);
+        assert(options.health_options.restart_probability < 1.0);
+        assert(options.health_options.restart_probability >= 0.0);
+
         const cluster = try allocator.create(Cluster);
         errdefer allocator.destroy(cluster);
 
@@ -67,6 +94,10 @@ pub const Cluster = struct {
 
         const replicas = try allocator.alloc(Replica, options.replica_count);
         errdefer allocator.free(replicas);
+
+        const health = try allocator.alloc(ReplicaHealth, options.replica_count);
+        errdefer allocator.free(health);
+        mem.set(ReplicaHealth, health, .{.up = 0});
 
         const clients = try allocator.alloc(Client, options.client_count);
         errdefer allocator.free(clients);
@@ -86,6 +117,7 @@ pub const Cluster = struct {
             .storages = storages,
             .times = times,
             .replicas = replicas,
+            .health = health,
             .clients = clients,
             .network = network,
         };
@@ -164,6 +196,7 @@ pub const Cluster = struct {
 
         for (cluster.replicas) |*replica| replica.deinit(cluster.allocator);
         cluster.allocator.free(cluster.replicas);
+        cluster.allocator.free(cluster.health);
 
         for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
         cluster.allocator.free(cluster.storages);
@@ -177,6 +210,8 @@ pub const Cluster = struct {
     /// Leave the persistent storage untouched, and leave any currently
     /// inflight messages to/from the replica in the network.
     pub fn simulate_replica_crash(cluster: *Cluster, replica_index: u8) !void {
+        cluster.health[replica_index] = .{.down = cluster.options.health_options.crash_stability};
+
         const replica = &cluster.replicas[replica_index];
         replica.deinit(cluster.allocator);
 
@@ -243,6 +278,32 @@ pub const Cluster = struct {
                 },
                 .view_change => {},
                 .recovering => {},
+            }
+        }
+        return count;
+    }
+
+    /// Returns whether the replica was crashed.
+    pub fn maybe_crash_replica(cluster: *Cluster, replica: u8) bool {
+        switch (cluster.health[replica]) {
+            .up => |ticks| {
+                // The replica is temporarily protected from crashing again.
+                if (ticks > 0) return false;
+            },
+            .down => unreachable,
+        }
+
+        if (!cluster.sample(cluster.options.health_options.crash_probability)) return false;
+
+        cluster.health[replica] = .{.down = cluster.options.health_options.crash_stability};
+        return true;
+    }
+
+    pub fn up_count(cluster: *const Cluster) u8 {
+        var count: u8 = 0;
+        for (cluster.health) |health| {
+            if (health == .up) {
+                count += 1;
             }
         }
         return count;
