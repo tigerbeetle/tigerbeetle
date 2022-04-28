@@ -21,7 +21,6 @@ const Time = @import("time.zig").Time;
 const vsr = @import("../vsr.zig");
 pub const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
 pub const Client = vsr.Client(StateMachine, MessageBus);
-const Journal = vsr.Journal(Replica, Storage);
 
 pub const ClusterOptions = struct {
     cluster: u32,
@@ -166,7 +165,7 @@ pub const Cluster = struct {
                 while (sector < sectors) : (sector += 1) {
                     const offset = sector * config.sector_size;
                     mem.copy(u8, storage.memory[offset .. offset + config.sector_size],
-                        Journal.format(options.cluster, sector)[0..]);
+                        vsr.format_journal_sector(options.cluster, sector)[0..]);
                 }
             }
         }
