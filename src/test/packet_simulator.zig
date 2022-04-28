@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 
 const log = std.log.scoped(.packet_simulator);
-const ClusterHealth = @import("./cluster_health.zig").ClusterHealth;
+const ReplicaHealth = @import("./cluster.zig").ReplicaHealth;
 
 pub const PacketSimulatorOptions = struct {
     /// Mean for the exponential distribution used to calculate forward delay.
@@ -279,7 +279,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
                 self.partition[from] != self.partition[to];
         }
 
-        pub fn tick(self: *Self, cluster_health: *const ClusterHealth) void {
+        pub fn tick(self: *Self, cluster_health: []const ReplicaHealth) void {
             self.ticks += 1;
 
             if (self.stability > 0) {
@@ -326,7 +326,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
                             continue;
                         }
 
-                        if (to < self.options.replica_count and !cluster_health.up(to)) {
+                        if (to < self.options.replica_count and cluster_health[to] == .down) {
                             self.stats[@enumToInt(PacketStatistics.dropped_due_to_crash)] += 1;
                             log.err("dropped packet (destination is crashed): from={} to={}", .{ from, to });
                             data.packet.deinit(path);
