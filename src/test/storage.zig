@@ -190,10 +190,12 @@ pub const Storage = struct {
         // TODO This is a hack. Rather than just always protecting this one offset,
         // it should only protect f+1 replicas. At time of writing, seed 2432231839409258639
         // corrupts 2/4 replicas' initial prepares.
+        const initial_header_offset = 0;
         const initial_prepare_offset = config.journal_slot_count * @sizeOf(vsr.Header);
 
         const faulty = storage.faulty_sectors(read.offset, read.buffer.len);
         if (faulty.len > 0 and storage.x_in_100(storage.options.read_fault_probability) and
+            read.offset != initial_header_offset and
             read.offset != initial_prepare_offset)
         {
             // Randomly corrupt one of the faulty sectors the read targeted
