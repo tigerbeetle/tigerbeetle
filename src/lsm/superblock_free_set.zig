@@ -96,7 +96,8 @@ pub const FreeSet = struct {
         }
     }
 
-    /// Marks a free block as allocated, and returns the address. Panics if no blocks are available.
+    /// Marks a free block as allocated, and returns the address.
+    /// Returns null if no free block is available.
     pub fn acquire(set: *FreeSet) ?u64 {
         const block = blk: {
             if (set.index.findFirstSet()) |shard| {
