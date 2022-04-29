@@ -1031,7 +1031,7 @@ pub fn TreeType(
                     const header_bytes = block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.grid.superblock.free_set.acquire().?;
+                    const address = builder.grid.acquire();
 
                     header.* = .{
                         .cluster = builder.grid.superblock.working.cluster,
@@ -1079,7 +1079,7 @@ pub fn TreeType(
                 pub fn filter_block_finish(builder: *Builder) void {
                     assert(!builder.filter_block_empty());
 
-                    const address = builder.grid.superblock.free_set.acquire().?;
+                    const address = builder.grid.acquire();
 
                     const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
@@ -1137,7 +1137,7 @@ pub fn TreeType(
                     const header_bytes = index_block[0..@sizeOf(vsr.Header)];
                     const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                    const address = builder.grid.superblock.free_set.acquire().?;
+                    const address = builder.grid.acquire();
 
                     header.* = .{
                         .cluster = builder.grid.superblock.working.cluster,

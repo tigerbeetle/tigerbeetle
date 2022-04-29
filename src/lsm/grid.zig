@@ -116,6 +116,21 @@ pub fn GridType(comptime Storage: type) type {
             grid.* = undefined;
         }
 
+        pub fn acquire(grid: *Grid) u64 {
+            // We will reject incoming data before it reaches this point
+            // when storage is full, so this assertion is safe.
+            return grid.superblock.free_set.acquire().?;
+        }
+
+        /// This function must be used to release block addresses instead of calling release()
+        /// on the free set directly as this function also removes the address from the block
+        /// cache. This allows us to assume that addresses are not already in the cache on
+        /// insertion and avoids a lookup on that path by using the "no clobber" put variant.
+        pub fn release(grid: *Grid, address: u64) void {
+            grid.cache.remove(address);
+            grid.superblock.free_set.release(address);
+        }
+
         pub fn write_block(
             grid: *Grid,
             callback: fn (*Grid.Write) void,
