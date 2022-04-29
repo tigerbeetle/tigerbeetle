@@ -210,12 +210,16 @@ pub fn SetAssociativeCache(
                 // locked by comparing pointers directly.
                 if (locked(context, @alignCast(value_alignment, &set.values[way]))) continue;
 
-                const count = self.counts.get(set.offset + way);
+                var count = self.counts.get(set.offset + way);
 
                 // Free way found
                 if (count == 0) break;
 
-                self.counts.set(set.offset + way, count - 1);
+                count -= 1;
+                self.counts.set(set.offset + way, count);
+
+                // This way is now free
+                if (count == 0) break;
             }
             assert(safety_count <= clock_iterations_max);
 
@@ -309,7 +313,7 @@ pub fn SetAssociativeCache(
 test "SetAssociativeCache eviction" {
     const testing = std.testing;
 
-    const log = true;
+    const log = false;
 
     const Key = u64;
     const Value = u64;
@@ -361,19 +365,51 @@ test "SetAssociativeCache eviction" {
         try testing.expect(sac.clocks.get(0) == 0);
     }
 
-    sac.associate(0).inspect(sac);
+    if (log) sac.associate(0).inspect(sac);
 
     // insert another element into the first set, causing key 0 to be evicted
     {
         const key = layout.ways * sac.sets;
         sac.put_no_clobber(key).* = key;
-        sac.associate(0).inspect(sac);
         try testing.expect(sac.counts.get(0) == 1);
         try testing.expectEqual(key, sac.get(key).?.*);
-        std.debug.print("{}\n", .{sac.counts.get(0)});
         try testing.expect(sac.counts.get(0) == 2);
 
         try testing.expectEqual(@as(?*Value, null), sac.get(0));
+
+        {
+            var i: usize = 1;
+            while (i < layout.ways) : (i += 1) {
+                try testing.expect(sac.counts.get(i) == 1);
+            }
+        }
+    }
+
+    if (log) sac.associate(0).inspect(sac);
+
+    // lock all other slots, causing key layout.ways * sac.sets to be evicted despite having the
+    // highest count.
+    {
+        {
+            assert(sac.counts.get(0) == 2);
+            var i: usize = 1;
+            while (i < layout.ways) : (i += 1) assert(sac.counts.get(i) == 1);
+        }
+
+        const key = (layout.ways + 1) * sac.sets;
+
+        sac.put_no_clobber_preserve_locked(
+            u64,
+            struct {
+                inline fn locked(only_unlocked: u64, value: *const Value) bool {
+                    return value.* != only_unlocked;
+                }
+            }.locked,
+            layout.ways * sac.sets,
+            key,
+        ).* = key;
+
+        try testing.expectEqual(@as(?*Value, null), sac.get(layout.ways * sac.sets));
     }
 }
 
