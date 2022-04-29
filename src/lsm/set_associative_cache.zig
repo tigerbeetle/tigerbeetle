@@ -159,7 +159,33 @@ pub fn SetAssociativeCache(
 
         pub fn get(self: *Self, key: Key) ?*align(value_alignment) Value {
             const set = self.associate(key);
-            return self.search(set, key);
+            const way = self.search(set, key) orelse return null;
+
+            const count = self.counts.get(set.offset + way);
+            self.counts.set(set.offset + way, count +| 1);
+
+            return @alignCast(value_alignment, &set.values[way]);
+        }
+
+        /// Remove a key from the set associative cache if present.
+        pub fn remove(self: *Self, key: Key) void {
+            const set = self.associate(key);
+            const way = self.search(set, key) orelse return;
+
+            self.counts.set(set.offset + way, 0);
+        }
+
+        /// If the key is present in the set, returns the way. Otherwise returns null.
+        inline fn search(self: *Self, set: Set, key: Key) ?usize {
+            for (set.tags) |tag, way| {
+                if (tag == set.tag) {
+                    const count = self.counts.get(set.offset + way);
+                    if (count > 0 and equal(key_from_value(set.values[way]), key)) {
+                        return way;
+                    }
+                }
+            }
+            return null;
         }
 
         pub fn put_no_clobber(self: *Self, key: Key) *align(value_alignment) Value {
@@ -232,22 +258,6 @@ pub fn SetAssociativeCache(
             return @alignCast(value_alignment, &set.values[way]);
         }
 
-        fn search(self: *Self, set: Set, key: Key) ?*align(value_alignment) Value {
-            for (set.tags) |tag, way| {
-                if (tag == set.tag) {
-                    const count = self.counts.get(set.offset + way);
-                    if (count > 0) {
-                        const value_ptr = @alignCast(value_alignment, &set.values[way]);
-                        if (equal(key_from_value(value_ptr.*), key)) {
-                            self.counts.set(set.offset + way, count +| 1);
-                            return value_ptr;
-                        }
-                    }
-                }
-            }
-            return null;
-        }
-
         const Set = struct {
             tag: Tag,
             offset: u64,
@@ -313,7 +323,7 @@ pub fn SetAssociativeCache(
 test "SetAssociativeCache eviction" {
     const testing = std.testing;
 
-    const log = false;
+    const log = true;
 
     const Key = u64;
     const Value = u64;
@@ -398,6 +408,8 @@ test "SetAssociativeCache eviction" {
 
         const key = (layout.ways + 1) * sac.sets;
 
+        const expect_evicted = layout.ways * sac.sets;
+
         sac.put_no_clobber_preserve_locked(
             u64,
             struct {
@@ -405,11 +417,24 @@ test "SetAssociativeCache eviction" {
                     return value.* != only_unlocked;
                 }
             }.locked,
-            layout.ways * sac.sets,
+            expect_evicted,
             key,
         ).* = key;
 
-        try testing.expectEqual(@as(?*Value, null), sac.get(layout.ways * sac.sets));
+        try testing.expectEqual(@as(?*Value, null), sac.get(expect_evicted));
+    }
+
+    if (log) sac.associate(0).inspect(sac);
+
+    // Ensure removal works
+    {
+        const key = 5 * sac.sets;
+        assert(sac.get(key).?.* == key);
+        try testing.expect(sac.counts.get(5) == 2);
+
+        sac.remove(key);
+        try testing.expectEqual(@as(?*Value, null), sac.get(key));
+        try testing.expect(sac.counts.get(5) == 0);
     }
 }
 
