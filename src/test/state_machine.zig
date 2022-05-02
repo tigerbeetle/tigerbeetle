@@ -40,11 +40,12 @@ pub const StateMachine = struct {
     pub fn commit(
         state_machine: *StateMachine,
         client: u128,
-        operation: Operation,
         timestamp: u64,
+        operation: Operation,
         input: []const u8,
         output: []u8,
     ) usize {
+        assert(state_machine.commit_timestamp < timestamp);
         defer {
             assert(state_machine.commit_timestamp <= timestamp);
             state_machine.commit_timestamp = timestamp;

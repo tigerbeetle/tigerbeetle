@@ -306,7 +306,7 @@ pub fn Replica(
             try client_table.ensureTotalCapacity(allocator, @intCast(u32, config.clients_max));
             assert(client_table.capacity() >= config.clients_max);
 
-            const init_prepare = Header.init_prepare(cluster);
+            const root_prepare = Header.root_prepare(cluster);
 
             var clock = try Clock.init(
                 allocator,
@@ -336,11 +336,11 @@ pub fn Replica(
                 .message_bus = message_bus,
                 .state_machine = state_machine,
                 .client_table = client_table,
-                .view = init_prepare.view,
-                .view_normal = init_prepare.view,
-                .op = init_prepare.op,
-                .commit_min = init_prepare.commit,
-                .commit_max = init_prepare.commit,
+                .view = root_prepare.view,
+                .view_normal = root_prepare.view,
+                .op = root_prepare.op,
+                .commit_min = root_prepare.commit,
+                .commit_max = root_prepare.commit,
                 .ping_timeout = Timeout{
                     .name = "ping_timeout",
                     .id = replica,
@@ -734,7 +734,7 @@ pub fn Replica(
                 return;
             }
 
-            if (message.header.op >= self.op_checkpoint + self.journal.headers.len) {
+            if (message.header.op >= self.op_checkpoint + config.journal_slot_count) {
                 log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})",
                     .{ self.replica, message.header.op, self.op_checkpoint });
                 return;
@@ -1497,7 +1497,7 @@ pub fn Replica(
                             message.header.replica,
                         );
                     } else {
-                        self.journal.read_prepare_without_header(
+                        self.journal.read_prepare_with_op_and_checksum(
                             on_request_prepare_read,
                             op,
                             prepare_checksum,
@@ -2270,8 +2270,8 @@ pub fn Replica(
 
             const reply_body_size = @intCast(u32, self.state_machine.commit(
                 prepare.header.client,
-                prepare.header.operation.cast(StateMachine),
                 prepare.header.timestamp,
+                prepare.header.operation.cast(StateMachine),
                 prepare.buffer[@sizeOf(Header)..prepare.header.size],
                 reply.buffer[@sizeOf(Header)..],
             ));
@@ -2559,7 +2559,7 @@ pub fn Replica(
             assert(!self.repair_timeout.ticking);
             assert(self.op >= self.commit_max);
             assert(self.replica_count > 1);
-            assert(self.op - self.commit_max <= self.journal.headers.len);
+            assert(self.op - self.commit_max <= config.journal_slot_count);
 
             const threshold = self.replica_count - self.quorum_replication;
             if (threshold == 0) {
@@ -3096,7 +3096,7 @@ pub fn Replica(
             // newer op that is less than `commit_max` but greater than `commit_min`:
             assert(header.op > self.commit_min);
             // Never overwrite an op that still needs to be checkpointed.
-            assert(header.op - self.op_checkpoint < self.journal.headers.len);
+            assert(header.op - self.op_checkpoint < config.journal_slot_count);
 
             log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
                 self.replica,
@@ -3698,12 +3698,12 @@ pub fn Replica(
                 return;
             }
 
-            if (self.op < self.journal.headers.len) {
+            if (self.op < config.journal_slot_count) {
                 // The op is known, and this is the first WAL cycle.
                 // Therefore, any faulty ops to the right of `replica.op` are corrupt reserved
                 // entries from the initial format.
                 var op: usize = self.op + 1;
-                while (op < self.journal.headers.len) : (op += 1) {
+                while (op < config.journal_slot_count) : (op += 1) {
                     const slot = self.journal.slot_for_op(op);
                     assert(slot.index == op);
 
@@ -3720,7 +3720,7 @@ pub fn Replica(
             }
 
             var op = self.op + 1;
-            const op_min = op -| self.journal.headers.len;
+            const op_min = op -| config.journal_slot_count;
             while (op > op_min) {
                 op -= 1;
 
@@ -3797,7 +3797,7 @@ pub fn Replica(
             // Using the pipeline to repair is faster than a `request_prepare`.
             // Also, messages in the pipeline are never corrupt.
             if (self.commit_max < op) {
-                if (self.pipeline.get(op - self.commit_max - 1)) |prepare| {
+                if (self.pipeline.get_ptr(op - self.commit_max - 1)) |prepare| {
                     if (prepare.message.header.checksum == checksum) {
                         log.debug("{}: repair_prepare: in pipeline op={} checksum={}",
                             .{ self.replica, op, checksum });
@@ -4450,7 +4450,7 @@ pub fn Replica(
             if (self.op_known) return;
             self.op_known = true;
 
-            if (self.op < self.journal.headers.len) {
+            if (self.op < config.journal_slot_count) {
                 if (self.journal.header_with_op(0)) |header| {
                     assert(header.command == .prepare);
                     assert(header.operation == .init);
@@ -4461,7 +4461,7 @@ pub fn Replica(
                     //
                     // The op is known, so we can safely repair the initial prepare.
                     // This is required to maintain the invariant that the op=commit_min exists in-memory.
-                    const header = Header.init_prepare(self.cluster);
+                    const header = Header.root_prepare(self.cluster);
                     self.journal.set_header_as_dirty(&header);
                     log.debug("{}: set_op_known: repair initial op", .{ self.replica });
                 }

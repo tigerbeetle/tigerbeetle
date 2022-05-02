@@ -375,8 +375,9 @@ pub const Storage = struct {
 
         {
             // Allow at most `f` faulty replicas to ensure the view change can succeed.
-            // TODO Allow more than `f` faulty replicas when the fault is to the right of the highest known replica.op (and to the left of the last checkpointed op).
-            const majority = (replica_count / 2) + 1;
+            // TODO Allow more than `f` faulty replicas when the fault is to the right of the
+            // highest known replica.op (and to the left of the last checkpointed op).
+            const majority = @divFloor(replica_count, 2) + 1;
             const quorum_replication = std.math.min(config.quorum_replication_max, majority);
             const quorum_view_change = std.math.max(
                 replica_count - quorum_replication + 1,

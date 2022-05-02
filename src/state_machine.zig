@@ -128,7 +128,6 @@ pub const StateMachine = struct {
         return self.prepare_timestamp;
     }
 
-    /// Returns the header's timestamp.
     fn prepare_timestamps(
         self: *StateMachine,
         comptime operation: Operation,
@@ -152,14 +151,16 @@ pub const StateMachine = struct {
     pub fn commit(
         self: *StateMachine,
         client: u128,
-        operation: Operation,
         timestamp: u64,
+        operation: Operation,
         input: []const u8,
         output: []u8,
     ) usize {
         _ = client;
+        assert(self.commit_timestamp < timestamp);
 
         defer {
+            // If this condition is modified, modify the same condition in `test/state_machine.zig`.
             assert(self.commit_timestamp <= timestamp);
             self.commit_timestamp = timestamp;
         }
@@ -765,7 +766,7 @@ test "linked accounts" {
     const output = try allocator.alloc(u8, 4096);
 
     const prepare_timestamp = state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, prepare_timestamp, input, output);
+    const size = state_machine.commit(0, prepare_timestamp, .create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try testing.expectEqualSlices(
@@ -820,7 +821,7 @@ test "create/lookup/rollback transfers" {
     const output = try allocator.alloc(u8, 4096);
 
     const prepare_timestamp = state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, prepare_timestamp, input, output);
+    const size = state_machine.commit(0, prepare_timestamp, .create_accounts, input, output);
 
     const errors = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
     try testing.expectEqual(@as(usize, 0), errors.len);
@@ -1199,7 +1200,7 @@ test "create/lookup/rollback commits" {
 
     // Accounts:
     const accounts_timestamp = state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, accounts_timestamp, input, output);
+    const size = state_machine.commit(0, accounts_timestamp, .create_accounts, input, output);
     {
         const errors = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
         try testing.expectEqual(@as(usize, 0), errors.len);
@@ -1217,8 +1218,8 @@ test "create/lookup/rollback commits" {
     try testing.expect(transfers_timestamp > accounts_timestamp);
     const size_transfers = state_machine.commit(
         0,
-        .create_transfers,
         transfers_timestamp,
+        .create_transfers,
         object_transfers,
         output_transfers,
     );

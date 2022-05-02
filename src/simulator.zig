@@ -118,8 +118,6 @@ pub fn main() !void {
     cluster.state_checker = try StateChecker.init(allocator, cluster);
     defer cluster.state_checker.deinit();
 
-    // TODO When storage is supported, run more transitions than fit in the journal.
-    const transitions_max = cluster.replicas[0].journal.headers.len / 2;
     for (cluster.replicas) |*replica| {
         replica.on_change_state = on_change_replica;
     }
@@ -191,17 +189,19 @@ pub fn main() !void {
     var requests_sent: u64 = 0;
     var idle = false;
 
-    // The minimum number of healthy replicas that can allow crashed a node to recover.
+    // The minimum number of healthy replicas required for a crashed replica to be able to recover.
     const replica_healthy_min = replicas: {
         if (replica_count == 1) {
             // A cluster of 1 can crash safely (as long as there is no disk corruption) since it
-            // does not run recovery protocol.
+            // does not run the recovery protocol.
             break :replicas 0;
         } else {
             break :replicas cluster.replicas[0].quorum_view_change;
         }
     };
 
+    // TODO When storage is supported, run more transitions than fit in the journal.
+    const transitions_max = config.journal_slot_count / 2;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         for (cluster.storages) |*storage| storage.tick();
@@ -209,17 +209,16 @@ pub fn main() !void {
         const health_options = &cluster.options.health_options;
         // The maximum the number of replicas that can be safely crashed, while ensuring that the
         // cluster can eventually recover.
-        var crashes = cluster.count_healthy() -| replica_healthy_min;
+        var crashes = cluster.replica_healthy_count() -| replica_healthy_min;
         for (cluster.replicas) |*replica| {
             switch (cluster.health[replica.replica]) {
                 .up => |*ticks| {
                     ticks.* -|= 1;
-                    // Test `replica.op > 0` — an empty WAL would skip recovery after a crash.
-                    if (ticks.* == 0 and crashes > 0 and replica.op > 0 and
+                    if (ticks.* == 0 and crashes > 0 and
                         prng.random().float(f64) < health_options.crash_probability)
                     {
                         log_health.debug("crash replica={}", .{replica.replica});
-                        try cluster.simulate_replica_crash(replica.replica);
+                        try cluster.crash_replica(replica.replica);
                         crashes -= 1;
                     } else {
                         replica.tick();
@@ -245,7 +244,7 @@ pub fn main() !void {
 
         if (cluster.state_checker.transitions == transitions_max) {
             if (cluster.state_checker.convergence() and
-                cluster.up_count() == replica_count)
+                cluster.replica_up_count() == replica_count)
             {
                 break;
             }
