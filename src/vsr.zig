@@ -932,8 +932,10 @@ pub fn format_journal_sector(cluster: u32, sector: usize) [config.sector_size]u8
 }
 
 test "format_journal_sector" {
-    var bytes = try std.testing.allocator.alloc(u8,
-        config.journal_size_headers+ config.journal_size_prepares);
+    var bytes = try std.testing.allocator.alloc(
+        u8,
+        config.journal_size_headers + config.journal_size_prepares,
+    );
     defer std.testing.allocator.free(bytes);
 
     var sectors = std.mem.bytesAsSlice([config.sector_size]u8, bytes);

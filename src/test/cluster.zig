@@ -96,7 +96,7 @@ pub const Cluster = struct {
 
         const health = try allocator.alloc(ReplicaHealth, options.replica_count);
         errdefer allocator.free(health);
-        mem.set(ReplicaHealth, health, .{.up = 0});
+        mem.set(ReplicaHealth, health, .{ .up = 0 });
 
         const clients = try allocator.alloc(Client, options.client_count);
         errdefer allocator.free(clients);
@@ -164,8 +164,11 @@ pub const Cluster = struct {
                 var sector: usize = 0;
                 while (sector < sectors) : (sector += 1) {
                     const offset = sector * config.sector_size;
-                    mem.copy(u8, storage.memory[offset .. offset + config.sector_size],
-                        vsr.format_journal_sector(options.cluster, sector)[0..]);
+                    mem.copy(
+                        u8,
+                        storage.memory[offset .. offset + config.sector_size],
+                        vsr.format_journal_sector(options.cluster, sector)[0..],
+                    );
                 }
             }
         }
@@ -215,7 +218,7 @@ pub const Cluster = struct {
             return;
         }
 
-        cluster.health[replica_index] = .{.down = cluster.options.health_options.crash_stability};
+        cluster.health[replica_index] = .{ .down = cluster.options.health_options.crash_stability };
 
         replica.deinit(cluster.allocator);
         cluster.storages[replica_index].reset();

@@ -746,8 +746,11 @@ pub fn Replica(
             }
 
             if (message.header.op >= self.op_checkpoint + config.journal_slot_count) {
-                log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})",
-                    .{ self.replica, message.header.op, self.op_checkpoint });
+                log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})", .{
+                    self.replica,
+                    message.header.op,
+                    self.op_checkpoint,
+                });
                 return;
             }
 
@@ -872,7 +875,7 @@ pub fn Replica(
                     //
                     // In particular, this is useful when a crash occurs at the very end of a VOPR
                     // run, since no additional prepares will arrive.
-                    log.debug("{}: on_commit: learn op={}", .{self.replica, op_leader});
+                    log.debug("{}: on_commit: learn op={}", .{ self.replica, op_leader });
                     assert(self.op >= op_leader);
 
                     self.journal.remove_entries_from(op_leader + 1);
@@ -1298,7 +1301,9 @@ pub fn Replica(
                 assert(message.header.replica == existing.header.replica);
                 if (existing.header.checksum == message.header.checksum) {
                     // The response packet was repeated by the network; ignore it.
-                    log.debug("{}: on_recovery_response: ignoring (duplicate message)", .{ self.replica });
+                    log.debug("{}: on_recovery_response: ignoring (duplicate message)", .{
+                        self.replica,
+                    });
                     return;
                 }
 
@@ -1309,10 +1314,10 @@ pub fn Replica(
 
                 if (message.header.view < existing.header.view or
                     (message.header.view == existing.header.view and
-                     message.header.op < existing.header.op) or
+                    message.header.op < existing.header.op) or
                     (message.header.view == existing.header.view and
-                     message.header.op == existing.header.op and
-                     message.header.commit < existing.header.commit))
+                    message.header.op == existing.header.op and
+                    message.header.commit < existing.header.commit))
                 {
                     // The second message is actually older (reordered packets), so we can ignore it.
                     log.debug("{}: on_recovery_response: ignoring outdated replica={} view={} op={} commit={}", .{
@@ -1354,8 +1359,10 @@ pub fn Replica(
 
             const threshold = self.quorum_replication;
             if (count < threshold) {
-                log.debug("{}: on_recovery_response: waiting for quorum count={}",
-                    .{ self.replica, count });
+                log.debug("{}: on_recovery_response: waiting for quorum count={}", .{
+                    self.replica,
+                    count,
+                });
                 return;
             }
 
@@ -1375,16 +1382,21 @@ pub fn Replica(
             const leader_replica = self.leader_index(view);
             const leader_response = responses[leader_replica];
             if (leader_response == null) {
-                log.debug("{}: on_recovery_response: ignoring (awaiting response from leader of view={})",
-                    .{ self.replica, view });
+                log.debug("{}: on_recovery_response: ignoring (awaiting response from leader of view={})", .{
+                    self.replica,
+                    view,
+                });
                 return;
             }
 
             if (leader_response.?.header.view != view) {
                 // The leader (according to the view quorum) isn't the leader (according to itself).
                 // The `recovery_timeout` will retry shortly with another round.
-                log.debug("{}: on_recovery_response: ignoring (leader has wrong view actual={} expect={})",
-                    .{ self.replica, leader_response.?.header.view, view });
+                log.debug("{}: on_recovery_response: ignoring (leader has wrong view actual={} expect={})", .{
+                    self.replica,
+                    leader_response.?.header.view,
+                    view,
+                });
                 return;
             }
 
@@ -2537,9 +2549,9 @@ pub fn Replica(
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_message_from_header(self: *Self, header: Header) *Message {
             assert(header.replica == self.replica);
-            assert(header.view == self.view
-                or header.command == .request_start_view
-                or header.command == .recovery);
+            assert(header.view == self.view or
+                header.command == .request_start_view or
+                header.command == .recovery);
             assert(header.size == @sizeOf(Header));
 
             const message = self.message_bus.pool.get_message();
@@ -2607,8 +2619,12 @@ pub fn Replica(
                             }
 
                             if (nack) nacks += 1;
-                            log.debug("{}: discard_uncommitted_headers: replica={} op={} nack={}",
-                                .{ self.replica, m.header.replica, op, nack });
+                            log.debug("{}: discard_uncommitted_headers: replica={} op={} nack={}", .{
+                                self.replica,
+                                m.header.replica,
+                                op,
+                                nack,
+                            });
                         }
                     }
                 }
@@ -3496,12 +3512,15 @@ pub fn Replica(
                     });
                 }
             } else {
-                log.debug("{}: repair_header: op={} gap", .{self.replica, header.op});
+                log.debug("{}: repair_header: op={} gap", .{ self.replica, header.op });
             }
 
             // Caveat: Do not repair an existing op or gap if doing so would break the hash chain:
             if (self.repair_header_would_break_hash_chain_with_next_entry(header)) {
-                log.debug("{}: repair_header: op={} false (breaks hash chain)", .{self.replica, header.op});
+                log.debug("{}: repair_header: op={} false (breaks hash chain)", .{
+                    self.replica,
+                    header.op,
+                });
                 return false;
             }
 
@@ -3813,8 +3832,11 @@ pub fn Replica(
             if (self.commit_max < op) {
                 if (self.pipeline.get_ptr(op - self.commit_max - 1)) |prepare| {
                     if (prepare.message.header.checksum == checksum) {
-                        log.debug("{}: repair_prepare: in pipeline op={} checksum={}",
-                            .{ self.replica, op, checksum });
+                        log.debug("{}: repair_prepare: in pipeline op={} checksum={}", .{
+                            self.replica,
+                            op,
+                            checksum,
+                        });
                         self.write_prepare(prepare.message, .pipeline);
                         return true;
                     }
@@ -3971,8 +3993,10 @@ pub fn Replica(
                 self.message_bus.unref(prepare.message);
                 assert(self.pipeline.pop_tail() != null);
             }
-            log.debug("{}: reset_pipeline: retain messages (count={})",
-                .{ self.replica, self.pipeline.count });
+            log.debug("{}: reset_pipeline: retain messages (count={})", .{
+                self.replica,
+                self.pipeline.count,
+            });
 
             // Do not reset `repairing_pipeline` here as this must be reset by the read callback.
             // Otherwise, we would be making `repair_pipeline()` reentrant.
@@ -4002,8 +4026,12 @@ pub fn Replica(
                 received.* = null;
             }
             assert(count <= self.replica_count);
-            log.debug("{}: reset {} {s} message(s) from view={}",
-                .{ self.replica, count, @tagName(command), view });
+            log.debug("{}: reset {} {s} message(s) from view={}", .{
+                self.replica,
+                count,
+                @tagName(command),
+                view,
+            });
         }
 
         fn reset_quorum_counter(self: *Self, counter: *QuorumCounter) void {
@@ -4390,7 +4418,6 @@ pub fn Replica(
                 },
             }
 
-
             log.debug("{}: {s}: view={} op={}..{} commit={}..{} checksum={}", .{
                 self.replica,
                 method,
@@ -4477,7 +4504,7 @@ pub fn Replica(
                     // This is required to maintain the invariant that the op=commit_min exists in-memory.
                     const header = Header.root_prepare(self.cluster);
                     self.journal.set_header_as_dirty(&header);
-                    log.debug("{}: set_op_known: repair initial op", .{ self.replica });
+                    log.debug("{}: set_op_known: repair initial op", .{self.replica});
                 }
             }
         }
