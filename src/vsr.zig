@@ -577,7 +577,7 @@ pub const Header = packed struct {
         return header;
     }
 
-    pub fn init_prepare(cluster: u32) Header {
+    pub fn root_prepare(cluster: u32) Header {
         var header = Header{
             .cluster = cluster,
             .size = @sizeOf(Header),
@@ -904,7 +904,7 @@ pub fn format_journal_sector(cluster: u32, sector: usize) [config.sector_size]u8
         for (sector_headers) |*header, i| {
             const slot = sector * headers_per_sector + i;
             if (sector == 0 and i == 0) {
-                header.* = Header.init_prepare(cluster);
+                header.* = Header.root_prepare(cluster);
             } else {
                 header.* = Header.reserved(cluster, slot);
             }
@@ -920,7 +920,7 @@ pub fn format_journal_sector(cluster: u32, sector: usize) [config.sector_size]u8
         if (sector_in_prepares % sectors_per_message == 0) {
             // First sector of the message.
             if (message_slot == 0) {
-                sector_headers[0] = Header.init_prepare(cluster);
+                sector_headers[0] = Header.root_prepare(cluster);
             } else {
                 sector_headers[0] = Header.reserved(cluster, message_slot);
             }

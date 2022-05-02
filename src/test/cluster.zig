@@ -208,12 +208,16 @@ pub const Cluster = struct {
     /// Reset a replica to its initial state, simulating a random crash/panic.
     /// Leave the persistent storage untouched, and leave any currently
     /// inflight messages to/from the replica in the network.
-    pub fn simulate_replica_crash(cluster: *Cluster, replica_index: u8) !void {
+    pub fn crash_replica(cluster: *Cluster, replica_index: u8) !void {
+        const replica = &cluster.replicas[replica_index];
+        if (replica.op == 0) {
+            // Only crash when `replica.op > 0` — an empty WAL would skip recovery after a crash.
+            return;
+        }
+
         cluster.health[replica_index] = .{.down = cluster.options.health_options.crash_stability};
 
-        const replica = &cluster.replicas[replica_index];
         replica.deinit(cluster.allocator);
-
         cluster.storages[replica_index].reset();
         cluster.state_machines[replica_index] = StateMachine.init(cluster.options.seed);
 
@@ -268,7 +272,7 @@ pub const Cluster = struct {
     ///
     /// * replica.status=normal
     /// * replica.op_known=true
-    pub fn count_healthy(cluster: *Cluster) u8 {
+    pub fn replica_healthy_count(cluster: *Cluster) u8 {
         var count: u8 = 0;
         for (cluster.replicas) |*replica| {
             switch (replica.status) {
@@ -282,23 +286,7 @@ pub const Cluster = struct {
         return count;
     }
 
-    /// Returns whether the replica was crashed.
-    pub fn maybe_crash_replica(cluster: *Cluster, replica: u8) bool {
-        switch (cluster.health[replica]) {
-            .up => |ticks| {
-                // The replica is temporarily protected from crashing again.
-                if (ticks > 0) return false;
-            },
-            .down => unreachable,
-        }
-
-        if (!cluster.sample(cluster.options.health_options.crash_probability)) return false;
-
-        cluster.health[replica] = .{.down = cluster.options.health_options.crash_stability};
-        return true;
-    }
-
-    pub fn up_count(cluster: *const Cluster) u8 {
+    pub fn replica_up_count(cluster: *const Cluster) u8 {
         var count: u8 = 0;
         for (cluster.health) |health| {
             if (health == .up) {
