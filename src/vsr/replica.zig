@@ -646,8 +646,19 @@ pub fn Replica(
 
             log.debug("{}: on_request: request {}", .{ self.replica, message.header.checksum });
 
+            // Guard against the wall clock going backwards by taking the max with timestamps issued:
+            self.state_machine.prepare_timestamp = std.math.max(
+                // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
+                // may be our first prepare as a recently elected leader:
+                std.math.max(
+                    self.state_machine.prepare_timestamp,
+                    self.state_machine.commit_timestamp,
+                ) + 1,
+                @intCast(u64, realtime),
+            );
+            assert(self.state_machine.prepare_timestamp > self.state_machine.commit_timestamp);
+
             const prepare_timestamp = self.state_machine.prepare(
-                realtime,
                 message.header.operation.cast(StateMachine),
                 message.body(),
             );
@@ -2268,13 +2279,16 @@ pub fn Replica(
             const reply = self.message_bus.get_message();
             defer self.message_bus.unref(reply);
 
+            assert(self.state_machine.commit_timestamp < prepare.header.timestamp);
+
             const reply_body_size = @intCast(u32, self.state_machine.commit(
                 prepare.header.client,
-                prepare.header.timestamp,
                 prepare.header.operation.cast(StateMachine),
                 prepare.buffer[@sizeOf(Header)..prepare.header.size],
                 reply.buffer[@sizeOf(Header)..],
             ));
+            assert(self.state_machine.commit_timestamp <= prepare.header.timestamp);
+            self.state_machine.commit_timestamp = prepare.header.timestamp;
 
             self.commit_min += 1;
             assert(self.commit_min == prepare.header.op);

@@ -105,16 +105,7 @@ pub const StateMachine = struct {
     }
 
     /// Returns the header's timestamp.
-    pub fn prepare(self: *StateMachine, realtime: i64, operation: Operation, input: []u8) u64 {
-        // Guard against the wall clock going backwards by taking the max with timestamps issued:
-        self.prepare_timestamp = std.math.max(
-            // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
-            // may be our first prepare as a recently elected leader:
-            std.math.max(self.prepare_timestamp, self.commit_timestamp) + 1,
-            @intCast(u64, realtime),
-        );
-        assert(self.prepare_timestamp > self.commit_timestamp);
-
+    pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) u64 {
         switch (operation) {
             .init => unreachable,
             .register => {},
@@ -133,8 +124,6 @@ pub const StateMachine = struct {
         comptime operation: Operation,
         input: []u8,
     ) void {
-        assert(self.prepare_timestamp > self.commit_timestamp);
-
         var sum_reserved_timestamps: usize = 0;
         var events = std.mem.bytesAsSlice(Event(operation), input);
         for (events) |*event| {
@@ -151,19 +140,11 @@ pub const StateMachine = struct {
     pub fn commit(
         self: *StateMachine,
         client: u128,
-        timestamp: u64,
         operation: Operation,
         input: []const u8,
         output: []u8,
     ) usize {
         _ = client;
-        assert(self.commit_timestamp < timestamp);
-
-        defer {
-            // If this condition is modified, modify the same condition in `test/state_machine.zig`.
-            assert(self.commit_timestamp <= timestamp);
-            self.commit_timestamp = timestamp;
-        }
         return switch (operation) {
             .init => unreachable,
             .register => 0,
@@ -765,8 +746,8 @@ test "linked accounts" {
     const input = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    const prepare_timestamp = state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, prepare_timestamp, .create_accounts, input, output);
+    _ = state_machine.prepare(.create_accounts, input);
+    const size = state_machine.commit(0, .create_accounts, input, output);
     const results = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try testing.expectEqualSlices(
@@ -820,8 +801,8 @@ test "create/lookup/rollback transfers" {
     const input = std.mem.asBytes(&accounts);
     const output = try allocator.alloc(u8, 4096);
 
-    const prepare_timestamp = state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, prepare_timestamp, .create_accounts, input, output);
+    _ = state_machine.prepare(.create_accounts, input);
+    const size = state_machine.commit(0, .create_accounts, input, output);
 
     const errors = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
     try testing.expectEqual(@as(usize, 0), errors.len);
@@ -1199,8 +1180,8 @@ test "create/lookup/rollback commits" {
     const output = try allocator.alloc(u8, 4096);
 
     // Accounts:
-    const accounts_timestamp = state_machine.prepare(0, .create_accounts, input);
-    const size = state_machine.commit(0, accounts_timestamp, .create_accounts, input, output);
+    const accounts_timestamp = state_machine.prepare(.create_accounts, input);
+    const size = state_machine.commit(0, .create_accounts, input, output);
     {
         const errors = std.mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
         try testing.expectEqual(@as(usize, 0), errors.len);
@@ -1214,11 +1195,10 @@ test "create/lookup/rollback commits" {
     const object_transfers = std.mem.asBytes(&transfers);
     const output_transfers = try allocator.alloc(u8, 4096);
 
-    const transfers_timestamp = state_machine.prepare(0, .create_transfers, object_transfers);
+    const transfers_timestamp = state_machine.prepare(.create_transfers, object_transfers);
     try testing.expect(transfers_timestamp > accounts_timestamp);
     const size_transfers = state_machine.commit(
         0,
-        transfers_timestamp,
         .create_transfers,
         object_transfers,
         output_transfers,

@@ -23,33 +23,22 @@ pub const StateMachine = struct {
 
     pub fn prepare(
         state_machine: *StateMachine,
-        realtime: i64,
         operation: Operation,
         input: []u8,
     ) u64 {
         _ = operation;
         _ = input;
 
-        // TODO: use realtime in some way to test the system
-        state_machine.prepare_timestamp = std.math.max(
-            std.math.max(state_machine.prepare_timestamp, state_machine.commit_timestamp) + 1,
-            @intCast(u64, realtime));
         return state_machine.prepare_timestamp;
     }
 
     pub fn commit(
         state_machine: *StateMachine,
         client: u128,
-        timestamp: u64,
         operation: Operation,
         input: []const u8,
         output: []u8,
     ) usize {
-        assert(state_machine.commit_timestamp < timestamp);
-        defer {
-            assert(state_machine.commit_timestamp <= timestamp);
-            state_machine.commit_timestamp = timestamp;
-        }
         switch (operation) {
             .reserved, .init => unreachable,
             .register => return 0,
