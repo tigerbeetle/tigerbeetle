@@ -231,10 +231,10 @@ pub fn main() !void {
                     if (ticks.* == 0 and
                         prng.random().float(f64) < health_options.restart_probability)
                     {
-                        cluster.health[replica.replica] = .{.up = health_options.restart_stability};
+                        cluster.health[replica.replica] = .{ .up = health_options.restart_stability };
                         log_health.debug("restart replica={}", .{replica.replica});
                     }
-                }
+                },
             }
         }
 
