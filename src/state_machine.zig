@@ -30,7 +30,7 @@ pub const StateMachine = struct {
     pub const Operation = enum(u8) {
         /// Operations reserved by VR protocol (for all state machines):
         reserved,
-        init,
+        root,
         register,
 
         /// Operations exported by TigerBeetle:
@@ -107,7 +107,7 @@ pub const StateMachine = struct {
     /// Returns the header's timestamp.
     pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) u64 {
         switch (operation) {
-            .init => unreachable,
+            .root => unreachable,
             .register => {},
             .create_accounts => self.prepare_timestamps(.create_accounts, input),
             .create_transfers => self.prepare_timestamps(.create_transfers, input),
@@ -146,7 +146,7 @@ pub const StateMachine = struct {
     ) usize {
         _ = client;
         return switch (operation) {
-            .init => unreachable,
+            .root => unreachable,
             .register => 0,
             .create_accounts => self.execute(.create_accounts, input, output),
             .create_transfers => self.execute(.create_transfers, input, output),

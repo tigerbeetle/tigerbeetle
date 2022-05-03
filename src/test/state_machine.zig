@@ -7,7 +7,7 @@ pub const StateMachine = struct {
     pub const Operation = enum(u8) {
         /// Operations reserved by VR protocol (for all state machines):
         reserved,
-        init,
+        root,
         register,
 
         hash,
@@ -40,7 +40,7 @@ pub const StateMachine = struct {
         output: []u8,
     ) usize {
         switch (operation) {
-            .reserved, .init => unreachable,
+            .reserved, .root => unreachable,
             .register => return 0,
 
             // TODO: instead of always using the first 32 bytes of the output

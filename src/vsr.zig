@@ -54,7 +54,7 @@ pub const Operation = enum(u8) {
     /// The value 0 is reserved to prevent a spurious zero from being interpreted as an operation.
     reserved = 0,
     /// The value 1 is reserved to initialize the cluster.
-    init = 1,
+    root = 1,
     /// The value 2 is reserved to register a client session with the cluster.
     register = 2,
 
@@ -75,8 +75,8 @@ pub const Operation = enum(u8) {
         if (!@hasField(Op, "reserved") or std.meta.fieldInfo(Op, .reserved).value != 0) {
             @compileError("StateMachine.Operation must have a 'reserved' field with value 0");
         }
-        if (!@hasField(Op, "init") or std.meta.fieldInfo(Op, .init).value != 1) {
-            @compileError("StateMachine.Operation must have an 'init' field with value 1");
+        if (!@hasField(Op, "root") or std.meta.fieldInfo(Op, .root).value != 1) {
+            @compileError("StateMachine.Operation must have an 'root' field with value 1");
         }
         if (!@hasField(Op, "register") or std.meta.fieldInfo(Op, .register).value != 2) {
             @compileError("StateMachine.Operation must have a 'register' field with value 2");
@@ -296,7 +296,7 @@ pub const Header = packed struct {
         if (self.replica != 0) return "replica != 0";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
-            .init => return "operation == .init",
+            .root => return "operation == .root",
             .register => {
                 // The first request a client makes must be to register with the cluster:
                 if (self.parent != 0) return "parent != 0";
@@ -319,17 +319,17 @@ pub const Header = packed struct {
         assert(self.command == .prepare);
         switch (self.operation) {
             .reserved => return "operation == .reserved",
-            .init => {
-                if (self.parent != 0) return "init: parent != 0";
-                if (self.client != 0) return "init: client != 0";
-                if (self.context != 0) return "init: context != 0";
-                if (self.request != 0) return "init: request != 0";
-                if (self.view != 0) return "init: view != 0";
-                if (self.op != 0) return "init: op != 0";
-                if (self.commit != 0) return "init: commit != 0";
-                if (self.timestamp != 0) return "init: timestamp != 0";
-                if (self.size != @sizeOf(Header)) return "init: size != @sizeOf(Header)";
-                if (self.replica != 0) return "init: replica != 0";
+            .root => {
+                if (self.parent != 0) return "root: parent != 0";
+                if (self.client != 0) return "root: client != 0";
+                if (self.context != 0) return "root: context != 0";
+                if (self.request != 0) return "root: request != 0";
+                if (self.view != 0) return "root: view != 0";
+                if (self.op != 0) return "root: op != 0";
+                if (self.commit != 0) return "root: commit != 0";
+                if (self.timestamp != 0) return "root: timestamp != 0";
+                if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
+                if (self.replica != 0) return "root: replica != 0";
             },
             else => {
                 if (self.client == 0) return "client == 0";
@@ -353,16 +353,16 @@ pub const Header = packed struct {
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
-            .init => {
-                if (self.parent != 0) return "init: parent != 0";
-                if (self.client != 0) return "init: client != 0";
-                if (self.context != 0) return "init: context != 0";
-                if (self.request != 0) return "init: request != 0";
-                if (self.view != 0) return "init: view != 0";
-                if (self.op != 0) return "init: op != 0";
-                if (self.commit != 0) return "init: commit != 0";
-                if (self.timestamp != 0) return "init: timestamp != 0";
-                if (self.replica != 0) return "init: replica != 0";
+            .root => {
+                if (self.parent != 0) return "root: parent != 0";
+                if (self.client != 0) return "root: client != 0";
+                if (self.context != 0) return "root: context != 0";
+                if (self.request != 0) return "root: request != 0";
+                if (self.view != 0) return "root: view != 0";
+                if (self.op != 0) return "root: op != 0";
+                if (self.commit != 0) return "root: commit != 0";
+                if (self.timestamp != 0) return "root: timestamp != 0";
+                if (self.replica != 0) return "root: replica != 0";
             },
             else => {
                 if (self.client == 0) return "client == 0";
@@ -582,7 +582,7 @@ pub const Header = packed struct {
             .cluster = cluster,
             .size = @sizeOf(Header),
             .command = .prepare,
-            .operation = .init,
+            .operation = .root,
         };
         header.set_checksum_body(&[0]u8{});
         header.set_checksum();
@@ -959,7 +959,7 @@ test "format_journal_sector" {
         try std.testing.expectEqual(header.size, @sizeOf(Header));
         if (slot == 0) {
             try std.testing.expectEqual(header.command, .prepare);
-            try std.testing.expectEqual(header.operation, .init);
+            try std.testing.expectEqual(header.operation, .root);
         } else {
             try std.testing.expectEqual(header.command, .reserved);
         }
