@@ -2268,7 +2268,7 @@ pub fn Replica(
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
             assert(prepare.header.command == .prepare);
-            assert(prepare.header.operation != .init);
+            assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
 
@@ -2427,7 +2427,7 @@ pub fn Replica(
             const session = reply.header.commit; // The commit number becomes the session number.
             const request = reply.header.request;
 
-            assert(session > 0); // We reserved the `0` commit number for the cluster `.init` operation.
+            assert(session > 0); // We reserved the `0` commit number for the cluster `.root` operation.
             assert(request == 0);
 
             // For correctness, it's critical that all replicas evict deterministically:
@@ -3358,7 +3358,7 @@ pub fn Replica(
                 assert(range.op_min > self.commit_min);
                 assert(range.op_max < self.op);
                 // A range of `op_min=0` or `op_max=0` should be impossible as a header break:
-                // This is the init op that is prepared when the cluster is initialized.
+                // This is the root op that is prepared when the cluster is initialized.
                 assert(range.op_min > 0);
                 assert(range.op_max > 0);
 
@@ -4494,17 +4494,17 @@ pub fn Replica(
             if (self.op < config.journal_slot_count) {
                 if (self.journal.header_with_op(0)) |header| {
                     assert(header.command == .prepare);
-                    assert(header.operation == .init);
+                    assert(header.operation == .root);
                 } else {
                     // Both:
                     // * this is the first wrap of the log
-                    // * op=0 (the init prepare) is corrupt on journal recovery
+                    // * op=0 (the root prepare) is corrupt on journal recovery
                     //
-                    // The op is known, so we can safely repair the initial prepare.
+                    // The op is known, so we can safely repair the root prepare.
                     // This is required to maintain the invariant that the op=commit_min exists in-memory.
                     const header = Header.root_prepare(self.cluster);
                     self.journal.set_header_as_dirty(&header);
-                    log.debug("{}: set_op_known: repair initial op", .{self.replica});
+                    log.debug("{}: set_op_known: repair root op", .{self.replica});
                 }
             }
         }

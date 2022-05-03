@@ -255,19 +255,19 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        /// Returns whether this is a fresh database WAL; no prepares (except the init) have ever
+        /// Returns whether this is a fresh database WAL; no prepares (except the root) have ever
         /// been written.
         pub fn is_empty(self: *const Self) bool {
             assert(!self.recovering);
             assert(self.recovered);
 
             const replica = @fieldParentPtr(Replica, "journal", self);
-            if (self.headers[0].operation != .init) return false;
+            if (self.headers[0].operation != .root) return false;
 
             assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
             assert(self.headers[0].checksum == self.prepare_checksums[0]);
 
-            // If the message immediately following the initial prepare is damaged, we must fall
+            // If the message immediately following the root prepare is damaged, we must fall
             // back to VSR recovery protocol (i.e. treat this as a non-empty WAL) since that
             // message may have been a prepare.
             if (self.faulty.bit(Slot{ .index = 1 })) return false;
@@ -854,8 +854,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             for (std.mem.bytesAsSlice(Header, buffer)) |*header, index| {
                 const slot = Slot{ .index = offset / @sizeOf(Header) + index };
                 if (slot.index != 0 or self.headers[slot.index].op != 0) {
-                    // This is the first recovery pass, so no headers (except the initial prepare)
-                    // are loaded yet.
+                    // This is the first recovery pass, so no headers (except the root prepare) are
+                    // loaded yet.
                     assert(self.headers[slot.index].command == .reserved);
                     assert(self.headers[slot.index].op == slot.index);
                 }
