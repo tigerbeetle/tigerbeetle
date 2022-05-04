@@ -5,12 +5,9 @@ const MessageBus = @import("../message_bus.zig").MessageBusClient;
 const StateMachine = @import("../state_machine.zig").StateMachine;
 const ClientThread = @import("client_thread.zig").ClientThread(StateMachine, MessageBus);
 
-pub const tb_event_t = ClientThread.Event;
-pub const tb_result_t = ClientThread.Result;
-
-pub const tb_packet_t = ClientThread.Packet;
-pub const tb_packet_list_t = ClientThread.Packet.List;
-pub const tb_packet_status_t = ClientThread.Packet.Status;
+pub const tb_packet_t = @import("client_thread.zig").Packet;
+pub const tb_packet_list_t = tb_packet_t.List;
+pub const tb_packet_status_t = tb_packet_t.Status;
 
 pub const tb_client_t = *anyopaque;
 pub const tb_status_t = enum(c_int) {
