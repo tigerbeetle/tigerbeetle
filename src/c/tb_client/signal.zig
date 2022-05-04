@@ -23,7 +23,7 @@ pub const Signal = struct {
     completion: IO.Completion,
     recv_buffer: [1]u8,
     send_buffer: [1]u8,
-    
+
     on_signal_fn: fn (*Signal) void,
     state: Atomic(enum(u8) {
         running,
@@ -35,20 +35,14 @@ pub const Signal = struct {
     pub fn init(self: *Signal, io: *IO, on_signal_fn: fn (*Signal) void) !void {
         self.io = io;
         self.server_socket = os.socket(
-            os.AF.INET, 
-            os.SOCK.STREAM | os.SOCK.NONBLOCK, 
+            os.AF.INET,
+            os.SOCK.STREAM | os.SOCK.NONBLOCK,
             os.IPPROTO.TCP,
         ) catch |err| {
             log.err("failed to create signal server socket: {}", .{err});
             return switch (err) {
-                error.PermissionDenied,
-                error.ProtocolNotSupported,
-                error.SocketTypeNotSupported,
-                error.AddressFamilyNotSupported,
-                error.ProtocolFamilyNotAvailable => error.NetworkSubsystemFailed,
-                error.ProcessFdQuotaExceeded,
-                error.SystemFdQuotaExceeded,
-                error.SystemResources => error.SystemResources,
+                error.PermissionDenied, error.ProtocolNotSupported, error.SocketTypeNotSupported, error.AddressFamilyNotSupported, error.ProtocolFamilyNotAvailable => error.NetworkSubsystemFailed,
+                error.ProcessFdQuotaExceeded, error.SystemFdQuotaExceeded, error.SystemResources => error.SystemResources,
                 error.Unexpected => error.Unexpected,
             };
         };
@@ -61,8 +55,7 @@ pub const Signal = struct {
                 error.FileDescriptorNotASocket => unreachable,
                 error.AlreadyConnected => unreachable,
                 error.SocketNotBound => unreachable,
-                error.OperationNotSupported,
-                error.NetworkSubsystemFailed => error.NetworkSubsystemFailed,
+                error.OperationNotSupported, error.NetworkSubsystemFailed => error.NetworkSubsystemFailed,
                 error.SystemResources => error.SystemResources,
                 error.Unexpected => error.Unexpected,
             };
@@ -96,7 +89,7 @@ pub const Signal = struct {
             result: IO.ConnectError!void = undefined,
             completion: IO.Completion = undefined,
             is_connected: bool = false,
-            
+
             fn on_connect(
                 do_connect: *@This(),
                 _completion: *IO.Completion,
@@ -118,7 +111,7 @@ pub const Signal = struct {
             self.connect_socket,
             addr,
         );
-        
+
         // Wait for the connect_socket to connect to the server_socket.
         self.accept_socket = IO.INVALID_SOCKET;
         while (!do_connect.is_connected or self.accept_socket == IO.INVALID_SOCKET) {
@@ -134,14 +127,10 @@ pub const Signal = struct {
                     error.ConnectionAborted => unreachable,
                     error.ConnectionResetByPeer => unreachable,
                     error.FileDescriptorNotASocket => unreachable,
-                    error.ProcessFdQuotaExceeded,
-                    error.SystemFdQuotaExceeded,
-                    error.SystemResources => return error.SystemResources,
+                    error.ProcessFdQuotaExceeded, error.SystemFdQuotaExceeded, error.SystemResources => return error.SystemResources,
                     error.SocketNotListening => unreachable,
                     error.BlockedByFirewall => unreachable,
-                    error.ProtocolFailure,
-                    error.OperationNotSupported,
-                    error.NetworkSubsystemFailed => return error.NetworkSubsystemFailed,
+                    error.ProtocolFailure, error.OperationNotSupported, error.NetworkSubsystemFailed => return error.NetworkSubsystemFailed,
                     error.Unexpected => return error.Unexpected,
                 };
             }
@@ -159,7 +148,7 @@ pub const Signal = struct {
         self.completion = undefined;
         self.recv_buffer = undefined;
         self.send_buffer = undefined;
-        
+
         self.state = @TypeOf(self.state).init(.running);
         self.on_signal_fn = on_signal_fn;
         self.wait();

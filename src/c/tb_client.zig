@@ -50,7 +50,9 @@ const DefaultContext = blk: {
 const global_allocator = if (builtin.link_libc)
     std.heap.c_allocator
 else if (builtin.target.os.tag == .windows)
-    (struct { var gpa = std.heap.HeapAllocator.init(); }).gpa.allocator()
+    (struct {
+        var gpa = std.heap.HeapAllocator.init();
+    }).gpa.allocator()
 else
     @compileError("tb_client must be built with libc");
 
