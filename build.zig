@@ -59,7 +59,7 @@ pub fn build(b: *std.build.Builder) void {
             tb_client.linkLibC();
         }
 
-        const build_step = b.step("c_client", "Build the TigerBeetle C client shared library");
+        const build_step = b.step("tb_client", "Build the TigerBeetle C client shared library");
         build_step.dependOn(&tb_client.step);
     }
 }
