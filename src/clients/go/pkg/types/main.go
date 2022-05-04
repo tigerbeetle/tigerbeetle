@@ -1,5 +1,10 @@
 package types
 
+/*
+#include "../native/tb_client.h"
+*/
+import "C"
+
 type Operation uint8
 
 const (
@@ -10,7 +15,7 @@ const (
 	TRANSFER_LOOKUP Operation = 7
 )
 
-type Uint128 [16]byte
+type Uint128 C.tb_uint128_t
 
 type Account struct {
 	ID              Uint128

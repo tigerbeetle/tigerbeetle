@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"testing"
+	"unsafe"
 
 	"github.com/coilhq/tigerbeetle-go/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -20,9 +21,9 @@ const (
 
 func toU128(value string) *types.Uint128 {
 	src := []byte(value)
-	dst := new(types.Uint128)
+	dst := make([]byte, unsafe.Sizeof(types.Uint128{}))
 	hex.Encode(dst[:], src)
-	return dst
+	return (*types.Uint128)(unsafe.Pointer(&dst[0]))
 }
 
 func WithClient(s testing.TB, withClient func(Client)) {
