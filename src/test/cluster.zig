@@ -160,16 +160,9 @@ pub const Cluster = struct {
         {
             // Format the WAL (equivalent to "tigerbeetle init ...").
             for (cluster.storages) |storage| {
-                const sectors = storage.size / config.sector_size;
-                var sector: usize = 0;
-                while (sector < sectors) : (sector += 1) {
-                    const offset = sector * config.sector_size;
-                    mem.copy(
-                        u8,
-                        storage.memory[offset .. offset + config.sector_size],
-                        vsr.format_journal_sector(options.cluster, sector)[0..],
-                    );
-                }
+                const write_size = vsr.format_journal(options.cluster, 0, storage.memory);
+                assert(write_size == storage.memory.len);
+                assert(write_size == config.journal_size_max);
             }
         }
 

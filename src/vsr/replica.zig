@@ -1459,6 +1459,9 @@ pub fn Replica(
         /// to the cluster. The cluster sees the replica as an underwriter of a guaranteed
         /// prepare. If a guaranteed prepare is found to by faulty, the replica must repair it
         /// to restore durability.
+        // TODO Use an explicit null when specifying a missing checksum rather than `0`, so that
+        // `0` is a valid checksum.
+        // As part of this change, `Journal.prepare_checksums` should store `?u128`.
         fn on_request_prepare(self: *Self, message: *const Message) void {
             if (self.ignore_repair_message(message)) return;
 
