@@ -17,6 +17,83 @@ const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
+pub const Packet = extern struct {
+    next: ?*Packet,
+    user_data: usize,
+    operation: u8,
+    status: Status,
+    data_size: u32,
+    data: [*]const u8,
+
+    pub const Status = enum(u8) {
+        ok,
+        too_much_data,
+        invalid_operation,
+        invalid_data_size,
+    };
+
+    pub const List = extern struct {
+        head: ?*Packet = null,
+        tail: ?*Packet = null,
+
+        pub fn from(packet: *Packet) List {
+            packet.next = null;
+            return List{
+                .head = packet,
+                .tail = packet,
+            };
+        }
+
+        pub fn push(self: *List, list: List) void {
+            const prev = if (self.tail) |tail| &tail.next else &self.head;
+            prev.* = list.head orelse return;
+            self.tail = list.tail orelse unreachable;
+        }
+
+        pub fn peek(self: List) ?*Packet {
+            return self.head orelse {
+                assert(self.tail == null);
+                return null;
+            };
+        }
+
+        pub fn pop(self: *List) ?*Packet {
+            const packet = self.head orelse return null;
+            self.head = packet.next;
+            if (self.head == null) self.tail = null;
+            return packet;
+        }
+    };
+
+    const Stack = struct {
+        pushed: Atomic(?*Packet) = Atomic(?*Packet).init(null),
+        popped: ?*Packet = null,
+
+        fn push(self: *Stack, list: List) void {
+            const head = list.head orelse return;
+            const tail = list.tail orelse unreachable;
+
+            var pushed = self.pushed.load(.Monotonic);
+            while (true) {
+                tail.next = pushed;
+                pushed = self.pushed.tryCompareAndSwap(
+                    pushed,
+                    head,
+                    .Release,
+                    .Monotonic,
+                ) orelse break;
+            }
+        }
+
+        fn pop(self: *Stack) ?*Packet {
+            if (self.popped == null) self.popped = self.pushed.swap(null, .Acquire);
+            const packet = self.popped orelse return null;
+            self.popped = packet.next;
+            return packet;
+        }
+    };
+};
+
 pub fn ClientThread(
     comptime StateMachine: type,
     comptime MessageBus: type,
@@ -25,7 +102,7 @@ pub fn ClientThread(
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const Operation = StateMachine.Operation;
 
-        fn operation_size_of(op: Operation) ?usize {
+        fn operation_size_of(op: u8) ?usize {
             const allowed_operations = [_]Operation{
                 .create_accounts,
                 .create_transfers,
@@ -35,90 +112,13 @@ pub fn ClientThread(
             };
 
             inline for (allowed_operations) |operation| {
-                if (op == operation) {
+                if (op == @enumToInt(operation)) {
                     return @sizeOf(StateMachine.Event(operation));
                 }
             }
 
             return null;
         }
-
-        pub const Packet = extern struct {
-            next: ?*Packet,
-            user_data: usize,
-            operation: Operation,
-            status: Status,
-            data_size: u32,
-            data: [*]const u8,
-
-            pub const Status = enum(u8) {
-                ok,
-                too_much_data,
-                invalid_operation,
-                invalid_data_size,
-            };
-
-            pub const List = extern struct {
-                head: ?*Packet = null,
-                tail: ?*Packet = null,
-
-                pub fn from(packet: *Packet) List {
-                    packet.next = null;
-                    return List{
-                        .head = packet,
-                        .tail = packet,
-                    };
-                }
-
-                pub fn push(self: *List, list: List) void {
-                    const prev = if (self.tail) |tail| &tail.next else &self.head;
-                    prev.* = list.head orelse return;
-                    self.tail = list.tail orelse unreachable;
-                }
-
-                pub fn peek(self: List) ?*Packet {
-                    return self.head orelse {
-                        assert(self.tail == null);
-                        return null;
-                    };
-                }
-
-                pub fn pop(self: *List) ?*Packet {
-                    const packet = self.head orelse return null;
-                    self.head = packet.next;
-                    if (self.head == null) self.tail = null;
-                    return packet;
-                }
-            };
-
-            const Stack = struct {
-                pushed: Atomic(?*Packet) = Atomic(?*Packet).init(null),
-                popped: ?*Packet = null,
-
-                fn push(self: *Stack, list: List) void {
-                    const head = list.head orelse return;
-                    const tail = list.tail orelse unreachable;
-
-                    var pushed = self.pushed.load(.Monotonic);
-                    while (true) {
-                        tail.next = pushed;
-                        pushed = self.pushed.tryCompareAndSwap(
-                            pushed,
-                            head,
-                            .Release,
-                            .Monotonic,
-                        ) orelse break;
-                    }
-                }
-
-                fn pop(self: *Stack) ?*Packet {
-                    if (self.popped == null) self.popped = self.pushed.swap(null, .Acquire);
-                    const packet = self.popped orelse return null;
-                    self.popped = packet.next;
-                    return packet;
-                }
-            };
-        };
 
         /////////////////////////////////////////////////////////////////////////
 
@@ -335,7 +335,7 @@ pub fn ClientThread(
                     .packet = packet,
                 }),
                 Self.on_result,
-                packet.operation,
+                @intToEnum(Operation, packet.operation),
                 message,
                 wrote,
             );
@@ -352,7 +352,7 @@ pub fn ClientThread(
             const packet = user_data.packet;
 
             // Complete the packet without a message as it's already unref()'s by the Client.
-            assert(packet.operation == op);
+            assert(packet.operation == @enumToInt(op));
             self.on_complete(packet, null, results);
         }
 
