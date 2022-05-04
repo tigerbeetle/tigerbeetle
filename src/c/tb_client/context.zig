@@ -10,7 +10,7 @@ const tb_packet_list_t = api.tb_packet_list_t;
 
 pub const ContextImplementation = struct {
     submit_fn: fn (*ContextImplementation, *tb_packet_list_t) void,
-    deinit_fn: fn (*ContextImplementation) void, 
+    deinit_fn: fn (*ContextImplementation) void,
 };
 
 pub fn ContextType(
@@ -52,8 +52,8 @@ pub fn ContextType(
             const addresses = @ptrCast([*]const u8, addresses_ptr)[0..addresses_len];
             context.thread.init(
                 allocator,
-                cluster_id, 
-                addresses, 
+                cluster_id,
+                addresses,
                 num_packets,
                 Context.on_completion,
             ) catch |err| {

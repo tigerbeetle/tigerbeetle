@@ -55,16 +55,16 @@ pub fn ThreadType(
         io: IO,
         message_bus: MessageBus,
         client: Client,
-        
+
         retry: Packet.List,
         submitted: Packet.Stack,
-        available_messages: usize, 
+        available_messages: usize,
         on_completion_fn: CompletionFn,
 
         signal: Signal,
         thread: std.Thread,
 
-        pub const CompletionFn = fn(
+        pub const CompletionFn = fn (
             client_thread: *Self,
             packet: *Packet,
             result: ?[]const u8,
@@ -81,8 +81,8 @@ pub fn ThreadType(
         pub fn init(
             self: *Self,
             allocator: std.mem.Allocator,
-            cluster_id: u32, 
-            addresses: []const u8, 
+            cluster_id: u32,
+            addresses: []const u8,
             num_packets: u32,
             on_completion_fn: CompletionFn,
         ) Error!void {
@@ -112,7 +112,7 @@ pub fn ThreadType(
                     error.Unexpected => error.Unexpected,
                     else => unreachable,
                 };
-            }; 
+            };
             errdefer self.io.deinit();
 
             log.debug("init: initializing MessageBus.", .{});
@@ -165,13 +165,11 @@ pub fn ThreadType(
                 return switch (err) {
                     error.Unexpected => error.Unexpected,
                     error.OutOfMemory => error.OutOfMemory,
-                    error.SystemResources,
-                    error.ThreadQuotaExceeded,
-                    error.LockedMemoryLimitExceeded => error.SystemResources,
+                    error.SystemResources, error.ThreadQuotaExceeded, error.LockedMemoryLimitExceeded => error.SystemResources,
                 };
             };
         }
-        
+
         pub fn deinit(self: *Self) void {
             self.signal.shutdown();
             self.thread.join();
@@ -191,7 +189,7 @@ pub fn ThreadType(
             self.submitted.push(list);
             self.signal.notify();
         }
-        
+
         fn run(self: *Self) void {
             while (!self.signal.is_shutdown()) {
                 self.client.tick();
@@ -250,7 +248,7 @@ pub fn ThreadType(
             // Write the packet data to the message
             std.mem.copy(u8, writable, readable);
             const wrote = readable.len;
-            
+
             // .. and submit the message for processing
             self.client.request(
                 @bitCast(u128, UserData{
@@ -308,5 +306,3 @@ pub fn ThreadType(
         }
     };
 }
-
-
