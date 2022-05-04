@@ -282,6 +282,7 @@ test "RingBuffer: pop_tail" {
     try testing.expectEqual(@as(?u32, 3), lifo.pop_tail());
     try testing.expectEqual(@as(?u32, 1), lifo.head());
     try testing.expectEqual(@as(?u32, 2), lifo.pop_tail());
+    try testing.expectEqual(@as(?u32, 1), lifo.head());
     try testing.expectEqual(@as(?u32, 1), lifo.pop_tail());
     try testing.expectEqual(@as(?u32, null), lifo.pop_tail());
     try testing.expect(lifo.empty());
