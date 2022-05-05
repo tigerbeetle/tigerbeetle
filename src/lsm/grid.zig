@@ -167,8 +167,30 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(address > 0);
             assert(!grid.superblock.free_set.is_free(address));
-            // TODO Assert that the block ptr is not being used for another I/O (read or write).
-            // TODO Assert that block is not already writing.
+
+            // Assert that block is not already writing.
+            // Assert that the block ptr is not being used for another I/O (read or write).
+            {
+                var it = grid.writes_pending.peek();
+                while (it) |pending_write| : (it = pending_write.next) {
+                    assert(address != pending_write.address);
+                    assert(block != pending_write.block);
+                }
+            }
+            {
+                var it = grid.write_iops.iterate();
+                while (it.next()) |iop| {
+                    assert(address != iop.write.address);
+                    assert(block != iop.write.block);
+                }
+            }
+            {
+                var it = grid.read_iops.iterate();
+                while (it.next()) |iop| {
+                    assert(address != iop.reads.peek().?.address);
+                    assert(block != iop.block);
+                }
+            }
 
             write.* = .{
                 .callback = callback,
