@@ -26,4 +26,8 @@ cp ./tigerbeetle/src/c/tb_client.h ./pkg/native/tb_client.h
 # Step 3.5 - build tigerbeetle binary for `go test`
 (cd ./tigerbeetle && zig/zig build -Drelease-safe -Dtarget=$TB_TARGET)
 cp ./tigerbeetle/zig-out/bin/tigerbeetle ./pkg/native/$TB_TARGET/tigerbeetle
+
+# Step 4 - build and test tigerbeetle-go (zgo = go with CGO env setup)
+./zgo.sh test # on unix
+zgo.bat test # on windows
 ```

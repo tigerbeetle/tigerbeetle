@@ -6,14 +6,19 @@ package tigerbeetle_go
 #cgo darwin,amd64 LDFLAGS: ${SRCDIR}/pkg/native/x86_64-macos/libtb_client.a -ldl -lm
 #cgo linux,arm64 LDFLAGS: ${SRCDIR}/pkg/native/aarch64-linux/libtb_client.a -ldl -lm
 #cgo linux,amd64 LDFLAGS: ${SRCDIR}/pkg/native/x86_64-linux/libtb_client.a -ldl -lm
-#cgo windows,amd64 LDFLAGS: ${SRCDIR}/pkg/native/x86_64-windows/libtb_client.lib -lm -lws2_32
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/pkg/native/x86_64-windows -ltb_client -lws2_32
 
 #include <stdlib.h>
 #include <string.h>
 #include "./pkg/native/tb_client.h"
 
+#ifndef __declspec
+	#define __declspec(x)
+#endif
+
 typedef const uint8_t* tb_result_bytes_t;
-void onGoPacketCompletion(
+
+extern __declspec(dllexport) void onGoPacketCompletion(
 	uintptr_t ctx,
 	tb_client_t client,
 	tb_packet_t* packet,
