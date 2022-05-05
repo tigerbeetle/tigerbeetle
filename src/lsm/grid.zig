@@ -53,6 +53,9 @@ pub fn GridType(comptime Storage: type) type {
     const read_iops_max = 16;
     assert(read_iops_max <= set_associative_cache_ways);
 
+    // TODO put more thought into how low/high this limit should be.
+    const write_iops_max = 16;
+
     const grid_offset: u64 = superblock_zone_size +
         write_ahead_log_zone_size +
         client_table_zone_size;
@@ -60,7 +63,27 @@ pub fn GridType(comptime Storage: type) type {
     return struct {
         const Grid = @This();
 
-        pub const Write = Storage.Write;
+        pub const Write = struct {
+            callback: fn (*Grid.Write) void,
+            address: u64,
+            block: BlockPtrConst,
+
+            /// Link for the writes_pending linked list.
+            next: ?*Write = null,
+
+            /// Call the user's callback, finishing the write.
+            pub fn finish(write: *Write) void {
+                const callback = write.callback;
+                write.* = undefined;
+                callback(write);
+            }
+        };
+
+        pub const WriteIOP = struct {
+            grid: *Grid,
+            completion: Storage.Write,
+            write: *Write,
+        };
 
         pub const Read = struct {
             callback: fn (*Grid.Read, BlockPtrConst) void,
@@ -90,8 +113,11 @@ pub fn GridType(comptime Storage: type) type {
         superblock: *SuperBlock,
         cache: Cache,
 
+        writes_pending: FIFO(Write) = .{},
+        write_iops: IOPS(WriteIOP, write_iops_max) = .{},
+
         reads_pending: FIFO(Read) = .{},
-        reads: IOPS(ReadIOP, read_iops_max) = .{},
+        read_iops: IOPS(ReadIOP, read_iops_max) = .{},
 
         // TODO interrogate this list and do recovery in Replica.tick().
         read_recovery_queue: FIFO(Read) = .{},
@@ -144,7 +170,46 @@ pub fn GridType(comptime Storage: type) type {
             // TODO Assert that the block ptr is not being used for another I/O (read or write).
             // TODO Assert that block is not already writing.
 
-            grid.superblock.storage.write_sectors(callback, write, block, block_offset(address));
+            write.* = .{
+                .callback = callback,
+                .address = address,
+                .block = block,
+            };
+
+            grid.start_write(write);
+        }
+
+        fn start_write(grid: *Grid, write: *Write) void {
+            const iop = grid.write_iops.acquire() orelse {
+                grid.writes_pending.push(write);
+                return;
+            };
+
+            iop.* = .{
+                .grid = grid,
+                .completion = undefined,
+                .write = write,
+            };
+
+            grid.superblock.storage.write_sectors(
+                write_block_callback,
+                &iop.completion,
+                write.block,
+                block_offset(write.address),
+            );
+        }
+
+        fn write_block_callback(completion: *Storage.Write) void {
+            const iop = @fieldParentPtr(WriteIOP, "completion", completion);
+
+            iop.write.finish();
+
+            const grid = iop.grid;
+            grid.write_iops.release(iop);
+
+            if (grid.writes_pending.pop()) |write| {
+                grid.start_write(write);
+            }
         }
 
         /// This function transparently handles recovery if the checksum fails.
@@ -161,7 +226,6 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(address > 0);
             assert(!grid.superblock.free_set.is_free(address));
-            // TODO Assert that the block ptr is not being used for another I/O (read or write).
 
             read.* = .{
                 .callback = callback,
@@ -175,7 +239,7 @@ pub fn GridType(comptime Storage: type) type {
         fn start_read(grid: *Grid, read: *Grid.Read) void {
             // Check if a read is already in progress for the target address.
             {
-                var it = grid.reads.iterate();
+                var it = grid.read_iops.iterate();
                 while (it.next()) |iop| {
                     if (iop.reads.peek().?.address == read.address) {
                         assert(iop.reads.peek().?.checksum == read.checksum);
@@ -185,7 +249,7 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            const iop = grid.reads.acquire() orelse {
+            const iop = grid.read_iops.acquire() orelse {
                 grid.reads_pending.push(read);
                 return;
             };
@@ -213,7 +277,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         inline fn block_locked(grid: *Grid, block: BlockPtrConst) bool {
-            var it = grid.reads.iterate();
+            var it = grid.read_iops.iterate();
             while (it.next()) |iop| {
                 if (block == iop.block) return true;
             }
@@ -246,7 +310,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             const grid = iop.grid;
-            grid.reads.release(iop);
+            grid.read_iops.release(iop);
 
             // Always iterate through the full list of pending reads here to ensure that all
             // possible reads in the list are started, even in the presence of concurrent reads
