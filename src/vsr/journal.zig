@@ -684,6 +684,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
+            if (self.prepare_checksums[self.slot_for_op(op).index] != checksum) {
+                self.read_prepare_log(op, checksum, "prepare changed during read");
+                read.callback(replica, null, null);
+                return;
+            }
+
             // Check that the `headers` slot belongs to the same op that it did when the read began.
             // The slot may not match the Read's op/checksum due to either:
             // * The in-memory header changed since the read began.
