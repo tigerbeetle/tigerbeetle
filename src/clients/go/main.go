@@ -24,10 +24,11 @@ void onGoPacketCompletion(
 import "C"
 import (
 	e "errors"
-	"github.com/coilhq/tigerbeetle-go/pkg/errors"
-	"github.com/coilhq/tigerbeetle-go/pkg/types"
 	"strings"
 	"unsafe"
+
+	"github.com/coilhq/tigerbeetle-go/pkg/errors"
+	"github.com/coilhq/tigerbeetle-go/pkg/types"
 )
 
 ///////////////////////////////////////////////////////////////
@@ -184,7 +185,7 @@ func (c *c_client) doRequest(
 
 	// Setup the packet.
 	req.packet.next = nil
-	req.packet.user_data = C.uintptr_t((uintptr)((unsafe.Pointer)(req)))
+	req.packet.user_data = unsafe.Pointer(req)
 	req.packet.operation = C.uint8_t(op)
 	req.packet.status = C.TB_PACKET_OK
 	req.packet.data_size = C.uint32_t(count * int(getEventSize(op)))
@@ -236,7 +237,7 @@ func onGoPacketCompletion(
 	result_len C.uint32_t,
 ) {
 	// Get the request from the packet user data
-	req := (*request)((unsafe.Pointer)((uintptr)(packet.user_data)))
+	req := (*request)(packet.user_data)
 	op := C.TB_OPERATION(packet.operation)
 
 	var wrote C.uint32_t

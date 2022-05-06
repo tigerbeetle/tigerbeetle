@@ -155,7 +155,7 @@ typedef enum TB_PACKET_STATUS {
 
 typedef struct tb_packet_t {
     struct tb_packet_t* next;
-    uintptr_t user_data;
+    void* user_data;
     uint8_t operation;
     uint8_t status;
     uint32_t data_size;
