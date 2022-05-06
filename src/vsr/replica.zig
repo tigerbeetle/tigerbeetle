@@ -1523,6 +1523,8 @@ pub fn Replica(
                             message.header.replica,
                         );
                     } else {
+                        // TODO Do not reissue the read if we are already reading in order to send to
+                        // this particular destination replica.
                         self.journal.read_prepare_with_op_and_checksum(
                             on_request_prepare_read,
                             op,
