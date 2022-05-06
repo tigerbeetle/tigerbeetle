@@ -176,13 +176,29 @@ pub fn SetAssociativeCache(
         }
 
         /// If the key is present in the set, returns the way. Otherwise returns null.
-        inline fn search(self: *Self, set: Set, key: Key) ?usize {
+        inline fn search_old(self: *Self, set: Set, key: Key) ?usize {
             for (set.tags) |tag, way| {
                 if (tag == set.tag) {
                     const count = self.counts.get(set.offset + way);
                     if (count > 0 and equal(key_from_value(set.values[way]), key)) {
                         return way;
                     }
+                }
+            }
+            return null;
+        }
+
+        /// If the key is present in the set, returns the way. Otherwise returns null.
+        inline fn search(self: *Self, set: Set, key: Key) ?usize {
+            const tags: Vector(layout.ways, Tag) = set.tags.*;
+            const matches = @splat(layout.ways, set.tag) == tags;
+
+            const MaskInt = meta.Int(.unsigned, layout.ways);
+            var it = BitMaskIter(MaskInt){ .mask = @ptrCast(*const MaskInt, &matches).* };
+            while (it.next()) |way| {
+                const count = self.counts.get(set.offset + way);
+                if (count > 0 and equal(key_from_value(set.values[way]), key)) {
+                    return way;
                 }
             }
             return null;
@@ -606,4 +622,35 @@ test "PackedUnsignedIntegerArray: fuzz" {
 
         try context.run();
     }
+}
+
+fn BitMaskIter(comptime MaskInt: type) type {
+    return struct {
+        const Self = @This();
+        const BitIndex = math.Log2Int(MaskInt);
+
+        mask: MaskInt,
+
+        /// Iterate over the bitmask, consuming it. Returns the bit index of
+        /// each set bit until there are no more set bits, then null.
+        fn next(it: *Self) ?BitIndex {
+            if (it.mask == 0) return null;
+            // This int cast is safe since we never pass 0 to @ctz().
+            const ret = @intCast(BitIndex, @ctz(MaskInt, it.mask));
+            // Zero the lowest set bit
+            it.mask &= it.mask - 1;
+            return ret;
+        }
+    };
+}
+
+test "BitMaskIter" {
+    const testing = @import("std").testing;
+
+    var bit_mask = BitMaskIter(u16){ .mask = 0b1000_0000_0100_0101 };
+
+    for ([_]u4{ 0, 2, 6, 15 }) |e| {
+        try testing.expectEqual(@as(?u4, e), bit_mask.next());
+    }
+    try testing.expectEqual(bit_mask.next(), null);
 }
