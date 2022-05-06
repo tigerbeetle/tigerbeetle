@@ -716,7 +716,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (read.message.header.cluster != replica.cluster) {
                 // This could be caused by a misdirected read or write.
                 // Though when a prepare spans multiple sectors, a misdirected read/write will
-                // likely trigger as a checksum failure instead.
+                // likely manifest as a checksum failure instead.
                 if (slot) |s| {
                     self.faulty.set(s);
                     self.dirty.set(s);
@@ -803,7 +803,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .callback = undefined,
                 .op = undefined,
                 .checksum = offset,
-                .destination_replica = undefined,
+                .destination_replica = null,
             };
 
             const buffer = recover_headers_buffer(message, offset);
@@ -850,22 +850,19 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(offset % @sizeOf(Header) == 0);
             assert(buffer.len >= @sizeOf(Header));
             assert(buffer.len % @sizeOf(Header) == 0);
+            assert(read.destination_replica == null);
 
             for (std.mem.bytesAsSlice(Header, buffer)) |*header, index| {
                 const slot = Slot{ .index = offset / @sizeOf(Header) + index };
-                if (slot.index != 0 or self.headers[slot.index].op != 0) {
-                    // This is the first recovery pass, so no headers (except the root prepare) are
-                    // loaded yet.
-                    assert(self.headers[slot.index].command == .reserved);
-                    assert(self.headers[slot.index].op == slot.index);
-                }
-
+                // This is the first recovery pass, so no headers are loaded yet.
+                assert(self.headers[slot.index].command == .reserved);
+                assert(self.headers[slot.index].op == slot.index);
                 assert(!self.dirty.bit(slot));
                 assert(!self.faulty.bit(slot));
 
                 if (header.valid_checksum()) {
-                    // All journalled headers should reserved or prepares. A misdirected
-                    // read/write to/from the block zone may return the wrong type of message.
+                    // All journalled headers should be reserved or else prepares. A misdirected
+                    // read/write to or from the block zone may return the wrong type of message.
                     const ok_command = header.command == .prepare or header.command == .reserved;
                     // A header in the wrong cluster/slot indicates a misdirected read or write.
                     const ok_cluster = header.cluster == replica.cluster;
@@ -942,7 +939,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .callback = undefined,
                 .op = undefined,
                 .checksum = slot.index,
-                .destination_replica = undefined,
+                .destination_replica = null,
             };
 
             log.debug("{}: recover_prepares: recovering slot={}", .{
@@ -1044,6 +1041,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const replica = @fieldParentPtr(Replica, "journal", self);
             assert(!self.recovered);
             assert(self.recovering);
+            assert(read.destination_replica == null);
 
             const slot = Slot{ .index = @intCast(u64, read.checksum) };
             assert(slot.index < slot_count);
