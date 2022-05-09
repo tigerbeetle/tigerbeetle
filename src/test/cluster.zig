@@ -123,6 +123,7 @@ pub const Cluster = struct {
 
         var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
         const faulty_areas = Storage.generate_faulty_areas(prng, config.journal_size_max, options.replica_count, &buffer);
+        assert(faulty_areas.len == options.replica_count);
 
         for (cluster.replicas) |*replica, replica_index| {
             cluster.times[replica_index] = .{
