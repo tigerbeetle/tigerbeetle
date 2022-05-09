@@ -43,7 +43,7 @@ comptime {
     assert(slot_count % headers_per_sector == 0);
     assert(slot_count >= headers_per_sector);
     // The length of the prepare pipeline is the upper bound on how many ops can be
-    // reordered during a view change. See `recover_prepares_on_read()` for more detail.
+    // reordered during a view change. See `recover_prepares_callback()` for more detail.
     assert(slot_count > config.pipelining_max);
 
     assert(headers_size > 0);
@@ -661,10 +661,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 @ptrToInt(buffer.ptr) > @ptrToInt(self.headers.ptr) + headers_size);
 
             assert_bounds(.prepares, offset, buffer.len);
-            self.storage.read_sectors(on_read, &read.completion, buffer, offset);
+            self.storage.read_sectors(
+                read_prepare_with_op_and_checksum_callback,
+                &read.completion,
+                buffer,
+                offset,
+            );
         }
 
-        fn on_read(completion: *Storage.Read) void {
+        fn read_prepare_with_op_and_checksum_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(Self.Read, "completion", completion);
             const self = read.self;
             const replica = @fieldParentPtr(Replica, "journal", self);
@@ -820,21 +825,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
 
             self.storage.read_sectors(
-                recover_headers_on_read,
+                recover_headers_callback,
                 &read.completion,
                 buffer,
                 offset_physical_for_logical(.headers, offset),
             );
         }
 
-        fn recover_headers_buffer(message: *Message, offset: u64) []u8 {
-            const max = std.math.min(message.buffer.len, headers_size - offset);
-            assert(max % config.sector_size == 0);
-            assert(max % @sizeOf(Header) == 0);
-            return message.buffer[0..max];
-        }
-
-        fn recover_headers_on_read(completion: *Storage.Read) void {
+        fn recover_headers_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(Self.Read, "completion", completion);
             const self = read.self;
             const replica = @fieldParentPtr(Replica, "journal", self);
@@ -919,6 +917,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             self.recover_headers(offset + buffer.len);
         }
 
+        fn recover_headers_buffer(message: *Message, offset: u64) []u8 {
+            const max = std.math.min(message.buffer.len, headers_size - offset);
+            assert(max % config.sector_size == 0);
+            assert(max % @sizeOf(Header) == 0);
+            return message.buffer[0..max];
+        }
+
         fn recover_prepares(self: *Self, slot: Slot) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
             assert(!self.recovered);
@@ -952,7 +957,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
 
             self.storage.read_sectors(
-                recover_prepares_on_read,
+                recover_prepares_callback,
                 &read.completion,
                 // Only the header of the message needs to be read (128 bytes).
                 // However, the minimum read is a 4 KiB sector.
@@ -1039,7 +1044,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ///
         /// This would be a safety violation — we assume that the likelihood of this event is
         /// negligible.
-        fn recover_prepares_on_read(completion: *Storage.Read) void {
+        fn recover_prepares_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(Self.Read, "completion", completion);
             const self = read.self;
             const replica = @fieldParentPtr(Replica, "journal", self);
@@ -1050,7 +1055,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const slot = Slot{ .index = @intCast(u64, read.checksum) };
             assert(slot.index < slot_count);
 
-            // `recover_headers_on_read` either sets both dirty+faulty, or neither.
+            // `recover_headers_callback` either sets both dirty+faulty, or neither.
             if (self.dirty.bit(slot)) {
                 assert(self.faulty.bit(slot));
             }
@@ -1094,32 +1099,32 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const match_op = header.op == prepare.op;
             const match_view = header.view == prepare.view;
 
-            const action: struct {
+            const case: struct {
                 label: []const u8,
                 decision: Decision,
-            } = action: {
+            } = case: {
                 if (!header_valid and !prepare_valid) {
-                    break :action .{ .label = "@A", .decision = .vsr };
+                    break :case .{ .label = "@A", .decision = .vsr };
                 }
 
                 // This prepare header is corrupt.
                 // We may have a valid redundant header, but need to recover the full message.
                 if (header_valid and !prepare_valid) {
                     if (header_reserved) {
-                        break :action .{ .label = "@B", .decision = .vsr };
+                        break :case .{ .label = "@B", .decision = .vsr };
                     } else {
-                        break :action .{ .label = "@C", .decision = .vsr };
+                        break :case .{ .label = "@C", .decision = .vsr };
                     }
                 }
 
                 if (prepare_valid and !header_valid) {
                     if (prepare_reserved) {
-                        break :action .{ .label = "@D", .decision = .vsr };
+                        break :case .{ .label = "@D", .decision = .vsr };
                     } else {
                         if (replica.replica_count == 1) {
-                            break :action .{ .label = "@E", .decision = .fix };
+                            break :case .{ .label = "@E", .decision = .fix };
                         } else {
-                            break :action .{ .label = "@E", .decision = .vsr };
+                            break :case .{ .label = "@E", .decision = .vsr };
                         }
                     }
                 }
@@ -1139,16 +1144,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 // need to be retrieved remotely.
                 if (header_reserved and !prepare_reserved) {
                     if (replica.replica_count == 1) {
-                        break :action .{ .label = "@F", .decision = .fix };
+                        break :case .{ .label = "@F", .decision = .fix };
                     } else {
-                        break :action .{ .label = "@F", .decision = .vsr };
+                        break :case .{ .label = "@F", .decision = .vsr };
                     }
                 }
 
                 // The redundant header is present & valid, but the corresponding prepare was a lost
                 // or misdirected read or write.
                 if (prepare_reserved and !header_reserved) {
-                    break :action .{ .label = "@G", .decision = .vsr };
+                    break :case .{ .label = "@G", .decision = .vsr };
                 }
 
                 if (header_reserved and prepare_reserved) {
@@ -1156,7 +1161,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(match_checksum);
                     assert(match_op);
                     assert(match_view);
-                    break :action .{ .label = "@H", .decision = .nil };
+                    break :case .{ .label = "@H", .decision = .nil };
                 }
                 assert(!header_reserved);
                 assert(!prepare_reserved);
@@ -1179,11 +1184,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         // When the higher op belongs to the prepare, repair locally.
                         // The most likely cause for this case is that the log wrapped, but the
                         // redundant header write was lost.
-                        break :action .{ .label = "@I", .decision = .fix };
+                        break :case .{ .label = "@I", .decision = .fix };
                     } else {
                         // When the higher op belongs to the header, mark faulty.
                         assert(header.op > prepare.op);
-                        break :action .{ .label = "@J", .decision = .vsr };
+                        break :case .{ .label = "@J", .decision = .vsr };
                     }
                 }
                 assert(match_op);
@@ -1193,7 +1198,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     // A single-replica cluster doesn't ever change views.
                     assert(!match_view);
                     assert(replica.replica_count != 1);
-                    break :action .{ .label = "@K", .decision = .vsr };
+                    break :case .{ .label = "@K", .decision = .vsr };
                 }
 
                 // The redundant header matches the message's header.
@@ -1201,7 +1206,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(match_checksum);
                 assert(match_view);
                 assert(header.checksum_body == prepare.checksum_body);
-                break :action .{ .label = "@L", .decision = .eql };
+                break :case .{ .label = "@L", .decision = .eql };
             };
 
             if (prepare.command == .prepare and prepare.valid_checksum()) {
@@ -1210,7 +1215,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.prepare_checksums[slot.index] = prepare.checksum;
             }
 
-            switch (action.decision) {
+            switch (case.decision) {
                 .eql => {
                     assert(header.command == .prepare);
                     assert(prepare.command == .prepare);
@@ -1241,28 +1246,28 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 },
                 .vsr => {
                     // Faulty headers are loaded as reserved to prevent unsafe batch updates of the
-                    // redundant headers. See `recover_prepares_on_read()` for more detail.
+                    // redundant headers. See `recover_prepares_callback()` for more detail.
                     self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
                     self.dirty.set(slot);
                     self.faulty.set(slot);
                 },
             }
 
-            switch (action.decision) {
+            switch (case.decision) {
                 .eql, .nil => {
                     log.debug("{}: recover_prepares: recovered slot={} label={s} decision={s}", .{
                         self.replica,
                         slot.index,
-                        action.label,
-                        @tagName(action.decision),
+                        case.label,
+                        @tagName(case.decision),
                     });
                 },
                 .fix, .vsr => {
                     log.warn("{}: recover_prepares: recovered slot={} label={s} decision={s}", .{
                         self.replica,
                         slot.index,
-                        action.label,
-                        @tagName(action.decision),
+                        case.label,
+                        @tagName(case.decision),
                     });
                 },
             }
