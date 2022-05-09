@@ -200,11 +200,23 @@ pub fn main() !void {
         }
     };
 
+    // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
+    for (cluster.storages) |*storage, i| {
+        storage.faulty = replica_healthy_min <= i;
+    }
+
     // TODO When storage is supported, run more transitions than fit in the journal.
     const transitions_max = config.journal_slot_count / 2;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
-        for (cluster.storages) |*storage| storage.tick();
+        for (cluster.storages) |*storage, replica| {
+            if (cluster.replicas[replica].journal.recovered) {
+                // When a journal recovers for the first time, enable its storage faults.
+                // Future crashes will recover in the presence of faults.
+                storage.faulty = true;
+            }
+            storage.tick();
+        }
 
         const health_options = &cluster.options.health_options;
         // The maximum the number of replicas that can be safely crashed, while ensuring that the

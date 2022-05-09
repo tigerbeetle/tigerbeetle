@@ -95,6 +95,9 @@ pub const Storage = struct {
     // the replicas as that would make recovery impossible. Instead, we only
     // allow faults in certain areas which differ between replicas.
     faulty_areas: FaultyAreas,
+    /// Whether to enable faults (when false, this supersedes `faulty_areas`).
+    /// This is used to disable faults during the replica's first startup.
+    faulty: bool = true,
 
     reads: std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
     writes: std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
@@ -185,19 +188,8 @@ pub const Storage = struct {
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
-        // At startup, f+1 replicas must have a non-faulty root prepare to allow the cluster
-        // to start. (If the root prepare is broken on a fresh-formatted WAL, op_known=false).
-        // TODO This is a hack. Rather than just always protecting this one offset,
-        // it should only protect f+1 replicas. At time of writing, seed 2432231839409258639
-        // corrupts 2/4 replicas' root prepares.
-        const root_header_offset = 0;
-        const root_prepare_offset = config.journal_slot_count * @sizeOf(vsr.Header);
-
         const faulty = storage.faulty_sectors(read.offset, read.buffer.len);
-        if (faulty.len > 0 and storage.x_in_100(storage.options.read_fault_probability) and
-            read.offset != root_header_offset and
-            read.offset != root_prepare_offset)
-        {
+        if (faulty.len > 0 and storage.x_in_100(storage.options.read_fault_probability)) {
             // Randomly corrupt one of the faulty sectors the read targeted
             // TODO: inject more realistic and varied storage faults as described above.
             const sector_count = @divExact(faulty.len, config.sector_size);
@@ -406,7 +398,7 @@ pub const Storage = struct {
         const end = std.math.min(offset + size, faulty_offset + message_size_max);
 
         // The read/write does not touch any faulty sectors
-        if (start >= end) return &[0]u8{};
+        if (start >= end or !storage.faulty) return &[0]u8{};
 
         return storage.memory[start..end];
     }

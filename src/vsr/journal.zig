@@ -267,13 +267,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
             assert(self.headers[0].checksum == self.prepare_checksums[0]);
 
-            // If the message immediately following the root prepare is damaged, we must fall
-            // back to VSR recovery protocol (i.e. treat this as a non-empty WAL) since that
-            // message may have been a prepare.
-            if (self.faulty.bit(Slot{ .index = 1 })) return false;
+            // If any message is faulty, we must fall back to VSR recovery protocol (i.e. treat
+            // this as a non-empty WAL) since that message may have been a prepare.
+            if (self.faulty.count > 0) return false;
+            assert(self.dirty.count == 0);
 
-            // Other headers are allowed to be damaged (they will be repaired from status=normal)
-            // but there shouldn't be any prepares.
             for (self.headers[1..]) |*header| {
                 if (header.command == .prepare) return false;
             }
