@@ -10,8 +10,9 @@ pub const Account = packed struct {
     user_data: u128,
     /// Reserved for accounting policy primitives:
     reserved: [48]u8,
-    ledger: u16,
     /// A chart of accounts code describing the type of account (e.g. clearing, settlement):
+    ledger: u16,
+    /// The currency code/type related to the transfer:
     code: u16,
     flags: AccountFlags,
     debits_pending: u64,
@@ -27,8 +28,8 @@ pub const Account = packed struct {
     pub fn debits_exceed_credits(self: *const Account, amount: u64) LimitExceedResult {
         if (!self.flags.debits_must_not_exceed_credits) return .ok;
 
-        const limit_amount: u66 = (@as(u66, self.debits_pending) + @as(u66, self.debits_posted) + @as(u66, amount));
-        if (limit_amount > std.math.maxInt(u64)) return .amount_overflow;
+        const pending_posted = try_add(self.debits_pending, self.debits_posted) orelse return .debit_overflow;
+        const limit_amount = try_add(pending_posted, amount) orelse return .debit_overflow;
         if (limit_amount > self.credits_posted) return .debits_exceed_credits;
         return .ok;
     }
@@ -36,10 +37,15 @@ pub const Account = packed struct {
     pub fn credits_exceed_debits(self: *const Account, amount: u64) LimitExceedResult {
         if (!self.flags.credits_must_not_exceed_debits) return .ok;
 
-        const limit_amount: u66 = (@as(u66, self.credits_pending) + @as(u66, self.credits_posted) + @as(u66, amount));
-        if (limit_amount > std.math.maxInt(u64)) return .amount_overflow;
+        const pending_posted = try_add(self.credits_pending, self.credits_posted) orelse return .credit_overflow;
+        const limit_amount = try_add(pending_posted, amount) orelse return .credit_overflow;
         if (limit_amount > self.debits_posted) return .credits_exceed_debits;
         return .ok;
+    }
+
+    fn try_add(a: u64, b: u64) ?u64 {
+        var c: u64 = undefined;
+        return if (@addWithOverflow(u64, a, b, &c)) null else c;
     }
 };
 
@@ -102,7 +108,8 @@ pub const TransferFlags = packed struct {
 
 pub const LimitExceedResult = enum(u32) {
     ok,
-    amount_overflow,
+    debit_overflow,
+    credit_overflow,
     debits_exceed_credits,
     credits_exceed_debits,
 };
@@ -130,6 +137,7 @@ pub const CreateTransferResult = enum(u32) {
     exists_with_different_debit_account_id,
     exists_with_different_credit_account_id,
     exists_with_different_user_data,
+    exists_with_different_ledger,
     exists_with_different_reserved_field,
     exists_with_different_code,
     exists_with_different_amount,
@@ -160,7 +168,7 @@ pub const CreateTransferResult = enum(u32) {
     credit_amount_not_pending,
     pending_id_should_be_zero,
     pending_id_is_zero,
-    post_amount_exceeds_pending_amount
+    post_amount_exceeds_pending_amount,
 };
 
 pub const CreateAccountsResult = packed struct {
