@@ -332,7 +332,7 @@ pub fn Replica(
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
                 .clock = clock,
-                .journal = try Journal.init(allocator, storage, cluster, replica),
+                .journal = try Journal.init(allocator, storage, replica),
                 .message_bus = message_bus,
                 .state_machine = state_machine,
                 .client_table = client_table,
@@ -2054,7 +2054,11 @@ pub fn Replica(
 
             // Do not allow duplicate messages to trigger multiple passes through a state transition:
             if (counter.isSet(message.header.replica)) {
-                log.debug("{}: on_{s}: ignoring (duplicate message)", .{ self.replica, command });
+                log.debug("{}: on_{s}: ignoring (duplicate message from={})", .{
+                    self.replica,
+                    command,
+                    message.header.replica,
+                });
                 return null;
             }
 
