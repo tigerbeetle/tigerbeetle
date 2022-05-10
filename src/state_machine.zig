@@ -299,13 +299,13 @@ pub const StateMachine = struct {
         // Opening balances may never exceed limits:
         switch (a.debits_exceed_credits(0)) {
             .debits_exceed_credits => return .exceeds_credits,
-            .amount_overflow => return .exceeds_credits,
+            .debit_overflow => return .exceeds_credits,
             else => {},
         }
 
         switch (a.credits_exceed_debits(0)) {
             .credits_exceed_debits => return .exceeds_debits,
-            .amount_overflow => return .exceeds_debits,
+            .credit_overflow => return .exceeds_debits,
             else => {},
         }
 
@@ -339,12 +339,8 @@ pub const StateMachine = struct {
         if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
             return .cannot_post_and_void_pending_transfer;
         } else if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-            //if (!t.flags.hashlock and !zeroed_32_bytes(t.reserved)) return .reserved_field;
             if (t.flags.padding != 0) return .reserved_flag_padding;
-            if (t.pending_id == 0) return .pending_id_is_zero; //TODO @jason, add test case for this...
-
-            // TODO need to perform a transfer lookup here.
-            // TODO self.get_transfer(t.id)
+            if (t.pending_id == 0) return .pending_id_is_zero;
             if (self.get_transfer(t.id)) |_| return .exists;
 
             if (self.get_posted(t.pending_id)) |exists| {
@@ -358,7 +354,6 @@ pub const StateMachine = struct {
 
             assert(t.timestamp > lookup.timestamp);
 
-            //TODO @jason need to test this for overflow...
             if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
 
             const dr = self.get_account(lookup.debit_account_id) orelse return .debit_account_not_found;
@@ -380,8 +375,17 @@ pub const StateMachine = struct {
             const c_acc_id = if (t.credit_account_id == 0) lookup.credit_account_id else t.credit_account_id;
             if (t.credit_account_id != c_acc_id) return .exists_with_different_credit_account_id;
 
+            const user_data = if (t.user_data == 0) lookup.user_data else t.user_data;
+            if (t.user_data != user_data) return .exists_with_different_user_data;
+
+            const ledger = if (t.ledger == 0) lookup.ledger else t.ledger;
+            if (t.ledger != ledger) return .exists_with_different_ledger;
+
+            const code = if (t.code == 0) lookup.code else t.code;
+            if (t.code != code) return .exists_with_different_code;
+
             const amnt = if (t.amount == 0) lookup.amount else t.amount;
-            if (amnt > lookup.amount) return .post_amount_exceeds_pending_amount; //TODO @jason, test for this
+            if (amnt > lookup.amount) return .post_amount_exceeds_pending_amount;
 
             // TODO We can combine this lookup with the previous lookup if we return `error!void`:
             const insert = self.posted.getOrPutAssumeCapacity(t.pending_id);
@@ -391,10 +395,10 @@ pub const StateMachine = struct {
                 .id = t.id,
                 .debit_account_id = d_acc_id,
                 .credit_account_id = c_acc_id,
-                .user_data = t.user_data,
+                .user_data = user_data,
                 .reserved = t.reserved,
-                .ledger = t.ledger,
-                .code = t.code,
+                .ledger = ledger,
+                .code = code,
                 .pending_id = t.pending_id,
                 .timeout = t.timeout,
                 .timestamp = t.timestamp,
@@ -405,13 +409,8 @@ pub const StateMachine = struct {
             dr.debits_pending -= lookup.amount;
             cr.credits_pending -= lookup.amount;
             if (!t.flags.void_pending_transfer) {
-                if (t.amount == 0) {
-                    dr.debits_posted += lookup.amount;
-                    cr.credits_posted += lookup.amount;
-                } else {
-                    dr.debits_posted += t.amount;
-                    cr.credits_posted += t.amount;
-                }
+                dr.debits_posted += amnt;
+                cr.credits_posted += amnt;
             }
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -496,8 +495,6 @@ pub const StateMachine = struct {
     }
 
     fn posted_transfer_rollback(self: *StateMachine, pt: Transfer) void {
-        //TODO @jason remove std.debug.print("ROLLING-BACK -> {any}.", .{pt});
-
         const dr = self.get_account(pt.debit_account_id).?;
         const cr = self.get_account(pt.credit_account_id).?;
         dr.debits_pending += pt.amount;
@@ -529,18 +526,6 @@ pub const StateMachine = struct {
         return self.posted.getPtr(pending_id);
     }
 };
-
-// TODO Optimize this by precomputing hashes outside and before committing to the state machine.
-// If we see that a batch of posted contains posted with preimages, then we will:
-// Divide the batch into subsets, dispatch these to multiple threads, store the result in a bitset.
-// Then we can simply provide the result bitset to the state machine when committing.
-// This will improve crypto performance significantly by a factor of 8x.
-//TODO Deprecated for now
-fn valid_preimage(condition: [32]u8, preimage: [32]u8) bool {
-    var target: [32]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(&preimage, &target, .{});
-    return std.crypto.utils.timingSafeEql([32]u8, target, condition);
-}
 
 /// Optimizes for the common case, where the array is zeroed. Completely branchless.
 fn zeroed_32_bytes(a: [32]u8) bool {
@@ -1359,6 +1344,27 @@ test "create/lookup/rollback 2-phase transfers" {
                 .flags = .{ .void_pending_transfer = true, .post_pending_transfer = true },
             }),
         },
+        Vector{
+            .result = .pending_id_is_zero,
+            .object = std.mem.zeroInit(Transfer, .{
+                .id = 22,
+                .pending_id = 0,
+                .timestamp = timestamp + 2,
+                .flags = .{ .void_pending_transfer = true },
+            }),
+        },
+        Vector{
+            .result = .post_amount_exceeds_pending_amount,
+            .object = std.mem.zeroInit(Transfer, .{
+                .id = 23,
+                .pending_id = 8,
+                .amount = 16, //original amount is 15.
+                .debit_account_id = 1,
+                .credit_account_id = 2,
+                .timestamp = timestamp + 3,
+                .flags = .{ .void_pending_transfer = true },
+            }),
+        },
     };
 
     // Test balances BEFORE posting
@@ -1494,11 +1500,10 @@ test "credit/debit limit overflows " {
         .code = 1000,
         .flags = .{ .debits_must_not_exceed_credits = true },
         .debits_pending = std.math.maxInt(u64),
-        .debits_posted = std.math.maxInt(u64),
-        .credits_pending = std.math.maxInt(u64),
-        .credits_posted = std.math.maxInt(u64),
+        .debits_posted = 0,
+        .credits_pending = 0,
+        .credits_posted = 0,
     };
-
     const acc_credit_not_exceed_debit = Account{
         .id = 1,
         .user_data = 1,
@@ -1506,14 +1511,76 @@ test "credit/debit limit overflows " {
         .ledger = 710,
         .code = 1000,
         .flags = .{ .credits_must_not_exceed_debits = true },
-        .debits_pending = std.math.maxInt(u64),
-        .debits_posted = std.math.maxInt(u64),
+        .debits_pending = 0,
+        .debits_posted = 0,
         .credits_pending = std.math.maxInt(u64),
-        .credits_posted = std.math.maxInt(u64),
+        .credits_posted = 0,
     };
 
-    try testing.expect(acc_debit_not_exceed_credit.debits_exceed_credits(std.math.maxInt(u64)) == .amount_overflow);
-    try testing.expect(acc_credit_not_exceed_debit.credits_exceed_debits(std.math.maxInt(u64)) == .amount_overflow);
+    // Exceeds the overflow limit by 1:
+    try testing.expect(acc_debit_not_exceed_credit.debits_exceed_credits(1) == .debit_overflow);
+    try testing.expect(acc_credit_not_exceed_debit.credits_exceed_debits(1) == .credit_overflow);
+
+    const acc_debit_not_exceed_credit_no_overflow = Account{
+        .id = 1,
+        .user_data = 1,
+        .reserved = [_]u8{0} ** 48,
+        .ledger = 710,
+        .code = 1000,
+        .flags = .{ .debits_must_not_exceed_credits = true },
+        .debits_pending = std.math.maxInt(u64) - 1,
+        .debits_posted = 0,
+        .credits_pending = 0,
+        .credits_posted = 0,
+    };
+    const acc_credit_not_exceed_debit_no_overflow = Account{
+        .id = 1,
+        .user_data = 1,
+        .reserved = [_]u8{0} ** 48,
+        .ledger = 710,
+        .code = 1000,
+        .flags = .{ .credits_must_not_exceed_debits = true },
+        .debits_pending = 0,
+        .debits_posted = 0,
+        .credits_pending = std.math.maxInt(u64) - 1,
+        .credits_posted = 0,
+    };
+
+    // Exceed limits, but still no overflow:
+    try testing.expect(acc_debit_not_exceed_credit_no_overflow.debits_exceed_credits(1) == .debits_exceed_credits);
+    try testing.expect(acc_credit_not_exceed_debit_no_overflow.credits_exceed_debits(1) == .credits_exceed_debits);
+
+    const acc_debit_not_exceed_credit_ok = Account{
+        .id = 1,
+        .user_data = 1,
+        .reserved = [_]u8{0} ** 48,
+        .ledger = 710,
+        .code = 1000,
+        .flags = .{ .debits_must_not_exceed_credits = true },
+        .debits_pending = 450,
+        .debits_posted = 450,
+        .credits_pending = 0,
+        .credits_posted = 1000,
+    };
+    const acc_credit_not_exceed_debit_ok = Account{
+        .id = 1,
+        .user_data = 1,
+        .reserved = [_]u8{0} ** 48,
+        .ledger = 710,
+        .code = 1000,
+        .flags = .{ .credits_must_not_exceed_debits = true },
+        .debits_pending = 0,
+        .debits_posted = 1000,
+        .credits_pending = 450,
+        .credits_posted = 450,
+    };
+
+    // No limit or overflow (.ok):
+    try testing.expect(acc_debit_not_exceed_credit_ok.debits_exceed_credits(100) == .ok);
+    try testing.expect(acc_credit_not_exceed_debit_ok.credits_exceed_debits(100) == .ok);
+    // Ensure we were at the limit:
+    try testing.expect(acc_debit_not_exceed_credit_ok.debits_exceed_credits(101) == .debits_exceed_credits);
+    try testing.expect(acc_credit_not_exceed_debit_ok.credits_exceed_debits(101) == .credits_exceed_debits);
 }
 
 fn test_debug_vector_create(comptime vector_type: type, comptime create_result_type: type, i: usize, vector: vector_type, create_result: create_result_type, err: anyerror) void {
