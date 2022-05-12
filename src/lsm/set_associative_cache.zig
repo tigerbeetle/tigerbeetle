@@ -176,25 +176,9 @@ pub fn SetAssociativeCache(
         }
 
         /// If the key is present in the set, returns the way. Otherwise returns null.
-        inline fn search_old(self: *Self, set: Set, key: Key) ?usize {
-            for (set.tags) |tag, way| {
-                if (tag == set.tag) {
-                    const count = self.counts.get(set.offset + way);
-                    if (count > 0 and equal(key_from_value(set.values[way]), key)) {
-                        return way;
-                    }
-                }
-            }
-            return null;
-        }
-
-        /// If the key is present in the set, returns the way. Otherwise returns null.
         inline fn search(self: *Self, set: Set, key: Key) ?usize {
-            const tags: Vector(layout.ways, Tag) = set.tags.*;
-            const matches = @splat(layout.ways, set.tag) == tags;
-
-            const MaskInt = meta.Int(.unsigned, layout.ways);
-            var it = BitMaskIter(MaskInt){ .mask = @ptrCast(*const MaskInt, &matches).* };
+            const matches = matches_bitmask(set.tags, set.tag);
+            var it = BitMaskIter(MatchesBitmask){ .mask = matches };
             while (it.next()) |way| {
                 const count = self.counts.get(set.offset + way);
                 if (count > 0 and equal(key_from_value(set.values[way]), key)) {
@@ -202,6 +186,13 @@ pub fn SetAssociativeCache(
                 }
             }
             return null;
+        }
+
+        const MatchesBitmask = meta.Int(.unsigned, layout.ways);
+        inline fn matches_bitmask(tags: *[layout.ways]Tag, tag: Tag) MatchesBitmask {
+            const tags_vec: Vector(layout.ways, Tag) = tags.*;
+            const matches = @splat(layout.ways, tag) == tags_vec;
+            return @ptrCast(*const MatchesBitmask, &matches).*;
         }
 
         pub fn put_no_clobber(self: *Self, key: Key) *align(value_alignment) Value {
@@ -336,10 +327,10 @@ pub fn SetAssociativeCache(
     };
 }
 
-test "SetAssociativeCache eviction" {
+test "SetAssociativeCache: eviction" {
     const testing = std.testing;
 
-    const log = true;
+    const log = false;
 
     const Key = u64;
     const Value = u64;
@@ -653,4 +644,76 @@ test "BitMaskIter" {
         try testing.expectEqual(@as(?u4, e), bit_mask.next());
     }
     try testing.expectEqual(bit_mask.next(), null);
+}
+
+test "SetAssociativeCache: matches_bitmask()" {
+    const testing = std.testing;
+
+    const log = false;
+    const seed = 42;
+
+    const Key = u64;
+    const Value = u64;
+
+    const context = struct {
+        inline fn key_from_value(value: Value) Key {
+            return value;
+        }
+        inline fn hash(key: Key) u64 {
+            return key;
+        }
+        inline fn equal(a: Key, b: Key) bool {
+            return a == b;
+        }
+    };
+
+    const layout: Layout = .{};
+    const SAC = SetAssociativeCache(
+        Key,
+        Value,
+        context.key_from_value,
+        context.hash,
+        context.equal,
+        layout,
+    );
+    if (log) SAC.inspect();
+
+    const Tag = meta.Int(.unsigned, layout.tag_bits);
+
+    const reference = struct {
+        inline fn matches_bitmask(tags: *[layout.ways]Tag, tag: Tag) SAC.MatchesBitmask {
+            var matches: SAC.MatchesBitmask = 0;
+            for (tags) |t, i| {
+                if (t == tag) {
+                    matches |= @as(SAC.MatchesBitmask, 1) << @intCast(math.Log2Int(SAC.MatchesBitmask), i);
+                }
+            }
+            return matches;
+        }
+    };
+
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    var iterations: usize = 0;
+    while (iterations < 10_000) : (iterations += 1) {
+        var tags: [layout.ways]Tag = undefined;
+        random.bytes(&tags);
+
+        const tag = random.int(Tag);
+
+        var indexes: [layout.ways]usize = undefined;
+        for (indexes) |*x, i| x.* = i;
+        random.shuffle(usize, &indexes);
+
+        const matches_count_min = random.uintAtMostBiased(u32, layout.ways);
+        for (indexes[0..matches_count_min]) |index| {
+            tags[index] = tag;
+        }
+
+        const expected = reference.matches_bitmask(&tags, tag);
+        const actual = SAC.matches_bitmask(&tags, tag);
+        if (log) std.debug.print("expected: {b:0>16}, actual: {b:0>16}\n", .{ expected, actual });
+        try testing.expectEqual(expected, actual);
+    }
 }
