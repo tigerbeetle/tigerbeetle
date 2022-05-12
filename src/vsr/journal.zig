@@ -861,18 +861,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(!self.faulty.bit(slot));
 
                 if (header.valid_checksum()) {
-                    // All journalled headers should be reserved or else prepares. A misdirected
-                    // read/write to or from another storage zone may return the wrong message.
-                    const ok_command = header.command == .prepare or header.command == .reserved;
-                    // A header in the wrong cluster/slot indicates a misdirected read or write.
-                    const ok_cluster = header.cluster == replica.cluster;
-                    const ok_slot = switch (header.command) {
-                        .prepare => slot.index == self.slot_for_header(header).index,
-                        .reserved => slot.index == header.op,
-                        else => false,
-                    };
-
-                    if (ok_command and ok_cluster and ok_slot) {
+                    if (header_ok(replica.cluster, slot, header)) {
                         assert(header.invalid() == null);
                         // One of the following cases:
                         //
@@ -1062,162 +1051,32 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // `recover_headers_callback` either sets both dirty+faulty, or neither.
             assert(self.dirty.bit(slot) == self.faulty.bit(slot));
 
-            const Decision = enum {
-                /// The header and prepare are identical; no repair necessary.
-                eql,
-                /// Reserved; clear dirty/faulty, no repair necessary.
-                nil,
-                /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty, clear faulty.
-                /// If replica_count=1: Use intact prepare. Clear dirty, clear faulty.
-                fix,
-                /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty and faulty.
-                /// If replica_count=1: Fail; cannot recover safely.
-                vsr,
-            };
-
             const header = &self.headers[slot.index];
-            const header_reserved = header.command == .reserved;
-            const header_valid = !self.faulty.bit(slot);
-            assert(header.invalid() == null);
-
             const prepare = read.message.header;
-            const prepare_checksum = prepare.valid_checksum();
-            // A prepare in the wrong cluster/slot indicates a misdirected read or write.
-            const prepare_cluster = prepare.cluster == replica.cluster;
-            const prepare_slot = switch (prepare.command) {
-                .prepare => slot.index == self.slot_for_op(prepare.op).index,
-                .reserved => slot.index == prepare.op,
-                else => false,
-            };
-            // All journalled messages should reserved or prepares.
-            // A misdirected read/write to or from another storage zone may return the wrong message.
-            const prepare_reserved = prepare.command == .reserved;
-            const prepare_prepare = prepare.command == .prepare;
-            const prepare_valid = prepare_checksum and prepare_cluster and prepare_slot and
-                (prepare_reserved or prepare_prepare);
-            if (prepare_valid) assert(prepare.invalid() == null);
-
-            const match_checksum = header.checksum == prepare.checksum;
-            const match_op = header.op == prepare.op;
-            const match_view = header.view == prepare.view;
-
-            const case: struct {
-                label: []const u8,
-                decision: Decision,
-            } = case: {
-                if (!header_valid and !prepare_valid) {
-                    break :case .{ .label = "@A", .decision = .vsr };
+            const case = recovery_case(
+                replica.cluster,
+                slot,
+                header,
+                !self.faulty.bit(slot),
+                prepare,
+            );
+            const decision = decision: {
+                if (replica.replica_count == 1) {
+                    break :decision case.decision_single;
+                } else {
+                    break :decision case.decision_multi;
                 }
-
-                // This prepare header is corrupt.
-                // We may have a valid redundant header, but need to recover the full message.
-                if (header_valid and !prepare_valid) {
-                    if (header_reserved) {
-                        break :case .{ .label = "@B", .decision = .vsr };
-                    } else {
-                        break :case .{ .label = "@C", .decision = .vsr };
-                    }
-                }
-
-                if (prepare_valid and !header_valid) {
-                    if (prepare_reserved) {
-                        break :case .{ .label = "@D", .decision = .vsr };
-                    } else {
-                        if (replica.replica_count == 1) {
-                            break :case .{ .label = "@E", .decision = .fix };
-                        } else {
-                            break :case .{ .label = "@E", .decision = .vsr };
-                        }
-                    }
-                }
-
-                assert(header_valid);
-                assert(prepare_valid);
-                assert(prepare_reserved or prepare_prepare);
-
-                // One of:
-                //
-                // * A misdirected read to a reserved header.
-                // * The replica is recovering from a crash after writing the prepare, but before
-                //   writing the redundant header.
-                // * The redundant header's write was lost or misdirected.
-                //
-                // The redundant header can be repaired using the prepare's header; it does not
-                // need to be retrieved remotely.
-                if (header_reserved and !prepare_reserved) {
-                    if (replica.replica_count == 1) {
-                        break :case .{ .label = "@F", .decision = .fix };
-                    } else {
-                        break :case .{ .label = "@F", .decision = .vsr };
-                    }
-                }
-
-                // The redundant header is present & valid, but the corresponding prepare was a lost
-                // or misdirected read or write.
-                if (prepare_reserved and !header_reserved) {
-                    break :case .{ .label = "@G", .decision = .vsr };
-                }
-
-                if (header_reserved and prepare_reserved) {
-                    // This slot is legitimately reserved — this may be the first fill of the log.
-                    assert(match_checksum);
-                    assert(match_op);
-                    assert(match_view);
-                    break :case .{ .label = "@H", .decision = .nil };
-                }
-                assert(!header_reserved);
-                assert(!prepare_reserved);
-                assert(prepare_prepare);
-
-                if (!match_op) {
-                    // When the redundant header & prepare header are both valid but distinct ops,
-                    // always pick the higher op.
-                    //
-                    // For example, consider slot_count=10, the op to the left is 12, the op to the
-                    // right is 14, and the tiebreak is between an op=3 and op=13.
-                    // Choosing op=13 over op=3 is safe because the op=3 must be from a previous
-                    // wrap — it is too far back (>pipeline) to have been replaced by a view change.
-                    //
-                    // The length of the prepare pipeline is the upper bound on how many ops can be
-                    // reordered during a view change.
-                    assert(slot_count > config.pipelining_max);
-
-                    if (header.op < prepare.op) {
-                        // When the higher op belongs to the prepare, repair locally.
-                        // The most likely cause for this case is that the log wrapped, but the
-                        // redundant header write was lost.
-                        break :case .{ .label = "@I", .decision = .fix };
-                    } else {
-                        // When the higher op belongs to the header, mark faulty.
-                        assert(header.op > prepare.op);
-                        break :case .{ .label = "@J", .decision = .vsr };
-                    }
-                }
-                assert(match_op);
-
-                if (!match_checksum) {
-                    // The message was rewritten due to a view change.
-                    // A single-replica cluster doesn't ever change views.
-                    assert(!match_view);
-                    assert(replica.replica_count != 1);
-                    break :case .{ .label = "@K", .decision = .vsr };
-                }
-
-                // The redundant header matches the message's header.
-                // This is the usual case: both the prepare and header are correct and equivalent.
-                assert(match_checksum);
-                assert(match_view);
-                assert(header.checksum_body == prepare.checksum_body);
-                break :case .{ .label = "@L", .decision = .eql };
             };
 
             if (prepare.command == .prepare and prepare.valid_checksum()) {
                 assert(self.prepare_checksums[slot.index] == 0);
 
+                // Store the message in `prepare_checksums` even if it belongs in a different slot.
+                // This improves the availability of `request_prepare`.
                 self.prepare_checksums[slot.index] = prepare.checksum;
             }
 
-            switch (case.decision) {
+            switch (decision) {
                 .eql => {
                     assert(header.command == .prepare);
                     assert(prepare.command == .prepare);
@@ -1255,13 +1114,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 },
             }
 
-            switch (case.decision) {
+            switch (decision) {
                 .eql, .nil => {
                     log.debug("{}: recover_prepares: recovered slot={} label={s} decision={s}", .{
                         self.replica,
                         slot.index,
                         case.label,
-                        @tagName(case.decision),
+                        @tagName(decision),
                     });
                 },
                 .fix, .vsr => {
@@ -1269,7 +1128,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         self.replica,
                         slot.index,
                         case.label,
-                        @tagName(case.decision),
+                        @tagName(decision),
                     });
                 },
             }
@@ -1841,7 +1700,7 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
     };
 }
 
-test {
+test "IOPS" {
     const testing = std.testing;
     var iops = IOPS(u32, 4){};
 
@@ -1886,4 +1745,242 @@ test {
     three = iops.acquire().?;
     four = iops.acquire().?;
     try testing.expectEqual(@as(?*u32, null), iops.acquire());
+}
+
+/// @B and @C:
+/// This prepare header is corrupt.
+/// We may have a valid redundant header, but need to recover the full message.
+///
+///
+/// @F:
+/// One of:
+///
+/// * A misdirected read to a reserved header.
+/// * The replica is recovering from a crash after writing the prepare, but before writing the
+///   redundant header.
+/// * The redundant header's write was lost or misdirected.
+///
+/// The redundant header can be repaired using the prepare's header; it does not need to be
+/// retrieved remotely.
+///
+///
+/// @G:
+/// The redundant header is present & valid, but the corresponding prepare was a lost or misdirected
+/// read or write.
+///
+///
+/// @H:
+/// This slot is legitimately reserved — this may be the first fill of the log.
+///
+///
+/// @I and @J:
+/// When the redundant header & prepare header are both valid but distinct ops, always pick the
+/// higher op.
+///
+/// For example, consider slot_count=10, the op to the left is 12, the op to the right is 14, and
+/// the tiebreak is between an op=3 and op=13. Choosing op=13 over op=3 is safe because the op=3
+/// must be from a previous wrap — it is too far back (>pipeline) to have been replaced by a view
+/// change.
+///
+/// The length of the prepare pipeline is the upper bound on how many ops can be reordered during a
+/// view change.
+///
+/// @I:
+/// When the higher op belongs to the prepare, repair locally.
+/// The most likely cause for this case is that the log wrapped, but the redundant header write was
+/// lost.
+///
+/// @J:
+/// When the higher op belongs to the header, mark faulty.
+///
+///
+/// @K:
+/// The message was rewritten due to a view change.
+/// A single-replica cluster doesn't ever change views.
+///
+///
+/// @L:
+/// The redundant header matches the message's header.
+/// This is the usual case: both the prepare and header are correct and equivalent.
+const recovery_cases = table: {
+    const __ = Matcher.any;
+    const _0 = Matcher.is_false;
+    const _1 = Matcher.is_true;
+    // The replica will abort if any of these checks fail:
+    const a0 = Matcher.assert_is_false;
+    const a1 = Matcher.assert_is_true;
+
+    break :table [_]Case{
+        // Legend:
+        //
+        //    R>1  replica_count > 1
+        //    R=1  replica_count = 1
+        //     ok  valid checksum ∧ valid cluster ∧ valid slot ∧ valid command
+        //    nil  command == reserved
+        //     ✓∑  header.checksum == prepare.checksum
+        //    op=  header.op == prepare.op
+        //    op<  header.op <  prepare.op
+        //   view  header.view == prepare.view
+        //
+        //        Label  Decision      Header  Prepare Compare
+        //               R>1   R=1     ok  nil ok  nil ✓∑  op= op< view
+        Case.init("@A", .vsr, .vsr, .{ _0, __, _0, __, __, __, __, __ }),
+        Case.init("@B", .vsr, .vsr, .{ _1, _1, _0, __, __, __, __, __ }),
+        Case.init("@C", .vsr, .vsr, .{ _1, _0, _0, __, __, __, __, __ }),
+        Case.init("@D", .vsr, .vsr, .{ _0, __, _1, _1, __, __, __, __ }),
+        Case.init("@E", .vsr, .fix, .{ _0, __, _1, _0, __, __, __, __ }),
+        Case.init("@F", .vsr, .fix, .{ _1, _1, _1, _0, __, __, __, __ }),
+        Case.init("@G", .vsr, .vsr, .{ _1, _0, _1, _1, __, __, __, __ }),
+        Case.init("@H", .nil, .nil, .{ _1, _1, _1, _1, a1, a1, a0, a1 }), // normal path: empty
+        Case.init("@I", .fix, .fix, .{ _1, _0, _1, _0, _0, _0, _1, __ }), // header.op < prepare.op
+        Case.init("@J", .vsr, .vsr, .{ _1, _0, _1, _0, _0, _0, _0, __ }), // header.op > prepare.op
+        Case.init("@K", .vsr, .vsr, .{ _1, _0, _1, _0, _0, _1, a0, a0 }),
+        Case.init("@L", .eql, .eql, .{ _1, _0, _1, _0, _1, a1, a0, a1 }), // normal path: occupied
+    };
+};
+
+const RecoveryDecision = enum {
+    /// The header and prepare are identical; no repair necessary.
+    eql,
+    /// Reserved; clear dirty/faulty, no repair necessary.
+    nil,
+    /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty, clear faulty.
+    /// If replica_count=1: Use intact prepare. Clear dirty, clear faulty.
+    fix,
+    /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty and faulty.
+    /// If replica_count=1: Fail; cannot recover safely.
+    vsr,
+};
+
+const Matcher = enum { any, is_false, is_true, assert_is_false, assert_is_true };
+
+const Case = struct {
+    label: []const u8,
+    /// Decision when replica_count>1.
+    decision_multi: RecoveryDecision,
+    /// Decision when replica_count=1.
+    decision_single: RecoveryDecision,
+    /// 0: header_ok(header)
+    /// 1: header.command == reserved
+    /// 2: header_ok(prepare)
+    /// 3: prepare.command == reserved
+    /// 4: header.checksum == prepare.checksum
+    /// 5: header.op == prepare.op
+    /// 6: header.op < prepare.op
+    /// 7: header.view == prepare.view
+    pattern: [8]Matcher,
+
+    fn init(
+        label: []const u8,
+        decision_multi: RecoveryDecision,
+        decision_single: RecoveryDecision,
+        pattern: [8]Matcher,
+    ) Case {
+        return .{
+            .label = label,
+            .decision_multi = decision_multi,
+            .decision_single = decision_single,
+            .pattern = pattern,
+        };
+    }
+
+    fn check(self: *const Case, parameters: [8]bool) !bool {
+        for (parameters) |b, i| {
+            switch (self.pattern[i]) {
+                .any => {},
+                .is_false => if (b) return false,
+                .is_true => if (!b) return false,
+                .assert_is_false => if (b) return error.ExpectFalse,
+                .assert_is_true => if (!b) return error.ExpectTrue,
+            }
+        }
+        return true;
+    }
+};
+
+fn recovery_case(
+    cluster: u32,
+    slot: Slot,
+    header: *const Header,
+    header_valid: bool,
+    prepare: *const Header,
+) *const Case {
+    assert(slot.index < slot_count);
+    assert(slot.index == header.op % slot_count);
+    assert(header.cluster == cluster);
+    assert(header.invalid() == null);
+    if (header_valid) {
+        assert(header.command == .reserved or header.command == .prepare);
+    } else {
+        assert(header.command == .reserved);
+    }
+
+    const prepare_valid = header_ok(cluster, slot, prepare);
+    if (prepare_valid) assert(prepare.invalid() == null);
+    const parameters = .{
+        header_valid,
+        header.command == .reserved,
+        prepare_valid,
+        prepare.command == .reserved,
+        header.checksum == prepare.checksum,
+        header.op == prepare.op,
+        header.op < prepare.op,
+        header.view == prepare.view,
+    };
+    for (recovery_cases) |*case| {
+        const match = case.check(parameters) catch {
+            log.err("recovery_case: impossible state case={s} parameters={any}", .{
+                case.label,
+                parameters,
+            });
+            unreachable;
+        };
+        if (match) return case;
+    }
+    // The recovery table is exhaustive.
+    unreachable;
+}
+
+/// Test whether the message header:
+/// * has a valid checksum, and
+/// * has the expected cluster, and
+/// * has an expected command, and
+/// * resides the the correct slot.
+fn header_ok(cluster: u32, slot: Slot, header: *const Header) bool {
+    // A prepare in the wrong cluster/slot indicates a misdirected read or write.
+    //
+    // All journalled headers should be reserved or else prepares. A misdirected
+    // read/write to or from another storage zone may return the wrong message.
+    return header.valid_checksum() and
+        header.cluster == cluster and
+        switch (header.command) {
+        .prepare => slot.index == header.op % slot_count,
+        .reserved => slot.index == header.op,
+        else => false,
+    };
+}
+
+test "recovery_cases" {
+    // Verify that every pattern matches exactly one case.
+    //
+    // Every possible combination of parameters must either:
+    // * have a matching case
+    // * have a case that fails (which would result in a panic).
+    var i: usize = 0;
+    while (i <= std.math.maxInt(u8)) : (i += 1) {
+        var parameters: [8]bool = undefined;
+        comptime var j: usize = 0;
+        inline while (j < parameters.len) : (j += 1) {
+            parameters[j] = i & (1 << j) != 0;
+        }
+
+        var case_match: ?*const Case = null;
+        for (recovery_cases) |*case| {
+            if (case.check(parameters) catch true) {
+                try std.testing.expectEqual(case_match, null);
+                case_match = case;
+            }
+        }
+        if (case_match == null) @panic("no matching case");
+    }
 }
