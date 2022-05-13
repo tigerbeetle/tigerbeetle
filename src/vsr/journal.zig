@@ -428,7 +428,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             var copied: usize = 0;
             // Poison all slots; only slots less than `copied` are used.
-            std.mem.set(Header, dest, Header.reserved(0, 0));
+            std.mem.set(Header, dest, undefined);
 
             // Start at op_max + 1 and do the decrement upfront to avoid overflow when op_min == 0:
             var op = op_max + 1;
@@ -722,18 +722,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            const body = read.message.buffer[@sizeOf(Header)..read.message.header.size];
-            if (!read.message.header.valid_checksum_body(body)) {
-                if (slot) |s| {
-                    self.faulty.set(s);
-                    self.dirty.set(s);
-                }
-
-                self.read_prepare_log(op, checksum, "corrupt body after read");
-                read.callback(replica, null, null);
-                return;
-            }
-
             if (read.message.header.cluster != replica.cluster) {
                 // This could be caused by a misdirected read or write.
                 // Though when a prepare spans multiple sectors, a misdirected read/write will
@@ -772,6 +760,18 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(slot == null);
 
                 self.read_prepare_log(op, checksum, "checksum changed during read");
+                read.callback(replica, null, null);
+                return;
+            }
+
+            const body = read.message.buffer[@sizeOf(Header)..read.message.header.size];
+            if (!read.message.header.valid_checksum_body(body)) {
+                if (slot) |s| {
+                    self.faulty.set(s);
+                    self.dirty.set(s);
+                }
+
+                self.read_prepare_log(op, checksum, "corrupt body after read");
                 read.callback(replica, null, null);
                 return;
             }
@@ -910,12 +910,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 }
             }
 
+            const offset_next = offset + buffer.len;
             // We must release before we call `recover_headers()` in case Storage is synchronous.
             // Otherwise, we would run out of messages and reads.
             replica.message_bus.unref(read.message);
             self.reads.release(read);
 
-            self.recover_headers(offset + buffer.len);
+            self.recover_headers(offset_next);
         }
 
         fn recover_headers_buffer(message: *Message, offset: u64) []u8 {
@@ -1070,7 +1071,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 slot,
                 header,
                 !self.faulty.bit(slot),
-                prepare,
+                read.message,
             );
             const decision = decision: {
                 if (replica.replica_count == 1) {
@@ -1159,16 +1160,22 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.faulty.count,
             });
 
-            assert(self.faulty.count == 0 or replica.replica_count != 1);
-            assert(self.faulty.count >= self.dirty.count);
+            // A cluster-of-1 cannot recover from faults.
+            assert(self.faulty.count == 0 or replica.replica_count > 1);
+            assert(self.faulty.count <= self.dirty.count);
+            // Abort if all slots are faulty, since something is very wrong.
             assert(self.faulty.count < slot_count);
             if (self.headers[0].op == 0 and self.headers[0].command == .prepare) {
                 assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
+                assert(!self.faulty.bit(Slot{ .index = 0 }));
+                // We can only "fix" the root prepare for a cluster-of-1.
+                // When `replica_count>1`, "fix" is only used when the log wraps.
+                assert(!self.dirty.bit(Slot{ .index = 0}) or replica.replica_count == 1);
             }
 
             {
-                var min_op: u64 = std.math.maxInt(u64);
-                var max_op: u64 = 0;
+                var op_min: u64 = std.math.maxInt(u64);
+                var op_max: u64 = 0;
                 for (self.headers) |*header, slot| {
                     if (header.command == .reserved) {
                         assert(header.cluster == replica.cluster);
@@ -1181,13 +1188,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(!self.dirty.bit(Slot{ .index = slot }));
                     assert(!self.faulty.bit(Slot{ .index = slot }));
 
-                    if (min_op > header.op) min_op = header.op;
-                    if (max_op < header.op) max_op = header.op;
+                    if (op_min > header.op) op_min = header.op;
+                    if (op_max < header.op) op_max = header.op;
                 }
 
-                if (max_op != 0) {
+                if (op_max != 0) {
                     // Only committed ops are ever overwritten by a WAL wrap.
-                    assert(max_op - min_op < 2 * slot_count - config.pipelining_max);
+                    assert(op_max - op_min < 2 * slot_count - config.pipelining_max);
                 }
             }
 
@@ -1858,6 +1865,7 @@ const RecoveryDecision = enum {
     nil,
     /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty, clear faulty.
     /// If replica_count=1: Use intact prepare. Clear dirty, clear faulty.
+    /// (Don't set faulty, because we have the valid message.)
     fix,
     /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty and faulty.
     /// If replica_count=1: Fail; cannot recover safely.
@@ -1915,7 +1923,7 @@ fn recovery_case(
     slot: Slot,
     header: *const Header,
     header_valid: bool,
-    prepare: *const Header,
+    prepare_message: *const Message,
 ) *const Case {
     assert(slot.index < slot_count);
     assert(slot.index == header.op % slot_count);
@@ -1927,6 +1935,7 @@ fn recovery_case(
         assert(header.command == .reserved);
     }
 
+    const prepare = prepare_message.header;
     const prepare_valid = header_ok(cluster, slot, prepare);
     if (prepare_valid) assert(prepare.invalid() == null);
     const parameters = .{
