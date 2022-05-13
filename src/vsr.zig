@@ -402,6 +402,7 @@ pub const Header = packed struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;

@@ -145,30 +145,6 @@ pub fn Replica(
         // TODO enforce invariant op≥op_checkpoint
         op_checkpoint: u64 = 0,
 
-        /// After recovering the WAL, there are 2 possible outcomes:
-        ///
-        /// * All entries valid. The highest op is certain, and safe to set as `replica.op`.
-        /// * One or more entries are faulty. The highest op isn't certain — it may be one of the
-        ///   broken entries.
-        ///
-        /// The replica must refrain from repairing any faulty slots until the highest op is known.
-        /// Otherwise, if we were to repair a slot while uncertain of `replica.op`:
-        ///
-        /// * we may nack an op that we shouldn't, or
-        /// * we may replace a prepared op that we were guaranteeing for the primary, potentially
-        ///   forking the log.
-        ///
-        /// The replica may learn its op (set `op_known` to true) by any of the following
-        /// (in approximate descending order of likelihood):
-        ///
-        /// * recovering an intact journal (faulty.count=0)
-        /// * receiving a `prepare` that advances the op
-        /// * participating in a view change
-        /// * the `recovery_response`'s headers repaired all faulty slots
-        /// * receiving a `commit` with an `op` we have
-        /// * receiving a header/prepare that repairs the last faulty entry
-        op_known: bool = false,
-
         /// The op number of the latest committed and executed operation (according to the replica):
         /// The replica may have to wait for repairs to complete before commit_min reaches commit_max.
         commit_min: u64,
@@ -459,14 +435,24 @@ pub fn Replica(
             }
 
             if (self.status == .recovering) {
-                if (self.recovery_timeout.ticking) {
+                if (self.replica_count == 1) {
+                    // Cluster-of-1 doesn't run recovery protocol.
+
+                    if (self.journal.faulty.count != 0) @panic("journal is corrupt");
+                    if (self.committing) return;
+                    assert(self.op == 0);
+                    self.op = self.journal.op_maximum();
+
+                    self.commit_ops(self.op);
+                    // This is a cluster-of-1 (we are always the leader), so the actual recovering→normal
+                    // status transition is deferred until all ops are committed.
+                } else if (self.recovery_timeout.ticking) {
                     // Continue running VSR recovery protocol.
                     self.recovery_timeout.tick();
                     if (self.recovery_timeout.fired()) self.on_recovery_timeout();
                 } else if (self.journal.is_empty()) {
                     // The database is brand-new — no messages have ever been written.
                     // Transition immediately to normal mode; no need to run VSR recovery protocol.
-                    self.op_known = true;
                     self.transition_from_recovering_status(0);
                     assert(self.status == .normal);
                 } else {
@@ -785,7 +771,6 @@ pub fn Replica(
             });
             assert(message.header.op == self.op + 1);
             self.op = message.header.op;
-            self.set_op_known();
             self.journal.set_header_as_dirty(message.header);
 
             self.replicate(message);
@@ -864,31 +849,6 @@ pub fn Replica(
             assert(self.follower());
             assert(message.header.view == self.view);
             assert(message.header.replica == self.leader_index(message.header.view));
-
-            if (!self.op_known) {
-                const op_leader = message.header.op;
-                if (self.journal.header_with_op(op_leader)) |_| {
-                    // Usually the op is learned via `prepare` or view change.
-                    // But if no prepares are arriving and the view is stable, we can learn the
-                    // current op from a `commit`. This only works if we already have the op's
-                    // header in memory, due to `replica.op`'s invariant.
-                    //
-                    // In particular, this is useful when a crash occurs at the very end of a VOPR
-                    // run, since no additional prepares will arrive.
-                    log.debug("{}: on_commit: learn op={}", .{ self.replica, op_leader });
-                    assert(self.op >= op_leader);
-
-                    self.journal.remove_entries_from(op_leader + 1);
-                    self.op = op_leader;
-                    self.set_op_known();
-                    assert(self.journal.header_with_op(self.op) != null);
-                } else {
-                    log.debug("{}: on_commit: cannot learn op={}", .{
-                        self.replica,
-                        message.header.op,
-                    });
-                }
-            }
 
             // We may not always have the latest commit entry but if we do our checksum must match:
             if (self.journal.header_with_op(message.header.commit)) |commit_entry| {
@@ -1265,9 +1225,6 @@ pub fn Replica(
             response.header.set_checksum();
 
             assert(self.status == .normal);
-            // The leader has a known op.
-            // Followers don't need a known op — their  headers aren't used in `on_recovery_response`.
-            assert(self.follower() or self.op_known);
             // The checksum for a recovery message is deterministic, and cannot be used as a nonce:
             assert(response.header.context != message.header.checksum);
 
@@ -1429,7 +1386,20 @@ pub fn Replica(
             for (leader_headers) |*header| {
                 _ = self.repair_header(header);
             }
-            if (self.journal.faulty.count == 0) self.set_op_known();
+
+            if (self.op < config.journal_slot_count) {
+                if (self.journal.header_with_op(0)) |header| {
+                    assert(header.command == .prepare);
+                    assert(header.operation == .root);
+                } else {
+                    // This is the first wrap of the log, and the root prepare is corrupt.
+                    // Repair the root repair. This is necessary to maintain the invariant that the
+                    // op=commit_min exists in-memory.
+                    const header = Header.root_prepare(self.cluster);
+                    self.journal.set_header_as_dirty(&header);
+                    log.debug("{}: on_recovery_response: repair root op", .{self.replica});
+                }
+            }
 
             log.debug("{}: on_recovery_response: responses={} view={} headers={}..{} commit={} dirty={} faulty={}", .{
                 self.replica,
@@ -1901,7 +1871,6 @@ pub fn Replica(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
-                .op = self.op, // Help the other replica set op_known=true.
                 .commit = self.commit_max,
             });
         }
@@ -1941,12 +1910,9 @@ pub fn Replica(
 
         fn on_recovery_timeout(self: *Self) void {
             assert(self.status == .recovering);
+            assert(self.replica_count > 1);
             self.recovery_timeout.reset();
-            if (self.replica_count == 1) {
-                // A single-replica cluster doesn't run recovery protocol.
-            } else {
-                self.recover();
-            }
+            self.recover();
         }
 
         fn reference_message_and_receive_quorum_exactly_once(
@@ -3058,45 +3024,61 @@ pub fn Replica(
                 else => unreachable,
             }
 
-            // Don't participate in view change if the true op is not known and there is a fault to
-            // the right of the current op. The fault might be our true op, and sharing our current
-            // `replica.op` might cause the cluster's op to likewise regress.
-            //
-            // Note that for our purposes here, we only care about entries that were faulty after
-            // WAL recovery, not ones that were found to be faulty after the fact (e.g. due to
-            // `request_prepare`).
-            //
-            // Cases (`✓`: checkpoint, `✗`: faulty, `o`: `replica.op`):
-            // * ` ✓ o ✗ `: View change is unsafe.
-            // * ` ✗ ✓ o `: View change is unsafe.
-            // * ` ✓ ✗ o `: View change is safe.
-            // * ✓=o:       View change is unsafe.
-            //
-            // (But always allow the `start_view` — it will result in `op_known` being set to `true`).
-            if (!self.op_known and message.header.command != .start_view) {
-                assert(self.journal.recovered);
-                assert(self.journal.faulty.count > 0);
-
-                const end = self.journal.slot_for_op(self.op_checkpoint);
-                var slot = self.journal.slot_with_op(self.op).?;
-                while (true) {
-                    // The command=reserved when the entry was found faulty during WAL recovery.
-                    if (self.journal.faulty.bit(slot) and
-                        self.journal.headers[slot.index].command == .reserved)
-                    {
-                        log.warn("{}: on_{s}: ignoring (op not known, faulty_slot={})", .{
-                            self.replica,
-                            command,
-                            slot.index,
-                        });
-                        return true;
-                    }
-                    slot.index = (slot.index + 1) % config.journal_slot_count;
-                    if (slot.index == end.index) break;
-                }
-            }
-
             return false;
+        }
+
+        /// Returns whether the highest known op is certain.
+        ///
+        /// After recovering the WAL, there are 2 possible outcomes:
+        /// * All entries valid. The highest op is certain, and safe to set as `replica.op`.
+        /// * One or more entries are faulty. The highest op isn't certain — it may be one of the
+        ///   broken entries.
+        ///
+        /// The replica must refrain from repairing any faulty slots until the highest op is known.
+        /// Otherwise, if we were to repair a slot while uncertain of `replica.op`:
+        ///
+        /// * we may nack an op that we shouldn't, or
+        /// * we may replace a prepared op that we were guaranteeing for the primary, potentially
+        ///   forking the log.
+        ///
+        ///
+        /// Test for a fault the right of the current op. The fault might be our true op, and
+        /// sharing our current `replica.op` might cause the cluster's op to likewise regress.
+        ///
+        /// Note that for our purposes here, we only care about entries that were faulty during
+        /// WAL recovery, not ones that were found to be faulty after the fact (e.g. due to
+        /// `request_prepare`).
+        ///
+        /// Cases (`✓`: checkpoint, `✗`: faulty, `o`: `replica.op`):
+        /// * ` ✓ o ✗ `: View change is unsafe.
+        /// * ` ✗ ✓ o `: View change is unsafe.
+        /// * ` ✓ ✗ o `: View change is safe.
+        /// * ✓=o:       View change is unsafe (`op_checkpoint` == `replica.op`).
+        // TODO Use this function once we switch from recovery protocol to the superblock.
+        // If there is an "unsafe" fault, we will need to request a start_view from the leader to learn the op.
+        fn op_certain(self: *const Self) bool {
+            assert(self.status == .recovering);
+            assert(self.journal.recovered);
+
+            if (self.journal.faulty.count == 0) return true;
+
+            const end = self.journal.slot_for_op(self.op_checkpoint);
+            var slot = self.journal.slot_with_op(self.op).?;
+            while (true) {
+                // The command=reserved when the entry was found faulty during WAL recovery.
+                if (self.journal.faulty.bit(slot) and
+                    self.journal.headers[slot.index].command == .reserved)
+                {
+                    log.warn("{}: has_unsafe_fault: ignoring (op not known, faulty_slot={})", .{
+                        self.replica,
+                        slot.index,
+                    });
+                    return false;
+                }
+                slot.index = (slot.index + 1) % config.journal_slot_count;
+                if (slot.index == end.index) break;
+            }
+            return true;
         }
 
         fn is_repair(self: *Self, message: *const Message) bool {
@@ -3243,41 +3225,20 @@ pub fn Replica(
 
         fn recover(self: *Self) void {
             assert(self.status == .recovering);
+            assert(self.replica_count > 1);
             assert(self.journal.recovered);
 
-            if (self.replica_count == 1) {
-                // Cluster-of-1 doesn't run recovery protocol.
-                if (self.journal.faulty.count != 0) {
-                    @panic("journal is corrupt");
-                }
+            log.debug("{}: recover: sending recovery messages nonce={}", .{
+                self.replica,
+                self.recovery_nonce,
+            });
 
-                assert(self.op == 0);
-                assert(!self.op_known);
-                self.op = op_max: {
-                    var op: u64 = 0;
-                    for (self.journal.headers) |*h| {
-                        if (h.command == .prepare and op < h.op) op = h.op;
-                    }
-                    break :op_max op;
-                };
-                self.set_op_known();
-
-                self.commit_ops(self.op);
-                // This is a cluster-of-1 (we are always the leader), so the actual recovering→normal
-                // status transition is deferred until all ops are committed.
-            } else {
-                log.debug("{}: recover: sending recovery messages nonce={}", .{
-                    self.replica,
-                    self.recovery_nonce,
-                });
-
-                self.send_header_to_other_replicas(.{
-                    .command = .recovery,
-                    .cluster = self.cluster,
-                    .context = self.recovery_nonce,
-                    .replica = self.replica,
-                });
-            }
+            self.send_header_to_other_replicas(.{
+                .command = .recovery,
+                .cluster = self.cluster,
+                .context = self.recovery_nonce,
+                .replica = self.replica,
+            });
         }
 
         /// Starting from the latest journal entry, backfill any missing or disconnected headers.
@@ -3294,22 +3255,6 @@ pub fn Replica(
 
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
-
-            if (!self.op_known) {
-                if (self.journal.faulty.count == 0) {
-                    // We learned the last unknown op in our WAL, either from replacing a header
-                    // (`repair_header`) or repairing a prepare (`write_prepare`).
-                    self.set_op_known();
-                } else {
-                    assert(self.journal.faulty.count > 0);
-                    log.debug("{}: repair: ignoring (replica op not known) op={} faulty={}", .{
-                        self.replica,
-                        self.op,
-                        self.journal.faulty.count,
-                    });
-                    return;
-                }
-            }
 
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
@@ -3731,7 +3676,6 @@ pub fn Replica(
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
-            assert(self.op_known);
 
             // Request enough prepares to utilize our max IO depth:
             var budget = self.journal.writes.available();
@@ -4349,7 +4293,6 @@ pub fn Replica(
                     assert(self.leader());
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
-                    assert(message.header.op == self.op);
                 },
                 .request_headers => {
                     assert(message.header.view == self.view);
@@ -4467,14 +4410,6 @@ pub fn Replica(
             assert(self.op >= self.commit_max or self.op < self.commit_max);
 
             self.op = latest.op;
-            // When status=recovering, `op_known` can't be set yet; it will be set after the
-            // `recovery_response` headers are loaded with `repair_header` (since some faulty
-            // bits may be repaired).
-            switch (self.status) {
-                .normal => unreachable,
-                .view_change => self.set_op_known(),
-                .recovering => assert(!self.op_known),
-            }
             // Crucially, we must never rewind `commit_max` (and then `commit_min`) because
             // `commit_min` represents what we have already applied to our state machine:
             self.commit_max = std.math.max(self.commit_max, k);
@@ -4496,33 +4431,10 @@ pub fn Replica(
             assert(self.journal.header_with_op(self.op).?.checksum == latest.checksum);
         }
 
-        fn set_op_known(self: *Self) void {
-            if (self.op_known) return;
-            self.op_known = true;
-
-            if (self.op < config.journal_slot_count) {
-                if (self.journal.header_with_op(0)) |header| {
-                    assert(header.command == .prepare);
-                    assert(header.operation == .root);
-                } else {
-                    // Both:
-                    // * this is the first wrap of the log
-                    // * op=0 (the root prepare) is corrupt on journal recovery
-                    //
-                    // The op is known, so we can safely repair the root prepare.
-                    // This is required to maintain the invariant that the op=commit_min exists in-memory.
-                    const header = Header.root_prepare(self.cluster);
-                    self.journal.set_header_as_dirty(&header);
-                    log.debug("{}: set_op_known: repair root op", .{self.replica});
-                }
-            }
-        }
-
         fn start_view_as_the_new_leader(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
-            assert(self.op_known);
 
             assert(!self.committing);
             assert(!self.repairing_pipeline);
@@ -4582,7 +4494,6 @@ pub fn Replica(
 
             if (self.leader()) {
                 assert(self.journal.is_empty() or self.replica_count == 1);
-                assert(self.op_known);
 
                 log.debug("{}: transition_from_recovering_status: leader view={}", .{ self.replica, new_view });
                 self.ping_timeout.start();
@@ -4601,7 +4512,6 @@ pub fn Replica(
             // In the VRR paper it's possible to transition from normal to normal for the same view.
             // For example, this could happen after a state transfer triggered by an op jump.
             assert(new_view >= self.view);
-            assert(self.op_known);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
