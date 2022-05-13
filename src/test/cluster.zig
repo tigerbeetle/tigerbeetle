@@ -264,21 +264,12 @@ pub const Cluster = struct {
         replica.on_change_state = cluster.on_change_state;
     }
 
-    /// Returns the number of replicas capable of helping a crashed node recover.
-    /// That is, a "healthy" replica has:
-    ///
-    /// * replica.status=normal
-    /// * replica.op_known=true
+    /// Returns the number of replicas capable of helping a crashed node recover (i.e. with
+    /// replica.status=normal).
     pub fn replica_healthy_count(cluster: *Cluster) u8 {
         var count: u8 = 0;
         for (cluster.replicas) |*replica| {
-            switch (replica.status) {
-                .normal => {
-                    if (replica.op_known) count += 1;
-                },
-                .view_change => {},
-                .recovering => {},
-            }
+            if (replica.status == .normal) count += 1;
         }
         return count;
     }

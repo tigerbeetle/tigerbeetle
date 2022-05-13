@@ -371,6 +371,18 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return self.header_for_op(header.op + 1);
         }
 
+        pub fn op_maximum(self: *const Self) u64 {
+            assert(self.recovered);
+
+            var op: u64 = 0;
+            for (self.headers) |*header| {
+                if (header.command == .prepare and op < header.op) {
+                    op = header.op;
+                }
+            }
+            return op;
+        }
+
         pub fn has(self: *const Self, header: *const Header) bool {
             assert(header.command == .prepare);
             // TODO Snapshots
@@ -1011,10 +1023,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ///    >  header.op > prepare.op
         ///
         /// A "valid" header/prepare:
-        /// 1. has a correct checksum, AND
-        /// 2. one of the following:
-        ///   * command=reserved
-        ///   * command=prepare AND correct cluster AND is in its proper slot (op % slot_count).
+        /// 1. has a valid checksum
+        /// 2. has the correct cluster
+        /// 3. is in the correct slot (op % slot_count)
+        /// 4. has command=reserved or command=prepare
         ///
         ///
         /// Regarding cases @E and @F for *single-replica clusters*:
