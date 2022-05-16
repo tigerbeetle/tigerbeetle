@@ -435,7 +435,18 @@ pub fn Replica(
             }
 
             if (self.status == .recovering) {
-                if (self.replica_count == 1) {
+                if (self.recovery_timeout.ticking) {
+                    // Continue running VSR recovery protocol.
+                    self.recovery_timeout.tick();
+                    if (self.recovery_timeout.fired()) self.on_recovery_timeout();
+                } else if (self.journal.is_empty()) {
+                    // The database is brand-new — no messages have ever been written.
+                    // Transition immediately to normal mode; no need to run VSR recovery protocol.
+                    assert(self.journal.dirty.count == 0);
+                    assert(self.journal.faulty.count == 0);
+                    self.transition_from_recovering_status(0);
+                    assert(self.status == .normal);
+                } else if (self.replica_count == 1) {
                     // Cluster-of-1 doesn't run recovery protocol.
 
                     if (self.journal.faulty.count != 0) @panic("journal is corrupt");
@@ -446,15 +457,6 @@ pub fn Replica(
                     self.commit_ops(self.op);
                     // This is a cluster-of-1 (we are always the leader), so the actual recovering→normal
                     // status transition is deferred until all ops are committed.
-                } else if (self.recovery_timeout.ticking) {
-                    // Continue running VSR recovery protocol.
-                    self.recovery_timeout.tick();
-                    if (self.recovery_timeout.fired()) self.on_recovery_timeout();
-                } else if (self.journal.is_empty()) {
-                    // The database is brand-new — no messages have ever been written.
-                    // Transition immediately to normal mode; no need to run VSR recovery protocol.
-                    self.transition_from_recovering_status(0);
-                    assert(self.status == .normal);
                 } else {
                     // The journal just finished recovery.
                     // Now try to learn the current view via VSR recovery protocol.
