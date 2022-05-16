@@ -974,10 +974,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ///
         /// There are two special cases where faulty slots must be carefully handled:
         ///
-        /// A) During recovery, the in-memory header of a faulty slot must be left reserved.
+        /// A) Redundant headers are written in batches. Slots that are marked faulty are written
+        /// as invalid (zeroed). This ensures that if the replica crashes and recovers, the
+        /// entries are still faulty rather than reserved.
         /// The recovery process must be conservative about which headers are stored in
-        /// `journal.headers`. To understand why this is important, consider what happens if it
-        /// did load the faulty header into `journal.headers`:
+        /// `journal.headers`. To understand why this is important, consider what happens if it did
+        /// load the faulty header into `journal.headers`, and then reads it back after a restart:
         ///
         /// 1. Suppose slot 8 is in case @D. Per the table below, mark slot 8 faulty.
         /// 2. Suppose slot 9 is also loaded as faulty.
@@ -1113,14 +1115,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         self.dirty.clear(slot);
                     } else {
                         // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty).
-                        // This is tricky because the redundant headers are written in batches.
                         self.set_header_as_dirty(prepare);
                     }
                     self.faulty.clear(slot);
                 },
                 .vsr => {
-                    // Faulty headers are loaded as reserved to prevent unsafe batch updates of the
-                    // redundant headers. See `recover_prepares_callback()` for more detail.
                     self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
                     self.dirty.set(slot);
                     self.faulty.set(slot);
@@ -1170,7 +1169,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(!self.faulty.bit(Slot{ .index = 0 }));
                 // We can only "fix" the root prepare for a cluster-of-1.
                 // When `replica_count>1`, "fix" is only used when the log wraps.
-                assert(!self.dirty.bit(Slot{ .index = 0}) or replica.replica_count == 1);
+                assert(!self.dirty.bit(Slot{ .index = 0 }) or replica.replica_count == 1);
             }
 
             {
@@ -1370,16 +1369,32 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             const message = write.message;
             const slot = self.slot_for_header(message.header);
+            const slot_first = Slot{
+                .index = @divFloor(slot.index, headers_per_sector) * headers_per_sector,
+            };
 
-            const headers_bytes = std.mem.sliceAsBytes(self.headers);
-            std.mem.copy(
-                u8,
-                write.header_sector(self),
-                headers_bytes[offset_logical(.headers, slot)..][0..config.sector_size],
-            );
-
-            const buffer: []const u8 = write.header_sector(self);
             const offset = offset_physical(.headers, slot);
+            assert(offset % config.sector_size == 0);
+            assert(offset == slot_first.index * @sizeOf(Header));
+
+            const buffer: []u8 = write.header_sector(self);
+            const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
+            assert(buffer_headers.len == headers_per_sector);
+
+            var i: usize = 0;
+            while (i < headers_per_sector) : (i += 1) {
+                if (self.faulty.bit(Slot{ .index = slot_first.index + i })) {
+                    // Redundant faulty headers are deliberately written as invalid.
+                    // This ensures that faulty headers are still faulty when they are read back
+                    // from disk during recovery. This prevents faulty entries from changing to
+                    // reserved (and clean) after a crash and restart (e.g. accidentally converting
+                    // a case `@D` to a `@H` after a restart).
+                    buffer_headers[i] = .{ .cluster = 0, .command = .reserved };
+                    assert(!buffer_headers[i].valid_checksum());
+                } else {
+                    buffer_headers[i] = self.headers[i + slot_first.index];
+                }
+            }
 
             log.debug("{}: write_header: op={} sectors[{}..{}]", .{
                 self.replica,
