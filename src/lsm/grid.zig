@@ -181,7 +181,7 @@ pub fn GridType(comptime Storage: type) type {
 
             // If there are IOPS available the write queue must be empty.
             if (grid.write_iops.available() > 0) {
-                assert(grid.write_queue.peek() == null);
+                assert(grid.write_queue.empty());
             }
 
             grid.start_write(write);

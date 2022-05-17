@@ -83,7 +83,7 @@ pub const IO = struct {
         const change_events = self.flush_io(&events, &io_pending);
 
         // Only call kevent() if we need to submit io events or if we need to wait for completions.
-        if (change_events > 0 or self.completed.peek() == null) {
+        if (change_events > 0 or self.completed.empty()) {
             // Zero timeouts for kevent() implies a non-blocking poll
             var ts = std.mem.zeroes(os.timespec);
 
@@ -91,7 +91,7 @@ pub const IO = struct {
             // We should never wait indefinitely (timeout_ptr = null for kevent) given:
             // - tick() is non-blocking (wait_for_completions = false)
             // - run_for_ns() always submits a timeout
-            if (change_events == 0 and self.completed.peek() == null) {
+            if (change_events == 0 and self.completed.empty()) {
                 if (wait_for_completions) {
                     const timeout_ns = next_timeout orelse @panic("kevent() blocking forever");
                     ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
