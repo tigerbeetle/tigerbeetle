@@ -297,17 +297,8 @@ pub const StateMachine = struct {
         if (a.flags.padding != 0) return .reserved_flag_padding;
 
         // Opening balances may never exceed limits:
-        switch (a.debits_exceed_credits(0)) {
-            .debits_exceed_credits => return .exceeds_credits,
-            .debit_overflow => return .exceeds_credits,
-            else => {},
-        }
-
-        switch (a.credits_exceed_debits(0)) {
-            .credits_exceed_debits => return .exceeds_debits,
-            .credit_overflow => return .exceeds_debits,
-            else => {},
-        }
+        if (a.debits_exceed_credits(0)) return .exceeds_credits;
+        if (a.credits_exceed_debits(0)) return .exceeds_debits;
 
         var insert = self.accounts.getOrPutAssumeCapacity(a.id);
         if (insert.found_existing) {
@@ -366,8 +357,8 @@ pub const StateMachine = struct {
             if (cr.credits_pending < lookup.amount) return .credit_amount_not_pending;
 
             // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
-            assert(dr.debits_exceed_credits(0) == .ok);
-            assert(cr.credits_exceed_debits(0) == .ok);
+            assert(!dr.debits_exceed_credits(0));
+            assert(!cr.credits_exceed_debits(0));
 
             const dr_id = if (t.debit_account_id == 0) lookup.debit_account_id else t.debit_account_id;
             if (t.debit_account_id != dr_id) return .exists_with_different_debit_account_id;
@@ -439,6 +430,8 @@ pub const StateMachine = struct {
             assert(t.timestamp > cr.timestamp);
 
             if (dr.ledger != cr.ledger) return .accounts_have_different_ledgers;
+            if (dr.debits_overflow(t.amount)) return .overflow_debits;
+            if (cr.credits_overflow(t.amount)) return .overflow_credits;
 
             const insert = self.transfers.getOrPutAssumeCapacity(t.id);
             if (insert.found_existing) {
@@ -460,10 +453,10 @@ pub const StateMachine = struct {
                 return .exists;
             }
 
-            if (dr.debits_exceed_credits(t.amount) != .ok) {
+            if (dr.debits_exceed_credits(t.amount)) {
                 assert(self.transfers.remove(t.id));
                 return .exceeds_credits;
-            } else if (cr.credits_exceed_debits(t.amount) != .ok) {
+            } else if (cr.credits_exceed_debits(t.amount)) {
                 assert(self.transfers.remove(t.id));
                 return .exceeds_debits;
             }
@@ -811,8 +804,8 @@ test "create/lookup/rollback transfers" {
         std.mem.zeroInit(Account, .{ .id = 2 }),
         std.mem.zeroInit(Account, .{ .id = 3, .ledger = 1 }),
         std.mem.zeroInit(Account, .{ .id = 4, .ledger = 2 }),
-        std.mem.zeroInit(Account, .{ .id = 5, .flags = .{ .debits_must_not_exceed_credits = true } }),
-        std.mem.zeroInit(Account, .{ .id = 6, .flags = .{ .credits_must_not_exceed_debits = true } }),
+        std.mem.zeroInit(Account, .{ .id = 5, .credits_posted = 1000, .debits_posted = 500, .flags = .{ .debits_must_not_exceed_credits = true } }),
+        std.mem.zeroInit(Account, .{ .id = 6, .credits_posted = 500, .debits_posted = 1000, .flags = .{ .credits_must_not_exceed_debits = true } }),
         std.mem.zeroInit(Account, .{ .id = 7 }),
         std.mem.zeroInit(Account, .{ .id = 8 }),
     };
@@ -906,6 +899,26 @@ test "create/lookup/rollback transfers" {
                 .amount = 10,
                 .debit_account_id = 3,
                 .credit_account_id = 4,
+            }),
+        },
+        Vector{
+            .result = .overflow_credits,
+            .object = std.mem.zeroInit(Transfer, .{
+                .id = 10,
+                .timestamp = timestamp,
+                .amount = std.math.maxInt(u64),
+                .debit_account_id = 1,
+                .credit_account_id = 6,
+            }),
+        },
+        Vector{
+            .result = .overflow_debits,
+            .object = std.mem.zeroInit(Transfer, .{
+                .id = 10,
+                .timestamp = timestamp,
+                .amount = std.math.maxInt(u64),
+                .debit_account_id = 5,
+                .credit_account_id = 1,
             }),
         },
         Vector{
@@ -1100,7 +1113,7 @@ test "create/lookup/rollback transfers" {
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.debits_posted);
 
     // Rollback transfer with id [12], amount of 10:
-    state_machine.transfer_rollback(state_machine.get_transfer(vectors[11].object.id).?.*);
+    state_machine.transfer_rollback(state_machine.get_transfer(vectors[12].object.id).?.*);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(7).?.*.debits_posted);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.credits_posted);
     try testing.expectEqual(@as(u64, 10), state_machine.get_account(8).?.*.credits_posted);
@@ -1108,7 +1121,7 @@ test "create/lookup/rollback transfers" {
     try testing.expect(state_machine.get_transfer(vectors[11].object.id) == null);
 
     // Rollback transfer with id [15], amount of 10:
-    state_machine.transfer_rollback(state_machine.get_transfer(vectors[22].object.id).?.*);
+    state_machine.transfer_rollback(state_machine.get_transfer(vectors[23].object.id).?.*);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(7).?.*.debits_pending);
     try testing.expectEqual(@as(u64, 0), state_machine.get_account(8).?.*.credits_pending);
     try testing.expect(state_machine.get_transfer(vectors[22].object.id) == null);
@@ -1518,8 +1531,8 @@ test "credit/debit limit overflows " {
     };
 
     // Exceeds the overflow limit by 1:
-    try testing.expect(acc_debit_not_exceed_credit.debits_exceed_credits(1) == .debit_overflow);
-    try testing.expect(acc_credit_not_exceed_debit.credits_exceed_debits(1) == .credit_overflow);
+    try testing.expect(acc_debit_not_exceed_credit.debits_overflow(1));
+    try testing.expect(acc_credit_not_exceed_debit.credits_overflow(1));
 
     const acc_debit_not_exceed_credit_no_overflow = Account{
         .id = 1,
@@ -1547,8 +1560,8 @@ test "credit/debit limit overflows " {
     };
 
     // Exceed limits, but still no overflow:
-    try testing.expect(acc_debit_not_exceed_credit_no_overflow.debits_exceed_credits(1) == .debits_exceed_credits);
-    try testing.expect(acc_credit_not_exceed_debit_no_overflow.credits_exceed_debits(1) == .credits_exceed_debits);
+    try testing.expect(acc_debit_not_exceed_credit_no_overflow.debits_exceed_credits(1));
+    try testing.expect(acc_credit_not_exceed_debit_no_overflow.credits_exceed_debits(1));
 
     const acc_debit_not_exceed_credit_ok = Account{
         .id = 1,
@@ -1576,11 +1589,11 @@ test "credit/debit limit overflows " {
     };
 
     // No limit or overflow (.ok):
-    try testing.expect(acc_debit_not_exceed_credit_ok.debits_exceed_credits(100) == .ok);
-    try testing.expect(acc_credit_not_exceed_debit_ok.credits_exceed_debits(100) == .ok);
+    try testing.expect(!acc_debit_not_exceed_credit_ok.debits_exceed_credits(100));
+    try testing.expect(!acc_credit_not_exceed_debit_ok.credits_exceed_debits(100));
     // Ensure we were at the limit:
-    try testing.expect(acc_debit_not_exceed_credit_ok.debits_exceed_credits(101) == .debits_exceed_credits);
-    try testing.expect(acc_credit_not_exceed_debit_ok.credits_exceed_debits(101) == .credits_exceed_debits);
+    try testing.expect(acc_debit_not_exceed_credit_ok.debits_exceed_credits(101));
+    try testing.expect(acc_credit_not_exceed_debit_ok.credits_exceed_debits(101));
 }
 
 fn test_debug_vector_create(comptime vector_type: type, comptime create_result_type: type, i: usize, vector: vector_type, create_result: create_result_type, err: anyerror) void {

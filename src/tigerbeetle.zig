@@ -24,22 +24,26 @@ pub const Account = packed struct {
         assert(@sizeOf(Account) == 128);
     }
 
-    pub fn debits_exceed_credits(self: *const Account, amount: u64) LimitExceedResult {
-        if (!self.flags.debits_must_not_exceed_credits) return .ok;
-
-        const pending_posted = try_add(self.debits_pending, self.debits_posted) orelse return .debit_overflow;
-        const limit_amount = try_add(pending_posted, amount) orelse return .debit_overflow;
-        if (limit_amount > self.credits_posted) return .debits_exceed_credits;
-        return .ok;
+    pub fn debits_overflow(self: *const Account, amount: u64) bool {
+        const pending_posted = try_add(self.debits_pending, self.debits_posted) orelse return true;
+        _ = try_add(pending_posted, amount) orelse return true;
+        return false;
     }
 
-    pub fn credits_exceed_debits(self: *const Account, amount: u64) LimitExceedResult {
-        if (!self.flags.credits_must_not_exceed_debits) return .ok;
+    pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
+        return (self.flags.debits_must_not_exceed_credits and
+            self.debits_pending + self.debits_posted + amount > self.credits_posted);
+    }
 
-        const pending_posted = try_add(self.credits_pending, self.credits_posted) orelse return .credit_overflow;
-        const limit_amount = try_add(pending_posted, amount) orelse return .credit_overflow;
-        if (limit_amount > self.debits_posted) return .credits_exceed_debits;
-        return .ok;
+    pub fn credits_overflow(self: *const Account, amount: u64) bool {
+        const pending_posted = try_add(self.credits_pending, self.credits_posted) orelse return true;
+        _ = try_add(pending_posted, amount) orelse return true;
+        return false;
+    }
+
+    pub fn credits_exceed_debits(self: *const Account, amount: u64) bool {
+        return (self.flags.credits_must_not_exceed_debits and
+            self.credits_pending + self.credits_posted + amount > self.debits_posted);
     }
 
     fn try_add(a: u64, b: u64) ?u64 {
@@ -105,14 +109,6 @@ pub const TransferFlags = packed struct {
     }
 };
 
-pub const LimitExceedResult = enum(u32) {
-    ok,
-    debit_overflow,
-    credit_overflow,
-    debits_exceed_credits,
-    credits_exceed_debits,
-};
-
 pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
@@ -150,6 +146,8 @@ pub const CreateTransferResult = enum(u32) {
     amount_is_zero,
     exceeds_credits,
     exceeds_debits,
+    overflow_credits,
+    overflow_debits,
     pending_transfer_must_timeout,
     timeout_reserved_for_pending_transfer,
     /// For two-phase transfers:
