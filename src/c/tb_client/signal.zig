@@ -48,6 +48,25 @@ pub const Signal = struct {
         };
         errdefer os.closeSocket(self.server_socket);
 
+        // Windows requires that the socket is bound before listening
+        if (builtin.target.os.tag == .windows) {
+            var addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 0); // zero port lets the OS choose
+            os.bind(self.server_socket, &addr.any, addr.getOsSockLen()) catch |err| {
+                log.err("failed to bind the server socket to a local random port: {}", .{err});
+                return switch (err) {
+                    error.AccessDenied => unreachable,
+                    error.AlreadyBound => unreachable,
+                    error.AddressInUse, error.AddressNotAvailable => unreachable,
+                    error.SymLinkLoop => unreachable,
+                    error.NameTooLong => unreachable,
+                    error.FileNotFound, error.FileDescriptorNotASocket => unreachable,
+                    error.NotDir => unreachable,
+                    error.ReadOnlyFileSystem => unreachable,
+                    error.SystemResources, error.NetworkSubsystemFailed, error.Unexpected => |e| e,
+                };
+            };
+        }
+
         os.listen(self.server_socket, 1) catch |err| {
             log.err("failed to listen on signal server socket: {}", .{err});
             return switch (err) {
