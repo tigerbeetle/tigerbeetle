@@ -10,6 +10,8 @@ const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
+const log = std.log.scoped(.grid);
+
 const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
 const write_ahead_log_zone_size = config.message_size_max * 1024; // TODO Use journal_slot_count.
 const client_table_zone_size = config.message_size_max * config.clients_max * 2;
@@ -335,16 +337,29 @@ pub fn GridType(comptime Storage: type) type {
             const address = iop.reads.peek().?.address;
             const checksum = iop.reads.peek().?.checksum;
 
-            if (header.checksum == checksum and
-                header.valid_checksum() and
-                header.valid_checksum_body(body))
-            {
+            const checksum_valid = header.valid_checksum();
+            const checksum_body_valid = header.valid_checksum_body(body);
+            const checksum_match = header.checksum == checksum;
+
+            if (checksum_valid and checksum_body_valid and checksum_match) {
                 while (iop.reads.pop()) |read| {
                     assert(read.address == address);
                     assert(read.checksum == checksum);
                     read.finish(iop.block);
                 }
             } else {
+                if (!checksum_valid) {
+                    log.err("invalid checksum at address {}", .{address});
+                } else if (!checksum_body_valid) {
+                    log.err("invalid checksum body at address {}", .{address});
+                } else if (!checksum_match) {
+                    log.err(
+                        "valid checksum {} at address {} does not match expected checksum {}",
+                        .{ header.checksum, address, checksum },
+                    );
+                } else {
+                    unreachable;
+                }
                 while (iop.reads.pop()) |read| {
                     iop.grid.read_recovery_queue.push(read);
                 }
