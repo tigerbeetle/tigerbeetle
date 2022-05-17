@@ -456,8 +456,8 @@ pub fn Replica(
                     self.op = self.journal.op_maximum();
 
                     self.commit_ops(self.op);
-                    // This is a cluster-of-1 (we are always the leader), so the actual recovering→normal
-                    // status transition is deferred until all ops are committed.
+                    // This is a cluster-of-1 (we are always the leader), so the actual
+                    // recovering→normal status transition is deferred until all ops are committed.
                 } else {
                     // The journal just finished recovery.
                     // Now try to learn the current view via VSR recovery protocol.
@@ -613,9 +613,9 @@ pub fn Replica(
 
         /// The primary advances op-number, adds the request to the end of the log, and updates the
         /// information for this client in the client-table to contain the new request number, s.
-        /// Then it sends a ⟨PREPARE v, m, n, k⟩ message to the other replicas, where v is the current
-        /// view-number, m is the message it received from the client, n is the op-number it assigned to
-        /// the request, and k is the commit-number.
+        /// Then it sends a ⟨PREPARE v, m, n, k⟩ message to the other replicas, where v is the
+        /// current view-number, m is the message it received from the client, n is the op-number
+        /// it assigned to the request, and k is the commit-number.
         fn on_request(self: *Self, message: *Message) void {
             if (self.ignore_request_message(message)) return;
 
@@ -689,22 +689,23 @@ pub fn Replica(
         ///
         /// The leader starts by sending a prepare message to itself.
         ///
-        /// Each replica (including the leader) then forwards this prepare message to the next replica
-        /// in the configuration, in parallel to writing to its own journal, closing the circle until
-        /// the next replica is back to the leader, in which case the replica does not forward.
+        /// Each replica (including the leader) then forwards this prepare message to the next
+        /// replica in the configuration, in parallel to writing to its own journal, closing the
+        /// circle until the next replica is back to the leader, in which case the replica does not
+        /// forward.
         ///
         /// This keeps the leader's outgoing bandwidth limited (one-for-one) to incoming bandwidth,
-        /// since the leader need only replicate to the next replica. Otherwise, the leader would need
-        /// to replicate to multiple followers, dividing available bandwidth.
+        /// since the leader need only replicate to the next replica. Otherwise, the leader would
+        /// need to replicate to multiple followers, dividing available bandwidth.
         ///
-        /// This does not impact latency, since with Flexible Paxos we need only one remote prepare_ok.
-        /// It is ideal if this synchronous replication to one remote replica is to the next replica,
-        /// since that is the replica next in line to be leader, which will need to be up-to-date before
-        /// it can start the next view.
+        /// This does not impact latency, since with Flexible Paxos we need only one remote
+        /// prepare_ok. It is ideal if this synchronous replication to one remote replica is to the
+        /// next replica, since that is the replica next in line to be leader, which will need to
+        /// be up-to-date before it can start the next view.
         ///
-        /// At the same time, asynchronous replication keeps going, so that if our local disk is slow,
-        /// then any latency spike will be masked by more remote prepare_ok messages as they come in.
-        /// This gives automatic tail latency tolerance for storage latency spikes.
+        /// At the same time, asynchronous replication keeps going, so that if our local disk is
+        /// slow, then any latency spike will be masked by more remote prepare_ok messages as they
+        /// come in. This gives automatic tail latency tolerance for storage latency spikes.
         ///
         /// The remaining problem then is tail latency tolerance for network latency spikes.
         /// If the next replica is down or partitioned, then the leader's prepare timeout will fire,
@@ -1407,7 +1408,8 @@ pub fn Replica(
                 }
             }
 
-            log.debug("{}: on_recovery_response: responses={} view={} headers={}..{} commit={} dirty={} faulty={}", .{
+            log.debug("{}: on_recovery_response: responses={} view={} headers={}..{}" ++
+                " commit={} dirty={} faulty={}", .{
                 self.replica,
                 count,
                 view,
@@ -1494,8 +1496,8 @@ pub fn Replica(
                         // Main path: the header for the target prepare is already in-memory.
                         // This is preferrable to the `else` case since we have the prepare's
                         // `header.size` in-memory, so the read can be (potentially) shorter.
-                        // TODO Do not reissue the read if we are already reading in order to send to
-                        // this particular destination replica.
+                        // TODO Do not reissue the read if we are already reading in order to send
+                        // to this particular destination replica.
                         self.journal.read_prepare(
                             on_request_prepare_read,
                             op,
@@ -1861,7 +1863,10 @@ pub fn Replica(
             const replica = waiting[self.prepare_timeout.attempts % waiting_len];
             assert(replica != self.replica);
 
-            log.debug("{}: on_prepare_timeout: replicating to replica {}", .{ self.replica, replica });
+            log.debug("{}: on_prepare_timeout: replicating to replica {}", .{
+                self.replica,
+                replica,
+            });
             self.send_message_to_replica(replica, prepare.message);
         }
 
@@ -1981,7 +1986,10 @@ pub fn Replica(
 
             // This is not the first time we have had quorum, the state transition has already happened:
             if (count > threshold) {
-                log.debug("{}: on_{s}: ignoring (quorum received already)", .{ self.replica, command });
+                log.debug("{}: on_{s}: ignoring (quorum received already)", .{
+                    self.replica,
+                    command,
+                });
                 return null;
             }
 
@@ -2055,7 +2063,10 @@ pub fn Replica(
 
             // This is not the first time we have had quorum, the state transition has already happened:
             if (count > threshold) {
-                log.debug("{}: on_{s}: ignoring (quorum received already)", .{ self.replica, command });
+                log.debug("{}: on_{s}: ignoring (quorum received already)", .{
+                    self.replica,
+                    command,
+                });
                 return null;
             }
 
@@ -2412,7 +2423,8 @@ pub fn Replica(
             const session = reply.header.commit; // The commit number becomes the session number.
             const request = reply.header.request;
 
-            assert(session > 0); // We reserved the `0` commit number for the cluster `.root` operation.
+            // We reserved the `0` commit number for the cluster `.root` operation.
+            assert(session > 0);
             assert(request == 0);
 
             // For correctness, it's critical that all replicas evict deterministically:
@@ -2886,7 +2898,9 @@ pub fn Replica(
                         return false;
                     } else {
                         // The client may have only one request inflight at a time.
-                        log.err("{}: on_request: ignoring new request (client bug)", .{self.replica});
+                        log.err("{}: on_request: ignoring new request (client bug)", .{
+                            self.replica,
+                        });
                         return true;
                     }
                 } else {
@@ -3123,8 +3137,8 @@ pub fn Replica(
             assert(self.follower());
             assert(header.view == self.view);
             assert(header.op > self.op + 1);
-            // We may have learned of a higher `commit_max` through a commit message before jumping to a
-            // newer op that is less than `commit_max` but greater than `commit_min`:
+            // We may have learned of a higher `commit_max` through a commit message before jumping
+            // to a newer op that is less than `commit_max` but greater than `commit_min`:
             assert(header.op > self.commit_min);
             // Never overwrite an op that still needs to be checkpointed.
             assert(header.op - self.op_checkpoint < config.journal_slot_count);
@@ -3145,7 +3159,10 @@ pub fn Replica(
         fn message_body_as_headers(_: *Self, message: *const Message) []Header {
             // TODO Assert message commands that we expect this to be called for.
             assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
-            return std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..message.header.size]);
+            return std.mem.bytesAsSlice(
+                Header,
+                message.buffer[@sizeOf(Header)..message.header.size],
+            );
         }
 
         /// Panics if immediate neighbors in the same view would have a broken hash chain.
@@ -3516,10 +3533,12 @@ pub fn Replica(
                 if (header.checksum == next.parent) {
                     assert(header.view <= next.view);
                     assert(header.op + 1 == next.op);
-                    // We don't break with `next` but this is no guarantee that `next` does not break.
+                    // We don't break with `next` but this is no guarantee that `next` does not
+                    // break.
                     return false;
                 } else {
-                    // If the journal has wrapped, then err in favor of a break regardless of op order:
+                    // If the journal has wrapped, then err in favor of a break regardless of op
+                    // order:
                     return true;
                 }
             }
@@ -3528,14 +3547,17 @@ pub fn Replica(
             return false;
         }
 
-        /// If we repair this header, then would this connect the hash chain through to the latest op?
-        /// This offers a strong guarantee that may be used to replace or overlap an existing op.
+        /// If we repair this header, then would this connect the hash chain through to the latest
+        /// op? This offers a strong guarantee that may be used to replace or overlap an existing
+        /// op.
         ///
         /// Here is an example of what could go wrong if we did not check for complete connection:
         ///
         /// 1. We do a prepare that's going to be committed.
-        /// 2. We do a stale prepare to the right of this, ignoring the hash chain break to the left.
-        /// 3. We do another stale prepare that replaces the first op because it connects to the second.
+        /// 2. We do a stale prepare to the right of this, ignoring the hash chain break to the
+        ///    left.
+        /// 3. We do another stale prepare that replaces the first op because it connects to the
+        ///    second.
         ///
         /// This would violate our quorum replication commitment to the leader.
         /// The mistake in this example was not that we ignored the break to the left, which we must
@@ -3810,8 +3832,8 @@ pub fn Replica(
 
             const request_prepare = Header{
                 .command = .request_prepare,
-                // If we request a prepare from a follower, as below, it is critical to pass a checksum:
-                // Otherwise we could receive different prepares for the same op number.
+                // If we request a prepare from a follower, as below, it is critical to pass a
+                // checksum: Otherwise we could receive different prepares for the same op number.
                 .context = checksum,
                 .timestamp = 1, // The checksum is included in context.
                 .cluster = self.cluster,
@@ -4508,12 +4530,18 @@ pub fn Replica(
             if (self.leader()) {
                 assert(self.journal.is_empty() or self.replica_count == 1);
 
-                log.debug("{}: transition_from_recovering_status: leader view={}", .{ self.replica, new_view });
+                log.debug("{}: transition_from_recovering_status: leader view={}", .{
+                    self.replica,
+                    new_view,
+                });
                 self.ping_timeout.start();
                 self.commit_timeout.start();
                 self.repair_timeout.start();
             } else {
-                log.debug("{}: transition_from_recovering_status: follower view={}", .{ self.replica, new_view });
+                log.debug("{}: transition_from_recovering_status: follower view={}", .{
+                    self.replica,
+                    new_view,
+                });
                 self.ping_timeout.start();
                 self.normal_status_timeout.start();
                 self.repair_timeout.start();
@@ -4565,11 +4593,11 @@ pub fn Replica(
             assert(self.nack_prepare_op == null);
         }
 
-        /// A replica i that notices the need for a view change advances its view, sets its status to
-        /// view_change, and sends a ⟨start_view_change v, i⟩ message to all the other replicas,
-        /// where v identifies the new view. A replica notices the need for a view change either based
-        /// on its own timer, or because it receives a start_view_change or do_view_change message for
-        /// a view with a larger number than its own view.
+        /// A replica i that notices the need for a view change advances its view, sets its status
+        /// to view_change, and sends a ⟨start_view_change v, i⟩ message to all the other replicas,
+        /// where v identifies the new view. A replica notices the need for a view change either
+        /// based on its own timer, or because it receives a start_view_change or do_view_change
+        /// message for a view with a larger number than its own view.
         fn transition_to_view_change_status(self: *Self, new_view: u32) void {
             log.debug("{}: transition_to_view_change_status: view={}..{}", .{
                 self.replica,
@@ -4591,8 +4619,8 @@ pub fn Replica(
             // Do not reset quorum counters only on entering a view, assuming that the view will be
             // followed only by a single subsequent view change to the next view, because multiple
             // successive view changes can fail, e.g. after a view change timeout.
-            // We must therefore reset our counters here to avoid counting messages from an older view,
-            // which would violate the quorum intersection property essential for correctness.
+            // We must therefore reset our counters here to avoid counting messages from an older
+            // view, which would violate the quorum intersection property essential for correctness.
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
@@ -4667,13 +4695,13 @@ pub fn Replica(
             return true;
         }
 
-        /// Returns true if all operations are present, correctly ordered and connected by hash chain,
-        /// between `op_min` and `op_max` (both inclusive).
+        /// Returns true if all operations are present, correctly ordered and connected by hash
+        /// chain, between `op_min` and `op_max` (both inclusive).
         fn valid_hash_chain_between(self: *Self, op_min: u64, op_max: u64) bool {
             assert(op_min <= op_max);
 
-            // If we use anything less than self.op then we may commit ops for a forked hash chain that
-            // have since been reordered by a new leader.
+            // If we use anything less than self.op then we may commit ops for a forked hash chain
+            // that have since been reordered by a new leader.
             assert(op_max == self.op);
             var b = self.journal.header_with_op(op_max).?;
 
