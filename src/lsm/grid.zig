@@ -227,14 +227,25 @@ pub fn GridType(comptime Storage: type) type {
         fn write_block_callback(completion: *Storage.Write) void {
             const iop = @fieldParentPtr(WriteIOP, "completion", completion);
 
-            iop.write.finish();
-
+            // We must copy these values to the stack as they will be overwritten
+            // when we release the iop and potentially start a queued write.
             const grid = iop.grid;
+            const completed_write = iop.write;
+
             grid.write_iops.release(iop);
 
-            if (grid.write_queue.pop()) |write| {
-                grid.start_write(write);
+            // Start a queued write if possible *before* calling the completed
+            // write's callback through write.finish(). This ensures that if the
+            // callback calls Grid.write_block() it doesn't preempt the queue.
+            if (grid.write_queue.pop()) |queued_write| {
+                grid.start_write(queued_write);
+                assert(grid.write_iops.available() == 0);
             }
+
+            // This call must come after releasing the IOP. Otherwise we risk tripping
+            // assertions forbidding concurrent writes using the same block/address
+            // if the callback calls write_block().
+            completed_write.finish();
         }
 
         /// This function transparently handles recovery if the checksum fails.
