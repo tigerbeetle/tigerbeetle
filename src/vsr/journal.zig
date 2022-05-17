@@ -162,12 +162,17 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// This is used to respond to `request_prepare` messages even when the slot is faulty.
         /// For example, the slot may be faulty because the redundant header is faulty.
         ///
-        /// The checksum will be `0` when:
+        /// The checksum will missing (`prepare_checksums[i]=0`, `prepare_inhabited[i]=false`) when:
         /// * the message in the slot is reserved,
         /// * the message in the slot is being written, or when
         /// * the message in the slot is corrupt.
-        // TODO While the chances of colliding with 0 are "impossible", using null is cleaner.
+        // TODO: `prepare_checksums` and `prepare_inhabited` should be combined into a []?u128,
+        // but that type is currently unusable (as ofZig 0.9.1).
+        // See: https://github.com/ziglang/zig/issues/9871
         prepare_checksums: []u128,
+        /// When prepare_inhabited[i]==false, prepare_checksums[i]==0.
+        /// (`undefined` would may more sense than `0`, but `0` allows it to be asserted).
+        prepare_inhabited: []bool,
 
         recovered: bool = false,
         recovering: bool = false,
@@ -194,6 +199,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             errdefer allocator.free(prepare_checksums);
             std.mem.set(u128, prepare_checksums, 0);
 
+            var prepare_inhabited = try allocator.alloc(bool, slot_count);
+            errdefer allocator.free(prepare_inhabited);
+            std.mem.set(bool, prepare_inhabited, false);
+
             const headers_iops = (try allocator.allocAdvanced(
                 [config.sector_size]u8,
                 config.sector_size,
@@ -217,6 +226,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .dirty = dirty,
                 .faulty = faulty,
                 .prepare_checksums = prepare_checksums,
+                .prepare_inhabited = prepare_inhabited,
                 .headers_iops = headers_iops,
             };
 
@@ -224,6 +234,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.dirty.bits.bit_length == slot_count);
             assert(self.faulty.bits.bit_length == slot_count);
             assert(self.prepare_checksums.len == slot_count);
+            assert(self.prepare_inhabited.len == slot_count);
 
             return self;
         }
@@ -236,6 +247,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             allocator.free(self.headers);
             allocator.free(self.headers_iops);
             allocator.free(self.prepare_checksums);
+            allocator.free(self.prepare_inhabited);
 
             {
                 var it = self.reads.iterate();
@@ -267,6 +279,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
             assert(self.headers[0].checksum == self.prepare_checksums[0]);
+            assert(self.prepare_inhabited[0]);
 
             // If any message is faulty, we must fall back to VSR recovery protocol (i.e. treat
             // this as a non-empty WAL) since that message may have been a prepare.
@@ -277,8 +290,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 if (header.command == .prepare) return false;
             }
 
-            for (self.prepare_checksums[1..]) |checksum| {
-                if (checksum != 0) return false;
+            for (self.prepare_inhabited[1..]) |inhabited| {
+                if (inhabited) return false;
             }
 
             return true;
@@ -640,8 +653,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
             const slot = self.slot_for_op(op);
+            assert(self.prepare_inhabited[slot.index]);
             assert(checksum == self.prepare_checksums[slot.index]);
-            assert(checksum != 0);
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
@@ -701,7 +714,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            if (self.prepare_checksums[self.slot_for_op(op).index] != checksum) {
+            const checksum_inhabited = self.prepare_inhabited[self.slot_for_op(op).index];
+            const checksum_match = self.prepare_checksums[self.slot_for_op(op).index] == checksum;
+            if (!checksum_inhabited or !checksum_match) {
                 self.read_prepare_log(op, checksum, "prepare changed during read");
                 read.callback(replica, null, null);
                 return;
@@ -1086,10 +1101,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
 
             if (prepare.command == .prepare and prepare.valid_checksum()) {
-                assert(self.prepare_checksums[slot.index] == 0);
+                assert(!self.prepare_inhabited[slot.index]);
 
                 // Store the message in `prepare_checksums` even if it belongs in a different slot.
                 // This improves the availability of `request_prepare`.
+                self.prepare_inhabited[slot.index] = true;
                 self.prepare_checksums[slot.index] = prepare.checksum;
             }
 
@@ -1100,6 +1116,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(header.checksum == prepare.checksum);
                     assert(!self.dirty.bit(slot));
                     assert(!self.faulty.bit(slot));
+                    assert(self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == prepare.checksum);
                 },
                 .nil => {
@@ -1107,10 +1124,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(prepare.command == .reserved);
                     assert(!self.dirty.bit(slot));
                     assert(!self.faulty.bit(slot));
+                    assert(!self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == 0);
                 },
                 .fix => {
                     assert(prepare.command == .prepare);
+                    assert(self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == prepare.checksum);
                     if (replica.replica_count == 1) {
                         self.headers[slot.index] = prepare.*;
@@ -1286,6 +1305,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (!self.dirty.bit(slot)) {
                 // Any function that sets the faulty bit should also set the dirty bit:
                 assert(!self.faulty.bit(slot));
+                assert(self.prepare_inhabited[slot.index]);
                 assert(self.prepare_checksums[slot.index] == message.header.checksum);
                 self.write_prepare_debug(message.header, "skipping (clean)");
                 callback(replica, message, trigger);
@@ -1321,6 +1341,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(sum_of_sector_padding_bytes == 0);
             }
 
+            self.prepare_inhabited[slot.index] = false;
             self.prepare_checksums[slot.index] = 0;
 
             assert_bounds(.prepares, offset, buffer.len);
@@ -1334,6 +1355,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const message = write.message;
 
             if (self.slot_with_op_and_checksum(message.header.op, message.header.checksum)) |slot| {
+                assert(!self.prepare_inhabited[slot.index]);
+                self.prepare_inhabited[slot.index] = true;
                 self.prepare_checksums[slot.index] = message.header.checksum;
             } else {
                 self.write_prepare_debug(message.header, "entry changed while writing sectors");

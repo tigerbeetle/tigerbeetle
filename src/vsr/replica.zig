@@ -1431,9 +1431,6 @@ pub fn Replica(
         /// to the cluster. The cluster sees the replica as an underwriter of a guaranteed
         /// prepare. If a guaranteed prepare is found to by faulty, the replica must repair it
         /// to restore durability.
-        // TODO Use an explicit null when specifying a missing checksum rather than `0`, so that
-        // `0` is a valid checksum.
-        // As part of this change, `Journal.prepare_checksums` should store `?u128`.
         fn on_request_prepare(self: *Self, message: *const Message) void {
             if (self.ignore_repair_message(message)) return;
 
@@ -1444,12 +1441,19 @@ pub fn Replica(
 
             const op = message.header.op;
             const slot = self.journal.slot_for_op(op);
-            var checksum: ?u128 = message.header.context;
-            if (self.leader_index(self.view) == self.replica) {
-                if (checksum.? == 0) checksum = null;
-            } else {
+            const checksum: ?u128 = switch (message.header.timestamp) {
+                0 => null,
+                1 => message.header.context,
+                else => unreachable,
+            };
+
+            if (message.header.timestamp == 0) {
+                assert(self.leader_index(message.header.view) == self.replica);
+            }
+
+            if (self.leader_index(self.view) != self.replica) {
                 // Only the leader may respond to `request_prepare` messages without a checksum.
-                if (checksum.? == 0) return;
+                if (checksum == null) return;
             }
 
             // Try to serve the message directly from the pipeline.
@@ -1470,8 +1474,8 @@ pub fn Replica(
                 }
             }
 
-            const prepare_checksum = self.journal.prepare_checksums[slot.index];
-            if (prepare_checksum != 0) {
+            if (self.journal.prepare_inhabited[slot.index]) {
+                const prepare_checksum = self.journal.prepare_checksums[slot.index];
                 // Consult `journal.prepare_checksums` (rather than `journal.headers`):
                 // the former may have the prepare we want — even if journal recovery marked the
                 // slot as faulty and left the in-memory header as reserved.
@@ -3287,9 +3291,11 @@ pub fn Replica(
                 // since only `on_prepare()` can do this, not `repair_header()` in `on_headers()`.
                 self.send_header_to_replica(self.leader_index(self.view), .{
                     .command = .request_prepare,
-                    // We cannot yet know the checksum of the prepare so we set the context to 0:
-                    // Context is optional when requesting from the leader but required otherwise.
+                    // We cannot yet know the checksum of the prepare so we set the context and
+                    // timestamp to 0: Context is optional when requesting from the leader but
+                    // required otherwise.
                     .context = 0,
+                    .timestamp = 0,
                     .cluster = self.cluster,
                     .replica = self.replica,
                     .view = self.view,
@@ -3803,6 +3809,7 @@ pub fn Replica(
                 // If we request a prepare from a follower, as below, it is critical to pass a checksum:
                 // Otherwise we could receive different prepares for the same op number.
                 .context = checksum,
+                .timestamp = 1, // The checksum is included in context.
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
