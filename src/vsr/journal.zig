@@ -162,9 +162,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// This is used to respond to `request_prepare` messages even when the slot is faulty.
         /// For example, the slot may be faulty because the redundant header is faulty.
         ///
-        /// A checksum of `0` indicates either that:
-        /// * the message in the slot is corrupt, or that
-        /// * the message in the slot is reserved.
+        /// The checksum will be `0` when:
+        /// * the message in the slot is reserved,
+        /// * the message in the slot is being written, or when
+        /// * the message in the slot is corrupt.
         // TODO While the chances of colliding with 0 are "impossible", using null is cleaner.
         prepare_checksums: []u128,
 
@@ -259,6 +260,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         pub fn is_empty(self: *const Self) bool {
             assert(!self.recovering);
             assert(self.recovered);
+            assert(self.writes.executing() == 0);
 
             const replica = @fieldParentPtr(Replica, "journal", self);
             if (self.headers[0].operation != .root) return false;
@@ -1159,6 +1161,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.faulty.count,
             });
 
+            assert(self.reads.executing() == 0);
+            assert(self.writes.executing() == 0);
+
             // A cluster-of-1 cannot recover from faults.
             assert(self.faulty.count == 0 or replica.replica_count > 1);
             assert(self.faulty.count <= self.dirty.count);
@@ -1173,8 +1178,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             {
-                var op_min: u64 = std.math.maxInt(u64);
-                var op_max: u64 = 0;
+                var op_min: ?u64 = null;
+                var op_max: ?u64 = null;
                 for (self.headers) |*header, slot| {
                     if (header.command == .reserved) {
                         assert(header.cluster == replica.cluster);
@@ -1187,13 +1192,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(!self.dirty.bit(Slot{ .index = slot }));
                     assert(!self.faulty.bit(Slot{ .index = slot }));
 
-                    if (op_min > header.op) op_min = header.op;
-                    if (op_max < header.op) op_max = header.op;
+                    if (op_min == null or op_min.? > header.op) op_min = header.op;
+                    if (op_max == null or op_max.? < header.op) op_max = header.op;
                 }
 
-                if (op_max != 0) {
+                if (op_max != null and op_max.? != 0) {
                     // Only committed ops are ever overwritten by a WAL wrap.
-                    assert(op_max - op_min < 2 * slot_count - config.pipelining_max);
+                    assert(op_max.? - op_min.? < 2 * slot_count - config.pipelining_max);
                 }
             }
 
@@ -1258,6 +1263,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
+        /// `write_prepare` uses `write_sectors` to prevent concurrent disk writes.
         pub fn write_prepare(
             self: *Self,
             callback: fn (self: *Replica, wrote: ?*Message, trigger: Write.Trigger) void,
@@ -1707,7 +1713,7 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
             return @popCount(Map, self.free);
         }
 
-        /// Returns the coutn of IOPs in use.
+        /// Returns the count of IOPs in use.
         pub fn executing(self: *const Self) math.Log2IntCeil(Map) {
             return @popCount(Map, math.maxInt(Map)) - @popCount(Map, self.free);
         }
