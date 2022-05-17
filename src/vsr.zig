@@ -170,6 +170,8 @@ pub const Header = packed struct {
     ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
     /// * A `do_view_change` sets this to the latest normal view number.
     /// * A `pong` sets this to the sender's wall clock value.
+    /// * A `request_prepare` sets this to `1` when `context` is set to a checksum, and `0`
+    ///   otherwise.
     timestamp: u64 = 0,
 
     /// The size of the Header structure (always), plus any associated body.
@@ -496,7 +498,11 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
+        switch (self.timestamp) {
+            0 => if (self.context != 0) return "context != 0",
+            1 => {}, // context is a checksum, which may be 0.
+            else => return "timestamp > 1",
+        }
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
