@@ -18,21 +18,21 @@ const log = std.log.scoped(.replica);
 pub const Status = enum {
     normal,
     view_change,
-    // Recovery (for replica_count≠1):
+    // Recovery (for replica_count > 1):
     //
     // 1. At replica start: `status=recovering` and `journal.recovered=false`
     // 2. Load the WAL. Mark questionable entries as faulty.
     // 3. If the WAL has no entries (besides the initial commit), skip to step 5 with view 0.
     // 4. Run VSR recovery protocol:
     //    a. Send a `recovery` message to every replica (except self).
-    //    b. Wait for f+1 `recovery_response` messages.
+    //    b. Wait for f+1 `recovery_response` messages from replicas in `normal` status.
     //       Each `recovery_response` includes the current view number.
     //       Each `recovery_response` must include a nonce matching the `recovery` message.
     //    c. Wait for a `recovery_response` from the leader of the highest known view.
-    // 5. Transition to `status=normal` with the discovered view number.
+    // 5. Transition to `status=normal` with the discovered view number:
     //    * Set `op` to the highest op in the leader's recovery response.
     //    * Repair faulty messages.
-    //    * Commit to the discovered `commit_max`.
+    //    * Commit through to the discovered `commit_max`.
     //    * Set `state_machine.prepare_timeout` to the current op's timestamp.
     //
     // TODO document snapshot recovery in this progression
@@ -142,7 +142,7 @@ pub fn Replica(
         /// The op of the highest checkpointed message.
         // TODO Update this to use LSM storage.
         // TODO Refuse to store/ack any op>op_checkpoint+journal_slot_count.
-        // TODO enforce invariant op≥op_checkpoint
+        // TODO Enforce invariant op≥op_checkpoint.
         op_checkpoint: u64 = 0,
 
         /// The op number of the latest committed and executed operation (according to the replica):
@@ -163,7 +163,7 @@ pub fn Replica(
         /// This allows us to pipeline without the complexity of out-of-order commits.
         ///
         /// After a view change, the old leader's pipeline is left untouched so that it is able to
-        /// help the new leader repair.
+        /// help the new leader repair, even in the face of local storage faults.
         pipeline: RingBuffer(Prepare, config.pipeline_max) = .{},
 
         /// In some cases, a replica may send a message to itself. We do not submit these messages
@@ -292,12 +292,15 @@ pub fn Replica(
             );
             errdefer clock.deinit(allocator);
 
+            const journal = try Journal.init(allocator, storage, replica);
+            errdefer journal.deinit(allocator);
+
             const recovery_nonce = blk: {
                 var nonce: [@sizeOf(Nonce)]u8 = undefined;
-                var hasher = std.crypto.hash.Blake3.init(.{});
-                hasher.update(std.mem.asBytes(&clock.monotonic()));
-                hasher.update(&[_]u8{replica});
-                hasher.final(nonce[0..nonce.len]);
+                var hash = std.crypto.hash.Blake3.init(.{});
+                hash.update(std.mem.asBytes(&clock.monotonic()));
+                hash.update(&[_]u8{replica});
+                hash.final(&nonce);
                 break :blk @bitCast(Nonce, nonce);
             };
 
@@ -308,7 +311,7 @@ pub fn Replica(
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
                 .clock = clock,
-                .journal = try Journal.init(allocator, storage, replica),
+                .journal = journal,
                 .message_bus = message_bus,
                 .state_machine = state_machine,
                 .client_table = client_table,
@@ -376,8 +379,6 @@ pub fn Replica(
                 config.clients_max,
             });
 
-            // We must initialize timeouts here, not in tick() on the first tick, because on_message()
-            // can race with tick()... before timeouts have been initialized:
             assert(self.status == .recovering);
 
             return self;
@@ -428,7 +429,7 @@ pub fn Replica(
             self.clock.tick();
 
             if (!self.journal.recovered) {
-                self.journal.recover();
+                if (!self.journal.recovering) self.journal.recover();
                 return;
             } else {
                 assert(!self.journal.recovering);
@@ -516,7 +517,6 @@ pub fn Replica(
             }
 
             if (!self.journal.recovered) {
-                self.journal.recover();
                 log.debug("{}: on_message: waiting for journal to recover", .{self.replica});
                 return;
             } else {
@@ -746,6 +746,7 @@ pub fn Replica(
             assert(message.header.view == self.view);
             assert(self.leader() or self.follower());
             assert(message.header.replica == self.leader_index(message.header.view));
+            assert(message.header.op > self.op_checkpoint);
             assert(message.header.op > self.op);
             assert(message.header.op > self.commit_min);
 
@@ -1086,7 +1087,6 @@ pub fn Replica(
 
             self.discard_uncommitted_headers();
             assert(self.op >= self.commit_max);
-            assert(self.journal.header_with_op(self.op) != null);
 
             const prepare_timestamp = self.journal.header_with_op(self.op).?.timestamp;
             if (self.state_machine.prepare_timestamp < prepare_timestamp) {
@@ -1168,7 +1168,6 @@ pub fn Replica(
             self.send_message_to_replica(message.header.replica, start_view);
         }
 
-        /// TODO This is a work in progress (out of scope for the bounty)
         fn on_recovery(self: *Self, message: *const Message) void {
             if (self.status != .normal) {
                 log.debug("{}: on_recovery: ignoring ({})", .{
@@ -1259,7 +1258,7 @@ pub fn Replica(
             if (responses[message.header.replica]) |existing| {
                 assert(message.header.replica == existing.header.replica);
                 if (existing.header.checksum == message.header.checksum) {
-                    // The response packet was repeated by the network; ignore it.
+                    // The response was replayed by the network; ignore it.
                     log.debug("{}: on_recovery_response: ignoring (duplicate message)", .{
                         self.replica,
                     });
@@ -1303,6 +1302,7 @@ pub fn Replica(
                     existing.header.commit,
                     message.header.commit,
                 });
+
                 self.message_bus.unref(existing);
                 responses[message.header.replica] = null;
             }
@@ -1316,7 +1316,7 @@ pub fn Replica(
             const count = self.count_quorum(responses, .recovery_response, self.recovery_nonce);
             assert(count <= self.replica_count - 1);
 
-            const threshold = self.quorum_replication;
+            const threshold = self.quorum_view_change;
             if (count < threshold) {
                 log.debug("{}: on_recovery_response: waiting for quorum count={}", .{
                     self.replica,
@@ -1384,7 +1384,11 @@ pub fn Replica(
             assert(self.status == .normal);
             assert(self.follower());
 
-            // TODO if the view's primary is >1 WAL ahead of us, these headers could cause problems. We don't want to jump this far ahead to repair, but we still need to use the hash chain to figure out which headers to request. Maybe include our op_checkpoint in the recovery (request) message so that the response can give more useful (i.e. older) headers.
+            // TODO if the view's primary is >1 WAL ahead of us, these headers could cause
+            // problems. We don't want to jump this far ahead to repair, but we still need to use
+            // the hash chain to figure out which headers to request. Maybe include our
+            // `op_checkpoint` in the recovery (request) message so that the response can give more
+            // useful (i.e. older) headers.
             for (leader_headers) |*header| {
                 _ = self.repair_header(header);
             }

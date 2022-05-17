@@ -190,7 +190,7 @@ pub fn main() !void {
     var idle = false;
 
     // The minimum number of healthy replicas required for a crashed replica to be able to recover.
-    const replica_healthy_min = replicas: {
+    const replica_normal_min = replicas: {
         if (replica_count == 1) {
             // A cluster of 1 can crash safely (as long as there is no disk corruption) since it
             // does not run the recovery protocol.
@@ -202,7 +202,7 @@ pub fn main() !void {
 
     // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
     for (cluster.storages) |*storage, i| {
-        storage.faulty = replica_healthy_min <= i;
+        storage.faulty = replica_normal_min <= i;
     }
 
     // TODO When storage is supported, run more transitions than fit in the journal.
@@ -221,7 +221,7 @@ pub fn main() !void {
         const health_options = &cluster.options.health_options;
         // The maximum the number of replicas that can be safely crashed, while ensuring that the
         // cluster can eventually recover.
-        var crashes = cluster.replica_healthy_count() -| replica_healthy_min;
+        var crashes = cluster.replica_normal_count() -| replica_normal_min;
         for (cluster.replicas) |*replica| {
             switch (cluster.health[replica.replica]) {
                 .up => |*ticks| {

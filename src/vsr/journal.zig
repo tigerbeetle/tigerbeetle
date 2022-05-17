@@ -654,7 +654,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const replica = @fieldParentPtr(Replica, "journal", self);
             const slot = self.slot_for_op(op);
             assert(self.prepare_inhabited[slot.index]);
-            assert(checksum == self.prepare_checksums[slot.index]);
+            assert(self.prepare_checksums[slot.index] == checksum);
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
@@ -805,8 +805,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         pub fn recover(self: *Self) void {
             assert(!self.recovered);
+            assert(!self.recovering);
 
-            if (self.recovering) return;
             self.recovering = true;
 
             log.debug("{}: recover: recovering", .{self.replica});
@@ -1092,13 +1092,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 !self.faulty.bit(slot),
                 read.message,
             );
-            const decision = decision: {
-                if (replica.replica_count == 1) {
-                    break :decision case.decision_single;
-                } else {
-                    break :decision case.decision_multi;
-                }
-            };
+            const decision = case.decision(replica.replica_count);
 
             if (prepare.command == .prepare and prepare.valid_checksum()) {
                 assert(!self.prepare_inhabited[slot.index]);
@@ -1894,24 +1888,24 @@ const recovery_cases = table: {
         Case.init("@E", .vsr, .fix, .{ _0, __, _1, _0, __, __, __, __ }),
         Case.init("@F", .vsr, .fix, .{ _1, _1, _1, _0, __, __, __, __ }),
         Case.init("@G", .vsr, .vsr, .{ _1, _0, _1, _1, __, __, __, __ }),
-        Case.init("@H", .nil, .nil, .{ _1, _1, _1, _1, a1, a1, a0, a1 }), // normal path: empty
+        Case.init("@H", .nil, .nil, .{ _1, _1, _1, _1, a1, a1, a0, a1 }), // normal path: reserved
         Case.init("@I", .fix, .fix, .{ _1, _0, _1, _0, _0, _0, _1, __ }), // header.op < prepare.op
         Case.init("@J", .vsr, .vsr, .{ _1, _0, _1, _0, _0, _0, _0, __ }), // header.op > prepare.op
         Case.init("@K", .vsr, .vsr, .{ _1, _0, _1, _0, _0, _1, a0, a0 }),
-        Case.init("@L", .eql, .eql, .{ _1, _0, _1, _0, _1, a1, a0, a1 }), // normal path: occupied
+        Case.init("@L", .eql, .eql, .{ _1, _0, _1, _0, _1, a1, a0, a1 }), // normal path: prepare
     };
 };
 
 const RecoveryDecision = enum {
     /// The header and prepare are identical; no repair necessary.
     eql,
-    /// Reserved; clear dirty/faulty, no repair necessary.
+    /// Reserved; dirty/faulty are clear, no repair necessary.
     nil,
     /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty, clear faulty.
     /// If replica_count=1: Use intact prepare. Clear dirty, clear faulty.
     /// (Don't set faulty, because we have the valid message.)
     fix,
-    /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty and faulty.
+    /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty, mark faulty.
     /// If replica_count=1: Fail; cannot recover safely.
     vsr,
 };
@@ -1921,7 +1915,7 @@ const Matcher = enum { any, is_false, is_true, assert_is_false, assert_is_true }
 const Case = struct {
     label: []const u8,
     /// Decision when replica_count>1.
-    decision_multi: RecoveryDecision,
+    decision_multiple: RecoveryDecision,
     /// Decision when replica_count=1.
     decision_single: RecoveryDecision,
     /// 0: header_ok(header)
@@ -1936,13 +1930,13 @@ const Case = struct {
 
     fn init(
         label: []const u8,
-        decision_multi: RecoveryDecision,
+        decision_multiple: RecoveryDecision,
         decision_single: RecoveryDecision,
         pattern: [8]Matcher,
     ) Case {
         return .{
             .label = label,
-            .decision_multi = decision_multi,
+            .decision_multiple = decision_multiple,
             .decision_single = decision_single,
             .pattern = pattern,
         };
@@ -1959,6 +1953,15 @@ const Case = struct {
             }
         }
         return true;
+    }
+
+    fn decision(self: *const Case, replica_count: u8) RecoveryDecision {
+        assert(replica_count > 0);
+        if (replica_count == 1) {
+            return self.decision_single;
+        } else {
+            return self.decision_multiple;
+        }
     }
 };
 
@@ -1992,37 +1995,42 @@ fn recovery_case(
         header.op < prepare.op,
         header.view == prepare.view,
     };
+
+    var result: ?*const Case = null;
     for (recovery_cases) |*case| {
         const match = case.check(parameters) catch {
-            log.err("recovery_case: impossible state case={s} parameters={any}", .{
+            log.err("recovery_case: impossible state: case={s} parameters={any}", .{
                 case.label,
                 parameters,
             });
             unreachable;
         };
-        if (match) return case;
+        if (match) {
+            assert(result == null);
+            result = case;
+        }
     }
     // The recovery table is exhaustive.
-    unreachable;
+    // Every combination of parameters matches exactly one case.
+    return result.?;
 }
 
-/// Test whether the message header:
+/// Returns whether the message header:
 /// * has a valid checksum, and
 /// * has the expected cluster, and
 /// * has an expected command, and
-/// * resides the the correct slot.
+/// * resides in the correct slot.
 fn header_ok(cluster: u32, slot: Slot, header: *const Header) bool {
-    // A prepare in the wrong cluster/slot indicates a misdirected read or write.
+    // A header with the wrong cluster, or in the wrong slot, may indicate a misdirected read/write.
     //
-    // All journalled headers should be reserved or else prepares. A misdirected
-    // read/write to or from another storage zone may return the wrong message.
-    return header.valid_checksum() and
-        header.cluster == cluster and
-        switch (header.command) {
+    // All journalled headers should be reserved or else prepares.
+    // A misdirected read/write to or from another storage zone may return the wrong message.
+    const valid_command_and_slot = switch (header.command) {
         .prepare => slot.index == header.op % slot_count,
         .reserved => slot.index == header.op,
         else => false,
     };
+    return header.valid_checksum() and header.cluster == cluster and valid_command_and_slot;
 }
 
 test "recovery_cases" {
