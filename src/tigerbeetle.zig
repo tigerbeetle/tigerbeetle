@@ -12,7 +12,6 @@ pub const Account = packed struct {
     reserved: [48]u8,
     /// A chart of accounts code describing the type of account (e.g. clearing, settlement):
     ledger: u16,
-    /// The currency code/type related to the transfer:
     code: u16,
     flags: AccountFlags,
     debits_pending: u64,
@@ -133,7 +132,6 @@ pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
     exists,
-    exists_user_data,
     exists_with_different_debit_account_id,
     exists_with_different_credit_account_id,
     exists_with_different_user_data,
@@ -154,21 +152,18 @@ pub const CreateTransferResult = enum(u32) {
     exceeds_debits,
     pending_transfer_must_timeout,
     timeout_reserved_for_pending_transfer,
-    // For two-phase transfers:
+    /// For two-phase transfers:
     cannot_post_and_void_pending_transfer,
     transfer_not_found,
     transfer_not_pending,
     transfer_already_posted,
     transfer_already_voided,
     transfer_expired,
-    condition_requires_preimage,
-    preimage_invalid,
-    preimage_requires_condition,
     debit_amount_not_pending,
     credit_amount_not_pending,
-    pending_id_should_be_zero,
+    pending_id_must_be_zero,
     pending_id_is_zero,
-    post_amount_exceeds_pending_amount,
+    amount_exceeds_pending_amount,
 };
 
 pub const CreateAccountsResult = packed struct {
