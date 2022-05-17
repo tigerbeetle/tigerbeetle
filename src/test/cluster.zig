@@ -266,7 +266,7 @@ pub const Cluster = struct {
 
     /// Returns the number of replicas capable of helping a crashed node recover (i.e. with
     /// replica.status=normal).
-    pub fn replica_healthy_count(cluster: *Cluster) u8 {
+    pub fn replica_normal_count(cluster: *Cluster) u8 {
         var count: u8 = 0;
         for (cluster.replicas) |*replica| {
             if (replica.status == .normal) count += 1;
