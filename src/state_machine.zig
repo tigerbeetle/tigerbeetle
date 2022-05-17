@@ -369,11 +369,11 @@ pub const StateMachine = struct {
             assert(dr.debits_exceed_credits(0) == .ok);
             assert(cr.credits_exceed_debits(0) == .ok);
 
-            const d_acc_id = if (t.debit_account_id == 0) lookup.debit_account_id else t.debit_account_id;
-            if (t.debit_account_id != d_acc_id) return .exists_with_different_debit_account_id;
+            const dr_id = if (t.debit_account_id == 0) lookup.debit_account_id else t.debit_account_id;
+            if (t.debit_account_id != dr_id) return .exists_with_different_debit_account_id;
 
-            const c_acc_id = if (t.credit_account_id == 0) lookup.credit_account_id else t.credit_account_id;
-            if (t.credit_account_id != c_acc_id) return .exists_with_different_credit_account_id;
+            const cr_id = if (t.credit_account_id == 0) lookup.credit_account_id else t.credit_account_id;
+            if (t.credit_account_id != cr_id) return .exists_with_different_credit_account_id;
 
             const user_data = if (t.user_data == 0) lookup.user_data else t.user_data;
             if (t.user_data != user_data) return .exists_with_different_user_data;
@@ -384,8 +384,8 @@ pub const StateMachine = struct {
             const code = if (t.code == 0) lookup.code else t.code;
             if (t.code != code) return .exists_with_different_code;
 
-            const amnt = if (t.amount == 0) lookup.amount else t.amount;
-            if (amnt > lookup.amount) return .post_amount_exceeds_pending_amount;
+            const amount = if (t.amount == 0) lookup.amount else t.amount;
+            if (amount > lookup.amount) return .amount_exceeds_pending_amount;
 
             // TODO We can combine this lookup with the previous lookup if we return `error!void`:
             const insert = self.posted.getOrPutAssumeCapacity(t.pending_id);
@@ -393,8 +393,8 @@ pub const StateMachine = struct {
 
             insert.value_ptr.* = Transfer{
                 .id = t.id,
-                .debit_account_id = d_acc_id,
-                .credit_account_id = c_acc_id,
+                .debit_account_id = dr_id,
+                .credit_account_id = cr_id,
                 .user_data = user_data,
                 .reserved = t.reserved,
                 .ledger = ledger,
@@ -403,14 +403,14 @@ pub const StateMachine = struct {
                 .timeout = t.timeout,
                 .timestamp = t.timestamp,
                 .flags = t.flags,
-                .amount = amnt,
+                .amount = amount,
             };
 
             dr.debits_pending -= lookup.amount;
             cr.credits_pending -= lookup.amount;
             if (!t.flags.void_pending_transfer) {
-                dr.debits_posted += amnt;
-                cr.credits_posted += amnt;
+                dr.debits_posted += amount;
+                cr.credits_posted += amount;
             }
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -419,7 +419,7 @@ pub const StateMachine = struct {
             if (t.flags.pending) {
                 // Otherwise reserved amounts may never be released:
                 if (t.timeout == 0) return .pending_transfer_must_timeout;
-                if (t.pending_id != 0) return .pending_id_should_be_zero;
+                if (t.pending_id != 0) return .pending_id_must_be_zero;
             } else if (t.timeout != 0) {
                 return .timeout_reserved_for_pending_transfer;
             }
@@ -1354,7 +1354,7 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         Vector{
-            .result = .post_amount_exceeds_pending_amount,
+            .result = .amount_exceeds_pending_amount,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 23,
                 .pending_id = 8,
