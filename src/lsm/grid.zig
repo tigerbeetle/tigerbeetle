@@ -25,10 +25,13 @@ pub fn GridType(comptime Storage: type) type {
         inline fn address_from_block(block: [block_size]u8) u64 {
             const header_bytes = block[0..@sizeOf(vsr.Header)];
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
-            return header.op;
+            const address = header.op;
+            assert(address > 0);
+            return address;
         }
 
         inline fn hash_address(address: u64) u64 {
+            assert(address > 0);
             return std.hash.Wyhash.hash(0, mem.asBytes(&address));
         }
 
@@ -68,7 +71,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             block: BlockPtrConst,
 
-            /// Link for the writes_pending linked list.
+            /// Link for the write_queue linked list.
             next: ?*Write = null,
 
             /// Call the user's callback, finishing the write.
@@ -90,7 +93,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
 
-            /// Link for reads_pending/read_recovery_queue/ReadIOP.reads linked lists.
+            /// Link for read_queue/read_recovery_queue/ReadIOP.reads linked lists.
             next: ?*Read = null,
 
             /// Call the user's callback, finishing the read.
@@ -113,11 +116,11 @@ pub fn GridType(comptime Storage: type) type {
         superblock: *SuperBlock,
         cache: Cache,
 
-        writes_pending: FIFO(Write) = .{},
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
+        write_queue: FIFO(Write) = .{},
 
-        reads_pending: FIFO(Read) = .{},
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
+        read_queue: FIFO(Read) = .{},
 
         // TODO interrogate this list and do recovery in Replica.tick().
         read_recovery_queue: FIFO(Read) = .{},
@@ -143,8 +146,8 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn acquire(grid: *Grid) u64 {
-            // We will reject incoming data before it reaches this point
-            // when storage is full, so this assertion is safe.
+            // We will reject incoming data before it reaches the point
+            // where storage is full, so this assertion is safe.
             return grid.superblock.free_set.acquire().?;
         }
 
@@ -171,7 +174,7 @@ pub fn GridType(comptime Storage: type) type {
             // Assert that block is not already writing.
             // Assert that the block ptr is not being used for another I/O (read or write).
             {
-                var it = grid.writes_pending.peek();
+                var it = grid.write_queue.peek();
                 while (it) |pending_write| : (it = pending_write.next) {
                     assert(address != pending_write.address);
                     assert(block != pending_write.block);
@@ -203,7 +206,7 @@ pub fn GridType(comptime Storage: type) type {
 
         fn start_write(grid: *Grid, write: *Write) void {
             const iop = grid.write_iops.acquire() orelse {
-                grid.writes_pending.push(write);
+                grid.write_queue.push(write);
                 return;
             };
 
@@ -229,7 +232,7 @@ pub fn GridType(comptime Storage: type) type {
             const grid = iop.grid;
             grid.write_iops.release(iop);
 
-            if (grid.writes_pending.pop()) |write| {
+            if (grid.write_queue.pop()) |write| {
                 grid.start_write(write);
             }
         }
@@ -272,7 +275,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             const iop = grid.read_iops.acquire() orelse {
-                grid.reads_pending.push(read);
+                grid.read_queue.push(read);
                 return;
             };
 
@@ -337,8 +340,8 @@ pub fn GridType(comptime Storage: type) type {
             // Always iterate through the full list of pending reads here to ensure that all
             // possible reads in the list are started, even in the presence of concurrent reads
             // targeting the same block address.
-            var copy = grid.reads_pending;
-            grid.reads_pending = .{};
+            var copy = grid.read_queue;
+            grid.read_queue = .{};
             while (copy.pop()) |read| {
                 grid.start_read(read);
             }
