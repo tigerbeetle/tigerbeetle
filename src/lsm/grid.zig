@@ -171,40 +171,45 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
             assert(!grid.superblock.free_set.is_free(address));
 
-            // Assert that block is not already writing.
-            // Assert that the block ptr is not being used for another I/O (read or write).
-            {
-                var it = grid.write_queue.peek();
-                while (it) |pending_write| : (it = pending_write.next) {
-                    assert(address != pending_write.address);
-                    assert(block != pending_write.block);
-                }
-            }
-            {
-                var it = grid.write_iops.iterate();
-                while (it.next()) |iop| {
-                    assert(address != iop.write.address);
-                    assert(block != iop.write.block);
-                }
-            }
-            {
-                var it = grid.read_iops.iterate();
-                while (it.next()) |iop| {
-                    assert(address != iop.reads.peek().?.address);
-                    assert(block != iop.block);
-                }
-            }
-
             write.* = .{
                 .callback = callback,
                 .address = address,
                 .block = block,
             };
 
+            // If there are IOPS available the write queue must be empty.
+            if (grid.write_iops.available() > 0) {
+                assert(grid.write_queue.peek() == null);
+            }
+
             grid.start_write(write);
         }
 
         fn start_write(grid: *Grid, write: *Write) void {
+            // Assert that block is not already writing.
+            // Assert that the block ptr is not being used for another I/O (read or write).
+            {
+                var it = grid.write_queue.peek();
+                while (it) |pending_write| : (it = pending_write.next) {
+                    assert(write.address != pending_write.address);
+                    assert(write.block != pending_write.block);
+                }
+            }
+            {
+                var it = grid.write_iops.iterate();
+                while (it.next()) |iop| {
+                    assert(write.address != iop.write.address);
+                    assert(write.block != iop.write.block);
+                }
+            }
+            {
+                var it = grid.read_iops.iterate();
+                while (it.next()) |iop| {
+                    assert(write.address != iop.reads.peek().?.address);
+                    assert(write.block != iop.block);
+                }
+            }
+
             const iop = grid.write_iops.acquire() orelse {
                 grid.write_queue.push(write);
                 return;
