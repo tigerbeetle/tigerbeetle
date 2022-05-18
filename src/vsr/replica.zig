@@ -3073,34 +3073,39 @@ pub fn Replica(
         /// WAL recovery, not ones that were found to be faulty after the fact (e.g. due to
         /// `request_prepare`).
         ///
-        /// Cases (`✓`: checkpoint, `✗`: faulty, `o`: `replica.op`):
+        /// Cases (`✓`: `replica.op_checkpoint`, `✗`: faulty, `o`: `replica.op`):
         /// * ` ✓ o ✗ `: View change is unsafe.
         /// * ` ✗ ✓ o `: View change is unsafe.
         /// * ` ✓ ✗ o `: View change is safe.
-        /// * ✓=o:       View change is unsafe (`op_checkpoint` == `replica.op`).
+        /// * ✓=o:       View change is unsafe if any slots are faulty
+        ///              (`replica.op_checkpoint` == `replica.op`).
         // TODO Use this function once we switch from recovery protocol to the superblock.
-        // If there is an "unsafe" fault, we will need to request a start_view from the leader to learn the op.
+        // If there is an "unsafe" fault, we will need to request a start_view from the leader to
+        // learn the op.
         fn op_certain(self: *const Self) bool {
             assert(self.status == .recovering);
             assert(self.journal.recovered);
+            assert(self.op_checkpoint <= self.op);
 
-            if (self.journal.faulty.count == 0) return true;
+            const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint);
+            const slot_op = self.journal.slot_with_op(self.op).?;
+            const slot_op_min = std.math.min(slot_op, slot_op_checkpoint);
+            const slot_op_max = std.math.max(slot_op, slot_op_checkpoint);
 
-            const end = self.journal.slot_for_op(self.op_checkpoint);
-            var slot = self.journal.slot_with_op(self.op).?;
-            while (true) {
-                // The command=reserved when the entry was found faulty during WAL recovery.
-                if (self.journal.faulty.bit(slot) and
-                    self.journal.headers[slot.index].command == .reserved)
-                {
-                    log.warn("{}: has_unsafe_fault: ignoring (op not known, faulty_slot={})", .{
+            var iterator = self.journal.faulty.bits.iterator(.{ .kind = .set });
+            while (iterator.next()) |slot| {
+                // The command is `reserved` when the entry was found faulty during WAL recovery.
+                // Faults found after WAL recovery are not relevant, because we know their op.
+                if (self.journal.headers[slot.index].command != .reserved) continue;
+                if (slot <= slot_op_min or slot >= slot_op_max) {
+                    log.warn("{}: op_certain: op not known (faulty_slot={}, op={}, op_checkpoint={})", .{
                         self.replica,
                         slot.index,
+                        self.op,
+                        self.op_checkpoint,
                     });
                     return false;
                 }
-                slot.index = (slot.index + 1) % config.journal_slot_count;
-                if (slot.index == end.index) break;
             }
             return true;
         }
