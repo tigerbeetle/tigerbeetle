@@ -806,6 +806,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         pub fn recover(self: *Self) void {
             assert(!self.recovered);
             assert(!self.recovering);
+            assert(self.dirty.count == 0);
+            assert(self.faulty.count == 0);
 
             self.recovering = true;
 
@@ -819,6 +821,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             assert(!self.recovered);
             assert(self.recovering);
+            assert(self.dirty.count == 0);
+            assert(self.faulty.count == 0);
 
             if (offset == headers_size) {
                 log.debug("{}: recover_headers: complete", .{self.replica});
@@ -882,50 +886,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(buffer.len >= @sizeOf(Header));
             assert(buffer.len % @sizeOf(Header) == 0);
             assert(read.destination_replica == null);
+            assert(self.dirty.count == 0);
+            assert(self.faulty.count == 0);
 
-            for (std.mem.bytesAsSlice(Header, buffer)) |*header, index| {
-                const slot = Slot{ .index = offset / @sizeOf(Header) + index };
-                // This is the first recovery pass, so no headers are loaded yet.
-                assert(!self.dirty.bit(slot));
-                assert(!self.faulty.bit(slot));
-
-                if (header.valid_checksum()) {
-                    if (header_ok(replica.cluster, slot, header)) {
-                        assert(header.invalid() == null);
-                        // One of the following cases:
-                        //
-                        // * This is a legitimate prepare header.
-                        // * This is a legitimate reserved header (e.g. on the first WAL cycle).
-                        // * There was a crash between writing the prepare and the redundant header.
-                        //   (That is, there should be a header here but it didn't make it to disk).
-                        //   The dirty/faulty bits are left clear. There is no way to distinguish
-                        //   this case until the prepare is also read.
-                        self.headers[slot.index] = header.*;
-                    } else {
-                        // Unexpected cluster, slot, or message type due to a misdirected I/O.
-                        self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
-                        self.dirty.set(slot);
-                        self.faulty.set(slot);
-                        log.warn("{}: recover_headers: invalid header in slot={} " ++
-                            "(command={} cluster={} op={})", .{
-                            self.replica,
-                            slot.index,
-                            header.command,
-                            header.cluster,
-                            header.op,
-                        });
-                    }
-                } else {
-                    // The header is corrupt, or a faulty/misdirected read has occurred.
-                    self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
-                    self.dirty.set(slot);
-                    self.faulty.set(slot);
-                    log.warn("{}: recover_headers: corrupt header in slot={}", .{
-                        self.replica,
-                        slot.index,
-                    });
-                }
-            }
+            const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
+            const target_headers = self.headers[offset / @sizeOf(Header)..][0..buffer_headers.len];
+            // Directly store all the redundant headers in `self.headers` (including any that are
+            // invalid or corrupt). As the prepares are recovered, these will be replaced or
+            // removed as necessary.
+            std.mem.copy(Header, target_headers, buffer_headers);
 
             const offset_next = offset + buffer.len;
             // We must release before we call `recover_headers()` in case Storage is synchronous.
@@ -955,6 +924,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
             assert(slot.index < slot_count);
+            assert(!self.dirty.bit(slot));
+            assert(!self.faulty.bit(slot));
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
@@ -1079,19 +1050,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             const slot = Slot{ .index = @intCast(u64, read.checksum) };
             assert(slot.index < slot_count);
+            assert(!self.dirty.bit(slot));
+            assert(!self.faulty.bit(slot));
 
-            // `recover_headers_callback` either sets both dirty+faulty, or neither.
-            assert(self.dirty.bit(slot) == self.faulty.bit(slot));
-
-            const header = &self.headers[slot.index];
+            const header = self.headers[slot.index];
             const prepare = read.message.header;
-            const case = recovery_case(
-                replica.cluster,
-                slot,
-                header,
-                !self.faulty.bit(slot),
-                read.message,
-            );
+            const case = recovery_case(replica.cluster, slot, &header, read.message);
             const decision = case.decision(replica.replica_count);
 
             if (prepare.command == .prepare and prepare.valid_checksum()) {
@@ -1112,6 +1076,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(!self.faulty.bit(slot));
                     assert(self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == prepare.checksum);
+                    self.headers[slot.index] = header;
                 },
                 .nil => {
                     assert(header.command == .reserved);
@@ -1120,6 +1085,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(!self.faulty.bit(slot));
                     assert(!self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == 0);
+                    self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
                 },
                 .fix => {
                     assert(prepare.command == .prepare);
@@ -1969,22 +1935,16 @@ fn recovery_case(
     cluster: u32,
     slot: Slot,
     header: *const Header,
-    header_valid: bool,
     prepare_message: *const Message,
 ) *const Case {
     assert(slot.index < slot_count);
-    assert(slot.index == header.op % slot_count);
-    assert(header.cluster == cluster);
-    assert(header.invalid() == null);
-    if (header_valid) {
-        assert(header.command == .reserved or header.command == .prepare);
-    } else {
-        assert(header.command == .reserved);
-    }
 
     const prepare = prepare_message.header;
     const prepare_valid = header_ok(cluster, slot, prepare);
+    const header_valid = header_ok(cluster, slot, header);
     if (prepare_valid) assert(prepare.invalid() == null);
+    if (header_valid) assert(header.invalid() == null);
+
     const parameters = .{
         header_valid,
         header.command == .reserved,
