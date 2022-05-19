@@ -178,9 +178,49 @@ pub fn GridType(comptime Storage: type) type {
         /// on the free set directly as this function also removes the address from the block
         /// cache. This allows us to assume that addresses are not already in the cache on
         /// insertion and avoids a lookup on that path by using the "no clobber" put variant.
+        /// Asserts that the address is not currently being read from or written to.
         pub fn release(grid: *Grid, address: u64) void {
+            grid.assert_not_in_use(address, null);
+
             grid.cache.remove(address);
             grid.superblock.free_set.release(address);
+        }
+
+        /// Assert that the address is not currently being read from or written to.
+        /// Assert that the block pointer is not being used for another read/write if non-null.
+        fn assert_not_in_use(grid: *Grid, address: u64, block: ?BlockPtrConst) void {
+            assert(address > 0);
+            {
+                var it = grid.write_queue.peek();
+                while (it) |pending_write| : (it = pending_write.next) {
+                    assert(address != pending_write.address);
+                    assert(block != pending_write.block);
+                }
+            }
+            {
+                var it = grid.write_iops.iterate();
+                while (it.next()) |iop| {
+                    assert(address != iop.write.address);
+                    assert(block != iop.write.block);
+                }
+            }
+            for ([_]FIFO(Read){
+                grid.read_queue,
+                grid.read_recursion_queue,
+                grid.read_recovery_queue,
+            }) |queue| {
+                var it = queue.peek();
+                while (it) |pending_read| : (it = pending_read.next) {
+                    assert(address != pending_read.address);
+                }
+            }
+            {
+                var it = grid.read_iops.iterate();
+                while (it.next()) |iop| {
+                    assert(address != iop.reads.peek().?.address);
+                    assert(block != iop.block);
+                }
+            }
         }
 
         pub fn write_block(
@@ -209,29 +249,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn start_write(grid: *Grid, write: *Write) void {
-            // Assert that block is not already writing.
-            // Assert that the block ptr is not being used for another I/O (read or write).
-            {
-                var it = grid.write_queue.peek();
-                while (it) |pending_write| : (it = pending_write.next) {
-                    assert(write.address != pending_write.address);
-                    assert(write.block != pending_write.block);
-                }
-            }
-            {
-                var it = grid.write_iops.iterate();
-                while (it.next()) |iop| {
-                    assert(write.address != iop.write.address);
-                    assert(write.block != iop.write.block);
-                }
-            }
-            {
-                var it = grid.read_iops.iterate();
-                while (it.next()) |iop| {
-                    assert(write.address != iop.reads.peek().?.address);
-                    assert(write.block != iop.block);
-                }
-            }
+            grid.assert_not_in_use(write.address, write.block);
 
             const iop = grid.write_iops.acquire() orelse {
                 grid.write_queue.push(write);
