@@ -1170,6 +1170,8 @@ pub fn Replica(
         }
 
         fn on_recovery(self: *Self, message: *const Message) void {
+            assert(self.replica_count > 1);
+
             if (self.status != .normal) {
                 log.debug("{}: on_recovery: ignoring ({})", .{
                     self.replica,
@@ -1233,8 +1235,9 @@ pub fn Replica(
             self.send_message_to_replica(message.header.replica, response);
         }
 
-        /// TODO This is a work in progress (out of scope for the bounty)
         fn on_recovery_response(self: *Self, message: *Message) void {
+            assert(self.replica_count > 1);
+
             if (self.status != .recovering) {
                 log.debug("{}: on_recovery_response: ignoring ({})", .{
                     self.replica,

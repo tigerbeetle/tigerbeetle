@@ -167,7 +167,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// * the message in the slot is being written, or when
         /// * the message in the slot is corrupt.
         // TODO: `prepare_checksums` and `prepare_inhabited` should be combined into a []?u128,
-        // but that type is currently unusable (as ofZig 0.9.1).
+        // but that type is currently unusable (as of Zig 0.9.1).
         // See: https://github.com/ziglang/zig/issues/9871
         prepare_checksums: []u128,
         /// When prepare_inhabited[i]==false, prepare_checksums[i]==0.
@@ -890,7 +890,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.faulty.count == 0);
 
             const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
-            const target_headers = self.headers[offset / @sizeOf(Header)..][0..buffer_headers.len];
+            const target_headers = self.headers[offset / @sizeOf(Header) ..][0..buffer_headers.len];
             // Directly store all the redundant headers in `self.headers` (including any that are
             // invalid or corrupt). As the prepares are recovered, these will be replaced or
             // removed as necessary.
@@ -1148,6 +1148,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.faulty.count <= self.dirty.count);
             // Abort if all slots are faulty, since something is very wrong.
             assert(self.faulty.count < slot_count);
+            assert(self.dirty.count <= slot_count);
+
             if (self.headers[0].op == 0 and self.headers[0].command == .prepare) {
                 assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
                 assert(!self.faulty.bit(Slot{ .index = 0 }));
@@ -1170,6 +1172,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(header.op % slot_count == slot);
                     assert(!self.dirty.bit(Slot{ .index = slot }));
                     assert(!self.faulty.bit(Slot{ .index = slot }));
+                    assert(self.prepare_inhabited[slot]);
+                    assert(self.prepare_checksums[slot] == header.checksum);
 
                     if (op_min == null or op_min.? > header.op) op_min = header.op;
                     if (op_max == null or op_max.? < header.op) op_max = header.op;
@@ -1450,7 +1454,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             self.writes.release(write);
         }
 
-        fn write_prepare_debug(self: *Self, header: *const Header, status: []const u8) void {
+        fn write_prepare_debug(self: *const Self, header: *const Header, status: []const u8) void {
             log.debug("{}: write: view={} op={} len={}: {} {s}", .{
                 self.replica,
                 header.view,
@@ -1496,7 +1500,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
         }
 
-        fn offset_logical_in_headers_for_message(self: *Self, message: *Message) u64 {
+        fn offset_logical_in_headers_for_message(self: *const Self, message: *Message) u64 {
             return offset_logical(.headers, self.slot_for_header(message.header));
         }
 
