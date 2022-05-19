@@ -55,8 +55,11 @@ pub fn GridType(comptime Storage: type) type {
         },
     );
 
-    const read_iops_max = 16;
-    assert(read_iops_max <= set_associative_cache_ways);
+    const read_iops_max = 15;
+    // This + 1 ensures that it is always possible for writes to add the written block
+    // to the cache on completion, even if the maximum number of concurrent reads are in
+    // progress and have locked all but one way in the target set.
+    assert(read_iops_max + 1 <= set_associative_cache_ways);
 
     // TODO put more thought into how low/high this limit should be.
     const write_iops_max = 16;
@@ -277,6 +280,14 @@ pub fn GridType(comptime Storage: type) type {
             // when we release the iop and potentially start a queued write.
             const grid = iop.grid;
             const completed_write = iop.write;
+
+            const cached_block = grid.cache.put_no_clobber_preserve_locked(
+                *Grid,
+                block_locked,
+                grid,
+                completed_write.address,
+            );
+            mem.copy(u8, cached_block, completed_write.block);
 
             grid.write_iops.release(iop);
 
