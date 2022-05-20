@@ -2323,7 +2323,7 @@ pub fn Replica(
             assert(reply.header.timestamp == 0);
             assert(reply.header.epoch == 0);
 
-            reply.header.set_checksum_body(reply.buffer[@sizeOf(Header)..reply.header.size]);
+            reply.header.set_checksum_body(reply.body());
             reply.header.set_checksum();
 
             if (reply.header.operation == .register) {
