@@ -1443,9 +1443,9 @@ pub fn Replica(
         fn on_request_prepare(self: *Self, message: *const Message) void {
             if (self.ignore_repair_message(message)) return;
 
+            assert(self.replica_count > 1);
             assert(self.status == .normal or self.status == .view_change);
             assert(message.header.view == self.view);
-            assert(self.replica_count > 1);
             assert(message.header.replica != self.replica);
 
             const op = message.header.op;
