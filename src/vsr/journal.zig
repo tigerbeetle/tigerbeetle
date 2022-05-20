@@ -268,7 +268,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         /// Returns whether this is a fresh database WAL; no prepares (except the root) have ever
-        /// been written.
+        /// been written. This determines whether a replica can transition immediately to normal
+        /// status, or if it needs to run recovery protocol.
+        ///
+        /// Called by the replica immediately after WAL recovery completes, but before the replica
+        /// issues any I/O from handling messages.
         pub fn is_empty(self: *const Self) bool {
             assert(!self.recovering);
             assert(self.recovered);
@@ -1145,10 +1149,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             // A cluster-of-1 cannot recover from faults.
             assert(self.faulty.count == 0 or replica.replica_count > 1);
-            assert(self.faulty.count <= self.dirty.count);
-            // Abort if all slots are faulty, since something is very wrong.
-            assert(self.faulty.count < slot_count);
             assert(self.dirty.count <= slot_count);
+            assert(self.faulty.count <= slot_count);
+            assert(self.faulty.count <= self.dirty.count);
+            if (self.faulty.count == slot_count) {
+                // Abort if all slots are faulty, since something is very wrong.
+                @panic("all WAL slots are faulty");
+            }
 
             if (self.headers[0].op == 0 and self.headers[0].command == .prepare) {
                 assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
