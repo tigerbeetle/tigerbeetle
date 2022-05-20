@@ -375,14 +375,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn previous_entry(self: *const Self, header: *const Header) ?*const Header {
-            // TODO Snapshots
-            if (header.op == 0) return null;
-            return self.header_for_op(header.op - 1);
+            if (header.op == 0) {
+                return self.header_for_op(slot_count - 1);
+            } else {
+                return self.header_for_op(header.op - 1);
+            }
         }
 
         pub fn next_entry(self: *const Self, header: *const Header) ?*const Header {
-            // TODO Snapshots
-            if (header.op + 1 == slot_count) return null;
             return self.header_for_op(header.op + 1);
         }
 
@@ -781,7 +781,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            const body = read.message.buffer[@sizeOf(Header)..read.message.header.size];
+            const body = read.message.body();
             if (!read.message.header.valid_checksum_body(body)) {
                 if (slot) |s| {
                     self.faulty.set(s);
