@@ -239,6 +239,9 @@ pub fn main() !void {
                 },
                 .down => |*ticks| {
                     ticks.* -|= 1;
+                    // Keep ticking the time so that it won't have diverged too far to synchronize
+                    // when the replica restarts.
+                    replica.clock.time.tick();
                     assert(replica.status == .recovering);
                     if (ticks.* == 0 and
                         prng.random().float(f64) < health_options.restart_probability)
