@@ -183,15 +183,16 @@ pub fn GridType(comptime Storage: type) type {
         /// insertion and avoids a lookup on that path by using the "no clobber" put variant.
         /// Asserts that the address is not currently being read from or written to.
         pub fn release(grid: *Grid, address: u64) void {
-            grid.assert_not_in_use(address, null);
+            grid.assert_not_writing(address, null);
+            grid.assert_not_reading(address, null);
 
             grid.cache.remove(address);
             grid.superblock.free_set.release(address);
         }
 
-        /// Assert that the address is not currently being read from or written to.
-        /// Assert that the block pointer is not being used for another read/write if non-null.
-        fn assert_not_in_use(grid: *Grid, address: u64, block: ?BlockPtrConst) void {
+        /// Assert that the address is not currently being written to.
+        /// Assert that the block pointer is not being used for any write if non-null.
+        fn assert_not_writing(grid: *Grid, address: u64, block: ?BlockPtrConst) void {
             assert(address > 0);
             {
                 var it = grid.write_queue.peek();
@@ -207,6 +208,12 @@ pub fn GridType(comptime Storage: type) type {
                     assert(block != iop.write.block);
                 }
             }
+        }
+
+        /// Assert that the address is not currently being read from.
+        /// Assert that the block pointer is not being used for any read if non-null.
+        fn assert_not_reading(grid: *Grid, address: u64, block: ?BlockPtrConst) void {
+            assert(address > 0);
             for ([_]FIFO(Read){
                 grid.read_queue,
                 grid.read_recursion_queue,
@@ -236,6 +243,8 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(address > 0);
             assert(!grid.superblock.free_set.is_free(address));
+            grid.assert_not_writing(address, block);
+            grid.assert_not_reading(address, block);
 
             write.* = .{
                 .callback = callback,
@@ -256,7 +265,8 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn start_write(grid: *Grid, write: *Write) void {
-            grid.assert_not_in_use(write.address, write.block);
+            grid.assert_not_writing(write.address, write.block);
+            grid.assert_not_reading(write.address, write.block);
 
             const iop = grid.write_iops.acquire() orelse {
                 grid.write_queue.push(write);
@@ -325,6 +335,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(address > 0);
             assert(!grid.superblock.free_set.is_free(address));
+            grid.assert_not_writing(address, null);
 
             read.* = .{
                 .callback = callback,
@@ -342,6 +353,7 @@ pub fn GridType(comptime Storage: type) type {
 
         fn start_read(grid: *Grid, read: *Grid.Read) void {
             assert(!grid.read_recursion_guard);
+            grid.assert_not_writing(read.address, null);
 
             // Check if a read is already in progress for the target address.
             {
