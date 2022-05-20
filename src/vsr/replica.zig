@@ -1457,7 +1457,7 @@ pub fn Replica(
             };
 
             if (message.header.timestamp == 0) {
-                assert(self.leader_index(message.header.view) == self.replica);
+                assert(self.leader_index(self.view) == self.replica);
             }
 
             if (self.leader_index(self.view) != self.replica) {
@@ -2780,7 +2780,7 @@ pub fn Replica(
                         return true;
                     },
                     // Only the leader may answer a request for a prepare without a context:
-                    .request_prepare => if (message.header.context == 0) {
+                    .request_prepare => if (message.header.timestamp == 0) {
                         log.warn("{}: on_{s}: ignoring (no context)", .{ self.replica, command });
                         return true;
                     },
