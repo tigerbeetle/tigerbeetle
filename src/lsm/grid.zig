@@ -243,12 +243,16 @@ pub fn GridType(comptime Storage: type) type {
                 .block = block,
             };
 
-            // If there are IOPS available the write queue must be empty.
-            if (grid.write_iops.available() > 0) {
+            const initial_iops_available = grid.write_iops.available();
+            if (initial_iops_available > 0) {
                 assert(grid.write_queue.empty());
             }
 
             grid.start_write(write);
+
+            if (initial_iops_available > 0) {
+                assert(grid.write_iops.available() == initial_iops_available - 1);
+            }
         }
 
         fn start_write(grid: *Grid, write: *Write) void {
@@ -295,8 +299,10 @@ pub fn GridType(comptime Storage: type) type {
             // write's callback through write.finish(). This ensures that if the
             // callback calls Grid.write_block() it doesn't preempt the queue.
             if (grid.write_queue.pop()) |queued_write| {
+                const initial_iops_available = grid.write_iops.available();
+                assert(initial_iops_available > 0);
                 grid.start_write(queued_write);
-                assert(grid.write_iops.available() == 0);
+                assert(grid.write_iops.available() == initial_iops_available - 1);
             }
 
             // This call must come after releasing the IOP. Otherwise we risk tripping
