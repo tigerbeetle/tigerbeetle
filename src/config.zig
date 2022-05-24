@@ -92,7 +92,7 @@ pub const message_size_max = 1 * 1024 * 1024;
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
 /// possibly be uncommitted during a view change, and this must be constant for all replicas.
-pub const pipelining_max = clients_max;
+pub const pipeline_max = clients_max;
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and jitter are applied within this range.

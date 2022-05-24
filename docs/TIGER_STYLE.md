@@ -14,6 +14,8 @@ Another word for style is design.
 
 Our design goals are safety, performance, and developer experience. In that order. All three are important. Good style advances these goals. Put this way, style is more than readability, and readability is table stakes, a means to an end rather than an end in itself. Does the code make for more or less safety, performance or developer experience? That is why we need style.
 
+> [I]n programming, style is not something to pursue directly. Style is necessary only where understanding is missing. ─ [Let Over Lambda](https://letoverlambda.com/index.cl/guest/chap1.html)
+
 This document explores how we apply these design goals to coding style. First, a word on simplicity, elegance and technical debt.
 
 ## On simplicity and elegance
@@ -124,7 +126,7 @@ Beyond these rules:
 
 * Don't overload names with multiple meanings that are context-dependent. For example, TigerBeetle has a feature called *pending transfers* where a pending transfer can be subsequently *posted* or *voided*. At first, we called them *two-phase commit transfers*, but this overloaded the *two-phase commit* terminology that was used in our consensus protocol, causing confusion.
 
-* Think of how names will be used outside the code, in documentation or communication. For example, a noun is often a better descriptor than an adjective or present participle, because a noun can be directly used in correspondence without having to be rephrased. Compare `replica.pipeline` vs `replica.preparing`. The former can be used directly as a section header in a document or conversation, whereas the latter must be clarified.
+* Think of how names will be used outside the code, in documentation or communication. For example, a noun is often a better descriptor than an adjective or present participle, because a noun can be directly used in correspondence without having to be rephrased. Compare `replica.pipeline` vs `replica.preparing`. The former can be used directly as a section header in a document or conversation, whereas the latter must be clarified. Noun names compose more clearly for derived identifiers, e.g. `config.pipeline_max`.
 
 * **Write descriptive commit messages** that inform and delight the reader, because your commit messages are being read.
 
