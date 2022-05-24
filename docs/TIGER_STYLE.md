@@ -56,9 +56,15 @@ We know that what we ship is solid. We may lack crucial features, but what we ha
 
 * **Put a limit on everything** because, in reality, this is what we expect—everything has a limit. For example, all loops and all queues must have a fixed upper bound to prevent infinite loops or tail latency spikes. This follows the [“fail-fast”](https://en.wikipedia.org/wiki/Fail-fast) principle so that violations are detected sooner rather than later. Where a loop cannot terminate (e.g. an event loop), this must be asserted.
 
-* Assert all function preconditions/postconditions and invariants. **Assert the positive space that you expect. Assert the negative space that you do not expect.** The assertion density of the code must average a minimum of two assertions per function. On rare occasions, you may use a blatantly true assertion instead of a comment as stronger documentation where the assertion condition is critical and surprising. Assertions detect programmer error. Unlike operating errors, which are expected and which must be handled, assertions are unexpected. The only correct way to handle corrupt code is to crash. Assertions downgrade catastrophic correctness bugs into liveness bugs.
+* Assertions detect programmer error. Unlike operating errors, which are expected and which must be handled, assertions are unexpected. The only correct way to handle corrupt code is to crash. Assertions downgrade catastrophic correctness bugs into liveness bugs. Assertions are a force multiplier for discovering bugs by fuzzing.
 
-* **Assert all function arguments and return values.** A function should not operate blindly on data it has not checked. **The purpose of a function is to increase the probability that a program is correct.** Assertions within a function are part of how functions serve this purpose. A clear dilineation between control plane and data plane, and the use of batching enables TigerBeetle to achieve a high level of assertion safety without losing performance.
+* **Assert all function arguments and return values, pre/postconditions and invariants.** A function must not operate blindly on data it has not checked. The purpose of a function is to increase the probability that a program is correct. Assertions within a function are part of how functions serve this purpose. The assertion density of the code must average a minimum of two assertions per function.
+
+* On occasion, you may use a blatantly true assertion instead of a comment as stronger documentation where the assertion condition is critical and surprising.
+
+* **Assert the relationships of compile-time constants** as a sanity check, and also to document and enforce [subtle invariants](https://github.com/coilhq/tigerbeetle/blob/db789acfb93584e5cb9f331f9d6092ef90b53ea6/src/vsr/journal.zig#L45-L47) or [type sizes](https://github.com/coilhq/tigerbeetle/blob/578ac603326e1d3d33532701cb9285d5d2532fe7/src/ewah.zig#L41-L53). Compile-time assertions are extremely powerful because they are able to check a program's design integrity *before* the program even executes.
+
+* **The golden rule of assertions is to assert the _positive space_ that you do expect AND to assert the _negative space_ that you do not expect** because where data moves across the valid/invalid boundary between these spaces is where interesting bugs are often found. This is also why **tests must test exhaustively**, not only with valid data but also with invalid data, and as valid data becomes invalid.
 
 * All memory must be statically allocated at startup. **No memory may be dynamically allocated (or freed and reallocated) after initialization.** This avoids unpredictable behavior that can significantly affect performance, and avoids use-after-free. As a second-order effect, it is our experience that this also makes for more efficient, simpler designs that are more performant and easier to maintain and reason about, compared to designs that do not consider all possible memory usage patterns upfront as part of the design.
 
@@ -69,6 +75,8 @@ We know that what we ship is solid. We may lack crucial features, but what we ha
 * Appreciate, from day one, **all compiler warnings at the compiler's strictest setting**.
 
 Beyond these rules:
+
+* Compound conditions that evaluate multiple booleans make it difficult for the reader to verify that all cases are handled. Split compound conditions into simple conditions using nested `if/else` branches. Split complex `else if` chains into `else { if { } }` trees. This makes the branches and cases clear. Again, consider whether a single `if` does not also need a matching `else` branch, to ensure that the positive and negative spaces are handled or asserted.
 
 * All errors must be handled. An [analysis of production failures in distributed data-intensive systems](https://www.usenix.org/system/files/conference/osdi14/osdi14-paper-yuan.pdf) found that the majority of catastrophic failures could have been prevented by simple testing of error handling code.
 
@@ -86,7 +94,7 @@ Beyond these rules:
 
 * Optimize for the slowest resources first (network, disk, memory, CPU) in that order, after compensating for the frequency of usage, because faster resources may be used many times more. For example, a memory cache miss may be as expensive as a disk fsync, if it happens many times more.
 
-* Distinguish between the control plane and data plane. See our [July 2021 talk on Zig SHOWTIME](https://youtu.be/BH2jvJ74npM?t=1958) for examples.
+* Distinguish between the control plane and data plane. A clear delineation between control plane and data plane through the use of batching enables a high level of assertion safety without losing performance. See our [July 2021 talk on Zig SHOWTIME](https://youtu.be/BH2jvJ74npM?t=1958) for examples.
 
 * Amortize network, disk, memory and CPU costs by batching accesses.
 
@@ -114,7 +122,13 @@ Beyond these rules:
 
 * When a single function calls out to a helper function or callback, prefix the name of the helper function with the name of the calling function to show the call history. For example, `read_sector()` and `read_sector_callback()`.
 
-* Don't forget to say why. Code is not documentation.
+* Don't overload names with multiple meanings that are context-dependent. For example, TigerBeetle has a feature called *pending transfers* where a pending transfer can be subsequently *posted* or *voided*. At first, we called them *two-phase commit transfers*, but this overloaded the *two-phase commit* terminology that was used in our consensus protocol, causing confusion.
+
+* Think of how names will be used outside the code, in documentation or communication. For example, a noun is often a better descriptor than an adjective or present participle, because a noun can be directly used in correspondence without having to be rephrased. Compare `replica.pipeline` vs `replica.preparing`. The former can be used directly as a section header in a document or conversation, whereas the latter must be clarified.
+
+* **Write descriptive commit messages** that inform and delight the reader, because your commit messages are being read.
+
+* Don't forget to say why. Code alone is not documentation. Use comments to explain why you wrote the code the way you did. Show your workings.
 
 * Don't forget to say how. For example, when writing a test, think of writing a description at the top to explain the goal and methodology of the test, to help your reader get up to speed, or to skip over sections, without forcing them to dive in.
 
@@ -124,7 +138,7 @@ Beyond these rules:
 
 * Don't duplicate variables or take aliases to them. This will reduce the probability that state gets out of sync.
 
-* If you don't mean a function argument to be copied when passed by value, and if the argument type is more than 16 bytes, than pass the argument as `*const`. This will catch bugs where the caller makes an accidental copy on the stack before calling the function.
+* If you don't mean a function argument to be copied when passed by value, and if the argument type is more than 16 bytes, then pass the argument as `*const`. This will catch bugs where the caller makes an accidental copy on the stack before calling the function.
 
 * **Shrink the scope** to minimize the number of variables at play and reduce the probability that the wrong variable is used.
 
@@ -134,7 +148,7 @@ Beyond these rules:
 
 * Ensure that functions run to completion without suspending, so that precondition assertions are true throughout the lifetime of the function. These assertions are useful documentation without a suspend, but may be misleading otherwise.
 
-* Be on your guard for **[buffer bleeds](https://en.wikipedia.org/wiki/Heartbleed)**. This is a buffer underflow, the opposite of buffer overflow, where a buffer is not fully utilized, with padding not zeroed correctly. This may not only leak sensitive information, but may cause deterministic guarantees as required by TigerBeetle to be violated.
+* Be on your guard for **[buffer bleeds](https://en.wikipedia.org/wiki/Heartbleed)**. This is a buffer underflow, the opposite of a buffer overflow, where a buffer is not fully utilized, with padding not zeroed correctly. This may not only leak sensitive information, but may cause deterministic guarantees as required by TigerBeetle to be violated.
 
 * Use newlines to **group resource allocation and deallocation**, i.e. before the resource allocation and after the corresponding `defer` statement, to make leaks easier to spot.
 
