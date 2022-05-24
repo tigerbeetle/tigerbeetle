@@ -52,7 +52,7 @@ We know that what we ship is solid. We may lack crucial features, but what we ha
 
 [NASA's Power of Ten — Rules for Developing Safety Critical Code](https://spinroot.com/gerard/pdf/P10.pdf) will change the way you code forever. To expand:
 
-* Use **only very simple, explicit control flow** for clarity. **Do not use recursion** to ensure that all executions that should be bounded are bounded. Use **only a minimum of excellent abstractions** but only if they make the best sense of the domain. Abstractions are never zero cost. Every abstraction introduces the risk of a leaky abstraction.
+* Use **only very simple, explicit control flow** for clarity. **Do not use recursion** to ensure that all executions that should be bounded are bounded. Use **only a minimum of excellent abstractions** but only if they make the best sense of the domain. Abstractions are [never zero cost](https://isaacfreund.com/blog/2022-05/). Every abstraction introduces the risk of a leaky abstraction.
 
 * **Put a limit on everything** because, in reality, this is what we expect—everything has a limit. For example, all loops and all queues must have a fixed upper bound to prevent infinite loops or tail latency spikes. This follows the [“fail-fast”](https://en.wikipedia.org/wiki/Fail-fast) principle so that violations are detected sooner rather than later. Where a loop cannot terminate (e.g. an event loop), this must be asserted.
 
