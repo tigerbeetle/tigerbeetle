@@ -3961,35 +3961,30 @@ pub fn Replica(
         }
 
         /// Discard messages from the prepare pipeline.
-        /// Retain uncommitted messages that belong in the current view.
+        /// Retain uncommitted messages that belong in the current view to maximize durability.
         fn reset_pipeline(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
 
-            // Discard messages from the front of the pipeline that have been committed by the
-            // cluster since the last time we were leader.
-            while (self.pipeline.head()) |prepare| {
+            // Discard messages from the front of the pipeline that committed since we were leader.
+            while (self.pipeline.head_ptr()) |prepare| {
                 if (prepare.message.header.op > self.commit_max) break;
+
                 self.message_bus.unref(prepare.message);
                 assert(self.pipeline.pop() != null);
             }
 
-            if (self.pipeline.head()) |prepare| {
-                assert(prepare.message.header.op == self.commit_max + 1);
-            }
+            // Discard messages from the back of the pipeline that are not part of this view.
+            while (self.pipeline.tail_ptr()) |prepare| {
+                if (self.journal.has(prepare.message.header)) break;
 
-            // Discard messages from back of the pipeline that aren't part of this view.
-            while (self.pipeline.tail()) |prepare| {
-                const pipeline_header = prepare.message.header;
-                if (self.journal.header_with_op(pipeline_header.op)) |journal_header| {
-                    if (journal_header.checksum == pipeline_header.checksum) {
-                        break;
-                    }
-                }
                 self.message_bus.unref(prepare.message);
                 assert(self.pipeline.pop_tail() != null);
             }
-            log.debug("{}: reset_pipeline: retain messages (count={})", .{
+
+            self.verify_pipeline();
+
+            log.debug("{}: reset_pipeline: retained {} prepare(s)", .{
                 self.replica,
                 self.pipeline.count,
             });
@@ -4487,19 +4482,7 @@ pub fn Replica(
             assert(self.commit_max + self.pipeline.count == self.op);
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
-            var pipeline_op = self.commit_max + 1;
-            var pipeline_parent = self.journal.header_with_op(self.commit_max).?.checksum;
-            var iterator = self.pipeline.iterator();
-            while (iterator.next_ptr()) |prepare| {
-                assert(prepare.message.header.command == .prepare);
-                assert(prepare.message.header.op == pipeline_op);
-                assert(prepare.message.header.parent == pipeline_parent);
-
-                pipeline_parent = prepare.message.header.checksum;
-                pipeline_op += 1;
-            }
-            assert(self.pipeline.count <= config.pipeline_max);
-            assert(self.commit_max + self.pipeline.count == pipeline_op - 1);
+            self.verify_pipeline();
 
             assert(self.journal.dirty.count == 0);
             assert(self.journal.faulty.count == 0);
@@ -4765,6 +4748,22 @@ pub fn Replica(
             }
             assert(b.op == op_min);
             return true;
+        }
+
+        fn verify_pipeline(self: *Self) void {
+            var op = self.commit_max + 1;
+            var parent = self.journal.header_with_op(self.commit_max).?.checksum;
+            var iterator = self.pipeline.iterator();
+            while (iterator.next_ptr()) |prepare| {
+                assert(prepare.message.header.command == .prepare);
+                assert(prepare.message.header.op == op);
+                assert(prepare.message.header.parent == parent);
+
+                parent = prepare.message.header.checksum;
+                op += 1;
+            }
+            assert(self.pipeline.count <= config.pipelining_max);
+            assert(self.commit_max + self.pipeline.count == op - 1);
         }
 
         fn view_jump(self: *Self, header: *const Header) void {
