@@ -4061,11 +4061,11 @@ pub fn Replica(
         }
 
         fn reset_quorum_recovery_response(self: *Self) void {
-            for (self.recovery_response_from_other_replicas) |*message, replica| {
-                if (message.*) |m| {
-                    self.message_bus.unref(m);
-                    message.* = null;
+            for (self.recovery_response_from_other_replicas) |*received, replica| {
+                if (received.*) |message| {
                     assert(replica != self.replica);
+                    self.message_bus.unref(message);
+                    received.* = null;
                 }
             }
         }
@@ -4529,7 +4529,7 @@ pub fn Replica(
 
         fn transition_to_normal_from_recovering_status(self: *Self, new_view: u32) void {
             assert(self.status == .recovering);
-            assert(new_view >= self.view);
+            assert(self.view == 0);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
