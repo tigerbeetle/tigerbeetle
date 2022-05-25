@@ -243,13 +243,7 @@ pub const StateMachine = struct {
 
             switch (operation) {
                 .create_accounts => self.create_account_rollback(event),
-                .create_transfers => {
-                    if (event.pending_id > 0) {
-                        self.posted_transfer_rollback(event);
-                    } else {
-                        self.transfer_rollback(event);
-                    }
-                },
+                .create_transfers => self.transfer_rollback(event),
                 else => unreachable,
             }
             log.debug("{s} {}/{}: rollback(): {}", .{
@@ -330,90 +324,14 @@ pub const StateMachine = struct {
         if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
             return .cannot_post_and_void_pending_transfer;
         } else if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-            if (t.flags.padding != 0) return .reserved_flag_padding;
-            if (t.pending_id == 0) return .pending_id_is_zero;
-            if (self.get_transfer(t.id)) |_| return .exists;
-
-            if (self.get_posted(t.pending_id)) |exists| {
-                if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .transfer_already_posted;
-                if (exists.flags.void_pending_transfer and !t.flags.void_pending_transfer) return .transfer_already_voided;
-                return .transfer_already_posted;
-            }
-
-            const lookup = self.get_transfer(t.pending_id) orelse return .transfer_not_found;
-            if (!lookup.flags.pending) return .transfer_not_pending;
-
-            assert(t.timestamp > lookup.timestamp);
-
-            if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
-
-            const dr = self.get_account(lookup.debit_account_id) orelse return .debit_account_not_found;
-            const cr = self.get_account(lookup.credit_account_id) orelse return .credit_account_not_found;
-            assert(lookup.timestamp > dr.timestamp);
-            assert(lookup.timestamp > cr.timestamp);
-
-            assert(lookup.flags.pending);
-            if (dr.debits_pending < lookup.amount) return .debit_amount_not_pending;
-            if (cr.credits_pending < lookup.amount) return .credit_amount_not_pending;
-
-            // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
-            assert(!dr.debits_exceed_credits(0));
-            assert(!cr.credits_exceed_debits(0));
-
-            const dr_id = if (t.debit_account_id == 0) lookup.debit_account_id else t.debit_account_id;
-            if (t.debit_account_id != dr_id) return .exists_with_different_debit_account_id;
-
-            const cr_id = if (t.credit_account_id == 0) lookup.credit_account_id else t.credit_account_id;
-            if (t.credit_account_id != cr_id) return .exists_with_different_credit_account_id;
-
-            const user_data = if (t.user_data == 0) lookup.user_data else t.user_data;
-            if (t.user_data != user_data) return .exists_with_different_user_data;
-
-            const ledger = if (t.ledger == 0) lookup.ledger else t.ledger;
-            if (t.ledger != ledger) return .exists_with_different_ledger;
-
-            const code = if (t.code == 0) lookup.code else t.code;
-            if (t.code != code) return .exists_with_different_code;
-
-            const amount = if (t.amount == 0) lookup.amount else t.amount;
-            if (amount > lookup.amount) return .amount_exceeds_pending_amount;
-
-            // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-            const insert = self.posted.getOrPutAssumeCapacity(t.pending_id);
-            assert(!insert.found_existing);
-
-            insert.value_ptr.* = Transfer{
-                .id = t.id,
-                .debit_account_id = dr_id,
-                .credit_account_id = cr_id,
-                .user_data = user_data,
-                .reserved = t.reserved,
-                .ledger = ledger,
-                .code = code,
-                .pending_id = t.pending_id,
-                .timeout = t.timeout,
-                .timestamp = t.timestamp,
-                .flags = t.flags,
-                .amount = amount,
-            };
-
-            dr.debits_pending -= lookup.amount;
-            cr.credits_pending -= lookup.amount;
-            if (!t.flags.void_pending_transfer) {
-                dr.debits_posted += amount;
-                cr.credits_posted += amount;
-            }
-            self.commit_timestamp = t.timestamp;
-            return .ok;
+            return self.post_or_void_pending_transfer(t);
         } else {
             if (t.flags.padding != 0) return .reserved_flag_padding;
             if (t.flags.pending) {
                 // Otherwise reserved amounts may never be released:
                 if (t.timeout == 0) return .pending_transfer_must_timeout;
                 if (t.pending_id != 0) return .pending_id_must_be_zero;
-            } else if (t.timeout != 0) {
-                return .timeout_reserved_for_pending_transfer;
-            }
+            } else if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
 
             if (t.amount == 0) return .amount_is_zero;
 
@@ -430,37 +348,28 @@ pub const StateMachine = struct {
             assert(t.timestamp > cr.timestamp);
 
             if (dr.ledger != cr.ledger) return .accounts_have_different_ledgers;
-            if (dr.debits_overflow(t.amount)) return .overflow_debits;
-            if (cr.credits_overflow(t.amount)) return .overflow_credits;
 
-            const insert = self.transfers.getOrPutAssumeCapacity(t.id);
-            if (insert.found_existing) {
-                const exists = insert.value_ptr.*;
-                if (exists.debit_account_id != t.debit_account_id) {
-                    return .exists_with_different_debit_account_id;
-                } else if (exists.credit_account_id != t.credit_account_id) {
-                    return .exists_with_different_credit_account_id;
-                }
-                if (exists.amount != t.amount) return .exists_with_different_amount;
-                if (@bitCast(u16, exists.flags) != @bitCast(u16, t.flags)) {
-                    return .exists_with_different_flags;
-                }
-                if (exists.user_data != t.user_data) return .exists_with_different_user_data;
-                if (exists.reserved != t.reserved) {
-                    return .exists_with_different_reserved_field;
-                }
-                if (exists.timeout != t.timeout) return .exists_with_different_timeout;
-                return .exists;
-            }
+            // Verify that the debit/credit amounts do not exceed or overflow:
+            // Debit:
+            if (dr.debits_pending_overflow(t.amount)) return .debits_pending_would_overflow;
+            if (dr.debits_posted_overflow(t.amount)) return .debits_posted_would_overflow;
+            if (dr.debits_overflow(t.amount)) return .debits_would_overflow;
+
+            // Credit:
+            if (dr.credits_pending_overflow(t.amount)) return .credits_pending_would_overflow;
+            if (dr.credits_posted_overflow(t.amount)) return .credits_posted_would_overflow;
+            if (cr.credits_overflow(t.amount)) return .credits_would_overflow;
 
             if (dr.debits_exceed_credits(t.amount)) {
-                assert(self.transfers.remove(t.id));
                 return .exceeds_credits;
             } else if (cr.credits_exceed_debits(t.amount)) {
-                assert(self.transfers.remove(t.id));
                 return .exceeds_debits;
             }
 
+            const insert = self.transfers.getOrPutAssumeCapacity(t.id);
+            if (insert.found_existing) return existing_transfer_error(t, insert.value_ptr.*);
+
+            // Success, update balances on the C/D accounts:
             insert.value_ptr.* = t;
             if (t.flags.pending) {
                 dr.debits_pending += t.amount;
@@ -474,29 +383,144 @@ pub const StateMachine = struct {
         }
     }
 
-    fn transfer_rollback(self: *StateMachine, t: Transfer) void {
-        var dr = self.get_account(t.debit_account_id).?;
-        var cr = self.get_account(t.credit_account_id).?;
-        if (t.flags.pending) {
-            dr.debits_pending -= t.amount;
-            cr.credits_pending -= t.amount;
-        } else {
-            dr.debits_posted -= t.amount;
-            cr.credits_posted -= t.amount;
+    fn post_or_void_pending_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
+        if (t.flags.padding != 0) return .reserved_flag_padding;
+        if (t.pending_id == 0) return .pending_id_is_zero;
+        //TODO this needs to be more specific... See 1-phase transfer...
+        //TODO ensure the logic between 1 and 2 phase is the same..
+        //TODO ensure the order of checking values are also the same
+
+        //TODO confirm that the posted and
+
+        //TODO only need to store the flags on the posted.
+
+        //TODO confirm that the duplicate checks don't have bugs...
+        if (self.get_transfer(t.id)) |existing| return existing_transfer_error(t, existing.*);
+
+        if (self.get_posted(t.pending_id)) |exists| {
+            if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .transfer_already_posted;
+            if (exists.flags.void_pending_transfer and !t.flags.void_pending_transfer) return .transfer_already_voided;
+            return .transfer_already_posted;
         }
-        assert(self.transfers.remove(t.id));
+
+        // Lookup should be [pending]:
+        const lookup = self.get_transfer(t.pending_id) orelse return .transfer_not_found;
+        if (!lookup.flags.pending) return .transfer_not_pending;
+
+        assert(t.timestamp > lookup.timestamp);
+
+        if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
+
+        const dr = self.get_account(lookup.debit_account_id) orelse return .debit_account_not_found;
+        const cr = self.get_account(lookup.credit_account_id) orelse return .credit_account_not_found;
+        assert(lookup.timestamp > dr.timestamp);
+        assert(lookup.timestamp > cr.timestamp);
+
+        assert(lookup.flags.pending);
+        if (dr.debits_pending < lookup.amount) return .debit_amount_not_pending;
+        if (cr.credits_pending < lookup.amount) return .credit_amount_not_pending;
+
+        // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
+        //TODO not required. already checked during [create_transfer]
+        //assert(!dr.debits_exceed_credits(0));
+        //assert(!cr.credits_exceed_debits(0));
+
+        if (t.debit_account_id > 0 and lookup.debit_account_id != t.debit_account_id) {
+            return .exists_with_different_debit_account_id;
+        }
+
+        if (t.credit_account_id > 0 and lookup.credit_account_id != t.credit_account_id) {
+            std.debug.print("BOOM -> {any} vs {any}.", .{ lookup.credit_account_id, t.credit_account_id });
+            return .exists_with_different_credit_account_id;
+        }
+
+        //TODO Change!!!!
+        //const dr_id = if (t.debit_account_id == 0) lookup.debit_account_id else t.debit_account_id;
+        //if (t.debit_account_id != dr_id) return .exists_with_different_debit_account_id;
+
+        //const cr_id = if (t.credit_account_id == 0) lookup.credit_account_id else t.credit_account_id;
+        //if (t.credit_account_id != cr_id) return .exists_with_different_credit_account_id;
+
+        const user_data = if (t.user_data == 0) lookup.user_data else t.user_data;
+        if (t.user_data != user_data) return .exists_with_different_user_data;
+
+        const ledger = if (t.ledger == 0) lookup.ledger else t.ledger;
+        if (t.ledger != ledger) return .exists_with_different_ledger;
+
+        const code = if (t.code == 0) lookup.code else t.code;
+        if (t.code != code) return .exists_with_different_code;
+
+        const amount = if (t.amount == 0) lookup.amount else t.amount;
+        if (amount > lookup.amount) return .amount_exceeds_pending_amount;
+
+        // TODO We can combine this lookup with the previous lookup if we return `error!void`:
+        const insert = self.posted.getOrPutAssumeCapacity(t.pending_id);
+        assert(!insert.found_existing);
+
+        insert.value_ptr.* = Transfer{
+            .id = t.id,
+            .debit_account_id = lookup.debit_account_id,
+            .credit_account_id = lookup.credit_account_id,
+            .user_data = user_data,
+            .reserved = t.reserved,
+            .ledger = ledger,
+            .code = code,
+            .pending_id = t.pending_id,
+            .timeout = t.timeout,
+            .timestamp = t.timestamp,
+            .flags = t.flags,
+            .amount = amount,
+        };
+
+        dr.debits_pending -= lookup.amount;
+        cr.credits_pending -= lookup.amount;
+        if (!t.flags.void_pending_transfer) {
+            dr.debits_posted += amount;
+            cr.credits_posted += amount;
+        }
+        self.commit_timestamp = t.timestamp;
+        return .ok;
     }
 
-    fn posted_transfer_rollback(self: *StateMachine, pt: Transfer) void {
-        const dr = self.get_account(pt.debit_account_id).?;
-        const cr = self.get_account(pt.credit_account_id).?;
-        dr.debits_pending += pt.amount;
-        cr.credits_pending += pt.amount;
-        if (!pt.flags.void_pending_transfer) {
-            dr.debits_posted -= pt.amount;
-            cr.credits_posted -= pt.amount;
+    fn existing_transfer_error(t: Transfer, exists: Transfer) CreateTransferResult {
+        if (exists.debit_account_id != t.debit_account_id) {
+            return .exists_with_different_debit_account_id;
+        } else if (exists.credit_account_id != t.credit_account_id) {
+            return .exists_with_different_credit_account_id;
         }
-        assert(self.posted.remove(pt.pending_id));
+        if (exists.amount != t.amount) return .exists_with_different_amount;
+        if (@bitCast(u16, exists.flags) != @bitCast(u16, t.flags)) {
+            return .exists_with_different_flags;
+        }
+        if (exists.user_data != t.user_data) return .exists_with_different_user_data;
+        if (exists.ledger != t.ledger) return .exists_with_different_ledger;
+        if (exists.reserved != t.reserved) return .exists_with_different_reserved_field;
+        if (exists.timeout != t.timeout) return .exists_with_different_timeout;
+        return .exists;
+    }
+
+    fn transfer_rollback(self: *StateMachine, t: Transfer) void {
+        const dr = self.get_account(t.debit_account_id).?;
+        const cr = self.get_account(t.credit_account_id).?;
+
+        if (t.pending_id > 0) {
+            dr.debits_pending += t.amount;
+            cr.credits_pending += t.amount;
+            if (!t.flags.void_pending_transfer) {
+                dr.debits_posted -= t.amount;
+                cr.credits_posted -= t.amount;
+            }
+            assert(self.posted.remove(t.pending_id));
+        } else {
+            if (t.flags.pending) {
+                dr.debits_pending -= t.amount;
+                cr.credits_pending -= t.amount;
+            } else {
+                dr.debits_posted -= t.amount;
+                cr.credits_posted -= t.amount;
+            }
+            assert(self.transfers.remove(t.id));
+        }
     }
 
     /// This is our core private method for changing balances.
@@ -902,7 +926,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         Vector{
-            .result = .overflow_credits,
+            .result = .credits_would_overflow,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 10,
                 .timestamp = timestamp,
@@ -912,7 +936,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         Vector{
-            .result = .overflow_debits,
+            .result = .debits_posted_would_overflow,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 10,
                 .timestamp = timestamp,
@@ -1372,8 +1396,8 @@ test "create/lookup/rollback 2-phase transfers" {
                 .id = 23,
                 .pending_id = 8,
                 .amount = 16, //original amount is 15.
-                .debit_account_id = 1,
-                .credit_account_id = 2,
+                .debit_account_id = 11,
+                .credit_account_id = 12,
                 .timestamp = timestamp + 3,
                 .flags = .{ .void_pending_transfer = true },
             }),
@@ -1468,7 +1492,7 @@ test "create/lookup/rollback 2-phase transfers" {
     );
 
     // Rollback [id=13,pending_id=2] not rejected:
-    state_machine.posted_transfer_rollback(vectors[4].object);
+    state_machine.transfer_rollback(vectors[4].object);
 
     // Account 1:
     const account_1_rollback = state_machine.get_account(1).?.*;
@@ -1486,7 +1510,7 @@ test "create/lookup/rollback 2-phase transfers" {
     try testing.expectEqual(@as(u64, 60), account_2_rollback.credits_pending);
 
     // Rollback [id=3] rejected:
-    state_machine.posted_transfer_rollback(vectors[7].object);
+    state_machine.transfer_rollback(vectors[7].object);
     // Account 1:
     const account_1_rollback_reject = state_machine.get_account(1).?.*;
     try testing.expectEqual(@as(u64, 15), account_1_rollback_reject.debits_posted);

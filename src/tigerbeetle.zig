@@ -24,8 +24,34 @@ pub const Account = packed struct {
         assert(@sizeOf(Account) == 128);
     }
 
+    pub fn debits_pending_overflow(self: *const Account, amount: u64) bool {
+        _ = try_add(self.debits_pending, amount) orelse return true;
+        return false;
+    }
+
+    pub fn debits_posted_overflow(self: *const Account, amount: u64) bool {
+        _ = try_add(self.debits_posted, amount) orelse return true;
+        return false;
+    }
+
     pub fn debits_overflow(self: *const Account, amount: u64) bool {
         const pending_posted = try_add(self.debits_pending, self.debits_posted) orelse return true;
+        _ = try_add(pending_posted, amount) orelse return true;
+        return false;
+    }
+
+    pub fn credits_pending_overflow(self: *const Account, amount: u64) bool {
+        _ = try_add(self.credits_pending, amount) orelse return true;
+        return false;
+    }
+
+    pub fn credits_posted_overflow(self: *const Account, amount: u64) bool {
+        _ = try_add(self.credits_posted, amount) orelse return true;
+        return false;
+    }
+
+    pub fn credits_overflow(self: *const Account, amount: u64) bool {
+        const pending_posted = try_add(self.credits_pending, self.credits_posted) orelse return true;
         _ = try_add(pending_posted, amount) orelse return true;
         return false;
     }
@@ -33,12 +59,6 @@ pub const Account = packed struct {
     pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
         return (self.flags.debits_must_not_exceed_credits and
             self.debits_pending + self.debits_posted + amount > self.credits_posted);
-    }
-
-    pub fn credits_overflow(self: *const Account, amount: u64) bool {
-        const pending_posted = try_add(self.credits_pending, self.credits_posted) orelse return true;
-        _ = try_add(pending_posted, amount) orelse return true;
-        return false;
     }
 
     pub fn credits_exceed_debits(self: *const Account, amount: u64) bool {
@@ -146,8 +166,12 @@ pub const CreateTransferResult = enum(u32) {
     amount_is_zero,
     exceeds_credits,
     exceeds_debits,
-    overflow_credits,
-    overflow_debits,
+    debits_would_overflow,
+    debits_pending_would_overflow,
+    debits_posted_would_overflow,
+    credits_pending_would_overflow,
+    credits_posted_would_overflow,
+    credits_would_overflow,
     pending_transfer_must_timeout,
     timeout_reserved_for_pending_transfer,
     /// For two-phase transfers:
