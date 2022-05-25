@@ -19,7 +19,7 @@ const LookupAccountResult = tb.LookupAccountResult;
 
 const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);
-const HashMapPosted = std.AutoHashMap(u128, Transfer);
+const HashMapPosted = std.AutoHashMap(u128, TransferFlags);
 const HashMapUserDataToId = std.AutoHashMap(u128, u128);
 
 pub const StateMachine = struct {
@@ -360,11 +360,8 @@ pub const StateMachine = struct {
             if (dr.credits_posted_overflow(t.amount)) return .credits_posted_would_overflow;
             if (cr.credits_overflow(t.amount)) return .credits_would_overflow;
 
-            if (dr.debits_exceed_credits(t.amount)) {
-                return .exceeds_credits;
-            } else if (cr.credits_exceed_debits(t.amount)) {
-                return .exceeds_debits;
-            }
+            if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
+            if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
 
             const insert = self.transfers.getOrPutAssumeCapacity(t.id);
             if (insert.found_existing) return existing_transfer_error(t, insert.value_ptr.*);
@@ -386,98 +383,76 @@ pub const StateMachine = struct {
     fn post_or_void_pending_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
         if (t.flags.padding != 0) return .reserved_flag_padding;
         if (t.pending_id == 0) return .pending_id_is_zero;
-        //TODO this needs to be more specific... See 1-phase transfer...
-        //TODO ensure the logic between 1 and 2 phase is the same..
-        //TODO ensure the order of checking values are also the same
+        //TODO @jason ensure the logic between 1 and 2 phase is the same..
+        //TODO @jason ensure the order of checking values are also the same
 
-        //TODO confirm that the posted and
+        //TODO @jason only need to store the flags on the posted.
 
-        //TODO only need to store the flags on the posted.
+        //TODO @jason confirm that the duplicate checks don't have bugs...
+        //---
+        //---
 
-        //TODO confirm that the duplicate checks don't have bugs...
+        //TODO remove this:
         if (self.get_transfer(t.id)) |existing| return existing_transfer_error(t, existing.*);
 
         if (self.get_posted(t.pending_id)) |exists| {
-            if (!exists.flags.void_pending_transfer and t.flags.void_pending_transfer) return .transfer_already_posted;
-            if (exists.flags.void_pending_transfer and !t.flags.void_pending_transfer) return .transfer_already_voided;
+            if (!exists.void_pending_transfer and t.flags.void_pending_transfer) return .transfer_already_posted;
+            if (exists.void_pending_transfer and !t.flags.void_pending_transfer) return .transfer_already_voided;
             return .transfer_already_posted;
         }
 
-        // Lookup should be [pending]:
-        const lookup = self.get_transfer(t.pending_id) orelse return .transfer_not_found;
-        if (!lookup.flags.pending) return .transfer_not_pending;
+        const pending = self.get_transfer(t.pending_id) orelse return .transfer_not_found;
+        if (!pending.flags.pending) return .transfer_not_pending;
 
-        assert(t.timestamp > lookup.timestamp);
+        assert(t.timestamp > pending.timestamp);
 
-        if (lookup.timeout > 0 and lookup.timestamp + lookup.timeout <= t.timestamp) return .transfer_expired;
+        if (pending.timeout > 0 and pending.timestamp + pending.timeout <= t.timestamp) return .transfer_expired;
 
-        const dr = self.get_account(lookup.debit_account_id) orelse return .debit_account_not_found;
-        const cr = self.get_account(lookup.credit_account_id) orelse return .credit_account_not_found;
-        assert(lookup.timestamp > dr.timestamp);
-        assert(lookup.timestamp > cr.timestamp);
+        const dr = self.get_account(pending.debit_account_id) orelse return .debit_account_not_found;
+        const cr = self.get_account(pending.credit_account_id) orelse return .credit_account_not_found;
+        assert(pending.timestamp > dr.timestamp);
+        assert(pending.timestamp > cr.timestamp);
 
-        assert(lookup.flags.pending);
-        if (dr.debits_pending < lookup.amount) return .debit_amount_not_pending;
-        if (cr.credits_pending < lookup.amount) return .credit_amount_not_pending;
+        assert(pending.flags.pending);
+        if (dr.debits_pending < pending.amount) return .debit_amount_not_pending;
+        if (cr.credits_pending < pending.amount) return .credit_amount_not_pending;
 
-        // Once reserved, the amount can be moved from reserved to accepted without breaking limits:
-        //TODO not required. already checked during [create_transfer]
-        //assert(!dr.debits_exceed_credits(0));
-        //assert(!cr.credits_exceed_debits(0));
-
-        if (t.debit_account_id > 0 and lookup.debit_account_id != t.debit_account_id) {
+        if (t.debit_account_id > 0 and pending.debit_account_id != t.debit_account_id) {
             return .exists_with_different_debit_account_id;
         }
-
-        if (t.credit_account_id > 0 and lookup.credit_account_id != t.credit_account_id) {
-            std.debug.print("BOOM -> {any} vs {any}.", .{ lookup.credit_account_id, t.credit_account_id });
+        if (t.credit_account_id > 0 and pending.credit_account_id != t.credit_account_id) {
             return .exists_with_different_credit_account_id;
         }
 
-        //TODO Change!!!!
-        //const dr_id = if (t.debit_account_id == 0) lookup.debit_account_id else t.debit_account_id;
-        //if (t.debit_account_id != dr_id) return .exists_with_different_debit_account_id;
-
-        //const cr_id = if (t.credit_account_id == 0) lookup.credit_account_id else t.credit_account_id;
-        //if (t.credit_account_id != cr_id) return .exists_with_different_credit_account_id;
-
-        const user_data = if (t.user_data == 0) lookup.user_data else t.user_data;
+        const user_data = if (t.user_data == 0) pending.user_data else t.user_data;
         if (t.user_data != user_data) return .exists_with_different_user_data;
 
-        const ledger = if (t.ledger == 0) lookup.ledger else t.ledger;
+        const ledger = if (t.ledger == 0) pending.ledger else t.ledger;
         if (t.ledger != ledger) return .exists_with_different_ledger;
 
-        const code = if (t.code == 0) lookup.code else t.code;
+        const code = if (t.code == 0) pending.code else t.code;
         if (t.code != code) return .exists_with_different_code;
 
-        const amount = if (t.amount == 0) lookup.amount else t.amount;
-        if (amount > lookup.amount) return .amount_exceeds_pending_amount;
+        const amount = if (t.amount == 0) pending.amount else t.amount;
+        if (amount > pending.amount) return .amount_exceeds_pending_amount;
 
         // TODO We can combine this lookup with the previous lookup if we return `error!void`:
-        const insert = self.posted.getOrPutAssumeCapacity(t.pending_id);
-        assert(!insert.found_existing);
+        const p_insert = self.posted.getOrPutAssumeCapacity(t.pending_id);
+        assert(!p_insert.found_existing);
 
-        insert.value_ptr.* = Transfer{
-            .id = t.id,
-            .debit_account_id = lookup.debit_account_id,
-            .credit_account_id = lookup.credit_account_id,
-            .user_data = user_data,
-            .reserved = t.reserved,
-            .ledger = ledger,
-            .code = code,
-            .pending_id = t.pending_id,
-            .timeout = t.timeout,
-            .timestamp = t.timestamp,
-            .flags = t.flags,
-            .amount = amount,
-        };
+        p_insert.value_ptr.* = t.flags;
 
-        dr.debits_pending -= lookup.amount;
-        cr.credits_pending -= lookup.amount;
+        dr.debits_pending -= pending.amount;
+        cr.credits_pending -= pending.amount;
         if (!t.flags.void_pending_transfer) {
             dr.debits_posted += amount;
             cr.credits_posted += amount;
         }
+
+        // Store the pending transaction:
+        //TODO @jason: const insert = self.transfers.getOrPutAssumeCapacity(t.id);
+        //TODO @jason: if (insert.found_existing) return existing_transfer_error(t, insert.value_ptr.*);
+
         self.commit_timestamp = t.timestamp;
         return .ok;
     }
@@ -511,6 +486,7 @@ pub const StateMachine = struct {
                 cr.credits_posted -= t.amount;
             }
             assert(self.posted.remove(t.pending_id));
+            //TODO @jason, also need to remove the transaction...
         } else {
             if (t.flags.pending) {
                 dr.debits_pending -= t.amount;
@@ -539,7 +515,7 @@ pub const StateMachine = struct {
     }
 
     /// See the comment for get_account().
-    fn get_posted(self: *StateMachine, pending_id: u128) ?*Transfer {
+    fn get_posted(self: *StateMachine, pending_id: u128) ?*TransferFlags {
         return self.posted.getPtr(pending_id);
     }
 };
@@ -1426,12 +1402,13 @@ test "create/lookup/rollback 2-phase transfers" {
         };
 
         if (vector.result == .ok) {
-            const fetched_posted = state_machine.get_posted(vector.object.pending_id).?.*;
-            testing.expectEqual(vector.object, fetched_posted) catch |err| {
-                test_debug_vector_create(Vector, Transfer, i, vector, fetched_posted, err);
-                return err;
-            };
-            //try testing.expectEqual(vector.object, fetched_posted);
+            //TODO @jason: needs to come from transfer, not posted...
+            //const fetched_posted = state_machine.get_posted(vector.object.pending_id).?.*;
+            //testing.expectEqual(vector.object, fetched_posted) catch |err| {
+            //    test_debug_vector_create(Vector, Transfer, i, vector, fetched_posted, err);
+            //    return err;
+            //};
+            //TODO @jason try testing.expectEqual(vector.object, fetched_posted);
         }
     }
 
@@ -1529,7 +1506,7 @@ test "create/lookup/rollback 2-phase transfers" {
 }
 
 test "credit/debit limit overflows " {
-    const acc_debit_not_exceed_credit = Account{
+    const acc_debit_not_exceed_credit_pending = Account{
         .id = 1,
         .user_data = 1,
         .reserved = [_]u8{0} ** 48,
@@ -1541,7 +1518,19 @@ test "credit/debit limit overflows " {
         .credits_pending = 0,
         .credits_posted = 0,
     };
-    const acc_credit_not_exceed_debit = Account{
+    const acc_debit_not_exceed_credit_posted = Account{
+        .id = 1,
+        .user_data = 1,
+        .reserved = [_]u8{0} ** 48,
+        .ledger = 710,
+        .code = 1000,
+        .flags = .{ .debits_must_not_exceed_credits = true },
+        .debits_pending = 0,
+        .debits_posted = std.math.maxInt(u64),
+        .credits_pending = 0,
+        .credits_posted = 0,
+    };
+    const acc_credit_not_exceed_debit_pending = Account{
         .id = 1,
         .user_data = 1,
         .reserved = [_]u8{0} ** 48,
@@ -1553,10 +1542,26 @@ test "credit/debit limit overflows " {
         .credits_pending = std.math.maxInt(u64),
         .credits_posted = 0,
     };
+    const acc_credit_not_exceed_debit_posted = Account{
+        .id = 1,
+        .user_data = 1,
+        .reserved = [_]u8{0} ** 48,
+        .ledger = 710,
+        .code = 1000,
+        .flags = .{ .credits_must_not_exceed_debits = true },
+        .debits_pending = 0,
+        .debits_posted = 0,
+        .credits_pending = 0,
+        .credits_posted = std.math.maxInt(u64),
+    };
 
     // Exceeds the overflow limit by 1:
-    try testing.expect(acc_debit_not_exceed_credit.debits_overflow(1));
-    try testing.expect(acc_credit_not_exceed_debit.credits_overflow(1));
+    try testing.expect(acc_debit_not_exceed_credit_pending.debits_overflow(1));
+    try testing.expect(acc_debit_not_exceed_credit_pending.debits_pending_overflow(1));
+    try testing.expect(acc_debit_not_exceed_credit_posted.debits_posted_overflow(1));
+    try testing.expect(acc_credit_not_exceed_debit_pending.credits_overflow(1));
+    try testing.expect(acc_credit_not_exceed_debit_pending.credits_pending_overflow(1));
+    try testing.expect(acc_credit_not_exceed_debit_posted.credits_posted_overflow(1));
 
     const acc_debit_not_exceed_credit_no_overflow = Account{
         .id = 1,
