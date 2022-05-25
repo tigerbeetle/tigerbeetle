@@ -445,7 +445,7 @@ pub fn Replica(
                     // Transition immediately to normal mode; no need to run VSR recovery protocol.
                     assert(self.journal.dirty.count == 0);
                     assert(self.journal.faulty.count == 0);
-                    self.transition_from_recovering_status(0);
+                    self.transition_to_normal_from_recovering_status(0);
                     assert(self.status == .normal);
                 } else if (self.replica_count == 1) {
                     // Cluster-of-1 doesn't run recovery protocol.
@@ -1136,7 +1136,7 @@ pub fn Replica(
             assert(self.journal.header_with_op(self.op).?.checksum == latest.checksum);
 
             if (self.status == .view_change) {
-                self.transition_to_normal_status(message.header.view);
+                self.transition_to_normal_from_view_change_status(message.header.view);
                 self.send_prepare_oks_after_view_change();
             }
 
@@ -1384,7 +1384,7 @@ pub fn Replica(
             }
 
             assert(self.status == .recovering);
-            self.transition_from_recovering_status(view);
+            self.transition_to_normal_from_recovering_status(view);
             assert(self.status == .normal);
             assert(self.follower());
 
@@ -2204,7 +2204,7 @@ pub fn Replica(
 
                 if (self.status == .recovering) {
                     assert(self.replica_count == 1);
-                    self.transition_from_recovering_status(0);
+                    self.transition_to_normal_from_recovering_status(0);
                 }
             }
         }
@@ -4508,7 +4508,7 @@ pub fn Replica(
             const start_view = self.create_view_change_message(.start_view);
             defer self.message_bus.unref(start_view);
 
-            self.transition_to_normal_status(self.view);
+            self.transition_to_normal_from_view_change_status(self.view);
             // Detect if the transition to normal status above accidentally resets the pipeline:
             assert(self.commit_max + self.pipeline.count == self.op);
 
@@ -4527,46 +4527,73 @@ pub fn Replica(
             self.send_message_to_other_replicas(start_view);
         }
 
-        fn transition_from_recovering_status(self: *Self, new_view: u32) void {
+        fn transition_to_normal_from_recovering_status(self: *Self, new_view: u32) void {
             assert(self.status == .recovering);
-
-            self.view = new_view;
-            self.view_normal = new_view;
-            self.status = .normal;
-            self.recovery_timeout.stop();
-
-            if (self.leader()) {
-                assert(self.journal.is_empty() or self.replica_count == 1);
-
-                log.debug("{}: transition_from_recovering_status: leader view={}", .{
-                    self.replica,
-                    new_view,
-                });
-                self.ping_timeout.start();
-                self.commit_timeout.start();
-                self.repair_timeout.start();
-            } else {
-                log.debug("{}: transition_from_recovering_status: follower view={}", .{
-                    self.replica,
-                    new_view,
-                });
-                self.ping_timeout.start();
-                self.normal_status_timeout.start();
-                self.repair_timeout.start();
-            }
-        }
-
-        fn transition_to_normal_status(self: *Self, new_view: u32) void {
-            log.debug("{}: transition_to_normal_status: view={}", .{ self.replica, new_view });
-            // In the VRR paper it's possible to transition from normal to normal for the same view.
-            // For example, this could happen after a state transfer triggered by an op jump.
             assert(new_view >= self.view);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
 
             if (self.leader()) {
-                log.debug("{}: transition_to_normal_status: leader", .{self.replica});
+                log.debug(
+                    "{}: transition_to_normal_from_recovering_status: view={} leader",
+                    .{
+                        self.replica,
+                        self.view,
+                    },
+                );
+
+                assert(self.journal.is_empty() or self.replica_count == 1);
+                assert(!self.prepare_timeout.ticking);
+                assert(!self.normal_status_timeout.ticking);
+                assert(!self.view_change_status_timeout.ticking);
+                assert(!self.view_change_message_timeout.ticking);
+
+                self.ping_timeout.start();
+                self.commit_timeout.start();
+                self.repair_timeout.start();
+                self.recovery_timeout.stop();
+            } else {
+                log.debug(
+                    "{}: transition_to_normal_from_recovering_status: view={} follower",
+                    .{
+                        self.replica,
+                        self.view,
+                    },
+                );
+
+                assert(!self.prepare_timeout.ticking);
+                assert(!self.commit_timeout.ticking);
+                assert(!self.view_change_status_timeout.ticking);
+                assert(!self.view_change_message_timeout.ticking);
+
+                self.ping_timeout.start();
+                self.normal_status_timeout.start();
+                self.repair_timeout.start();
+                self.recovery_timeout.stop();
+            }
+        }
+
+        fn transition_to_normal_from_view_change_status(self: *Self, new_view: u32) void {
+            // In the VRR paper it's possible to transition from normal to normal for the same view.
+            // For example, this could happen after a state transfer triggered by an op jump.
+            assert(self.status == .view_change);
+            assert(new_view >= self.view);
+            self.view = new_view;
+            self.view_normal = new_view;
+            self.status = .normal;
+
+            if (self.leader()) {
+                log.debug(
+                    "{}: transition_to_normal_from_view_change_status: view={} leader",
+                    .{
+                        self.replica,
+                        self.view,
+                    },
+                );
+
+                assert(!self.prepare_timeout.ticking);
+                assert(!self.recovery_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.commit_timeout.start();
@@ -4576,12 +4603,15 @@ pub fn Replica(
                 self.repair_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
-                if (self.pipeline.count > 0) {
-                    assert(!self.prepare_timeout.ticking);
-                    self.prepare_timeout.start();
-                }
+                if (self.pipeline.count > 0) self.prepare_timeout.start();
             } else {
-                log.debug("{}: transition_to_normal_status: follower", .{self.replica});
+                log.debug("{}: transition_to_normal_from_view_change_status: view={} follower", .{
+                    self.replica,
+                    self.view,
+                });
+
+                assert(!self.prepare_timeout.ticking);
+                assert(!self.recovery_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.commit_timeout.stop();
@@ -4589,7 +4619,6 @@ pub fn Replica(
                 self.view_change_status_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
-                self.prepare_timeout.stop();
             }
 
             self.reset_quorum_start_view_change();
@@ -4612,6 +4641,7 @@ pub fn Replica(
                 self.view,
                 new_view,
             });
+            assert(self.status == .normal or self.status == .view_change);
             assert(new_view > self.view);
             self.view = new_view;
             self.status = .view_change;
@@ -4623,6 +4653,7 @@ pub fn Replica(
             self.view_change_message_timeout.start();
             self.repair_timeout.stop();
             self.prepare_timeout.stop();
+            assert(!self.recovery_timeout.ticking);
 
             // Do not reset quorum counters only on entering a view, assuming that the view will be
             // followed only by a single subsequent view change to the next view, because multiple
