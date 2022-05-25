@@ -1367,13 +1367,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // For this, we'll need to have a way to tweak write_prepare_release() to release locks.
             // At present, we don't return early here simply because it doesn't yet do that.
 
+            const replica = @fieldParentPtr(Replica, "journal", self);
             const message = write.message;
-            const slot = self.slot_for_header(message.header);
+            const slot_of_message = self.slot_for_header(message.header);
             const slot_first = Slot{
-                .index = @divFloor(slot.index, headers_per_sector) * headers_per_sector,
+                .index = @divFloor(slot_of_message.index, headers_per_sector) * headers_per_sector,
             };
 
-            const offset = offset_physical(.headers, slot);
+            const offset = offset_physical(.headers, slot_of_message);
             assert(offset % config.sector_size == 0);
             assert(offset == slot_first.index * @sizeOf(Header));
 
@@ -1383,17 +1384,45 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             var i: usize = 0;
             while (i < headers_per_sector) : (i += 1) {
-                if (self.faulty.bit(Slot{ .index = slot_first.index + i })) {
+                const slot = Slot{ .index = slot_first.index + i };
+                if (self.faulty.bit(slot)) {
                     // Redundant faulty headers are deliberately written as invalid.
                     // This ensures that faulty headers are still faulty when they are read back
                     // from disk during recovery. This prevents faulty entries from changing to
                     // reserved (and clean) after a crash and restart (e.g. accidentally converting
                     // a case `@D` to a `@H` after a restart).
-                    buffer_headers[i] = .{ .cluster = 0, .command = .reserved };
+                    buffer_headers[i] = .{
+                        .checksum = 0,
+                        .cluster = replica.cluster,
+                        .command = .reserved,
+                    };
                     assert(!buffer_headers[i].valid_checksum());
-                } else {
-                    buffer_headers[i] = self.headers[i + slot_first.index];
+                    continue;
                 }
+
+                if (message.header.op < slot_count and !self.prepare_inhabited[slot.index]) {
+                    // When:
+                    // * this is the first wrap of the WAL, and
+                    // * this prepare slot is not inhabited (never has been)
+                    // write a reserved header instead of the in-memory prepare header.
+                    //
+                    // This can be triggered by the follow sequence of events:
+                    // 1. Ops 6 and 7 arrive.
+                    // 2. The write of prepare 7 finishes (before prepare 6).
+                    // 3. Op 7 continues on to write the redundant headers.
+                    //    Because prepare 6 is not yet written, header 6 is written as reserved.
+                    // 4. (If at this point the replica crashes & restarts, slot 6 is in case `@H`
+                    //    (decision=nil) which can be locally repaired. In contrast, if op 6's
+                    //    header was written in step 3, it would be case `@G`, which requires
+                    //    remote repair.
+                    //
+                    // * When `replica_count=1`, case `@G`, is not recoverable.
+                    // * When `replica_count>1` this marginally improves availability by enabling
+                    //   local repair.
+                    buffer_headers[i] = Header.reserved(replica.cluster, slot.index);
+                    continue;
+                }
+                buffer_headers[i] = self.headers[slot.index];
             }
 
             log.debug("{}: write_header: op={} sectors[{}..{}]", .{
