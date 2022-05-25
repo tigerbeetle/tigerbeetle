@@ -3316,9 +3316,12 @@ pub fn Replica(
             assert(self.journal.header_with_op(self.commit_min) != null);
             assert(self.journal.header_with_op(self.op) != null);
 
-            // The replica repairs backwards from `commit_max`. But if the `commit_max` is too high
-            // (>1 WAL ahead) bound it such that uncommitted WAL entries are not overwritten.
-            const commit_max_limit = std.math.min(self.commit_max, self.op_checkpoint + config.journal_slot_count);
+            // The replica repairs backwards from `commit_max`. But if `commit_max` is too high
+            // (>1 WAL ahead), then bound it such that uncommitted WAL entries are not overwritten.
+            const commit_max_limit = std.math.min(
+                self.commit_max,
+                self.op_checkpoint + config.journal_slot_count,
+            );
 
             // Request outstanding committed prepares to advance our op number:
             // This handles the case of an idle cluster, where a follower will not otherwise advance.
@@ -3329,7 +3332,7 @@ pub fn Replica(
                 // received, so we must therefore be a follower in normal status:
                 assert(self.status == .normal);
                 assert(self.follower());
-                log.debug("{}: repair: op={} < commit_max_limit={}; commit_max={}", .{
+                log.debug("{}: repair: op={} < commit_max_limit={}, commit_max={}", .{
                     self.replica,
                     self.op,
                     commit_max_limit,
