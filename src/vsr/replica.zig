@@ -453,7 +453,7 @@ pub fn Replica(
                     if (self.journal.faulty.count != 0) @panic("journal is corrupt");
                     if (self.committing) return;
                     assert(self.op == 0);
-                    self.op = self.journal.op_maximum();
+                    self.op = self.journal.op_chain_maximum(self.op_checkpoint);
 
                     self.commit_ops(self.op);
                     // This is a cluster-of-1 (we are always the leader), so the actual

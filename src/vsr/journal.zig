@@ -390,14 +390,19 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return self.header_for_op(header.op + 1);
         }
 
-        pub fn op_maximum(self: *const Self) u64 {
-            assert(self.recovered);
+        pub fn op_chain_maximum(self: *const Self, op_chain_min: u64) u64 {
+            const replica = @fieldParentPtr(Replica, "journal", self);
 
-            var op: u64 = 0;
-            for (self.headers) |*header| {
-                if (header.command == .prepare and op < header.op) {
-                    op = header.op;
-                }
+            assert(self.recovered);
+            assert(replica.replica_count == 1);
+            assert(self.dirty.count == 0);
+            assert(self.faulty.count == 0);
+
+            var op: u64 = op_chain_min;
+            while (op < op_chain_min + slot_count) : (op += 1) {
+                const header = &self.headers[self.slot_for_op(op + 1).index];
+                if (header.command != .prepare) break;
+                if (header.op != op + 1) break;
             }
             return op;
         }
