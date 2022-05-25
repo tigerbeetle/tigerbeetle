@@ -3192,6 +3192,25 @@ pub fn Replica(
             }
         }
 
+        /// Searches the pipeline for a prepare for a given op and checksum.
+        fn pipeline_prepare_for_op_and_checksum(self: *Self, op: u64, checksum: u128) ?*Prepare {
+            // To optimize the search, we can leverage the fact that the pipeline is ordered:
+            // Avoid scanning the whole pipeline if the op is before the pipeline.
+            if (self.pipeline.head_ptr()) |head| if (op < head.message.header.op) return null;
+            // Avoid scanning the whole pipeline if the op is after the pipeline.
+            if (self.pipeline.tail_ptr()) |tail| if (op > tail.message.header.op) return null;
+
+            var iterator = self.pipeline.iterator();
+            while (iterator.next_ptr()) |prepare| {
+                if (prepare.message.header.checksum == checksum) {
+                    assert(prepare.message.header.op == op);
+                    return prepare;
+                }
+            }
+
+            return null;
+        }
+
         /// Searches the pipeline for a prepare for a given client.
         fn pipeline_prepare_for_client(self: *Self, client: u128) ?*Prepare {
             assert(self.status == .normal);
@@ -3807,7 +3826,7 @@ pub fn Replica(
             // We may be appending to or repairing the journal concurrently.
             // We do not want to re-request any of these prepares unnecessarily.
             if (self.journal.writing(op, checksum)) {
-                log.debug("{}: repair_prepare: already writing op={} checksum={}", .{
+                log.debug("{}: repair_prepare: op={} checksum={} (already writing)", .{
                     self.replica,
                     op,
                     checksum,
@@ -3824,17 +3843,18 @@ pub fn Replica(
             //
             // Using the pipeline to repair is faster than a `request_prepare`.
             // Also, messages in the pipeline are never corrupt.
-            if (self.commit_max < op) {
-                if (self.pipeline.get_ptr(op - self.commit_max - 1)) |prepare| {
-                    if (prepare.message.header.checksum == checksum) {
-                        log.debug("{}: repair_prepare: in pipeline op={} checksum={}", .{
-                            self.replica,
-                            op,
-                            checksum,
-                        });
-                        self.write_prepare(prepare.message, .pipeline);
-                        return true;
-                    }
+            if (op > self.commit_max) {
+                if (self.pipeline_prepare_for_op_and_checksum(op, checksum)) |prepare| {
+                    assert(prepare.message.header.op == op);
+                    assert(prepare.message.header.checksum == checksum);
+
+                    log.debug("{}: repair_prepare: op={} checksum={} (from pipeline)", .{
+                        self.replica,
+                        op,
+                        checksum,
+                    });
+                    self.write_prepare(prepare.message, .pipeline);
+                    return true;
                 }
             }
 
