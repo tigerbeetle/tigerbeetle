@@ -1096,12 +1096,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(!self.dirty.bit(slot));
             assert(!self.faulty.bit(slot));
 
-            const header = self.headers[slot.index];
-            const prepare = read.message.header;
-            const case = recovery_case(replica.cluster, slot, &header, read.message);
+            const header: *const Header = &self.headers[slot.index];
+            const prepare: *const Header = read.message.header;
+
+            const case = recovery_case(replica.cluster, slot, header, read.message);
             const decision = case.decision(replica.replica_count);
 
-            if (prepare.command == .prepare and prepare.valid_checksum()) {
+            if (prepare.valid_checksum() and prepare.command == .prepare) {
                 assert(!self.prepare_inhabited[slot.index]);
 
                 // Store the message in `prepare_checksums` even if it belongs in a different slot.
@@ -1119,7 +1120,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(!self.faulty.bit(slot));
                     assert(self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == prepare.checksum);
-                    self.headers[slot.index] = header;
+                    self.headers[slot.index] = header.*;
                 },
                 .nil => {
                     assert(header.command == .reserved);
@@ -1171,6 +1172,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             replica.message_bus.unref(read.message);
             self.reads.release(read);
+
             self.recover_prepares(Slot{ .index = slot.index + 1 });
         }
 
@@ -2021,7 +2023,7 @@ fn recovery_case(
 ) *const Case {
     assert(slot.index < slot_count);
 
-    const prepare = prepare_message.header;
+    const prepare: *const Header = prepare_message.header;
     const prepare_valid = header_ok(cluster, slot, prepare);
     const header_valid = header_ok(cluster, slot, header);
     if (prepare_valid) assert(prepare.invalid() == null);
