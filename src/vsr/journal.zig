@@ -1421,6 +1421,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             var i: usize = 0;
             while (i < headers_per_sector) : (i += 1) {
                 const slot = Slot{ .index = slot_first.index + i };
+
                 if (self.faulty.bit(slot)) {
                     // Redundant faulty headers are deliberately written as invalid.
                     // This ensures that faulty headers are still faulty when they are read back
@@ -1433,13 +1434,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         .command = .reserved,
                     };
                     assert(!buffer_headers[i].valid_checksum());
-                    continue;
-                }
-
-                if (message.header.op < slot_count and !self.prepare_inhabited[slot.index]) {
+                } else if (message.header.op < slot_count and
+                    !self.prepare_inhabited[slot.index] and
+                    message.header.command == .prepare and
+                    self.dirty.bit(slot))
+                {
                     // When:
                     // * this is the first wrap of the WAL, and
-                    // * this prepare slot is not inhabited (never has been)
+                    // * this prepare slot is not inhabited (never has been), and
+                    // * this prepare slot is a dirty prepare,
                     // write a reserved header instead of the in-memory prepare header.
                     //
                     // This can be triggered by the follow sequence of events:
@@ -1456,9 +1459,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     // * When `replica_count>1` this marginally improves availability by enabling
                     //   local repair.
                     buffer_headers[i] = Header.reserved(replica.cluster, slot.index);
-                    continue;
+                } else {
+                    buffer_headers[i] = self.headers[slot.index];
                 }
-                buffer_headers[i] = self.headers[slot.index];
             }
 
             log.debug("{}: write_header: op={} sectors[{}..{}]", .{
