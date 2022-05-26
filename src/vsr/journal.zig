@@ -378,9 +378,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return null;
         }
 
+        // TODO How should we handle the case where the current header argument is the same as
+        // op_checkpoint?
         pub fn previous_entry(self: *const Self, header: *const Header) ?*const Header {
             if (header.op == 0) {
-                return self.header_for_op(slot_count - 1);
+                return null;
             } else {
                 return self.header_for_op(header.op - 1);
             }
@@ -821,8 +823,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            const body = read.message.body();
-            if (!read.message.header.valid_checksum_body(body)) {
+            if (!read.message.header.valid_checksum_body(read.message.body())) {
                 if (slot) |s| {
                     self.faulty.set(s);
                     self.dirty.set(s);

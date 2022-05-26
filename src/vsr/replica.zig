@@ -1452,14 +1452,8 @@ pub fn Replica(
                 else => unreachable,
             };
 
-            if (message.header.timestamp == 0) {
-                assert(self.leader_index(self.view) == self.replica);
-            }
-
-            if (self.leader_index(self.view) != self.replica) {
-                // Only the leader may respond to `request_prepare` messages without a checksum.
-                if (checksum == null) return;
-            }
+            // Only the leader may respond to `request_prepare` messages without a checksum.
+            assert(checksum != null or self.leader_index(self.view) == self.replica);
 
             // Try to serve the message directly from the pipeline.
             // This saves us from going to disk. And we don't need to worry that the WAL's copy
@@ -3083,7 +3077,7 @@ pub fn Replica(
         /// * ` ✓ o ✗ `: View change is unsafe.
         /// * ` ✗ ✓ o `: View change is unsafe.
         /// * ` ✓ ✗ o `: View change is safe.
-        /// * ✓=o:       View change is unsafe if any slots are faulty
+        /// * ` ✓ = o `: View change is unsafe if any slots are faulty
         ///              (`replica.op_checkpoint` == `replica.op`).
         // TODO Use this function once we switch from recovery protocol to the superblock.
         // If there is an "unsafe" fault, we will need to request a start_view from the leader to
@@ -3313,6 +3307,8 @@ pub fn Replica(
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
 
+            assert(self.op_checkpoint <= self.op);
+            assert(self.op_checkpoint <= self.commit_min);
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
 
@@ -3766,12 +3762,6 @@ pub fn Replica(
 
                     if (self.journal.faulty.bit(slot)) {
                         assert(self.journal.headers[op].command == .reserved);
-                        self.journal.dirty.clear(slot);
-                        self.journal.faulty.clear(slot);
-                        log.debug("{}: repair_prepares: op={} (op known, first cycle)", .{
-                            self.replica,
-                            op,
-                        });
                     }
                 }
             }
