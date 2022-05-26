@@ -929,12 +929,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.dirty.count == 0);
             assert(self.faulty.count == 0);
 
-            const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
-            const target_headers = self.headers[offset / @sizeOf(Header) ..][0..buffer_headers.len];
             // Directly store all the redundant headers in `self.headers` (including any that are
             // invalid or corrupt). As the prepares are recovered, these will be replaced or
             // removed as necessary.
-            std.mem.copy(Header, target_headers, buffer_headers);
+            const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
+            std.mem.copy(
+                Header,
+                self.headers[@divExact(offset, @sizeOf(Header))..][0..buffer_headers.len],
+                buffer_headers,
+            );
 
             const offset_next = offset + buffer.len;
             // We must release before we call `recover_headers()` in case Storage is synchronous.
