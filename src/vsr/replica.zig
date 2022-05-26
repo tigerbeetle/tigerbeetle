@@ -437,30 +437,27 @@ pub fn Replica(
 
             if (self.status == .recovering) {
                 if (self.recovery_timeout.ticking) {
-                    // Continue running VSR recovery protocol.
+                    // Continue running the VSR recovery protocol.
                     self.recovery_timeout.tick();
                     if (self.recovery_timeout.fired()) self.on_recovery_timeout();
                 } else if (self.journal.is_empty()) {
-                    // The database is brand-new — no messages have ever been written.
-                    // Transition immediately to normal mode; no need to run VSR recovery protocol.
+                    // The data file is brand new — no messages have ever been written.
+                    // Transition to normal status; no need to run the VSR recovery protocol.
                     assert(self.journal.dirty.count == 0);
                     assert(self.journal.faulty.count == 0);
                     self.transition_to_normal_from_recovering_status(0);
                     assert(self.status == .normal);
                 } else if (self.replica_count == 1) {
-                    // Cluster-of-1 doesn't run recovery protocol.
-
+                    // A cluster-of-one does not run the VSR recovery protocol.
                     if (self.journal.faulty.count != 0) @panic("journal is corrupt");
                     if (self.committing) return;
                     assert(self.op == 0);
-                    self.op = self.journal.op_chain_maximum(self.op_checkpoint);
-
+                    self.op = self.journal.op_maximum_continuous(self.op_checkpoint);
                     self.commit_ops(self.op);
-                    // This is a cluster-of-1 (we are always the leader), so the actual
-                    // recovering→normal status transition is deferred until all ops are committed.
+                    // The recovering→normal transition is deferred until all ops are committed.
                 } else {
                     // The journal just finished recovery.
-                    // Now try to learn the current view via VSR recovery protocol.
+                    // Now try to learn the current view via the VSR recovery protocol.
                     self.recovery_timeout.start();
                     self.recover();
                 }
@@ -867,7 +864,6 @@ pub fn Replica(
             }
 
             self.normal_status_timeout.reset();
-
             self.commit_ops(message.header.commit);
         }
 
@@ -2187,6 +2183,7 @@ pub fn Replica(
 
             if (!self.valid_hash_chain("commit_ops_read")) {
                 self.committing = false;
+                assert(self.replica_count > 1);
                 return;
             }
             assert(self.op >= self.commit_max);
@@ -2204,7 +2201,12 @@ pub fn Replica(
 
                 if (self.status == .recovering) {
                     assert(self.replica_count == 1);
+                    assert(self.commit_min == self.commit_max);
+                    assert(self.commit_min == self.op);
                     self.transition_to_normal_from_recovering_status(0);
+                } else {
+                    // We expect that a cluster-of-one only calls commit_ops() in recovering status.
+                    assert(self.replica_count > 1);
                 }
             }
         }
@@ -2217,9 +2219,7 @@ pub fn Replica(
 
             if (prepare == null) {
                 log.debug("{}: commit_ops_commit: prepare == null", .{self.replica});
-                if (self.replica_count == 1) {
-                    @panic("cannot recover corrupt prepare");
-                }
+                if (self.replica_count == 1) @panic("cannot recover corrupt prepare");
                 return;
             }
 
@@ -2228,6 +2228,7 @@ pub fn Replica(
                 .view_change => {
                     if (self.leader_index(self.view) != self.replica) {
                         log.debug("{}: commit_ops_commit: no longer leader", .{self.replica});
+                        assert(self.replica_count > 1);
                         return;
                     }
 
@@ -2244,11 +2245,13 @@ pub fn Replica(
 
             if (prepare.?.header.op != op) {
                 log.debug("{}: commit_ops_commit: op changed", .{self.replica});
+                assert(self.replica_count > 1);
                 return;
             }
 
             if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
                 log.debug("{}: commit_ops_commit: checksum changed", .{self.replica});
+                assert(self.replica_count > 1);
                 return;
             }
 
@@ -3396,7 +3399,11 @@ pub fn Replica(
             if (self.journal.dirty.count > 0) return self.repair_prepares();
 
             // Commit ops, which may in turn discover faulty prepares and drive more repairs:
-            if (self.commit_min < self.commit_max) return self.commit_ops(self.commit_max);
+            if (self.commit_min < self.commit_max) {
+                assert(self.replica_count > 1);
+                self.commit_ops(self.commit_max);
+                return;
+            }
 
             if (self.status == .view_change and self.leader_index(self.view) == self.replica) {
                 if (self.repair_pipeline_op() != null) return self.repair_pipeline();
