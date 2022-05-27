@@ -3,38 +3,35 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const config = @import("config.zig");
 
+const log = std.log;
+pub const log_level: std.log.Level = .err;
+
 const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
 
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const StateMachine = @import("state_machine.zig").StateMachine;
-const Operation = StateMachine.Operation;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 const vsr = @import("vsr.zig");
-const Header = vsr.Header;
 const Client = vsr.Client(StateMachine, MessageBus);
 
 const tb = @import("tigerbeetle.zig");
-const Transfer = tb.Transfer;
-const Commit = tb.Commit;
-const Account = tb.Account;
-const CreateAccountsResult = tb.CreateAccountsResult;
-const CreateTransfersResult = tb.CreateTransfersResult;
 
-const MAX_TRANSFERS: u32 = 1_000_000;
-const BATCH_SIZE: u32 = 5_000;
-const IS_TWO_PHASE_COMMIT = false;
-const BENCHMARK = if (IS_TWO_PHASE_COMMIT) 500_000 else 1_000_000;
-const RESULT_TOLERANCE = 10; // percent
-const BATCHES: f32 = MAX_TRANSFERS / BATCH_SIZE;
-const TOTAL_BATCHES = @ceil(BATCHES);
+const batches_count = 100;
 
-const log = std.log;
-pub const log_level: std.log.Level = .info;
+const transfers_per_batch: u32 = @divExact(
+    config.message_size_max - @sizeOf(vsr.Header),
+    @sizeOf(tb.Transfer),
+);
+comptime {
+    assert(transfers_per_batch == 8191);
+}
 
-var accounts = [_]Account{
-    Account{
+const transfers_max: u32 = batches_count * transfers_per_batch;
+
+var accounts = [_]tb.Account{
+    .{
         .id = 1,
         .user_data = 0,
         .reserved = [_]u8{0} ** 48,
@@ -46,7 +43,7 @@ var accounts = [_]Account{
         .credits_reserved = 0,
         .credits_accepted = 0,
     },
-    Account{
+    .{
         .id = 2,
         .user_data = 0,
         .reserved = [_]u8{0} ** 48,
@@ -59,15 +56,14 @@ var accounts = [_]Account{
         .credits_accepted = 0,
     },
 };
-var max_create_transfers_latency: i64 = 0;
-var max_commit_transfers_latency: i64 = 0;
+var create_transfers_latency_max: i64 = 0;
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
-        try stderr.print("Benchmark must be built as ReleaseSafe for minimum performance.\n", .{});
+        try stderr.print("Benchmark must be built as ReleaseSafe for reasonable results.\n", .{});
     }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -78,9 +74,11 @@ pub fn main() !void {
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
     var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
+
     var io = try IO.init(32, 0);
     var message_bus = try MessageBus.init(allocator, cluster_id, address[0..], client_id, &io);
     defer message_bus.deinit();
+
     var client = try Client.init(
         allocator,
         client_id,
@@ -89,10 +87,11 @@ pub fn main() !void {
         &message_bus,
     );
     defer client.deinit();
+
     message_bus.set_on_message(*Client, &client, Client.on_message);
 
     // Pre-allocate a million transfers:
-    const transfers = try arena.allocator().alloc(Transfer, MAX_TRANSFERS);
+    const transfers = try arena.allocator().alloc(tb.Transfer, transfers_max);
     for (transfers) |*transfer, index| {
         transfer.* = .{
             .id = index,
@@ -101,82 +100,52 @@ pub fn main() !void {
             .user_data = 0,
             .reserved = [_]u8{0} ** 32,
             .code = 0,
-            .flags = if (IS_TWO_PHASE_COMMIT) .{ .two_phase_commit = true } else .{},
+            .flags = .{},
             .amount = 1,
-            .timeout = if (IS_TWO_PHASE_COMMIT) std.time.ns_per_hour else 0,
+            .timeout = 0,
         };
-    }
-
-    // Pre-allocate a million commits:
-    const commits: ?[]Commit = if (IS_TWO_PHASE_COMMIT) try arena.allocator().alloc(Commit, MAX_TRANSFERS) else null;
-    if (commits) |all_commits| {
-        for (all_commits) |*commit, index| {
-            commit.* = .{
-                .id = index,
-                .reserved = [_]u8{0} ** 32,
-                .code = 0,
-                .flags = .{},
-            };
-        }
     }
 
     try wait_for_connect(&client, &io);
 
-    try stdout.print("creating accounts...\n", .{});
     var queue = TimedQueue.init(&client, &io);
     try queue.push(.{
-        .operation = Operation.create_accounts,
+        .operation = StateMachine.Operation.create_accounts,
         .data = std.mem.sliceAsBytes(accounts[0..]),
     });
+
     try queue.execute();
     assert(queue.end != null);
     assert(queue.batches.empty());
 
-    try stdout.print("batching transfers...\n", .{});
     var count: u64 = 0;
     queue.reset();
     while (count < transfers.len) {
         try queue.push(.{
             .operation = .create_transfers,
-            .data = std.mem.sliceAsBytes(transfers[count..][0..BATCH_SIZE]),
+            .data = std.mem.sliceAsBytes(transfers[count..][0..transfers_per_batch]),
         });
-
-        if (IS_TWO_PHASE_COMMIT) {
-            try queue.push(.{
-                .operation = .commit_transfers,
-                .data = std.mem.sliceAsBytes(commits.?[count..][0..BATCH_SIZE]),
-            });
-        }
-
-        count += BATCH_SIZE;
+        count += transfers_per_batch;
     }
-    assert(count == MAX_TRANSFERS);
+    assert(count == transfers_max);
 
-    try stdout.print("starting benchmark...\n", .{});
     try queue.execute();
     assert(queue.end != null);
     assert(queue.batches.empty());
 
     var ms = queue.end.? - queue.start.?;
-    const transfer_type = if (IS_TWO_PHASE_COMMIT) "two-phase commit " else "";
+
     const result: i64 = @divFloor(@intCast(i64, transfers.len * 1000), ms);
     try stdout.print("============================================\n", .{});
-    try stdout.print("{} {s}transfers per second\n\n", .{
-        result,
-        transfer_type,
-    });
-    try stdout.print("create_transfers max p100 latency per {} transfers = {}ms\n", .{
-        BATCH_SIZE,
-        queue.max_transfers_latency,
-    });
-    try stdout.print("commit_transfers max p100 latency per {} transfers = {}ms\n", .{
-        BATCH_SIZE,
-        queue.max_commits_latency,
+    try stdout.print("{} transfers per second\n\n", .{result});
+    try stdout.print("max p100 latency per {} transfers = {}ms\n", .{
+        transfers_per_batch,
+        queue.transfers_latency_max,
     });
 }
 
 const Batch = struct {
-    operation: Operation,
+    operation: StateMachine.Operation,
     data: []u8,
 };
 
@@ -184,19 +153,17 @@ const TimedQueue = struct {
     batch_start: ?i64,
     start: ?i64,
     end: ?i64,
-    max_transfers_latency: i64,
-    max_commits_latency: i64,
+    transfers_latency_max: i64,
     client: *Client,
     io: *IO,
-    batches: if (IS_TWO_PHASE_COMMIT) RingBuffer(Batch, 2 * TOTAL_BATCHES) else RingBuffer(Batch, TOTAL_BATCHES),
+    batches: RingBuffer(Batch, batches_count),
 
     pub fn init(client: *Client, io: *IO) TimedQueue {
         var self = TimedQueue{
             .batch_start = null,
             .start = null,
             .end = null,
-            .max_transfers_latency = 0,
-            .max_commits_latency = 0,
+            .transfers_latency_max = 0,
             .client = client,
             .io = io,
             .batches = .{},
@@ -209,8 +176,7 @@ const TimedQueue = struct {
         self.batch_start = null;
         self.start = null;
         self.end = null;
-        self.max_transfers_latency = 0;
-        self.max_commits_latency = 0;
+        self.transfers_latency_max = 0;
     }
 
     pub fn push(self: *TimedQueue, batch: Batch) !void {
@@ -233,7 +199,7 @@ const TimedQueue = struct {
 
             std.mem.copy(
                 u8,
-                message.buffer[@sizeOf(Header)..],
+                message.buffer[@sizeOf(vsr.Header)..],
                 std.mem.sliceAsBytes(starting_batch.data),
             );
             self.client.request(
@@ -251,14 +217,18 @@ const TimedQueue = struct {
         }
     }
 
-    pub fn lap(user_data: u128, operation: Operation, results: Client.Error![]const u8) void {
+    pub fn lap(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        results: Client.Error![]const u8,
+    ) void {
         const now = std.time.milliTimestamp();
         const value = results catch |err| {
             log.err("Client returned error={o}", .{@errorName(err)});
             @panic("Client returned error during benchmarking.");
         };
 
-        log.debug("response={s}", .{std.mem.bytesAsSlice(CreateAccountsResult, value)});
+        log.debug("response={s}", .{std.mem.bytesAsSlice(tb.CreateAccountsResult, value)});
 
         const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
         const completed_batch: ?Batch = self.batches.pop();
@@ -273,13 +243,8 @@ const TimedQueue = struct {
         switch (operation) {
             .create_accounts => {},
             .create_transfers => {
-                if (latency > self.max_transfers_latency) {
-                    self.max_transfers_latency = latency;
-                }
-            },
-            .commit_transfers => {
-                if (latency > self.max_commits_latency) {
-                    self.max_commits_latency = latency;
+                if (latency > self.transfers_latency_max) {
+                    self.transfers_latency_max = latency;
                 }
             },
             else => unreachable,
@@ -291,7 +256,7 @@ const TimedQueue = struct {
 
             std.mem.copy(
                 u8,
-                message.buffer[@sizeOf(Header)..],
+                message.buffer[@sizeOf(vsr.Header)..],
                 std.mem.sliceAsBytes(next_batch.data),
             );
 
