@@ -1103,15 +1103,25 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const case = recovery_case(header, prepare);
             const decision = case.decision(replica.replica_count);
 
-            if (prepare != null and prepare.?.command == .prepare) {
+            // `prepare_checksums` improves the availability of `request_prepare` by being more
+            // flexible than `headers` regarding the prepares it references:
+            //
+            // * Unlike `headers`, it may hold prepares that are found in an incorrect slot, e.g.
+            //   due to a misdirected read or write.
+            //   (That is why the following condition tests `read.message.header` instead of
+            //   `prepare`/`header_ok()`).
+            // * It may hold a prepare whose redundant header is broken (decision=`fix`|`vsr`) as
+            //   long as the prepare itself is valid.
+            if (
+                read.message.header.valid_checksum() and
+                read.message.header.cluster == replica.cluster and
+                read.message.header.command == .prepare
+            ) {
                 assert(!self.prepare_inhabited[slot.index]);
+                assert(decision != .nil);
 
-                // TODO Should we fix this, because at present, prepare is null if a different slot?
-
-                // Store the message in `prepare_checksums` even if it belongs in a different slot.
-                // This improves the availability of `request_prepare`.
                 self.prepare_inhabited[slot.index] = true;
-                self.prepare_checksums[slot.index] = prepare.?.checksum;
+                self.prepare_checksums[slot.index] = read.message.header.checksum;
             }
 
             switch (decision) {
