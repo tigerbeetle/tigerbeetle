@@ -986,7 +986,7 @@ pub const IO = struct {
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
     /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
     fn fs_supports_direct_io(dir_fd: std.os.fd_t) !bool {
-        if (!@hasDecl(std.os, "O_DIRECT")) return false;
+        if (!@hasDecl(std.os.O, "DIRECT")) return false;
 
         const path = "fs_supports_direct_io";
         const dir = std.fs.Dir{ .fd = dir_fd };
@@ -997,12 +997,12 @@ pub const IO = struct {
         while (true) {
             const res = os.system.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
             switch (os.linux.getErrno(res)) {
-                0 => {
+                .SUCCESS => {
                     os.close(@intCast(os.fd_t, res));
                     return true;
                 },
-                os.linux.EINTR => continue,
-                os.linux.EINVAL => return false,
+                .INTR => continue,
+                .INVAL => return false,
                 else => |err| return os.unexpectedErrno(err),
             }
         }
