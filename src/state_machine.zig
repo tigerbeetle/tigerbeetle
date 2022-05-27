@@ -360,6 +360,7 @@ pub const StateMachine = struct {
             if (dr.credits_posted_overflow(t.amount)) return .credits_posted_would_overflow;
             if (cr.credits_overflow(t.amount)) return .credits_would_overflow;
 
+            // Exceed Limits Verification:
             if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
             if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
 
@@ -383,17 +384,6 @@ pub const StateMachine = struct {
     fn post_or_void_pending_transfer(self: *StateMachine, t: Transfer) CreateTransferResult {
         if (t.flags.padding != 0) return .reserved_flag_padding;
         if (t.pending_id == 0) return .pending_id_is_zero;
-        //TODO @jason ensure the logic between 1 and 2 phase is the same..
-        //TODO @jason ensure the order of checking values are also the same
-
-        //TODO @jason only need to store the flags on the posted.
-
-        //TODO @jason confirm that the duplicate checks don't have bugs...
-        //---
-        //---
-
-        //TODO remove this:
-        if (self.get_transfer(t.id)) |existing| return existing_transfer_error(t, existing.*);
 
         if (self.get_posted(t.pending_id)) |exists| {
             if (!exists.void_pending_transfer and t.flags.void_pending_transfer) return .transfer_already_posted;
@@ -401,7 +391,7 @@ pub const StateMachine = struct {
             return .transfer_already_posted;
         }
 
-        const pending = self.get_transfer(t.pending_id) orelse return .transfer_not_found;
+        const pending = self.get_transfer(t.pending_id) orelse return .pending_transfer_not_found;
         if (!pending.flags.pending) return .transfer_not_pending;
 
         assert(t.timestamp > pending.timestamp);
@@ -413,7 +403,6 @@ pub const StateMachine = struct {
         assert(pending.timestamp > dr.timestamp);
         assert(pending.timestamp > cr.timestamp);
 
-        assert(pending.flags.pending);
         if (dr.debits_pending < pending.amount) return .debit_amount_not_pending;
         if (cr.credits_pending < pending.amount) return .credit_amount_not_pending;
 
@@ -436,42 +425,37 @@ pub const StateMachine = struct {
         const amount = if (t.amount == 0) pending.amount else t.amount;
         if (amount > pending.amount) return .amount_exceeds_pending_amount;
 
-        // TODO We can combine this lookup with the previous lookup if we return `error!void`:
+        // Store the [posted]/[voided] transfer:
+        const insert = self.transfers.getOrPutAssumeCapacity(t.id);
+        if (insert.found_existing) return existing_transfer_error(t, insert.value_ptr.*);
+        insert.value_ptr.* = Transfer{
+            .id = t.id,
+            .debit_account_id = pending.debit_account_id,
+            .credit_account_id = pending.credit_account_id,
+            .user_data = user_data,
+            .reserved = t.reserved,
+            .ledger = ledger,
+            .code = code,
+            .pending_id = t.pending_id,
+            .timeout = t.timeout,
+            .timestamp = t.timestamp,
+            .flags = t.flags,
+            .amount = amount,
+        };
+
         const p_insert = self.posted.getOrPutAssumeCapacity(t.pending_id);
         assert(!p_insert.found_existing);
-
         p_insert.value_ptr.* = t.flags;
 
+        // Success, update balances on the C/D accounts:
         dr.debits_pending -= pending.amount;
         cr.credits_pending -= pending.amount;
-        if (!t.flags.void_pending_transfer) {
+        if (t.flags.post_pending_transfer) {
             dr.debits_posted += amount;
             cr.credits_posted += amount;
         }
-
-        // Store the pending transaction:
-        //TODO @jason: const insert = self.transfers.getOrPutAssumeCapacity(t.id);
-        //TODO @jason: if (insert.found_existing) return existing_transfer_error(t, insert.value_ptr.*);
-
         self.commit_timestamp = t.timestamp;
         return .ok;
-    }
-
-    fn existing_transfer_error(t: Transfer, exists: Transfer) CreateTransferResult {
-        if (exists.debit_account_id != t.debit_account_id) {
-            return .exists_with_different_debit_account_id;
-        } else if (exists.credit_account_id != t.credit_account_id) {
-            return .exists_with_different_credit_account_id;
-        }
-        if (exists.amount != t.amount) return .exists_with_different_amount;
-        if (@bitCast(u16, exists.flags) != @bitCast(u16, t.flags)) {
-            return .exists_with_different_flags;
-        }
-        if (exists.user_data != t.user_data) return .exists_with_different_user_data;
-        if (exists.ledger != t.ledger) return .exists_with_different_ledger;
-        if (exists.reserved != t.reserved) return .exists_with_different_reserved_field;
-        if (exists.timeout != t.timeout) return .exists_with_different_timeout;
-        return .exists;
     }
 
     fn transfer_rollback(self: *StateMachine, t: Transfer) void {
@@ -486,7 +470,6 @@ pub const StateMachine = struct {
                 cr.credits_posted -= t.amount;
             }
             assert(self.posted.remove(t.pending_id));
-            //TODO @jason, also need to remove the transaction...
         } else {
             if (t.flags.pending) {
                 dr.debits_pending -= t.amount;
@@ -495,8 +478,30 @@ pub const StateMachine = struct {
                 dr.debits_posted -= t.amount;
                 cr.credits_posted -= t.amount;
             }
-            assert(self.transfers.remove(t.id));
         }
+        // ID will be unique for a [posted] and [pending] Transfer:
+        assert(self.transfers.remove(t.id));
+    }
+
+    fn existing_transfer_error(t: Transfer, existing: Transfer) CreateTransferResult {
+        if (existing.debit_account_id != t.debit_account_id) {
+            return .exists_with_different_debit_account_id;
+        } else if (existing.credit_account_id != t.credit_account_id) {
+            return .exists_with_different_credit_account_id;
+        }
+
+        if (existing.amount != t.amount) return .exists_with_different_amount;
+
+        if (@bitCast(u16, existing.flags) != @bitCast(u16, t.flags)) {
+            return .exists_with_different_flags;
+        }
+
+        if (existing.user_data != t.user_data) return .exists_with_different_user_data;
+        if (existing.ledger != t.ledger) return .exists_with_different_ledger;
+        if (existing.reserved != t.reserved) return .exists_with_different_reserved_field;
+        if (existing.timeout != t.timeout) return .exists_with_different_timeout;
+
+        return .exists;
     }
 
     /// This is our core private method for changing balances.
@@ -1271,7 +1276,7 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         Vector{
-            .result = .transfer_not_found,
+            .result = .pending_transfer_not_found,
             .object = std.mem.zeroInit(Transfer, .{
                 .id = 11,
                 .pending_id = 777,
@@ -1402,13 +1407,11 @@ test "create/lookup/rollback 2-phase transfers" {
         };
 
         if (vector.result == .ok) {
-            //TODO @jason: needs to come from transfer, not posted...
-            //const fetched_posted = state_machine.get_posted(vector.object.pending_id).?.*;
-            //testing.expectEqual(vector.object, fetched_posted) catch |err| {
-            //    test_debug_vector_create(Vector, Transfer, i, vector, fetched_posted, err);
-            //    return err;
-            //};
-            //TODO @jason try testing.expectEqual(vector.object, fetched_posted);
+            const fetched_posted = state_machine.get_transfer(vector.object.id).?.*;
+            testing.expectEqual(vector.object, fetched_posted) catch |err| {
+                test_debug_vector_create(Vector, Transfer, i, vector, fetched_posted, err);
+                return err;
+            };
         }
     }
 

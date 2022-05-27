@@ -176,7 +176,7 @@ pub const CreateTransferResult = enum(u32) {
     timeout_reserved_for_pending_transfer,
     /// For two-phase transfers:
     cannot_post_and_void_pending_transfer,
-    transfer_not_found,
+    pending_transfer_not_found,
     transfer_not_pending,
     transfer_already_posted,
     transfer_already_voided,
