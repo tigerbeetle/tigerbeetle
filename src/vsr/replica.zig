@@ -136,7 +136,7 @@ pub fn Replica(
 
         /// The leader's pipeline of inflight prepares waiting to commit in FIFO order.
         /// This allows us to pipeline without the complexity of out-of-order commits.
-        pipeline: RingBuffer(Prepare, config.pipelining_max) = .{},
+        pipeline: RingBuffer(Prepare, config.pipeline_max) = .{},
 
         /// In some cases, a replica may send a message to itself. We do not submit these messages
         /// to the message bus but rather queue them here for guaranteed immediate delivery, which
@@ -1482,7 +1482,7 @@ pub fn Replica(
                 // We may be slow and waiting for the write to complete.
                 //
                 // We may even have maxed out our IO depth and been unable to initiate the write,
-                // which can happen if `config.pipelining_max` exceeds `config.io_depth_write`.
+                // which can happen if `config.pipeline_max` exceeds `config.io_depth_write`.
                 // This can lead to deadlock for a cluster of one or two (if we do not retry here),
                 // since there is no other way for the leader to repair the dirty op because no
                 // other replica has it.
@@ -2125,7 +2125,7 @@ pub fn Replica(
             // that cannot be repaired because they are gaps, and this must be relative to the
             // cluster as a whole (not relative to the difference between our op and commit number)
             // as otherwise we would break correctness.
-            const count_max = config.pipelining_max;
+            const count_max = config.pipeline_max;
             assert(count_max > 0);
 
             const size_max = @sizeOf(Header) * std.math.min(
@@ -2738,7 +2738,7 @@ pub fn Replica(
                 op += 1;
             }
 
-            assert(self.pipeline.count <= config.pipelining_max);
+            assert(self.pipeline.count <= config.pipeline_max);
             assert(self.commit_max + self.pipeline.count == op - 1);
             assert(self.commit_max + self.pipeline.count == self.op);
 
@@ -3847,7 +3847,7 @@ pub fn Replica(
                 });
             }
             assert(k >= latest.commit);
-            assert(k >= self.commit_max - std.math.min(config.pipelining_max, self.commit_max));
+            assert(k >= self.commit_max - std.math.min(config.pipeline_max, self.commit_max));
 
             assert(self.commit_min <= self.commit_max);
             assert(self.op >= self.commit_max or self.op < self.commit_max);
@@ -3898,7 +3898,7 @@ pub fn Replica(
                 pipeline_parent = prepare.message.header.checksum;
                 pipeline_op += 1;
             }
-            assert(self.pipeline.count <= config.pipelining_max);
+            assert(self.pipeline.count <= config.pipeline_max);
             assert(self.commit_max + self.pipeline.count == pipeline_op - 1);
 
             assert(self.journal.dirty.len == 0);
