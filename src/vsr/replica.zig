@@ -3763,6 +3763,12 @@ pub fn Replica(
 
                     if (self.journal.faulty.bit(slot)) {
                         assert(self.journal.headers[op].command == .reserved);
+                        self.journal.dirty.clear(slot);
+                        self.journal.faulty.clear(slot);
+                        log.debug("{}: repair_prepares: op={} (op known, first cycle)", .{
+                            self.replica,
+                            op,
+                        });
                     }
                 }
             }
