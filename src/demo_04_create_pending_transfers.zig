@@ -12,7 +12,9 @@ pub fn main() !void {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .user_data = 0,
-            .reserved = [_]u8{0} ** 32,
+            .reserved = 0,
+            .pending_id = 0,
+            .ledger = 1,
             .timeout = std.time.ns_per_hour,
             .code = 0,
             .flags = .{
@@ -25,7 +27,9 @@ pub fn main() !void {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .user_data = 0,
-            .reserved = [_]u8{0} ** 32,
+            .reserved = 0,//[_]u8{0} ** 32,
+            .pending_id = 0,
+            .ledger = 1,
             .timeout = std.time.ns_per_hour,
             .code = 0,
             .flags = .{
@@ -39,7 +43,9 @@ pub fn main() !void {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .user_data = 0,
-            .reserved = [_]u8{0} ** 32,
+            .reserved = 0,
+            .pending_id = 0,
+            .ledger = 1,
             .timeout = std.time.ns_per_hour,
             .code = 0,
             .flags = .{
