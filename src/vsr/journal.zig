@@ -1097,53 +1097,59 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(!self.dirty.bit(slot));
             assert(!self.faulty.bit(slot));
 
-            const header: *const Header = &self.headers[slot.index];
-            const prepare: *const Header = read.message.header;
+            const header = header_ok(replica.cluster, slot, &self.headers[slot.index]);
+            const prepare = header_ok(replica.cluster, slot, read.message.header);
 
-            const case = recovery_case(replica.cluster, slot, header, read.message);
+            const case = recovery_case(header, prepare);
             const decision = case.decision(replica.replica_count);
 
-            if (prepare.valid_checksum() and prepare.command == .prepare) {
+            if (prepare != null and prepare.?.command == .prepare) {
                 assert(!self.prepare_inhabited[slot.index]);
+
+                // TODO Should we fix this, because at present, prepare is null if a different slot?
 
                 // Store the message in `prepare_checksums` even if it belongs in a different slot.
                 // This improves the availability of `request_prepare`.
                 self.prepare_inhabited[slot.index] = true;
-                self.prepare_checksums[slot.index] = prepare.checksum;
+                self.prepare_checksums[slot.index] = prepare.?.checksum;
             }
 
             switch (decision) {
                 .eql => {
-                    assert(header.command == .prepare);
-                    assert(prepare.command == .prepare);
-                    assert(header.checksum == prepare.checksum);
-                    assert(!self.dirty.bit(slot));
-                    assert(!self.faulty.bit(slot));
+                    assert(header.?.command == .prepare);
+                    assert(prepare.?.command == .prepare);
+                    assert(header.?.checksum == prepare.?.checksum);
                     assert(self.prepare_inhabited[slot.index]);
-                    assert(self.prepare_checksums[slot.index] == prepare.checksum);
-                    self.headers[slot.index] = header.*;
+                    assert(self.prepare_checksums[slot.index] == prepare.?.checksum);
+                    self.headers[slot.index] = header.?.*;
                 },
                 .nil => {
-                    assert(header.command == .reserved);
-                    assert(prepare.command == .reserved);
-                    assert(!self.dirty.bit(slot));
-                    assert(!self.faulty.bit(slot));
+                    assert(header.?.command == .reserved);
+                    assert(prepare.?.command == .reserved);
+                    assert(header.?.checksum == prepare.?.checksum);
                     assert(!self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == 0);
-                    self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
+                    // TODO Assert that header matches what we expect from Header.reserved().
+                    self.headers[slot.index] = header.?.*;
                 },
                 .fix => {
-                    assert(prepare.command == .prepare);
+                    // TODO Perhaps we should have 3 separate branches here for the different cases.
+                    // The header may be valid or invalid.
+                    // The header may be reserved or a prepare.
+                    assert(prepare.?.command == .prepare);
                     assert(self.prepare_inhabited[slot.index]);
-                    assert(self.prepare_checksums[slot.index] == prepare.checksum);
+                    assert(self.prepare_checksums[slot.index] == prepare.?.checksum);
                     if (replica.replica_count == 1) {
-                        self.headers[slot.index] = prepare.*;
-                        self.dirty.clear(slot);
+                        // @E, @F, @I:
+                        self.headers[slot.index] = prepare.?.*;
+                        // TODO Repair header on disk to restore durability.
                     } else {
+                        // @I:
+                        assert(header.?.command == .prepare);
+                        assert(header.?.op < prepare.?.op);
                         // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty).
-                        self.set_header_as_dirty(prepare);
+                        self.set_header_as_dirty(prepare.?);
                     }
-                    self.faulty.clear(slot);
                 },
                 .vsr => {
                     self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
@@ -2016,29 +2022,22 @@ const Case = struct {
     }
 };
 
-fn recovery_case(
-    cluster: u32,
-    slot: Slot,
-    header: *const Header,
-    prepare_message: *const Message,
-) *const Case {
-    assert(slot.index < slot_count);
+fn recovery_case(header: ?*const Header, prepare: ?*const Header) *const Case {
+    const h_ok = header != null;
+    const p_ok = prepare != null;
 
-    const prepare: *const Header = prepare_message.header;
-    const prepare_valid = header_ok(cluster, slot, prepare);
-    const header_valid = header_ok(cluster, slot, header);
-    if (prepare_valid) assert(prepare.invalid() == null);
-    if (header_valid) assert(header.invalid() == null);
+    if (h_ok) assert(header.?.invalid() == null);
+    if (p_ok) assert(prepare.?.invalid() == null);
 
     const parameters = .{
-        header_valid,
-        header.command == .reserved,
-        prepare_valid,
-        prepare.command == .reserved,
-        header.checksum == prepare.checksum,
-        header.op == prepare.op,
-        header.op < prepare.op,
-        header.view == prepare.view,
+        h_ok,
+        if (h_ok) header.?.command == .reserved else true,
+        p_ok,
+        if (p_ok) prepare.?.command == .reserved else true,
+        if (h_ok and p_ok) header.?.checksum == prepare.?.checksum else false,
+        if (h_ok and p_ok) header.?.op == prepare.?.op else false,
+        if (h_ok and p_ok) header.?.op < prepare.?.op else false,
+        if (h_ok and p_ok) header.?.view == prepare.?.view else false,
     };
 
     var result: ?*const Case = null;
@@ -2060,22 +2059,27 @@ fn recovery_case(
     return result.?;
 }
 
-/// Returns whether the message header:
+/// Returns the header, only if the header:
 /// * has a valid checksum, and
 /// * has the expected cluster, and
 /// * has an expected command, and
 /// * resides in the correct slot.
-fn header_ok(cluster: u32, slot: Slot, header: *const Header) bool {
+fn header_ok(cluster: u32, slot: Slot, header: *const Header) ?*const Header {
+    // We must first validate the header checksum before accessing any fields.
+    // Otherwise, we may hit undefined data or an out-of-bounds enum and cause a runtime crash.
+    if (!header.valid_checksum()) return null;
+
     // A header with the wrong cluster, or in the wrong slot, may indicate a misdirected read/write.
-    //
     // All journalled headers should be reserved or else prepares.
     // A misdirected read/write to or from another storage zone may return the wrong message.
-    const valid_command_and_slot = switch (header.command) {
-        .prepare => slot.index == header.op % slot_count,
-        .reserved => slot.index == header.op,
+    const valid_cluster_command_and_slot = switch (header.command) {
+        .prepare => header.cluster == cluster and slot.index == header.op % slot_count,
+        .reserved => header.cluster == cluster and slot.index == header.op,
         else => false,
     };
-    return header.valid_checksum() and header.cluster == cluster and valid_command_and_slot;
+
+    // Do not check the checksum here, because that would run only after the other field accesses.
+    return if (valid_cluster_command_and_slot) header else null;
 }
 
 test "recovery_cases" {
