@@ -2295,6 +2295,7 @@ pub fn Replica(
                 prepare.buffer[@sizeOf(Header)..prepare.header.size],
                 reply.buffer[@sizeOf(Header)..],
             ));
+
             assert(self.state_machine.commit_timestamp <= prepare.header.timestamp);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
 
@@ -3087,8 +3088,8 @@ pub fn Replica(
             assert(self.journal.recovered);
             assert(self.op_checkpoint <= self.op);
 
-            const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint);
-            const slot_op = self.journal.slot_with_op(self.op).?;
+            const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint).index;
+            const slot_op = self.journal.slot_with_op(self.op).?.index;
             const slot_op_min = std.math.min(slot_op, slot_op_checkpoint);
             const slot_op_max = std.math.max(slot_op, slot_op_checkpoint);
 
@@ -3097,7 +3098,7 @@ pub fn Replica(
                 // The command is `reserved` when the entry was found faulty during WAL recovery.
                 // Faults found after WAL recovery are not relevant, because we know their op.
                 if (self.journal.headers[slot.index].command != .reserved) continue;
-                if (slot <= slot_op_min or slot >= slot_op_max) {
+                if (slot.index <= slot_op_min or slot.index >= slot_op_max) {
                     log.warn("{}: op_certain: op not known (faulty_slot={}, op={}, op_checkpoint={})", .{
                         self.replica,
                         slot.index,
