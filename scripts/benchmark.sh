@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -e
 
+# Install Zig if it does not already exist:
+if [ ! -d "zig" ]; then
+    scripts/install_zig.sh
+fi
+
 COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
