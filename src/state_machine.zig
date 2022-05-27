@@ -64,7 +64,14 @@ pub const StateMachine = struct {
         // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
         // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
 
-        return StateMachine{ .allocator = allocator, .prepare_timestamp = 0, .commit_timestamp = 0, .accounts = accounts, .transfers = transfers, .posted = posted };
+        return StateMachine{
+            .allocator = allocator,
+            .prepare_timestamp = 0,
+            .commit_timestamp = 0,
+            .accounts = accounts,
+            .transfers = transfers,
+            .posted = posted,
+        };
     }
 
     pub fn deinit(self: *StateMachine) void {
@@ -299,7 +306,7 @@ pub const StateMachine = struct {
             const exists = insert.value_ptr.*;
             if (exists.ledger != a.ledger) return .exists_with_different_ledger;
             if (exists.code != a.code) return .exists_with_different_code;
-            if (@bitCast(u32, exists.flags) != @bitCast(u32, a.flags)) {
+            if (@bitCast(u16, exists.flags) != @bitCast(u16, a.flags)) {
                 return .exists_with_different_flags;
             }
             if (exists.user_data != a.user_data) return .exists_with_different_user_data;

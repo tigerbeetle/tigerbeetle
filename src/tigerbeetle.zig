@@ -10,8 +10,8 @@ pub const Account = packed struct {
     user_data: u128,
     /// Reserved for accounting policy primitives:
     reserved: [48]u8,
+    ledger: u32,
     /// A chart of accounts code describing the type of account (e.g. clearing, settlement):
-    ledger: u16,
     code: u16,
     flags: AccountFlags,
     debits_pending: u64,
@@ -86,10 +86,10 @@ pub const AccountFlags = packed struct {
     linked: bool = false,
     debits_must_not_exceed_credits: bool = false,
     credits_must_not_exceed_debits: bool = false,
-    padding: u29 = 0,
+    padding: u13 = 0,
 
     comptime {
-        assert(@sizeOf(AccountFlags) == @sizeOf(u32));
+        assert(@sizeOf(AccountFlags) == @sizeOf(u16));
     }
 };
 
@@ -100,7 +100,6 @@ pub const Transfer = packed struct {
     /// Opaque third-party identifier to link this transfer (many-to-one) to an external entity:
     user_data: u128,
     /// Reserved for accounting policy primitives:
-    //reserved: [32]u8,
     reserved: u128,
     //2 phase transfer:
     pending_id: u128,
