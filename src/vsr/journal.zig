@@ -1056,33 +1056,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ///    _  ignore
         ///    <  header.op < prepare.op
         ///    >  header.op > prepare.op
+        ///  eql  The header and prepare are identical; no repair necessary.
+        ///  nil  Reserved; dirty/faulty are clear, no repair necessary.
+        ///  fix  When replicas=1, use intact prepare. When replicas>1, use VSR `request_prepare`.
+        ///  vsr  Repair with VSR `request_prepare`.
         ///
         /// A "valid" header/prepare:
         /// 1. has a valid checksum
         /// 2. has the correct cluster
         /// 3. is in the correct slot (op % slot_count)
         /// 4. has command=reserved or command=prepare
-        ///
-        ///
-        /// Regarding cases @E and @F for *single-replica clusters*:
-        ///
-        /// Most likely the redundant header write was corrupted/lost (respectively).
-        /// Since single-replica clusters never rewrite ops, it can be locally repaired by copying
-        /// over the prepare's header.
-        ///
-        /// However, another (astronomically low) possibility is this:
-        ///
-        /// 1. A prepare is written to slot 12.
-        /// 2. A redundant header is written to slot 12.
-        /// 3. Continue normal operation; wrap around the WAL.
-        /// 4. A prepare is written to slot 12, but lost.
-        /// 5. A redundant header is written to slot 12.
-        /// 6. Replica crash.
-        /// 7. On recovery, the old prepare (from step 1) is read and used to "repair" the corrupt
-        ///    redundant header.
-        ///
-        /// This would be a safety violation — we assume that the likelihood of this event is
-        /// negligible.
         fn recover_prepares_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(Self.Read, "completion", completion);
             const self = read.self;
@@ -2041,9 +2024,9 @@ fn recovery_case(header: ?*const Header, prepare: ?*const Header) *const Case {
 
     const parameters = .{
         h_ok,
-        if (h_ok) header.?.command == .reserved else true,
+        if (h_ok) header.?.command == .reserved else false,
         p_ok,
-        if (p_ok) prepare.?.command == .reserved else true,
+        if (p_ok) prepare.?.command == .reserved else false,
         if (h_ok and p_ok) header.?.checksum == prepare.?.checksum else false,
         if (h_ok and p_ok) header.?.op == prepare.?.op else false,
         if (h_ok and p_ok) header.?.op < prepare.?.op else false,
