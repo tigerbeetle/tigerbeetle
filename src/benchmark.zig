@@ -25,7 +25,7 @@ const transfers_per_batch: u32 = @divExact(
     @sizeOf(tb.Transfer),
 );
 comptime {
-    assert(transfers_per_batch == 8191);
+    assert(transfers_per_batch >= 2041);
 }
 
 const transfers_max: u32 = batches_count * transfers_per_batch;
