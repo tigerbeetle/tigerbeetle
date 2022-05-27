@@ -229,7 +229,7 @@ comptime {
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
     _ = @as(u16, port);
 
-    // Avoid latency issues from a too-large sndbuf.
-    assert(tcp_sndbuf_replica <= 4 * 1024 * 1024);
-    assert(tcp_sndbuf_client <= 4 * 1024 * 1024);
+    // Avoid latency issues from setting sndbuf too high:
+    assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
+    assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
 }
