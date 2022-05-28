@@ -191,9 +191,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             var dirty = try BitSet.init(allocator, slot_count);
             errdefer dirty.deinit(allocator);
+            for (headers) |_, slot| dirty.set(Slot{ .index = slot });
 
             var faulty = try BitSet.init(allocator, slot_count);
             errdefer faulty.deinit(allocator);
+            for (headers) |_, slot| faulty.set(Slot {.index = slot });
 
             var prepare_checksums = try allocator.alloc(u128, slot_count);
             errdefer allocator.free(prepare_checksums);
@@ -233,6 +235,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(@mod(@ptrToInt(&self.headers[0]), config.sector_size) == 0);
             assert(self.dirty.bits.bit_length == slot_count);
             assert(self.faulty.bits.bit_length == slot_count);
+            assert(self.dirty.count == slot_count);
+            assert(self.faulty.count == slot_count);
             assert(self.prepare_checksums.len == slot_count);
             assert(self.prepare_inhabited.len == slot_count);
 
@@ -847,8 +851,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         pub fn recover(self: *Self) void {
             assert(!self.recovered);
             assert(!self.recovering);
-            assert(self.dirty.count == 0);
-            assert(self.faulty.count == 0);
+            assert(self.dirty.count == slot_count);
+            assert(self.faulty.count == slot_count);
 
             self.recovering = true;
 
@@ -862,8 +866,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             assert(!self.recovered);
             assert(self.recovering);
-            assert(self.dirty.count == 0);
-            assert(self.faulty.count == 0);
+            assert(self.dirty.count == slot_count);
+            assert(self.faulty.count == slot_count);
 
             if (offset == headers_size) {
                 log.debug("{}: recover_headers: complete", .{self.replica});
@@ -927,8 +931,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(buffer.len >= @sizeOf(Header));
             assert(buffer.len % @sizeOf(Header) == 0);
             assert(read.destination_replica == null);
-            assert(self.dirty.count == 0);
-            assert(self.faulty.count == 0);
+            assert(self.dirty.count == slot_count);
+            assert(self.faulty.count == slot_count);
 
             // Directly store all the redundant headers in `self.headers` (including any that are
             // invalid or corrupt). As the prepares are recovered, these will be replaced or
@@ -968,8 +972,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
             assert(slot.index < slot_count);
-            assert(!self.dirty.bit(slot));
-            assert(!self.faulty.bit(slot));
+            assert(self.dirty.bit(slot));
+            assert(self.faulty.bit(slot));
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
@@ -1077,8 +1081,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             const slot = Slot{ .index = @intCast(u64, read.checksum) };
             assert(slot.index < slot_count);
-            assert(!self.dirty.bit(slot));
-            assert(!self.faulty.bit(slot));
+            assert(self.dirty.bit(slot));
+            assert(self.faulty.bit(slot));
 
             const header = header_ok(replica.cluster, slot, &self.headers[slot.index]);
             const prepare = header_ok(replica.cluster, slot, read.message.header);
@@ -1114,15 +1118,20 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == prepare.?.checksum);
                     self.headers[slot.index] = header.?.*;
+                    self.dirty.clear(slot);
+                    self.faulty.clear(slot);
                 },
                 .nil => {
                     assert(header.?.command == .reserved);
                     assert(prepare.?.command == .reserved);
                     assert(header.?.checksum == prepare.?.checksum);
+                    assert(header.?.checksum == Header.reserved(replica.cluster, slot.index).checksum);
                     assert(!self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == 0);
                     // TODO Assert that header matches what we expect from Header.reserved().
                     self.headers[slot.index] = header.?.*;
+                    self.dirty.clear(slot);
+                    self.faulty.clear(slot);
                 },
                 .fix => {
                     // TODO Perhaps we should have 3 separate branches here for the different cases.
@@ -1134,6 +1143,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     if (replica.replica_count == 1) {
                         // @E, @F, @I:
                         self.headers[slot.index] = prepare.?.*;
+                        self.dirty.clear(slot);
+                        self.faulty.clear(slot);
                         // TODO Repair header on disk to restore durability.
                     } else {
                         // @I:
@@ -1141,12 +1152,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         assert(header.?.op < prepare.?.op);
                         // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty).
                         self.set_header_as_dirty(prepare.?);
+                        assert(!self.dirty.bit(slot));
+                        assert(!self.faulty.bit(slot));
                     }
                 },
                 .vsr => {
                     self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
-                    self.dirty.set(slot);
-                    self.faulty.set(slot);
+                    assert(self.dirty.bit(slot));
+                    assert(self.faulty.bit(slot));
                 },
             }
 
