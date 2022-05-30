@@ -1095,11 +1095,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             //   `prepare`/`header_ok()`).
             // * It may hold a prepare whose redundant header is broken (decision=`fix`|`vsr`) as
             //   long as the prepare itself is valid.
-            if (
-                read.message.header.valid_checksum() and
+            if (read.message.header.valid_checksum() and
                 read.message.header.cluster == replica.cluster and
-                read.message.header.command == .prepare
-            ) {
+                read.message.header.command == .prepare)
+            {
                 assert(!self.prepare_inhabited[slot.index]);
                 assert(decision != .nil);
 
