@@ -1202,7 +1202,7 @@ pub fn Replica(
             const count_max = 8; // The maximum number of prepare headers to include in the body.
             const count = self.copy_latest_headers_and_set_size(0, self.op, count_max, response);
             assert(count > 0); // We expect that self.op always exists.
-            assert(@divExact(message.header.size, @sizeOf(Header)) == 1 + count);
+            assert(@divExact(response.header.size, @sizeOf(Header)) == 1 + count);
 
             response.header.set_checksum_body(response.body());
             response.header.set_checksum();
@@ -1613,7 +1613,7 @@ pub fn Replica(
 
             const count = self.copy_latest_headers_and_set_size(op_min, op_max, null, response);
             assert(count >= 0);
-            assert(@divExact(message.header.size, @sizeOf(Header)) == 1 + count);
+            assert(@divExact(response.header.size, @sizeOf(Header)) == 1 + count);
 
             if (count == 0) {
                 log.debug("{}: on_request_headers: ignoring (op={}..{}, no headers)", .{
