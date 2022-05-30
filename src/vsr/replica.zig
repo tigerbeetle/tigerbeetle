@@ -2373,7 +2373,7 @@ pub fn Replica(
             message: *Message,
         ) usize {
             assert(op_max >= op_min);
-            assert(count_max == null or count_max > 0);
+            assert(count_max == null or count_max.? > 0);
 
             const body_size_max = @sizeOf(Header) * std.math.min(
                 @divExact(message.buffer.len - @sizeOf(Header), @sizeOf(Header)),
