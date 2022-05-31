@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@ronomon/crypto-async": "^5.0.1",
-    "@ronomon/hash-table": "^2.0.7",
+    "@ronomon/hash-table": "^2.0.8",
     "@ronomon/queue": "^3.0.1"
   }
 }
