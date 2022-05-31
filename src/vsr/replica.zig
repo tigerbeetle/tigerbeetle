@@ -1486,8 +1486,8 @@ pub fn Replica(
                     });
 
                     if (self.journal.header_with_op_and_checksum(op, checksum)) |_| {
-                        // Main path: the header for the target prepare is already in-memory.
-                        // This is preferrable to the `else` case since we have the prepare's
+                        // The header for the target prepare is already in-memory.
+                        // This is preferable to the `else` case since we have the prepare's
                         // `header.size` in-memory, so the read can be (potentially) shorter.
                         // TODO Do not reissue the read if we are already reading in order to send
                         // to this particular destination replica.
@@ -1515,20 +1515,17 @@ pub fn Replica(
             }
 
             {
-                const slot_clean = !self.journal.dirty.bit(slot);
-                const slot_faulty = self.journal.faulty.bit(slot);
-                if (self.journal.header_with_op_and_checksum(message.header.op, checksum)) |_| {
-                    // Either:
-                    // * We have guaranteed the prepare and our copy is clean (not safe to nack).
-                    // * We have guaranteed the prepare but our copy is faulty (not safe to nack —
-                    //   we don't know what op we prepared in this slot).
-                    if (slot_clean or slot_faulty) return;
-                    // We know of the prepare but we have yet to write or guarantee it (safe to nack).
-                    // Continue through below...
-                }
-
                 // We may have guaranteed the prepare but our copy is faulty (not safe to nack).
-                if (slot_faulty) return;
+                if (self.journal.faulty.bit(slot)) return;
+                if (self.journal.header_with_op_and_checksum(message.header.op, checksum)) |_| {
+                    if (self.journal.dirty.bit(slot)) {
+                        // We know of the prepare but have yet to write it (safe to nack).
+                        // Continue through below...
+                    } else {
+                        // We have guaranteed the prepare and our copy is clean (not safe to nack).
+                        return;
+                    }
+                }
             }
 
             // Protocol-Aware Recovery's CTRL protocol only runs during the view change, when the
@@ -2369,6 +2366,10 @@ pub fn Replica(
         ) usize {
             assert(op_max >= op_min);
             assert(count_max == null or count_max.? > 0);
+            assert(message.header.command == .do_view_change or
+                message.header.command == .start_view or
+                message.header.command == .headers or
+                message.header.command == .recovery_response);
 
             const body_size_max = @sizeOf(Header) * std.math.min(
                 @divExact(message.buffer.len - @sizeOf(Header), @sizeOf(Header)),

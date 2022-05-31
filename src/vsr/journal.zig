@@ -281,6 +281,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(!self.recovering);
             assert(self.recovered);
             assert(self.writes.executing() == 0);
+            assert(self.headers[0].valid_checksum());
 
             const replica = @fieldParentPtr(Replica, "journal", self);
             if (self.headers[0].operation != .root) return false;
@@ -445,6 +446,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn has(self: *const Self, header: *const Header) bool {
+            assert(self.recovered);
             assert(header.command == .prepare);
             // TODO Snapshots
             const slot = self.slot_for_op(header.op);
@@ -484,6 +486,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             op_max: u64,
             dest: []Header,
         ) usize {
+            assert(self.recovered);
             assert(op_min <= op_max);
             assert(dest.len > 0);
 
@@ -644,6 +647,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             checksum: u128,
             destination_replica: ?u8,
         ) void {
+            assert(self.recovered);
             assert(checksum != 0);
 
             const replica = @fieldParentPtr(Replica, "journal", self);
@@ -699,6 +703,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
             const slot = self.slot_for_op(op);
+            assert(self.recovered);
             assert(self.prepare_inhabited[slot.index]);
             assert(self.prepare_checksums[slot.index] == checksum);
 
@@ -748,6 +753,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const replica = @fieldParentPtr(Replica, "journal", self);
             const op = read.op;
             const checksum = read.checksum;
+            assert(self.recovered);
 
             defer {
                 replica.message_bus.unref(read.message);
@@ -1197,6 +1203,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.faulty.count,
             });
 
+            assert(self.recovering);
+            assert(!self.recovered);
             assert(self.reads.executing() == 0);
             assert(self.writes.executing() == 0);
 
@@ -1222,6 +1230,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 var op_min: ?u64 = null;
                 var op_max: ?u64 = null;
                 for (self.headers) |*header, slot| {
+                    assert(header.valid_checksum());
                     if (header.command == .reserved) {
                         assert(header.cluster == replica.cluster);
                         assert(header.op == slot);
@@ -1262,6 +1271,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 header.checksum,
             });
 
+            assert(self.recovered);
             assert(self.header_for_entry(header).?.checksum == header.checksum);
             assert(self.headers[slot.index].checksum == header.checksum); // TODO Snapshots
 
@@ -1273,6 +1283,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// Removes entries from `op_min` (inclusive) onwards.
         /// Used after a view change to remove uncommitted entries discarded by the new leader.
         pub fn remove_entries_from(self: *Self, op_min: u64) void {
+            assert(self.recovered);
             // TODO Snapshots
             // TODO Optimize to jump directly to op:
             assert(op_min > 0);
@@ -1315,6 +1326,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
 
+            assert(self.recovered);
             assert(message.header.command == .prepare);
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= message.buffer.len);
@@ -1377,6 +1389,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn write_prepare_header(write: *Self.Write) void {
             const self = write.self;
             const message = write.message;
+            assert(self.recovered);
 
             if (self.slot_with_op_and_checksum(message.header.op, message.header.checksum)) |slot| {
                 assert(!self.prepare_inhabited[slot.index]);
@@ -1412,6 +1425,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn write_prepare_on_lock_header_sector(self: *Self, write: *Write) void {
+            assert(self.recovered);
             assert(write.header_sector_locked);
 
             // TODO It's possible within this section that the header has since been replaced but we
