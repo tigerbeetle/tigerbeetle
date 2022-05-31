@@ -1463,19 +1463,14 @@ pub fn Replica(
             // Try to serve the message directly from the pipeline.
             // This saves us from going to disk. And we don't need to worry that the WAL's copy
             // of an uncommitted prepare is lost/corrupted.
-            var it = self.pipeline.iterator();
-            while (it.next()) |prepare| {
-                if (prepare.message.header.op == op and
-                    (checksum == null or checksum.? == prepare.message.header.checksum))
-                {
-                    log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
-                        self.replica,
-                        op,
-                        checksum,
-                    });
-                    self.send_message_to_replica(message.header.replica, prepare.message);
-                    return;
-                }
+            if (self.pipeline_prepare_for_op_and_checksum(op, checksum)) |prepare| {
+                log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
+                    self.replica,
+                    op,
+                    checksum,
+                });
+                self.send_message_to_replica(message.header.replica, prepare.message);
+                return;
             }
 
             if (self.journal.prepare_inhabited[slot.index]) {
@@ -3198,22 +3193,26 @@ pub fn Replica(
         }
 
         /// Searches the pipeline for a prepare for a given op and checksum.
-        fn pipeline_prepare_for_op_and_checksum(self: *Self, op: u64, checksum: u128) ?*Prepare {
-            // To optimize the search, we can leverage the fact that the pipeline is ordered:
-            // Avoid scanning the whole pipeline if the op is before the pipeline.
-            if (self.pipeline.head_ptr()) |head| if (op < head.message.header.op) return null;
-            // Avoid scanning the whole pipeline if the op is after the pipeline.
-            if (self.pipeline.tail_ptr()) |tail| if (op > tail.message.header.op) return null;
+        /// When `checksum` is `null`, match any checksum.
+        fn pipeline_prepare_for_op_and_checksum(self: *Self, op: u64, checksum: ?u128) ?*Prepare {
+            assert(self.status == .normal or self.status == .view_change);
 
-            var iterator = self.pipeline.iterator();
-            while (iterator.next_ptr()) |prepare| {
-                if (prepare.message.header.checksum == checksum) {
-                    assert(prepare.message.header.op == op);
-                    return prepare;
-                }
+            // To optimize the search, we can leverage the fact that the pipeline is ordered and
+            // continuous.
+            if (self.pipeline.count == 0) return null;
+            const head_op = self.pipeline.head_ptr().?.message.header.op;
+            const tail_op = self.pipeline.tail_ptr().?.message.header.op;
+            if (op < head_op) return null;
+            if (op > tail_op) return null;
+
+            const pipeline_prepare = self.pipeline.get_ptr(op - head_op).?;
+            assert(pipeline_prepare.message.header.op == op);
+
+            if (checksum == null or pipeline_prepare.message.header.checksum == checksum.?) {
+                return pipeline_prepare;
+            } else {
+                return null;
             }
-
-            return null;
         }
 
         /// Searches the pipeline for a prepare for a given client.
