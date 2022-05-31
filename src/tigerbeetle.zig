@@ -6,12 +6,12 @@ pub const config = @import("config.zig");
 
 pub const Account = packed struct {
     id: u128,
-    /// Opaque third-party identifier to link this account (many-to-one) to an external entity:
+    /// Opaque third-party identifier to link this account (many-to-one) to an external entity.
     user_data: u128,
-    /// Reserved for accounting policy primitives:
+    /// Reserved for accounting policy primitives.
     reserved: [48]u8,
     ledger: u32,
-    /// A chart of accounts code describing the type of account (e.g. clearing, settlement):
+    /// A chart of accounts code describing the type of account (e.g. clearing, settlement).
     code: u16,
     flags: AccountFlags,
     debits_pending: u64,
@@ -24,38 +24,6 @@ pub const Account = packed struct {
         assert(@sizeOf(Account) == 128);
     }
 
-    pub fn debits_pending_overflow(self: *const Account, amount: u64) bool {
-        _ = try_add(self.debits_pending, amount) orelse return true;
-        return false;
-    }
-
-    pub fn debits_posted_overflow(self: *const Account, amount: u64) bool {
-        _ = try_add(self.debits_posted, amount) orelse return true;
-        return false;
-    }
-
-    pub fn debits_overflow(self: *const Account, amount: u64) bool {
-        const pending_posted = try_add(self.debits_pending, self.debits_posted) orelse return true;
-        _ = try_add(pending_posted, amount) orelse return true;
-        return false;
-    }
-
-    pub fn credits_pending_overflow(self: *const Account, amount: u64) bool {
-        _ = try_add(self.credits_pending, amount) orelse return true;
-        return false;
-    }
-
-    pub fn credits_posted_overflow(self: *const Account, amount: u64) bool {
-        _ = try_add(self.credits_posted, amount) orelse return true;
-        return false;
-    }
-
-    pub fn credits_overflow(self: *const Account, amount: u64) bool {
-        const pending_posted = try_add(self.credits_pending, self.credits_posted) orelse return true;
-        _ = try_add(pending_posted, amount) orelse return true;
-        return false;
-    }
-
     pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
         return (self.flags.debits_must_not_exceed_credits and
             self.debits_pending + self.debits_posted + amount > self.credits_posted);
@@ -64,11 +32,6 @@ pub const Account = packed struct {
     pub fn credits_exceed_debits(self: *const Account, amount: u64) bool {
         return (self.flags.credits_must_not_exceed_debits and
             self.credits_pending + self.credits_posted + amount > self.debits_posted);
-    }
-
-    fn try_add(a: u64, b: u64) ?u64 {
-        var c: u64 = undefined;
-        return if (@addWithOverflow(u64, a, b, &c)) null else c;
     }
 };
 
@@ -97,15 +60,15 @@ pub const Transfer = packed struct {
     id: u128,
     debit_account_id: u128,
     credit_account_id: u128,
-    /// Opaque third-party identifier to link this transfer (many-to-one) to an external entity:
+    /// Opaque third-party identifier to link this transfer (many-to-one) to an external entity.
     user_data: u128,
-    /// Reserved for accounting policy primitives:
+    /// Reserved for accounting policy primitives.
     reserved: u128,
-    //2 phase transfer:
+    /// If this transfer will post or void a pending transfer, the id of that pending transfer.
     pending_id: u128,
     timeout: u64,
-    /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement):
     ledger: u32,
+    /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement).
     code: u16,
     flags: TransferFlags,
     amount: u64,
@@ -131,60 +94,92 @@ pub const TransferFlags = packed struct {
 pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
-    exists,
+
+    reserved_flag,
+    reserved_field,
+
+    id_must_not_be_zero,
+    ledger_must_not_be_zero,
+    code_must_not_be_zero,
+
+    mutually_exclusive_flags,
+
+    exceeds_credits,
+    exceeds_debits,
+
     exists_with_different_user_data,
-    exists_with_different_reserved_field,
     exists_with_different_ledger,
     exists_with_different_code,
     exists_with_different_flags,
-    exceeds_credits,
-    exceeds_debits,
-    reserved_field,
-    reserved_flag_padding,
+    exists,
 };
 
 pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
-    exists,
+
+    reserved_flag,
+    reserved_field,
+
+    id_must_not_be_zero,
+    debit_account_id_must_not_be_zero,
+    credit_account_id_must_not_be_zero,
+    accounts_must_be_different,
+
+    pending_id_must_be_zero,
+    pending_transfer_must_timeout,
+    timeout_reserved_for_pending_transfer,
+
+    ledger_must_not_be_zero,
+    code_must_not_be_zero,
+    amount_must_not_be_zero,
+
+    debit_account_not_found,
+    credit_account_not_found,
+
+    accounts_must_have_the_same_ledger,
+    transfer_must_have_the_same_ledger_as_accounts,
+
+    overflows_debits_pending,
+    overflows_credits_pending,
+    overflows_debits_posted,
+    overflows_credits_posted,
+    overflows_debits,
+    overflows_credits,
+
+    exceeds_credits,
+    exceeds_debits,
+
     exists_with_different_debit_account_id,
     exists_with_different_credit_account_id,
     exists_with_different_user_data,
-    exists_with_different_ledger,
-    exists_with_different_reserved_field,
-    exists_with_different_code,
-    exists_with_different_amount,
+    exists_with_different_pending_id,
     exists_with_different_timeout,
+    exists_with_different_ledger,
+    exists_with_different_code,
     exists_with_different_flags,
-    reserved_field,
-    reserved_flag_padding,
-    debit_account_not_found,
-    credit_account_not_found,
-    accounts_are_the_same,
-    accounts_have_different_ledgers,
-    amount_is_zero,
-    exceeds_credits,
-    exceeds_debits,
-    debits_would_overflow,
-    debits_pending_would_overflow,
-    debits_posted_would_overflow,
-    credits_pending_would_overflow,
-    credits_posted_would_overflow,
-    credits_would_overflow,
-    pending_transfer_must_timeout,
-    timeout_reserved_for_pending_transfer,
-    /// For two-phase transfers:
+    exists_with_different_amount,
+    exists,
+
     cannot_post_and_void_pending_transfer,
+    pending_transfer_cannot_post_or_void_another,
+
+    pending_id_must_not_be_zero,
+    pending_id_must_be_different,
+
+    pending_transfer_already_posted,
+    pending_transfer_already_voided,
+
     pending_transfer_not_found,
-    transfer_not_pending,
-    transfer_already_posted,
-    transfer_already_voided,
-    transfer_expired,
-    debit_amount_not_pending,
-    credit_amount_not_pending,
-    pending_id_must_be_zero,
-    pending_id_is_zero,
-    amount_exceeds_pending_amount,
+    pending_transfer_not_pending,
+    pending_transfer_expired,
+
+    pending_transfer_has_different_debit_account_id,
+    pending_transfer_has_different_credit_account_id,
+    pending_transfer_has_different_ledger,
+    pending_transfer_has_different_code,
+
+    exceeds_pending_transfer_amount,
 };
 
 pub const CreateAccountsResult = packed struct {
