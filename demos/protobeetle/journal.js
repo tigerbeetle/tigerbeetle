@@ -1,6 +1,5 @@
 const assert = require('assert');
-
-const Crypto = require('@ronomon/crypto-async');
+const crypto = require('crypto');
 
 const Journal = {
   fs: require('fs'),
@@ -28,7 +27,8 @@ Journal.write = function(buffer) {
   assert(buffer.length > 0);
   self.writing = true;
   // Simulate CPU cost of checkum:
-  Crypto.hash('sha256', buffer);
+  crypto.createHash('sha256').update(buffer).digest();
+
   var bytesWritten = self.fs.writeSync(
     self.fd,
     buffer,
