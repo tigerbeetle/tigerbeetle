@@ -731,15 +731,6 @@ pub fn Replica(
                 return;
             }
 
-            if (message.header.op >= self.op_checkpoint + config.journal_slot_count) {
-                log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})", .{
-                    self.replica,
-                    message.header.op,
-                    self.op_checkpoint,
-                });
-                return;
-            }
-
             assert(self.status == .normal);
             assert(message.header.view == self.view);
             assert(self.leader() or self.follower());
@@ -747,6 +738,7 @@ pub fn Replica(
             assert(message.header.op > self.op_checkpoint);
             assert(message.header.op > self.op);
             assert(message.header.op > self.commit_min);
+            assert(message.header.op < self.op_checkpoint + config.journal_slot_count);
 
             if (self.follower()) self.normal_status_timeout.reset();
 
@@ -2853,6 +2845,18 @@ pub fn Replica(
             if (self.ignore_request_message_follower(message)) return true;
             if (self.ignore_request_message_duplicate(message)) return true;
             if (self.ignore_request_message_preparing(message)) return true;
+
+            // Verify that the new request will fit in the WAL.
+            // The message's op hasn't been assigned yet, but it will be `self.op + 1`.
+            if (self.op + 1 >= self.op_checkpoint + config.journal_slot_count) {
+                log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
+                    self.replica,
+                    message.header.op,
+                    self.op_checkpoint,
+                });
+                return true;
+            }
+
             return false;
         }
 
