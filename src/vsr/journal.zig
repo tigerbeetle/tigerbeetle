@@ -191,11 +191,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             var dirty = try BitSet.init(allocator, slot_count);
             errdefer dirty.deinit(allocator);
-            for (headers) |_, slot| dirty.set(Slot{ .index = slot });
+            for (headers) |_, index| dirty.set(Slot{ .index = index });
 
             var faulty = try BitSet.init(allocator, slot_count);
             errdefer faulty.deinit(allocator);
-            for (headers) |_, slot| faulty.set(Slot {.index = slot });
+            for (headers) |_, index| faulty.set(Slot{ .index = index });
 
             var prepare_checksums = try allocator.alloc(u128, slot_count);
             errdefer allocator.free(prepare_checksums);
@@ -1131,10 +1131,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(header.?.command == .reserved);
                     assert(prepare.?.command == .reserved);
                     assert(header.?.checksum == prepare.?.checksum);
-                    assert(header.?.checksum == Header.reserved(replica.cluster, slot.index).checksum);
+                    assert(header.?.checksum ==
+                        Header.reserved(replica.cluster, slot.index).checksum);
                     assert(!self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == 0);
-                    // TODO Assert that header matches what we expect from Header.reserved().
                     self.headers[slot.index] = header.?.*;
                     self.dirty.clear(slot);
                     self.faulty.clear(slot);
