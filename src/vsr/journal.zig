@@ -132,6 +132,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ///
         /// Each slot's `header.command` is either `prepare` or `reserved`.
         /// When the slot's header is `reserved`, the header's `op` is the slot index.
+        // TODO Use 2 separate header lists: "staging" and "working".
+        // When participating in a view change, each replica should only send the headers from its
+        // working set that it knows it prepared.
+        // This also addresses the problem of redundant headers being written prematurely due to
+        // batching (after the first log cycle — for the first log cycle we write an invalid message).
         headers: []align(config.sector_size) Header,
 
         /// We copy-on-write to these buffers, as the in-memory headers may change while writing.

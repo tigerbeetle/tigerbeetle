@@ -2574,6 +2574,12 @@ pub fn Replica(
         /// uncommitted header gaps and compare them with the quorum of do_view_change messages
         /// received from other replicas, before starting the new view, to discard any that may be
         /// impossible to repair.
+        ///
+        /// For example, if the old primary replicas ops=7,8,9 (all uncommitted) but only op=9 is
+        /// prepared on another replica before the old primary crashes, this function finds a gap
+        /// for ops=7,8 and will attempt to discard ops 7,8,9.
+        // TODO To improve availability, potentially call this before the local headers are
+        // repaired during the view change, so that we can participate in nacking headers.
         fn discard_uncommitted_headers(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
@@ -2606,13 +2612,19 @@ pub fn Replica(
 
                         if (replica != self.replica) {
                             // Check for a gap in the uncommitted headers from this replica.
-                            var nack: bool = true;
-                            for (self.message_body_as_headers(m)) |*h| {
-                                if (h.op == op) {
-                                    nack = false;
-                                    break;
-                                }
-                            }
+                            const received_headers = self.message_body_as_headers(m);
+                            assert(received_headers.len >= 1);
+
+                            const received_op_min = received_headers[received_headers.len - 1].op;
+                            const received_op_max = received_headers[0].op;
+                            assert(received_op_max >= received_op_min);
+
+                            const nack = for (received_headers) |*h| {
+                                if (h.op == op) break false;
+                            } else nack: {
+                                // Don't nack ops that didn't fit in the message's attached headers.
+                                break :nack op >= received_op_min;
+                            };
 
                             if (nack) nacks += 1;
                             log.debug("{}: discard_uncommitted_headers: replica={} op={} nack={}", .{
