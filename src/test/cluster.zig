@@ -212,6 +212,30 @@ pub const Cluster = struct {
             return;
         }
 
+        // Ensure that the replica can eventually recover without this replica.
+        // Verify that each op is recoverable by the current healthy cluster (minus the replica we
+        // are trying to crash).
+        // TODO Remove this workaround when VSR recovery protocol is disabled.
+        if (cluster.options.replica_count != 1) {
+            var slot: usize = 0;
+            while (slot < config.journal_slot_count) : (slot += 1) {
+                for (cluster.replicas) |other_replica, i| {
+                    // TODO This doesn't handle log wrapping correctly.
+                    if (cluster.health[i] == .up and i != replica_index and
+                        other_replica.status != .recovering and
+                        other_replica.journal.slot_with_op(slot) != null and
+                        !other_replica.journal.dirty.bit(.{ .index = slot }))
+                    {
+                        // The op is recoverable if this replica crashes.
+                        break;
+                    }
+                } else {
+                    // The op isn't recoverable if this replica is crashed.
+                    return;
+                }
+            }
+        }
+
         cluster.health[replica_index] = .{ .down = cluster.options.health_options.crash_stability };
 
         replica.deinit(cluster.allocator);
