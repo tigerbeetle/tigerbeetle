@@ -177,22 +177,25 @@ pub fn SetAssociativeCache(
 
         /// If the key is present in the set, returns the way. Otherwise returns null.
         inline fn search(self: *Self, set: Set, key: Key) ?usize {
-            const matches = matches_bitmask(set.tags, set.tag);
-            var it = BitMaskIter(MatchesBitmask){ .mask = matches };
+            const ways = search_tags(set.tags, set.tag);
+
+            var it = BitIterator(Ways){ .bits = ways };
             while (it.next()) |way| {
                 const count = self.counts.get(set.offset + way);
                 if (count > 0 and equal(key_from_value(set.values[way]), key)) {
                     return way;
                 }
             }
+
             return null;
         }
 
-        const MatchesBitmask = meta.Int(.unsigned, layout.ways);
-        inline fn matches_bitmask(tags: *[layout.ways]Tag, tag: Tag) MatchesBitmask {
-            const tags_vec: Vector(layout.ways, Tag) = tags.*;
-            const matches = @splat(layout.ways, tag) == tags_vec;
-            return @ptrCast(*const MatchesBitmask, &matches).*;
+        const Ways = meta.Int(.unsigned, layout.ways);
+
+        inline fn search_tags(tags: *[layout.ways]Tag, tag: Tag) Ways {
+            const tags_vector: Vector(layout.ways, Tag) = tags.*;
+            const ways_equal = @splat(layout.ways, tag) == tags_vector;
+            return @ptrCast(*const Ways, &ways_equal).*;
         }
 
         pub fn put_no_clobber(self: *Self, key: Key) *align(value_alignment) Value {
@@ -615,38 +618,38 @@ test "PackedUnsignedIntegerArray: fuzz" {
     }
 }
 
-fn BitMaskIter(comptime MaskInt: type) type {
+fn BitIterator(comptime Bits: type) type {
     return struct {
         const Self = @This();
-        const BitIndex = math.Log2Int(MaskInt);
+        const BitIndex = math.Log2Int(Bits);
 
-        mask: MaskInt,
+        bits: Bits,
 
-        /// Iterate over the bitmask, consuming it. Returns the bit index of
-        /// each set bit until there are no more set bits, then null.
+        /// Iterates over the bits, consuming them.
+        /// Returns the bit index of each set bit until there are no more set bits, then null.
         fn next(it: *Self) ?BitIndex {
-            if (it.mask == 0) return null;
-            // This int cast is safe since we never pass 0 to @ctz().
-            const ret = @intCast(BitIndex, @ctz(MaskInt, it.mask));
-            // Zero the lowest set bit
-            it.mask &= it.mask - 1;
-            return ret;
+            if (it.bits == 0) return null;
+            // This @intCast() is safe since we never pass 0 to @ctz().
+            const index = @intCast(BitIndex, @ctz(Bits, it.bits));
+            // Zero the lowest set bit.
+            it.bits &= it.bits - 1;
+            return index;
         }
     };
 }
 
-test "BitMaskIter" {
+test "BitIterator" {
     const testing = @import("std").testing;
 
-    var bit_mask = BitMaskIter(u16){ .mask = 0b1000_0000_0100_0101 };
+    var it = BitIterator(u16){ .bits = 0b1000_0000_0100_0101 };
 
     for ([_]u4{ 0, 2, 6, 15 }) |e| {
-        try testing.expectEqual(@as(?u4, e), bit_mask.next());
+        try testing.expectEqual(@as(?u4, e), it.next());
     }
-    try testing.expectEqual(bit_mask.next(), null);
+    try testing.expectEqual(it.next(), null);
 }
 
-test "SetAssociativeCache: matches_bitmask()" {
+test "SetAssociativeCache: search_tags()" {
     const testing = std.testing;
 
     const log = false;
@@ -681,14 +684,15 @@ test "SetAssociativeCache: matches_bitmask()" {
     const Tag = meta.Int(.unsigned, layout.tag_bits);
 
     const reference = struct {
-        inline fn matches_bitmask(tags: *[layout.ways]Tag, tag: Tag) SAC.MatchesBitmask {
-            var matches: SAC.MatchesBitmask = 0;
+        inline fn search_tags(tags: *[layout.ways]Tag, tag: Tag) SAC.Ways {
+            var bits: SAC.Ways = 0;
             for (tags) |t, i| {
                 if (t == tag) {
-                    matches |= @as(SAC.MatchesBitmask, 1) << @intCast(math.Log2Int(SAC.MatchesBitmask), i);
+                    const bit = @intCast(math.Log2Int(SAC.Ways), i);
+                    bits |= (@as(SAC.Ways, 1) << bit);
                 }
             }
-            return matches;
+            return bits;
         }
     };
 
@@ -711,8 +715,8 @@ test "SetAssociativeCache: matches_bitmask()" {
             tags[index] = tag;
         }
 
-        const expected = reference.matches_bitmask(&tags, tag);
-        const actual = SAC.matches_bitmask(&tags, tag);
+        const expected = reference.search_tags(&tags, tag);
+        const actual = SAC.search_tags(&tags, tag);
         if (log) std.debug.print("expected: {b:0>16}, actual: {b:0>16}\n", .{ expected, actual });
         try testing.expectEqual(expected, actual);
     }
