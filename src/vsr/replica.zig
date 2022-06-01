@@ -1426,10 +1426,9 @@ pub fn Replica(
             self.state_machine.prepare_timestamp = self.journal.header_with_op(self.op).?.timestamp;
             // `state_machine.commit_timestamp` is updated as messages are committed.
 
+            self.reset_quorum_recovery_response();
             self.commit_ops(commit);
             self.repair();
-
-            self.reset_quorum_recovery_response();
         }
 
         /// If the requested prepare has been guaranteed by this replica:
@@ -1544,6 +1543,10 @@ pub fn Replica(
 
                 if (self.journal.header_with_op_and_checksum(op, checksum)) |_| {
                     assert(self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot));
+                }
+
+                if (self.journal.prepare_inhabited[slot.index]) {
+                    assert(self.journal.prepare_checksums[slot.index] != checksum.?);
                 }
 
                 log.debug("{}: on_request_prepare: op={} checksum={} nacking", .{
@@ -4212,8 +4215,8 @@ pub fn Replica(
             assert(message.header.command == .do_view_change);
             assert(message.header.view == self.view);
             assert(message.header.op == self.op);
+            assert(message.header.op == self.message_body_as_headers(message)[0].op);
             assert(message.header.commit == self.commit_max);
-            // TODO Assert that latest header in message body matches self.op.
 
             self.send_message_to_replica(self.leader_index(self.view), message);
         }
