@@ -200,17 +200,8 @@ pub const Storage = struct {
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
         mem.copy(u8, read.buffer, storage.memory[read.offset..][0..read.buffer.len]);
 
-        if (storage.faulty_sectors(read.offset, read.buffer.len)) |faulty| {
-            if (storage.x_in_100(storage.options.read_fault_probability)) {
-                // Randomly corrupt one of the faulty sectors the read targeted.
-                // TODO: inject more realistic and varied storage faults as described above.
-                const faulty_sector = storage.random_uint_between(usize, faulty.min, faulty.max);
-                log.info("corrupting sector {} during read by replica {}", .{
-                    faulty_sector,
-                    storage.replica_index,
-                });
-                storage.faults.set(faulty_sector);
-            }
+        if (storage.x_in_100(storage.options.read_fault_probability)) {
+            storage.fault_sectors(read.offset, read.buffer.len);
         }
 
         if (storage.faulty) {
@@ -266,23 +257,13 @@ pub const Storage = struct {
             while (sector < sector_max) : (sector += 1) storage.faults.unset(sector);
         }
 
-        if (storage.faulty_sectors(write.offset, write.buffer.len)) |faulty| {
-            if (storage.x_in_100(storage.options.write_fault_probability)) {
-                // Randomly corrupt one of the faulty sectors the write targeted.
-                // TODO: inject more realistic and varied storage faults as described above.
-                const faulty_sector = storage.random_uint_between(usize, faulty.min, faulty.max);
-                log.info("corrupting sector {} during write by replica {}", .{
-                    faulty_sector,
-                    storage.replica_index,
-                });
-                storage.faults.set(faulty_sector);
-            }
+        if (storage.x_in_100(storage.options.write_fault_probability)) {
+            storage.fault_sectors(write.offset, write.buffer.len);
         }
-
         write.callback(write);
     }
 
-    fn assert_bounds_and_alignment(storage: *Storage, buffer: []const u8, offset: u64) void {
+    fn assert_bounds_and_alignment(storage: *const Storage, buffer: []const u8, offset: u64) void {
         assert(buffer.len > 0);
         assert(offset + buffer.len <= storage.size);
 
@@ -419,7 +400,7 @@ pub const Storage = struct {
 
     /// Given an offset and size of a read/write, returns the range of any faulty sectors touched
     /// by the read/write.
-    fn faulty_sectors(storage: *Storage, offset: u64, size: u64) ?SectorRange {
+    fn faulty_sectors(storage: *const Storage, offset: u64, size: u64) ?SectorRange {
         assert(size <= config.message_size_max);
         const message_size_max = config.message_size_max;
         const period = storage.faulty_areas.period;
@@ -429,12 +410,24 @@ pub const Storage = struct {
         const start = std.math.max(offset, faulty_offset);
         const end = std.math.min(offset + size, faulty_offset + message_size_max);
 
-        // The read/write does not touch any faulty sectors
+        // The read/write does not touch any faulty sectors.
         if (start >= end) return null;
 
         return SectorRange{
             .min = @divExact(start, config.sector_size),
             .max = @divExact(end, config.sector_size),
         };
+    }
+
+    fn fault_sectors(storage: *Storage, offset: u64, size: u64) void {
+        const faulty = storage.faulty_sectors(offset, size) orelse return;
+        // Randomly corrupt one of the faulty sectors the operation targeted.
+        // TODO: inject more realistic and varied storage faults as described above.
+        const faulty_sector = storage.random_uint_between(usize, faulty.min, faulty.max);
+        log.info("corrupting sector {} by replica {}", .{
+            faulty_sector,
+            storage.replica_index,
+        });
+        storage.faults.set(faulty_sector);
     }
 };
