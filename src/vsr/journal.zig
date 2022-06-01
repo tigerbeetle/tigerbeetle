@@ -1158,7 +1158,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         assert(header.?.op < prepare.?.op);
                         // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty).
                         self.set_header_as_dirty(prepare.?);
-                        assert(!self.dirty.bit(slot));
+                        assert(self.dirty.bit(slot));
                         assert(!self.faulty.bit(slot));
                     }
                 },
