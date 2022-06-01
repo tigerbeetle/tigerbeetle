@@ -209,19 +209,33 @@ pub fn main() !void {
     const transitions_max = config.journal_slot_count / 2;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
+        const health_options = &cluster.options.health_options;
+        // The maximum the number of replicas that can be safely crashed, while ensuring that the
+        // cluster can eventually recover.
+        var crashes = cluster.replica_normal_count() -| replica_normal_min;
+
         for (cluster.storages) |*storage, replica| {
             if (cluster.replicas[replica].journal.recovered) {
                 // When a journal recovers for the first time, enable its storage faults.
                 // Future crashes will recover in the presence of faults.
                 storage.faulty = true;
             }
+
+            // TODO Remove this workaround when VSR recovery protocol is disabled.
+            // When only the minimum number of replicas are healthy (no more crashes allowed),
+            // disable storage faults on all healthy replicas.
+            //
+            // This is a workaround to avoid the deadlock that occurs when (for example) in a 3
+            // replica cluster, one is down, another has a corrupt prepare, and the last doesn't
+            // have the prepare. The two healthy replicas can never complete a view change, because
+            // two replicas isn't enough to nack, but the unhealthy replica cannot complete recovery
+            // protocol.
+            if (cluster.health[replica] == .up and crashes == 0) {
+                storage.faulty = false;
+            }
             storage.tick();
         }
 
-        const health_options = &cluster.options.health_options;
-        // The maximum the number of replicas that can be safely crashed, while ensuring that the
-        // cluster can eventually recover.
-        var crashes = cluster.replica_normal_count() -| replica_normal_min;
         for (cluster.replicas) |*replica| {
             switch (cluster.health[replica.replica]) {
                 .up => |*ticks| {
