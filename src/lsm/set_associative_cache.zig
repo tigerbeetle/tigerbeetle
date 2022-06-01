@@ -99,9 +99,9 @@ pub fn SetAssociativeCache(
             const sets = @divExact(value_count_max, layout.ways);
             assert(math.isPowerOfTwo(sets));
 
-            const value_size_max = value_count_max * @sizeOf(Value);
-            assert(value_size_max >= layout.cache_line_size);
-            assert(value_size_max % layout.cache_line_size == 0);
+            const values_size_max = value_count_max * @sizeOf(Value);
+            assert(values_size_max >= layout.cache_line_size);
+            assert(values_size_max % layout.cache_line_size == 0);
 
             const counts_size = @divExact(value_count_max * layout.clock_bits, 8);
             assert(counts_size >= layout.cache_line_size);
