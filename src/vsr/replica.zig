@@ -731,6 +731,18 @@ pub fn Replica(
                 return;
             }
 
+            // Verify that the new request will fit in the WAL.
+            if (message.header.op >= self.op_checkpoint + config.journal_slot_count) {
+                log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})", .{
+                    self.replica,
+                    message.header.op,
+                    self.op_checkpoint,
+                });
+                // When we are the leader, `on_request` enforces this invariant.
+                assert(self.follower());
+                return;
+            }
+
             assert(self.status == .normal);
             assert(message.header.view == self.view);
             assert(self.leader() or self.follower());
