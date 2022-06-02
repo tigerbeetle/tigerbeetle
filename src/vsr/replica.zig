@@ -4815,7 +4815,7 @@ pub fn Replica(
                 parent = prepare.message.header.checksum;
                 op += 1;
             }
-            assert(self.pipeline.count <= config.pipelining_max);
+            assert(self.pipeline.count <= config.pipeline_max);
             assert(self.commit_max + self.pipeline.count == op - 1);
         }
 

@@ -44,7 +44,7 @@ comptime {
     assert(slot_count >= headers_per_sector);
     // The length of the prepare pipeline is the upper bound on how many ops can be
     // reordered during a view change. See `recover_prepares_callback()` for more detail.
-    assert(slot_count > config.pipelining_max);
+    assert(slot_count > config.pipeline_max);
 
     assert(headers_size > 0);
     assert(headers_size % config.sector_size == 0);
@@ -445,7 +445,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const op_max = self.op_maximum();
             assert(op >= op_checkpoint);
             assert(op <= op_max);
-            assert(op + config.pipelining_max >= op_max); // We expect gaps only in the pipeline.
+            assert(op + config.pipeline_max >= op_max); // We expect gaps only in the pipeline.
 
             return op;
         }
@@ -1255,7 +1255,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
                 if (op_max != null and op_max.? != 0) {
                     // Only committed ops are ever overwritten by a WAL wrap.
-                    assert(op_max.? - op_min.? < 2 * slot_count - config.pipelining_max);
+                    assert(op_max.? - op_min.? < 2 * slot_count - config.pipeline_max);
                 }
             }
 
