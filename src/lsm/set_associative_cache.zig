@@ -239,8 +239,8 @@ pub fn SetAssociativeCache(
             comptime assert(@as(@TypeOf(way), math.maxInt(@TypeOf(way))) +% 1 == 0);
 
             const clock_iterations_max = layout.ways * math.maxInt(Count);
-            var safety_count: usize = 1;
-            while (safety_count <= clock_iterations_max + 1) : ({
+            var safety_count: usize = 0;
+            while (safety_count <= clock_iterations_max) : ({
                 safety_count += 1;
                 way +%= 1;
             }) {
@@ -255,8 +255,10 @@ pub fn SetAssociativeCache(
                 count -= 1;
                 self.counts.set(set.offset + way, count);
                 if (count == 0) break; // Way has become free.
+            } else {
+                unreachable;
             }
-            assert(safety_count <= clock_iterations_max);
+            assert(self.counts.get(set.offset + way) == 0);
 
             set.tags[way] = set.tag;
             self.counts.set(set.offset + way, 1);
