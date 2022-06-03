@@ -2587,9 +2587,9 @@ pub fn Replica(
         /// received from other replicas, before starting the new view, to discard any that may be
         /// impossible to repair.
         ///
-        /// For example, if the old primary replicas ops=7,8,9 (all uncommitted) but only op=9 is
-        /// prepared on another replica before the old primary crashes, this function finds a gap
-        /// for ops=7,8 and will attempt to discard ops 7,8,9.
+        /// For example, if the old primary replicates ops=7,8,9 (all uncommitted) but only op=9 is
+        /// prepared on another replica before the old primary crashes, then this function finds a
+        /// gap for ops=7,8 and will attempt to discard ops 7,8,9.
         // TODO To improve availability, potentially call this before the local headers are
         // repaired during the view change, so that we can participate in nacking headers.
         fn discard_uncommitted_headers(self: *Self) void {
