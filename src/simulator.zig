@@ -210,8 +210,7 @@ pub fn main() !void {
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         const health_options = &cluster.options.health_options;
-        // The maximum the number of replicas that can be safely crashed, while ensuring that the
-        // cluster can eventually recover.
+        // The maximum number of replicas that can crash, with the cluster still able to recover.
         var crashes = cluster.replica_normal_count() -| replica_normal_min;
 
         for (cluster.storages) |*storage, replica| {
@@ -225,11 +224,11 @@ pub fn main() !void {
             // When only the minimum number of replicas are healthy (no more crashes allowed),
             // disable storage faults on all healthy replicas.
             //
-            // This is a workaround to avoid the deadlock that occurs when (for example) in a 3
-            // replica cluster, one is down, another has a corrupt prepare, and the last doesn't
-            // have the prepare. The two healthy replicas can never complete a view change, because
-            // two replicas isn't enough to nack, but the unhealthy replica cannot complete recovery
-            // protocol.
+            // This is a workaround to avoid the deadlock that occurs when (for example) in a
+            // cluster of 3 replicas, one is down, another has a corrupt prepare, and the last does
+            // not have the prepare. The two healthy replicas can never complete a view change,
+            // because two replicas are not enough to nack, and the unhealthy replica cannot
+            // complete the VSR recovery protocol either.
             if (cluster.health[replica] == .up and crashes == 0) {
                 storage.faulty = false;
             }
