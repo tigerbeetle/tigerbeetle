@@ -80,14 +80,14 @@ pub fn GridType(comptime Storage: type) type {
             next: ?*Write = null,
 
             /// Call the user's callback, finishing the write.
-            pub fn finish(write: *Write) void {
+            fn finish(write: *Write) void {
                 const callback = write.callback;
                 write.* = undefined;
                 callback(write);
             }
         };
 
-        pub const WriteIOP = struct {
+        const WriteIOP = struct {
             grid: *Grid,
             completion: Storage.Write,
             write: *Write,
@@ -103,14 +103,14 @@ pub fn GridType(comptime Storage: type) type {
 
             /// Call the user's callback, finishing the read.
             /// May be called by Replica after recovering the block over the network.
-            pub fn finish(read: *Read, block: BlockPtrConst) void {
+            fn finish(read: *Read, block: BlockPtrConst) void {
                 const callback = read.callback;
                 read.* = undefined;
                 callback(read, block);
             }
         };
 
-        pub const ReadIOP = struct {
+        const ReadIOP = struct {
             grid: *Grid,
             completion: Storage.Read,
             reads: FIFO(Read) = .{},
