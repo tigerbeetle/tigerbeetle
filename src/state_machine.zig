@@ -1747,6 +1747,75 @@ test "create/lookup/rollback 2-phase transfers" {
     try assert_acc_bal_equal(&state_machine, 1, 0, 0, 0, 0);
     try assert_acc_bal_equal(&state_machine, 2, 0, 0, 0, 0);
 
+    //Ensure fields are set from pending transfer:
+    const f_pending_compare = &mem.zeroInit(Transfer, .{
+        .id = 200,
+        .timestamp = timestamp + 2,
+        .amount = 15,
+        .debit_account_id = 1,
+        .credit_account_id = 2,
+        .flags = .{ .pending = true },
+        .timeout = 10,
+        .code = 1,
+        .ledger = 1,
+        .user_data = 'U',
+    });
+    try testing.expectEqual(state_machine.create_transfer(f_pending_compare), .ok);
+    try testing.expectEqual(
+        state_machine.create_transfer(
+            &mem.zeroInit(Transfer, .{
+                .id = 201,
+                .pending_id = 200,
+                .timestamp = timestamp + 11,
+                .flags = .{ .post_pending_transfer = true },
+            }),
+        ),
+        .ok,
+    );
+
+    const f_posted = state_machine.get_transfer(201).?.*;
+    try testing.expectEqual(f_pending_compare.amount, f_posted.amount);
+    try testing.expectEqual(f_pending_compare.debit_account_id, f_posted.debit_account_id);
+    try testing.expectEqual(f_pending_compare.credit_account_id, f_posted.credit_account_id);
+    try testing.expectEqual(f_pending_compare.code, f_posted.code);
+    try testing.expectEqual(f_pending_compare.ledger, f_posted.ledger);
+    try testing.expectEqual(f_pending_compare.user_data, f_posted.user_data);
+
+    try testing_rollback_transfer_ensure(&state_machine, 201);
+    try testing_rollback_transfer_ensure(&state_machine, 200);
+    try assert_acc_bal_equal(&state_machine, 1, 0, 0, 0, 0);
+    try assert_acc_bal_equal(&state_machine, 2, 0, 0, 0, 0);
+
+    // Negative test to ensure posted values can be set:
+    f_pending_compare.timestamp = state_machine.commit_timestamp + 1;
+    try testing.expectEqual(state_machine.create_transfer(f_pending_compare), .ok);
+    try testing.expectEqual(
+        state_machine.create_transfer(
+            &mem.zeroInit(Transfer, .{
+                .id = 201,
+                .pending_id = 200,
+                .amount = 10,
+                .user_data = 'A',
+                .timestamp = state_machine.commit_timestamp + 1,
+                .flags = .{ .post_pending_transfer = true },
+            }),
+        ),
+        .ok,
+    );
+
+    const f_posted_neg = state_machine.get_transfer(201).?.*;
+    try testing.expectEqual(@as(u64, 10), f_posted_neg.amount);
+    try testing.expectEqual(@as(u128, 'A'), f_posted_neg.user_data);
+    try testing.expectEqual(f_pending_compare.debit_account_id, f_posted.debit_account_id);
+    try testing.expectEqual(f_pending_compare.credit_account_id, f_posted.credit_account_id);
+    try testing.expectEqual(f_pending_compare.code, f_posted.code);
+    try testing.expectEqual(f_pending_compare.ledger, f_posted.ledger);
+
+    try testing_rollback_transfer_ensure(&state_machine, 201);
+    try testing_rollback_transfer_ensure(&state_machine, 200);
+    try assert_acc_bal_equal(&state_machine, 1, 0, 0, 0, 0);
+    try assert_acc_bal_equal(&state_machine, 2, 0, 0, 0, 0);
+
     // Test posted Transfer with invalid debit/credit accounts
     state_machine.create_account_rollback(&accounts[1]);
     try testing.expect(state_machine.get_account(accounts[1].id) == null);
@@ -1754,7 +1823,7 @@ test "create/lookup/rollback 2-phase transfers" {
         state_machine.create_transfer(&mem.zeroInit(Transfer, .{
             .id = 103,
             .pending_id = 5,
-            .timestamp = timestamp + 2,
+            .timestamp = state_machine.commit_timestamp + 1,
             .flags = .{ .post_pending_transfer = true },
         })),
         .credit_account_not_found,
@@ -1765,7 +1834,7 @@ test "create/lookup/rollback 2-phase transfers" {
         state_machine.create_transfer(&mem.zeroInit(Transfer, .{
             .id = 103,
             .pending_id = 5,
-            .timestamp = timestamp + 2,
+            .timestamp = state_machine.commit_timestamp + 1,
             .flags = .{ .post_pending_transfer = true },
         })),
         .debit_account_not_found,
