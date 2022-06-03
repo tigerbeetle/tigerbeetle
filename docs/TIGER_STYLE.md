@@ -12,9 +12,11 @@ Another word for style is design.
 
 > “The design is not just what it looks like and feels like. The design is how it works.” — Steve Jobs
 
-Our design goals are safety, performance, and developer experience. In that order. All three are important. Good style advances these goals. Put this way, style is more than readability, and readability is table stakes, a means to an end rather than an end in itself. Does the code make for more or less safety, performance or developer experience? That is why we need style.
+Our design goals are safety, performance, and developer experience. In that order. All three are important. Good style advances these goals. Does the code make for more or less safety, performance or developer experience? That is why we need style.
 
-> [I]n programming, style is not something to pursue directly. Style is necessary only where understanding is missing. ─ [Let Over Lambda](https://letoverlambda.com/index.cl/guest/chap1.html)
+Put this way, style is more than readability, and readability is table stakes, a means to an end rather than an end in itself.
+
+> “...in programming, style is not something to pursue directly. Style is necessary only where understanding is missing.” ─ [Let Over Lambda](https://letoverlambda.com/index.cl/guest/chap1.html)
 
 This document explores how we apply these design goals to coding style. First, a word on simplicity, elegance and technical debt.
 
@@ -146,7 +148,7 @@ Beyond these rules:
 
 * Calculate or check variables close to where/when they are used. **Don't introduce variables before they are needed.** Don't leave them around where they are not. This will reduce the probability of a POCPOU (place-of-check to place-of-use), a distant cousin to the infamous [TOCTOU](https://en.wikipedia.org/wiki/Time-of-check_to_time-of-use). Most bugs come down to a semantic gap, caused by a gap in time or space, because it's harder to check code that's not contained along those dimensions.
 
-* Use simpler function signatures and return types to reduce dimensionality. For example, prefer `void` as your return type.
+* Use simpler function signatures and return types to reduce dimensionality at the call site, the number of branches that need to be handled at the call site, because this dimensionality can also be viral, propagating through the call chain. For example, as a return type, `void` trumps `bool`, `bool` trumps `u64`, `u64` trumps `?u64`, and `?u64` trumps `!u64`.
 
 * Ensure that functions run to completion without suspending, so that precondition assertions are true throughout the lifetime of the function. These assertions are useful documentation without a suspend, but may be misleading otherwise.
 
@@ -154,11 +156,13 @@ Beyond these rules:
 
 * Use newlines to **group resource allocation and deallocation**, i.e. before the resource allocation and after the corresponding `defer` statement, to make leaks easier to spot.
 
+* TigerBeetle has **a “zero dependencies” policy**, apart from the Zig toolchain. Dependencies, in general, inevitably lead to supply chain attacks, safety and performance risk, and slow install times. For foundational infrastructure in particular, the cost of any dependency is further amplified throughout the rest of the stack.
+
 ### Off-by-one errors
 
 * **The usual suspects for off-by-one errors are casual interactions between an `index`, a `count` or a `size`.** These are all primitive integer types, but should be seen as distinct types, with clear rules to cast between them. To go from an `index` to a `count` you need to add one, since indexes are *0-based* but counts are *1-based*. To go from a `count` to a `size` you need to multiply by the unit. Again, this is why including units and qualifiers in variable names is important.
 
-* Be explicit around arithmetic. For example, use `@divExact()`, `@divFloor()` or `div_ceil()` to show the reader you've thought through all the interesting scenarios where rounding may be involved.
+* Show your intent with respect to division. For example, use `@divExact()`, `@divFloor()` or `div_ceil()` to show the reader you've thought through all the interesting scenarios where rounding may be involved.
 
 ### Style by the numbers
 
@@ -168,4 +172,10 @@ Beyond these rules:
 
 * Hard limit all line lengths, without exception, to at most 100 columns for a good typographic "measure". Use it up. Never go beyond. Nothing should be hidden by a horizontal scrollbar. Let your editor help you by setting a column ruler. To wrap a function signature, call or data structure, add a trailing comma, close your eyes and let `zig fmt` do the rest.
 
-* TigerBeetle has **a “zero dependencies” policy**, apart from the Zig toolchain. Dependencies, in general, inevitably lead to supply chain attacks, safety and performance risk, and slow install times. For foundational infrastructure in particular, the cost of any dependency is further amplified throughout the rest of the stack.
+## The Last Stage
+
+At the end of the day, keep trying things out, have fun, and remember—it's called TigerBeetle, not only because it's fast, but because it's small!
+
+> You don’t really suppose, do you, that all your adventures and escapes were managed by mere luck, just for your sole benefit? You are a very fine person, Mr. Baggins, and I am very fond of you; but you are only quite a little fellow in a wide world after all!”
+> 
+> “Thank goodness!” said Bilbo laughing, and handed him the tobacco-jar.
