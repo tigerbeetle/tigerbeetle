@@ -11,14 +11,14 @@ This will:
 
 ```shell
 git clone https://github.com/coilhq/tigerbeetle.git
-cd tiger-beetle/proto-beetle
+cd tiger-beetle/demos/protobeetle
 npm install
 dd < /dev/zero bs=1048576 count=256 > journal
 scripts/create-transfers
 node server
 
 # In another tab:
-cd tigerbeetle/demos/protobeetle
+cd tiger-beetle/demos/protobeetle
 time node stress
 ```
 
