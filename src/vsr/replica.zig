@@ -648,7 +648,7 @@ pub fn Replica(
                 message.body(),
             );
 
-            var latest_entry = self.journal.header_with_op(self.op).?;
+            const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.parent = latest_entry.checksum;
             message.header.context = message.header.checksum;
             message.header.view = self.view;
@@ -3520,6 +3520,8 @@ pub fn Replica(
             }
 
             if (self.journal.header_for_entry(header)) |existing| {
+                assert(existing.op == header.op);
+
                 // Do not replace any existing op lightly as doing so may impair durability and even
                 // violate correctness by undoing a prepare already acknowledged to the leader:
                 if (existing.checksum == header.checksum) {
@@ -4043,6 +4045,18 @@ pub fn Replica(
 
                 self.message_bus.unref(prepare.message);
                 assert(self.pipeline.pop() != null);
+            }
+
+            if (self.pipeline.head_ptr()) |prepare| {
+                // Discard the pipeline if it is disconnected from the WAL's hash chain.
+                const parent = self.journal.header_with_op_and_checksum(
+                    prepare.message.header.op - 1,
+                    prepare.message.header.parent,
+                );
+                if (parent == null) {
+                    while (self.pipeline.count > 0) assert(self.pipeline.pop() != null);
+                    assert(self.pipeline.count == 0);
+                }
             }
 
             // Discard messages from the back of the pipeline that are not part of this view.
