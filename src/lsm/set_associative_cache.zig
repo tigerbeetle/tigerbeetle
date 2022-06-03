@@ -652,14 +652,10 @@ test "BitIterator" {
     try expectEqual(it.next(), null);
 }
 
-test "SetAssociativeCache: search_tags()" {
+fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: Layout) type {
     const testing = std.testing;
 
     const log = false;
-    const seed = 42;
-
-    const Key = u64;
-    const Value = u64;
 
     const context = struct {
         inline fn key_from_value(value: Value) Key {
@@ -673,7 +669,6 @@ test "SetAssociativeCache: search_tags()" {
         }
     };
 
-    const layout: Layout = .{};
     const SAC = SetAssociativeCache(
         Key,
         Value,
@@ -682,7 +677,6 @@ test "SetAssociativeCache: search_tags()" {
         context.equal,
         layout,
     );
-    if (log) SAC.inspect();
 
     const Tag = meta.Int(.unsigned, layout.tag_bits);
 
@@ -699,28 +693,52 @@ test "SetAssociativeCache: search_tags()" {
         }
     };
 
+    return struct {
+        fn run(random: std.rand.Random) !void {
+            if (log) SAC.inspect();
+
+            var iterations: usize = 0;
+            while (iterations < 10_000) : (iterations += 1) {
+                var tags: [layout.ways]Tag = undefined;
+                random.bytes(mem.asBytes(&tags));
+
+                const tag = random.int(Tag);
+
+                var indexes: [layout.ways]usize = undefined;
+                for (indexes) |*x, i| x.* = i;
+                random.shuffle(usize, &indexes);
+
+                const matches_count_min = random.uintAtMostBiased(u32, layout.ways);
+                for (indexes[0..matches_count_min]) |index| {
+                    tags[index] = tag;
+                }
+
+                const expected = reference.search_tags(&tags, tag);
+                const actual = SAC.search_tags(&tags, tag);
+                if (log) std.debug.print("expected: {b:0>16}, actual: {b:0>16}\n", .{ expected, actual });
+                try testing.expectEqual(expected, actual);
+            }
+        }
+    };
+}
+
+test "SetAssociativeCache: search_tags()" {
+    const seed = 42;
+
+    const Key = u64;
+    const Value = u64;
+
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    var iterations: usize = 0;
-    while (iterations < 10_000) : (iterations += 1) {
-        var tags: [layout.ways]Tag = undefined;
-        random.bytes(&tags);
+    inline for ([_]u64{ 2, 4, 16 }) |ways| {
+        inline for ([_]u64{ 8, 16 }) |tag_bits| {
+            const case = search_tags_test(Key, Value, .{
+                .ways = ways,
+                .tag_bits = tag_bits,
+            });
 
-        const tag = random.int(Tag);
-
-        var indexes: [layout.ways]usize = undefined;
-        for (indexes) |*x, i| x.* = i;
-        random.shuffle(usize, &indexes);
-
-        const matches_count_min = random.uintAtMostBiased(u32, layout.ways);
-        for (indexes[0..matches_count_min]) |index| {
-            tags[index] = tag;
+            try case.run(random);
         }
-
-        const expected = reference.search_tags(&tags, tag);
-        const actual = SAC.search_tags(&tags, tag);
-        if (log) std.debug.print("expected: {b:0>16}, actual: {b:0>16}\n", .{ expected, actual });
-        try testing.expectEqual(expected, actual);
     }
 }
