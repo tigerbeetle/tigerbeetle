@@ -2607,6 +2607,10 @@ pub fn Replica(
                 return;
             }
 
+            // Iterating > commit_max does not in itself guarantee that the header is uncommitted.
+            // We must also count nacks from the quorum, since the old primary may have committed
+            // another op just before crashing, if there was sufficient quorum. Counting nacks
+            // ensures that the old primary could not possibly have committed the header.
             var op = self.op;
             while (op > self.commit_max) : (op -= 1) {
                 if (self.journal.header_with_op(op) != null) continue;
@@ -2657,6 +2661,8 @@ pub fn Replica(
                 });
 
                 if (nacks >= threshold) {
+                    assert(op > self.commit_max);
+
                     self.journal.remove_entries_from(op);
                     self.op = op - 1;
 
