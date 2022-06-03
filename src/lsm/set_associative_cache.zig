@@ -44,7 +44,7 @@ pub fn SetAssociativeCache(
     }
 
     if (layout.value_alignment) |alignment| {
-        assert(alignment > @alignOf(Value));
+        assert(alignment >= @alignOf(Value));
         assert(@sizeOf(Value) % alignment == 0);
     }
     const value_alignment = layout.value_alignment orelse @alignOf(Value);
