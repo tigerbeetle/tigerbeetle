@@ -190,12 +190,15 @@ pub fn SetAssociativeCache(
             return null;
         }
 
+        /// Where each set bit represents the index of a way that has the same tag.
         const Ways = meta.Int(.unsigned, layout.ways);
 
         inline fn search_tags(tags: *[layout.ways]Tag, tag: Tag) Ways {
-            const tags_vector: Vector(layout.ways, Tag) = tags.*;
-            const ways_equal = @splat(layout.ways, tag) == tags_vector;
-            return @ptrCast(*const Ways, &ways_equal).*;
+            const x: Vector(layout.ways, Tag) = tags.*;
+            const y: Vector(layout.ways, Tag) = @splat(layout.ways, tag);
+
+            const result: Vector(layout.ways, bool) = x == y;
+            return @ptrCast(*const Ways, &result).*;
         }
 
         pub fn put_no_clobber(self: *Self, key: Key) *align(value_alignment) Value {
@@ -211,35 +214,35 @@ pub fn SetAssociativeCache(
             );
         }
 
-        /// Add a key, evicting older entires if needed, and return a pointer to the value.
+        /// Add a key, evicting an older entry if needed, and return a pointer to the value.
         /// The key must not already be in the cache.
         /// Never evicts keys for which locked() returns true.
         /// The caller must guarantee that locked() returns true for less than layout.ways keys.
         pub fn put_no_clobber_preserve_locked(
             self: *Self,
             comptime Context: type,
-            comptime locked: fn (Context, *align(value_alignment) const Value) callconv(.Inline) bool,
+            comptime locked: fn (
+                Context,
+                *align(value_alignment) const Value,
+            ) callconv(.Inline) bool,
             context: Context,
             key: Key,
         ) *align(value_alignment) Value {
             const set = self.associate(key);
 
-            if (verify) {
-                assert(self.search(set, key) == null);
-            }
+            if (verify) assert(self.search(set, key) == null);
 
             const clock_index = @divExact(set.offset, layout.ways);
-
-            const clock_iterations_max = layout.ways * math.maxInt(Count);
-            var safety_count: usize = 1;
 
             var way = self.clocks.get(clock_index);
             comptime assert(math.maxInt(@TypeOf(way)) == layout.ways - 1);
             comptime assert(@as(@TypeOf(way), math.maxInt(@TypeOf(way))) +% 1 == 0);
 
+            const clock_iterations_max = layout.ways * math.maxInt(Count);
+            var safety_count: usize = 1;
             while (safety_count <= clock_iterations_max + 1) : ({
-                way +%= 1;
                 safety_count += 1;
+                way +%= 1;
             }) {
                 // We pass a value pointer to the callback here so that a cache miss
                 // can be avoided if the caller is able to determine if the value is
@@ -247,23 +250,17 @@ pub fn SetAssociativeCache(
                 if (locked(context, @alignCast(value_alignment, &set.values[way]))) continue;
 
                 var count = self.counts.get(set.offset + way);
-
-                // Free way found
-                if (count == 0) break;
+                if (count == 0) break; // Way is already free.
 
                 count -= 1;
                 self.counts.set(set.offset + way, count);
-
-                // This way is now free
-                if (count == 0) break;
+                if (count == 0) break; // Way has become free.
             }
             assert(safety_count <= clock_iterations_max);
 
-            self.clocks.set(clock_index, way +% 1);
-
             set.tags[way] = set.tag;
-
             self.counts.set(set.offset + way, 1);
+            self.clocks.set(clock_index, way +% 1);
 
             return @alignCast(value_alignment, &set.values[way]);
         }
@@ -597,9 +594,15 @@ test "PackedUnsignedIntegerArray: unit" {
     try testing.expectEqual(@as(u2, 0b00), p.get(3));
 
     p.set(4, 0b11);
-    try testing.expectEqual(@as(u64, 0b0000000000000000000000000000000000000000000000000000001100111001), words[0]);
+    try testing.expectEqual(@as(
+        u64,
+        0b0000000000000000000000000000000000000000000000000000001100111001,
+    ), words[0]);
     p.set(31, 0b11);
-    try testing.expectEqual(@as(u64, 0b1100000000000000000000000000000000000000000000000000001100111001), words[0]);
+    try testing.expectEqual(@as(
+        u64,
+        0b1100000000000000000000000000000000000000000000000000001100111001,
+    ), words[0]);
 }
 
 test "PackedUnsignedIntegerArray: fuzz" {
@@ -627,7 +630,7 @@ fn BitIterator(comptime Bits: type) type {
 
         /// Iterates over the bits, consuming them.
         /// Returns the bit index of each set bit until there are no more set bits, then null.
-        fn next(it: *Self) ?BitIndex {
+        inline fn next(it: *Self) ?BitIndex {
             if (it.bits == 0) return null;
             // This @intCast() is safe since we never pass 0 to @ctz().
             const index = @intCast(BitIndex, @ctz(Bits, it.bits));
@@ -639,14 +642,14 @@ fn BitIterator(comptime Bits: type) type {
 }
 
 test "BitIterator" {
-    const testing = @import("std").testing;
+    const expectEqual = @import("std").testing.expectEqual;
 
     var it = BitIterator(u16){ .bits = 0b1000_0000_0100_0101 };
 
     for ([_]u4{ 0, 2, 6, 15 }) |e| {
-        try testing.expectEqual(@as(?u4, e), it.next());
+        try expectEqual(@as(?u4, e), it.next());
     }
-    try testing.expectEqual(it.next(), null);
+    try expectEqual(it.next(), null);
 }
 
 test "SetAssociativeCache: search_tags()" {
