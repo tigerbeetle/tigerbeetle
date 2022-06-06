@@ -673,7 +673,8 @@ pub fn Replica(
             } else {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
                 assert(self.prepare_timeout.ticking);
-                assert(self.pipeline.tail_ptr().?.message.header.checksum == message.header.parent);
+                const previous = self.pipeline.get_ptr(self.pipeline.count - 2).?;
+                assert(previous.message.header.checksum == message.header.parent);
             }
 
             self.on_prepare(message);
