@@ -24,7 +24,7 @@ export type Account = {
   id: bigint // u128
   user_data: bigint // u128
   reserved: Buffer // [48]u8
-  unit: number // u16, unit of value
+  ledger: number // u32, ledger of value
   code: number // u16, A chart of accounts code describing the type of account (e.g. clearing, settlement)
   flags: number // u32
   debits_pending: bigint // u64
@@ -41,17 +41,25 @@ export enum AccountFlags {
 }
 
 export enum CreateAccountError {
+  //ok = 0 (No Error)
   linked_event_failed = 1,
-  exists,
-  exists_with_different_user_data,
-  exists_with_different_reserved_field,
-  exists_with_different_unit,
-  exists_with_different_code,
-  exists_with_different_flags,
+  reserved_flag,
+  reserved_field,
+
+  id_must_not_be_zero,
+  ledger_must_not_be_zero,
+  code_must_not_be_zero,
+
+  mutually_exclusive_flags,
+
   exceeds_credits,
   exceeds_debits,
-  reserved_field,
-  reserved_flag_padding,
+
+  exists_with_different_user_data,
+  exists_with_different_ledger,
+  exists_with_different_code,
+  exists_with_different_flags,
+  exists,
 }
 
 export type CreateAccountsError = {
@@ -64,9 +72,11 @@ export type Transfer = {
   debit_account_id: bigint, // u128
   credit_account_id: bigint, // u128
   user_data: bigint, // u128
-  reserved: Buffer, // [32]u8
+  reserved: bigint, // u128
+  pending_id: bigint, // u128
   timeout: bigint, // u64, in nano-seconds
-  code: number, // u32 accounting system code to describe the type of transfer (e.g. settlement)
+  ledger: number // u32, ledger of value
+  code: number, // u16 accounting system code to describe the type of transfer (e.g. settlement)
   flags: number, // u32
   amount: bigint, // u64,
   timestamp: bigint, // u64, Set this to 0n - the actual value will be set by TigerBeetle server
@@ -76,44 +86,75 @@ export enum TransferFlags {
   linked = (1 << 0),
   pending = (1 << 1),
   post_pending_transfer = (1 << 2),
-  void_pending_transfer = (1 << 3),
-  hashlock = (1 << 4)// whether or not a condition will be supplied
+  void_pending_transfer = (1 << 3)
 }
 
 export enum CreateTransferError {
-  linked_event_failed = 1,
-  exists,
+  //ok = 0 (No Error)
+  linked_event_failed,
+
+  reserved_flag,
+  reserved_field,
+
+  id_must_not_be_zero,
+  debit_account_id_must_not_be_zero,
+  credit_account_id_must_not_be_zero,
+  accounts_must_be_different,
+
+  pending_id_must_be_zero,
+  pending_transfer_must_timeout,
+  timeout_reserved_for_pending_transfer,
+
+  ledger_must_not_be_zero,
+  code_must_not_be_zero,
+  amount_must_not_be_zero,
+
+  debit_account_not_found,
+  credit_account_not_found,
+
+  accounts_must_have_the_same_ledger,
+  transfer_must_have_the_same_ledger_as_accounts,
+
+  overflows_debits_pending,
+  overflows_credits_pending,
+  overflows_debits_posted,
+  overflows_credits_posted,
+  overflows_debits,
+  overflows_credits,
+
+  exceeds_credits,
+  exceeds_debits,
+
   exists_with_different_debit_account_id,
   exists_with_different_credit_account_id,
   exists_with_different_user_data,
-  exists_with_different_reserved_field,
-  exists_with_different_code,
-  exists_with_different_amount,
+  exists_with_different_pending_id,
   exists_with_different_timeout,
+  exists_with_different_ledger,
+  exists_with_different_code,
   exists_with_different_flags,
-  reserved_field,
-  reserved_flag_padding,
-  debit_account_not_found,
-  credit_account_not_found,
-  accounts_are_the_same,
-  accounts_have_different_units,
-  amount_is_zero,
-  exceeds_credits,
-  exceeds_debits,
-  pending_transfer_must_timeout,
-  timeout_reserved_for_pending_transfer,
-  // Fields for the 2-phase Transfer
+  exists_with_different_amount,
+  exists,
+
   cannot_post_and_void_pending_transfer,
-  transfer_not_found,
-  transfer_not_pending,
-  transfer_already_posted,
-  transfer_already_voided,
-  transfer_expired,
-  condition_requires_preimage,
-  preimage_invalid,
-  preimage_requires_condition,
-  debit_amount_not_pending,
-  credit_amount_not_pending
+  pending_transfer_cannot_post_or_void_another,
+
+  pending_id_must_not_be_zero,
+  pending_id_must_be_different,
+
+  pending_transfer_not_found,
+  pending_transfer_not_pending,
+
+  pending_transfer_has_different_debit_account_id,
+  pending_transfer_has_different_credit_account_id,
+  pending_transfer_has_different_ledger,
+  pending_transfer_has_different_code,
+
+  exceeds_pending_transfer_amount,
+  pending_transfer_already_posted,
+  pending_transfer_already_voided,
+
+  pending_transfer_expired,
 }
 
 export type CreateTransfersError = {

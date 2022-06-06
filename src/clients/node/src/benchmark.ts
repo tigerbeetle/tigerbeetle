@@ -30,9 +30,9 @@ const accountA: Account = {
   id: 137n,
   user_data: 0n,
   reserved: Zeroed48Bytes,
+  ledger: 1,
   code: 0,
   flags: 0,
-  unit: 1,
   debits_posted: 0n,
   debits_pending: 0n,
   credits_posted: 0n,
@@ -44,9 +44,9 @@ const accountB: Account = {
   id: 138n,
   user_data: 0n,
   reserved: Zeroed48Bytes,
+  ledger: 1,
   code: 0,
   flags: 0,
-  unit: 1,
   debits_posted: 0n,
   debits_pending: 0n,
   credits_posted: 0n,
@@ -87,7 +87,7 @@ const rawCreateTransfers = async (batch: Buffer): Promise<CreateTransfersError[]
  * TIMESTAMP_OFFSET = 112 + 8 = 120
  */ 
 const encodeTransfer = (transfer: Transfer, offset: number, output: Buffer): void => {
-  assert(offset + TRANSFER_SIZE <= output.length)
+   assert(offset + TRANSFER_SIZE <= output.length)
 
    output.writeBigUInt64LE(transfer.id, offset)
    output.writeBigUInt64LE(transfer.debit_account_id, offset + 16)
@@ -99,7 +99,7 @@ const encodeTransfer = (transfer: Transfer, offset: number, output: Buffer): voi
    output.writeBigUInt64LE(transfer.timestamp, offset + 120)
 }
 
-const runBenchmarkRawReqeust = async () => {
+const runBenchmarkRawRequest = async () => {
   assert(
     MAX_TRANSFERS % MAX_REQUEST_BATCH_SIZE === 0,
     "The raw request benchmark requires MAX_TRANSFERS to be a multiple of MAX_REQUEST_BATCH_SIZE"
@@ -121,8 +121,10 @@ const runBenchmarkRawReqeust = async () => {
           id: BigInt(count),
           debit_account_id: accountA.id,
           credit_account_id: accountB.id,
-          code: 0,
-          reserved: Zeroed32Bytes,
+          code: 1,
+          ledger: 1,
+          reserved: 0n,
+          pending_id: 0n,
           user_data: 0n,
           flags: IS_TWO_PHASE_COMMIT ? TransferFlags.pending : 0,
           amount: 1n,
@@ -136,11 +138,13 @@ const runBenchmarkRawReqeust = async () => {
       if (IS_TWO_PHASE_COMMIT) {
         encodeTransfer(
           {
-            id: BigInt(count),
+            id: BigInt(MAX_TRANSFERS - count),
             debit_account_id: accountA.id,
             credit_account_id: accountB.id,
-            code: 0,
-            reserved: Zeroed32Bytes,
+            code: 1,
+            ledger: 1,
+            reserved: 0n,
+            pending_id: BigInt(count),
             user_data: 0n,
             flags: TransferFlags.post_pending_transfer,
             amount: 1n,
@@ -213,8 +217,10 @@ const runBenchmark = async () => {
         id: BigInt(count),
         debit_account_id: accountA.id,
         credit_account_id: accountB.id,
-        code: 0,
-        reserved: Zeroed32Bytes,
+        pending_id: 0n,
+        code: 1,
+        ledger: 1,
+        reserved: 0n,
         user_data: 0n,
         flags: IS_TWO_PHASE_COMMIT ? TransferFlags.pending : 0,
         amount: 1n,
@@ -224,11 +230,13 @@ const runBenchmark = async () => {
     
       if (IS_TWO_PHASE_COMMIT) {
         commitBatch.push({
-          id: BigInt(count),
+          id: BigInt(MAX_TRANSFERS - count),
           debit_account_id: accountA.id,
           credit_account_id: accountB.id,
-          code: 0,
-          reserved: Zeroed32Bytes,
+          pending_id: BigInt(count),
+          code: 1,
+          ledger: 1,
+          reserved: 0n,
           user_data: 0n,
           flags: IS_TWO_PHASE_COMMIT ? TransferFlags.post_pending_transfer : 0,
           amount: 1n,
@@ -289,7 +297,7 @@ const main = async () => {
   assert(accountResults[0].debits_posted === 0n)
   assert(accountResults[1].debits_posted === 0n)
 
-  const benchmark = IS_RAW_REQUEST ? await runBenchmarkRawReqeust() : await runBenchmark() 
+  const benchmark = IS_RAW_REQUEST ? await runBenchmarkRawRequest() : await runBenchmark()
   
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   const result = Math.floor((1000 * MAX_TRANSFERS)/benchmark.ms)

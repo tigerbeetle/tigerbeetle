@@ -340,6 +340,23 @@ pub fn u32_into_object(
     }
 }
 
+pub fn u16_into_object(
+    env: c.napi_env,
+    object: c.napi_value,
+    comptime key: [:0]const u8,
+    value: u16,
+    comptime error_message: [:0]const u8,
+) !void {
+    var result: c.napi_value = undefined;
+    if (c.napi_create_uint16(env, value, &result) != c.napi_ok) {
+        return throw(env, error_message);
+    }
+
+    if (c.napi_set_named_property(env, object, key, result) != c.napi_ok) {
+        return throw(env, error_message);
+    }
+}
+
 pub fn create_object(env: c.napi_env, comptime error_message: [:0]const u8) !c.napi_value {
     var result: c.napi_value = undefined;
     if (c.napi_create_object(env, &result) != c.napi_ok) {

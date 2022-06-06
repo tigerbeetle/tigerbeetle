@@ -336,24 +336,24 @@ fn encode_napi_results_array(
                 try translate.u32_into_object(
                     env,
                     napi_object,
-                    "unit",
-                    @intCast(u32, result.unit),
-                    "Failed to set property \"unit\" of account lookup result.",
+                    "ledger",
+                    @intCast(u32, result.ledger),
+                    "Failed to set property \"ledger\" of account lookup result.",
                 );
 
-                try translate.u32_into_object(
+                try translate.u16_into_object(
                     env,
                     napi_object,
                     "code",
-                    @intCast(u32, result.code),
+                    @intCast(u16, result.code),
                     "Failed to set property \"code\" of account lookup result.",
                 );
 
-                try translate.u32_into_object(
+                try translate.u16_into_object(
                     env,
                     napi_object,
                     "flags",
-                    @bitCast(u32, result.flags),
+                    @bitCast(u16, result.flags),
                     "Failed to set property \"flags\" of account lookup result.",
                 );
 
@@ -447,12 +447,20 @@ fn encode_napi_results_array(
                     "Failed to set property \"user_data\" of transfer lookup result.",
                 );
 
-                try translate.byte_slice_into_object(
+                try translate.u128_into_object(
                     env,
                     napi_object,
                     "reserved",
-                    &result.reserved,
+                    result.reserved,
                     "Failed to set property \"reserved\" of transfer lookup result.",
+                );
+
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "pending_id",
+                    result.pending_id,
+                    "Failed to set property \"pending_id\" of transfer lookup result.",
                 );
 
                 try translate.u64_into_object(
@@ -466,8 +474,16 @@ fn encode_napi_results_array(
                 try translate.u32_into_object(
                     env,
                     napi_object,
+                    "ledger",
+                    @intCast(u32, result.ledger),
+                    "Failed to set property \"ledger\" of transfer lookup result.",
+                );
+
+                try translate.u16_into_object(
+                    env,
+                    napi_object,
                     "code",
-                    @intCast(u32, result.code),
+                    @intCast(u16, result.code),
                     "Failed to set property \"code\" of transfer lookup result.",
                 );
 
