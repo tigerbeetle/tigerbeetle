@@ -673,6 +673,7 @@ pub fn Replica(
             } else {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
                 assert(self.prepare_timeout.ticking);
+                assert(self.pipeline.tail_ptr().?.message.header.checksum == message.header.parent);
             }
 
             self.on_prepare(message);
@@ -1094,7 +1095,6 @@ pub fn Replica(
                 self.state_machine.prepare_timestamp = prepare_timestamp;
             }
 
-            self.reset_pipeline();
             // Start repairs according to the CTRL protocol:
             assert(!self.repair_timeout.ticking);
             self.repair_timeout.start();
@@ -2021,7 +2021,7 @@ pub fn Replica(
 
             // Do not allow duplicate messages to trigger multiple passes through a state transition:
             if (counter.isSet(message.header.replica)) {
-                log.debug("{}: on_{s}: ignoring (duplicate message from={})", .{
+                log.debug("{}: on_{s}: ignoring (duplicate message replica={})", .{
                     self.replica,
                     command,
                     message.header.replica,
@@ -3338,8 +3338,8 @@ pub fn Replica(
         }
 
         /// Starting from the latest journal entry, backfill any missing or disconnected headers.
-        /// A header is disconnected if it breaks the hash chain with its newer neighbor to the right.
-        /// Since we work backwards from the latest entry, we should always be able to fix the chain.
+        /// A header is disconnected if it breaks the chain with its newer neighbor to the right.
+        /// Since we work back from the latest entry, we should always be able to fix the chain.
         /// Once headers are connected, backfill any dirty or faulty prepares.
         fn repair(self: *Self) void {
             if (!self.repair_timeout.ticking) {
@@ -3684,10 +3684,58 @@ pub fn Replica(
             self.repair_pipeline_read();
         }
 
+        /// Discard messages from the prepare pipeline.
+        /// Retain uncommitted messages that belong in the current view to maximize durability.
+        fn repair_pipeline_diff(self: *Self) void {
+            assert(self.status == .view_change);
+            assert(self.leader_index(self.view) == self.replica);
+
+            // Discard messages from the front of the pipeline that committed since we were leader.
+            while (self.pipeline.head_ptr()) |prepare| {
+                if (prepare.message.header.op > self.commit_max) break;
+
+                self.message_bus.unref(prepare.message);
+                assert(self.pipeline.pop() != null);
+            }
+
+            // Discard the whole pipeline if it is now disconnected from the WAL's hash chain.
+            if (self.pipeline.head_ptr()) |prepare| {
+                const parent = self.journal.header_with_op_and_checksum(
+                    prepare.message.header.op - 1,
+                    prepare.message.header.parent,
+                );
+                if (parent == null) {
+                    while (self.pipeline.count > 0) assert(self.pipeline.pop() != null);
+                    assert(self.pipeline.count == 0);
+                }
+            }
+
+            // Discard messages from the back of the pipeline that are not part of this view.
+            while (self.pipeline.tail_ptr()) |prepare| {
+                if (self.journal.has(prepare.message.header)) break;
+
+                self.message_bus.unref(prepare.message);
+                assert(self.pipeline.pop_tail() != null);
+            }
+
+            log.debug("{}: repair_pipeline_diff: {} prepare(s)", .{
+                self.replica,
+                self.pipeline.count,
+            });
+
+            self.verify_pipeline();
+
+            // Do not reset `repairing_pipeline` here as this must be reset by the read callback.
+            // Otherwise, we would be making `repair_pipeline()` reentrant.
+        }
+
         /// Returns the next `op` number that needs to be read into the pipeline.
         fn repair_pipeline_op(self: *Self) ?u64 {
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
+
+            // We cannot rely on `pipeline.count` below unless the pipeline has first been diffed.
+            self.repair_pipeline_diff();
 
             const op = self.commit_max + self.pipeline.count + 1;
             if (op <= self.op) return op;
@@ -3778,6 +3826,10 @@ pub fn Replica(
                 prepare.?.header.op,
                 prepare.?.header.checksum,
             });
+
+            if (self.pipeline.tail_ptr()) |parent| {
+                assert(prepare.?.header.parent == parent.message.header.checksum);
+            }
 
             self.pipeline.push_assume_capacity(.{ .message = prepare.?.ref() });
             assert(self.pipeline.count >= 1);
@@ -3896,19 +3948,17 @@ pub fn Replica(
             //
             // Using the pipeline to repair is faster than a `request_prepare`.
             // Also, messages in the pipeline are never corrupt.
-            if (op > self.commit_max) {
-                if (self.pipeline_prepare_for_op_and_checksum(op, checksum)) |prepare| {
-                    assert(prepare.message.header.op == op);
-                    assert(prepare.message.header.checksum == checksum);
+            if (self.pipeline_prepare_for_op_and_checksum(op, checksum)) |prepare| {
+                assert(prepare.message.header.op == op);
+                assert(prepare.message.header.checksum == checksum);
 
-                    log.debug("{}: repair_prepare: op={} checksum={} (from pipeline)", .{
-                        self.replica,
-                        op,
-                        checksum,
-                    });
-                    self.write_prepare(prepare.message, .pipeline);
-                    return true;
-                }
+                log.debug("{}: repair_prepare: op={} checksum={} (from pipeline)", .{
+                    self.replica,
+                    op,
+                    checksum,
+                });
+                self.write_prepare(prepare.message, .pipeline);
+                return true;
             }
 
             const request_prepare = Header{
@@ -4031,51 +4081,6 @@ pub fn Replica(
 
             log.debug("{}: replicate: replicating to replica {}", .{ self.replica, next });
             self.send_message_to_replica(next, message);
-        }
-
-        /// Discard messages from the prepare pipeline.
-        /// Retain uncommitted messages that belong in the current view to maximize durability.
-        fn reset_pipeline(self: *Self) void {
-            assert(self.status == .view_change);
-            assert(self.leader_index(self.view) == self.replica);
-
-            // Discard messages from the front of the pipeline that committed since we were leader.
-            while (self.pipeline.head_ptr()) |prepare| {
-                if (prepare.message.header.op > self.commit_max) break;
-
-                self.message_bus.unref(prepare.message);
-                assert(self.pipeline.pop() != null);
-            }
-
-            if (self.pipeline.head_ptr()) |prepare| {
-                // Discard the pipeline if it is disconnected from the WAL's hash chain.
-                const parent = self.journal.header_with_op_and_checksum(
-                    prepare.message.header.op - 1,
-                    prepare.message.header.parent,
-                );
-                if (parent == null) {
-                    while (self.pipeline.count > 0) assert(self.pipeline.pop() != null);
-                    assert(self.pipeline.count == 0);
-                }
-            }
-
-            // Discard messages from the back of the pipeline that are not part of this view.
-            while (self.pipeline.tail_ptr()) |prepare| {
-                if (self.journal.has(prepare.message.header)) break;
-
-                self.message_bus.unref(prepare.message);
-                assert(self.pipeline.pop_tail() != null);
-            }
-
-            self.verify_pipeline();
-
-            log.debug("{}: reset_pipeline: retained {} prepare(s)", .{
-                self.replica,
-                self.pipeline.count,
-            });
-
-            // Do not reset `repairing_pipeline` here as this must be reset by the read callback.
-            // Otherwise, we would be making `repair_pipeline()` reentrant.
         }
 
         fn reset_quorum_messages(self: *Self, messages: *QuorumMessages, command: Command) void {
@@ -4564,10 +4569,9 @@ pub fn Replica(
 
             assert(self.commit_min == self.commit_max);
             assert(self.repair_pipeline_op() == null);
+            self.verify_pipeline();
             assert(self.commit_max + self.pipeline.count == self.op);
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
-
-            self.verify_pipeline();
 
             assert(self.journal.dirty.count == 0);
             assert(self.journal.faulty.count == 0);
@@ -4838,10 +4842,21 @@ pub fn Replica(
         fn verify_pipeline(self: *Self) void {
             var op = self.commit_max + 1;
             var parent = self.journal.header_with_op(self.commit_max).?.checksum;
+
             var iterator = self.pipeline.iterator();
             while (iterator.next_ptr()) |prepare| {
                 assert(prepare.message.header.command == .prepare);
+
+                log.debug("{}: verify_pipeline: op={} checksum={x} parent={x}", .{
+                    self.replica,
+                    prepare.message.header.op,
+                    prepare.message.header.checksum,
+                    prepare.message.header.parent,
+                });
+
+                assert(self.journal.has(prepare.message.header));
                 assert(prepare.message.header.op == op);
+                assert(prepare.message.header.op <= self.op);
                 assert(prepare.message.header.parent == parent);
 
                 parent = prepare.message.header.checksum;
