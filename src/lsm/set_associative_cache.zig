@@ -285,15 +285,19 @@ pub fn SetAssociativeCache(
                     set.offset,
                     sac.clocks.get(clock_index),
                 });
+
                 std.debug.print("\n  tags={}", .{set.tags[0]});
                 for (set.tags[1..]) |tag| std.debug.print(", {}", .{tag});
+
                 std.debug.print("\n  values={}", .{set.values[0]});
                 for (set.values[1..]) |value| std.debug.print(", {}", .{value});
+
                 std.debug.print("\n  counts={}", .{sac.counts.get(set.offset)});
                 var i: usize = 1;
                 while (i < layout.ways) : (i += 1) {
                     std.debug.print(", {}", .{sac.counts.get(set.offset + i)});
                 }
+
                 std.debug.print("\n}}\n", .{});
             }
         };
@@ -314,7 +318,9 @@ pub fn SetAssociativeCache(
         }
 
         pub fn inspect() void {
-            std.debug.print("Key={} Value={} ways={} tag_bits={} clock_bits={} clock_hand_bits={} tags_per_line={} clocks_per_line={} clock_hands_per_line={}\n", .{
+            std.debug.print("\nKey={} Value={} ways={} tag_bits={} clock_bits={} " ++
+                "clock_hand_bits={} tags_per_line={} clocks_per_line={} " ++
+                "clock_hands_per_line={}\n", .{
                 @bitSizeOf(Key),
                 @sizeOf(Value),
                 layout.ways,
@@ -331,6 +337,8 @@ pub fn SetAssociativeCache(
 
 test "SetAssociativeCache: eviction" {
     const testing = std.testing;
+    const expect = testing.expect;
+    const expectEqual = testing.expectEqual;
 
     const log = false;
 
@@ -361,52 +369,52 @@ test "SetAssociativeCache: eviction" {
     if (log) SAC.inspect();
 
     // TODO Add a nice calculator method to help solve the minimum value_count_max required:
-    var sac = try SAC.init(std.testing.allocator, 16 * 16 * 8);
-    defer sac.deinit(std.testing.allocator);
+    var sac = try SAC.init(testing.allocator, 16 * 16 * 8);
+    defer sac.deinit(testing.allocator);
 
-    try testing.expectEqual(@as(?*Value, null), sac.get(123));
+    try expectEqual(@as(?*Value, null), sac.get(123));
     const value_ptr = sac.put_no_clobber(123);
     value_ptr.* = 123;
-    try testing.expectEqual(@as(Value, 123), sac.get(123).?.*);
+    try expectEqual(@as(Value, 123), sac.get(123).?.*);
 
     // Fill up the first set entirely.
     {
         var i: usize = 0;
         while (i < layout.ways) : (i += 1) {
-            try testing.expectEqual(i, sac.clocks.get(0));
+            try expectEqual(i, sac.clocks.get(0));
 
             const key = i * sac.sets;
             sac.put_no_clobber(key).* = key;
-            try testing.expect(sac.counts.get(i) == 1);
-            try testing.expectEqual(key, sac.get(key).?.*);
-            try testing.expect(sac.counts.get(i) == 2);
+            try expect(sac.counts.get(i) == 1);
+            try expectEqual(key, sac.get(key).?.*);
+            try expect(sac.counts.get(i) == 2);
         }
-        try testing.expect(sac.clocks.get(0) == 0);
+        try expect(sac.clocks.get(0) == 0);
     }
 
     if (log) sac.associate(0).inspect(sac);
 
-    // insert another element into the first set, causing key 0 to be evicted
+    // Insert another element into the first set, causing key 0 to be evicted.
     {
         const key = layout.ways * sac.sets;
         sac.put_no_clobber(key).* = key;
-        try testing.expect(sac.counts.get(0) == 1);
-        try testing.expectEqual(key, sac.get(key).?.*);
-        try testing.expect(sac.counts.get(0) == 2);
+        try expect(sac.counts.get(0) == 1);
+        try expectEqual(key, sac.get(key).?.*);
+        try expect(sac.counts.get(0) == 2);
 
-        try testing.expectEqual(@as(?*Value, null), sac.get(0));
+        try expectEqual(@as(?*Value, null), sac.get(0));
 
         {
             var i: usize = 1;
             while (i < layout.ways) : (i += 1) {
-                try testing.expect(sac.counts.get(i) == 1);
+                try expect(sac.counts.get(i) == 1);
             }
         }
     }
 
     if (log) sac.associate(0).inspect(sac);
 
-    // lock all other slots, causing key layout.ways * sac.sets to be evicted despite having the
+    // Lock all other slots, causing key layout.ways * sac.sets to be evicted despite having the
     // highest count.
     {
         {
@@ -416,7 +424,6 @@ test "SetAssociativeCache: eviction" {
         }
 
         const key = (layout.ways + 1) * sac.sets;
-
         const expect_evicted = layout.ways * sac.sets;
 
         sac.put_no_clobber_preserve_locked(
@@ -430,20 +437,20 @@ test "SetAssociativeCache: eviction" {
             key,
         ).* = key;
 
-        try testing.expectEqual(@as(?*Value, null), sac.get(expect_evicted));
+        try expectEqual(@as(?*Value, null), sac.get(expect_evicted));
     }
 
     if (log) sac.associate(0).inspect(sac);
 
-    // Ensure removal works
+    // Ensure removal works.
     {
         const key = 5 * sac.sets;
         assert(sac.get(key).?.* == key);
-        try testing.expect(sac.counts.get(5) == 2);
+        try expect(sac.counts.get(5) == 2);
 
         sac.remove(key);
-        try testing.expectEqual(@as(?*Value, null), sac.get(key));
-        try testing.expect(sac.counts.get(5) == 0);
+        try expectEqual(@as(?*Value, null), sac.get(key));
+        try expect(sac.counts.get(5) == 0);
     }
 }
 
@@ -508,8 +515,54 @@ fn PackedUnsignedIntegerArray(comptime UInt: type) type {
     };
 }
 
-fn ArrayTestContext(comptime UInt: type) type {
+test "PackedUnsignedIntegerArray: unit" {
+    const expectEqual = std.testing.expectEqual;
+
+    var words = [8]u64{ 0, 0b10110010, 0, 0, 0, 0, 0, 0 };
+
+    var p: PackedUnsignedIntegerArray(u2) = .{
+        .words = &words,
+    };
+
+    try expectEqual(@as(u2, 0b10), p.get(32 + 0));
+    try expectEqual(@as(u2, 0b00), p.get(32 + 1));
+    try expectEqual(@as(u2, 0b11), p.get(32 + 2));
+    try expectEqual(@as(u2, 0b10), p.get(32 + 3));
+
+    p.set(0, 0b01);
+    try expectEqual(@as(u64, 0b00000001), words[0]);
+    try expectEqual(@as(u2, 0b01), p.get(0));
+    p.set(1, 0b10);
+    try expectEqual(@as(u64, 0b00001001), words[0]);
+    try expectEqual(@as(u2, 0b10), p.get(1));
+    p.set(2, 0b11);
+    try expectEqual(@as(u64, 0b00111001), words[0]);
+    try expectEqual(@as(u2, 0b11), p.get(2));
+    p.set(3, 0b11);
+    try expectEqual(@as(u64, 0b11111001), words[0]);
+    try expectEqual(@as(u2, 0b11), p.get(3));
+    p.set(3, 0b01);
+    try expectEqual(@as(u64, 0b01111001), words[0]);
+    try expectEqual(@as(u2, 0b01), p.get(3));
+    p.set(3, 0b00);
+    try expectEqual(@as(u64, 0b00111001), words[0]);
+    try expectEqual(@as(u2, 0b00), p.get(3));
+
+    p.set(4, 0b11);
+    try expectEqual(
+        @as(u64, 0b0000000000000000000000000000000000000000000000000000001100111001),
+        words[0],
+    );
+    p.set(31, 0b11);
+    try expectEqual(
+        @as(u64, 0b1100000000000000000000000000000000000000000000000000001100111001),
+        words[0],
+    );
+}
+
+fn PackedUnsignedIntegerArrayFuzzTest(comptime UInt: type) type {
     const testing = std.testing;
+
     return struct {
         const Self = @This();
 
@@ -562,51 +615,6 @@ fn ArrayTestContext(comptime UInt: type) type {
     };
 }
 
-test "PackedUnsignedIntegerArray: unit" {
-    const testing = std.testing;
-
-    var words = [8]u64{ 0, 0b10110010, 0, 0, 0, 0, 0, 0 };
-
-    var p: PackedUnsignedIntegerArray(u2) = .{
-        .words = &words,
-    };
-
-    try testing.expectEqual(@as(u2, 0b10), p.get(32 + 0));
-    try testing.expectEqual(@as(u2, 0b00), p.get(32 + 1));
-    try testing.expectEqual(@as(u2, 0b11), p.get(32 + 2));
-    try testing.expectEqual(@as(u2, 0b10), p.get(32 + 3));
-
-    p.set(0, 0b01);
-    try testing.expectEqual(@as(u64, 0b00000001), words[0]);
-    try testing.expectEqual(@as(u2, 0b01), p.get(0));
-    p.set(1, 0b10);
-    try testing.expectEqual(@as(u64, 0b00001001), words[0]);
-    try testing.expectEqual(@as(u2, 0b10), p.get(1));
-    p.set(2, 0b11);
-    try testing.expectEqual(@as(u64, 0b00111001), words[0]);
-    try testing.expectEqual(@as(u2, 0b11), p.get(2));
-    p.set(3, 0b11);
-    try testing.expectEqual(@as(u64, 0b11111001), words[0]);
-    try testing.expectEqual(@as(u2, 0b11), p.get(3));
-    p.set(3, 0b01);
-    try testing.expectEqual(@as(u64, 0b01111001), words[0]);
-    try testing.expectEqual(@as(u2, 0b01), p.get(3));
-    p.set(3, 0b00);
-    try testing.expectEqual(@as(u64, 0b00111001), words[0]);
-    try testing.expectEqual(@as(u2, 0b00), p.get(3));
-
-    p.set(4, 0b11);
-    try testing.expectEqual(@as(
-        u64,
-        0b0000000000000000000000000000000000000000000000000000001100111001,
-    ), words[0]);
-    p.set(31, 0b11);
-    try testing.expectEqual(@as(
-        u64,
-        0b1100000000000000000000000000000000000000000000000000001100111001,
-    ), words[0]);
-}
-
 test "PackedUnsignedIntegerArray: fuzz" {
     const seed = 42;
 
@@ -614,7 +622,7 @@ test "PackedUnsignedIntegerArray: fuzz" {
     const random = prng.random();
 
     inline for (.{ u1, u2, u4 }) |UInt| {
-        const Context = ArrayTestContext(UInt);
+        const Context = PackedUnsignedIntegerArrayFuzzTest(UInt);
 
         var context = try Context.init(random, 1024);
         defer context.deinit();
@@ -685,12 +693,15 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
     const reference = struct {
         inline fn search_tags(tags: *[layout.ways]Tag, tag: Tag) SAC.Ways {
             var bits: SAC.Ways = 0;
+            var count: usize = 0;
             for (tags) |t, i| {
                 if (t == tag) {
                     const bit = @intCast(math.Log2Int(SAC.Ways), i);
                     bits |= (@as(SAC.Ways, 1) << bit);
+                    count += 1;
                 }
             }
+            assert(@popCount(SAC.Ways, bits) == count);
             return bits;
         }
     };
@@ -717,7 +728,10 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
 
                 const expected = reference.search_tags(&tags, tag);
                 const actual = SAC.search_tags(&tags, tag);
-                if (log) std.debug.print("expected: {b:0>16}, actual: {b:0>16}\n", .{ expected, actual });
+                if (log) std.debug.print("expected: {b:0>16}, actual: {b:0>16}\n", .{
+                    expected,
+                    actual,
+                });
                 try testing.expectEqual(expected, actual);
             }
         }
