@@ -379,11 +379,9 @@ pub const StateMachine = struct {
         }
         if (sum_overflows(t.amount, dr.debits_posted)) return .overflows_debits_posted;
         if (sum_overflows(t.amount, cr.credits_posted)) return .overflows_credits_posted;
-        if (sum_overflows(dr.debits_pending, dr.debits_posted)) return .overflows_debits;
         if (sum_overflows(t.amount, dr.debits_pending + dr.debits_posted)) {
             return .overflows_debits;
         }
-        if (sum_overflows(cr.credits_pending, cr.credits_posted)) return .overflows_credits;
         if (sum_overflows(t.amount, cr.credits_pending + cr.credits_posted)) {
             return .overflows_credits;
         }
@@ -552,7 +550,9 @@ pub const StateMachine = struct {
         if (t.credit_account_id > 0 and t.credit_account_id != e.credit_account_id) {
             return .exists_with_different_credit_account_id;
         }
-        if (t.user_data != e.user_data) return .exists_with_different_user_data;
+        if (t.user_data > 0 and t.user_data != e.user_data) {
+            return .exists_with_different_user_data;
+        }
         if (t.pending_id != e.pending_id) return .exists_with_different_pending_id;
         if (t.timeout != e.timeout) return .exists_with_different_timeout;
         if (t.code > 0 and t.code != e.code) return .exists_with_different_code;
@@ -623,7 +623,7 @@ fn equal_48_bytes(a: [48]u8, b: [48]u8) bool {
 
 const testing = std.testing;
 
-test "overflow" {
+test "sum overflows" {
     const expectEqual = std.testing.expectEqual;
 
     try expectEqual(false, sum_overflows(std.math.maxInt(u64), 0));
@@ -925,20 +925,6 @@ test "create/lookup/rollback transfers" {
             .credits_posted = std.math.maxInt(u64),
         }),
         mem.zeroInit(Account, .{
-            .id = 4,
-            .ledger = 1,
-            .code = 1,
-            .debits_pending = std.math.maxInt(u64) - 1,
-            .debits_posted = std.math.maxInt(u64) - 1,
-        }),
-        mem.zeroInit(Account, .{
-            .id = 5,
-            .ledger = 1,
-            .code = 1,
-            .credits_pending = std.math.maxInt(u64) - 1,
-            .credits_posted = std.math.maxInt(u64) - 1,
-        }),
-        mem.zeroInit(Account, .{
             .id = 6,
             .ledger = 1,
             .code = 1,
@@ -1171,30 +1157,6 @@ test "create/lookup/rollback transfers" {
                 .timestamp = timestamp,
                 .debit_account_id = 1,
                 .credit_account_id = 3,
-                .ledger = 1,
-                .code = 1,
-                .amount = 1,
-            }),
-        },
-        .{
-            .result = .overflows_debits,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .timestamp = timestamp,
-                .debit_account_id = 4,
-                .credit_account_id = 1,
-                .ledger = 1,
-                .code = 1,
-                .amount = 1,
-            }),
-        },
-        .{
-            .result = .overflows_credits,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .timestamp = timestamp,
-                .debit_account_id = 1,
-                .credit_account_id = 5,
                 .ledger = 1,
                 .code = 1,
                 .amount = 1,
