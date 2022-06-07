@@ -77,12 +77,12 @@ pub fn SetAssociativeCache(
     const clock_hands_per_line = @divExact(layout.cache_line_size * 8, clock_hand_bits);
     assert(clock_hands_per_line > 0);
 
-    const Tag = meta.Int(.unsigned, layout.tag_bits);
-    const Count = meta.Int(.unsigned, layout.clock_bits);
-    const Clock = meta.Int(.unsigned, clock_hand_bits);
-
     return struct {
         const Self = @This();
+
+        const Tag = meta.Int(.unsigned, layout.tag_bits);
+        const Count = meta.Int(.unsigned, layout.clock_bits);
+        const Clock = meta.Int(.unsigned, clock_hand_bits);
 
         sets: u64,
         tags: []Tag,
@@ -238,7 +238,11 @@ pub fn SetAssociativeCache(
             comptime assert(math.maxInt(@TypeOf(way)) == layout.ways - 1);
             comptime assert(@as(@TypeOf(way), math.maxInt(@TypeOf(way))) +% 1 == 0);
 
-            const clock_iterations_max = layout.ways * math.maxInt(Count);
+            // The maximum number of iterations happens when every slot in the set has the maximum
+            // count. In this case, the loop will iterate until all counts have been decremented
+            // to 1. Then in the next iteration it will decrement a count to 0 and break.
+            const clock_iterations_max = layout.ways * (math.maxInt(Count) - 1);
+
             var safety_count: usize = 0;
             while (safety_count <= clock_iterations_max) : ({
                 safety_count += 1;
@@ -439,6 +443,50 @@ fn set_associative_cache_test(
                 try expectEqual(@as(?*Value, null), sac.get(key));
                 try expect(sac.counts.get(5) == 0);
             }
+
+            sac.reset();
+
+            // Fill up the first set entirely, maxing out the count for each slot.
+            {
+                var i: usize = 0;
+                while (i < layout.ways) : (i += 1) {
+                    try expectEqual(i, sac.clocks.get(0));
+
+                    const key = i * sac.sets;
+                    sac.put_no_clobber(key).* = key;
+                    try expect(sac.counts.get(i) == 1);
+                    var j: usize = 2;
+                    while (j <= math.maxInt(SAC.Count)) : (j += 1) {
+                        try expectEqual(key, sac.get(key).?.*);
+                        try expect(sac.counts.get(i) == j);
+                    }
+                    try expectEqual(key, sac.get(key).?.*);
+                    try expect(sac.counts.get(i) == math.maxInt(SAC.Count));
+                }
+                try expect(sac.clocks.get(0) == 0);
+            }
+
+            if (log) sac.associate(0).inspect(sac);
+
+            // Insert another element into the first set, causing key 0 to be evicted.
+            {
+                const key = layout.ways * sac.sets;
+                sac.put_no_clobber(key).* = key;
+                try expect(sac.counts.get(0) == 1);
+                try expectEqual(key, sac.get(key).?.*);
+                try expect(sac.counts.get(0) == 2);
+
+                try expectEqual(@as(?*Value, null), sac.get(0));
+
+                {
+                    var i: usize = 1;
+                    while (i < layout.ways) : (i += 1) {
+                        try expect(sac.counts.get(i) == 1);
+                    }
+                }
+            }
+
+            if (log) sac.associate(0).inspect(sac);
         }
     };
 }
@@ -717,10 +765,8 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
         layout,
     );
 
-    const Tag = meta.Int(.unsigned, layout.tag_bits);
-
     const reference = struct {
-        inline fn search_tags(tags: *[layout.ways]Tag, tag: Tag) SAC.Ways {
+        inline fn search_tags(tags: *[layout.ways]SAC.Tag, tag: SAC.Tag) SAC.Ways {
             var bits: SAC.Ways = 0;
             var count: usize = 0;
             for (tags) |t, i| {
@@ -741,10 +787,10 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
 
             var iterations: usize = 0;
             while (iterations < 10_000) : (iterations += 1) {
-                var tags: [layout.ways]Tag = undefined;
+                var tags: [layout.ways]SAC.Tag = undefined;
                 random.bytes(mem.asBytes(&tags));
 
-                const tag = random.int(Tag);
+                const tag = random.int(SAC.Tag);
 
                 var indexes: [layout.ways]usize = undefined;
                 for (indexes) |*x, i| x.* = i;
