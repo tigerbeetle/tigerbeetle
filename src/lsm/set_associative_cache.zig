@@ -335,13 +335,115 @@ pub fn SetAssociativeCache(
     };
 }
 
-test "SetAssociativeCache: eviction" {
+fn set_associative_cache_test(
+    comptime Key: type,
+    comptime Value: type,
+    comptime context: type,
+    comptime layout: Layout,
+) type {
     const testing = std.testing;
     const expect = testing.expect;
     const expectEqual = testing.expectEqual;
 
     const log = false;
 
+    const SAC = SetAssociativeCache(
+        Key,
+        Value,
+        context.key_from_value,
+        context.hash,
+        context.equal,
+        layout,
+    );
+
+    return struct {
+        fn run() !void {
+            if (log) SAC.inspect();
+
+            // TODO Add a nice calculator method to help solve the minimum value_count_max required:
+            var sac = try SAC.init(testing.allocator, 16 * 16 * 8);
+            defer sac.deinit(testing.allocator);
+
+            // Fill up the first set entirely.
+            {
+                var i: usize = 0;
+                while (i < layout.ways) : (i += 1) {
+                    try expectEqual(i, sac.clocks.get(0));
+
+                    const key = i * sac.sets;
+                    sac.put_no_clobber(key).* = key;
+                    try expect(sac.counts.get(i) == 1);
+                    try expectEqual(key, sac.get(key).?.*);
+                    try expect(sac.counts.get(i) == 2);
+                }
+                try expect(sac.clocks.get(0) == 0);
+            }
+
+            if (log) sac.associate(0).inspect(sac);
+
+            // Insert another element into the first set, causing key 0 to be evicted.
+            {
+                const key = layout.ways * sac.sets;
+                sac.put_no_clobber(key).* = key;
+                try expect(sac.counts.get(0) == 1);
+                try expectEqual(key, sac.get(key).?.*);
+                try expect(sac.counts.get(0) == 2);
+
+                try expectEqual(@as(?*Value, null), sac.get(0));
+
+                {
+                    var i: usize = 1;
+                    while (i < layout.ways) : (i += 1) {
+                        try expect(sac.counts.get(i) == 1);
+                    }
+                }
+            }
+
+            if (log) sac.associate(0).inspect(sac);
+
+            // Lock all other slots, causing key layout.ways * sac.sets to be evicted despite having the
+            // highest count.
+            {
+                {
+                    assert(sac.counts.get(0) == 2);
+                    var i: usize = 1;
+                    while (i < layout.ways) : (i += 1) assert(sac.counts.get(i) == 1);
+                }
+
+                const key = (layout.ways + 1) * sac.sets;
+                const expect_evicted = layout.ways * sac.sets;
+
+                sac.put_no_clobber_preserve_locked(
+                    u64,
+                    struct {
+                        inline fn locked(only_unlocked: u64, value: *const Value) bool {
+                            return value.* != only_unlocked;
+                        }
+                    }.locked,
+                    expect_evicted,
+                    key,
+                ).* = key;
+
+                try expectEqual(@as(?*Value, null), sac.get(expect_evicted));
+            }
+
+            if (log) sac.associate(0).inspect(sac);
+
+            // Ensure removal works.
+            {
+                const key = 5 * sac.sets;
+                assert(sac.get(key).?.* == key);
+                try expect(sac.counts.get(5) == 2);
+
+                sac.remove(key);
+                try expectEqual(@as(?*Value, null), sac.get(key));
+                try expect(sac.counts.get(5) == 0);
+            }
+        }
+    };
+}
+
+test "SetAssociativeCache: eviction" {
     const Key = u64;
     const Value = u64;
 
@@ -357,101 +459,28 @@ test "SetAssociativeCache: eviction" {
         }
     };
 
-    const layout: Layout = .{};
-    const SAC = SetAssociativeCache(
-        Key,
-        Value,
-        context.key_from_value,
-        context.hash,
-        context.equal,
-        layout,
-    );
-    if (log) SAC.inspect();
+    try set_associative_cache_test(Key, Value, context, .{}).run();
+}
 
-    // TODO Add a nice calculator method to help solve the minimum value_count_max required:
-    var sac = try SAC.init(testing.allocator, 16 * 16 * 8);
-    defer sac.deinit(testing.allocator);
+test "SetAssociativeCache: hash collision" {
+    const Key = u64;
+    const Value = u64;
 
-    try expectEqual(@as(?*Value, null), sac.get(123));
-    const value_ptr = sac.put_no_clobber(123);
-    value_ptr.* = 123;
-    try expectEqual(@as(Value, 123), sac.get(123).?.*);
-
-    // Fill up the first set entirely.
-    {
-        var i: usize = 0;
-        while (i < layout.ways) : (i += 1) {
-            try expectEqual(i, sac.clocks.get(0));
-
-            const key = i * sac.sets;
-            sac.put_no_clobber(key).* = key;
-            try expect(sac.counts.get(i) == 1);
-            try expectEqual(key, sac.get(key).?.*);
-            try expect(sac.counts.get(i) == 2);
+    const context = struct {
+        inline fn key_from_value(value: Value) Key {
+            return value;
         }
-        try expect(sac.clocks.get(0) == 0);
-    }
-
-    if (log) sac.associate(0).inspect(sac);
-
-    // Insert another element into the first set, causing key 0 to be evicted.
-    {
-        const key = layout.ways * sac.sets;
-        sac.put_no_clobber(key).* = key;
-        try expect(sac.counts.get(0) == 1);
-        try expectEqual(key, sac.get(key).?.*);
-        try expect(sac.counts.get(0) == 2);
-
-        try expectEqual(@as(?*Value, null), sac.get(0));
-
-        {
-            var i: usize = 1;
-            while (i < layout.ways) : (i += 1) {
-                try expect(sac.counts.get(i) == 1);
-            }
+        /// This hash function is intentionally broken to simulate hash collision.
+        inline fn hash(key: Key) u64 {
+            _ = key;
+            return 0;
         }
-    }
-
-    if (log) sac.associate(0).inspect(sac);
-
-    // Lock all other slots, causing key layout.ways * sac.sets to be evicted despite having the
-    // highest count.
-    {
-        {
-            assert(sac.counts.get(0) == 2);
-            var i: usize = 1;
-            while (i < layout.ways) : (i += 1) assert(sac.counts.get(i) == 1);
+        inline fn equal(a: Key, b: Key) bool {
+            return a == b;
         }
+    };
 
-        const key = (layout.ways + 1) * sac.sets;
-        const expect_evicted = layout.ways * sac.sets;
-
-        sac.put_no_clobber_preserve_locked(
-            u64,
-            struct {
-                inline fn locked(only_unlocked: u64, value: *const Value) bool {
-                    return value.* != only_unlocked;
-                }
-            }.locked,
-            expect_evicted,
-            key,
-        ).* = key;
-
-        try expectEqual(@as(?*Value, null), sac.get(expect_evicted));
-    }
-
-    if (log) sac.associate(0).inspect(sac);
-
-    // Ensure removal works.
-    {
-        const key = 5 * sac.sets;
-        assert(sac.get(key).?.* == key);
-        try expect(sac.counts.get(5) == 2);
-
-        sac.remove(key);
-        try expectEqual(@as(?*Value, null), sac.get(key));
-        try expect(sac.counts.get(5) == 0);
-    }
+    try set_associative_cache_test(Key, Value, context, .{}).run();
 }
 
 /// A little simpler than PackedIntArray in the std lib, restricted to little endian 64-bit words,
