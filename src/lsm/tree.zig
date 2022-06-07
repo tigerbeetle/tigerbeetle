@@ -327,6 +327,8 @@ pub fn TreeType(
                 assert(commit_count_max > 0);
 
                 const value_count_max = commit_count_max * config.lsm_mutable_table_batch_multiple;
+                const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
+                assert(data_block_count <= Table.data_block_count_max);
 
                 var values: Values = .{};
                 try values.ensureTotalCapacity(allocator, value_count_max);
@@ -375,15 +377,14 @@ pub fn TreeType(
             }
 
             /// The returned slice is invalidated whenever this is called for any tree.
-            pub fn as_sorted_values(
+            pub fn sort_into_values_and_clear(
                 table: *MutableTable, 
                 values_max: []Value,
             ) []const Value {
-                assert(values_max.len >= table.value_count_max);
-
                 assert(table.count() > 0);
                 assert(table.count() <= table.value_count_max);
                 assert(table.count() <= values_max.len);
+                assert(values_max.len == table.value_count_max);
 
                 var i: usize = 0;
                 var it = table.values.keyIterator();
@@ -393,14 +394,155 @@ pub fn TreeType(
 
                 const values = values_max[0..i];
                 assert(values.len == table.count());
-
                 std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+                
+                table.clear();
+                assert(table.count() == 0);
+
                 return values;
             }
 
             fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
                 return compare_keys(key_from_value(a), key_from_value(b)) == .lt;
             }
+        };
+
+        pub const ImmutableTable = struct {
+            snapshot_min: u64,
+            value_count_max: u32,
+            values: []Value,
+            iterator_index: u32,
+
+            /// Whether the in-memory table is free to accept the mutable table, or else flushing.
+            /// As soon as the flush completes, the table will be invalidated and marked as free.
+            free: bool,
+
+            pub fn init(allocator: mem.Allocator, commit_count_max: u32) !ImmutableTable {
+                // The in-memory immutable table is the same size as the mutable table:
+                const value_count_max = commit_count_max * config.lsm_mutable_table_batch_multiple;
+                assert(div_ceil(value_count_max, data.value_count_max) <= data_block_count_max);
+
+                const values = try allocator.alloc(Value, value_count_max);
+                errdefer allocator.free(values);
+
+                return ImmutableTable{
+                    .value_count_max = value_count_max,
+                    .snaphshot_min = undefined,
+                    .values = values,
+                    .free = true,
+                };
+            }
+
+            inline fn values_max(table: *const ImmutableTable) []Value {
+                return table.values.ptr[0..table.value_count_max];
+            }
+
+            pub fn deinit(table: *ImmutableTable, allocator: mem.Allocator) void {
+                allocator.free(table.values_max());
+            }
+
+            pub fn create_from_sorted_values(
+                table: *ImmutableTable,
+                snapshot_min: u64,
+                sorted_values: []const Value,
+            ) void {
+                assert(table.free);
+                assert(snapshot_min > 0);
+                assert(snapshot_min < snapshot_latest);
+
+                assert(sorted_values.ptr == table.values.ptr);
+                assert(sorted_values.len > 0);
+                assert(sorted_values.len <= table.value_count_max);
+                assert(sorted_values.len <= data.value_count_max * data_block_count_max);
+
+                if (verify) {
+                    // TODO: check all values if compare_keys(v1, v2) != .gt
+                }
+
+                table.free = false;
+                table.values = sorted_values;
+                table.snapshot_min = snapshot_min;
+                table.iterator_index = 0;
+            }
+
+            // TODO(ifreund) This would be great to unit test.
+            fn get(table: *const ImmutableTable, key: Key) ?*const Value {
+                // TODO: in-memory binary search using fingerprint
+
+                assert(!table.free);
+                assert(table.info.address != 0);
+                assert(table.info.snapshot_max == math.maxInt(u64));
+
+                if (compare_keys(key, table.info.key_min) == .lt) return null;
+                if (compare_keys(key, table.info.key_max) == .gt) return null;
+
+                const index_block = &table.blocks[0];
+
+                const i = index_data_block_for_key(index_block, key);
+
+                const meta_block_count = index_block_count + filter_block_count_max;
+                const data_blocks_used = index_data_blocks_used(index_block);
+                const data_block = @alignCast(
+                    config.sector_size,
+                    &table.blocks[meta_block_count..][0..data_blocks_used][i],
+                );
+
+                if (verify) {
+                    // TODO What else do we expect?
+                    assert(compare_keys(key, index_data_keys(index_block)[i]) != .gt);
+                    assert(index_data_addresses(index_block)[i] != 0);
+                }
+
+                {
+                    const filter_blocks =
+                        table.blocks[index_block_count..][0..table.filter_blocks_used()];
+                    const filter_block = @alignCast(
+                        config.sector_size,
+                        &filter_blocks[i / filter.data_block_count_max],
+                    );
+                    if (!bloom_filter.may_contain(fingerprint, filter_block_filter(filter_block))) {
+                        return null;
+                    }
+                }
+
+                assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
+                const key_layout_bytes = @alignCast(
+                    @alignOf(Key),
+                    data_block[data.key_layout_offset..][0..data.key_layout_size],
+                );
+                const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
+
+                const e = eytzinger(data.key_count, data.value_count_max);
+                const values = e.search_values(
+                    Key,
+                    Value,
+                    compare_keys,
+                    key_layout,
+                    data_block_values_used(data_block),
+                    key,
+                );
+
+                switch (values.len) {
+                    0 => return null,
+                    else => {
+                        const result = binary_search.binary_search_values(
+                            Key,
+                            Value,
+                            key_from_value,
+                            compare_keys,
+                            values,
+                            key,
+                        );
+                        if (result.exact) {
+                            return &values[result.index];
+                        } else {
+                            return null;
+                        }
+                    },
+                }
+            }
+
+            // TODO: peek, pop, buffered_all_values, buffered_enough_values, tick
         };
 
         pub const Table = struct {
@@ -723,62 +865,6 @@ pub fn TreeType(
                 }
             }
 
-            value_count_max: u32,
-            snapshot_min: u64,
-            values: []Value,
-
-            /// Whether the in-memory table is free to accept the mutable table, or else flushing.
-            /// As soon as the flush completes, the table will be invalidated and marked as free.
-            free: bool,
-
-            pub fn init(allocator: mem.Allocator, commit_count_max: u32) !Table {
-                // The in-memory immutable table is the same size as the mutable table:
-                const value_count_max = commit_count_max * config.lsm_mutable_table_batch_multiple;
-
-                const block_count = index_block_count + filter_block_count_max +
-                    div_ceil(value_count_max, data.value_count_max);
-
-                const values = try allocator.alloc(Value, value_count_max);
-                errdefer allocator.free(blocks);
-
-                // .values = alloc(Value, value_count_max * sizeof(Value))
-                return Table{
-                    .value_count_max = value_count_max,
-                    .snaphshot_min = undefined,
-                    .values = values,
-                    .free = true,
-                };
-            }
-
-            inline fn values_max(table: Table) []Value {
-                return table.values.ptr[0..table.value_count_max];
-            }
-
-            pub fn deinit(table: *Table, allocator: mem.Allocator) void {
-                allocator.free(table.values_max());
-            }
-
-            pub fn create_sorted_from_mutable_table(
-                table: *Table,
-                snapshot_min: u64,
-                mutable_table: *const MutableTable,
-            ) void {
-                assert(table.free);
-                assert(snapshot_min > 0);
-                assert(snapshot_min < snapshot_latest);
-
-                const values_max = table.values_max();
-                const sorted_values = mutable_table.as_sorted_values(values_max);
-
-                assert(sorted_values.ptr == table.values.ptr);
-                assert(sorted_values.len > 0);
-                assert(sorted_values.len <= table.value_count_max);
-                assert(sorted_values.len <= data.value_count_max * data_block_count_max);
-
-                table.values = sorted_values;
-                table.snapshot_min = snapshot_min;
-            }
-
             fn blocks_used(table: *Table) u32 {
                 assert(!table.free);
                 return Table.index_blocks_used(&table.blocks[0]);
@@ -787,81 +873,6 @@ pub fn TreeType(
             fn filter_blocks_used(table: *Table) u32 {
                 assert(!table.free);
                 return Table.index_filter_blocks_used(&table.blocks[0]);
-            }
-
-            // TODO(ifreund) This would be great to unit test.
-            fn get(table: *Table, key: Key, fingerprint: bloom_filter.Fingerprint) ?*const Value {
-                assert(!table.free);
-                assert(table.info.address != 0);
-                assert(table.info.snapshot_max == math.maxInt(u64));
-
-                if (compare_keys(key, table.info.key_min) == .lt) return null;
-                if (compare_keys(key, table.info.key_max) == .gt) return null;
-
-                const index_block = &table.blocks[0];
-
-                const i = index_data_block_for_key(index_block, key);
-
-                const meta_block_count = index_block_count + filter_block_count_max;
-                const data_blocks_used = index_data_blocks_used(index_block);
-                const data_block = @alignCast(
-                    config.sector_size,
-                    &table.blocks[meta_block_count..][0..data_blocks_used][i],
-                );
-
-                if (verify) {
-                    // TODO What else do we expect?
-                    assert(compare_keys(key, index_data_keys(index_block)[i]) != .gt);
-                    assert(index_data_addresses(index_block)[i] != 0);
-                }
-
-                {
-                    const filter_blocks =
-                        table.blocks[index_block_count..][0..table.filter_blocks_used()];
-                    const filter_block = @alignCast(
-                        config.sector_size,
-                        &filter_blocks[i / filter.data_block_count_max],
-                    );
-                    if (!bloom_filter.may_contain(fingerprint, filter_block_filter(filter_block))) {
-                        return null;
-                    }
-                }
-
-                assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
-                const key_layout_bytes = @alignCast(
-                    @alignOf(Key),
-                    data_block[data.key_layout_offset..][0..data.key_layout_size],
-                );
-                const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
-
-                const e = eytzinger(data.key_count, data.value_count_max);
-                const values = e.search_values(
-                    Key,
-                    Value,
-                    compare_keys,
-                    key_layout,
-                    data_block_values_used(data_block),
-                    key,
-                );
-
-                switch (values.len) {
-                    0 => return null,
-                    else => {
-                        const result = binary_search.binary_search_values(
-                            Key,
-                            Value,
-                            key_from_value,
-                            compare_keys,
-                            values,
-                            key,
-                        );
-                        if (result.exact) {
-                            return &values[result.index];
-                        } else {
-                            return null;
-                        }
-                    },
-                }
             }
 
             const Builder = struct {
@@ -1237,7 +1248,9 @@ pub fn TreeType(
         };
 
         /// Compact a table in level A with overlapping tables in level B.
-        pub fn CompactionType(comptime LevelAIterator: type) type {
+        const LevelCompaction = CompactionType(LevelIteratorType(???, io_callback));
+
+        pub fn CompactionType(comptime LevelAIteratorType: anytype) type {
             // LevelAIterator requires:
             // - init(allocator) void
             // - deinit(allocator) void
@@ -1251,6 +1264,7 @@ pub fn TreeType(
                 pub const Callback = fn (it: *Compaction, done: bool) void;
 
                 //const LevelAIterator = TableIteratorType(Compaction, io_callback);
+                const LevelAIterator = LevelAIteratorType(Compaction);
                 const LevelBIterator = LevelIteratorType(Compaction, io_callback);
 
                 const k = 2;
@@ -2057,12 +2071,16 @@ pub fn TreeType(
         value_cache: ?*ValueCache,
 
         mutable_table: MutableTable,
-        table: Table,
+        immutable_table: ImmutableTable,
 
         manifest: Manifest,
-        compactions: [config.lsm_levels - 1]LevelCompaction,
 
-        const LevelCompaction = CompactionType(LevelIteratorType);
+        /// The number of Compaction instances is less than the number of levels
+        /// as the last level doesn't pair up to compact into another.
+        compactions: [config.lsm_levels - 1]TableCompaction, 
+
+        const TableCompaction = CompactionType(TableIteratorType);
+        const ImmutableTableCompaction = CompactionType(ImmutableTable.IteratorType);
 
         pub const Options = struct {
             /// The maximum number of keys that may need to be prefetched before commit.
@@ -2206,30 +2224,29 @@ pub fn TreeType(
             // Convert the mutable table to an immutable table if necessary:
             if (tree.mutable_table.cannot_commit_batch(tree.options.commit_count_max)) {
                 assert(tree.mutable_table.count() > 0);
-                assert(tree.table.free);
+                assert(tree.immutable_table.free);
 
-                tree.table.create_sorted_from_mutable_table(
+                const values_max = tree.immutable_table.values_max();
+                const values = tree.mutable_table.sort_into_values_and_clear(values_max);
+                assert(values.ptr == values_max.ptr);
+
+                tree.immutable_table.create_from_sorted_values(
                     tree.manifest.take_snapshot(),
-                    &tree.mutable_table,
+                    values,
                 );
 
-
-                tree.table.create_from_sorted_values(
-                    tree.grid,
-                    tree.manifest.take_snapshot(),
-                    tree.mutable_table.as_sorted_values(sort_buffer),
-                );
-                assert(!tree.table.free);
-
-                tree.mutable_table.clear();
                 assert(tree.mutable_table.count() == 0);
+                assert(!tree.immutable_table.free);
             }
 
-            if (!tree.table.free) {
-                tree.table.flush.tick(callback);
-            } else {
-                callback(tree);
-            }
+            // if compactions are started, tick them or start some
+            // scatter-gather compaction callbacks -> callback
+
+            // if (!tree.table.free) {
+            //     tree.table.flush.tick(callback);
+            // } else {
+            //     callback(tree);
+            // }
 
             // TODO Call tree.manifest.flush() in parallel.
         }
