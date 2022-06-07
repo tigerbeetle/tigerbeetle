@@ -368,6 +368,10 @@ fn set_associative_cache_test(
             var sac = try SAC.init(testing.allocator, 16 * 16 * 8);
             defer sac.deinit(testing.allocator);
 
+            for (sac.tags) |tag| try testing.expectEqual(@as(SAC.Tag, 0), tag);
+            for (sac.counts.words) |word| try testing.expectEqual(@as(u64, 0), word);
+            for (sac.clocks.words) |word| try testing.expectEqual(@as(u64, 0), word);
+
             // Fill up the first set entirely.
             {
                 var i: usize = 0;
@@ -445,6 +449,10 @@ fn set_associative_cache_test(
             }
 
             sac.reset();
+
+            for (sac.tags) |tag| try testing.expectEqual(@as(SAC.Tag, 0), tag);
+            for (sac.counts.words) |word| try testing.expectEqual(@as(u64, 0), word);
+            for (sac.clocks.words) |word| try testing.expectEqual(@as(u64, 0), word);
 
             // Fill up the first set entirely, maxing out the count for each slot.
             {
