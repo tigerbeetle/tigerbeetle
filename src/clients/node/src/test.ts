@@ -7,7 +7,6 @@ import {
   CreateAccountError,
   CreateTransferError
 } from '.'
-import * as console from "console";
 
 const client = createClient({
   cluster_id: 0,
@@ -68,14 +67,14 @@ test('can create accounts', async (): Promise<void> => {
   assert.strictEqual(errors.length, 0)
 })
 
-test('can return error', async (): Promise<void> => {
+test('can return error on account', async (): Promise<void> => {
   const errors = await client.createAccounts([accountA, accountB])
 
   assert.strictEqual(errors.length, 1)
   assert.deepStrictEqual(errors[0], { index: 0, code: CreateAccountError.exists })
 })
 
-test('throws error if timestamp is not set to 0n', async (): Promise<void> => {
+test('throws error if timestamp is not set to 0n on account', async (): Promise<void> => {
   const account = { ...accountA, timestamp: 2n, id: 3n }
   await assert.rejects(client.createAccounts([account]))
 })
