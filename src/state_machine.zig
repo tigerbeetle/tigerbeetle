@@ -379,6 +379,7 @@ pub const StateMachine = struct {
         }
         if (sum_overflows(t.amount, dr.debits_posted)) return .overflows_debits_posted;
         if (sum_overflows(t.amount, cr.credits_posted)) return .overflows_credits_posted;
+        // We assert that the sum of the pending and posted balances can never overflow:
         if (sum_overflows(t.amount, dr.debits_pending + dr.debits_posted)) {
             return .overflows_debits;
         }
