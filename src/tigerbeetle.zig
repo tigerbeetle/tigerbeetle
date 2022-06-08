@@ -104,6 +104,9 @@ pub const CreateAccountResult = enum(u32) {
 
     mutually_exclusive_flags,
 
+    overflows_debits,
+    overflows_credits,
+
     exceeds_credits,
     exceeds_debits,
 
@@ -150,14 +153,13 @@ pub const CreateTransferResult = enum(u32) {
     exceeds_credits,
     exceeds_debits,
 
+    exists_with_different_flags,
     exists_with_different_debit_account_id,
     exists_with_different_credit_account_id,
     exists_with_different_user_data,
     exists_with_different_pending_id,
     exists_with_different_timeout,
-    exists_with_different_ledger,
     exists_with_different_code,
-    exists_with_different_flags,
     exists_with_different_amount,
     exists,
 
