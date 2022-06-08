@@ -198,17 +198,16 @@ test('can post a two-phase transfer', async (): Promise<void> => {
 
   const commit: Transfer = {
     id: 3n,
-    credit_account_id: BigInt(0),
     debit_account_id: BigInt(0),
+    credit_account_id: BigInt(0),
     user_data: 0n,
     reserved: 0n,
     pending_id: 2n,// must match the id of the pending transfer
-    amount: 0n,
+    timeout: 0n,
     ledger: 1,
     code: 1,
     flags: flags,
-    //reserved: Zeroed32Bytes,
-    timeout: 0n,
+    amount: 0n,
     timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
@@ -255,11 +254,11 @@ test('can reject a two-phase transfer', async (): Promise<void> => {
     user_data: 0n,
     reserved: 0n,
     pending_id: 4n, // must match the id of the pending transfer
-    amount: 0n,
+    timeout: 0n,
     ledger: 1,
     code: 1,
     flags: TransferFlags.void_pending_transfer,
-    timeout: 0n,
+    amount: 0n,
     timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
@@ -284,30 +283,30 @@ test('can link transfers', async (): Promise<void> => {
     id: 6n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
-    amount: 100n,
-    ledger: 1,
-    code: 1,
-    flags: TransferFlags.linked, // points to transfer2
     user_data: 0n,
     reserved: 0n,
     pending_id: 0n,
     timeout: 0n,
+    ledger: 1,
+    code: 1,
+    flags: TransferFlags.linked, // points to transfer2
+    amount: 100n,
     timestamp: 0n, // will be set correctly by the TigerBeetle server
   }
   const transfer2: Transfer = {
     id: 6n,
-    amount: 100n,
-    ledger: 1,
-    code: 1,
-    credit_account_id: accountA.id,
     debit_account_id: accountB.id,
-    // Does not have linked flag as it is the end of the chain.
-    // This will also cause it to fail as this is now a duplicate with different flags
-    flags: 0,
+    credit_account_id: accountA.id,
     user_data: 0n,
     reserved: 0n,
     pending_id: 0n,
     timeout: 0n,
+    ledger: 1,
+    code: 1,
+    // Does not have linked flag as it is the end of the chain.
+    // This will also cause it to fail as this is now a duplicate with different flags
+    flags: 0,
+    amount: 100n,
     timestamp: 0n, // will be set correctly by the TigerBeetle server
   }
 
