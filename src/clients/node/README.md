@@ -150,7 +150,7 @@ const transfer = {
     debit_account_id: 1n,  // u128
     credit_account_id: 2n, // u128
     user_data: 0n, // u128, opaque third-party identifier to link this transfer (many-to-one) to an external entity 
-    reserved: 0n, // two-phase condition can go in here
+    reserved: 0n,
     timeout: 0n, // u64, in nano-seconds. 
     ledger: 1,  // u32, ledger for transfer (e.g. currency)
     code: 1,  // u16, a chart of accounts code describing the reason for the transfer (e.g. deposit, settlement)
@@ -162,9 +162,10 @@ const transfer = {
 const errors = await client.createTransfers([transfer])
 ```
 Two-phase transfers are supported natively by toggling the appropriate flag. TigerBeetle will then adjust the `credits_pending` and `debits_pending` fields of the appropriate accounts. A corresponding commit transfer then needs to be sent to accept or reject the transfer.
-| bit 0    | bit 1              | bit 2            |
-|----------|--------------------|------------------|
-| `linked` | `pending`          | `condition`      |
+
+| bit 0    | bit 1     |
+|----------|-----------|
+| `linked` | `pending` |
 
 The `condition` flag signals to TigerBeetle that a 256-bit cryptographic condition will be supplied in the `reserved` field. This will be validated against a supplied pre-image when the transfer is committed. Transfers within a batch may also be linked (see [linked events](#linked-events)).
 ```js
