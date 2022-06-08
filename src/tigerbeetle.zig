@@ -143,16 +143,6 @@ pub const CreateTransferResult = enum(u32) {
     accounts_must_have_the_same_ledger,
     transfer_must_have_the_same_ledger_as_accounts,
 
-    overflows_debits_pending,
-    overflows_credits_pending,
-    overflows_debits_posted,
-    overflows_credits_posted,
-    overflows_debits,
-    overflows_credits,
-
-    exceeds_credits,
-    exceeds_debits,
-
     exists_with_different_flags,
     exists_with_different_debit_account_id,
     exists_with_different_credit_account_id,
@@ -162,6 +152,16 @@ pub const CreateTransferResult = enum(u32) {
     exists_with_different_code,
     exists_with_different_amount,
     exists,
+
+    overflows_debits_pending,
+    overflows_credits_pending,
+    overflows_debits_posted,
+    overflows_credits_posted,
+    overflows_debits,
+    overflows_credits,
+
+    exceeds_credits,
+    exceeds_debits,
 
     cannot_post_and_void_pending_transfer,
     pending_transfer_cannot_post_or_void_another,
