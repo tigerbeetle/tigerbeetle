@@ -43,6 +43,7 @@ export enum AccountFlags {
 export enum CreateAccountError {
   //ok = 0 (No Error)
   linked_event_failed = 1,
+
   reserved_flag,
   reserved_field,
 
@@ -51,6 +52,9 @@ export enum CreateAccountError {
   code_must_not_be_zero,
 
   mutually_exclusive_flags,
+
+  overflows_debits,
+  overflows_credits,
 
   exceeds_credits,
   exceeds_debits,
@@ -91,7 +95,7 @@ export enum TransferFlags {
 
 export enum CreateTransferError {
   //ok = 0 (No Error)
-  linked_event_failed = 1,
+  linked_event_failed,
 
   reserved_flag,
   reserved_field,
@@ -115,6 +119,16 @@ export enum CreateTransferError {
   accounts_must_have_the_same_ledger,
   transfer_must_have_the_same_ledger_as_accounts,
 
+  exists_with_different_flags,
+  exists_with_different_debit_account_id,
+  exists_with_different_credit_account_id,
+  exists_with_different_user_data,
+  exists_with_different_pending_id,
+  exists_with_different_timeout,
+  exists_with_different_code,
+  exists_with_different_amount,
+  exists,
+
   overflows_debits_pending,
   overflows_credits_pending,
   overflows_debits_posted,
@@ -124,17 +138,6 @@ export enum CreateTransferError {
 
   exceeds_credits,
   exceeds_debits,
-
-  exists_with_different_debit_account_id,
-  exists_with_different_credit_account_id,
-  exists_with_different_user_data,
-  exists_with_different_pending_id,
-  exists_with_different_timeout,
-  exists_with_different_ledger,
-  exists_with_different_code,
-  exists_with_different_flags,
-  exists_with_different_amount,
-  exists,
 
   cannot_post_and_void_pending_transfer,
   pending_transfer_cannot_post_or_void_another,
