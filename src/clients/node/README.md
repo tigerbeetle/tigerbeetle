@@ -9,27 +9,43 @@ The following steps will install the `tigerbeetle-node` module to your current w
 * NodeJS >= `14.0.0`. _(If the correct version is not installed, an installation error will occur)_ 
 
 > Your operating system should be Linux (kernel >= v5.6) or macOS. Windows support is not yet available but is in the works.
-     
+
 ### YARN Package Manager
 
-```sh
+```shell
 # Run the following from this directory:
 yarn set version latest
 yarn && yarn build && yarn add
+yarn postinstall
 ```
 or
 
 ### NPM Package Manager
 Run the following command from this directory:
-```sh
+```shell
 npm install .
+```
+
+**Yarn - Run Test**
+Ensure TigerBeetle is running on the port configured in `test.tx`, then run: 
+```shell
+yarn test
+```
+
+**Yarn - Run Benchmark**
+Ensure you have run the TigerBeetle `init` command prior to running the benchmark:
+```shell
+./tigerbeetle init --cluster=0 --replica=0 --directory=.
+```
+Run the benchmark:
+```shell
+yarn benchmark
 ```
 
 **Development**
 
 Follow these steps to get up and running when cloning the repo:
-
-```sh
+```shell
 git clone --recurse-submodules https://github.com/coilhq/tigerbeetle-node.git
 yarn
 ```
@@ -43,7 +59,7 @@ Future releases will allow multiple client instantiations.
 import { createClient } from 'tigerbeetle-node'
 
 const client = createClient({
-  cluster_id: 1,
+  cluster_id: 0,
   replica_addresses: ['3001', '3002', '3003']
 })
 ```
@@ -58,7 +74,7 @@ const account = {
     id: 137n, // u128
     user_data: 0n, // u128, opaque third-party identifier to link this account (many-to-one) to an external entity:
     reserved: Buffer.alloc(48, 0), // [48]u8
-    unit: 1,   // u16, unit of value
+    ledger: 1,   // u16, unit of value
     code: 718, // u16, a chart of accounts code describing the type of account (e.g. clearing, settlement)
     flags: 0,  // u32
     debits_pending: 0n,  // u64
@@ -113,7 +129,7 @@ The `id` of the account is used for lookups. Only matched accounts are returned.
    *   id: 137n,
    *   user_data: 0n,
    *   reserved: Buffer,
-   *   unit: 1,
+   *   ledger: 1,
    *   code: 718,
    *   flags: 0,
    *   debits_pending: 0n,
@@ -134,9 +150,10 @@ const transfer = {
     debit_account_id: 1n,  // u128
     credit_account_id: 2n, // u128
     user_data: 0n, // u128, opaque third-party identifier to link this transfer (many-to-one) to an external entity 
-    reserved: Buffer.alloc(32, 0), // two-phase condition can go in here
+    reserved: 0n, // two-phase condition can go in here
     timeout: 0n, // u64, in nano-seconds. 
-    code: 1,  // u32, a chart of accounts code describing the reason for the transfer (e.g. deposit, settlement)
+    ledger: 1,  // u32, ledger for transfer (e.g. currency)
+    code: 1,  // u16, a chart of accounts code describing the reason for the transfer (e.g. deposit, settlement)
     flags: 0, // u32
     amount: 10n, // u64
     timestamp: 0n, //u64, Reserved: This will be set by the server.
@@ -157,7 +174,7 @@ The `condition` flag signals to TigerBeetle that a 256-bit cryptographic conditi
     condition = (1 << 2)
   }
 
-// two-phase transfer
+  // two-phase transfer
   let flags = 0n
   flags |= TransferFlags.two_phase_commit
 
@@ -167,23 +184,23 @@ The `condition` flag signals to TigerBeetle that a 256-bit cryptographic conditi
   flags |= TransferFlags.condition
 ```
 
-### Committing a transfer
+### Post a Pending transfer (2-phase)
 
-This is used to commit a two-phase transfer.
-| bit 0    | bit 1    | bit 2      |
-|----------|----------|------------|
-| `linked` | `reject` | `preimage` |
+This is used to commit a two-phase pending transfer:
 
-By default (`flags = 0`), it will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_pending` and `credits_pending` of the appropriate accounts and apply them to the `debits_posted` and `credits_posted` balances. If the `preimage` bit is set then TigerBeetle will look for it in the `reserved` field and validate it against the `condition` from the associated transfer. If this validation fails, or `reject` is set, then the changes to the `reserved` balances are atomically rolled back.
+| bit 0    | bit 1     | bit 2                    | bit 3                   |
+|----------|-----------|--------------------------|-------------------------|
+| `linked` | `pending` | `post_pending_transfer`  | `void_pending_transfer` |
+
+Flag (`flags = post_pending_transfer`), it will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_pending` and `credits_pending` of the appropriate accounts and apply them to the `debits_posted` and `credits_posted` balances.
 ```js
-const commit = {
-    id: 1n,   // u128, must correspond to the transfer id
-    reserved: Buffer.alloc(32, 0), // [32]u8
-    code: 1,  // u32, accounting system code to identify type of transfer
-    flags: 0, // u32
+const post = {
+    id: 2n,   // u128, must correspond to the transfer id
+    pending_id: n1,//id of the pending transfer
+    flags: post_pending_transfer,
     timestamp: 0n, // u64, Reserved: This will be set by the server.
 }
-const errors = await client.commitTransfers([commit])
+const errors = await client.createTransfers([post])
 ```
 
 ### Linked events
