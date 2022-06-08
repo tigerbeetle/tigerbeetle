@@ -348,7 +348,7 @@ pub fn u16_into_object(
     comptime error_message: [:0]const u8,
 ) !void {
     var result: c.napi_value = undefined;
-    if (c.napi_create_uint16(env, value, &result) != c.napi_ok) {
+    if (c.napi_create_uint32(env, value, &result) != c.napi_ok) {
         return throw(env, error_message);
     }
 

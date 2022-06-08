@@ -91,7 +91,7 @@ export enum TransferFlags {
 
 export enum CreateTransferError {
   //ok = 0 (No Error)
-  linked_event_failed,
+  linked_event_failed = 1,
 
   reserved_flag,
   reserved_field,
