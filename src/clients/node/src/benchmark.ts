@@ -73,18 +73,18 @@ const rawCreateTransfers = async (batch: Buffer): Promise<CreateTransfersError[]
 /**
  * This encoding function is only for this benchmark script.
  * 
- * ID_OFFSET                    = 0                 (0->16)
- * DEBIT_ACCOUNT_ID_OFFSET      = 0   + 16 = 16     (16-32)
- * CREDIT_ACCOUNT_ID_OFFSET     = 16  + 16 = 32     (32-48)
- * USER_DATA_OFFSET             = 32  + 16 = 48     (48-64)
- * RESERVED_OFFSET              = 48  + 16 = 64     (64-80)
- * PENDING_ID_OFFSET            = 64  + 16 = 80     (80-96)
- * TIMEOUT_OFFSET               = 96  + 8  = 104    (96-104)
- * LEDGER_OFFSET                = 104 + 4  = 108    (104-108)
- * CODE_OFFSET                  = 108 + 2  = 110    (108-110)
- * FLAGS_OFFSET                 = 110 + 2  = 112    (110-112)
- * AMOUNT_OFFSET                = 112 + 8  = 120    (112-120)
- * TIMESTAMP                    = 120 + 8  = 128    (120-128)
+ * ID_OFFSET                    = 0                 (0   -> 16)
+ * DEBIT_ACCOUNT_ID_OFFSET      = 0   + 16 = 16     (16  -> 32)
+ * CREDIT_ACCOUNT_ID_OFFSET     = 16  + 16 = 32     (32  -> 48)
+ * USER_DATA_OFFSET             = 32  + 16 = 48     (48  -> 64)
+ * RESERVED_OFFSET              = 48  + 16 = 64     (64  -> 80)
+ * PENDING_ID_OFFSET            = 64  + 16 = 80     (80  -> 96)
+ * TIMEOUT_OFFSET               = 96  + 8  = 104    (96  -> 104)
+ * LEDGER_OFFSET                = 104 + 4  = 108    (104 -> 108)
+ * CODE_OFFSET                  = 108 + 2  = 110    (108 -> 110)
+ * FLAGS_OFFSET                 = 110 + 2  = 112    (110 -> 112)
+ * AMOUNT_OFFSET                = 112 + 8  = 120    (112 -> 120)
+ * TIMESTAMP                    = 120 + 8  = 128    (120 -> 128)
  */ 
 const encodeTransfer = (transfer: Transfer, offset: number, output: Buffer): void => {
   //console.log(`offset = ${(offset + TRANSFER_SIZE)} out = ${output.length}`);
