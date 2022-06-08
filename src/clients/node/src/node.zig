@@ -186,10 +186,12 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
             .debit_account_id = try translate.u128_from_object(env, object, "debit_account_id"),
             .credit_account_id = try translate.u128_from_object(env, object, "credit_account_id"),
             .user_data = try translate.u128_from_object(env, object, "user_data"),
-            .reserved = try translate.bytes_from_object(env, object, 32, "reserved"),
+            .reserved = try translate.u128_from_object(env, object, "reserved"),
+            .pending_id = try translate.u128_from_object(env, object, "pending_id"),
             .timeout = try translate.u64_from_object(env, object, "timeout"),
-            .code = try translate.u32_from_object(env, object, "code"),
-            .flags = @bitCast(TransferFlags, try translate.u32_from_object(env, object, "flags")),
+            .ledger = try translate.u32_from_object(env, object, "ledger"),
+            .code = try translate.u16_from_object(env, object, "code"),
+            .flags = @bitCast(TransferFlags, try translate.u16_from_object(env, object, "flags")),
             .amount = try translate.u64_from_object(env, object, "amount"),
             .timestamp = try validate_timestamp(env, object),
         },
@@ -197,9 +199,9 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
             .id = try translate.u128_from_object(env, object, "id"),
             .user_data = try translate.u128_from_object(env, object, "user_data"),
             .reserved = try translate.bytes_from_object(env, object, 48, "reserved"),
-            .unit = try translate.u16_from_object(env, object, "unit"),
+            .ledger = try translate.u32_from_object(env, object, "ledger"),
             .code = try translate.u16_from_object(env, object, "code"),
-            .flags = @bitCast(AccountFlags, try translate.u32_from_object(env, object, "flags")),
+            .flags = @bitCast(AccountFlags, try translate.u16_from_object(env, object, "flags")),
             .debits_pending = try translate.u64_from_object(env, object, "debits_pending"),
             .debits_posted = try translate.u64_from_object(env, object, "debits_posted"),
             .credits_pending = try translate.u64_from_object(env, object, "credits_pending"),
@@ -487,11 +489,11 @@ fn encode_napi_results_array(
                     "Failed to set property \"code\" of transfer lookup result.",
                 );
 
-                try translate.u32_into_object(
+                try translate.u16_into_object(
                     env,
                     napi_object,
                     "flags",
-                    @bitCast(u32, result.flags),
+                    @bitCast(u16, result.flags),
                     "Failed to set property \"flags\" of transfer lookup result.",
                 );
 

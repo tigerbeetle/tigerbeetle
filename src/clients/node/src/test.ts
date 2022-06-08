@@ -7,6 +7,7 @@ import {
   CreateAccountError,
   CreateTransferError
 } from '.'
+import * as console from "console";
 
 const client = createClient({
   cluster_id: 0,
@@ -18,8 +19,8 @@ const Zeroed32Bytes = Buffer.alloc(32, 0)
 const Zeroed48Bytes = Buffer.alloc(48, 0)
 const accountA: Account = {
   id: 17n,
-  reserved: Zeroed48Bytes,
   user_data: 0n,
+  reserved: Zeroed48Bytes,
   ledger: 1,
   code: 718,
   flags: 0,
@@ -31,8 +32,8 @@ const accountA: Account = {
 }
 const accountB: Account = {
   id: 19n,
-  reserved: Zeroed48Bytes,
   user_data: 0n,
+  reserved: Zeroed48Bytes,
   ledger: 1,
   code: 719,
   flags: 0,
@@ -51,24 +52,19 @@ test.skip = (name: string, fn: () => Promise<void>) => {
   console.log(name + ': SKIPPED')
 }
 
-test('range checks `ledger` and `code` on Account to be u16', async (): Promise<void> => {
-  const account = { ...accountA, id: 0n, ledger: 65535 + 1 }//TODO @jason, fix...
+test('range check `code` on Account to be u16', async (): Promise<void> => {
+  const account = { ...accountA, id: 0n }
 
-  const unitError = await client.createAccounts([account]).catch(error => error)
-  assert.strictEqual(unitError.message, 'ledger must be a u32.')
-
-  account.ledger = 0
-  account.code = 65535 + 1
+  account.code = 65535 + 1//std.math.maxInt(u16)
   const codeError = await client.createAccounts([account]).catch(error => error)
   assert.strictEqual(codeError.message, 'code must be a u16.')
 
-  const accounts = await client.lookupAccounts([0n])
+  const accounts = await client.lookupAccounts([account.id])
   assert.strictEqual(accounts.length, 0)
 })
 
 test('can create accounts', async (): Promise<void> => {
   const errors = await client.createAccounts([accountA])
-
   assert.strictEqual(errors.length, 0)
 })
 
@@ -117,7 +113,7 @@ test('can lookup accounts', async (): Promise<void> => {
 
 test('can create a transfer', async (): Promise<void> => {
   const transfer: Transfer = {
-    id: 0n,
+    id: 1n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
     user_data: 0n,
@@ -151,7 +147,7 @@ test('can create a two-phase transfer', async (): Promise<void> => {
   let flags = 0
   flags |= TransferFlags.pending
   const transfer: Transfer = {
-    id: 1n,
+    id: 2n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
     user_data: 0n,
@@ -184,7 +180,7 @@ test('can create a two-phase transfer', async (): Promise<void> => {
   // Lookup the transfer
   const transfers = await client.lookupTransfers([transfer.id])
   assert.strictEqual(transfers.length, 1)
-  assert.strictEqual(transfers[0].id, 1n)
+  assert.strictEqual(transfers[0].id, 2n)
   assert.strictEqual(transfers[0].debit_account_id, accountB.id)
   assert.strictEqual(transfers[0].credit_account_id, accountA.id)
   assert.strictEqual(transfers[0].user_data, 0n)
@@ -201,12 +197,12 @@ test('can post a two-phase transfer', async (): Promise<void> => {
   flags |= TransferFlags.post_pending_transfer
 
   const commit: Transfer = {
-    id: 2n,
+    id: 3n,
     credit_account_id: BigInt(0),
     debit_account_id: BigInt(0),
     user_data: 0n,
     reserved: 0n,
-    pending_id: 1n,// must match the id of the pending transfer
+    pending_id: 2n,// must match the id of the pending transfer
     amount: 0n,
     ledger: 1,
     code: 1,
@@ -235,7 +231,7 @@ test('can post a two-phase transfer', async (): Promise<void> => {
 test('can reject a two-phase transfer', async (): Promise<void> => {
   // create a two-phase transfer
   const transfer: Transfer = {
-    id: 3n,
+    id: 4n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
     user_data: 0n,
@@ -253,12 +249,12 @@ test('can reject a two-phase transfer', async (): Promise<void> => {
 
   // send in the reject
   const reject: Transfer = {
-    id: 4n,
+    id: 5n,
     debit_account_id: BigInt(0),
     credit_account_id: BigInt(0),
     user_data: 0n,
     reserved: 0n,
-    pending_id: 3n, // must match the id of the pending transfer
+    pending_id: 4n, // must match the id of the pending transfer
     amount: 0n,
     ledger: 1,
     code: 1,
@@ -285,7 +281,7 @@ test('can reject a two-phase transfer', async (): Promise<void> => {
 
 test('can link transfers', async (): Promise<void> => {
   const transfer1: Transfer = {
-    id: 4n,
+    id: 6n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
     amount: 100n,
@@ -299,7 +295,7 @@ test('can link transfers', async (): Promise<void> => {
     timestamp: 0n, // will be set correctly by the TigerBeetle server
   }
   const transfer2: Transfer = {
-    id: 5n,
+    id: 6n,
     amount: 100n,
     ledger: 1,
     code: 1,
@@ -310,7 +306,7 @@ test('can link transfers', async (): Promise<void> => {
     flags: 0,
     user_data: 0n,
     reserved: 0n,
-    pending_id: 4n,
+    pending_id: 0n,
     timeout: 0n,
     timestamp: 0n, // will be set correctly by the TigerBeetle server
   }
