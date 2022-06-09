@@ -192,9 +192,9 @@ Transfers within a batch may also be linked (see [linked events](#linked-events)
 With (`flags = post_pending_transfer`), TigerBeetle will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_pending` and `credits_pending` of the appropriate accounts and apply them to the `debits_posted` and `credits_posted` balances.
 ```js
 const post = {
-    id: 2n,   // u128, must correspond to the transfer id
-    pending_id: n1,//u128, id of the pending transfer
-    flags: TransferFlags.post_pending_transfer,// to void, use [void_pending_transfer]
+    id: 2n, // u128, must correspond to the transfer id
+    pending_id: 1n, //u128, id of the pending transfer
+    flags: TransferFlags.post_pending_transfer, // to void, use [void_pending_transfer]
     timestamp: 0n, // u64, Reserved: This will be set by the server.
 }
 const errors = await client.createTransfers([post])
