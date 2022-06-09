@@ -7,28 +7,39 @@ const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
-
-const ManifestLevel = @import("manifest_level.zig").ManifestLevel;
-const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
-const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
+const GridType = @import("grid.zig").GridType;
 
 pub fn TableType(
-    comptime Storage: type,
-    comptime Key: type,
-    comptime Value: type,
+    comptime TableStorage: type,
+    comptime TableKey: type,
+    comptime TableValue: type,
     /// Returns the sort order between two keys.
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    comptime table_compare_keys: fn (TableKey, TableKey) callconv(.Inline) math.Order,
     /// Returns the key for a value. For example, given `object` returns `object.id`.
     /// Since most objects contain an id, this avoids duplicating the key when storing the value.
-    comptime key_from_value: fn (Value) callconv(.Inline) Key,
+    comptime table_key_from_value: fn (TableValue) callconv(.Inline) TableKey,
     /// Must compare greater than all other keys.
-    comptime sentinel_key: Key,
+    comptime table_sentinel_key: TableKey,
+    /// Returns whether a value is a tombstone value.
+    comptime table_tombstone: fn (TableValue) callconv(.Inline) bool,
+    /// Returns a tombstone value representation for a key.
+    comptime table_tombstone_from_key: fn (TableKey) callconv(.Inline) TableValue,
 ) type {
     return struct {
         const Table = @This();
+        const Grid = GridType(Storage);
 
-        pub const Grid = @import("grid.zig").GridType(Storage);
+        // Re-export all the generic arguments.
+        pub const Storage = TableStorage;
+        pub const Key = TableKey;
+        pub const Value = TableValue;
+        pub const compare_keys = table_compare_keys;
+        pub const key_from_value = table_key_from_value;
+        pub const sentinel_key = table_sentinel_key;
+        pub const tombstone = table_tombstone;
+        pub const tombstone_from_key = table_tombstone_from_key;
 
+        // Export hashmap context for Key and Value
         pub const HashMapContextValue = struct {
             pub fn eql(_: HashMapContextValue, a: Value, b: Value) bool {
                 return compare_keys(key_from_value(a), key_from_value(b)) == .eq;

@@ -9,9 +9,7 @@ const binary_search = @import("binary_search.zig");
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
-pub fn ImmutableTableType(
-    comtpime Table: type,
-) type {
+pub fn ImmutableTableType(comptime Table: type) type {
     return struct {
         const ImmutableTable = @This();
 
@@ -132,4 +130,9 @@ pub fn ImmutableTableType(
             return table.values[table.iterator_index];
         }
     };
+}
+
+test "" {
+    const ImmutableTable = 
+    _ = ImmutableTable.get;
 }
