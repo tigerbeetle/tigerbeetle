@@ -5,18 +5,20 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 const table_count_max = @import("tree.zig").table_count_max;
+const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const ManifestLevel = @import("manifest_level.zig").ManifestLevel;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 
-pub fn ManifestType(
-    comptime Key: type,
-    comptime Value: type,
-    /// Returns the sort order between two keys.
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
-) type {
+pub fn ManifestType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+
     return struct {
+        const Manifest = @This();
+
         pub const TableInfo = extern struct {
             checksum: u128,
             address: u64,
@@ -71,18 +73,9 @@ pub fn ManifestType(
             }
         };
 
-        /// Level 0 is special since tables can overlap the same key range.
-        /// Here, we simply store tables in reverse order of precedence (i.e. newest first).
-        const Conjoint = SegmentedArray(TableInfo, NodePool, table_count_max);
-
         /// Levels beyond level 0 have tables with disjoint key ranges.
         /// Here, we use a structure with indexes over the segmented array for performance.
-        const Disjoint = ManifestLevel(NodePool, Key, TableInfo, compare_keys, table_count_max);
-
-        const Level = union(LevelTag) {
-            conjoint: Conjoint,
-            disjoint: Disjoint,
-        };
+        const Level = ManifestLevel(NodePool, Key, TableInfo, compare_keys, table_count_max)
 
         const LevelTag = enum {
             conjoint,
@@ -101,15 +94,10 @@ pub fn ManifestType(
         pub fn init(allocator: mem.Allocator, node_pool: *NodePool) !Manifest {
             var levels: [config.lsm_levels]Level = undefined;
 
-            levels[0] = .{ .conjoint = try Conjoint.init(allocator) };
-            errdefer levels[0].conjoint.deinit(allocator, node_pool);
-
-            for (levels[1..]) |*level, i| {
-                errdefer for (levels[1..i]) |*l| l.disjoint.deinit(allocator, node_pool);
-
-                level.* = .{ .disjoint = try Disjoint.init(allocator) };
+            for (levels) |*level, i| {
+                errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
+                level.* = try Level.init(allocator);
             }
-            errdefer for (levels[1..]) |*l| l.disjoint.deinit(allocator, node_pool);
 
             return Manifest{
                 .node_pool = node_pool,
@@ -118,8 +106,7 @@ pub fn ManifestType(
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
-            manifest.levels[0].conjoint.deinit(allocator, manifest.node_pool);
-            for (manifest.levels[1..]) |*l| l.disjoint.deinit(allocator, manifest.node_pool);
+            for (manifest.levels) |*l| l.deinit(allocator, manifest.node_pool);
         }
 
         pub const LookupIterator = struct {
@@ -132,41 +119,20 @@ pub fn ManifestType(
 
             pub fn next(it: *LookupIterator) ?*const TableInfo {
                 while (it.level < config.lsm_levels) : (it.level += 1) {
-                    switch (it.manifest.levels[it.level]) {
-                        .conjoint => |*level| {
-                            assert(it.level == 0);
+                    const level = &it.manifest.levels[it.level];
 
-                            if (it.inner == null) it.inner = level.iterator(0, 0, .ascending);
-                            while (it.inner.?.next()) |table| {
-                                if (it.precedence) |p| assert(p > table.snapshot_min);
-                                it.precedence = table.snapshot_min;
+                    var inner = level.iterator(it.snapshot, it.key, it.key, .ascending);
+                    if (inner.next()) |table| {
+                        if (it.precedence) |p| assert(p > table.snapshot_min);
+                        it.precedence = table.snapshot_min;
 
-                                if (!table.visible(it.snapshot)) continue;
-                                if (compare_keys(it.key, table.key_min) == .lt) continue;
-                                if (compare_keys(it.key, table.key_max) == .gt) continue;
+                        assert(table.visible(it.snapshot));
+                        assert(compare_keys(it.key, table.key_min) != .lt);
+                        assert(compare_keys(it.key, table.key_max) != .gt);
+                        assert(inner.next() == null);
 
-                                return table;
-                            }
-                            assert(it.inner.?.done);
-                            it.inner = null;
-                        },
-                        .disjoint => |*level| {
-                            assert(it.level > 0);
-
-                            var inner = level.iterator(it.snapshot, it.key, it.key, .ascending);
-                            if (inner.next()) |table| {
-                                if (it.precedence) |p| assert(p > table.snapshot_min);
-                                it.precedence = table.snapshot_min;
-
-                                assert(table.visible(it.snapshot));
-                                assert(compare_keys(it.key, table.key_min) != .lt);
-                                assert(compare_keys(it.key, table.key_max) != .gt);
-                                assert(inner.next() == null);
-
-                                it.level += 1;
-                                return table;
-                            }
-                        },
+                        it.level += 1;
+                        return table;
                     }
                 }
 
@@ -178,23 +144,8 @@ pub fn ManifestType(
         pub fn insert_tables(manifest: *Manifest, level: u8, tables: []const TableInfo) void {
             assert(tables.len > 0);
 
-            switch (manifest.levels[level]) {
-                .conjoint => |*segmented_array| {
-                    assert(level == 0);
-
-                    // We only expect to flush one table at a time:
-                    // We would also otherwise need to think through precedence order.
-                    assert(tables.len == 1);
-
-                    const absolute_index = 0;
-                    segmented_array.insert_elements(manifest.node_pool, absolute_index, tables);
-                },
-                .disjoint => |*manifest_level| {
-                    assert(level > 0);
-
-                    manifest_level.insert_tables(manifest.node_pool, tables);
-                },
-            }
+            const manifest_level = &manifest.levels[level];
+            manifest_level.insert_tables(manifest.node_pool, tables);
 
             // TODO Verify that tables can be found exactly before returning.
         }
