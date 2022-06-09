@@ -87,7 +87,6 @@ const rawCreateTransfers = async (batch: Buffer): Promise<CreateTransfersError[]
  * TIMESTAMP                    = 120 + 8  = 128    (120 -> 128)
  */ 
 const encodeTransfer = (transfer: Transfer, offset: number, output: Buffer): void => {
-  //console.log(`offset = ${(offset + TRANSFER_SIZE)} out = ${output.length}`);
   assert(BigInt((offset + TRANSFER_SIZE)) <= BigInt(output.length), `Transfer ${transfer} exceeds buffer of ${output}!`)
 
   output.writeBigUInt64LE(transfer.id, offset)
@@ -166,7 +165,6 @@ const runBenchmarkRawRequest = async () => {
     if (IS_TWO_PHASE_TRANSFER) posts.push(postTransferBatch)
     if (count % 100) console.log(`${Number((count / MAX_TRANSFERS) * 100).toFixed(1)}%`)
   }
-  console.log(`.`)
   assert(count === MAX_TRANSFERS)
 
   console.log(`starting benchmark. MAX_TRANSFERS=${MAX_TRANSFERS} REQUEST_BATCH_SIZE=${MAX_REQUEST_BATCH_SIZE} NUMBER_OF_BATCHES=${transfers.length}`)

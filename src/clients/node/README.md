@@ -105,7 +105,7 @@ The `flags` on an account provide a way for you to enforce policies by toggling 
 |----------|----------------------------------|-----------------------------------------|
 | `linked` | `debits_must_not_exceed_credits` | `credits_must_not_exceed_debits` |
 
-The creation of an account can be linked to the successful creation of another by setting the `linked` flag (see [linked events](#linked-events)). By setting `debits_must_not_exceed_credits`, then any transfer such that `debits_posted + debits_pending + amount > credit_posted` will fail. Similarly for `credits_must_not_exceed_debits`.
+The creation of an account can be linked to the successful creation of another by setting the `linked` flag (see [linked events](#linked-events)). By setting `debits_must_not_exceed_credits`, then any transfer such that `debits_posted + debits_pending + amount > credits_posted` will fail. Similarly for `credits_must_not_exceed_debits`.
 ```js
   enum CreateAccountFlags {
     linked = (1 << 0),
@@ -147,58 +147,54 @@ This creates a journal entry between two accounts.
 ```js
 const transfer = {
     id: 1n, // u128
+    // T-based accounting:
     debit_account_id: 1n,  // u128
     credit_account_id: 2n, // u128
-    user_data: 0n, // u128, opaque third-party identifier to link this transfer (many-to-one) to an external entity 
-    reserved: 0n,
-    timeout: 0n, // u64, in nano-seconds. 
-    ledger: 1,  // u32, ledger for transfer (e.g. currency)
-    code: 1,  // u16, a chart of accounts code describing the reason for the transfer (e.g. deposit, settlement)
+    // Opaque third-party identifier to link this transfer to an external entity:
+    user_data: 0n, // u128, (many-to-one)  
+    reserved: 0n, // u128
+    // Timeout applicable for a pending/2-phase transfer:
+    timeout: 0n, // u64, in nano-seconds.
+    // Collection of accounts usually grouped by the currency: 
+    // You can't transfer money between accounts with different ledgers:
+    ledger: 720,  // u32, ledger for transfer (e.g. currency).
+    // Chart of accounts code describing the reason for the transfer:
+    code: 1,  // u16, (e.g. deposit, settlement)
     flags: 0, // u32
     amount: 10n, // u64
     timestamp: 0n, //u64, Reserved: This will be set by the server.
 }
-
 const errors = await client.createTransfers([transfer])
 ```
 Two-phase transfers are supported natively by toggling the appropriate flag. TigerBeetle will then adjust the `credits_pending` and `debits_pending` fields of the appropriate accounts. A corresponding commit transfer then needs to be sent to accept or reject the transfer.
 
-| bit 0    | bit 1     |
-|----------|-----------|
-| `linked` | `pending` |
-
-The `condition` flag signals to TigerBeetle that a 256-bit cryptographic condition will be supplied in the `reserved` field. This will be validated against a supplied pre-image when the transfer is committed. Transfers within a batch may also be linked (see [linked events](#linked-events)).
+Transfers within a batch may also be linked (see [linked events](#linked-events)).
 ```js
-  enum CreateTransferFlags {
-    linked = (1 << 0>>),
-    two_phase_commit = (1 << 1),
-    condition = (1 << 2)
+  enum TransferFlags {
+    linked = (1 << 0),
+    pending = (1 << 1),
+    post_pending_transfer = (1 << 2),
+    void_pending_transfer = (1 << 3)
   }
-
-  // two-phase transfer
+  
+  // two-phase transfer (pending)
   let flags = 0n
-  flags |= TransferFlags.two_phase_commit
+  flags |= TransferFlags.pending
 
-  // two-phase transfer with condition supplied in `reserved`
+  // linked two-phase transfer (pending)
   let flags = 0n
-  flags |= TransferFlags.two_phase_commit
-  flags |= TransferFlags.condition
+  flags |= TransferFlags.linked
+  flags |= TransferFlags.pending
 ```
 
 ### Post a Pending transfer (2-phase)
 
-This is used to commit a two-phase pending transfer:
-
-| bit 0    | bit 1     | bit 2                    | bit 3                   |
-|----------|-----------|--------------------------|-------------------------|
-| `linked` | `pending` | `post_pending_transfer`  | `void_pending_transfer` |
-
-Flag (`flags = post_pending_transfer`), it will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_pending` and `credits_pending` of the appropriate accounts and apply them to the `debits_posted` and `credits_posted` balances.
+With (`flags = post_pending_transfer`), TigerBeetle will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_pending` and `credits_pending` of the appropriate accounts and apply them to the `debits_posted` and `credits_posted` balances.
 ```js
 const post = {
     id: 2n,   // u128, must correspond to the transfer id
-    pending_id: n1,//id of the pending transfer
-    flags: post_pending_transfer,
+    pending_id: n1,//u128, id of the pending transfer
+    flags: TransferFlags.post_pending_transfer,// to void, use [void_pending_transfer]
     timestamp: 0n, // u64, Reserved: This will be set by the server.
 }
 const errors = await client.createTransfers([post])

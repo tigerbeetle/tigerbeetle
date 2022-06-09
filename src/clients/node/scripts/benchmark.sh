@@ -31,17 +31,17 @@ function onerror {
 }
 trap onerror EXIT
 
-CLUSTER_ID="--cluster=0"
+CLUSTER_ID="0"
 REPLICA_ADDRESSES="--addresses=3001"
 
-# Initiate database file:
-rm -f cluster_*_replica_*.tigerbeetle
-./tigerbeetle init $CLUSTER_ID --replica=0 --directory=.
+echo "Initiating database file..."
+rm -f cluster_*$CLUSTER_ID_replica_*.tigerbeetle
+./tigerbeetle init --cluster=$CLUSTER_ID --replica=0 --directory=.
 
 for I in 0
 do
     echo "Starting replica $I..."
-    ./tigerbeetle start $CLUSTER_ID $REPLICA_ADDRESSES --replica=$I --directory=. > benchmark.log 2>&1 &
+    ./tigerbeetle start --cluster=$CLUSTER_ID $REPLICA_ADDRESSES --replica=$I --directory=. > benchmark.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:
