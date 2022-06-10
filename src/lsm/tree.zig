@@ -21,7 +21,7 @@ const SuperBlockType = @import("superblock.zig").SuperBlockType;
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
 /// Since we ensure and assert that a query snapshot never exactly matches
-/// the snaphshot_min/snapshot_max of a table, we must use maxInt(u64) - 1
+/// the snapshot_min/snapshot_max of a table, we must use maxInt(u64) - 1
 /// to query all non-deleted tables.
 pub const snapshot_latest = math.maxInt(u64) - 1;
 
@@ -49,10 +49,8 @@ pub const snapshot_latest = math.maxInt(u64) - 1;
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
 
 pub fn TreeType(comptime Table: type) type {
-    const Grid = @import("grid.zig").GridType(Table.Storage);
-    const Manifest = @import("manifest.zig").ManifestType(Table);
-    const MutableTable = @import("mutable_table.zig").MutableTableType(Table);
-    const ImmutableTable = @import("immutable_table.zig").ImmutableTableType(Table);
+    const Key = Table.Key;
+    const Value = Table.Value;    
 
     const block_size = config.block_size;
     const BlockPtr = *align(config.sector_size) [block_size]u8;
@@ -75,16 +73,18 @@ pub fn TreeType(comptime Table: type) type {
     return struct {
         const Tree = @This();
 
-        
+        const Grid = @import("grid.zig").GridType(Table.Storage);
+        const Manifest = @import("manifest.zig").ManifestType(Table);
+        const MutableTable = @import("mutable_table.zig").MutableTableType(Table);
+        const ImmutableTable = @import("immutable_table.zig").ImmutableTableType(Table);
 
-        
-
-        
+        const CompactionType = @import("compaction.zig").CompactionType;
+        const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
 
         pub const PrefetchKeys = std.AutoHashMapUnmanaged(Key, void);
-        pub const PrefetchValues = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
+        pub const PrefetchValues = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, 70);
 
-        pub const ValueCache = std.HashMapUnmanaged(Value, void, HashMapContextValue, 70);
+        pub const ValueCache = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, 70);
 
         grid: *Grid,
         options: Options,
@@ -115,10 +115,70 @@ pub fn TreeType(comptime Table: type) type {
 
         /// The number of Compaction instances is less than the number of levels
         /// as the last level doesn't pair up to compact into another.
-        compactions: [config.lsm_levels - 1]TableCompaction, 
+        /// The first compaction level is from the immutable-table into a table (level 0 is special)
+        /// while the remaining levels are from one on-disk table into another. 
+        compactions: [config.lsm_levels - 1]Compaction,
 
-        const TableCompaction = CompactionType(TableIteratorType);
-        const ImmutableTableCompaction = CompactionType(ImmutableTable.IteratorType);
+        const TableCompaction = CompactionType(Table, TableIteratorType);
+        const ImmutableTableCompaction = CompactionType(Table, ImmutableTable.IteratorType);
+
+        /// A wrapper around both types of CompactionType's
+        const Compaction = union(enum) {
+            from_immutable: ImmutableTableCompaction,
+            from_table: TableCompaction,
+
+            pub fn init(
+                level: usize,
+                allocator: mem.Allocator, 
+                manifest: *Manifest, 
+                grid: *Grid,
+            ) !Compaction {
+                return switch (level) {
+                    0 => Compaction{
+                        .from_immutable = try ImmutableTableCompaction.init(allocator, manifest, grid),
+                    },
+                    else => Compaction{
+                        .from_table = try TableCompaction.init(allocator, manifest, grid),
+                    },
+                };
+            }
+
+            fn call(compaction: *Compaction, comptime func_name: []const u8, args: anytype) void {
+                switch (compaction) {
+                    .from_immutable => |*c| @call(.{}, @field(c, func_name), args),
+                    .from_table => |*c| @call(.{}, @field(c, func_name), args),
+                }
+            }
+
+            pub fn deinit(compaction: *Compaction, allocator: mem.Allocator) void {
+                compaction.call("deinit", .{allocator});
+            }
+
+            pub fn start(
+                compaction: *Compaction,
+                level_a: u64,
+                level_b: u32,
+                level_b_key_min: Key,
+                level_b_key_max: Key,
+                drop_tombstones: bool,
+            ) void {
+                compaction.call("start", .{
+                    level_a, 
+                    level_b, 
+                    level_b_key_min, 
+                    level_b_key_max,
+                    drop_tombstones,
+                });
+            }
+
+            pub fn tick_io(compaction: *Compaction, callback: Callback) void {
+                compaction.call("tick_io", .{callback});
+            }
+
+            pub fn tick_cpu(compaction: *Compaction) void {
+                compaction.call("tick_cpu", .{});
+            }
+        };
 
         pub const Options = struct {
             /// The maximum number of keys that may need to be prefetched before commit.
@@ -171,15 +231,14 @@ pub fn TreeType(comptime Table: type) type {
                 .compactions = compactions,
             };
 
-            for (tree.compactions) |*compaction| {
-                complaction.* = Compaction.init(allocator, &tree.manifest, tree.grid);
+            for (tree.compactions) |*compaction, level| {
+                errdefer for (tree.compactions[0..level]) |*c| c.deinit(allocator);
+                compaction.* = try Compaction.init(level, allocator, &tree.manifest, tree.grid);
             }
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            for (tree.complactions) |*compaction| {
-                complaction.deinit(allocator);
-            }
+            for (tree.compactions) |*compaction| compaction.deinit(allocator);
 
             // TODO Consider whether we should release blocks acquired from Grid.block_free_set.
             tree.prefetch_keys.deinit(allocator);
@@ -264,14 +323,14 @@ pub fn TreeType(comptime Table: type) type {
                 assert(tree.mutable_table.count() > 0);
                 assert(tree.immutable_table.free);
 
+                // sort the mutable_table values directly into the immutable_table's array.
                 const values_max = tree.immutable_table.values_max();
                 const values = tree.mutable_table.sort_into_values_and_clear(values_max);
                 assert(values.ptr == values_max.ptr);
 
-                tree.immutable_table.reset_with_sorted_values(
-                    tree.manifest.take_snapshot(),
-                    values,
-                );
+                // take a manifest snapshot and setup the immutable_table with the sorted values.
+                const snapshot_min = tree.manifest.take_snapshot();
+                tree.immutable_table.reset_with_sorted_values(snapshot_min, values);
 
                 assert(tree.mutable_table.count() == 0);
                 assert(!tree.immutable_table.free);
