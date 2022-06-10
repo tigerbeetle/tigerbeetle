@@ -16,6 +16,7 @@ pub fn CompactionType(
 ) type {
     const Key = Table.Key;
     const Value = Table.Value;
+    const BlockPtr = Table.BlockPtr;
 
     return struct {
         const Compaction = @This();

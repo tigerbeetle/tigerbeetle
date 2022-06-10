@@ -13,7 +13,6 @@ const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 
 pub fn ManifestType(comptime Table: type) type {
     const Key = Table.Key;
-    const Value = Table.Value;
     const compare_keys = Table.compare_keys;
 
     return struct {
@@ -36,7 +35,7 @@ pub fn ManifestType(comptime Table: type) type {
             key_max: Key,
 
             comptime {
-                assert(@sizeOf(TableInfo) == 48 + key_size * 2);
+                assert(@sizeOf(TableInfo) == 48 + Table.key_size * 2);
                 assert(@alignOf(TableInfo) == 16);
             }
 
@@ -75,7 +74,7 @@ pub fn ManifestType(comptime Table: type) type {
 
         /// Levels beyond level 0 have tables with disjoint key ranges.
         /// Here, we use a structure with indexes over the segmented array for performance.
-        const Level = ManifestLevel(NodePool, Key, TableInfo, compare_keys, table_count_max)
+        const Level = ManifestLevel(NodePool, Key, TableInfo, compare_keys, table_count_max);
 
         const LevelTag = enum {
             conjoint,
@@ -114,7 +113,7 @@ pub fn ManifestType(comptime Table: type) type {
             snapshot: u64,
             key: Key,
             level: u8 = 0,
-            inner: ?Conjoint.Iterator = null,
+            inner: ?Level.Iterator = null,
             precedence: ?u64 = null,
 
             pub fn next(it: *LookupIterator) ?*const TableInfo {

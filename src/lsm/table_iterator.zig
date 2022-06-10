@@ -26,7 +26,7 @@ pub fn TableIteratorType(
         address: u64,
         checksum: u128,
 
-        index: BlockPtr,
+        index: Table.BlockPtr,
         /// The index of the current block in the table index block.
         block_index: u32,
 
@@ -48,16 +48,16 @@ pub fn TableIteratorType(
         read_pending: bool = false,
 
         pub fn init(allocator: mem.Allocator) !TableIterator {
-            const index = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+            const index = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
             errdefer allocator.free(index);
 
             const values = try ValuesRingBuffer.init(allocator);
             errdefer values.deinit(allocator);
 
-            const block_a = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+            const block_a = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
             errdefer allocator.free(block_a);
 
-            const block_b = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+            const block_b = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
             errdefer allocator.free(block_b);
 
             return .{
@@ -67,13 +67,13 @@ pub fn TableIteratorType(
                 // Use 0 so that we can assert(address != 0) in tick().
                 .address = 0,
                 .checksum = undefined,
-                .index = index[0..block_size],
+                .index = index[0..config.block_size],
                 .block_index = undefined,
                 .values = values,
                 .blocks = .{
                     .buffer = .{
-                        block_a[0..block_size],
-                        block_b[0..block_size],
+                        block_a[0..config.block_size],
+                        block_b[0..config.block_size],
                     },
                 },
                 .value = undefined,
@@ -233,7 +233,7 @@ pub fn TableIteratorType(
                 it.buffered_value_count() >= Table.data.value_count_max;
         }
 
-        pub fn peek(it: TableIterator) ?Key {
+        pub fn peek(it: TableIterator) ?Table.Key {
             assert(!it.read_pending);
             assert(!it.read_table_index);
 
@@ -249,7 +249,7 @@ pub fn TableIteratorType(
         }
 
         /// This is only safe to call after peek() has returned non-null.
-        pub fn pop(it: *TableIterator) Value {
+        pub fn pop(it: *TableIterator) Table.Value {
             assert(!it.read_pending);
             assert(!it.read_table_index);
 
