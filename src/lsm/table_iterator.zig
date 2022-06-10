@@ -18,7 +18,8 @@ pub fn TableIteratorType(
     return struct {
         const TableIterator = @This();
 
-        const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
+        const Grid = GridType(Table.Storage);
+        const ValuesRingBuffer = RingBuffer(Table.Value, Table.data.value_count_max, .pointer);
 
         grid: *Grid,
         parent: *Parent,
@@ -39,7 +40,7 @@ pub fn TableIteratorType(
         /// iteration is complete.
         values: ValuesRingBuffer,
 
-        blocks: RingBuffer(BlockPtr, 2, .array),
+        blocks: RingBuffer(Table.BlockPtr, 2, .array),
         /// The index of the current value in the head of the blocks ring buffer.
         value: u32,
 
@@ -151,7 +152,7 @@ pub fn TableIteratorType(
             }
         }
 
-        fn read_next_data_block(it: *TableIterator, block: BlockPtr) void {
+        fn read_next_data_block(it: *TableIterator, block: Table.BlockPtr) void {
             assert(!it.read_table_index);
             assert(it.block < Table.index_data_blocks_used(it.index));
 
@@ -228,7 +229,7 @@ pub fn TableIteratorType(
             assert(!it.read_pending);
             assert(!it.read_table_index);
 
-            if (it.values.head()) |value| return key_from_value(value);
+            if (it.values.head()) |value| return Table.key_from_value(value);
 
             const block = it.blocks.head() orelse {
                 assert(it.block == Table.index_data_blocks_used(it.index));
@@ -236,7 +237,7 @@ pub fn TableIteratorType(
             };
 
             const values = Table.data_block_values_used(block);
-            return key_from_value(values[it.value]);
+            return Table.key_from_value(values[it.value]);
         }
 
         /// This is only safe to call after peek() has returned non-null.

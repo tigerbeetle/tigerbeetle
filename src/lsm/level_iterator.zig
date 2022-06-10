@@ -16,11 +16,13 @@ fn LevelIteratorType(
 ) type {
     const Key = Table.Key;
     const Value = Table.Value;
-    const Grid = GridType(Table.Storage);
+    const key_from_value = Table.key_from_value;
 
     return struct {
         const LevelIterator = @This();
         const TableIterator = TableIteratorType(LevelIterator, on_read_done);
+
+        const Grid = GridType(Table.Storage);
 
         const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
         const TablesRingBuffer = RingBuffer(TableIterator, 2, .array);
