@@ -12,7 +12,7 @@ const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
-    comptime LevelAIteratorType: anytype, // fn (table: type, t2: type, fn(t2) void) type
+    comptime IteratorAType: anytype, // fn (Table: type) type
 ) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -25,8 +25,9 @@ pub fn CompactionType(
         const Grid = GridType(Table.Storage);
         const Manifest = ManifestType(Table);
 
-        const LevelAIterator = LevelAIteratorType(Table, Compaction, io_callback);
-        const LevelBIterator = LevelIteratorType(Table, Compaction, io_callback);
+        // TODO: remove "Level" + "Iterator{AB}" + runtime io_callback
+        const LevelAIterator = IteratorAType(Table);
+        const LevelBIterator = LevelIteratorType(Table);
 
         pub const Callback = fn (it: *Compaction, done: bool) void;
 
