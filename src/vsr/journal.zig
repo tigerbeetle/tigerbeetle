@@ -31,6 +31,32 @@ comptime {
 /// A slot is `op % config.journal_slot_count`.
 const Slot = struct { index: u64 };
 
+/// An inclusive, non-empty range of slots.
+const SlotRange = struct {
+    head: Slot,
+    tail: Slot,
+
+    /// Returns whether this range (inclusive) includes the specified slot.
+    ///
+    /// Cases (`·`=included, ` `=excluded):
+    ///
+    /// * `head < tail` → `  head··tail  `
+    /// * `head > tail` → `··tail  head··` (The range wraps around).
+    /// * `head = tail` → panic            (Caller must handle this case separately).
+    fn contains(self: *const SlotRange, slot: Slot) bool {
+        // To avoid confusion, the empty range must be checked separately by the caller.
+        assert(self.head.index != self.tail.index);
+
+        if (self.head.index < self.tail.index) {
+            return self.head.index <= slot.index and slot.index <= self.tail.index;
+        }
+        if (self.head.index > self.tail.index) {
+            return slot.index <= self.tail.index or self.head.index <= slot.index;
+        }
+        unreachable;
+    }
+};
+
 const slot_count = config.journal_slot_count;
 const headers_size = config.journal_size_headers;
 const prepares_size = config.journal_size_prepares;
@@ -1178,7 +1204,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.headers.len == cases.len);
 
             // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
-            self.recover_torn_prepare(&cases);
+            if (self.recover_torn_prepare(&cases)) |torn_slot| {
+                assert(cases[torn_slot.index].decision(replica.replica_count) == .vsr);
+                cases[torn_slot.index] = &case_cut;
+            }
 
             for (cases) |case, index| self.recover_slot(Slot{ .index = index }, case);
             assert(cases.len == slot_count);
@@ -1195,6 +1224,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // From here it's over to the Recovery protocol from VRR 2012.
         }
 
+        /// Returns a slot that is safe to truncate.
+        //
         /// Truncate any prepare that was torn while being appended to the log before a crash, when:
         /// * the maximum valid op is the same in the prepare headers and redundant headers,
         /// * in the slot following the maximum valid op:
@@ -1203,7 +1234,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ///   - the prepare is corrupt, and
         /// * there are no faults except for those between `op_checkpoint` and `op_max + 1`,
         ///   so that we can be sure that the maximum valid op is in fact the maximum.
-        fn recover_torn_prepare(self: *const Self, cases: []*const Case) void {
+        fn recover_torn_prepare(self: *const Self, cases: []const *const Case) ?Slot {
             const replica = @fieldParentPtr(Replica, "journal", self);
 
             assert(!self.recovered);
@@ -1212,25 +1243,27 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.faulty.count == slot_count);
 
             const op_max = op_maximum_headers_untrusted(replica.cluster, self.headers_redundant);
-            if (op_max != op_maximum_headers_untrusted(replica.cluster, self.headers)) return;
-            if (op_max < replica.op_checkpoint) return;
+            if (op_max != op_maximum_headers_untrusted(replica.cluster, self.headers)) return null;
+            if (op_max < replica.op_checkpoint) return null;
+            // We can't assume that the header at `op_max` is a prepare — an empty journal with a
+            // corrupt root prepare (op_max=0) will be repaired later.
 
-            const op = op_max + 1;
-            const slot = self.slot_for_op(op);
+            const torn_op = op_max + 1;
+            const torn_slot = self.slot_for_op(torn_op);
 
-            const prepare_untrusted = &self.headers[slot.index];
-            if (prepare_untrusted.valid_checksum()) return;
+            const torn_prepare_untrusted = &self.headers[torn_slot.index];
+            if (torn_prepare_untrusted.valid_checksum()) return null;
             // The prepare is at least corrupt, possibly torn, but not valid and simply misdirected.
 
-            const header_untrusted = &self.headers_redundant[slot.index];
-            const header = header_ok(replica.cluster, slot, header_untrusted) orelse return;
+            const header_untrusted = &self.headers_redundant[torn_slot.index];
+            const header = header_ok(replica.cluster, torn_slot, header_untrusted) orelse return null;
             // The redundant header is valid, also for the correct cluster and not misdirected.
 
             if (header.command == .prepare) {
                 // The redundant header was already written, so the prepare is corrupt, not torn.
-                if (header.op == op) return;
+                if (header.op == torn_op) return null;
 
-                assert(header.op < op); // Since op > op_max.
+                assert(header.op < torn_op); // Since torn_op > op_max.
                 // The redundant header is from any previous log cycle.
             } else {
                 assert(header.command == .reserved);
@@ -1243,32 +1276,40 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             const checkpoint_index = self.slot_for_op(replica.op_checkpoint).index;
+            if (checkpoint_index == torn_slot.index) {
+                // The checkpoint and the torn op are in the same slot.
+                assert(cases[checkpoint_index].decision(replica.replica_count) == .vsr);
+                assert(slot_count > 1);
+                assert(op_max >= replica.op_checkpoint);
+                assert(torn_op == op_max + 1);
+                assert(torn_op > replica.op_checkpoint);
+                return null;
+            }
+
+            const known_range = SlotRange{
+                .head = Slot{ .index = checkpoint_index },
+                .tail = torn_slot,
+            };
 
             // We must be certain that the torn prepare really was being appended to the WAL.
-            // Return if any faults do not lie between the checkpoint and the torn prepare.
+            // Return if any faults do not lie between the checkpoint and the torn prepare, such as:
+            //
+            //   (fault  [checkpoint..........torn]        fault)
+            //   (...torn]    fault     fault  [checkpoint......)
             for (cases) |case, index| {
                 // Do not use `faulty.bit()` because the decisions have not been processed yet.
-                if (case.decision(replica.replica_count) != .vsr) continue;
-
-                if (checkpoint_index < slot.index) {
-                    // (fault  [checkpoint..........torn]        fault)
-                    if (index < checkpoint_index or slot.index < index) return;
-                } else if (checkpoint_index > slot.index) {
-                    // (torn]        fault     fault  [checkpoint......)
-                    if (slot.index < index and index < checkpoint_index) return;
-                } else {
-                    assert(slot_count > 1);
-                    assert(op_max >= replica.op_checkpoint);
-                    assert(op == op_max + 1);
-                    assert(op > replica.op_checkpoint);
-                    unreachable;
+                if (case.decision(replica.replica_count) == .vsr and
+                    !known_range.contains(Slot{ .index = index }))
+                {
+                    return null;
                 }
             }
 
             // The prepare is torn.
-            assert(!self.prepare_inhabited[slot.index]);
-            assert(cases[slot.index].decision(replica.replica_count) == .vsr);
-            cases[slot.index] = &case_cut;
+            assert(!self.prepare_inhabited[torn_slot.index]);
+            assert(!torn_prepare_untrusted.valid_checksum());
+            assert(cases[torn_slot.index].decision(replica.replica_count) == .vsr);
+            return torn_slot;
         }
 
         fn recover_slot(self: *Self, slot: Slot, case: *const Case) void {

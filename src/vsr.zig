@@ -15,6 +15,7 @@ pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
 pub const Clock = @import("vsr/clock.zig").Clock;
 pub const Journal = @import("vsr/journal.zig").Journal;
+pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 
 pub const ProcessType = enum { replica, client };
 
