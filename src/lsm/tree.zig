@@ -102,70 +102,11 @@ pub fn TreeType(comptime Table: type) type {
         /// as the last level doesn't pair up to compact into another.
         /// The first compaction level is from the immutable-table into a table (level 0 is special)
         /// while the remaining levels are from one on-disk table into another.
-        compactions: [config.lsm_levels - 1]Compaction,
+        immutable_table_compaction: CompactionImmutableTable,
+        table_compactions: [config.lsm_levels - 1]CompactionTable,
 
-        const TableCompaction = CompactionType(Table, TableIteratorType);
-        const ImmutableTableCompaction = CompactionType(Table, ImmutableTable.IteratorType);
-
-        /// A wrapper around both types of CompactionType's
-        const Compaction = union(enum) {
-            from_immutable: ImmutableTableCompaction,
-            from_table: TableCompaction,
-
-            pub const Callback = fn (it: *Compaction, done: bool) void;
-
-            pub fn init(
-                level: usize,
-                allocator: mem.Allocator,
-                manifest: *Manifest,
-                grid: *Grid,
-            ) !Compaction {
-                return switch (level) {
-                    0 => Compaction{
-                        .from_immutable = try ImmutableTableCompaction.init(allocator, manifest, grid),
-                    },
-                    else => Compaction{
-                        .from_table = try TableCompaction.init(allocator, manifest, grid),
-                    },
-                };
-            }
-
-            fn call(compaction: *Compaction, comptime func_name: []const u8, args: anytype) void {
-                switch (compaction) {
-                    .from_immutable => |*c| @call(.{}, @field(c, func_name), args),
-                    .from_table => |*c| @call(.{}, @field(c, func_name), args),
-                }
-            }
-
-            pub fn deinit(compaction: *Compaction, allocator: mem.Allocator) void {
-                compaction.call("deinit", .{allocator});
-            }
-
-            pub fn start(
-                compaction: *Compaction,
-                level_a: u64,
-                level_b: u32,
-                level_b_key_min: Key,
-                level_b_key_max: Key,
-                drop_tombstones: bool,
-            ) void {
-                compaction.call("start", .{
-                    level_a,
-                    level_b,
-                    level_b_key_min,
-                    level_b_key_max,
-                    drop_tombstones,
-                });
-            }
-
-            pub fn tick_io(compaction: *Compaction, callback: Callback) void {
-                compaction.call("tick_io", .{callback});
-            }
-
-            pub fn tick_cpu(compaction: *Compaction) void {
-                compaction.call("tick_cpu", .{});
-            }
-        };
+        const CompactionImmutableTable = CompactionType(Table, ImmutableTable);
+        const CompactionTable = CompactionType(Table, TableIteratorType);
 
         pub const Options = struct {
             /// The maximum number of keys that may need to be prefetched before commit.
@@ -323,17 +264,42 @@ pub fn TreeType(comptime Table: type) type {
                 assert(!tree.immutable_table.free);
             }
 
-            // if compactions are started, tick them or start some
-            // scatter-gather/join compaction callbacks -> function callback
+            // TODO scatter-gather/join compaction callbacks -> function callback
+            //
+            // if no compactions, should we start one?
+            //  - (highlevel) impl note: replica.zig: compact all tress in forest + compact manifest log
+            //  - note: even-tables (level-a): 0-2-4-6 odd-tables (level-b): immut-1-3-5-7
+            //  - note: beats of the bar are completed when all compaction callbacks are joined
+            //
+            //  - assuming a batch_count_multiple=4 (i.e. 4-measure bar of compaction ticks):
+            //      - first beat of the bar:
+            //          - assert: no compactions are currently running
+            //          - assert: mutable table can be empty with immut containing any sorted values
+            //          - TODO think through mutable table being converted at the end of the bar?
+            //
+            //          - check if even levels needs to compact or have space for one more table:
+            //              - if so, "start" (choose which table best to compact) and tick compactions
+            //              - note: allow level table_count_max to overflow.
+            //          - after end of first beat:
+            //              - one batch committed to mut table (at most 1/4 full)
+            //              - even compactions started are at least half-way complete
+            //
+            //      - second beat of the bar:
+            //          - don't start any new compactions, but tick existing started even ones
+            //          - after end of second beat:
+            //              - assert: even compactions are "finished"
+            //              - atomically update manifest table-infos that were compacted/modified
+            //
+            //      - third beat of the bar:
+            //          - swap to the odd table and do same as first beat
+            //
+            //      - fourth beat of the bar:
+            //          - swapped to the odd tables, so do the same as second beat
+            //          - after end of fourth beat:
+            //              - assert: all levels have space and haven't overflowed
+            //              - convert mutable table to immut for next measure
 
             _ = callback;
-            // if (!tree.table.free) {
-            //     tree.table.flush.tick(callback);
-            // } else {
-            //     callback(tree);
-            // }
-
-            // TODO Call tree.manifest.flush()
         }
 
         pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
