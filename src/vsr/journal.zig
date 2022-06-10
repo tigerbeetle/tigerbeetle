@@ -470,6 +470,22 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return op;
         }
 
+        /// Returns the highest op number prepared, as per `header_ok()` in the untrusted headers.
+        fn op_maximum_headers_untrusted(cluster: u32, headers_untrusted: []const Header) u64 {
+            var op: u64 = 0;
+            for (headers_untrusted) |*header_untrusted, slot_index| {
+                const slot = Slot{ .index = slot_index };
+                if (header_ok(cluster, slot, header_untrusted)) |header| {
+                    if (header.command == .prepare) {
+                        if (header.op > op) op = header.op;
+                    } else {
+                        assert(header.command == .reserved);
+                    }
+                }
+            }
+            return op;
+        }
+
         pub fn has(self: *const Self, header: *const Header) bool {
             assert(self.recovered);
             assert(header.command == .prepare);
@@ -1001,7 +1017,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.reads.executing() == 0);
 
             if (slot.index == slot_count) {
-                self.recover_done();
+                self.recover_slots();
                 return;
             }
             assert(slot.index < slot_count);
@@ -1130,182 +1146,141 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// 2. has the correct cluster
         /// 3. is in the correct slot (op % slot_count)
         /// 4. has command=reserved or command=prepare
-        fn recover_done(self: *Self) void {
+        fn recover_slots(self: *Self) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
-            const cluster = replica.cluster;
 
-            assert(self.recovering);
             assert(!self.recovered);
+            assert(self.recovering);
             assert(self.reads.executing() == 0);
             assert(self.writes.executing() == 0);
             assert(self.dirty.count == slot_count);
             assert(self.faulty.count == slot_count);
 
-            const prepares_op_max_exact = headers_op_maximum(cluster, self.headers);
-            const prepares_op_max = std.math.max(replica.op_checkpoint, prepares_op_max_exact);
+            const prepare_op_max = std.math.max(
+                replica.op_checkpoint,
+                op_maximum_headers_untrusted(replica.cluster, self.headers),
+            );
 
             var cases: [slot_count]*const Case = undefined;
-            for (self.headers) |_, slot_index| {
-                const slot = Slot{ .index = slot_index };
-                const prepare_unchecked = &self.headers[slot.index];
-                const header = header_ok(cluster, slot, &self.headers_redundant[slot.index]);
-                const prepare = header_ok(cluster, slot, prepare_unchecked);
-                const case = recovery_case(header, prepare, prepares_op_max);
 
-                cases[slot_index] = case;
+            for (self.headers) |_, index| {
+                const slot = Slot{ .index = index };
+                const header = header_ok(replica.cluster, slot, &self.headers_redundant[index]);
+                const prepare = header_ok(replica.cluster, slot, &self.headers[index]);
+
+                cases[index] = recovery_case(header, prepare, prepare_op_max);
 
                 // `prepare_checksums` improves the availability of `request_prepare` by being more
-                // flexible than `headers` regarding the prepares it references:
-                //
-                // * Unlike `headers`, it may hold prepares that are found in an incorrect slot, e.g.
-                //   due to a misdirected read or write.
-                //   (That is why the following condition tests `read.message.header` instead of
-                //   `prepare`/`header_ok()`).
-                // * It may hold a prepare whose redundant header is broken (decision=`fix`|`vsr`) as
-                //   long as the prepare itself is valid.
-                if (prepare_unchecked.valid_checksum() and
-                    prepare_unchecked.cluster == cluster and
-                    prepare_unchecked.command == .prepare)
-                {
-                    assert(!self.prepare_inhabited[slot.index]);
-                    assert(case.decision(replica.replica_count) != .nil);
-
-                    self.prepare_inhabited[slot.index] = true;
-                    self.prepare_checksums[slot.index] = prepare_unchecked.checksum;
+                // flexible than `headers` regarding the prepares it references. It may hold a
+                // prepare whose redundant header is broken, as long as the prepare itself is valid.
+                if (prepare != null and prepare.?.command == .prepare) {
+                    assert(!self.prepare_inhabited[index]);
+                    self.prepare_inhabited[index] = true;
+                    self.prepare_checksums[index] = prepare.?.checksum;
                 }
             }
+            assert(self.headers.len == cases.len);
 
-            // Refine cases @B and @C: Repair (truncate) a torn prepare after a crash.
-            if (self.recover_cut_slot(&cases)) |cut| {
-                assert(!self.prepare_inhabited[cut.index]);
-                assert(cases[cut.index].decision(replica.replica_count) == .vsr);
-                cases[cut.index] = &case_cut;
-            }
+            // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
+            self.recover_torn_prepare(&cases);
 
-            for (cases) |case, slot_index| {
-                self.recover_apply_decision(Slot{ .index = slot_index }, case);
-            }
+            for (cases) |case, index| self.recover_slot(Slot{ .index = index }, case);
+            assert(cases.len == slot_count);
 
-            log.debug("{}: recover_done: dirty={} faulty={}", .{
+            log.debug("{}: recover_slots: dirty={} faulty={}", .{
                 self.replica,
                 self.dirty.count,
                 self.faulty.count,
             });
 
-            assert(self.dirty.count <= slot_count);
-            assert(self.faulty.count <= slot_count);
-            assert(self.faulty.count <= self.dirty.count);
-            // Abort if all slots are faulty, since something is very wrong.
-            if (self.faulty.count == slot_count) @panic("all WAL slots are faulty");
-            if (self.faulty.count > 0 and replica.replica_count == 1) {
-                @panic("cluster-of-1 cannot recover log faults");
-            }
-
-            if (self.headers[0].op == 0 and self.headers[0].command == .prepare) {
-                assert(self.headers[0].checksum == Header.root_prepare(cluster).checksum);
-                assert(!self.faulty.bit(Slot{ .index = 0 }));
-                // We can only "fix" the root prepare for a cluster-of-1.
-                // When `replica_count>1`, "fix" is only used when the log wraps.
-                assert(!self.dirty.bit(Slot{ .index = 0 }) or replica.replica_count == 1);
-            }
-
-            for (self.headers) |*header, slot| {
-                assert(header.valid_checksum());
-                if (header.command == .reserved) {
-                    assert(header.cluster == cluster);
-                    assert(header.op == slot);
-                    continue;
-                }
-
-                assert(header.command == .prepare);
-                assert(header.op % slot_count == slot);
-                assert(!self.dirty.bit(Slot{ .index = slot }));
-                assert(!self.faulty.bit(Slot{ .index = slot }));
-                assert(self.prepare_inhabited[slot]);
-                assert(self.prepare_checksums[slot] == header.checksum);
-            }
-
             self.recovered = true;
             self.recovering = false;
+            self.assert_recovered();
             // From here it's over to the Recovery protocol from VRR 2012.
         }
 
-        /// Returns a slot that is safe to truncate (if any).
-        ///
-        /// Truncate the last message from the log when:
-        /// * the highest valid op is the same in the prepares and the redundant headers
-        /// * in the slot following the maximum op:
-        ///   * the redundant header is valid
-        ///   * the redundant header is reserved or the op is one log cycle behind
-        ///   * the prepare is corrupt
-        /// * there are no faults except for those between `op_checkpoint` and `op_maximum+1`
-        fn recover_cut_slot(self: *const Self, cases: []const *const Case) ?Slot {
+        /// Truncate any prepare that was torn while being appended to the log before a crash, when:
+        /// * the maximum valid op is the same in the prepare headers and redundant headers,
+        /// * in the slot following the maximum valid op:
+        ///   - the redundant header is valid,
+        ///   - the redundant header is reserved, and/or the op is at least a log cycle behind,
+        ///   - the prepare is corrupt, and
+        /// * there are no faults except for those between `op_checkpoint` and `op_max + 1`,
+        ///   so that we can be sure that the maximum valid op is in fact the maximum.
+        fn recover_torn_prepare(self: *const Self, cases: []*const Case) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
-            const cluster = replica.cluster;
 
-            assert(self.recovering);
             assert(!self.recovered);
+            assert(self.recovering);
             assert(self.dirty.count == slot_count);
             assert(self.faulty.count == slot_count);
 
-            const headers_op_max_exact = headers_op_maximum(cluster, self.headers_redundant);
-            const headers_op_max = std.math.max(replica.op_checkpoint, headers_op_max_exact);
-            const prepares_op_max_exact = headers_op_maximum(cluster, self.headers);
-            const prepares_op_max = std.math.max(replica.op_checkpoint, prepares_op_max_exact);
-            if (prepares_op_max != headers_op_max) return null;
+            const op_max = op_maximum_headers_untrusted(replica.cluster, self.headers_redundant);
+            if (op_max != op_maximum_headers_untrusted(replica.cluster, self.headers)) return;
+            if (op_max < replica.op_checkpoint) return;
 
-            const last_op = headers_op_max + 1;
-            const last_slot = self.slot_for_op(last_op);
-            const last_header_unchecked = &self.headers_redundant[last_slot.index];
-            const last_prepare_unchecked = &self.headers[last_slot.index];
-            const last_header = header_ok(
-                cluster,
-                last_slot,
-                last_header_unchecked,
-            ) orelse return null;
+            const op = op_max + 1;
+            const slot = self.slot_for_op(op);
 
-            if (last_prepare_unchecked.valid_checksum()) return null;
-            assert(!self.prepare_inhabited[last_slot.index]);
-            assert(cases[last_slot.index].decision(replica.replica_count) == .vsr);
+            const prepare_untrusted = &self.headers[slot.index];
+            if (prepare_untrusted.valid_checksum()) return;
+            // The prepare is at least corrupt, possibly torn, but not valid and simply misdirected.
 
-            if (last_header.command == .prepare) {
-                if (last_op < slot_count) return null;
-                if (last_op - slot_count != last_header.op) return null;
+            const header_untrusted = &self.headers_redundant[slot.index];
+            const header = header_ok(replica.cluster, slot, header_untrusted) orelse return;
+            // The redundant header is valid, also for the correct cluster and not misdirected.
+
+            if (header.command == .prepare) {
+                // The redundant header was already written, so the prepare is corrupt, not torn.
+                if (header.op == op) return;
+
+                assert(header.op < op); // Since op > op_max.
+                // The redundant header is from any previous log cycle.
             } else {
-                assert(last_header.command == .reserved);
+                assert(header.command == .reserved);
+
+                // This is the first log cycle.
+
+                // TODO Can we be more sure about this? What if op_max is clearly many cycles ahead?
+                // Any previous log cycle is then expected to have a prepare, not a reserved header,
+                // unless the prepare header was lost, in which case this slot may also not be torn.
             }
 
-            // `op_min` and `op_max` are inclusive.
-            const op_min = replica.op_checkpoint;
-            const op_max = last_op;
-            assert(op_max >= op_min);
+            const checkpoint_index = self.slot_for_op(replica.op_checkpoint).index;
 
-            const op_min_slot = self.slot_for_op(op_min);
-            const op_max_slot = self.slot_for_op(op_max);
+            // We must be certain that the torn prepare really was being appended to the WAL.
+            // Return if any faults do not lie between the checkpoint and the torn prepare.
+            for (cases) |case, index| {
+                // Do not use `faulty.bit()` because the decisions have not been processed yet.
+                if (case.decision(replica.replica_count) != .vsr) continue;
 
-            // We must be certain that `last_op` really is the last op that was written to the WAL.
-            // Check for faults that may not lie between `op_checkpoint` and `last_op`.
-            var slot: u64 = 0;
-            while (slot <= slot_count) : (slot += 1) {
-                // Don't use `faulty.bit()` because the decisions haven't been processed yet.
-                if (cases[slot].decision(replica.replica_count) != .vsr) continue;
-                if (op_min_slot.index < op_max_slot.index) {
-                    if (slot < op_min_slot.index or op_max_slot.index < slot) return null;
-                } else if (op_min_slot.index > op_max_slot.index) {
-                    if (op_max_slot.index < slot and slot < op_min_slot.index) return null;
+                if (checkpoint_index < slot.index) {
+                    // (fault  [checkpoint..........torn]        fault)
+                    if (index < checkpoint_index or slot.index < index) return;
+                } else if (checkpoint_index > slot.index) {
+                    // (torn]        fault     fault  [checkpoint......)
+                    if (slot.index < index and index < checkpoint_index) return;
                 } else {
-                    return null;
+                    assert(slot_count > 1);
+                    assert(op_max >= replica.op_checkpoint);
+                    assert(op == op_max + 1);
+                    assert(op > replica.op_checkpoint);
+                    unreachable;
                 }
             }
-            return last_slot;
+
+            // The prepare is torn.
+            assert(!self.prepare_inhabited[slot.index]);
+            assert(cases[slot.index].decision(replica.replica_count) == .vsr);
+            cases[slot.index] = &case_cut;
         }
 
-        fn recover_apply_decision(self: *Self, slot: Slot, case: *const Case) void {
+        fn recover_slot(self: *Self, slot: Slot, case: *const Case) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
             const cluster = replica.cluster;
 
-            assert(self.recovering);
             assert(!self.recovered);
+            assert(self.recovering);
             assert(self.dirty.bit(slot));
             assert(self.faulty.bit(slot));
 
@@ -1365,6 +1340,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .cut => {
                     assert(header != null);
                     assert(prepare == null);
+                    assert(!self.prepare_inhabited[slot.index]);
+                    assert(self.prepare_checksums[slot.index] == 0);
                     self.headers[slot.index] = Header.reserved(cluster, slot.index);
                     self.dirty.clear(slot);
                     self.faulty.clear(slot);
@@ -1373,7 +1350,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             switch (decision) {
                 .eql, .nil => {
-                    log.debug("{}: recover_prepares: recovered slot={} label={s} decision={s}", .{
+                    log.debug("{}: recover_slot: recovered slot={} label={s} decision={s}", .{
                         self.replica,
                         slot.index,
                         case.label,
@@ -1381,13 +1358,51 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     });
                 },
                 .fix, .vsr, .cut => {
-                    log.warn("{}: recover_prepares: recovered slot={} label={s} decision={s}", .{
+                    log.warn("{}: recover_slot: recovered slot={} label={s} decision={s}", .{
                         self.replica,
                         slot.index,
                         case.label,
                         @tagName(decision),
                     });
                 },
+            }
+        }
+
+        fn assert_recovered(self: *const Self) void {
+            const replica = @fieldParentPtr(Replica, "journal", self);
+
+            assert(self.recovered);
+            assert(!self.recovering);
+
+            assert(self.dirty.count <= slot_count);
+            assert(self.faulty.count <= slot_count);
+            assert(self.faulty.count <= self.dirty.count);
+
+            // Abort if all slots are faulty, since something is very wrong.
+            if (self.faulty.count == slot_count) @panic("WAL is completely corrupt");
+            if (self.faulty.count > 0 and replica.replica_count == 1) @panic("WAL is corrupt");
+
+            if (self.headers[0].op == 0 and self.headers[0].command == .prepare) {
+                assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
+                assert(!self.faulty.bit(Slot{ .index = 0 }));
+                // We can only "fix" the root prepare for a cluster-of-one.
+                // When `replica_count > 1`, "fix" is only used when the log wraps.
+                assert(!self.dirty.bit(Slot{ .index = 0 }) or replica.replica_count == 1);
+            }
+
+            for (self.headers) |*header, index| {
+                assert(header.valid_checksum());
+                assert(header.cluster == replica.cluster);
+                if (header.command == .reserved) {
+                    assert(header.op == index);
+                } else {
+                    assert(header.command == .prepare);
+                    assert(header.op % slot_count == index);
+                    assert(self.prepare_inhabited[index]);
+                    assert(self.prepare_checksums[index] == header.checksum);
+                    assert(!self.dirty.bit(Slot{ .index = index }));
+                    assert(!self.faulty.bit(Slot{ .index = index }));
+                }
             }
         }
 
@@ -2282,22 +2297,4 @@ test "recovery_cases" {
         }
         if (case_match == null) @panic("no matching case");
     }
-}
-
-/// Returns the maximum op of any valid (according to `header_ok`) prepare in the headers.
-fn headers_op_maximum(cluster: u32, headers: []const Header) u64 {
-    var op: u64 = 0;
-    for (headers) |*header_unchecked, slot_index| {
-        const slot = Slot{ .index = slot_index };
-        if (header_ok(cluster, slot, header_unchecked)) |header| {
-            switch (header.command) {
-                .prepare => {
-                    if (op < header.op) op = header.op;
-                },
-                .reserved => {},
-                else => unreachable,
-            }
-        }
-    }
-    return op;
 }
