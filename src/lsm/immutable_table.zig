@@ -10,18 +10,11 @@ const binary_search = @import("binary_search.zig");
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 pub fn ImmutableTableType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+
     return struct {
         const ImmutableTable = @This();
-
-        const Key = Table.Key;
-        const Table = @import("table.zig").Table(
-            Storage,
-            Key,
-            Value, 
-            compare_keys, 
-            key_from_value, 
-            sentinel_key,
-        );
 
         value_count_max: u32,
         values: []Value,
@@ -40,7 +33,7 @@ pub fn ImmutableTableType(comptime Table: type) type {
             return ImmutableTable{
                 .value_count_max = value_count_max,
                 .snapshot_min = undefined,
-                .values = values, 
+                .values = values,
                 .iterator_index = values.len,
                 .free = true,
             };
@@ -105,10 +98,10 @@ pub fn ImmutableTableType(comptime Table: type) type {
                 if (result.exact) {
                     const value = &table.values[result.index];
                     if (config.verify) assert(compare_keys(key, key_from_value(value.*)) == .eq);
-                    return value; 
+                    return value;
                 }
             }
-            
+
             return null;
         }
 
@@ -130,9 +123,4 @@ pub fn ImmutableTableType(comptime Table: type) type {
             return table.values[table.iterator_index];
         }
     };
-}
-
-test "" {
-    const ImmutableTable = 
-    _ = ImmutableTable.get;
 }
