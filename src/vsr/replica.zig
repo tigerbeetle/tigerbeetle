@@ -3119,7 +3119,7 @@ pub fn Replica(
         /// * ` ✓ o ✗ `: View change is unsafe.
         /// * ` ✗ ✓ o `: View change is unsafe.
         /// * ` ✓ ✗ o `: View change is safe.
-        /// * ` ✓ = o `: View change is unsafe if any slots are faulty
+        /// * ` ✓ = o `: View change is unsafe if any slots are faulty.
         ///              (`replica.op_checkpoint` == `replica.op`).
         // TODO Use this function once we switch from recovery protocol to the superblock.
         // If there is an "unsafe" fault, we will need to request a start_view from the leader to
@@ -3131,22 +3131,27 @@ pub fn Replica(
 
             const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint).index;
             const slot_op = self.journal.slot_with_op(self.op).?.index;
-            const slot_op_min = std.math.min(slot_op, slot_op_checkpoint);
-            const slot_op_max = std.math.max(slot_op, slot_op_checkpoint);
+            const slot_known_range = vsr.SlotRange{
+                .head = slot_op_checkpoint,
+                .tail = slot_op,
+            };
 
             var iterator = self.journal.faulty.bits.iterator(.{ .kind = .set });
             while (iterator.next()) |slot| {
                 // The command is `reserved` when the entry was found faulty during WAL recovery.
                 // Faults found after WAL recovery are not relevant, because we know their op.
-                if (self.journal.headers[slot.index].command != .reserved) continue;
-                if (slot.index <= slot_op_min or slot.index >= slot_op_max) {
-                    log.warn("{}: op_certain: op not known (faulty_slot={}, op={}, op_checkpoint={})", .{
-                        self.replica,
-                        slot.index,
-                        self.op,
-                        self.op_checkpoint,
-                    });
-                    return false;
+                if (self.journal.headers[slot.index].command == .reserved) {
+                    if (slot_op_checkpoint == slot_op or
+                        !slot_known_range.contains(slot))
+                    {
+                        log.warn("{}: op_certain: op not known (faulty_slot={}, op={}, op_checkpoint={})", .{
+                            self.replica,
+                            slot.index,
+                            self.op,
+                            self.op_checkpoint,
+                        });
+                        return false;
+                    }
                 }
             }
             return true;
