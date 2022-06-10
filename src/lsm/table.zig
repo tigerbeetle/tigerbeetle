@@ -25,6 +25,20 @@ pub fn TableType(
     /// Returns a tombstone value representation for a key.
     comptime table_tombstone_from_key: fn (TableKey) callconv(.Inline) TableValue,
 ) type {
+    assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
+    // TODO(ifreund) What are our alignment expectations for Value?
+
+    // There must be no padding in the Key/Value types to avoid buffer bleeds.
+    assert(@bitSizeOf(Key) == @sizeOf(Key) * 8);
+    assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
+
+    const key_size = @sizeOf(Key);
+    const value_size = @sizeOf(Value);
+
+    // We can relax these if necessary. These impact our calculation of the superblock trailer size.
+    assert(key_size >= 8);
+    assert(key_size <= 32);
+
     return struct {
         const Table = @This();
         const Grid = GridType(Storage);
@@ -50,6 +64,11 @@ pub fn TableType(
                 return std.hash_map.getAutoHashFn(Key, HashMapContextValue)(.{}, key);
             }
         };
+
+        // Taken from tree.zig
+        pub const block_size = config.block_size;
+        pub const BlockPtr = *align(config.sector_size) [block_size]u8;
+        pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
         const address_size = @sizeOf(u64);
         const checksum_size = @sizeOf(u128);
@@ -765,7 +784,4 @@ test "Table" {
         Key.key_from_value,
         Key.sentinel_key,
     );
-
-    _ = Table.Builder.data_block_finish;
-    _ = Table.filter_blocks_used;
 }

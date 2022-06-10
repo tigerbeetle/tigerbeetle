@@ -6,12 +6,16 @@ const assert = std.debug.assert;
 const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 
+/// Range queries are not supported on the MutableTable, it must first be made immutable.
 pub fn MutableTableType(comptime Table: type) type {
-    /// Range queries are not supported on the MutableTable, it must first be made immutable.
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+    const tombstone_from_key = Table.tombstone_from_key;
+
     return struct {
         const MutableTable = @This();
-        const Key = Table.Key;
-        const Value = Table.Value;
 
         const load_factor = 50;
         const Values = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
@@ -75,7 +79,7 @@ pub fn MutableTableType(comptime Table: type) type {
 
         /// The returned slice is invalidated whenever this is called for any tree.
         pub fn sort_into_values_and_clear(
-            table: *MutableTable, 
+            table: *MutableTable,
             values_max: []Value,
         ) []const Value {
             assert(table.count() > 0);
@@ -92,7 +96,7 @@ pub fn MutableTableType(comptime Table: type) type {
             const values = values_max[0..i];
             assert(values.len == table.count());
             std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
-            
+
             table.clear();
             assert(table.count() == 0);
 
