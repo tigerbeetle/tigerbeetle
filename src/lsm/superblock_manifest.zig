@@ -5,11 +5,6 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 
-// The maximum number of tables in a tree when fully loaded.
-// We use the same number as the upper bound for all tables across the forest since many are small.
-// For example, this would be 2,396,752 tables for a tree with 8 levels and a growth factor of 8.
-const table_count_max = @import("tree.zig").table_count_max;
-
 pub const Manifest = struct {
     checksums: []u128,
     addresses: []u64,
@@ -33,23 +28,32 @@ pub const Manifest = struct {
         block: u64,
         entry: u32,
     };
-
-    pub fn init(allocator: mem.Allocator, count_max: u32) !Manifest {
-        const checksums = try allocator.alloc(u128, count_max);
+    
+    pub fn init(
+        allocator: mem.Allocator, 
+        manifest_block_count_max: u32, 
+        // The maximum number of tables in a tree when fully loaded.
+        // We use the same number as the upper bound for all tables across the forest since many are small.
+        // For example, this would be 2,396,752 tables for a tree with 8 levels and a growth factor of 8.
+        forest_table_count_max: u32,
+    ) !Manifest {
+        // TODO Assert relation between manifest_block_count_max and forest_table_count_max.
+        
+        const checksums = try allocator.alloc(u128, manifest_block_count_max);
         errdefer allocator.free(checksums);
 
-        const addresses = try allocator.alloc(u64, count_max);
+        const addresses = try allocator.alloc(u64, manifest_block_count_max);
         errdefer allocator.free(addresses);
 
-        const trees = try allocator.alloc(u8, count_max);
+        const trees = try allocator.alloc(u8, manifest_block_count_max);
         errdefer allocator.free(trees);
 
         var tables = std.AutoHashMapUnmanaged(u64, TableExtent){};
-        try tables.ensureTotalCapacity(allocator, table_count_max);
+        try tables.ensureTotalCapacity(allocator, forest_table_count_max);
         errdefer tables.deinit(allocator);
 
         var compaction_set = std.AutoHashMapUnmanaged(u64, void){};
-        try compaction_set.ensureTotalCapacity(allocator, count_max);
+        try compaction_set.ensureTotalCapacity(allocator, manifest_block_count_max);
         errdefer compaction_set.deinit(allocator);
 
         mem.set(u128, checksums, 0);
@@ -61,7 +65,7 @@ pub const Manifest = struct {
             .addresses = addresses,
             .trees = trees,
             .count = 0,
-            .count_max = count_max,
+            .count_max = manifest_block_count_max,
             .tables = tables,
             .compaction_set = compaction_set,
         };
