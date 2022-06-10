@@ -5,21 +5,23 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 
+const GridType = @import("grid.zig").GridType;
+const ManifestType = @import("manifest.zig").ManifestType;
 const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
+const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
-    comptime LevelAIterator: type,
+    comptime LevelAIteratorType: anytype, // fn (table: type, t2: type, fn(t2) void) type
 ) type {
     const Key = Table.Key;
     const Value = Table.Value;
 
     return struct {
         const Compaction = @This();
-        
-        const Grid = @import("grid.zig").GridType(Table.Storage);
-        const Manifest = @import("manifest.zig").ManifestType(Table);
-        const LevelBIterator = @import("level_iterator.zig").LevelIterator;
+
+        const LevelAIterator = LevelAIteratorType(Table, Compaction, io_callback);
+        const LevelBIterator = LevelIteratorType(Table, Compaction, io_callback);
 
         pub const Callback = fn (it: *Compaction, done: bool) void;
 
