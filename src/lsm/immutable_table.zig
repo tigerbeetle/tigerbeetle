@@ -12,6 +12,8 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 pub fn ImmutableTableType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
 
     return struct {
         const ImmutableTable = @This();
@@ -25,7 +27,8 @@ pub fn ImmutableTableType(comptime Table: type) type {
         pub fn init(allocator: mem.Allocator, commit_count_max: u32) !ImmutableTable {
             // The in-memory immutable table is the same size as the mutable table:
             const value_count_max = commit_count_max * config.lsm_mutable_table_batch_multiple;
-            assert(div_ceil(value_count_max, data.value_count_max) <= Table.data_block_count_max);
+            const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
+            assert(data_block_count <= Table.data_block_count_max);
 
             const values = try allocator.alloc(Value, value_count_max);
             errdefer allocator.free(values);
@@ -61,7 +64,7 @@ pub fn ImmutableTableType(comptime Table: type) type {
             assert(sorted_values.ptr == table.values.ptr);
             assert(sorted_values.len > 0);
             assert(sorted_values.len <= table.value_count_max);
-            assert(sorted_values.len <= data.value_count_max * data_block_count_max);
+            assert(sorted_values.len <= Table.data.value_count_max * Table.data_block_count_max);
 
             if (config.verify) {
                 var i: usize = 1;

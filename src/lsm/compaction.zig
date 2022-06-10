@@ -17,9 +17,13 @@ pub fn CompactionType(
     const Key = Table.Key;
     const Value = Table.Value;
     const BlockPtr = Table.BlockPtr;
+    const tombstone = Table.tombstone;
 
     return struct {
         const Compaction = @This();
+
+        const Grid = GridType(Table.Storage);
+        const Manifest = ManifestType(Table);
 
         const LevelAIterator = LevelAIteratorType(Table, Compaction, io_callback);
         const LevelBIterator = LevelIteratorType(Table, Compaction, io_callback);
@@ -124,8 +128,9 @@ pub fn CompactionType(
             drop_tombstones: bool,
         ) void {
             // There are at least 2 table inputs to the compaction.
-            assert(level_a_tables.len + 1 >= 2);
-
+            // assert(level_a_tables.len + 1 >= 2);
+            
+            _ = level_a;
             _ = level_b;
             _ = level_b_key_min;
             _ = level_b_key_max;
