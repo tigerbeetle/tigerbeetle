@@ -11,7 +11,7 @@ const GridType = @import("grid.zig").GridType;
 
 fn LevelIteratorType(
     comptime Table: type,
-    comptime Parent: type, 
+    comptime Parent: type,
     comptime read_done: fn (*Parent) void,
 ) type {
     const Key = Table.Key;

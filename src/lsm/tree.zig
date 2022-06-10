@@ -51,24 +51,9 @@ pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, c
 pub fn TreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
-
-    const block_size = config.block_size;
-    const BlockPtr = *align(config.sector_size) [block_size]u8;
-    const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
-
-    assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
-    // TODO(ifreund) What are our alignment expectations for Value?
-
-    // There must be no padding in the Key/Value types to avoid buffer bleeds.
-    assert(@bitSizeOf(Key) == @sizeOf(Key) * 8);
-    assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
-
-    const key_size = @sizeOf(Key);
-    const value_size = @sizeOf(Value);
-
-    // We can relax these if necessary. These impact our calculation of the superblock trailer size.
-    assert(key_size >= 8);
-    assert(key_size <= 32);
+    const compare_keys = Table.compare_keys;
+    const tombstone = Table.tombstone;
+    const tombstone_from_key = Table.tombstone_from_key;
 
     return struct {
         const Tree = @This();
@@ -126,6 +111,8 @@ pub fn TreeType(comptime Table: type) type {
         const Compaction = union(enum) {
             from_immutable: ImmutableTableCompaction,
             from_table: TableCompaction,
+
+            pub const Callback = fn (it: *Compaction, done: bool) void;
 
             pub fn init(
                 level: usize,
@@ -228,7 +215,7 @@ pub fn TreeType(comptime Table: type) type {
                 .mutable_table = mutable_table,
                 .table = table,
                 .manifest = manifest,
-                .compactions = compactions,
+                .compactions = undefined,
             };
 
             for (tree.compactions) |*compaction, level| {
@@ -339,6 +326,7 @@ pub fn TreeType(comptime Table: type) type {
             // if compactions are started, tick them or start some
             // scatter-gather/join compaction callbacks -> function callback
 
+            _ = callback;
             // if (!tree.table.free) {
             //     tree.table.flush.tick(callback);
             // } else {
@@ -507,8 +495,7 @@ pub fn main() !void {
     defer storage.deinit();
 
     const Key = CompositeKey(u128);
-
-    const Tree = TreeType(
+    const Table = @import("table.zig").TableType(
         Storage,
         Key,
         Key.Value,
@@ -518,6 +505,8 @@ pub fn main() !void {
         Key.tombstone,
         Key.tombstone_from_key,
     );
+
+    const Tree = TreeType(Table);
 
     // Check out our spreadsheet to see how we calculate node_count for a forest of trees.
     const node_count = 1024;
@@ -561,16 +550,19 @@ pub fn main() !void {
 
     testing.refAllDecls(@This());
 
-    _ = Tree.Table;
-    _ = Tree.Table.create_from_sorted_values;
-    _ = Tree.Table.get;
-    _ = Tree.Table.FlushIterator;
-    _ = Tree.Table.FlushIterator.tick;
-    _ = Tree.TableIteratorType;
-    _ = Tree.LevelIteratorType;
-    _ = Tree.Manifest.LookupIterator.next;
+    _ = Table;
+    _ = Table.create_from_sorted_values;
+    _ = Table.get;
+    _ = Table.Builder.data_block_finish;
+    _ = Table.filter_blocks_used;
+    _ = Table.Builder.data_block_finish;
+    _ = Table.filter_blocks_used;
+
     _ = Tree.Compaction;
-    _ = Tree.Table.Builder.data_block_finish;
+    _ = Tree.Compaction.tick_io;
+    _ = Tree.Compaction.tick_cpu;
+    _ = Tree.Compaction.tick_cpu_merge;
+
     _ = tree.prefetch_enqueue;
     _ = tree.prefetch;
     _ = tree.prefetch_key;
@@ -578,14 +570,11 @@ pub fn main() !void {
     _ = tree.put;
     _ = tree.remove;
     _ = tree.lookup;
+
+    _ = Tree.Manifest.LookupIterator.next;
     _ = tree.manifest;
     _ = tree.manifest.lookup;
-    _ = tree.flush;
-    _ = Tree.Table.filter_blocks_used;
     _ = tree.manifest.insert_tables;
-    _ = Tree.Compaction.tick_io;
-    _ = Tree.Compaction.tick_cpu;
-    _ = Tree.Compaction.tick_cpu_merge;
 
     std.debug.print("table_count_max={}\n", .{table_count_max});
 }
