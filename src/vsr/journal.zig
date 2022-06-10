@@ -570,7 +570,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// We expect that `op_min` and `op_max` (`replica.commit_min` and `replica.op`) must exist.
         /// A range will never include `op_min` because this is already committed.
         /// A range will never include `op_max` because this must be up to date as the latest op.
-        /// We must therefore first resolve any view jump barrier so that we can trust `op_max`.
+        /// We must therefore first resolve any op uncertainty so that we can trust `op_max` here.
         ///
         /// For example: If ops 3, 9 and 10 are missing, returns: `{ .op_min = 9, .op_max = 10 }`.
         ///
@@ -627,15 +627,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         } else if (a.checksum == b.parent) {
                             // A is connected to B, and B is connected or B is op_max.
                             assert(a.view <= b.view);
-                        } else if (a.view < b.view) {
-                            // A is not connected to B, and A is older than B, open range:
+                        } else if (a.view != b.view) {
+                            // A is not connected to B, open range:
                             assert(a.op > op_min);
+                            assert(b.op <= op_max);
                             range = .{ .op_min = a.op, .op_max = a.op };
-                        } else if (a.view > b.view) {
-                            // A is not connected to B, but A is newer than B, open and close range:
-                            assert(b.op < op_max);
-                            range = .{ .op_min = b.op, .op_max = b.op };
-                            break;
                         } else {
                             // Op numbers in the same view must be connected.
                             unreachable;
