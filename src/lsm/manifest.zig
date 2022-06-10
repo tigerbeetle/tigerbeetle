@@ -76,11 +76,6 @@ pub fn ManifestType(comptime Table: type) type {
         /// Here, we use a structure with indexes over the segmented array for performance.
         const Level = ManifestLevel(NodePool, Key, TableInfo, compare_keys, table_count_max);
 
-        const LevelTag = enum {
-            conjoint,
-            disjoint,
-        };
-
         node_pool: *NodePool,
 
         levels: [config.lsm_levels]Level,

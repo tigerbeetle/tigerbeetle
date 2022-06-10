@@ -93,8 +93,8 @@ pub fn ImmutableTableType(comptime Table: type) type {
                 const result = binary_search.binary_search_values(
                     Key,
                     Value,
-                    Table.key_from_value,
-                    Table.compare_keys,
+                    key_from_value,
+                    compare_keys,
                     table.values,
                     key,
                 );

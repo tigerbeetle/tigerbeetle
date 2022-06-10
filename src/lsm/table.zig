@@ -56,19 +56,21 @@ pub fn TableType(
         pub const BlockPtr = *align(config.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
-        assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
-        // TODO(ifreund) What are our alignment expectations for Value?
+        pub const key_size = @sizeOf(Key);
+        pub const value_size = @sizeOf(Value);
 
-        // There must be no padding in the Key/Value types to avoid buffer bleeds.
-        assert(@bitSizeOf(Key) == @sizeOf(Key) * 8);
-        assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
+        comptime {
+            assert(@alignOf(Key) == 8 or @alignOf(Key) == 16);
+            // TODO(ifreund) What are our alignment expectations for Value?
 
-        const key_size = @sizeOf(Key);
-        const value_size = @sizeOf(Value);
+            // There must be no padding in the Key/Value types to avoid buffer bleeds.
+            assert(@bitSizeOf(Key) == @sizeOf(Key) * 8);
+            assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
 
-        // We can relax these if necessary. These impact our calculation of the superblock trailer size.
-        assert(key_size >= 8);
-        assert(key_size <= 32);
+            // We can relax these if necessary. These impact our calculation of the superblock trailer size.
+            assert(key_size >= 8);
+            assert(key_size <= 32);
+        }
 
         const address_size = @sizeOf(u64);
         const checksum_size = @sizeOf(u128);
