@@ -313,25 +313,30 @@ pub const StateMachine = struct {
         if (a.debits_exceed_credits(0)) return .exceeds_credits;
         if (a.credits_exceed_debits(0)) return .exceeds_debits;
 
-        var insert = self.accounts.getOrPutAssumeCapacity(a.id);
-        if (insert.found_existing) {
-            const existing = insert.value_ptr.*;
-            if (a.user_data != existing.user_data) return .exists_with_different_user_data;
-            if (a.ledger != existing.ledger) return .exists_with_different_ledger;
-            if (a.code != existing.code) return .exists_with_different_code;
-            if (@bitCast(u16, a.flags) != @bitCast(u16, existing.flags)) {
-                return .exists_with_different_flags;
-            }
-            return .exists;
-        } else {
-            insert.value_ptr.* = a.*;
-            self.commit_timestamp = a.timestamp;
-            return .ok;
-        }
+        if (self.get_account(a.id)) |e| return create_account_exists(a, e);
+
+        self.accounts.putAssumeCapacityNoClobber(a.id, a.*);
+
+        self.commit_timestamp = a.timestamp;
+        return .ok;
     }
 
     fn create_account_rollback(self: *StateMachine, a: *const Account) void {
         assert(self.accounts.remove(a.id));
+    }
+
+    fn create_account_exists(a: *const Account, e: *const Account) CreateAccountResult {
+        assert(a.id == e.id);
+        if (@bitCast(u16, a.flags) != @bitCast(u16, e.flags)) return .exists_with_different_flags;
+        if (a.user_data != e.user_data) return .exists_with_different_user_data;
+        assert(zeroed_48_bytes(a.reserved) and zeroed_48_bytes(e.reserved));
+        if (a.ledger != e.ledger) return .exists_with_different_ledger;
+        if (a.code != e.code) return .exists_with_different_code;
+        if (a.debits_pending != e.debits_pending) return .exists_with_different_debits_pending;
+        if (a.debits_posted != e.debits_posted) return .exists_with_different_debits_posted;
+        if (a.credits_pending != e.credits_pending) return .exists_with_different_credits_pending;
+        if (a.credits_posted != e.credits_posted) return .exists_with_different_credits_posted;
+        return .exists;
     }
 
     fn create_transfer(self: *StateMachine, t: *const Transfer) CreateTransferResult {
@@ -700,28 +705,72 @@ test "create/lookup/rollback accounts" {
             .result = .ok,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
-                .ledger = 1,
-                .code = 1,
+                .user_data = 2,
+                .ledger = 3,
+                .code = 4,
+                .debits_pending = 5,
+                .debits_posted = 6,
+                .credits_pending = 7,
+                .credits_posted = 8,
                 .timestamp = 1,
             }),
         },
         .{
             .result = .reserved_flag,
             .object = mem.zeroInit(Account, .{
+                .id = 0,
+                .user_data = 0,
+                .reserved = [_]u8{1} ** 48,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{
+                    .padding = 1,
+                    .debits_must_not_exceed_credits = true,
+                    .credits_must_not_exceed_debits = true,
+                },
+                .debits_pending = math.maxInt(u64),
+                .debits_posted = math.maxInt(u64),
+                .credits_pending = math.maxInt(u64),
+                .credits_posted = math.maxInt(u64),
                 .timestamp = 2,
-                .flags = .{ .padding = 1 },
             }),
         },
         .{
             .result = .reserved_field,
             .object = mem.zeroInit(Account, .{
-                .timestamp = 2,
+                .id = 0,
+                .user_data = 0,
                 .reserved = [_]u8{1} ** 48,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{
+                    .padding = 0,
+                    .debits_must_not_exceed_credits = true,
+                    .credits_must_not_exceed_debits = true,
+                },
+                .debits_pending = math.maxInt(u64),
+                .debits_posted = math.maxInt(u64),
+                .credits_pending = math.maxInt(u64),
+                .credits_posted = math.maxInt(u64),
+                .timestamp = 2,
             }),
         },
         .{
             .result = .id_must_not_be_zero,
             .object = mem.zeroInit(Account, .{
+                .id = 0,
+                .user_data = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{
+                    .padding = 0,
+                    .debits_must_not_exceed_credits = true,
+                    .credits_must_not_exceed_debits = true,
+                },
+                .debits_pending = math.maxInt(u64),
+                .debits_posted = math.maxInt(u64),
+                .credits_pending = math.maxInt(u64),
+                .credits_posted = math.maxInt(u64),
                 .timestamp = 2,
             }),
         },
@@ -729,6 +778,18 @@ test "create/lookup/rollback accounts" {
             .result = .ledger_must_not_be_zero,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
+                .user_data = 20,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{
+                    .padding = 0,
+                    .debits_must_not_exceed_credits = true,
+                    .credits_must_not_exceed_debits = true,
+                },
+                .debits_pending = math.maxInt(u64),
+                .debits_posted = math.maxInt(u64),
+                .credits_pending = math.maxInt(u64),
+                .credits_posted = math.maxInt(u64),
                 .timestamp = 2,
             }),
         },
@@ -736,112 +797,233 @@ test "create/lookup/rollback accounts" {
             .result = .code_must_not_be_zero,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
+                .user_data = 20,
+                .ledger = 30,
+                .code = 0,
+                .flags = .{
+                    .debits_must_not_exceed_credits = true,
+                    .credits_must_not_exceed_debits = true,
+                },
+                .debits_pending = math.maxInt(u64),
+                .debits_posted = math.maxInt(u64),
+                .credits_pending = math.maxInt(u64),
+                .credits_posted = math.maxInt(u64),
                 .timestamp = 2,
-                .ledger = 1,
             }),
         },
         .{
             .result = .mutually_exclusive_flags,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
-                .timestamp = 2,
-                .ledger = 1,
-                .code = 1,
+                .user_data = 20,
+                .ledger = 30,
+                .code = 40,
                 .flags = .{
                     .debits_must_not_exceed_credits = true,
                     .credits_must_not_exceed_debits = true,
                 },
+                .debits_pending = math.maxInt(u64),
+                .debits_posted = math.maxInt(u64),
+                .credits_pending = math.maxInt(u64),
+                .credits_posted = math.maxInt(u64),
+                .timestamp = 2,
             }),
         },
         .{
             .result = .overflows_debits,
             .object = mem.zeroInit(Account, .{
-                .id = 10,
-                .timestamp = 2,
-                .ledger = 1,
-                .code = 1,
+                .id = 1,
+                .user_data = 20,
+                .ledger = 30,
+                .code = 40,
+                .flags = .{
+                    .debits_must_not_exceed_credits = true,
+                },
                 .debits_pending = math.maxInt(u64),
-                .debits_posted = math.maxInt(u64),
+                .debits_posted = 60,
+                .credits_pending = math.maxInt(u64),
+                .credits_posted = 80,
+                .timestamp = 2,
             }),
         },
         .{
             .result = .overflows_credits,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
-                .timestamp = 2,
-                .ledger = 1,
-                .code = 1,
+                .user_data = 20,
+                .ledger = 30,
+                .code = 40,
+                .flags = .{
+                    .credits_must_not_exceed_debits = true,
+                },
+                .debits_pending = 50,
+                .debits_posted = 60,
                 .credits_pending = math.maxInt(u64),
-                .credits_posted = math.maxInt(u64),
+                .credits_posted = 80,
+                .timestamp = 2,
             }),
         },
         .{
             .result = .exceeds_credits,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
+                .user_data = 20,
+                .ledger = 30,
+                .code = 40,
+                .flags = .{
+                    .debits_must_not_exceed_credits = true,
+                },
+                .debits_pending = 50,
+                .debits_posted = 60,
+                .credits_pending = 1,
+                .credits_posted = 109,
                 .timestamp = 2,
-                .ledger = 1,
-                .code = 1,
-                .debits_pending = 10,
-                .flags = .{ .debits_must_not_exceed_credits = true },
             }),
         },
         .{
             .result = .exceeds_debits,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
+                .user_data = 20,
+                .ledger = 30,
+                .code = 40,
+                .flags = .{
+                    .credits_must_not_exceed_debits = true,
+                },
+                .debits_pending = 50,
+                .debits_posted = 60,
+                .credits_pending = 1,
+                .credits_posted = 109,
                 .timestamp = 2,
-                .ledger = 1,
-                .code = 1,
-                .credits_posted = 10,
-                .flags = .{ .credits_must_not_exceed_debits = true },
-            }),
-        },
-        .{
-            .result = .exists_with_different_user_data,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .timestamp = 2,
-                .ledger = 1,
-                .code = 1,
-                .user_data = 'U',
-            }),
-        },
-        .{
-            .result = .exists_with_different_ledger,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .timestamp = 2,
-                .ledger = 2,
-                .code = 1,
-            }),
-        },
-        .{
-            .result = .exists_with_different_code,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .timestamp = 2,
-                .ledger = 1,
-                .code = 2,
             }),
         },
         .{
             .result = .exists_with_different_flags,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
+                .user_data = 20,
+                .ledger = 30,
+                .code = 40,
+                .flags = .{
+                    .credits_must_not_exceed_debits = true,
+                },
+                .debits_pending = 50,
+                .debits_posted = 60,
+                .credits_pending = 0,
+                .credits_posted = 0,
                 .timestamp = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .debits_must_not_exceed_credits = true },
+            }),
+        },
+        .{
+            .result = .exists_with_different_user_data,
+            .object = mem.zeroInit(Account, .{
+                .id = 1,
+                .user_data = 20,
+                .ledger = 30,
+                .code = 40,
+                .debits_pending = 50,
+                .debits_posted = 60,
+                .credits_pending = 70,
+                .credits_posted = 80,
+                .timestamp = 2,
+            }),
+        },
+        .{
+            .result = .exists_with_different_ledger,
+            .object = mem.zeroInit(Account, .{
+                .id = 1,
+                .user_data = 2,
+                .ledger = 30,
+                .code = 40,
+                .debits_pending = 50,
+                .debits_posted = 60,
+                .credits_pending = 70,
+                .credits_posted = 80,
+                .timestamp = 2,
+            }),
+        },
+        .{
+            .result = .exists_with_different_code,
+            .object = mem.zeroInit(Account, .{
+                .id = 1,
+                .user_data = 2,
+                .ledger = 3,
+                .code = 40,
+                .debits_pending = 50,
+                .debits_posted = 60,
+                .credits_pending = 70,
+                .credits_posted = 80,
+                .timestamp = 2,
+            }),
+        },
+        .{
+            .result = .exists_with_different_debits_pending,
+            .object = mem.zeroInit(Account, .{
+                .id = 1,
+                .user_data = 2,
+                .ledger = 3,
+                .code = 4,
+                .debits_pending = 50,
+                .debits_posted = 60,
+                .credits_pending = 70,
+                .credits_posted = 80,
+                .timestamp = 2,
+            }),
+        },
+        .{
+            .result = .exists_with_different_debits_posted,
+            .object = mem.zeroInit(Account, .{
+                .id = 1,
+                .user_data = 2,
+                .ledger = 3,
+                .code = 4,
+                .debits_pending = 5,
+                .debits_posted = 60,
+                .credits_pending = 70,
+                .credits_posted = 80,
+                .timestamp = 2,
+            }),
+        },
+        .{
+            .result = .exists_with_different_credits_pending,
+            .object = mem.zeroInit(Account, .{
+                .id = 1,
+                .user_data = 2,
+                .ledger = 3,
+                .code = 4,
+                .debits_pending = 5,
+                .debits_posted = 6,
+                .credits_pending = 70,
+                .credits_posted = 80,
+                .timestamp = 2,
+            }),
+        },
+        .{
+            .result = .exists_with_different_credits_posted,
+            .object = mem.zeroInit(Account, .{
+                .id = 1,
+                .user_data = 2,
+                .ledger = 3,
+                .code = 4,
+                .debits_pending = 5,
+                .debits_posted = 6,
+                .credits_pending = 7,
+                .credits_posted = 80,
+                .timestamp = 2,
             }),
         },
         .{
             .result = .exists,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
+                .user_data = 2,
+                .ledger = 3,
+                .code = 4,
+                .debits_pending = 5,
+                .debits_posted = 6,
+                .credits_pending = 7,
+                .credits_posted = 8,
                 .timestamp = 2,
-                .ledger = 1,
-                .code = 1,
             }),
         },
     };
@@ -928,7 +1110,7 @@ test "linked accounts" {
             .{ .index = 2, .result = .linked_event_failed },
             .{ .index = 3, .result = .exists },
             .{ .index = 4, .result = .linked_event_failed },
-            .{ .index = 6, .result = .exists_with_different_code },
+            .{ .index = 6, .result = .exists_with_different_flags },
             .{ .index = 7, .result = .linked_event_failed },
             .{ .index = 9, .result = .linked_event_failed },
             .{ .index = 10, .result = .exists_with_different_ledger },
@@ -972,21 +1154,21 @@ test "create/lookup/rollback transfers" {
             .id = 4,
             .ledger = 1,
             .code = 1,
+            .flags = .{ .debits_must_not_exceed_credits = true },
             .debits_pending = 20,
             .debits_posted = math.maxInt(u64) - 500 - 200,
             .credits_pending = 0,
             .credits_posted = math.maxInt(u64) - 500,
-            .flags = .{ .debits_must_not_exceed_credits = true },
         }),
         mem.zeroInit(Account, .{
             .id = 5,
             .ledger = 1,
             .code = 1,
+            .flags = .{ .credits_must_not_exceed_debits = true },
             .debits_pending = 0,
             .debits_posted = math.maxInt(u64) - 1000,
             .credits_pending = 10,
             .credits_posted = math.maxInt(u64) - 1000 - 100,
-            .flags = .{ .credits_must_not_exceed_debits = true },
         }),
     };
 

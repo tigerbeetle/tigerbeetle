@@ -110,10 +110,14 @@ pub const CreateAccountResult = enum(u32) {
     exceeds_credits,
     exceeds_debits,
 
+    exists_with_different_flags,
     exists_with_different_user_data,
     exists_with_different_ledger,
     exists_with_different_code,
-    exists_with_different_flags,
+    exists_with_different_debits_pending,
+    exists_with_different_debits_posted,
+    exists_with_different_credits_pending,
+    exists_with_different_credits_posted,
     exists,
 };
 
