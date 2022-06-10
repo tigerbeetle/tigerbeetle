@@ -34,6 +34,10 @@ pub fn FIFO(comptime T: type) type {
             return self.out;
         }
 
+        pub fn empty(self: Self) bool {
+            return self.peek() == null;
+        }
+
         /// Remove an element from the FIFO. Asserts that the element is
         /// in the FIFO. This operation is O(N), if this is done often you
         /// probably want a different data structure.
@@ -55,7 +59,7 @@ pub fn FIFO(comptime T: type) type {
     };
 }
 
-test "push/pop/peek/remove" {
+test "push/pop/peek/remove/empty" {
     const testing = @import("std").testing;
 
     const Foo = struct { next: ?*@This() = null };
@@ -65,34 +69,45 @@ test "push/pop/peek/remove" {
     var three: Foo = .{};
 
     var fifo: FIFO(Foo) = .{};
+    try testing.expect(fifo.empty());
 
     fifo.push(&one);
+    try testing.expect(!fifo.empty());
     try testing.expectEqual(@as(?*Foo, &one), fifo.peek());
 
     fifo.push(&two);
     fifo.push(&three);
+    try testing.expect(!fifo.empty());
     try testing.expectEqual(@as(?*Foo, &one), fifo.peek());
 
     fifo.remove(&one);
+    try testing.expect(!fifo.empty());
     try testing.expectEqual(@as(?*Foo, &two), fifo.pop());
     try testing.expectEqual(@as(?*Foo, &three), fifo.pop());
     try testing.expectEqual(@as(?*Foo, null), fifo.pop());
+    try testing.expect(fifo.empty());
 
     fifo.push(&one);
     fifo.push(&two);
     fifo.push(&three);
     fifo.remove(&two);
+    try testing.expect(!fifo.empty());
     try testing.expectEqual(@as(?*Foo, &one), fifo.pop());
     try testing.expectEqual(@as(?*Foo, &three), fifo.pop());
     try testing.expectEqual(@as(?*Foo, null), fifo.pop());
+    try testing.expect(fifo.empty());
 
     fifo.push(&one);
     fifo.push(&two);
     fifo.push(&three);
     fifo.remove(&three);
+    try testing.expect(!fifo.empty());
     try testing.expectEqual(@as(?*Foo, &one), fifo.pop());
+    try testing.expect(!fifo.empty());
     try testing.expectEqual(@as(?*Foo, &two), fifo.pop());
+    try testing.expect(fifo.empty());
     try testing.expectEqual(@as(?*Foo, null), fifo.pop());
+    try testing.expect(fifo.empty());
 
     fifo.push(&one);
     fifo.push(&two);
@@ -101,4 +116,5 @@ test "push/pop/peek/remove" {
     try testing.expectEqual(@as(?*Foo, &one), fifo.pop());
     try testing.expectEqual(@as(?*Foo, &three), fifo.pop());
     try testing.expectEqual(@as(?*Foo, null), fifo.pop());
+    try testing.expect(fifo.empty());
 }
