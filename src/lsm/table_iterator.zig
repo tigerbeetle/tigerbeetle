@@ -11,10 +11,7 @@ const GridType = @import("grid.zig").GridType;
 pub fn TableIteratorType(
     comptime Table: type,
     comptime Parent: type,
-    comptime read_done: fn (*Parent) void,
 ) type {
-    _ = read_done; // TODO
-
     return struct {
         const TableIterator = @This();
 
@@ -23,6 +20,7 @@ pub fn TableIteratorType(
 
         grid: *Grid,
         parent: *Parent,
+        read_done: fn (*Parent) void,
         read_table_index: bool,
         address: u64,
         checksum: u128,
@@ -48,7 +46,7 @@ pub fn TableIteratorType(
         /// This field is only used for safety checks, it does not affect the behavior.
         read_pending: bool = false,
 
-        pub fn init(allocator: mem.Allocator) !TableIterator {
+        pub fn init(allocator: mem.Allocator, read_done: fn (*Parent) void) !TableIterator {
             const index = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
             errdefer allocator.free(index);
 
@@ -64,6 +62,7 @@ pub fn TableIteratorType(
             return .{
                 .grid = undefined,
                 .parent = undefined,
+                .read_done = read_done,
                 .read_table_index = undefined,
                 // Use 0 so that we can assert(address != 0) in tick().
                 .address = 0,
@@ -191,7 +190,7 @@ pub fn TableIteratorType(
 
             if (!it.tick()) {
                 assert(it.buffered_enough_values());
-                read_done(it.parent);
+                it.read_done(it.parent);
             }
         }
 

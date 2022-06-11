@@ -11,8 +11,7 @@ const GridType = @import("grid.zig").GridType;
 
 fn LevelIteratorType(
     comptime Table: type,
-    comptime Parent: type,
-    comptime read_done: fn (*Parent) void,
+    comptime Parent: type
 ) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -20,7 +19,7 @@ fn LevelIteratorType(
 
     return struct {
         const LevelIterator = @This();
-        const TableIterator = TableIteratorType(LevelIterator, on_read_done);
+        const TableIterator = TableIteratorType(Table, LevelIterator);
 
         const Grid = GridType(Table.Storage);
 
@@ -29,25 +28,27 @@ fn LevelIteratorType(
 
         grid: *Grid,
         parent: *Parent,
+        read_done: fn (*Parent) void,
         level: u32,
         key_min: Key,
         key_max: Key,
         values: ValuesRingBuffer,
         tables: TablesRingBuffer,
 
-        pub fn init(allocator: mem.Allocator) !LevelIterator {
+        pub fn init(allocator: mem.Allocator, read_done: fn (*Parent) void) !LevelIterator {
             var values = try ValuesRingBuffer.init(allocator);
             errdefer values.deinit(allocator);
 
-            var table_a = try TableIterator.init(allocator);
+            var table_a = try TableIterator.init(allocator, on_read_done);
             errdefer table_a.deinit(allocator);
 
-            var table_b = try TableIterator.init(allocator);
+            var table_b = try TableIterator.init(allocator, on_read_done);
             errdefer table_b.deinit(allocator);
 
             return LevelIterator{
                 .grid = undefined,
                 .parent = undefined,
+                .read_done = read_done,
                 .level = undefined,
                 .key_min = undefined,
                 .key_max = undefined,
@@ -78,6 +79,7 @@ fn LevelIteratorType(
             it.* = .{
                 .grid = grid,
                 .parent = parent,
+                .read_done = it.read_done,
                 .level = level,
                 .key_min = key_min,
                 .key_max = key_max,
@@ -130,7 +132,7 @@ fn LevelIteratorType(
         fn on_read_done(it: *LevelIterator) void {
             if (!it.tick()) {
                 assert(it.buffered_enough_values());
-                read_done(it.parent);
+                it.read_done(it.parent);
             }
         }
 
