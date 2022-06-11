@@ -12,7 +12,7 @@ const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
-    comptime IteratorAType: anytype, // fn (Table: type) type
+    comptime IteratorAType: anytype, // fn (Table: type, Parent: type) type
 ) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -26,8 +26,8 @@ pub fn CompactionType(
         const Manifest = ManifestType(Table);
 
         // TODO: remove "Level" + "Iterator{AB}" + runtime io_callback
-        const LevelAIterator = IteratorAType(Table);
-        const LevelBIterator = LevelIteratorType(Table);
+        const LevelAIterator = IteratorAType(Table, Compaction);
+        const LevelBIterator = LevelIteratorType(Table, Compaction);
 
         pub const Callback = fn (it: *Compaction, done: bool) void;
 
@@ -73,10 +73,10 @@ pub fn CompactionType(
         data: BlockWrite,
 
         pub fn init(allocator: mem.Allocator, manifest: *Manifest, grid: *Grid) !Compaction {
-            var level_a_iterator = try LevelAIterator.init(allocator);
+            var level_a_iterator = try LevelAIterator.init(allocator, io_callback);
             errdefer level_a_iterator.deinit(allocator);
 
-            var level_b_iterator = try LevelBIterator.init(allocator);
+            var level_b_iterator = try LevelBIterator.init(allocator, io_callback);
             errdefer level_b_iterator.deinit(allocator);
 
             var table_builder = try Table.Builder.init(allocator);
