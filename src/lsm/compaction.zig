@@ -12,7 +12,7 @@ const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
-    comptime IteratorAType: anytype, // fn (Table: type, Parent: type) type
+    comptime IteratorAType: anytype, // fn (Table: type) type
 ) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -25,9 +25,8 @@ pub fn CompactionType(
         const Grid = GridType(Table.Storage);
         const Manifest = ManifestType(Table);
 
-        // TODO: remove "Level" + "Iterator{AB}" + runtime io_callback
-        const LevelAIterator = IteratorAType(Table, Compaction);
-        const LevelBIterator = LevelIteratorType(Table, Compaction);
+        const IteratorA = IteratorAType(Table);
+        const IteratorB = LevelIteratorType(Table);
 
         pub const Callback = fn (it: *Compaction, done: bool) void;
 
@@ -63,8 +62,8 @@ pub fn CompactionType(
         /// because a write I/O may yet follow even after the merge is done.
         merge_done: bool = false,
 
-        level_a_iterator: LevelAIterator,
-        level_b_iterator: LevelBIterator,
+        iterator_a: IteratorA,
+        iterator_b: IteratorB,
         merge_iterator: MergeIterator,
         table_builder: Table.Builder,
 
@@ -72,12 +71,12 @@ pub fn CompactionType(
         filter: BlockWrite,
         data: BlockWrite,
 
-        pub fn init(allocator: mem.Allocator, manifest: *Manifest, grid: *Grid) !Compaction {
-            var level_a_iterator = try LevelAIterator.init(allocator, io_callback);
-            errdefer level_a_iterator.deinit(allocator);
+        pub fn init(allocator: mem.Allocator) !Compaction {
+            var iterator_a = try IteratorA.init(allocator);
+            errdefer iterator_a.deinit(allocator);
 
-            var level_b_iterator = try LevelBIterator.init(allocator, io_callback);
-            errdefer level_b_iterator.deinit(allocator);
+            var iterator_b = try IteratorB.init(allocator);
+            errdefer iterator_b.deinit(allocator);
 
             var table_builder = try Table.Builder.init(allocator);
             errdefer table_builder.deinit(allocator);
@@ -92,11 +91,12 @@ pub fn CompactionType(
             errdefer allocator.free(data.block);
 
             return Compaction{
-                .manifest = manifest,
-                .grid = grid,
+                // Provided on start()
+                .manifest = undefined,
+                .grid = undefined,
 
-                .level_a_iterator = level_a_iterator,
-                .level_b_iterator = level_b_iterator,
+                .iterator_a = iterator_a,
+                .iterator_b = iterator_b,
                 .merge_iterator = undefined, // This must be initialized at tick 1.
                 .table_builder = table_builder,
 
@@ -111,8 +111,8 @@ pub fn CompactionType(
         }
 
         pub fn deinit(compaction: *Compaction, allocator: mem.Allocator) void {
-            compaction.level_a_iterator.deinit(allocator);
-            compaction.level_b_iterator.deinit(allocator);
+            compaction.iterator_a.deinit(allocator);
+            compaction.iterator_b.deinit(allocator);
             compaction.table_builder.deinit(allocator);
 
             allocator.free(compaction.index.block);
@@ -122,29 +122,26 @@ pub fn CompactionType(
 
         pub fn start(
             compaction: *Compaction,
-            level_a: u64,
-            level_b: u32,
-            level_b_key_min: Key,
-            level_b_key_max: Key,
+            grid: *Grid,
+            manifest: *Manifest,
+            iterator_a_context: IteratorA.Context,
+            iterator_b_context: IteratorB.Context,
             drop_tombstones: bool,
         ) void {
-            // There are at least 2 table inputs to the compaction.
-            // assert(level_a_tables.len + 1 >= 2);
-
-            _ = level_a;
-            _ = level_b;
-            _ = level_b_key_min;
-            _ = level_b_key_max;
-            _ = drop_tombstones;
-
             compaction.ticks = 0;
             assert(compaction.io_pending == 0);
+
+            compaction.merge_done = false;
             compaction.drop_tombstones = drop_tombstones;
             assert(compaction.callback == null);
-            compaction.merge_done = false;
+
+            compaction.grid = grid;
+            compaction.manifest = manifest;
+            compaction.merge_iterator = undefined;
 
             // TODO Reset iterators and builder.
-            compaction.merge_iterator = undefined;
+            compaction.iterator_a.reset(grid, manifest, iterator_a_read_done, iterator_a_context);
+            compaction.iterator_b.reset(grid, manifest, iterator_b_read_done, iterator_b_context);
 
             assert(!compaction.data.ready);
             assert(!compaction.filter.ready);
@@ -214,8 +211,8 @@ pub fn CompactionType(
         fn tick_io_read(compaction: *Compaction) void {
             assert(compaction.callback != null);
 
-            if (compaction.level_a_iterator.tick()) compaction.io_pending += 1;
-            if (compaction.level_b_iterator.tick()) compaction.io_pending += 1;
+            if (compaction.iterator_a.tick()) compaction.io_pending += 1;
+            if (compaction.iterator_b.tick()) compaction.io_pending += 1;
 
             if (compaction.merge_done) assert(compaction.io_pending == 0);
         }
@@ -307,6 +304,16 @@ pub fn CompactionType(
             }
         }
 
+        fn iterator_a_read_done(iterator_a: *IteratorA) void {
+            const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
+            compaction.io_callback();
+        }
+
+        fn iterator_b_read_done(iterator_b: *IteratorB) void {
+            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
+            compaction.io_callback();
+        }
+
         fn io_callback(compaction: *Compaction) void {
             compaction.io_pending -= 1;
 
@@ -350,20 +357,20 @@ pub fn CompactionType(
         }
 
         fn assert_read_iterators_empty(compaction: Compaction) void {
-            assert(compaction.level_a_iterator.buffered_all_values());
-            assert(compaction.level_a_iterator.peek() == null);
+            assert(compaction.iterator_a.buffered_all_values());
+            assert(compaction.iterator_a.peek() == null);
 
-            assert(compaction.level_b_iterator.buffered_all_values());
-            assert(compaction.level_b_iterator.peek() == null);
+            assert(compaction.iterator_b.buffered_all_values());
+            assert(compaction.iterator_b.peek() == null);
         }
 
         fn stream_peek(compaction: *Compaction, stream_id: u32) ?Key {
             assert(stream_id <= 1);
 
             if (stream_id == 0) {
-                return compaction.level_a_iterator.peek();
+                return compaction.iterator_a.peek();
             } else {
-                return compaction.level_b_iterator.peek();
+                return compaction.iterator_b.peek();
             }
         }
 
@@ -371,9 +378,9 @@ pub fn CompactionType(
             assert(stream_id <= 1);
 
             if (stream_id == 0) {
-                return compaction.level_a_iterator.pop();
+                return compaction.iterator_a.pop();
             } else {
-                return compaction.level_b_iterator.pop();
+                return compaction.iterator_b.pop();
             }
         }
 

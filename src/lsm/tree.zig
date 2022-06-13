@@ -65,6 +65,7 @@ pub fn TreeType(comptime Table: type) type {
 
         const CompactionType = @import("compaction.zig").CompactionType;
         const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
+        const ImmutableTableIteratorType = @import("immutable_table.zig").ImmutableTableIteratorType;
 
         pub const PrefetchKeys = std.AutoHashMapUnmanaged(Key, void);
         pub const PrefetchValues = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, 70);
@@ -106,7 +107,7 @@ pub fn TreeType(comptime Table: type) type {
         table_compactions: [config.lsm_levels - 1]CompactionTable,
 
         const CompactionTable = CompactionType(Table, TableIteratorType);
-        const CompactionImmutableTable = CompactionType(Table, ImmutableTable.IteratorType);
+        const CompactionImmutableTable = CompactionType(Table, ImmutableTableIteratorType);
 
         pub const Options = struct {
             /// The maximum number of keys that may need to be prefetched before commit.
@@ -117,13 +118,12 @@ pub fn TreeType(comptime Table: type) type {
         };
 
         pub fn init(
-            tree: *Tree,
             allocator: mem.Allocator,
             grid: *Grid,
             node_pool: *NodePool,
             value_cache: ?*ValueCache,
             options: Options,
-        ) !void {
+        ) !Tree {
             if (value_cache == null) {
                 assert(options.prefetch_count_max == 0);
             } else {
@@ -147,7 +147,17 @@ pub fn TreeType(comptime Table: type) type {
             var manifest = try Manifest.init(allocator, node_pool);
             errdefer manifest.deinit(allocator);
 
-            tree.* = Tree{
+            var immutable_table_compaction = CompactionImmutableTable.init(allocator);
+            errdefer immutable_table_compaction.deinit(allocator);
+
+            var table_compactions: [config.lsm_levels - 1]CompactionTable = undefined;
+            for (table_compactions) |*compaction, i| {
+                errdefer for (table_compactions[0..i]) |*c| c.deinit(allocator);
+                compaction.* = try CompactionTable.init(allocator);
+            }
+            errdefer for (table_compactions) |*c| c.deinit(allocator);
+
+            return Tree{
                 .grid = grid,
                 .options = options,
                 .prefetch_keys = prefetch_keys,
@@ -156,16 +166,9 @@ pub fn TreeType(comptime Table: type) type {
                 .mutable_table = mutable_table,
                 .table = table,
                 .manifest = manifest,
-                .compactions = undefined,
+                .immutable_table_compaction = immutable_table_compaction,
+                .table_compactions = table_compactions,
             };
-
-            tree.immutable_table_compaction.init(allocator, &tree.manifest, tree.grid);
-            errdefer tree.immutable_table_compaction.deinit(allocator);
-
-            for (tree.table_compactions) |*compaction, i| {
-                errdefer for (tree.table_compactions[0..i]) |*c| c.deinit(allocator);
-                compaction.* = try CompactionTable.init(allocator, &tree.manifest, tree.grid);
-            }
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
@@ -250,6 +253,8 @@ pub fn TreeType(comptime Table: type) type {
         }
 
         pub fn compact(tree: *Tree, callback: fn (*Tree) void) void {
+            // TODO do the (not)cannot_commit_batch() assertion in the first beat
+            // TODO do the stuff in the if at the end of the fourth beat
             // Convert the mutable table to an immutable table if necessary:
             if (tree.mutable_table.cannot_commit_batch(tree.options.commit_count_max)) {
                 assert(tree.mutable_table.count() > 0);
@@ -288,7 +293,7 @@ pub fn TreeType(comptime Table: type) type {
             //              - one batch committed to mut table (at most 1/4 full)
             //              - even compactions started are at least half-way complete
             //
-            //      - second beat of the bar:
+            //      - second+ beat of the bar:
             //          - don't start any new compactions, but tick existing started even ones
             //          - after end of second beat:
             //              - assert: even compactions are "finished"
@@ -504,8 +509,7 @@ pub fn main() !void {
     var grid = try Grid.init(allocator, &superblock);
     defer grid.deinit(allocator);
 
-    var tree: Tree = undefined;
-    try tree.init(
+    var tree = try Tree.init(
         allocator,
         &grid,
         &node_pool,
