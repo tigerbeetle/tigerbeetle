@@ -28,17 +28,17 @@ pub const Manifest = struct {
         block: u64,
         entry: u32,
     };
-    
+
     pub fn init(
-        allocator: mem.Allocator, 
-        manifest_block_count_max: u32, 
+        allocator: mem.Allocator,
+        manifest_block_count_max: u32,
         // The maximum number of tables in a tree when fully loaded.
         // We use the same number as the upper bound for all tables across the forest since many are small.
         // For example, this would be 2,396,752 tables for a tree with 8 levels and a growth factor of 8.
         forest_table_count_max: u32,
     ) !Manifest {
         // TODO Assert relation between manifest_block_count_max and forest_table_count_max.
-        
+
         const checksums = try allocator.alloc(u128, manifest_block_count_max);
         errdefer allocator.free(checksums);
 

@@ -104,9 +104,9 @@ pub fn TreeType(comptime Table: type) type {
         /// while the remaining levels are from one on-disk table into another. 
         immutable_table_compaction: CompactionImmutableTable,
         table_compactions: [config.lsm_levels - 1]CompactionTable,
-        
-        const CompactionImmutableTable = CompactionType(Table, ImmutableTable);
+
         const CompactionTable = CompactionType(Table, TableIteratorType);
+        const CompactionImmutableTable = CompactionType(Table, ImmutableTable.IteratorType);
 
         pub const Options = struct {
             /// The maximum number of keys that may need to be prefetched before commit.
@@ -159,14 +159,18 @@ pub fn TreeType(comptime Table: type) type {
                 .compactions = undefined,
             };
 
-            for (tree.compactions) |*compaction, level| {
-                errdefer for (tree.compactions[0..level]) |*c| c.deinit(allocator);
-                compaction.* = try Compaction.init(level, allocator, &tree.manifest, tree.grid);
+            tree.immutable_table_compaction.init(allocator, &tree.manifest, tree.grid);
+            errdefer tree.immutable_table_compaction.deinit(allocator);
+
+            for (tree.table_compactions) |*compaction, i| {
+                errdefer for (tree.table_compactions[0..i]) |*c| c.deinit(allocator);
+                compaction.* = try CompactionTable.init(allocator, &tree.manifest, tree.grid);
             }
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            for (tree.compactions) |*compaction| compaction.deinit(allocator);
+            tree.immutable_table_compaction.deinit(allocator);
+            for (tree.table_compactions) |*compaction| compaction.deinit(allocator);
 
             // TODO Consider whether we should release blocks acquired from Grid.block_free_set.
             tree.prefetch_keys.deinit(allocator);
@@ -266,7 +270,7 @@ pub fn TreeType(comptime Table: type) type {
 
             // TODO scatter-gather/join compaction callbacks -> function callback
             //
-            // if no compactions, should we start one? 
+            // if no compactions, should we start one?
             //  - (highlevel) impl note: replica.zig: compact all tress in forest + compact manifest log
             //  - note: even-tables (level-a): 0-2-4-6 odd-tables (level-b): immut-1-3-5-7
             //  - note: beats of the bar are completed when all compaction callbacks are joined
@@ -280,16 +284,16 @@ pub fn TreeType(comptime Table: type) type {
             //          - check if even levels needs to compact or have space for one more table:
             //              - if so, "start" (choose which table best to compact) and tick compactions
             //              - note: allow level table_count_max to overflow.
-            //          - after end of first beat: 
+            //          - after end of first beat:
             //              - one batch committed to mut table (at most 1/4 full)
             //              - even compactions started are at least half-way complete
             //
             //      - second beat of the bar:
             //          - don't start any new compactions, but tick existing started even ones
-            //          - after end of second beat: 
+            //          - after end of second beat:
             //              - assert: even compactions are "finished"
             //              - atomically update manifest table-infos that were compacted/modified
-            // 
+            //
             //      - third beat of the bar:
             //          - swap to the odd table and do same as first beat
             //
