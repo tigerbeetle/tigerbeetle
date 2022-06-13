@@ -113,7 +113,7 @@ Events are **immutable data structures** that **instantiate or mutate state data
        credit_account_id: 16 bytes (128-bit)
                user_data: 16 bytes (128-bit) [optional, e.g. opaque third-party identifier to link this transfer (many-to-one) to an external entity]
                 reserved: 16 bytes (128-bit) [reserved, for accounting policy primitives]
-              pending_id: 16 bytes (128-bit) [optional, post or void an existing but pending transfer]
+              pending_id: 16 bytes (128-bit) [optional, required to post or void an existing but pending transfer]
                  timeout:  8 bytes ( 64-bit) [optional, required only for a pending transfer, a quantity of time, i.e. an offset in nanoseconds from timestamp]
                   ledger:  4 bytes ( 32-bit) [required, to enforce isolation by ensuring that all transfers are between accounts of the same ledger]
                     code:  2 bytes ( 16-bit) [required, an opaque chart of accounts code describing the reason for the transfer e.g. deposit, settlement]
