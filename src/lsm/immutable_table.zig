@@ -21,7 +21,6 @@ pub fn ImmutableTableType(comptime Table: type) type {
         value_count_max: u32,
         values: []Value,
         snapshot_min: u64,
-        iterator_index: u32,
         free: bool,
 
         pub fn init(allocator: mem.Allocator, commit_count_max: u32) !ImmutableTable {
@@ -37,7 +36,6 @@ pub fn ImmutableTableType(comptime Table: type) type {
                 .value_count_max = value_count_max,
                 .snapshot_min = undefined,
                 .values = values,
-                .iterator_index = values.len,
                 .free = true,
             };
         }
@@ -56,8 +54,6 @@ pub fn ImmutableTableType(comptime Table: type) type {
             sorted_values: []const Value,
         ) void {
             assert(table.free);
-            assert(table.iterator_index == table.values.len);
-
             assert(snapshot_min > 0);
             assert(snapshot_min < snapshot_latest);
 
@@ -80,7 +76,6 @@ pub fn ImmutableTableType(comptime Table: type) type {
                 .value_count_max = table.value_count_max,
                 .values = sorted_values,
                 .snapshot_min = snapshot_min,
-                .iterator_index = 0,
                 .free = false,
             };
         }
@@ -107,23 +102,70 @@ pub fn ImmutableTableType(comptime Table: type) type {
 
             return null;
         }
+    };
+}
 
-        pub fn tick(_: *const ImmutableTable) bool {
+pub fn ImmutableTableIteratorType(comptime Table: type) type {
+    const ImmutableTable = ImmutableTableType(Table);
+
+    return struct {
+        const ImmutableTableIterator = @This();
+
+        table: *ImmutableTable,
+        values_index: u32,
+
+        pub fn init(allocator: mem.Allocator) !ImmutableTableIterator {
+            _ = allocator; // This only iterates an existing immutable table.
+
+            return ImmutableTableIterator{
+                .table = undefined,
+                .values_index = undefined,
+            };
+        }
+
+        pub fn deinit(it: *ImmutableTableIterator, allocator: mem.Allocator) void {
+            _ = allocator; // No memory allocation was initially performed.
+            it.* = undefined;
+        }
+
+        pub const Context = struct {
+            table: *ImmutableTable,
+        };
+
+        pub fn reset(
+            it: *ImmutableTableIterator,
+            grid: *Grid,
+            manifest: *Manifest,
+            read_done: fn (*ImmutableTableIterator) void,
+            context: Context,
+        ) void {
+            _ = grid;
+            _ = manifest;
+            _ = read_done;
+
+            it.* = .{
+                .table = context.table,
+                .values_index = 0,
+            };
+        }
+
+        pub fn tick(it: *ImmutableTableIterator) bool {
             return false; // No I/O is performed as it's all in memory.
         }
 
-        pub fn buffered_all_values(_: *const ImmutableTable) bool {
+        pub fn buffered_all_values(it: *ImmutableTableIterator) bool {
             return true; // All values are "buffered" in memory.
         }
 
-        pub fn peek(table: *const ImmutableTable) ?Key {
-            if (table.iterator_index == table.values.len) return null;
-            return key_from_value(table.values[table.iterator_index]);
+        pub fn peek(it: *ImmutableTableIterator) ?Key {
+            const values = it.table.values;
+            if (it.values_index == values.len) return null;
+            return Table.key_from_value(values[it.values_index]);
         }
 
-        pub fn pop(table: *ImmutableTable) Value {
-            defer table.iterator_index += 1;
-            return table.values[table.iterator_index];
+        pub fn pop(it: *ImmutableTableIterator) Value {
+            defer it.values_index += 1;
+            return it.table.values[it.values_index];
         }
     };
 }

@@ -7,53 +7,58 @@ const config = @import("../config.zig");
 
 const TableIteratorType = @import("table_iterator.zig").TableIterator;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
-fn LevelIteratorType(comptime Table: type, comptime Parent: type) type {
+fn LevelIteratorType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const key_from_value = Table.key_from_value;
 
     return struct {
         const LevelIterator = @This();
-        const TableIterator = TableIteratorType(Table, LevelIterator);
+        const TableIterator = TableIteratorType(Table);
 
         const Grid = GridType(Table.Storage);
+        const Manifest = ManifestType(Table);
+
+        const TableIteratorRef = struct {
+            table: TableIterator,
+            level: *LevelIterator,
+        };
 
         const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
-        const TablesRingBuffer = RingBuffer(TableIterator, 2, .array);
+        const TablesRingBuffer = RingBuffer(TableIteratorRef, 2, .array);
 
         grid: *Grid,
-        parent: *Parent,
-        read_done: fn (*Parent) void,
-        level: u32,
+        read_done: fn (*LevelIterator) void = null,
+        level: u8,
         key_min: Key,
         key_max: Key,
         values: ValuesRingBuffer,
         tables: TablesRingBuffer,
 
-        pub fn init(allocator: mem.Allocator, read_done: fn (*Parent) void) !LevelIterator {
+        pub fn init(allocator: mem.Allocator) !LevelIterator {
             var values = try ValuesRingBuffer.init(allocator);
             errdefer values.deinit(allocator);
 
-            var table_a = try TableIterator.init(allocator, on_read_done);
+            var table_a = try TableIterator.init(allocator);
             errdefer table_a.deinit(allocator);
 
-            var table_b = try TableIterator.init(allocator, on_read_done);
+            var table_b = try TableIterator.init(allocator);
             errdefer table_b.deinit(allocator);
 
             return LevelIterator{
                 .grid = undefined,
-                .parent = undefined,
-                .read_done = read_done,
+                .read_done = undefined,
                 .level = undefined,
                 .key_min = undefined,
                 .key_max = undefined,
                 .values = values,
                 .tables = .{
                     .buffer = .{
-                        table_a,
-                        table_b,
+                        .{ .table = table_a, .level = undefined },
+                        .{ .table = table_b, .level = undefined },
                     },
                 },
             };
@@ -61,28 +66,44 @@ fn LevelIteratorType(comptime Table: type, comptime Parent: type) type {
 
         pub fn deinit(it: *LevelIterator, allocator: mem.Allocator) void {
             it.values.deinit(allocator);
-            for (it.tables.buffer) |*table| table.deinit(allocator);
+            for (it.tables.buffer) |*table_ref| table_ref.table.deinit(allocator);
             it.* = undefined;
         }
 
-        fn reset(
-            it: *LevelIterator,
-            grid: *Grid,
-            parent: *Parent,
-            level: u32,
+        pub const Context = struct {
+            level: u8,
             key_min: Key,
             key_max: Key,
+        };
+
+        pub fn reset(
+            it: *LevelIterator,
+            grid: *Grid,
+            manifest: *Manifest,
+            read_done: fn (*LevelIterator) void,
+            context: Context,
         ) void {
             it.* = .{
                 .grid = grid,
-                .parent = parent,
-                .read_done = it.read_done,
-                .level = level,
-                .key_min = key_min,
-                .key_max = key_max,
+                .read_done = context.read_done,
+                .level = context.level,
+                .key_min = context.key_min,
+                .key_max = context.key_max,
                 .values = .{ .buffer = it.values.buffer },
                 .tables = .{ .buffer = it.tables.buffer },
             };
+
+            // TODO use correct context for TableIterator reset
+            for (it.tables.buffer) |*table_ref| {
+                table_ref.level = it;
+                table_ref.table.reset(
+                    grid,
+                    manifest,
+                    on_table_read_done,
+                    TableIterator.Context{},
+                );
+            }
+
             assert(it.values.empty());
             assert(it.tables.empty());
         }
@@ -90,7 +111,8 @@ fn LevelIteratorType(comptime Table: type, comptime Parent: type) type {
         pub fn tick(it: *LevelIterator) bool {
             if (it.buffered_enough_values()) return false;
 
-            if (it.tables.tail_ptr()) |tail| {
+            if (it.tables.tail_ptr()) |tail_ref| {
+                const tail = &tail_ref.table;
                 // Buffer values as necessary for the current tail.
                 if (tail.tick()) return true;
                 // Since buffered_enough_values() was false above and tick did not start
@@ -99,21 +121,21 @@ fn LevelIteratorType(comptime Table: type, comptime Parent: type) type {
                 assert(tail.buffered_all_values());
             }
 
-            if (it.tables.next_tail_ptr()) |next_tail| {
-                read_next_table(next_tail);
-                it.tables.advance_tail();
-                return true;
-            } else {
-                const table = it.tables.head_ptr().?;
-                while (table.peek() != null) {
-                    it.values.push(table.pop()) catch unreachable;
-                }
-                it.tables.advance_head();
-
-                read_next_table(it.tables.next_tail_ptr().?);
+            if (it.tables.next_tail_ptr()) |next_tail_ref| {
+                read_next_table(&next_tail_ref.table);
                 it.tables.advance_tail();
                 return true;
             }
+
+            const table = &it.tables.head_ptr().?.table;
+            while (table.peek() != null) {
+                it.values.push(table.pop()) catch unreachable;
+            }
+            it.tables.advance_head();
+
+            read_next_table(&it.tables.next_tail_ptr().?.table);
+            it.tables.advance_tail();
+            return true;
         }
 
         fn read_next_table(table: *TableIterator) void {
@@ -126,10 +148,15 @@ fn LevelIteratorType(comptime Table: type, comptime Parent: type) type {
             assert(read_pending);
         }
 
+        fn on_table_read_done(table: *TableIterator) void {
+            const table_ref = @fieldParentPtr(TableIteratorRef, "table", table);
+            table_ref.level.on_read_done();
+        }
+
         fn on_read_done(it: *LevelIterator) void {
             if (!it.tick()) {
                 assert(it.buffered_enough_values());
-                it.read_done(it.parent);
+                it.read_done(it);
             }
         }
 
@@ -158,19 +185,19 @@ fn LevelIteratorType(comptime Table: type, comptime Parent: type) type {
         pub fn peek(it: LevelIterator) ?Key {
             if (it.values.head()) |value| return key_from_value(value);
 
-            const table = it.tables.head_ptr_const() orelse {
+            const table_ref = it.tables.head_ptr_const() orelse {
                 assert(it.buffered_all_values());
                 return null;
             };
 
-            return table.peek().?;
+            return table_ref.table.peek().?;
         }
 
         /// This is only safe to call after peek() has returned non-null.
         pub fn pop(it: *LevelIterator) Value {
             if (it.values.pop()) |value| return value;
 
-            const table = it.tables.head_ptr().?;
+            const table = &it.tables.head_ptr().?.table;
             const value = table.pop();
 
             if (table.peek() == null) it.tables.advance_head();
