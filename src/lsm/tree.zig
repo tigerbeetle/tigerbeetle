@@ -105,8 +105,8 @@ pub fn TreeType(comptime Table: type) type {
         immutable_table_compaction: CompactionImmutableTable,
         table_compactions: [config.lsm_levels - 1]CompactionTable,
 
-        const CompactionImmutableTable = CompactionType(Table, ImmutableTable);
         const CompactionTable = CompactionType(Table, TableIteratorType);
+        const CompactionImmutableTable = CompactionType(Table, ImmutableTable.IteratorType);
 
         pub const Options = struct {
             /// The maximum number of keys that may need to be prefetched before commit.
@@ -159,14 +159,18 @@ pub fn TreeType(comptime Table: type) type {
                 .compactions = undefined,
             };
 
-            for (tree.compactions) |*compaction, level| {
-                errdefer for (tree.compactions[0..level]) |*c| c.deinit(allocator);
-                compaction.* = try Compaction.init(level, allocator, &tree.manifest, tree.grid);
+            tree.immutable_table_compaction.init(allocator, &tree.manifest, tree.grid);
+            errdefer tree.immutable_table_compaction.deinit(allocator);
+
+            for (tree.table_compactions) |*compaction, i| {
+                errdefer for (tree.table_compactions[0..i]) |*c| c.deinit(allocator);
+                compaction.* = try CompactionTable.init(allocator, &tree.manifest, tree.grid);
             }
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            for (tree.compactions) |*compaction| compaction.deinit(allocator);
+            tree.immutable_table_compaction.deinit(allocator);
+            for (tree.table_compactions) |*compaction| compaction.deinit(allocator);
 
             // TODO Consider whether we should release blocks acquired from Grid.block_free_set.
             tree.prefetch_keys.deinit(allocator);
