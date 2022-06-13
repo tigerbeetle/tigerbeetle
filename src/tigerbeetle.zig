@@ -135,7 +135,6 @@ pub const CreateTransferResult = enum(u32) {
 
     pending_id_must_be_zero,
     pending_transfer_must_timeout,
-    timeout_reserved_for_pending_transfer,
 
     ledger_must_not_be_zero,
     code_must_not_be_zero,
@@ -169,6 +168,7 @@ pub const CreateTransferResult = enum(u32) {
 
     cannot_post_and_void_pending_transfer,
     pending_transfer_cannot_post_or_void_another,
+    timeout_reserved_for_pending_transfer,
 
     pending_id_must_not_be_zero,
     pending_id_must_be_different,
@@ -182,6 +182,8 @@ pub const CreateTransferResult = enum(u32) {
     pending_transfer_has_different_code,
 
     exceeds_pending_transfer_amount,
+    pending_transfer_has_different_amount,
+
     pending_transfer_already_posted,
     pending_transfer_already_voided,
 
