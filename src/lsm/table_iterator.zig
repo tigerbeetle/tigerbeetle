@@ -6,21 +6,19 @@ const assert = std.debug.assert;
 const config = @import("../config.zig");
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
-pub fn TableIteratorType(
-    comptime Table: type,
-    comptime Parent: type,
-) type {
+pub fn TableIteratorType(comptime Table: type) type {
     return struct {
         const TableIterator = @This();
 
         const Grid = GridType(Table.Storage);
+        const Manifest = ManifestType(Table);
         const ValuesRingBuffer = RingBuffer(Table.Value, Table.data.value_count_max, .pointer);
 
         grid: *Grid,
-        parent: *Parent,
-        read_done: fn (*Parent) void,
+        read_done: fn (*TableIterator) void,
         read_table_index: bool,
         address: u64,
         checksum: u128,
@@ -46,7 +44,7 @@ pub fn TableIteratorType(
         /// This field is only used for safety checks, it does not affect the behavior.
         read_pending: bool = false,
 
-        pub fn init(allocator: mem.Allocator, read_done: fn (*Parent) void) !TableIterator {
+        pub fn init(allocator: mem.Allocator) !TableIterator {
             const index = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
             errdefer allocator.free(index);
 
@@ -61,8 +59,7 @@ pub fn TableIteratorType(
 
             return .{
                 .grid = undefined,
-                .parent = undefined,
-                .read_done = read_done,
+                .read_done = undefined,
                 .read_table_index = undefined,
                 // Use 0 so that we can assert(address != 0) in tick().
                 .address = 0,
@@ -89,17 +86,24 @@ pub fn TableIteratorType(
             it.* = undefined;
         }
 
-        fn reset(
+        pub const Context = struct {
+            // TODO info to extract address address checksum on reset().
+        };
+
+        pub fn reset(
             it: *TableIterator,
             grid: *Grid,
-            parent: *Parent,
-            address: u64,
-            checksum: u128,
+            manifest: *Manifest,
+            read_done: fn (*TableIterator) void,
+            context: Context,
         ) void {
+            // TODO Infer the address and checksum from context using manifest
+            _ = manifest;
+
             assert(!it.read_pending);
             it.* = .{
                 .grid = grid,
-                .parent = parent,
+                .read_done = read_done,
                 .read_table_index = true,
                 .address = address,
                 .checksum = checksum,
@@ -199,7 +203,7 @@ pub fn TableIteratorType(
 
             if (!it.tick()) {
                 assert(it.buffered_enough_values());
-                it.read_done(it.parent);
+                it.read_done(it);
             }
         }
 
