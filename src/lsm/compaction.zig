@@ -130,7 +130,7 @@ pub fn CompactionType(
         ) void {
             // There are at least 2 table inputs to the compaction.
             // assert(level_a_tables.len + 1 >= 2);
-            
+
             _ = level_a;
             _ = level_b;
             _ = level_b_key_min;
