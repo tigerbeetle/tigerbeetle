@@ -425,7 +425,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             errdefer allocator.free(reading);
 
             var manifest = try Manifest.init(
-                allocator, 
+                allocator,
                 @divExact(
                     superblock_trailer_manifest_size_max,
                     Manifest.BlockReferenceSize,

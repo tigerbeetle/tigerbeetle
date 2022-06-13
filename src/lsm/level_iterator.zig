@@ -9,10 +9,7 @@ const TableIteratorType = @import("table_iterator.zig").TableIterator;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const GridType = @import("grid.zig").GridType;
 
-fn LevelIteratorType(
-    comptime Table: type,
-    comptime Parent: type
-) type {
+fn LevelIteratorType(comptime Table: type, comptime Parent: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const key_from_value = Table.key_from_value;

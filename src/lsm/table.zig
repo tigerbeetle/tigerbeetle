@@ -5,9 +5,15 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
+const binary_search = @import("binary_search.zig");
+const bloom_filter = @import("bloom_filter.zig");
 
+const div_ceil = @import("../util.zig").div_ceil;
+const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
+
 const GridType = @import("grid.zig").GridType;
+const ManifestType = @import("manifest.zig").ManifestType;
 
 pub fn TableType(
     comptime TableStorage: type,
@@ -28,6 +34,7 @@ pub fn TableType(
     return struct {
         const Table = @This();
         const Grid = GridType(Storage);
+        const Manifest = ManifestType(Storage);
 
         // Re-export all the generic arguments.
         pub const Storage = TableStorage;
