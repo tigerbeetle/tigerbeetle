@@ -31,11 +31,11 @@ function onerror {
 }
 trap onerror EXIT
 
-CLUSTER_ID="0"
+CLUSTER_ID="0000000000"
 REPLICA_ADDRESSES="--addresses=3001"
 
 echo "Initiating database file..."
-rm -f cluster_*$CLUSTER_ID_replica_*.tigerbeetle
+rm -f cluster_${CLUSTER_ID}_replica_*.tigerbeetle
 ./tigerbeetle init --cluster=$CLUSTER_ID --replica=0 --directory=.
 
 for I in 0
