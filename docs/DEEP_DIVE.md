@@ -71,42 +71,42 @@ zig/zig run src/demo_01_create_accounts.zig
 
 Let's create some simple double-entry accounting journal entries:
 
-```
+```bash
 zig/zig run src/demo_03_create_transfers.zig
 zig/zig run src/demo_02_lookup_accounts.zig
 zig/zig run src/demo_07_lookup_transfers.zig
 ```
 
-### Demo 4, 5, 6: Two-phase commit journal entries
+### Demo 4, 5, 6: Two-phase transfer journal entries
 
-Let's try full two-phase commit transfers (create, and then commit):
+Let's try full two-phase transfers (create, and then post):
 
-*These two-phase commit transfers are designed for two-phase commit systems such as Interledger or Mojaloop, where the fulfil packet only includes the transfer id and you want to avoid a lookup query roundtrip to the database before writing the compensating journal entry.*
+*These two-phase transfers are designed for two-phase systems such as Interledger or Mojaloop, where the fulfil packet only includes the transfer id and you want to avoid a lookup query roundtrip to the database before writing the compensating journal entry.*
 
 You will see the second transfer is rejected with an error for tripping the debit reserved limit.
 
-```
-zig/zig run src/demo_04_create_transfers_two_phase_commit.zig
+```bash
+zig/zig run src/demo_04_create_pending_transfers.zig
 zig/zig run src/demo_02_lookup_accounts.zig
 ```
 
 You will see these two-phase transfers only update the inflight reserved limits.
 
-Let's commit (and accept):
+Let's post (and accept):
 
 Again, the second transfer is rejected because it was never created.
 
-```
-zig/zig run src/demo_05_accept_transfers.zig
+```bash
+zig/zig run src/demo_05_post_pending_transfers.zig
 zig/zig run src/demo_02_lookup_accounts.zig
 ```
 
-Let's also pretend someone else tried to commit (but reject) concurrently:
+Let's also pretend someone else tried to void the pending transfer concurrently:
 
-```
-zig/zig run src/demo_06_reject_transfers.zig
+```bash
+zig/zig run src/demo_06_void_pending_transfers.zig
 ```
 
-**From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state_machine.zig` by grepping the source for `fn create_account`, `fn create_transfer`, and `fn commit_transfer`.**
+**From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state_machine.zig` by grepping the source for `fn create_account` or `fn create_transfer`.**
 
 **Enjoy...**

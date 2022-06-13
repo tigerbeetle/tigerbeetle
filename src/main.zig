@@ -91,7 +91,7 @@ fn start(
         allocator,
         config.accounts_max,
         config.transfers_max,
-        config.commits_max,
+        config.transfers_pending_max,
     );
     var storage = try Storage.init(config.journal_size_max, storage_fd, io);
     var message_bus = try MessageBus.init(

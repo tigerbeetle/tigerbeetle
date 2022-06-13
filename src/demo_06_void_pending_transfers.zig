@@ -4,21 +4,21 @@ const demo = @import("demo.zig");
 const Transfer = tb.Transfer;
 
 pub fn main() !void {
-    const transfers = [_]Transfer{
+    const commits = [_]Transfer{
         Transfer{
-            .id = 1000,
+            .id = 1006,
+            .pending_id = 1003,
+            .ledger = 1,
             .debit_account_id = 1,
             .credit_account_id = 2,
             .user_data = 0,
             .reserved = 0,
-            .pending_id = 0,
-            .ledger = 0,
             .timeout = 0,
             .code = 0,
-            .flags = .{},
-            .amount = 1000,
+            .flags = .{ .void_pending_transfer = true },
+            .amount = 0,
         },
     };
 
-    try demo.request(.create_transfers, transfers, demo.on_create_transfers);
+    try demo.request(.create_transfers, commits, demo.on_create_transfers);
 }
