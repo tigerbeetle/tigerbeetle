@@ -59,10 +59,14 @@ export enum CreateAccountError {
   exceeds_credits,
   exceeds_debits,
 
+  exists_with_different_flags,
   exists_with_different_user_data,
   exists_with_different_ledger,
   exists_with_different_code,
-  exists_with_different_flags,
+  exists_with_different_debits_pending,
+  exists_with_different_debits_posted,
+  exists_with_different_credits_pending,
+  exists_with_different_credits_posted,
   exists,
 }
 
@@ -107,7 +111,6 @@ export enum CreateTransferError {
 
   pending_id_must_be_zero,
   pending_transfer_must_timeout,
-  timeout_reserved_for_pending_transfer,
 
   ledger_must_not_be_zero,
   code_must_not_be_zero,
@@ -141,6 +144,7 @@ export enum CreateTransferError {
 
   cannot_post_and_void_pending_transfer,
   pending_transfer_cannot_post_or_void_another,
+  timeout_reserved_for_pending_transfer,
 
   pending_id_must_not_be_zero,
   pending_id_must_be_different,
@@ -154,6 +158,8 @@ export enum CreateTransferError {
   pending_transfer_has_different_code,
 
   exceeds_pending_transfer_amount,
+  pending_transfer_has_different_amount,
+
   pending_transfer_already_posted,
   pending_transfer_already_voided,
 
