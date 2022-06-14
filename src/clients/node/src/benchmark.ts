@@ -52,7 +52,7 @@ const accountB: Account = {
   timestamp: 0n,
 }
 
-// helper function to promisify the raw_request
+// Helper function to promisify the raw_request:
 const rawCreateTransfers = async (batch: Buffer): Promise<CreateTransfersError[]> => {
   return new Promise((resolve, reject) => {
       const callback = (error: undefined | Error, results: CreateTransfersError[]) => {

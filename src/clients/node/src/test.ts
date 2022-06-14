@@ -54,7 +54,7 @@ test.skip = (name: string, fn: () => Promise<void>) => {
 test('range check `code` on Account to be u16', async (): Promise<void> => {
   const account = { ...accountA, id: 0n }
 
-  account.code = 65535 + 1//std.math.maxInt(u16)
+  account.code = 65535 + 1
   const codeError = await client.createAccounts([account]).catch(error => error)
   assert.strictEqual(codeError.message, 'code must be a u16.')
 
@@ -156,7 +156,6 @@ test('can create a two-phase transfer', async (): Promise<void> => {
     ledger: 1,
     code: 1,
     flags,
-    //reserved: Zeroed32Bytes,
     amount: 50n,
     timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
@@ -176,7 +175,7 @@ test('can create a two-phase transfer', async (): Promise<void> => {
   assert.strictEqual(accounts[1].debits_posted, 100n)
   assert.strictEqual(accounts[1].debits_pending, 50n)
 
-  // Lookup the transfer
+  // Lookup the transfer:
   const transfers = await client.lookupTransfers([transfer.id])
   assert.strictEqual(transfers.length, 1)
   assert.strictEqual(transfers[0].id, 2n)
@@ -227,7 +226,7 @@ test('can post a two-phase transfer', async (): Promise<void> => {
 })
 
 test('can reject a two-phase transfer', async (): Promise<void> => {
-  // create a two-phase transfer
+  // Create a two-phase transfer:
   const transfer: Transfer = {
     id: 4n,
     debit_account_id: accountB.id,

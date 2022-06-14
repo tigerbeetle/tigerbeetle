@@ -35,13 +35,14 @@ CLUSTER_ID="0000000000"
 REPLICA_ADDRESSES="--addresses=3001"
 
 echo "Initiating database file..."
-rm -f cluster_${CLUSTER_ID}_replica_*.tigerbeetle
-./tigerbeetle init --cluster=$CLUSTER_ID --replica=0 --directory=.
+mkdir -p benchmark
+rm -f ./benchmark/cluster_${CLUSTER_ID}_replica_*.tigerbeetle
+./tigerbeetle init --cluster=$CLUSTER_ID --replica=0 --directory=./benchmark
 
 for I in 0
 do
     echo "Starting replica $I..."
-    ./tigerbeetle start --cluster=$CLUSTER_ID $REPLICA_ADDRESSES --replica=$I --directory=. > benchmark.log 2>&1 &
+    ./tigerbeetle start --cluster=$CLUSTER_ID $REPLICA_ADDRESSES --replica=$I --directory=./benchmark > benchmark.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:
