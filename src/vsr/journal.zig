@@ -1961,58 +1961,52 @@ pub const BitSet = struct {
 
 /// Take a u6 to limit to 64 items max (2^6 = 64)
 pub fn IOPS(comptime T: type, comptime size: u6) type {
-    const Map = std.meta.Int(.unsigned, size);
-    const MapLog2 = math.Log2Int(Map);
+    const Map = std.StaticBitSet(size);
     return struct {
         const Self = @This();
 
         items: [size]T = undefined,
-        /// 1 bits are free items
-        free: Map = math.maxInt(Map),
+        /// 1 bits are free items.
+        free: Map = Map.initFull(),
 
         pub fn acquire(self: *Self) ?*T {
-            const i = @ctz(Map, self.free);
-            assert(i <= @bitSizeOf(Map));
-            if (i == @bitSizeOf(Map)) return null;
-            self.free &= ~(@as(Map, 1) << @intCast(MapLog2, i));
+            const i = self.free.findFirstSet() orelse return null;
+            self.free.unset(i);
             return &self.items[i];
         }
 
         pub fn release(self: *Self, item: *T) void {
             item.* = undefined;
             const i = (@ptrToInt(item) - @ptrToInt(&self.items)) / @sizeOf(T);
-            assert(self.free & (@as(Map, 1) << @intCast(MapLog2, i)) == 0);
-            self.free |= (@as(Map, 1) << @intCast(MapLog2, i));
+            assert(!self.free.isSet(i));
+            self.free.set(i);
         }
 
         /// Returns the count of IOPs available.
-        pub fn available(self: *const Self) math.Log2IntCeil(Map) {
-            return @popCount(Map, self.free);
+        pub fn available(self: *const Self) usize {
+            return self.free.count();
         }
 
         /// Returns the count of IOPs in use.
-        pub fn executing(self: *const Self) math.Log2IntCeil(Map) {
-            return @popCount(Map, math.maxInt(Map)) - @popCount(Map, self.free);
+        pub fn executing(self: *const Self) usize {
+            return size - self.available();
         }
 
         pub const Iterator = struct {
             iops: *Self,
-            /// On iteration start this is a copy of the free map, but
-            /// inverted so we can use @ctz() to find occupied instead of free slots.
-            unseen: Map,
+            bitset_iterator: Map.Iterator(.{ .kind = .unset }),
 
-            pub fn next(iterator: *Iterator) ?*T {
-                const i = @ctz(Map, iterator.unseen);
-                assert(i <= @bitSizeOf(Map));
-                if (i == @bitSizeOf(Map)) return null;
-                // Set this bit of unseen to 1 to indicate this slot has been seen.
-                iterator.unseen &= ~(@as(Map, 1) << @intCast(MapLog2, i));
+            pub fn next(iterator: *@This()) ?*T {
+                const i = iterator.bitset_iterator.next() orelse return null;
                 return &iterator.iops.items[i];
             }
         };
 
         pub fn iterate(self: *Self) Iterator {
-            return .{ .iops = self, .unseen = ~self.free };
+            return .{
+                .iops = self,
+                .bitset_iterator = self.free.iterator(.{ .kind = .unset }),
+            };
         }
     };
 }
