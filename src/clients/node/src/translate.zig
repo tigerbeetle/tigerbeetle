@@ -347,14 +347,7 @@ pub fn u16_into_object(
     value: u16,
     comptime error_message: [:0]const u8,
 ) !void {
-    var result: c.napi_value = undefined;
-    if (c.napi_create_uint32(env, value, &result) != c.napi_ok) {
-        return throw(env, error_message);
-    }
-
-    if (c.napi_set_named_property(env, object, key, result) != c.napi_ok) {
-        return throw(env, error_message);
-    }
+    try u32_into_object(env, object, key, value, error_message);
 }
 
 pub fn create_object(env: c.napi_env, comptime error_message: [:0]const u8) !c.napi_value {

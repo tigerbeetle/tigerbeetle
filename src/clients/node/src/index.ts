@@ -26,7 +26,7 @@ export type Account = {
   reserved: Buffer // [48]u8
   ledger: number // u32, ledger of value
   code: number // u16, A chart of accounts code describing the type of account (e.g. clearing, settlement)
-  flags: number // u32
+  flags: number // u16
   debits_pending: bigint // u64
   debits_posted: bigint // u64
   credits_pending: bigint // u64
@@ -41,7 +41,7 @@ export enum AccountFlags {
 }
 
 export enum CreateAccountError {
-  //ok = 0 (No Error)
+  // ok = 0 (No Error)
   linked_event_failed = 1,
 
   reserved_flag,
@@ -98,7 +98,7 @@ export enum TransferFlags {
 }
 
 export enum CreateTransferError {
-  //ok = 0 (No Error)
+  // ok = 0 (No Error)
   linked_event_failed = 1,
 
   reserved_flag,
@@ -217,7 +217,7 @@ const isSameArgs = (args: InitArgs): boolean => {
 
 let _client: Client | undefined = undefined
 let _interval: NodeJS.Timeout | undefined = undefined
-// here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+// Here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
 let _pinged = false
 // TODO: allow creation of clients if the arguments are different. Will require changes in node.zig as well.
 export function createClient (args: InitArgs): Client {
@@ -245,7 +245,7 @@ export function createClient (args: InitArgs): Client {
   }
 
   const createAccounts = async (batch: Account[]): Promise<CreateAccountsError[]> => {
-    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    // Here to wait until `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
         setTimeout(() => {
@@ -272,7 +272,7 @@ export function createClient (args: InitArgs): Client {
   }
 
   const createTransfers = async (batch: Transfer[]): Promise<CreateTransfersError[]> => {
-    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    // Here to wait until `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
         setTimeout(() => {

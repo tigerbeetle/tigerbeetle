@@ -14,9 +14,8 @@ The following steps will install the `tigerbeetle-node` module to your current w
 
 ```shell
 # Run the following from this directory:
-yarn set version latest
+yarn postinstall #Download NodeJS Headers, Install Zig, Build TigerBeetle
 yarn && yarn build && yarn add
-yarn postinstall
 ```
 or
 
@@ -27,17 +26,15 @@ npm install .
 ```
 
 **Yarn - Run Test**
-Ensure TigerBeetle is running on the port configured in `test.tx`, then run: 
+Ensure TigerBeetle (`init` & `start`) is running on the port configured in `test.ts`, then run: 
 ```shell
+./tigerbeetle init --cluster=1 --replica=0 --directory=.
+./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001
 yarn test
 ```
 
 **Yarn - Run Benchmark**
-Ensure you have run the TigerBeetle `init` command prior to running the benchmark:
-```shell
-./tigerbeetle init --cluster=0 --replica=0 --directory=.
-```
-Run the benchmark:
+Run the benchmark (The `benchmark` will automatically start TigerBeetle on port `3001` _(single replica)_:
 ```shell
 yarn benchmark
 ```
@@ -72,11 +69,11 @@ This is reflected in the below function interfaces where each one takes in an ar
 ```js
 const account = {
     id: 137n, // u128
-    user_data: 0n, // u128, opaque third-party identifier to link this account (many-to-one) to an external entity:
+    user_data: 0n, // u128, opaque third-party identifier to link this account to an external entity:
     reserved: Buffer.alloc(48, 0), // [48]u8
-    ledger: 1,   // u16, unit of value
+    ledger: 1,   // u32, ledger value
     code: 718, // u16, a chart of accounts code describing the type of account (e.g. clearing, settlement)
-    flags: 0,  // u32
+    flags: 0,  // u16
     debits_pending: 0n,  // u64
     debits_posted: 0n,  // u64
     credits_pending: 0n, // u64
@@ -147,11 +144,11 @@ This creates a journal entry between two accounts.
 ```js
 const transfer = {
     id: 1n, // u128
-    // T-based accounting:
+    // Double-entry accounting:
     debit_account_id: 1n,  // u128
     credit_account_id: 2n, // u128
     // Opaque third-party identifier to link this transfer to an external entity:
-    user_data: 0n, // u128, (many-to-one)  
+    user_data: 0n, // u128  
     reserved: 0n, // u128
     // Timeout applicable for a pending/2-phase transfer:
     timeout: 0n, // u64, in nano-seconds.
@@ -160,7 +157,7 @@ const transfer = {
     ledger: 720,  // u32, ledger for transfer (e.g. currency).
     // Chart of accounts code describing the reason for the transfer:
     code: 1,  // u16, (e.g. deposit, settlement)
-    flags: 0, // u32
+    flags: 0, // u16
     amount: 10n, // u64
     timestamp: 0n, //u64, Reserved: This will be set by the server.
 }
@@ -177,11 +174,11 @@ Transfers within a batch may also be linked (see [linked events](#linked-events)
     void_pending_transfer = (1 << 3)
   }
   
-  // two-phase transfer (pending)
+  // Two-phase transfer (pending):
   let flags = 0n
   flags |= TransferFlags.pending
 
-  // linked two-phase transfer (pending)
+  // Linked two-phase transfer (pending):
   let flags = 0n
   flags |= TransferFlags.linked
   flags |= TransferFlags.pending
@@ -209,10 +206,10 @@ let batch = []
 let linkedFlag = 0
 linkedFlag |= CreateTransferFlags.linked
 
-// An individual transfer (successful)
+// An individual transfer (successful):
 batch.push({ id: 1n, ... })
 
-// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false)
+// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
 batch.push({ id: 2n, ..., flags: linkedFlag }) // Commit/rollback.
 batch.push({ id: 3n, ..., flags: linkedFlag }) // Commit/rollback.
 batch.push({ id: 2n, ..., flags: linkedFlag }) // Fail with exists
@@ -222,11 +219,11 @@ batch.push({ id: 4n, ..., flags: 0 })          // Fail without committing.
 // This should not see any effect from the failed chain above.
 batch.push({ id: 2n, ..., flags: 0 })
 
-// A chain of 2 transfers (the first transfer fails the chain)
+// A chain of 2 transfers (the first transfer fails the chain):
 batch.push({ id: 2n, ..., flags: linkedFlag })
 batch.push({ id: 3n, ..., flags: 0 })
 
-// A chain of 2 transfers (successful)
+// A chain of 2 transfers (successful):
 batch.push({ id: 3n, ..., flags: linkedFlag })
 batch.push({ id: 4n, ..., flags: 0 })
 
@@ -234,13 +231,13 @@ const errors = await client.createTransfers(batch)
 
 /**
  * [
- *  { index: 1, error: 1 }, // linked_event_failed
- *  { index: 2, error: 1 }, // linked_event_failed
- *  { index: 3, error: 2 }, // exists
- *  { index: 4, error: 1 }, // linked_event_failed
+ *  { index: 1, error: 1 },  // linked_event_failed
+ *  { index: 2, error: 1 },  // linked_event_failed
+ *  { index: 3, error: 25 }, // exists
+ *  { index: 4, error: 1 },  // linked_event_failed
  * 
- *  { index: 6, error: 7 }, // exists_with_different_flags
- *  { index: 7, error: 1 }, // linked_event_failed
+ *  { index: 6, error: 17 }, // exists_with_different_flags
+ *  { index: 7, error: 1 },  // linked_event_failed
  * ]
  */
 ```
