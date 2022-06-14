@@ -1598,8 +1598,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 const other_offset = self.offset_logical_in_headers_for_message(other.message);
                 if (other_offset == write_offset) {
                     // The `other` and `write` target the same sector.
-                    write.header_sector_next = other.header_sector_next;
-                    other.header_sector_next = write;
+                    var last = other;
+                    while (last.header_sector_next) |next| last = next;
+                    last.header_sector_next = write;
                     return;
                 }
             }
@@ -1837,8 +1838,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 if (!other.range.locked) continue;
 
                 if (other.range.overlaps(&write.range)) {
-                    write.range.next = other.range.next;
-                    other.range.next = &write.range;
+                    var last = &other.range;
+                    while (last.next) |next| last = next;
+                    last.next = &write.range;
                     return;
                 }
             }
@@ -1885,13 +1887,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
 
             // Drain the list of ranges that were waiting on this range to complete.
-            var current = range.next;
-            range.next = null;
-            while (current) |waiting| {
-                assert(waiting.locked == false);
-                current = waiting.next;
-                waiting.next = null;
-                self.lock_sectors(@fieldParentPtr(Self.Write, "range", waiting));
+            if (!write.header_sector_locked) {
+                var current = range.next;
+                range.next = null;
+                while (current) |waiting| {
+                    assert(waiting.locked == false);
+                    current = waiting.next;
+                    waiting.next = null;
+                    self.lock_sectors(@fieldParentPtr(Self.Write, "range", waiting));
+                }
             }
 
             // The callback may set range, so we can't set range to undefined after the callback.
