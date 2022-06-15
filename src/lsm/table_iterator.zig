@@ -48,7 +48,7 @@ pub fn TableIteratorType(comptime Table: type) type {
             const index = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
             errdefer allocator.free(index);
 
-            const values = try ValuesRingBuffer.init(allocator);
+            var values = try ValuesRingBuffer.init(allocator);
             errdefer values.deinit(allocator);
 
             const block_a = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
@@ -57,7 +57,7 @@ pub fn TableIteratorType(comptime Table: type) type {
             const block_b = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
             errdefer allocator.free(block_b);
 
-            return .{
+            return TableIterator{
                 .grid = undefined,
                 .read_done = undefined,
                 .read_table_index = undefined,
@@ -99,14 +99,15 @@ pub fn TableIteratorType(comptime Table: type) type {
         ) void {
             // TODO Infer the address and checksum from context using manifest
             _ = manifest;
+            _ = context;
 
             assert(!it.read_pending);
             it.* = .{
                 .grid = grid,
                 .read_done = read_done,
                 .read_table_index = true,
-                .address = address,
-                .checksum = checksum,
+                .address = undefined,
+                .checksum = undefined,
                 .index = it.index,
                 .block = 0,
                 .values = .{ .buffer = it.values.buffer },

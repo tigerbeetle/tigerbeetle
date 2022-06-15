@@ -147,7 +147,7 @@ pub fn TreeType(comptime Table: type) type {
             var manifest = try Manifest.init(allocator, node_pool);
             errdefer manifest.deinit(allocator);
 
-            var immutable_table_compaction = CompactionImmutableTable.init(allocator);
+            var immutable_table_compaction = try CompactionImmutableTable.init(allocator);
             errdefer immutable_table_compaction.deinit(allocator);
 
             var table_compactions: [config.lsm_levels - 1]CompactionTable = undefined;
