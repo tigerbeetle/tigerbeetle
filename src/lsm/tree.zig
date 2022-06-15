@@ -60,12 +60,12 @@ pub fn TreeType(comptime Table: type) type {
 
         const Grid = @import("grid.zig").GridType(Table.Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table);
-        const MutableTable = @import("mutable_table.zig").MutableTableType(Table);
-        const ImmutableTable = @import("immutable_table.zig").ImmutableTableType(Table);
+        const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
+        const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
 
         const CompactionType = @import("compaction.zig").CompactionType;
         const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
-        const ImmutableTableIteratorType = @import("immutable_table.zig").ImmutableTableIteratorType;
+        const TableImmutableIteratorType = @import("table_immutable.zig").TableImmutableIteratorType;
 
         pub const PrefetchKeys = std.AutoHashMapUnmanaged(Key, void);
         pub const PrefetchValues = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, 70);
@@ -94,8 +94,8 @@ pub fn TreeType(comptime Table: type) type {
         /// The value type will be []u8 and this will be shared by trees with the same value size.
         value_cache: ?*ValueCache,
 
-        mutable_table: MutableTable,
-        immutable_table: ImmutableTable,
+        table_mutable: TableMutable,
+        table_immutable: TableImmutable,
 
         manifest: Manifest,
 
@@ -103,11 +103,11 @@ pub fn TreeType(comptime Table: type) type {
         /// as the last level doesn't pair up to compact into another.
         /// The first compaction level is from the immutable-table into a table (level 0 is special)
         /// while the remaining levels are from one on-disk table into another.
-        immutable_table_compaction: CompactionImmutableTable,
-        table_compactions: [config.lsm_levels - 1]CompactionTable,
+        compaction_table_immutable: CompactionTableImmutable,
+        compaction_tables: [config.lsm_levels - 1]CompactionTable,
 
         const CompactionTable = CompactionType(Table, TableIteratorType);
-        const CompactionImmutableTable = CompactionType(Table, ImmutableTableIteratorType);
+        const CompactionTableImmutable = CompactionType(Table, TableImmutableIteratorType);
 
         pub const Options = struct {
             /// The maximum number of keys that may need to be prefetched before commit.
@@ -138,24 +138,24 @@ pub fn TreeType(comptime Table: type) type {
             try prefetch_values.ensureTotalCapacity(allocator, options.prefetch_count_max);
             errdefer prefetch_values.deinit(allocator);
 
-            var mutable_table = try MutableTable.init(allocator, options.commit_count_max);
-            errdefer mutable_table.deinit(allocator);
+            var table_mutable = try TableMutable.init(allocator, options.commit_count_max);
+            errdefer table_mutable.deinit(allocator);
 
-            var table = try ImmutableTable.init(allocator, options.commit_count_max);
-            errdefer table.deinit(allocator);
+            var table_immutable = try TableImmutable.init(allocator, options.commit_count_max);
+            errdefer table_immutable.deinit(allocator);
 
             var manifest = try Manifest.init(allocator, node_pool);
             errdefer manifest.deinit(allocator);
 
-            var immutable_table_compaction = try CompactionImmutableTable.init(allocator);
-            errdefer immutable_table_compaction.deinit(allocator);
+            var compaction_table_immutable = try CompactionTableImmutable.init(allocator);
+            errdefer compaction_table_immutable.deinit(allocator);
 
-            var table_compactions: [config.lsm_levels - 1]CompactionTable = undefined;
-            for (table_compactions) |*compaction, i| {
-                errdefer for (table_compactions[0..i]) |*c| c.deinit(allocator);
+            var compaction_tables: [config.lsm_levels - 1]CompactionTable = undefined;
+            for (compaction_tables) |*compaction, i| {
+                errdefer for (compaction_tables[0..i]) |*c| c.deinit(allocator);
                 compaction.* = try CompactionTable.init(allocator);
             }
-            errdefer for (table_compactions) |*c| c.deinit(allocator);
+            errdefer for (compaction_tables) |*c| c.deinit(allocator);
 
             return Tree{
                 .grid = grid,
@@ -163,23 +163,23 @@ pub fn TreeType(comptime Table: type) type {
                 .prefetch_keys = prefetch_keys,
                 .prefetch_values = prefetch_values,
                 .value_cache = value_cache,
-                .mutable_table = mutable_table,
-                .table = table,
+                .table_mutable = table_mutable,
+                .table_immutable = table_immutable,
                 .manifest = manifest,
-                .immutable_table_compaction = immutable_table_compaction,
-                .table_compactions = table_compactions,
+                .compaction_table_immutable = compaction_table_immutable,
+                .compaction_tables = compaction_tables,
             };
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            tree.immutable_table_compaction.deinit(allocator);
-            for (tree.table_compactions) |*compaction| compaction.deinit(allocator);
+            tree.compaction_table_immutable.deinit(allocator);
+            for (tree.compaction_tables) |*compaction| compaction.deinit(allocator);
 
             // TODO Consider whether we should release blocks acquired from Grid.block_free_set.
             tree.prefetch_keys.deinit(allocator);
             tree.prefetch_values.deinit(allocator);
-            tree.mutable_table.deinit(allocator);
-            tree.table.deinit(allocator);
+            tree.table_mutable.deinit(allocator);
+            tree.table_immutable.deinit(allocator);
             tree.manifest.deinit(allocator);
         }
 
@@ -188,7 +188,7 @@ pub fn TreeType(comptime Table: type) type {
             assert(tree.prefetch_keys.count() == 0);
             assert(tree.prefetch_keys_iterator == null);
 
-            const value = tree.mutable_table.get(key) orelse
+            const value = tree.table_mutable.get(key) orelse
                 tree.value_cache.?.getKeyPtr(tombstone_from_key(key)) orelse
                 tree.prefetch_values.getKeyPtr(tombstone_from_key(key));
 
@@ -196,11 +196,11 @@ pub fn TreeType(comptime Table: type) type {
         }
 
         pub fn put(tree: *Tree, value: Value) void {
-            tree.mutable_table.put(value);
+            tree.table_mutable.put(value);
         }
 
         pub fn remove(tree: *Tree, key: Key) void {
-            tree.mutable_table.remove(key);
+            tree.table_mutable.remove(key);
         }
 
         pub fn lookup(tree: *Tree, snapshot: u64, key: Key, callback: fn (value: ?*const Value) void) void {
@@ -214,7 +214,7 @@ pub fn TreeType(comptime Table: type) type {
                 // This simplifies the mutable table and eliminates compaction for duplicate puts.
                 // The value cache is only used for the latest snapshot for simplicity.
                 // Earlier snapshots will still be able to utilize the block cache.
-                if (tree.mutable_table.get(key) orelse
+                if (tree.table_mutable.get(key) orelse
                     tree.value_cache.?.getKeyPtr(tombstone_from_key(key))) |value|
                 {
                     callback(unwrap_tombstone(value));
@@ -225,8 +225,8 @@ pub fn TreeType(comptime Table: type) type {
             // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
             const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
 
-            if (!tree.table.free and tree.table.info.visible(snapshot)) {
-                if (tree.table.get(key, fingerprint)) |value| {
+            if (!tree.table_immutable.free and tree.table_immutable.info.visible(snapshot)) {
+                if (tree.table_immutable.get(key, fingerprint)) |value| {
                     callback(unwrap_tombstone(value));
                     return;
                 }
@@ -256,21 +256,21 @@ pub fn TreeType(comptime Table: type) type {
             // TODO do the (not)cannot_commit_batch() assertion in the first beat
             // TODO do the stuff in the if at the end of the fourth beat
             // Convert the mutable table to an immutable table if necessary:
-            if (tree.mutable_table.cannot_commit_batch(tree.options.commit_count_max)) {
-                assert(tree.mutable_table.count() > 0);
-                assert(tree.immutable_table.free);
+            if (tree.table_mutable.cannot_commit_batch(tree.options.commit_count_max)) {
+                assert(tree.table_mutable.count() > 0);
+                assert(tree.table_immutable.free);
 
-                // sort the mutable_table values directly into the immutable_table's array.
-                const values_max = tree.immutable_table.values_max();
-                const values = tree.mutable_table.sort_into_values_and_clear(values_max);
+                // sort the table_mutable values directly into the table_immutable's array.
+                const values_max = tree.table_immutable.values_max();
+                const values = tree.table_mutable.sort_into_values_and_clear(values_max);
                 assert(values.ptr == values_max.ptr);
 
-                // take a manifest snapshot and setup the immutable_table with the sorted values.
+                // take a manifest snapshot and setup the table_immutable with the sorted values.
                 const snapshot_min = tree.manifest.take_snapshot();
-                tree.immutable_table.reset_with_sorted_values(snapshot_min, values);
+                tree.table_immutable.reset_with_sorted_values(snapshot_min, values);
 
-                assert(tree.mutable_table.count() == 0);
-                assert(!tree.immutable_table.free);
+                assert(tree.table_mutable.count() == 0);
+                assert(!tree.table_immutable.free);
             }
 
             // TODO scatter-gather/join compaction callbacks -> function callback
@@ -322,7 +322,7 @@ pub fn TreeType(comptime Table: type) type {
             assert(tree.value_cache != null);
             assert(tree.prefetch_keys_iterator == null);
 
-            if (tree.mutable_table.get(key) != null) return;
+            if (tree.table_mutable.get(key) != null) return;
             if (tree.value_cache.?.contains(tombstone_from_key(key))) return;
 
             // We tolerate duplicate keys enqueued by the state machine.
@@ -355,7 +355,7 @@ pub fn TreeType(comptime Table: type) type {
             assert(tree.value_cache != null);
 
             if (config.verify) {
-                assert(tree.mutable_table.get(key) == null);
+                assert(tree.table_mutable.get(key) == null);
                 assert(!tree.value_cache.?.contains(tombstone_from_key(key)));
             }
 
@@ -524,18 +524,12 @@ pub fn main() !void {
 
     testing.refAllDecls(@This());
 
+    // TODO: more references
     _ = Table;
-    _ = Table.create_from_sorted_values;
-    _ = Table.get;
     _ = Table.Builder.data_block_finish;
-    _ = Table.filter_blocks_used;
-    _ = Table.Builder.data_block_finish;
-    _ = Table.filter_blocks_used;
 
-    _ = Tree.Compaction;
-    _ = Tree.Compaction.tick_io;
-    _ = Tree.Compaction.tick_cpu;
-    _ = Tree.Compaction.tick_cpu_merge;
+    // TODO: more references
+    _ = Tree.CompactionTable;
 
     _ = tree.prefetch_enqueue;
     _ = tree.prefetch;

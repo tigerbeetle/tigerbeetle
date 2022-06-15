@@ -6,8 +6,8 @@ const assert = std.debug.assert;
 const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 
-/// Range queries are not supported on the MutableTable, it must first be made immutable.
-pub fn MutableTableType(comptime Table: type) type {
+/// Range queries are not supported on the TableMutable, it must first be made immutable.
+pub fn TableMutableType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
@@ -15,7 +15,7 @@ pub fn MutableTableType(comptime Table: type) type {
     const tombstone_from_key = Table.tombstone_from_key;
 
     return struct {
-        const MutableTable = @This();
+        const TableMutable = @This();
 
         const load_factor = 50;
         const Values = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
@@ -23,7 +23,7 @@ pub fn MutableTableType(comptime Table: type) type {
         value_count_max: u32,
         values: Values = .{},
 
-        pub fn init(allocator: mem.Allocator, commit_count_max: u32) !MutableTable {
+        pub fn init(allocator: mem.Allocator, commit_count_max: u32) !TableMutable {
             comptime assert(config.lsm_mutable_table_batch_multiple > 0);
             assert(commit_count_max > 0);
 
@@ -35,43 +35,43 @@ pub fn MutableTableType(comptime Table: type) type {
             try values.ensureTotalCapacity(allocator, value_count_max);
             errdefer values.deinit(allocator);
 
-            return MutableTable{
+            return TableMutable{
                 .value_count_max = value_count_max,
                 .values = values,
             };
         }
 
-        pub fn deinit(table: *MutableTable, allocator: mem.Allocator) void {
+        pub fn deinit(table: *TableMutable, allocator: mem.Allocator) void {
             table.values.deinit(allocator);
         }
 
-        pub fn get(table: *MutableTable, key: Key) ?*const Value {
+        pub fn get(table: *TableMutable, key: Key) ?*const Value {
             return table.values.getKeyPtr(tombstone_from_key(key));
         }
 
-        pub fn put(table: *MutableTable, value: Value) void {
+        pub fn put(table: *TableMutable, value: Value) void {
             table.values.putAssumeCapacity(value, {});
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
         }
 
-        pub fn remove(table: *MutableTable, key: Key) void {
+        pub fn remove(table: *TableMutable, key: Key) void {
             table.values.putAssumeCapacity(tombstone_from_key(key), {});
             assert(table.values.count() <= table.value_count_max);
         }
 
-        pub fn cannot_commit_batch(table: *MutableTable, batch_count: u32) bool {
+        pub fn cannot_commit_batch(table: *TableMutable, batch_count: u32) bool {
             assert(batch_count <= table.value_count_max);
             return table.count() + batch_count > table.value_count_max;
         }
 
-        pub fn clear(table: *MutableTable) void {
+        pub fn clear(table: *TableMutable) void {
             assert(table.values.count() > 0);
             table.values.clearRetainingCapacity();
             assert(table.values.count() == 0);
         }
 
-        pub fn count(table: *MutableTable) u32 {
+        pub fn count(table: *TableMutable) u32 {
             const value = @intCast(u32, table.values.count());
             assert(value <= table.value_count_max);
             return value;
@@ -79,7 +79,7 @@ pub fn MutableTableType(comptime Table: type) type {
 
         /// The returned slice is invalidated whenever this is called for any tree.
         pub fn sort_into_values_and_clear(
-            table: *MutableTable,
+            table: *TableMutable,
             values_max: []Value,
         ) []const Value {
             assert(table.count() > 0);
