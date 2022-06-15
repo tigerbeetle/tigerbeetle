@@ -99,9 +99,8 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     const command = meta.stringToEnum(meta.Tag(Command), raw_command) orelse
         fatal("unknown command '{s}', expected 'start' or 'format'", .{raw_command});
 
-    while (args.next(allocator)) |parsed_arg| {
-        const arg = try parsed_arg;
-        try args_allocated.append(arg);
+    while (args.next(allocator)) |arg_or_error| {
+        const arg = try arg_or_error;
 
         if (mem.startsWith(u8, arg, "--cluster")) {
             cluster = parse_flag("--cluster", arg);
