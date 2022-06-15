@@ -141,8 +141,8 @@ pub fn CompactionType(
             compaction.merge_iterator = undefined;
 
             // TODO Reset iterators and builder.
-            compaction.iterator_a.reset(grid, manifest, iterator_a_read_done, iterator_a_context);
-            compaction.iterator_b.reset(grid, manifest, iterator_b_read_done, iterator_b_context);
+            compaction.iterator_a.reset(iterator_a_context, iterator_a_read_done);
+            compaction.iterator_b.reset(iterator_b_context, iterator_b_read_done);
 
             assert(!compaction.data.ready);
             assert(!compaction.filter.ready);
