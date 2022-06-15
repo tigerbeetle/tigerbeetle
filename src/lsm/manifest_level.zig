@@ -76,7 +76,7 @@ pub fn ManifestLevel(
             assert(tables.len > 0);
             assert(level.keys.len() == level.tables.len());
 
-            if (lsm.verify and tables.len > 1) {
+            if (config.verify and tables.len > 1) {
                 var a = tables[0];
                 assert(compare_keys(a.key_min, a.key_max) != .gt);
                 for (tables[1..]) |b| {
@@ -156,7 +156,7 @@ pub fn ManifestLevel(
                 }
             }
 
-            if (lsm.verify and level.keys.node_count > 1) {
+            if (config.verify and level.keys.node_count > 1) {
                 var a = level.root_keys_array[0];
                 for (level.root_keys_array[1..level.keys.node_count]) |b| {
                     assert(compare_keys(a, b) != .gt);
@@ -188,7 +188,7 @@ pub fn ManifestLevel(
                 }
             }
 
-            if (lsm.verify and level.keys.node_count > 1) {
+            if (config.verify and level.keys.node_count > 1) {
                 var a = level.root_table_nodes_array[0];
                 for (level.root_table_nodes_array[1..level.keys.node_count]) |b| {
                     assert(a <= b);
@@ -196,7 +196,7 @@ pub fn ManifestLevel(
                 }
             }
 
-            if (lsm.verify) {
+            if (config.verify) {
                 // Assert that the first key in each key node is in the range of the table
                 // directly mapped to by root_table_nodes_array.
                 for (level.root_table_nodes_array[0..level.keys.node_count]) |table_node, i| {
@@ -227,7 +227,7 @@ pub fn ManifestLevel(
             assert(new_snapshot_max <= lsm.snapshot_latest);
             assert(tables.len > 0);
 
-            if (lsm.verify and tables.len > 1) {
+            if (config.verify and tables.len > 1) {
                 var a = tables[0];
                 assert(compare_keys(a.key_min, a.key_max) != .gt);
                 for (tables[1..]) |b| {
@@ -275,7 +275,7 @@ pub fn ManifestLevel(
             assert(level.keys.len() == level.tables.len());
             assert(level.keys.len() >= tables.len);
 
-            if (lsm.verify and tables.len > 1) {
+            if (config.verify and tables.len > 1) {
                 var a = tables[0];
                 assert(compare_keys(a.key_min, a.key_max) != .gt);
                 for (tables[1..]) |b| {

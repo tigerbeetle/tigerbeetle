@@ -34,7 +34,7 @@ pub fn TableType(
     return struct {
         const Table = @This();
         const Grid = GridType(Storage);
-        const Manifest = ManifestType(Storage);
+        const Manifest = ManifestType(Table);
 
         // Re-export all the generic arguments.
         pub const Storage = TableStorage;
