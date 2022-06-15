@@ -10,33 +10,14 @@ The following steps will install the `tigerbeetle-node` module to your current w
 
 > Your operating system should be Linux (kernel >= v5.6) or macOS. Windows support is not yet available but is in the works.
 
-### YARN Package Manager
-
+### YARN Package Manager Installation
 ```shell
-# Run the following from this directory:
-yarn postinstall #Download NodeJS Headers, Install Zig, Build TigerBeetle
-yarn && yarn build && yarn add
+yarn add tigerbeetle-node
 ```
 or
-
-### NPM Package Manager
-Run the following command from this directory:
+### NPM Package Manager Installation
 ```shell
-npm install .
-```
-
-**Yarn - Run Test**
-Ensure TigerBeetle (`init` & `start`) is running on the port configured in `test.ts`, then run: 
-```shell
-./tigerbeetle init --cluster=1 --replica=0 --directory=.
-./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001
-yarn test
-```
-
-**Yarn - Run Benchmark**
-Run the benchmark (The `benchmark` will automatically start TigerBeetle on port `3001` _(single replica)_:
-```shell
-yarn benchmark
+npm install tigerbeetle-node
 ```
 
 **Development**
@@ -45,6 +26,26 @@ Follow these steps to get up and running when cloning the repo:
 ```shell
 git clone --recurse-submodules https://github.com/coilhq/tigerbeetle-node.git
 yarn
+```
+
+***Yarn - Run Test***
+```shell
+# Run the following from this directory:
+yarn postinstall #Download NodeJS Headers, Install Zig, Build TigerBeetle
+yarn && yarn build
+```
+
+Ensure TigerBeetle (`init` & `start`) is running on the port configured in `test.ts`, then run:
+```shell
+./tigerbeetle init --cluster=1 --replica=0 --directory=.
+./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001
+yarn test
+```
+
+***Yarn - Run Benchmark***
+Run the benchmark (The `benchmark` will automatically start TigerBeetle on port `3001` _(single replica)_:
+```shell
+yarn benchmark
 ```
 
 ## Usage
