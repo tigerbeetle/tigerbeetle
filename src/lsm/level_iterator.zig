@@ -5,12 +5,12 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 
-const TableIteratorType = @import("table_iterator.zig").TableIterator;
+const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
-fn LevelIteratorType(comptime Table: type) type {
+pub fn LevelIteratorType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const key_from_value = Table.key_from_value;
@@ -85,7 +85,7 @@ fn LevelIteratorType(comptime Table: type) type {
         ) void {
             it.* = .{
                 .grid = grid,
-                .read_done = context.read_done,
+                .read_done = read_done,
                 .level = context.level,
                 .key_min = context.key_min,
                 .key_max = context.key_max,
