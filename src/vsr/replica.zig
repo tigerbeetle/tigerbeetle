@@ -452,7 +452,7 @@ pub fn Replica(
                     if (self.journal.faulty.count != 0) @panic("journal is corrupt");
                     if (self.committing) return;
                     assert(self.op == 0);
-                    self.op = self.journal.op_maximum_continuous(self.op_checkpoint);
+                    self.op = self.journal.op_maximum();
                     self.commit_ops(self.op);
                     // The recovering→normal transition is deferred until all ops are committed.
                 } else {
@@ -2064,8 +2064,15 @@ pub fn Replica(
             assert(message.header.view == self.view);
             assert(message.header.op == self.op);
 
-            log.debug("{}: append: appending to journal", .{self.replica});
-            self.write_prepare(message, .append);
+            if (self.replica_count == 1 and self.pipeline.count > 1) {
+                // In a cluster-of-one, the prepares must always be written to the WAL sequentially
+                // (never concurrently). This ensures that there will be no gaps in the WAL during
+                // crash recovery.
+                log.debug("{}: append: defer append op={}", .{ self.replica, message.header.op });
+            } else {
+                log.debug("{}: append: appending to journal", .{self.replica});
+                self.write_prepare(message, .append);
+            }
         }
 
         /// Returns whether `b` succeeds `a` by having a newer view or same view and newer op.
@@ -2358,6 +2365,15 @@ pub fn Replica(
 
                 self.message_bus.unref(prepare.message);
                 assert(self.pipeline.pop() != null);
+
+                if (self.replica_count == 1) {
+                    if (self.pipeline.head_ptr()) |head| {
+                        // Write the next message in the queue.
+                        // A cluster-of-one writes prepares sequentially to avoid gaps in the WAL.
+                        self.write_prepare(head.message, .append);
+                        // The loop will wrap around and exit when `!ok_quorum_received`.
+                    }
+                }
             }
 
             assert(self.prepare_timeout.ticking);
@@ -3157,7 +3173,7 @@ pub fn Replica(
             return true;
         }
 
-        fn is_repair(self: *Self, message: *const Message) bool {
+        fn is_repair(self: *const Self, message: *const Message) bool {
             assert(message.header.command == .prepare);
 
             if (self.status == .normal) {
@@ -3957,6 +3973,18 @@ pub fn Replica(
             if (self.pipeline_prepare_for_op_and_checksum(op, checksum)) |prepare| {
                 assert(prepare.message.header.op == op);
                 assert(prepare.message.header.checksum == checksum);
+
+                if (self.replica_count == 1) {
+                    // This op won't start writing until all ops in the pipeline preceding it have
+                    // been written.
+                    log.debug("{}: repair_prepare: op={} checksum={} (deferred append)", .{
+                        self.replica,
+                        op,
+                        checksum,
+                    });
+                    assert(op > self.pipeline.head_ptr().?.message.header.op);
+                    return false;
+                }
 
                 log.debug("{}: repair_prepare: op={} checksum={} (from pipeline)", .{
                     self.replica,
@@ -4967,10 +4995,10 @@ pub fn Replica(
                 return;
             }
 
-            self.journal.write_prepare(write_prepare_on_write, message, trigger);
+            self.journal.write_prepare(write_prepare_callback, message, trigger);
         }
 
-        fn write_prepare_on_write(
+        fn write_prepare_callback(
             self: *Self,
             wrote: ?*Message,
             trigger: Journal.Write.Trigger,
