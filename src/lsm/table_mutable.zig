@@ -22,6 +22,7 @@ pub fn TableMutableType(comptime Table: type) type {
 
         value_count_max: u32,
         values: Values = .{},
+        dirty: bool = false,
 
         pub fn init(allocator: mem.Allocator, commit_count_max: u32) !TableMutable {
             comptime assert(config.lsm_mutable_table_batch_multiple > 0);
@@ -53,25 +54,28 @@ pub fn TableMutableType(comptime Table: type) type {
             table.values.putAssumeCapacity(value, {});
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
+            table.dirty = true;
         }
 
         pub fn remove(table: *TableMutable, key: Key) void {
             table.values.putAssumeCapacity(tombstone_from_key(key), {});
             assert(table.values.count() <= table.value_count_max);
+            table.dirty = true;
         }
 
-        pub fn cannot_commit_batch(table: *TableMutable, batch_count: u32) bool {
+        pub fn can_commit_batch(table: *TableMutable, batch_count: u32) bool {
             assert(batch_count <= table.value_count_max);
-            return table.count() + batch_count > table.value_count_max;
+            return (table.count() + batch_count) <= table.value_count_max;
         }
 
         pub fn clear(table: *TableMutable) void {
             assert(table.values.count() > 0);
             table.values.clearRetainingCapacity();
             assert(table.values.count() == 0);
+            table.dirty = false;
         }
 
-        pub fn count(table: *TableMutable) u32 {
+        pub fn count(table: *const TableMutable) u32 {
             const value = @intCast(u32, table.values.count());
             assert(value <= table.value_count_max);
             return value;
