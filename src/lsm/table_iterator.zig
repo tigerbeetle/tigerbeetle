@@ -88,32 +88,31 @@ pub fn TableIteratorType(comptime Table: type) type {
 
         pub const Context = struct {
             // TODO info to extract address address checksum on reset().
+            grid: *Grid,
+            
+            address: u64,
+            checksum: u128,
         };
 
         pub fn reset(
-            it: *TableIterator,
-            grid: *Grid,
-            manifest: *Manifest,
-            read_done: fn (*TableIterator) void,
+            it: *TableIterator, 
             context: Context,
+            read_done: fn (*TableIterator) void,
         ) void {
-            // TODO Infer the address and checksum from context using manifest
-            _ = manifest;
-            _ = context;
-
             assert(!it.read_pending);
             it.* = .{
-                .grid = grid,
+                .grid = context.grid,
                 .read_done = read_done,
                 .read_table_index = true,
-                .address = undefined,
-                .checksum = undefined,
+                .address = context.address,
+                .checksum = context.checksum,
                 .index = it.index,
                 .block = 0,
                 .values = .{ .buffer = it.values.buffer },
                 .blocks = .{ .buffer = it.blocks.buffer },
                 .value = 0,
             };
+
             assert(it.values.empty());
             assert(it.blocks.empty());
         }
