@@ -150,8 +150,13 @@ pub const Storage = struct {
 
     /// Cancel any currently in progress reads/writes but leave the stored data untouched.
     pub fn reset(storage: *Storage) void {
+        while (storage.writes.peek()) |write| {
+            _ = storage.writes.remove();
+            storage.fault_sectors(write.offset, write.buffer.len);
+        }
+
         storage.reads.len = 0;
-        storage.writes.len = 0;
+        assert(storage.writes.len == 0);
     }
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
