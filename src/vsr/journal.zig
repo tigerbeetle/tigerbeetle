@@ -463,39 +463,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return op;
         }
 
-        /// Returns the highest op number prepared, after the checkpoint, without gaps.
-        /// This must only be used for a cluster-of-one, where pipelining may create gaps.
-        pub fn op_maximum_continuous(self: *const Self, op_checkpoint: u64) u64 {
-            const replica = @fieldParentPtr(Replica, "journal", self);
-            assert(replica.replica_count == 1);
-
-            assert(self.recovered);
-            assert(self.dirty.count == 0);
-            assert(self.faulty.count == 0);
-
-            // TODO Can we assert that op_checkpoint exists?
-
-            var op: u64 = op_checkpoint;
-            while (op < op_checkpoint + slot_count) : (op += 1) {
-                const next = &self.headers[self.slot_for_op(op + 1).index];
-
-                if (next.command == .reserved) break;
-                assert(next.command == .prepare);
-
-                if (next.op != op + 1) {
-                    assert(next.op <= op_checkpoint);
-                    break;
-                }
-            }
-
-            const op_max = self.op_maximum();
-            assert(op >= op_checkpoint);
-            assert(op <= op_max);
-            assert(op + config.pipeline_max >= op_max); // We expect gaps only in the pipeline.
-
-            return op;
-        }
-
         /// Returns the highest op number prepared, as per `header_ok()` in the untrusted headers.
         fn op_maximum_headers_untrusted(cluster: u32, headers_untrusted: []const Header) u64 {
             var op: u64 = 0;
