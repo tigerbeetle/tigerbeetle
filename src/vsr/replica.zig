@@ -3720,13 +3720,13 @@ pub fn Replica(
             }
 
             // Discard the whole pipeline if it is now disconnected from the WAL's hash chain.
-            if (self.pipeline.head_ptr()) |prepare| {
+            if (self.pipeline.head_ptr()) |pipeline_head| {
                 const parent = self.journal.header_with_op_and_checksum(
-                    prepare.message.header.op - 1,
-                    prepare.message.header.parent,
+                    pipeline_head.message.header.op - 1,
+                    pipeline_head.message.header.parent,
                 );
                 if (parent == null) {
-                    while (self.pipeline.count > 0) assert(self.pipeline.pop() != null);
+                    while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
                     assert(self.pipeline.count == 0);
                 }
             }
