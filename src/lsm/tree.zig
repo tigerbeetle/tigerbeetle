@@ -10,10 +10,8 @@ const div_ceil = @import("../util.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
-const bloom_filter = @import("bloom_filter.zig");
 
 const CompositeKey = @import("composite_key.zig").CompositeKey;
-
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
@@ -223,10 +221,8 @@ pub fn TreeType(comptime Table: type) type {
             }
 
             // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
-            const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
-
-            if (!tree.table_immutable.free and tree.table_immutable.info.visible(snapshot)) {
-                if (tree.table_immutable.get(key, fingerprint)) |value| {
+            if (!tree.table_immutable.free and tree.table_immutable.snapshot_min < snapshot) {
+                if (tree.table_immutable.get(key)) |value| {
                     callback(unwrap_tombstone(value));
                     return;
                 }
@@ -253,10 +249,10 @@ pub fn TreeType(comptime Table: type) type {
         }
 
         pub fn compact(tree: *Tree, callback: fn (*Tree) void) void {
-            // TODO do the (not)cannot_commit_batch() assertion in the first beat
+            // TODO do the can_commit_batch() assertion in the first beat
             // TODO do the stuff in the if at the end of the fourth beat
             // Convert the mutable table to an immutable table if necessary:
-            if (tree.table_mutable.cannot_commit_batch(tree.options.commit_count_max)) {
+            if (tree.table_mutable.can_commit_batch(tree.options.commit_count_max)) {
                 assert(tree.table_mutable.count() > 0);
                 assert(tree.table_immutable.free);
 
@@ -278,7 +274,12 @@ pub fn TreeType(comptime Table: type) type {
             // if no compactions, should we start one?
             //  - (highlevel) impl note: replica.zig: compact all tress in forest + compact manifest log
             //  - note: even-tables (level-a): 0-2-4-6 odd-tables (level-b): immut-1-3-5-7
+            //          this avoids having 1 table being involved in multiple compactioss (t in 0-1 & 1-2)
+            //          so even-tables compact in 0-1, 2-3, 4-5, 6-7
+            //          and odd-tables compact in immut-1, 3-4, 5-6, (ignore) 7
             //  - note: beats of the bar are completed when all compaction callbacks are joined
+            //  - note: assert: at the end of every beat; theres space in mut table for next commit/beat 
+            //  - only start compaction if mutable_table is dirty (was changed)
             //
             //  - assuming a batch_count_multiple=4 (i.e. 4-measure bar of compaction ticks):
             //      - first beat of the bar:
