@@ -443,7 +443,6 @@ pub fn Replica(
                 } else if (self.journal.is_empty()) {
                     // The data file is brand new — no messages have ever been written.
                     // Transition to normal status; no need to run the VSR recovery protocol.
-                    assert(self.journal.dirty.count == 0);
                     assert(self.journal.faulty.count == 0);
                     self.transition_to_normal_from_recovering_status(0);
                     assert(self.status == .normal);

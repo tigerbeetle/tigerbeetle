@@ -344,7 +344,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // If any message is faulty, we must fall back to VSR recovery protocol (i.e. treat
             // this as a non-empty WAL) since that message may have been a prepare.
             if (self.faulty.count > 0) return false;
-            assert(self.dirty.count == 0);
 
             for (self.headers[1..]) |*header| {
                 if (header.command == .prepare) return false;
@@ -1329,10 +1328,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         // TODO Repair header on disk to restore durability.
                     } else {
                         // @F, @H, @K:
-                        if (header) |h| {
-                            assert(h.command == .prepare);
-                            assert(h.op < prepare.?.op);
-                        }
                         // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty).
                         assert(self.dirty.bit(slot));
                     }
