@@ -1353,20 +1353,21 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(prepare.?.command == .prepare);
                     assert(self.prepare_inhabited[slot.index]);
                     assert(self.prepare_checksums[slot.index] == prepare.?.checksum);
+
+                    self.headers[slot.index] = prepare.?.*;
+                    self.faulty.clear(slot);
                     if (replica.replica_count == 1) {
                         // @E, @F, @G, @H, @K:
-                        self.headers[slot.index] = prepare.?.*;
                         self.dirty.clear(slot);
-                        self.faulty.clear(slot);
                         // TODO Repair header on disk to restore durability.
                     } else {
                         // @F, @H, @K:
-                        assert(header.?.command == .prepare);
-                        assert(header.?.op < prepare.?.op);
+                        if (header) |h| {
+                            assert(h.command == .prepare);
+                            assert(h.op < prepare.?.op);
+                        }
                         // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty).
-                        self.set_header_as_dirty(prepare.?);
                         assert(self.dirty.bit(slot));
-                        assert(!self.faulty.bit(slot));
                     }
                 },
                 .vsr => {
@@ -1422,9 +1423,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (self.headers[0].op == 0 and self.headers[0].command == .prepare) {
                 assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
                 assert(!self.faulty.bit(Slot{ .index = 0 }));
-                // We can only "fix" the root prepare for a cluster-of-one.
-                // When `replica_count > 1`, "fix" is only used when the log wraps.
-                assert(!self.dirty.bit(Slot{ .index = 0 }) or replica.replica_count == 1);
             }
 
             for (self.headers) |*header, index| {
@@ -1437,7 +1435,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(header.op % slot_count == index);
                     assert(self.prepare_inhabited[index]);
                     assert(self.prepare_checksums[index] == header.checksum);
-                    assert(!self.dirty.bit(Slot{ .index = index }));
                     assert(!self.faulty.bit(Slot{ .index = index }));
                 }
             }
@@ -1484,6 +1481,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn set_header_as_dirty(self: *Self, header: *const Header) void {
+            assert(self.recovered);
+            assert(header.command == .prepare);
+
             log.debug("{}: set_header_as_dirty: op={} checksum={}", .{
                 self.replica,
                 header.op,
