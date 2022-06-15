@@ -79,7 +79,7 @@ pub fn LevelIteratorType(comptime Table: type) type {
         };
 
         pub fn reset(
-            it: *LevelIterator, 
+            it: *LevelIterator,
             context: Context,
             read_done: fn (*LevelIterator) void,
         ) void {
