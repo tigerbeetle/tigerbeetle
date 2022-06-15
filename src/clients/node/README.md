@@ -25,16 +25,22 @@ npm install tigerbeetle-node
 Follow these steps to get up and running when cloning the repo:
 ```shell
 git clone --recurse-submodules https://github.com/coilhq/tigerbeetle-node.git
+cd tigerbeetle-node/
 yarn install --immutable
 ```
 
-***Yarn - Run Test***
+Build locally using `yarn`:
 ```shell
 # Run the following from this directory:
-yarn postinstall #Download NodeJS Headers, Install Zig, Build TigerBeetle
 yarn && yarn build
 ```
+ 
+* **Please note: `yarn clean` will remove Zig and NodeAPI C headers, which mean you need to run:**
+```shell
+./scripts/postinstall.sh #Install Zig and NodeJS C Headers
+```
 
+***Yarn - Run Test***
 Ensure TigerBeetle (`init` & `start`) is running on the port configured in `test.ts`, then run:
 ```shell
 ./tigerbeetle init --cluster=1 --replica=0 --directory=.
