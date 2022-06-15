@@ -25,7 +25,7 @@ npm install tigerbeetle-node
 Follow these steps to get up and running when cloning the repo:
 ```shell
 git clone --recurse-submodules https://github.com/coilhq/tigerbeetle-node.git
-yarn
+yarn install --immutable
 ```
 
 ***Yarn - Run Test***
