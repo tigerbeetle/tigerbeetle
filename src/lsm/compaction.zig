@@ -107,7 +107,8 @@ pub fn CompactionType(
         }
 
         fn allocate_block(allocator: mem.Allocator) !BlockPtr {
-            return allocator.alignedAlloc(u8, config.sector_size, config.block_size);
+            const block = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
+            return block[0..config.block_size];
         }
 
         pub fn deinit(compaction: *Compaction, allocator: mem.Allocator) void {

@@ -6,8 +6,10 @@ const assert = std.debug.assert;
 const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const binary_search = @import("binary_search.zig");
-
 const snapshot_latest = @import("tree.zig").snapshot_latest;
+
+const GridType = @import("grid.zig").GridType;
+const ManifestType = @import("manifest.zig").ManifestType;
 
 pub fn ImmutableTableType(comptime Table: type) type {
     const Key = Table.Key;
@@ -106,10 +108,12 @@ pub fn ImmutableTableType(comptime Table: type) type {
 }
 
 pub fn ImmutableTableIteratorType(comptime Table: type) type {
-    const ImmutableTable = ImmutableTableType(Table);
-
     return struct {
         const ImmutableTableIterator = @This();
+
+        const Grid = GridType(Table.Storage);
+        const Manifest = ManifestType(Table);
+        const ImmutableTable = ImmutableTableType(Table);
 
         table: *ImmutableTable,
         values_index: u32,
@@ -150,20 +154,22 @@ pub fn ImmutableTableIteratorType(comptime Table: type) type {
         }
 
         pub fn tick(it: *ImmutableTableIterator) bool {
+            _ = it;
             return false; // No I/O is performed as it's all in memory.
         }
 
         pub fn buffered_all_values(it: *ImmutableTableIterator) bool {
+            _ = it;
             return true; // All values are "buffered" in memory.
         }
 
-        pub fn peek(it: *ImmutableTableIterator) ?Key {
+        pub fn peek(it: *ImmutableTableIterator) ?Table.Key {
             const values = it.table.values;
             if (it.values_index == values.len) return null;
             return Table.key_from_value(values[it.values_index]);
         }
 
-        pub fn pop(it: *ImmutableTableIterator) Value {
+        pub fn pop(it: *ImmutableTableIterator) Table.Value {
             defer it.values_index += 1;
             return it.table.values[it.values_index];
         }
