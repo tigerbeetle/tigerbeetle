@@ -205,11 +205,13 @@ pub const Cluster = struct {
     /// Reset a replica to its initial state, simulating a random crash/panic.
     /// Leave the persistent storage untouched, and leave any currently
     /// inflight messages to/from the replica in the network.
-    pub fn crash_replica(cluster: *Cluster, replica_index: u8) !void {
+    ///
+    /// Returns whether the replica was crashed.
+    pub fn crash_replica(cluster: *Cluster, replica_index: u8) !bool {
         const replica = &cluster.replicas[replica_index];
         if (replica.op == 0) {
             // Only crash when `replica.op > 0` — an empty WAL would skip recovery after a crash.
-            return;
+            return false;
         }
 
         // Ensure that the replica can eventually recover without this replica.
@@ -217,29 +219,49 @@ pub const Cluster = struct {
         // are trying to crash).
         // TODO Remove this workaround when VSR recovery protocol is disabled.
         if (cluster.options.replica_count != 1) {
-            var slot: usize = 0;
-            while (slot < config.journal_slot_count) : (slot += 1) {
+            const cluster_op_max = op_max: {
+                var op_max: u64 = 0;
+                for (cluster.replicas) |other_replica| {
+                    op_max = std.math.max(op_max, other_replica.op);
+                }
+                break :op_max op_max;
+            };
+
+            // TODO This workaround doesn't handle log wrapping correctly.
+            assert(cluster_op_max < config.journal_slot_count);
+
+            var op: u64 = 0;
+            while (op <= cluster_op_max) : (op += 1) {
+                var cluster_op_known: bool = false;
                 for (cluster.replicas) |other_replica, i| {
-                    // TODO This doesn't handle log wrapping correctly.
-                    if (cluster.health[i] == .up and i != replica_index and
-                        other_replica.status != .recovering and
-                        other_replica.journal.slot_with_op(slot) != null and
-                        !other_replica.journal.dirty.bit(.{ .index = slot }))
-                    {
-                        // The op is recoverable if this replica crashes.
-                        break;
+                    // Ignore replicas that are eligable to assist recovery.
+                    if (replica_index == i) continue;
+                    if (cluster.health[i] == .down) continue;
+                    if (other_replica.status == .recovering) continue;
+
+                    if (other_replica.journal.slot_with_op(op) != null) {
+                        if (!other_replica.journal.dirty.bit(.{ .index = op })) {
+                            // The op is recoverable if this replica crashes.
+                            break;
+                        }
+                        cluster_op_known = true;
                     }
                 } else {
-                    // The op isn't recoverable if this replica is crashed.
-                    return;
+                    if (op == cluster_op_max and !cluster_op_known) {
+                        // The replica can crash; it will be able to truncate the last op.
+                    } else {
+                        // The op isn't recoverable if this replica is crashed.
+                        return false;
+                    }
                 }
             }
         }
 
         cluster.health[replica_index] = .{ .down = cluster.options.health_options.crash_stability };
 
-        replica.deinit(cluster.allocator);
+        // Reset the storage before the replica so that pending writes can (partially) finish.
         cluster.storages[replica_index].reset();
+        replica.deinit(cluster.allocator);
         cluster.state_machines[replica_index] = StateMachine.init(cluster.options.seed);
 
         // The message bus and network should be left alone, as messages
@@ -286,6 +308,7 @@ pub const Cluster = struct {
         );
         message_bus.set_on_message(*Replica, replica, Replica.on_message);
         replica.on_change_state = cluster.on_change_state;
+        return true;
     }
 
     /// Returns the number of replicas capable of helping a crashed node recover (i.e. with
