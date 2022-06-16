@@ -1538,10 +1538,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
                 const other_offset = self.offset_logical_in_headers_for_message(other.message);
                 if (other_offset == write_offset) {
-                    // The `other` and `write` target the same sector.
-                    var last = other;
-                    while (last.header_sector_next) |next| last = next;
-                    last.header_sector_next = write;
+                    // The `other` and `write` target the same sector; append to the list.
+                    var tail = other;
+                    while (tail.header_sector_next) |next| tail = next;
+                    tail.header_sector_next = write;
                     return;
                 }
             }
@@ -1779,9 +1779,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 if (!other.range.locked) continue;
 
                 if (other.range.overlaps(&write.range)) {
-                    var last = &other.range;
-                    while (last.next) |next| last = next;
-                    last.next = &write.range;
+                    var tail = &other.range;
+                    while (tail.next) |next| tail = next;
+                    tail.next = &write.range;
                     return;
                 }
             }
@@ -1828,15 +1828,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             });
 
             // Drain the list of ranges that were waiting on this range to complete.
-            if (!write.header_sector_locked) {
-                var current = range.next;
-                range.next = null;
-                while (current) |waiting| {
-                    assert(waiting.locked == false);
-                    current = waiting.next;
-                    waiting.next = null;
-                    self.lock_sectors(@fieldParentPtr(Self.Write, "range", waiting));
-                }
+            var current = range.next;
+            range.next = null;
+            while (current) |waiting| {
+                assert(waiting.locked == false);
+                current = waiting.next;
+                waiting.next = null;
+                self.lock_sectors(@fieldParentPtr(Self.Write, "range", waiting));
             }
 
             // The callback may set range, so we can't set range to undefined after the callback.
@@ -1960,30 +1958,30 @@ test "IOPS" {
     const testing = std.testing;
     var iops = IOPS(u32, 4){};
 
-    try testing.expectEqual(@as(u4, 4), iops.available());
-    try testing.expectEqual(@as(u4, 0), iops.executing());
+    try testing.expectEqual(@as(usize, 4), iops.available());
+    try testing.expectEqual(@as(usize, 0), iops.executing());
 
     var one = iops.acquire().?;
 
-    try testing.expectEqual(@as(u4, 3), iops.available());
-    try testing.expectEqual(@as(u4, 1), iops.executing());
+    try testing.expectEqual(@as(usize, 3), iops.available());
+    try testing.expectEqual(@as(usize, 1), iops.executing());
 
     var two = iops.acquire().?;
     var three = iops.acquire().?;
 
-    try testing.expectEqual(@as(u4, 1), iops.available());
-    try testing.expectEqual(@as(u4, 3), iops.executing());
+    try testing.expectEqual(@as(usize, 1), iops.available());
+    try testing.expectEqual(@as(usize, 3), iops.executing());
 
     var four = iops.acquire().?;
     try testing.expectEqual(@as(?*u32, null), iops.acquire());
 
-    try testing.expectEqual(@as(u4, 0), iops.available());
-    try testing.expectEqual(@as(u4, 4), iops.executing());
+    try testing.expectEqual(@as(usize, 0), iops.available());
+    try testing.expectEqual(@as(usize, 4), iops.executing());
 
     iops.release(two);
 
-    try testing.expectEqual(@as(u4, 1), iops.available());
-    try testing.expectEqual(@as(u4, 3), iops.executing());
+    try testing.expectEqual(@as(usize, 1), iops.available());
+    try testing.expectEqual(@as(usize, 3), iops.executing());
 
     // there is only one slot free, so we will get the same pointer back.
     try testing.expectEqual(@as(?*u32, two), iops.acquire());
@@ -1993,8 +1991,8 @@ test "IOPS" {
     iops.release(one);
     iops.release(three);
 
-    try testing.expectEqual(@as(u4, 4), iops.available());
-    try testing.expectEqual(@as(u4, 0), iops.executing());
+    try testing.expectEqual(@as(usize, 4), iops.available());
+    try testing.expectEqual(@as(usize, 0), iops.executing());
 
     one = iops.acquire().?;
     two = iops.acquire().?;
