@@ -2065,7 +2065,7 @@ pub fn Replica(
                 // In a cluster-of-one, the prepares must always be written to the WAL sequentially
                 // (never concurrently). This ensures that there will be no gaps in the WAL during
                 // crash recovery.
-                log.debug("{}: append: defer append op={}", .{ self.replica, message.header.op });
+                log.debug("{}: append: serializing append op={}", .{ self.replica, message.header.op });
             } else {
                 log.debug("{}: append: appending to journal", .{self.replica});
                 self.write_prepare(message, .append);
@@ -3971,7 +3971,7 @@ pub fn Replica(
                 if (self.replica_count == 1) {
                     // This op won't start writing until all ops in the pipeline preceding it have
                     // been written.
-                    log.debug("{}: repair_prepare: op={} checksum={} (deferred append)", .{
+                    log.debug("{}: repair_prepare: op={} checksum={} (serializing append)", .{
                         self.replica,
                         op,
                         checksum,
