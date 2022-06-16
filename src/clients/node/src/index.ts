@@ -24,13 +24,13 @@ export type Account = {
   id: bigint // u128
   user_data: bigint // u128
   reserved: Buffer // [48]u8
-  unit: number // u16, unit of value
+  ledger: number // u32, ledger of value
   code: number // u16, A chart of accounts code describing the type of account (e.g. clearing, settlement)
-  flags: number // u32
-  debits_reserved: bigint // u64
-  debits_accepted: bigint // u64
-  credits_reserved: bigint // u64
-  credits_accepted: bigint // u64
+  flags: number // u16
+  debits_pending: bigint // u64
+  debits_posted: bigint // u64
+  credits_pending: bigint // u64
+  credits_posted: bigint // u64
   timestamp: bigint // u64, Set this to 0n - the actual value will be set by TigerBeetle server
 }
 
@@ -41,17 +41,33 @@ export enum AccountFlags {
 }
 
 export enum CreateAccountError {
+  // ok = 0 (No Error)
   linked_event_failed = 1,
-  exists,
-  exists_with_different_user_data,
-  exists_with_different_reserved_field,
-  exists_with_different_unit,
-  exists_with_different_code,
-  exists_with_different_flags,
+
+  reserved_flag,
+  reserved_field,
+
+  id_must_not_be_zero,
+  ledger_must_not_be_zero,
+  code_must_not_be_zero,
+
+  mutually_exclusive_flags,
+
+  overflows_debits,
+  overflows_credits,
+
   exceeds_credits,
   exceeds_debits,
-  reserved_field,
-  reserved_flag_padding,
+
+  exists_with_different_flags,
+  exists_with_different_user_data,
+  exists_with_different_ledger,
+  exists_with_different_code,
+  exists_with_different_debits_pending,
+  exists_with_different_debits_posted,
+  exists_with_different_credits_pending,
+  exists_with_different_credits_posted,
+  exists,
 }
 
 export type CreateAccountsError = {
@@ -64,44 +80,90 @@ export type Transfer = {
   debit_account_id: bigint, // u128
   credit_account_id: bigint, // u128
   user_data: bigint, // u128
-  reserved: Buffer, // [32]u8
-  timeout: bigint, // u64, in nano-seconds
-  code: number, // u32 accounting system code to describe the type of transfer (e.g. settlement)
-  flags: number, // u32
+  reserved: bigint, // u128
+  pending_id: bigint, // u128
+  timeout: bigint, // u64, In nanoseconds.
+  ledger: number // u32, The ledger of value.
+  code: number, // u16, A user-defined accounting code to describe the type of transfer (e.g. settlement).
+  flags: number, // u16
   amount: bigint, // u64,
-  timestamp: bigint, // u64, Set this to 0n - the actual value will be set by TigerBeetle server
+  timestamp: bigint, // u64, Set this to 0n - the timestamp will be set by TigerBeetle.
 }
 
 export enum TransferFlags {
   linked = (1 << 0),
-  two_phase_commit = (1 << 1),
-  condition = (1 << 2) // whether or not a condition will be supplied
+  pending = (1 << 1),
+  post_pending_transfer = (1 << 2),
+  void_pending_transfer = (1 << 3)
 }
 
 export enum CreateTransferError {
+  // ok = 0 (No Error)
   linked_event_failed = 1,
-  exists,
+
+  reserved_flag,
+  reserved_field,
+
+  id_must_not_be_zero,
+  debit_account_id_must_not_be_zero,
+  credit_account_id_must_not_be_zero,
+  accounts_must_be_different,
+
+  pending_id_must_be_zero,
+  pending_transfer_must_timeout,
+
+  ledger_must_not_be_zero,
+  code_must_not_be_zero,
+  amount_must_not_be_zero,
+
+  debit_account_not_found,
+  credit_account_not_found,
+
+  accounts_must_have_the_same_ledger,
+  transfer_must_have_the_same_ledger_as_accounts,
+
+  exists_with_different_flags,
   exists_with_different_debit_account_id,
   exists_with_different_credit_account_id,
   exists_with_different_user_data,
-  exists_with_different_reserved_field,
+  exists_with_different_pending_id,
+  exists_with_different_timeout,
   exists_with_different_code,
   exists_with_different_amount,
-  exists_with_different_timeout,
-  exists_with_different_flags,
-  exists_and_already_committed_and_accepted,
-  exists_and_already_committed_and_rejected,
-  reserved_field,
-  reserved_flag_padding,
-  debit_account_not_found,
-  credit_account_not_found,
-  accounts_are_the_same,
-  accounts_have_different_units,
-  amount_is_zero,
+  exists,
+
+  overflows_debits_pending,
+  overflows_credits_pending,
+  overflows_debits_posted,
+  overflows_credits_posted,
+  overflows_debits,
+  overflows_credits,
+
   exceeds_credits,
   exceeds_debits,
-  two_phase_commit_must_timeout,
-  timeout_reserved_for_two_phase_commit,
+
+  cannot_post_and_void_pending_transfer,
+  pending_transfer_cannot_post_or_void_another,
+  timeout_reserved_for_pending_transfer,
+
+  pending_id_must_not_be_zero,
+  pending_id_must_be_different,
+
+  pending_transfer_not_found,
+  pending_transfer_not_pending,
+
+  pending_transfer_has_different_debit_account_id,
+  pending_transfer_has_different_credit_account_id,
+  pending_transfer_has_different_ledger,
+  pending_transfer_has_different_code,
+
+  exceeds_pending_transfer_amount,
+  pending_transfer_has_different_amount,
+
+  pending_transfer_already_posted,
+  pending_transfer_already_voided,
+
+  pending_transfer_expired,
 }
 
 export type CreateTransfersError = {
@@ -109,57 +171,16 @@ export type CreateTransfersError = {
   code: CreateTransferError,
 }
 
-export type Commit = {
-  id: bigint, // u128
-  reserved: Buffer, // [32]u8
-  code: number, // u32 accounting system code describing the reason for accept/reject
-  flags: number, // u32
-  timestamp: bigint, // u64, Set this to 0n - the actual value will be set by TigerBeetle server
-}
-
-export enum CommitFlags {
-  linked = (1 << 0),
-  reject = (1 << 1),
-  preimage = (1 << 2) // whether or not a pre-image will be supplied
-}
-
-export enum CommitTransferError {
-  linked_event_failed = 1,
-  reserved_field,
-  reserved_flag_padding,
-  transfer_not_found,
-  transfer_not_two_phase_commit,
-  transfer_expired,
-  already_committed,
-  already_committed_but_accepted,
-  already_committed_but_rejected,
-  debit_account_not_found,
-  credit_account_not_found,
-  debit_amount_was_not_reserved,
-  credit_amount_was_not_reserved,
-  exceeds_credits,
-  exceeds_debits,
-  condition_requires_preimage,
-  preimage_requires_condition,
-  preimage_invalid,
-}
-
-export type CommitTransfersError = {
-  index: number,
-  code: CommitTransferError,
-}
-
 export type AccountID = bigint // u128
 export type TransferID = bigint // u128
 
-export type Event = Account | Transfer | Commit | AccountID | TransferID
-export type Result = CreateAccountsError | CreateTransfersError | CommitTransfersError | Account | Transfer
+export type Event = Account | Transfer | AccountID | TransferID
+export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export enum Operation {
   CREATE_ACCOUNT = 3,
   CREATE_TRANSFER,
-  COMMIT_TRANSFER,
   ACCOUNT_LOOKUP,
   TRANSFER_LOOKUP
 }
@@ -167,7 +188,6 @@ export enum Operation {
 export interface Client {
   createAccounts: (batch: Account[]) => Promise<CreateAccountsError[]>
   createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
-  commitTransfers: (batch: Commit[]) => Promise<CommitTransfersError[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
   request: (operation: Operation, batch: Event[], callback: ResultCallback) => void
@@ -192,13 +212,12 @@ const isSameArgs = (args: InitArgs): boolean => {
     }
   })
 
-  return args.cluster_id === _args.cluster_id &&
-          isSameReplicas
+  return args.cluster_id === _args.cluster_id && isSameReplicas
 }
 
 let _client: Client | undefined = undefined
 let _interval: NodeJS.Timeout | undefined = undefined
-// here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+// Here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
 let _pinged = false
 // TODO: allow creation of clients if the arguments are different. Will require changes in node.zig as well.
 export function createClient (args: InitArgs): Client {
@@ -226,7 +245,7 @@ export function createClient (args: InitArgs): Client {
   }
 
   const createAccounts = async (batch: Account[]): Promise<CreateAccountsError[]> => {
-    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    // Here to wait until `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
         setTimeout(() => {
@@ -253,7 +272,7 @@ export function createClient (args: InitArgs): Client {
   }
 
   const createTransfers = async (batch: Transfer[]): Promise<CreateTransfersError[]> => {
-    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
+    // Here to wait until `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
     if (!_pinged) {
       await new Promise<void>(resolve => {
         setTimeout(() => {
@@ -273,33 +292,6 @@ export function createClient (args: InitArgs): Client {
 
       try {
         binding.request(context, Operation.CREATE_TRANSFER, batch, callback)
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  const commitTransfers = async (batch: Commit[]): Promise<CommitTransfersError[]> => {
-    // here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
-    if (!_pinged) {
-      await new Promise<void>(resolve => {
-        setTimeout(() => {
-          _pinged = true
-          resolve()
-        }, 600)
-      })
-    }
-    return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CommitTransfersError[]) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve(results)
-      }
-
-      try {
-        binding.request(context, Operation.COMMIT_TRANSFER, batch, callback)
       } catch (error) {
         reject(error)
       }
@@ -353,7 +345,6 @@ export function createClient (args: InitArgs): Client {
   _client = {
     createAccounts,
     createTransfers,
-    commitTransfers,
     lookupAccounts,
     lookupTransfers,
     request,

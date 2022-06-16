@@ -9,27 +9,49 @@ The following steps will install the `tigerbeetle-node` module to your current w
 * NodeJS >= `14.0.0`. _(If the correct version is not installed, an installation error will occur)_ 
 
 > Your operating system should be Linux (kernel >= v5.6) or macOS. Windows support is not yet available but is in the works.
-     
-### YARN Package Manager
 
-```sh
-# Run the following from this directory
-yarn add
+### YARN Package Manager Installation
+```shell
+yarn add tigerbeetle-node
 ```
 or
-
-### NPM Package Manager 
-```sh
+### NPM Package Manager Installation
+```shell
 npm install tigerbeetle-node
 ```
 
 **Development**
 
 Follow these steps to get up and running when cloning the repo:
-
-```sh
+```shell
 git clone --recurse-submodules https://github.com/coilhq/tigerbeetle-node.git
-yarn
+cd tigerbeetle-node/
+yarn install --immutable
+```
+
+Build locally using `yarn`:
+```shell
+# Run the following from this directory:
+yarn && yarn build
+```
+ 
+* **Please note: `yarn clean` will remove Zig and NodeAPI C headers, which mean you need to run:**
+```shell
+./scripts/postinstall.sh #Install Zig and NodeJS C Headers
+```
+
+***Yarn - Run Test***
+Ensure TigerBeetle (`init` & `start`) is running on the port configured in `test.ts`, then run:
+```shell
+./tigerbeetle init --cluster=1 --replica=0 --directory=.
+./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001
+yarn test
+```
+
+***Yarn - Run Benchmark***
+Run the benchmark (The `benchmark` will automatically start TigerBeetle on port `3001` _(single replica)_:
+```shell
+yarn benchmark
 ```
 
 ## Usage
@@ -41,7 +63,7 @@ Future releases will allow multiple client instantiations.
 import { createClient } from 'tigerbeetle-node'
 
 const client = createClient({
-  cluster_id: 1,
+  cluster_id: 0,
   replica_addresses: ['3001', '3002', '3003']
 })
 ```
@@ -54,15 +76,15 @@ This is reflected in the below function interfaces where each one takes in an ar
 ```js
 const account = {
     id: 137n, // u128
-    user_data: 0n, // u128, opaque third-party identifier to link this account (many-to-one) to an external entity:
+    user_data: 0n, // u128, opaque third-party identifier to link this account to an external entity:
     reserved: Buffer.alloc(48, 0), // [48]u8
-    unit: 1,   // u16, unit of value
+    ledger: 1,   // u32, ledger value
     code: 718, // u16, a chart of accounts code describing the type of account (e.g. clearing, settlement)
-    flags: 0,  // u32
-    debits_reserved: 0n,  // u64
-    debits_accepted: 0n,  // u64
-    credits_reserved: 0n, // u64
-    credits_accepted: 0n, // u64
+    flags: 0,  // u16
+    debits_pending: 0n,  // u64
+    debits_posted: 0n,  // u64
+    credits_pending: 0n, // u64
+    credits_posted: 0n, // u64
     timestamp: 0n, // u64, Reserved: This will be set by the server.
 }
 
@@ -87,7 +109,7 @@ The `flags` on an account provide a way for you to enforce policies by toggling 
 |----------|----------------------------------|-----------------------------------------|
 | `linked` | `debits_must_not_exceed_credits` | `credits_must_not_exceed_debits` |
 
-The creation of an account can be linked to the successful creation of another by setting the `linked` flag (see [linked events](#linked-events)). By setting `debits_must_not_exceed_credits`, then any transfer such that `debits_accepted + debits_reserved + amount > credit_accepted` will fail. Similarly for `credits_must_not_exceed_debits`.
+The creation of an account can be linked to the successful creation of another by setting the `linked` flag (see [linked events](#linked-events)). By setting `debits_must_not_exceed_credits`, then any transfer such that `debits_posted + debits_pending + amount > credits_posted` will fail. Similarly for `credits_must_not_exceed_debits`.
 ```js
   enum CreateAccountFlags {
     linked = (1 << 0),
@@ -111,13 +133,13 @@ The `id` of the account is used for lookups. Only matched accounts are returned.
    *   id: 137n,
    *   user_data: 0n,
    *   reserved: Buffer,
-   *   unit: 1,
+   *   ledger: 1,
    *   code: 718,
    *   flags: 0,
-   *   debits_reserved: 0n,
-   *   debits_accepted: 0n,
-   *   credits_reserved: 0n,
-   *   credits_accepted: 0n,
+   *   debits_pending: 0n,
+   *   debits_posted: 0n,
+   *   credits_pending: 0n,
+   *   credits_posted: 0n,
    *   timestamp: 1623062009212508993n,
    * }]
    */
@@ -129,59 +151,57 @@ This creates a journal entry between two accounts.
 ```js
 const transfer = {
     id: 1n, // u128
+    // Double-entry accounting:
     debit_account_id: 1n,  // u128
     credit_account_id: 2n, // u128
-    user_data: 0n, // u128, opaque third-party identifier to link this transfer (many-to-one) to an external entity 
-    reserved: Buffer.alloc(32, 0), // two-phase condition can go in here
-    timeout: 0n, // u64, in nano-seconds. 
-    code: 1,  // u32, a chart of accounts code describing the reason for the transfer (e.g. deposit, settlement)
-    flags: 0, // u32
+    // Opaque third-party identifier to link this transfer to an external entity:
+    user_data: 0n, // u128  
+    reserved: 0n, // u128
+    // Timeout applicable for a pending/2-phase transfer:
+    timeout: 0n, // u64, in nano-seconds.
+    // Collection of accounts usually grouped by the currency: 
+    // You can't transfer money between accounts with different ledgers:
+    ledger: 720,  // u32, ledger for transfer (e.g. currency).
+    // Chart of accounts code describing the reason for the transfer:
+    code: 1,  // u16, (e.g. deposit, settlement)
+    flags: 0, // u16
     amount: 10n, // u64
     timestamp: 0n, //u64, Reserved: This will be set by the server.
 }
-
 const errors = await client.createTransfers([transfer])
 ```
-Two-phase transfers are supported natively by toggling the appropriate flag. TigerBeetle will then adjust the `credits_reserved` and `debits_reserved` fields of the appropriate accounts. A corresponding commit transfer then needs to be sent to accept or reject the transfer.
-| bit 0    | bit 1              | bit 2            |
-|----------|--------------------|------------------|
-| `linked` | `posting`          | `condition`      |
+Two-phase transfers are supported natively by toggling the appropriate flag. TigerBeetle will then adjust the `credits_pending` and `debits_pending` fields of the appropriate accounts. A corresponding commit transfer then needs to be sent to accept or reject the transfer.
 
-The `condition` flag signals to TigerBeetle that a 256-bit cryptographic condition will be supplied in the `reserved` field. This will be validated against a supplied pre-image when the transfer is committed. Transfers within a batch may also be linked (see [linked events](#linked-events)).
+Transfers within a batch may also be linked (see [linked events](#linked-events)).
 ```js
-  enum CreateTransferFlags {
-    linked = (1 << 0>>),
-    two_phase_commit = (1 << 1),
-    condition = (1 << 2)
+  enum TransferFlags {
+    linked = (1 << 0),
+    pending = (1 << 1),
+    post_pending_transfer = (1 << 2),
+    void_pending_transfer = (1 << 3)
   }
-
-// two-phase transfer
+  
+  // Two-phase transfer (pending):
   let flags = 0n
-  flags |= TransferFlags.two_phase_commit
+  flags |= TransferFlags.pending
 
-  // two-phase transfer with condition supplied in `reserved`
+  // Linked two-phase transfer (pending):
   let flags = 0n
-  flags |= TransferFlags.two_phase_commit
-  flags |= TransferFlags.condition
+  flags |= TransferFlags.linked
+  flags |= TransferFlags.pending
 ```
 
-### Committing a transfer
+### Post a Pending transfer (2-phase)
 
-This is used to commit a two-phase transfer.
-| bit 0    | bit 1    | bit 2      |
-|----------|----------|------------|
-| `linked` | `reject` | `preimage` |
-
-By default (`flags = 0`), it will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_reserved` and `credits_reserved` of the appropriate accounts and apply them to the `debits_accepted` and `credits_accepted` balances. If the `preimage` bit is set then TigerBeetle will look for it in the `reserved` field and validate it against the `condition` from the associated transfer. If this validation fails, or `reject` is set, then the changes to the `reserved` balances are atomically rolled back.
+With `flags = post_pending_transfer`, TigerBeetle will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_pending` and `credits_pending` of the appropriate accounts and apply them to the `debits_posted` and `credits_posted` balances.
 ```js
-const commit = {
-    id: 1n,   // u128, must correspond to the transfer id
-    reserved: Buffer.alloc(32, 0), // [32]u8
-    code: 1,  // u32, accounting system code to identify type of transfer
-    flags: 0, // u32
+const post = {
+    id: 2n, // u128, must correspond to the transfer id
+    pending_id: 1n, // u128, id of the pending transfer
+    flags: TransferFlags.post_pending_transfer, // to void, use [void_pending_transfer]
     timestamp: 0n, // u64, Reserved: This will be set by the server.
 }
-const errors = await client.commitTransfers([commit])
+const errors = await client.createTransfers([post])
 ```
 
 ### Linked events
@@ -193,10 +213,10 @@ let batch = []
 let linkedFlag = 0
 linkedFlag |= CreateTransferFlags.linked
 
-// An individual transfer (successful)
+// An individual transfer (successful):
 batch.push({ id: 1n, ... })
 
-// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false)
+// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
 batch.push({ id: 2n, ..., flags: linkedFlag }) // Commit/rollback.
 batch.push({ id: 3n, ..., flags: linkedFlag }) // Commit/rollback.
 batch.push({ id: 2n, ..., flags: linkedFlag }) // Fail with exists
@@ -206,11 +226,11 @@ batch.push({ id: 4n, ..., flags: 0 })          // Fail without committing.
 // This should not see any effect from the failed chain above.
 batch.push({ id: 2n, ..., flags: 0 })
 
-// A chain of 2 transfers (the first transfer fails the chain)
+// A chain of 2 transfers (the first transfer fails the chain):
 batch.push({ id: 2n, ..., flags: linkedFlag })
 batch.push({ id: 3n, ..., flags: 0 })
 
-// A chain of 2 transfers (successful)
+// A chain of 2 transfers (successful):
 batch.push({ id: 3n, ..., flags: linkedFlag })
 batch.push({ id: 4n, ..., flags: 0 })
 
@@ -218,13 +238,13 @@ const errors = await client.createTransfers(batch)
 
 /**
  * [
- *  { index: 1, error: 1 }, // linked_event_failed
- *  { index: 2, error: 1 }, // linked_event_failed
- *  { index: 3, error: 2 }, // exists
- *  { index: 4, error: 1 }, // linked_event_failed
+ *  { index: 1, error: 1 },  // linked_event_failed
+ *  { index: 2, error: 1 },  // linked_event_failed
+ *  { index: 3, error: 25 }, // exists
+ *  { index: 4, error: 1 },  // linked_event_failed
  * 
- *  { index: 6, error: 7 }, // exists_with_different_flags
- *  { index: 7, error: 1 }, // linked_event_failed
+ *  { index: 6, error: 17 }, // exists_with_different_flags
+ *  { index: 7, error: 1 },  // linked_event_failed
  * ]
  */
 ```
