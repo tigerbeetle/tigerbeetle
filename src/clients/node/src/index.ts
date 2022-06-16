@@ -82,7 +82,7 @@ export type Transfer = {
   user_data: bigint, // u128
   reserved: bigint, // u128
   pending_id: bigint, // u128
-  timeout: bigint, // u64, in nano-seconds
+  timeout: bigint, // u64, In nanoseconds.
   ledger: number // u32, The ledger of value.
   code: number, // u16, A user-defined accounting code to describe the type of transfer (e.g. settlement).
   flags: number, // u16
