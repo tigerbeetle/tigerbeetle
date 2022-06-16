@@ -87,7 +87,7 @@ export type Transfer = {
   code: number, // u16 accounting system code to describe the type of transfer (e.g. settlement)
   flags: number, // u16
   amount: bigint, // u64,
-  timestamp: bigint, // u64, Set this to 0n - the actual value will be set by TigerBeetle server
+  timestamp: bigint, // u64, Set this to 0n - the timestamp will be set by TigerBeetle.
 }
 
 export enum TransferFlags {
