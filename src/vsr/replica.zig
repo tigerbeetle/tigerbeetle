@@ -398,9 +398,7 @@ pub fn Replica(
                 self.client_table.deinit(allocator);
             }
 
-            while (self.pipeline.pop()) |prepare| {
-                self.message_bus.unref(prepare.message);
-            }
+            while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
 
             if (self.loopback_queue) |loopback_message| {
                 assert(loopback_message.next == null);
@@ -2362,8 +2360,7 @@ pub fn Replica(
                 assert(self.commit_min == self.commit_max);
                 assert(self.commit_max == prepare.message.header.op);
 
-                self.message_bus.unref(prepare.message);
-                assert(self.pipeline.pop() != null);
+                self.message_bus.unref(self.pipeline.pop().?.message);
 
                 if (self.replica_count == 1) {
                     if (self.pipeline.head_ptr()) |head| {
@@ -3715,8 +3712,7 @@ pub fn Replica(
             while (self.pipeline.head_ptr()) |prepare| {
                 if (prepare.message.header.op > self.commit_max) break;
 
-                self.message_bus.unref(prepare.message);
-                assert(self.pipeline.pop() != null);
+                self.message_bus.unref(self.pipeline.pop().?.message);
             }
 
             // Discard the whole pipeline if it is now disconnected from the WAL's hash chain.
@@ -3735,8 +3731,7 @@ pub fn Replica(
             while (self.pipeline.tail_ptr()) |prepare| {
                 if (self.journal.has(prepare.message.header)) break;
 
-                self.message_bus.unref(prepare.message);
-                assert(self.pipeline.pop_tail() != null);
+                self.message_bus.unref(self.pipeline.pop_tail().?.message);
             }
 
             log.debug("{}: repair_pipeline_diff: {} prepare(s)", .{
