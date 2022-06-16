@@ -1,6 +1,6 @@
 {
   "name": "tigerbeetle-node",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "TigerBeetle Node.js client",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
