@@ -84,7 +84,7 @@ export type Transfer = {
   pending_id: bigint, // u128
   timeout: bigint, // u64, in nano-seconds
   ledger: number // u32, The ledger of value.
-  code: number, // u16 accounting system code to describe the type of transfer (e.g. settlement)
+  code: number, // u16, A user-defined accounting code to describe the type of transfer (e.g. settlement).
   flags: number, // u16
   amount: bigint, // u64,
   timestamp: bigint, // u64, Set this to 0n - the timestamp will be set by TigerBeetle.
