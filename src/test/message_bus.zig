@@ -6,12 +6,13 @@ const config = @import("../config.zig");
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const Header = @import("../vsr.zig").Header;
+const ProcessType = @import("../vsr.zig").ProcessType;
 
 const Network = @import("network.zig").Network;
 
 const log = std.log.scoped(.message_bus);
 
-pub const Process = union(enum) {
+pub const Process = union(ProcessType) {
     replica: u8,
     client: u128,
 };
@@ -35,7 +36,7 @@ pub const MessageBus = struct {
         network: *Network,
     ) !MessageBus {
         return MessageBus{
-            .pool = try MessagePool.init(allocator),
+            .pool = try MessagePool.init(allocator, @as(ProcessType, process)),
             .network = network,
             .cluster = cluster,
             .process = process,
@@ -61,7 +62,7 @@ pub const MessageBus = struct {
 
     pub fn tick(_: *MessageBus) void {}
 
-    pub fn get_message(bus: *MessageBus) ?*Message {
+    pub fn get_message(bus: *MessageBus) *Message {
         return bus.pool.get_message();
     }
 

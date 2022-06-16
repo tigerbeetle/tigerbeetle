@@ -17,15 +17,55 @@ comptime {
 /// message to be shifted to make space for 0 padding to vsr.sector_ceil.
 const message_size_max_padded = config.message_size_max + config.sector_size;
 
-/// A pool of reference-counted Messages, memory for which is allocated only once
-/// during initialization and reused thereafter. The config.message_bus_messages_max
-/// and config.message_bus_headers_max values determine the size of this pool.
+/// The number of full-sized messages allocated at initialization by the replica message pool.
+/// There must be enough messages to ensure that the replica can always progress, to avoid deadlock.
+pub const messages_max_replica = messages_max: {
+    var sum: usize = 0;
+
+    sum += config.io_depth_read + config.io_depth_write; // Journal I/O
+    sum += config.clients_max; // Replica.client_table
+    sum += 1; // Replica.loopback_queue
+    sum += config.pipeline_max; // Replica.pipeline
+    sum += config.replicas_max; // Replica.do_view_change_from_all_replicas quorum (all others are bitsets)
+    sum += config.connections_max; // Connection.recv_message
+    sum += config.connections_max * config.connection_send_queue_max_replica; // Connection.send_queue
+    sum += 1; // Handle bursts (e.g. Connection.parse_message)
+    // Handle Replica.commit_op's reply:
+    // (This is separate from the burst +1 because they may occur concurrently).
+    sum += 1;
+    sum += 20; // TODO Our network simulator allows up to 20 messages for path_capacity_max.
+
+    break :messages_max sum;
+};
+
+/// The number of full-sized messages allocated at initialization by the client message pool.
+pub const messages_max_client = messages_max: {
+    var sum: usize = 0;
+
+    sum += config.replicas_max; // Connection.recv_message
+    sum += config.replicas_max * config.connection_send_queue_max_client; // Connection.send_queue
+    sum += config.client_request_queue_max; // Client.request_queue
+    // Handle bursts (e.g. Connection.parse_message, or sending a ping when the send queue is full).
+    sum += 1;
+    sum += 20; // TODO Our network simulator allows up to 20 messages for path_capacity_max.
+
+    break :messages_max sum;
+};
+
+comptime {
+    // These conditions are necessary (but not sufficient) to prevent deadlocks.
+    assert(messages_max_replica > config.replicas_max);
+    assert(messages_max_client > config.client_request_queue_max);
+}
+
+/// A pool of reference-counted Messages, memory for which is allocated only once during
+/// initialization and reused thereafter. The messages_max values determine the size of this pool.
 pub const MessagePool = struct {
     pub const Message = struct {
         // TODO: replace this with a header() function to save memory
         header: *Header,
-        /// Unless this Message is header only, this buffer is in aligned to config.sector_size
-        /// and casting to that alignment in order to perform Direct I/O is safe.
+        /// This buffer is aligned to config.sector_size and casting to that alignment in order
+        /// to perform Direct I/O is safe.
         buffer: []u8,
         references: u32 = 0,
         next: ?*Message,
@@ -39,27 +79,23 @@ pub const MessagePool = struct {
         pub fn body(message: *Message) []u8 {
             return message.buffer[@sizeOf(Header)..message.header.size];
         }
-
-        fn header_only(message: Message) bool {
-            const ret = message.buffer.len == @sizeOf(Header);
-            assert(ret or message.buffer.len == message_size_max_padded);
-            return ret;
-        }
     };
 
     /// List of currently unused messages of message_size_max_padded
     free_list: ?*Message,
-    /// List of currently usused header-sized messages
-    header_only_free_list: ?*Message,
 
-    pub fn init(allocator: mem.Allocator) error{OutOfMemory}!MessagePool {
+    pub fn init(allocator: mem.Allocator, process_type: vsr.ProcessType) error{OutOfMemory}!MessagePool {
+        const messages_max: usize = switch (process_type) {
+            .replica => messages_max_replica,
+            .client => messages_max_client,
+        };
+
         var ret: MessagePool = .{
             .free_list = null,
-            .header_only_free_list = null,
         };
         {
             var i: usize = 0;
-            while (i < config.message_bus_messages_max) : (i += 1) {
+            while (i < messages_max) : (i += 1) {
                 const buffer = try allocator.allocAdvanced(
                     u8,
                     config.sector_size,
@@ -75,45 +111,20 @@ pub const MessagePool = struct {
                 ret.free_list = message;
             }
         }
-        {
-            var i: usize = 0;
-            while (i < config.message_bus_headers_max) : (i += 1) {
-                const header = try allocator.create(Header);
-                const message = try allocator.create(Message);
-                message.* = .{
-                    .header = header,
-                    .buffer = mem.asBytes(header),
-                    .next = ret.header_only_free_list,
-                };
-                ret.header_only_free_list = message;
-            }
-        }
 
         return ret;
     }
 
-    /// Get an unused message with a buffer of config.message_size_max. If no such message is
-    /// available, an error is returned. The returned message has exactly one reference.
-    pub fn get_message(pool: *MessagePool) ?*Message {
-        const ret = pool.free_list orelse return null;
-        pool.free_list = ret.next;
-        ret.next = null;
-        assert(!ret.header_only());
-        assert(ret.references == 0);
-        ret.references = 1;
-        return ret;
-    }
+    /// Get an unused message with a buffer of config.message_size_max.
+    /// The returned message has exactly one reference.
+    pub fn get_message(pool: *MessagePool) *Message {
+        const message = pool.free_list.?;
+        pool.free_list = message.next;
+        message.next = null;
+        assert(message.references == 0);
 
-    /// Get an unused message with a buffer only large enough to hold a header. If no such message
-    /// is available, an error is returned. The returned message has exactly one reference.
-    pub fn get_header_only_message(pool: *MessagePool) ?*Message {
-        const ret = pool.header_only_free_list orelse return null;
-        pool.header_only_free_list = ret.next;
-        ret.next = null;
-        assert(ret.header_only());
-        assert(ret.references == 0);
-        ret.references = 1;
-        return ret;
+        message.references = 1;
+        return message;
     }
 
     /// Decrement the reference count of the message, possibly freeing it.
@@ -121,13 +132,8 @@ pub const MessagePool = struct {
         message.references -= 1;
         if (message.references == 0) {
             if (builtin.mode == .Debug) mem.set(u8, message.buffer, undefined);
-            if (message.header_only()) {
-                message.next = pool.header_only_free_list;
-                pool.header_only_free_list = message;
-            } else {
-                message.next = pool.free_list;
-                pool.free_list = message;
-            }
+            message.next = pool.free_list;
+            pool.free_list = message;
         }
     }
 };

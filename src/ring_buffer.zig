@@ -118,6 +118,13 @@ pub fn RingBuffer(
             self.advance_tail();
         }
 
+        /// Add an element to a RingBuffer, and assert that the capacity is sufficient.
+        pub fn push_assume_capacity(self: *Self, item: T) void {
+            self.push(item) catch |err| switch (err) {
+                error.NoSpaceLeft => unreachable,
+            };
+        }
+
         pub fn push_slice(self: *Self, items: []const T) error{NoSpaceLeft}!void {
             if (self.count + items.len > self.buffer.len) return error.NoSpaceLeft;
 

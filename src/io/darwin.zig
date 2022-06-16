@@ -2,7 +2,9 @@ const std = @import("std");
 const os = std.os;
 const mem = std.mem;
 const assert = std.debug.assert;
+const log = std.log.scoped(.io);
 
+const config = @import("../config.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
@@ -204,9 +206,6 @@ pub const IO = struct {
             address: std.net.Address,
             initiated: bool,
         },
-        fsync: struct {
-            fd: os.fd_t,
-        },
         read: struct {
             fd: os.fd_t,
             buf: [*]u8,
@@ -248,7 +247,7 @@ pub const IO = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
                 // Perform the actual operaton
                 const op_data = &@field(_completion.operation, @tagName(operation_tag));
-                const result = OperationImpl.doOperation(op_data);
+                const result = OperationImpl.do_operation(op_data);
 
                 // Requeue onto io_pending if error.WouldBlock
                 switch (operation_tag) {
@@ -310,7 +309,7 @@ pub const IO = struct {
                 .socket = socket,
             },
             struct {
-                fn doOperation(op: anytype) AcceptError!os.socket_t {
+                fn do_operation(op: anytype) AcceptError!os.socket_t {
                     const fd = try os.accept(
                         op.socket,
                         null,
@@ -368,7 +367,7 @@ pub const IO = struct {
                 .fd = fd,
             },
             struct {
-                fn doOperation(op: anytype) CloseError!void {
+                fn do_operation(op: anytype) CloseError!void {
                     return switch (os.errno(os.system.close(op.fd))) {
                         .SUCCESS => {},
                         .BADF => error.FileDescriptorInvalid,
@@ -407,7 +406,7 @@ pub const IO = struct {
                 .initiated = false,
             },
             struct {
-                fn doOperation(op: anytype) ConnectError!void {
+                fn do_operation(op: anytype) ConnectError!void {
                     // Don't call connect after being rescheduled by io_pending as it gives EISCONN.
                     // Instead, check the socket error to see if has been connected successfully.
                     const result = switch (op.initiated) {
@@ -417,36 +416,6 @@ pub const IO = struct {
 
                     op.initiated = true;
                     return result;
-                }
-            },
-        );
-    }
-
-    pub const FsyncError = os.SyncError;
-
-    pub fn fsync(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: FsyncError!void,
-        ) void,
-        completion: *Completion,
-        fd: os.fd_t,
-    ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .fsync,
-            .{
-                .fd = fd,
-            },
-            struct {
-                fn doOperation(op: anytype) FsyncError!void {
-                    _ = os.fcntl(op.fd, os.F.FULLFSYNC, 1) catch return os.fsync(op.fd);
                 }
             },
         );
@@ -489,7 +458,7 @@ pub const IO = struct {
                 .offset = offset,
             },
             struct {
-                fn doOperation(op: anytype) ReadError!usize {
+                fn do_operation(op: anytype) ReadError!usize {
                     while (true) {
                         const rc = os.system.pread(
                             op.fd,
@@ -546,7 +515,7 @@ pub const IO = struct {
                 .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn doOperation(op: anytype) RecvError!usize {
+                fn do_operation(op: anytype) RecvError!usize {
                     return os.recv(op.socket, op.buf[0..op.len], 0);
                 }
             },
@@ -579,7 +548,7 @@ pub const IO = struct {
                 .len = @intCast(u32, buffer_limit(buffer.len)),
             },
             struct {
-                fn doOperation(op: anytype) SendError!usize {
+                fn do_operation(op: anytype) SendError!usize {
                     return os.send(op.socket, op.buf[0..op.len], 0);
                 }
             },
@@ -609,7 +578,7 @@ pub const IO = struct {
                 .expires = self.time.monotonic() + nanoseconds,
             },
             struct {
-                fn doOperation(_: anytype) TimeoutError!void {
+                fn do_operation(_: anytype) TimeoutError!void {
                     return; // timeouts don't have errors for now
                 }
             },
@@ -644,19 +613,178 @@ pub const IO = struct {
                 .offset = offset,
             },
             struct {
-                fn doOperation(op: anytype) WriteError!usize {
+                fn do_operation(op: anytype) WriteError!usize {
                     return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
                 }
             },
         );
     }
 
-    pub fn openSocket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+    pub const INVALID_SOCKET = -1;
+
+    /// Creates a socket that can be used for async operations with the IO instance.
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+        _ = self;
+
         const fd = try os.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
-        errdefer os.close(fd);
+        errdefer os.closeSocket(fd);
 
         // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
         try os.setsockopt(fd, os.SOL.SOCKET, os.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
         return fd;
+    }
+
+    /// Opens a directory with read only access.
+    pub fn open_dir(dir_path: []const u8) !os.fd_t {
+        return os.open(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
+    }
+
+    /// Opens or creates a journal file:
+    /// - For reading and writing.
+    /// - For Direct I/O (required on darwin).
+    /// - Obtains an advisory exclusive lock to the file descriptor.
+    /// - Allocates the file contiguously on disk if this is supported by the file system.
+    /// - Ensures that the file data (and file inode in the parent directory) is durable on disk.
+    ///   The caller is responsible for ensuring that the parent directory inode is durable.
+    /// - Verifies that the file size matches the expected file size before returning.
+    pub fn open_file(
+        dir_fd: os.fd_t,
+        relative_path: []const u8,
+        size: u64,
+        must_create: bool,
+    ) !os.fd_t {
+        assert(relative_path.len > 0);
+        assert(size >= config.sector_size);
+        assert(size % config.sector_size == 0);
+
+        // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
+        // This is much stronger than an advisory exclusive lock, and is required on some platforms.
+
+        // Opening with O_DSYNC is essential for both durability and correctness.
+        // O_DSYNC enables us to omit fsync() calls in the data plane, since we sync to the disk on every write.
+        var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
+        var mode: os.mode_t = 0;
+
+        // TODO Document this and investigate whether this is in fact correct to set here.
+        if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
+
+        if (must_create) {
+            log.info("creating \"{s}\"...", .{relative_path});
+            flags |= os.O.CREAT;
+            flags |= os.O.EXCL;
+            mode = 0o666;
+        } else {
+            log.info("opening \"{s}\"...", .{relative_path});
+        }
+
+        // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
+        assert((flags & os.O.DSYNC) > 0);
+
+        // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
+        assert(!std.fs.path.isAbsolute(relative_path));
+        const fd = try os.openat(dir_fd, relative_path, flags, mode);
+        // TODO Return a proper error message when the path exists or does not exist (init/start).
+        errdefer os.close(fd);
+
+        // TODO Check that the file is actually a file.
+
+        // On darwin assume that Direct I/O is always supported.
+        // Use F_NOCACHE to disable the page cache as O_DIRECT doesn't exist.
+        if (config.direct_io) {
+            _ = try os.fcntl(fd, os.F.NOCACHE, 1);
+        }
+
+        // Obtain an advisory exclusive lock that works only if all processes actually use flock().
+        // LOCK_NB means that we want to fail the lock without waiting if another process has it.
+        os.flock(fd, os.LOCK.EX | os.LOCK.NB) catch |err| switch (err) {
+            error.WouldBlock => @panic("another process holds the data file lock"),
+            else => return err,
+        };
+
+        // Ask the file system to allocate contiguous sectors for the file (if possible):
+        // If the file system does not support `fallocate()`, then this could mean more seeks or a
+        // panic if we run out of disk space (ENOSPC).
+        if (must_create) try fs_allocate(fd, size);
+
+        // The best fsync strategy is always to fsync before reading because this prevents us from
+        // making decisions on data that was never durably written by a previously crashed process.
+        // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
+        // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
+        try fs_sync(fd);
+
+        // We fsync the parent directory to ensure that the file inode is durably written.
+        // The caller is responsible for the parent directory inode stored under the grandparent.
+        // We always do this when opening because we don't know if this was done before crashing.
+        try fs_sync(dir_fd);
+
+        const stat = try os.fstat(fd);
+        if (stat.size != size) @panic("data file inode size was truncated or corrupted");
+
+        return fd;
+    }
+
+    /// Darwin's fsync() syscall does not flush past the disk cache. We must use F_FULLFSYNC instead.
+    /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
+    fn fs_sync(fd: os.fd_t) !void {
+        _ = os.fcntl(fd, os.F.FULLFSYNC, 1) catch return os.fsync(fd);
+    }
+
+    /// Allocates a file contiguously using fallocate() if supported.
+    /// Alternatively, writes to the last sector so that at least the file size is correct.
+    fn fs_allocate(fd: os.fd_t, size: u64) !void {
+        log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
+
+        // Darwin doesn't have fallocate() but we can simulate it using fcntl()s.
+        //
+        // https://stackoverflow.com/a/11497568
+        // https://api.kde.org/frameworks/kcoreaddons/html/posix__fallocate__mac_8h_source.html
+        // http://hg.mozilla.org/mozilla-central/file/3d846420a907/xpcom/glue/FileUtils.cpp#l61
+
+        const F_ALLOCATECONTIG = 0x2; // Allocate contiguous space.
+        const F_ALLOCATEALL = 0x4; // Allocate all or nothing.
+        const F_PEOFPOSMODE = 3; // Use relative offset from the seek pos mode.
+        const fstore_t = extern struct {
+            fst_flags: c_uint,
+            fst_posmode: c_int,
+            fst_offset: os.off_t,
+            fst_length: os.off_t,
+            fst_bytesalloc: os.off_t,
+        };
+
+        var store = fstore_t{
+            .fst_flags = F_ALLOCATECONTIG | F_ALLOCATEALL,
+            .fst_posmode = F_PEOFPOSMODE,
+            .fst_offset = 0,
+            .fst_length = @intCast(os.off_t, size),
+            .fst_bytesalloc = 0,
+        };
+
+        // Try to pre-allocate contiguous space and fall back to default non-contiguous.
+        var res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
+        if (os.errno(res) != .SUCCESS) {
+            store.fst_flags = F_ALLOCATEALL;
+            res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
+        }
+
+        switch (os.errno(res)) {
+            .SUCCESS => {},
+            .ACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
+            .BADF => return error.FileDescriptorInvalid,
+            .DEADLK => unreachable, // F_SETLKW
+            .INTR => unreachable, // F_SETLKW
+            .INVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
+            .MFILE => unreachable, // F_DUPFD or F_DUPED
+            .NOLCK => unreachable, // F_SETLK or F_SETLKW
+            .OVERFLOW => return error.FileTooBig,
+            .SRCH => unreachable, // F_SETOWN
+            .OPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
+            else => |errno| return os.unexpectedErrno(errno),
+        }
+
+        // Now actually perform the allocation.
+        return os.ftruncate(fd, size) catch |err| switch (err) {
+            error.AccessDenied => error.PermissionDenied,
+            else => |e| e,
+        };
     }
 };

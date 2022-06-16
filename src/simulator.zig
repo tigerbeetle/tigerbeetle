@@ -84,7 +84,7 @@ pub fn main() !void {
                 .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
                 .one_way_delay_min = random.uintLessThan(u16, 3),
                 .packet_loss_probability = random.uintLessThan(u8, 30),
-                .path_maximum_capacity = 20 + random.uintLessThan(u8, 20),
+                .path_maximum_capacity = 2 + random.uintLessThan(u8, 19),
                 .path_clog_duration_mean = random.uintLessThan(u16, 500),
                 .path_clog_probability = random.uintLessThan(u8, 2),
                 .packet_replay_probability = random.uintLessThan(u8, 50),
@@ -213,7 +213,7 @@ pub fn main() !void {
 
     assert(cluster.state_checker.convergence());
 
-    output.info("\n          PASSED", .{});
+    output.info("\n          PASSED ({} ticks)", .{tick});
 }
 
 /// Returns true, `p` percent of the time, else false.
@@ -244,7 +244,7 @@ fn send_request(random: std.rand.Random) bool {
     if (client.request_queue.full()) return false;
     if (checker_request_queue.full()) return false;
 
-    const message = client.get_message() orelse return false;
+    const message = client.get_message();
     defer client.unref(message);
 
     const body_size_max = config.message_size_max - @sizeOf(Header);
@@ -265,7 +265,7 @@ fn send_request(random: std.rand.Random) bool {
     // While hashing the client ID with the request body prevents input collisions across clients,
     // it's still possible for the same client to generate the same body, and therefore input hash.
     const client_input = StateMachine.hash(client.id, body);
-    checker_request_queue.push(client_input) catch unreachable;
+    checker_request_queue.push_assume_capacity(client_input);
     std.log.scoped(.test_client).debug("client {} sending input={x}", .{
         client_index,
         client_input,

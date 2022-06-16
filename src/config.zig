@@ -1,3 +1,6 @@
+const std = @import("std");
+const assert = std.debug.assert;
+
 /// Whether development or production:
 pub const deployment_environment = .development;
 
@@ -86,24 +89,25 @@ pub const connections_max = replicas_max + clients_max;
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const message_size_max = 1 * 1024 * 1024;
 
-/// The number of full-sized messages allocated at initialization by the message bus.
-pub const message_bus_messages_max = connections_max * 4;
-/// The number of header-sized messages allocated at initialization by the message bus.
-/// These are much smaller/cheaper and we can therefore have many of them.
-pub const message_bus_headers_max = connections_max * connection_send_queue_max * 2;
-
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
 /// possibly be uncommitted during a view change, and this must be constant for all replicas.
-pub const pipelining_max = clients_max;
+pub const pipeline_max = clients_max;
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and jitter are applied within this range.
 pub const connection_delay_min_ms = 50;
 pub const connection_delay_max_ms = 1000;
 
-/// The maximum number of outgoing messages that may be queued on a connection.
-pub const connection_send_queue_max = pipelining_max;
+/// The maximum number of outgoing messages that may be queued on a replica connection.
+pub const connection_send_queue_max_replica = std.math.max(std.math.min(clients_max, 4), 2);
+
+/// The maximum number of outgoing messages that may be queued on a client connection.
+/// The client has one in-flight request, and occasionally a ping.
+pub const connection_send_queue_max_client = 2;
+
+/// The maximum number of outgoing requests that may be queued on a client (including the in-flight request).
+pub const client_request_queue_max = 32;
 
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
 /// If the backlog argument is greater than the value in `/proc/sys/net/core/somaxconn`, then it is
@@ -124,7 +128,8 @@ pub const tcp_rcvbuf = 4 * 1024 * 1024;
 /// This sets SO_SNDBUF as an alternative to the auto-tuning range in /proc/sys/net/ipv4/tcp_wmem.
 /// The value is limited by /proc/sys/net/core/wmem_max, unless the CAP_NET_ADMIN privilege exists.
 /// The kernel doubles this value to allow space for packet bookkeeping overhead.
-pub const tcp_sndbuf = 4 * 1024 * 1024;
+pub const tcp_sndbuf_replica = connection_send_queue_max_replica * message_size_max;
+pub const tcp_sndbuf_client = connection_send_queue_max_client * message_size_max;
 
 /// Whether to enable TCP keepalive:
 pub const tcp_keepalive = true;
@@ -288,11 +293,13 @@ pub const verify = true;
 // TODO Move these into a separate `config_valid.zig` which we import here:
 
 comptime {
-    const std = @import("std");
-
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
     _ = @as(u16, port);
+
+    // Avoid latency issues from setting sndbuf too high:
+    assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
+    assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.

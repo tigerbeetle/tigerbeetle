@@ -28,7 +28,7 @@ pub const Network = struct {
         message: *Message,
 
         pub fn deinit(packet: *const Packet, path: PacketSimulatorPath) void {
-            const source_bus = &packet.network.busses.items[path.source];
+            const source_bus = &packet.network.buses.items[path.source];
             source_bus.unref(packet.message);
         }
     };
@@ -43,7 +43,7 @@ pub const Network = struct {
     options: NetworkOptions,
     packet_simulator: PacketSimulator(Packet),
 
-    busses: std.ArrayListUnmanaged(MessageBus),
+    buses: std.ArrayListUnmanaged(MessageBus),
     processes: std.ArrayListUnmanaged(u128),
 
     pub fn init(
@@ -55,8 +55,8 @@ pub const Network = struct {
         const process_count = client_count + replica_count;
         assert(process_count <= std.math.maxInt(u8));
 
-        var busses = try std.ArrayListUnmanaged(MessageBus).initCapacity(allocator, process_count);
-        errdefer busses.deinit(allocator);
+        var buses = try std.ArrayListUnmanaged(MessageBus).initCapacity(allocator, process_count);
+        errdefer buses.deinit(allocator);
 
         var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
         errdefer processes.deinit(allocator);
@@ -71,18 +71,18 @@ pub const Network = struct {
             .allocator = allocator,
             .options = options,
             .packet_simulator = packet_simulator,
-            .busses = busses,
+            .buses = buses,
             .processes = processes,
         };
     }
 
     pub fn deinit(network: *Network) void {
-        // TODO: deinit the busses themselves when they gain a deinit()
-        network.busses.deinit(network.allocator);
+        // TODO: deinit the buses themselves when they gain a deinit()
+        network.buses.deinit(network.allocator);
         network.processes.deinit(network.allocator);
     }
 
-    /// Returns the address (index into Network.busses)
+    /// Returns the address (index into Network.buses)
     pub fn init_message_bus(network: *Network, cluster: u32, process: Process) !*MessageBus {
         const raw_process = switch (process) {
             .replica => |replica| replica,
@@ -97,9 +97,9 @@ pub const Network = struct {
         const bus = try MessageBus.init(network.allocator, cluster, process, network);
 
         network.processes.appendAssumeCapacity(raw_process);
-        network.busses.appendAssumeCapacity(bus);
+        network.buses.appendAssumeCapacity(bus);
 
-        return &network.busses.items[network.busses.items.len - 1];
+        return &network.buses.items[network.buses.items.len - 1];
     }
 
     pub fn send_message(network: *Network, message: *Message, path: Path) void {
@@ -131,18 +131,15 @@ pub const Network = struct {
     }
 
     pub fn get_message_bus(network: *Network, process: Process) *MessageBus {
-        return &network.busses.items[network.process_to_address(process)];
+        return &network.buses.items[network.process_to_address(process)];
     }
 
     fn deliver_message(packet: Packet, path: PacketSimulatorPath) void {
         const network = packet.network;
 
-        const target_bus = &network.busses.items[path.target];
+        const target_bus = &network.buses.items[path.target];
 
-        const message = target_bus.get_message() orelse {
-            log.debug("deliver_message: target message bus has no free messages, dropping", .{});
-            return;
-        };
+        const message = target_bus.get_message();
         defer target_bus.unref(message);
 
         std.mem.copy(u8, message.buffer, packet.message.buffer);

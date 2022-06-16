@@ -53,7 +53,7 @@ pub fn request(
 
     message_bus.set_on_message(*Client, &client, Client.on_message);
 
-    var message = client.get_message() orelse unreachable;
+    var message = client.get_message();
     defer client.unref(message);
 
     const body = std.mem.asBytes(&batch);

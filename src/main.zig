@@ -30,7 +30,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    switch (cli.parse_args(allocator)) {
+    switch (try cli.parse_args(allocator)) {
         .format => |args| try Command.format(allocator, args.cluster, args.replica, args.path),
         .start => |args| try Command.start(allocator, args.addresses, args.memory, args.path),
     }
@@ -47,7 +47,7 @@ const Command = struct {
     addresses: ?[]std.net.Address,
 
     pub fn format(allocator: mem.Allocator, cluster: u32, replica: u8, path: [:0]const u8) !void {
-        const fd = try Storage.open(path, data_file_size_min, true);
+        const fd = try open_file(path, true);
 
         var command: Command = undefined;
         try command.init(allocator, fd, null);
@@ -68,7 +68,7 @@ const Command = struct {
     ) !void {
         _ = memory; // TODO
 
-        const fd = try Storage.open(path, data_file_size_min, false);
+        const fd = try open_file(path, false);
 
         var command: Command = undefined;
         try command.init(allocator, fd, addresses);
@@ -79,6 +79,16 @@ const Command = struct {
         // After opening the superblock, we immediately start the main event loop and remain there.
         // If we were to arrive here, then the memory for the command is about to go out of scope.
         unreachable;
+    }
+
+    fn open_file(path: [:0]const u8, must_create: bool) !os.fd_t {
+        // TODO Resolve the parent directory properly in the presence of .. and symlinks.
+        // TODO Handle physical volumes where there is no directory to fsync.
+        const dirname = std.fs.path.dirname(path) orelse ".";
+        const dir_fd = try IO.open_dir(dirname);
+
+        const basename = std.fs.path.basename(path);
+        return IO.open_file(dir_fd, basename, data_file_size_min, must_create);
     }
 
     fn run(command: *Command) !void {
@@ -97,6 +107,7 @@ const Command = struct {
         const command = @fieldParentPtr(Command, "superblock_context", superblock_context);
         command.pending -= 1;
 
+        // TODO log an error and exit instead. This is reachable if we e.g. run out of memory.
         command.event_loop() catch unreachable;
     }
 

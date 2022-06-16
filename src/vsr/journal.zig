@@ -510,11 +510,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const physical_size = vsr.sector_ceil(exact.size);
             assert(physical_size >= exact.size);
 
-            const message = replica.message_bus.get_message() orelse {
-                self.read_prepare_log(op, checksum, "no message available");
-                callback(replica, null, null);
-                return;
-            };
+            const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
             // Skip the disk read if the header is all we need:
@@ -658,7 +654,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
             assert(offset < self.size_headers);
 
-            const message = replica.message_bus.get_message() orelse unreachable;
+            const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
             // We use the count of reads executing to know when both versions have finished reading:
