@@ -5,6 +5,7 @@ CWD=$(pwd)
 COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
+yarn
 yarn build
 
 cd ./src/tigerbeetle
@@ -30,13 +31,18 @@ function onerror {
 }
 trap onerror EXIT
 
-CLUSTER_ID="--cluster-id=0a5ca1ab1ebee11e"
-REPLICA_ADDRESSES="--replica-addresses=3001"
+CLUSTER_ID="0000000000"
+REPLICA_ADDRESSES="--addresses=3001"
+
+echo "Initiating database file..."
+mkdir -p benchmark
+rm -f ./benchmark/cluster_${CLUSTER_ID}_replica_*.tigerbeetle
+./tigerbeetle init --cluster=$CLUSTER_ID --replica=0 --directory=./benchmark
 
 for I in 0
 do
     echo "Starting replica $I..."
-    ./tigerbeetle $CLUSTER_ID $REPLICA_ADDRESSES --replica-index=$I > benchmark.log 2>&1 &
+    ./tigerbeetle start --cluster=$CLUSTER_ID $REPLICA_ADDRESSES --replica=$I --directory=./benchmark > benchmark.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:

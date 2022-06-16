@@ -13,3 +13,8 @@ tigerbeetle
 yarn-error.log
 zig/
 zig-cache/
+
+# TigerBeetle
+*.tigerbeetle
+benchmark.log
+/benchmark
