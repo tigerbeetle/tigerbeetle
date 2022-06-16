@@ -1649,11 +1649,18 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
+            const slot = self.slot_with_header(message.header).?;
+            if (!self.prepare_inhabited[slot.index] or
+                self.prepare_checksums[slot.index] != message.header.checksum)
+            {
+                self.write_prepare_debug(message.header, "entry changed then restored while writing headers");
+                self.write_prepare_release(write, null);
+                return;
+            }
+
             self.write_prepare_debug(message.header, "complete, marking clean");
             // TODO Snapshots
-            assert(self.has(message.header));
 
-            const slot = self.slot_with_header(message.header).?;
             self.dirty.clear(slot);
             self.faulty.clear(slot);
 
