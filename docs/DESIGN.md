@@ -112,32 +112,23 @@ Events are **immutable data structures** that **instantiate or mutate state data
         debit_account_id: 16 bytes (128-bit)
        credit_account_id: 16 bytes (128-bit)
                user_data: 16 bytes (128-bit) [optional, e.g. opaque third-party identifier to link this transfer (many-to-one) to an external entity]
-                reserved: 32 bytes (256-bit) [optional, e.g. a hashlock condition to validate against the preimage of the corresponding `commit-transfer` event]
-                 timeout:  8 bytes ( 64-bit) [required for two phase commit, a quantity of time, i.e. an offset in nanoseconds from timestamp]
-                    code:  4 bytes ( 32-bit) [optional, a chart of accounts code describing the reason for the transfer e.g. deposit, settlement]
-                   flags:  4 bytes ( 32-bit) [optional, to modify the usage of the reserved field, and for future feature expansion]
+                reserved: 16 bytes (128-bit) [reserved, for accounting policy primitives]
+              pending_id: 16 bytes (128-bit) [optional, required to post or void an existing but pending transfer]
+                 timeout:  8 bytes ( 64-bit) [optional, required only for a pending transfer, a quantity of time, i.e. an offset in nanoseconds from timestamp]
+                  ledger:  4 bytes ( 32-bit) [required, to enforce isolation by ensuring that all transfers are between accounts of the same ledger]
+                    code:  2 bytes ( 16-bit) [required, an opaque chart of accounts code describing the reason for the transfer e.g. deposit, settlement]
+                   flags:  2 bytes ( 16-bit) [optional, to modify the usage of the reserved field, and for future feature expansion]
                   amount:  8 bytes ( 64-bit) [required, an unsigned integer in the unit of value of the debit and credit accounts, which must be the same for both accounts]
                timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
 } = 128 bytes (2 CPU cache lines)
 ```
 
-**commit_transfer**: Commit a transfer between accounts (maps to a "fulfill"). A transfer can be accepted or rejected by toggling a bit in the `flags` field.
-
-```
-          commit_transfer {
-                      id: 16 bytes (128-bit)
-                reserved: 32 bytes (256-bit) [optional, e.g. a hashlock preimage to validate against the condition of the corresponding `create-transfer` event]
-                   flags:  8 bytes ( 64-bit) [optional, used to indicate transfer success/failure, whether or not this is dependent on another commit, and for future feature expansion]
-               timestamp:  8 bytes ( 64-bit) [reserved, assigned by the leader before journalling]
-} = 64 bytes (1 CPU cache line)
-```
-
 **create_account**: Create an account.
 
 * We use the terms `credit` and `debit` instead of "payable" or "receivable" since the meaning of a credit balance depends on whether the account is an asset or liability or equity, income or expense.
-* An `accepted` amount refers to an amount posted by a committed transfer.
-* A `reserved` amount refers to an inflight amount posted by a two-phace commit transfer only, where the commit is still outstanding, and where the transfer timeout has not yet fired. In other words, the transfer amount has been reserved in the account balance (to avoid double-spending) but not yet committed. The reserved amount will rollback if the transfer ultimately fails.
-* The total debit balance of an account is given by adding `debits_accepted` plus `debits_reserved`. Likewise for the total credit balance of an account.
+* A `posted` amount refers to an amount posted by a transfer.
+* A `pending` amount refers to an inflight amount yet-to-be-posted by a two-phase transfer only, where the transfer is still pending, and where the transfer timeout has not yet fired. In other words, the transfer amount has been reserved in the pending account balance (to avoid double-spending) but not yet posted to the posted balance. The reserved amount will rollback if the transfer ultimately fails. By default, transfers post automatically, but being able to reserve the amount as pending and then post the amount only later can sometimes be convenient, for example when switching credit card payments.
+* The debit balance of an account is given by adding `debits_posted` plus `debits_pending`. Likewise for the credit balance of an account.
 * The total balance of an account can be derived by subtracting the total credit balance from the total debit balance.
 * We keep both sides of the ledger (debit and credit) separate to avoid dealing with signed numbers, and to preserve more information about the nature of an account. For example, two accounts could have the same balance of 0, but one account could have 1,000,000 units on both sides of the ledger, whereas another account could have 1 unit on both sides, both balancing out to 0.
 * Once created, an account may be changed only through transfer events, to keep an immutable paper trail for auditing.
@@ -147,13 +138,13 @@ Events are **immutable data structures** that **instantiate or mutate state data
                       id: 16 bytes (128-bit)
                user_data: 16 bytes (128-bit) [optional, opaque third-party identifier to link this account (many-to-one) to an external entity]
                 reserved: 48 bytes (384-bit) [reserved for future accounting policy primitives]
-                    unit:  2 bytes ( 16-bit) [optional, opaque unit of value, e.g. a currency code, or even something exotic like gold bars]
-                    code:  2 bytes ( 16-bit) [optional, opaque chart of accounts code to describe the type of account, e.g. a clearing account]
-                   flags:  4 bytes ( 32-bit) [optional, net balance limits: e.g. debits_must_not_exceed_credits or credits_must_not_exceed_debits]
-         debits_reserved:  8 bytes ( 64-bit)
-         debits_accepted:  8 bytes ( 64-bit)
-        credits_reserved:  8 bytes ( 64-bit)
-        credits_accepted:  8 bytes ( 64-bit)
+                  ledger:  4 bytes ( 32-bit) [required, to enforce isolation by ensuring that all transfers are between accounts of the same ledger]
+                    code:  2 bytes ( 16-bit) [required, an opaque chart of accounts code describing the reason for the transfer e.g. deposit, settlement]
+                   flags:  4 bytes ( 16-bit) [optional, net balance limits: e.g. debits_must_not_exceed_credits or credits_must_not_exceed_debits]
+          debits_pending:  8 bytes ( 64-bit)
+           debits_posted:  8 bytes ( 64-bit)
+         credits_pending:  8 bytes ( 64-bit)
+          credits_posted:  8 bytes ( 64-bit)
                timestamp:  8 bytes ( 64-bit) [reserved]
 } = 128 bytes (2 CPU cache lines)
 ```
