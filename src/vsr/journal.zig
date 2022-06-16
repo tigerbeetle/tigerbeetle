@@ -314,14 +314,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        /// Asserts that headers are .reserved (zeroed) from `op_min` (inclusive).
-        pub fn assert_headers_reserved_from(self: *const Self, op_min: u64) void {
-            // TODO Snapshots
-            for (self.headers) |*header| {
-                assert(header.command == .reserved or header.op < op_min);
-            }
-        }
-
         /// Returns whether this is a fresh database WAL; no prepares (except the root) have ever
         /// been written. This determines whether a replica can transition immediately to normal
         /// status, or if it needs to run recovery protocol.
@@ -1402,44 +1394,31 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        /// A safe way of removing an entry, where the header must match the current entry.
-        fn remove_entry(self: *Self, header: *const Header) void {
-            const replica = @fieldParentPtr(Replica, "journal", self);
-            // Copy the header.op by value to avoid a reset() followed by undefined header.op usage:
-            const op = header.op;
-            const slot = self.slot_with_header(header).?;
-            log.debug("{}: remove_entry: op={} checksum={}", .{
-                self.replica,
-                op,
-                header.checksum,
-            });
-
-            assert(self.recovered);
-            assert(self.header_for_entry(header).?.checksum == header.checksum);
-            assert(self.headers[slot.index].checksum == header.checksum); // TODO Snapshots
-
-            defer self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
-            self.dirty.clear(slot);
-            self.faulty.clear(slot);
-        }
-
         /// Removes entries from `op_min` (inclusive) onwards.
         /// Used after a view change to remove uncommitted entries discarded by the new leader.
         pub fn remove_entries_from(self: *Self, op_min: u64) void {
+            const replica = @fieldParentPtr(Replica, "journal", self);
+
             assert(self.recovered);
-            // TODO Snapshots
-            // TODO Optimize to jump directly to op:
             assert(op_min > 0);
+
             log.debug("{}: remove_entries_from: op_min={}", .{ self.replica, op_min });
-            for (self.headers) |*header| {
-                if (header.op >= op_min and header.command == .prepare) {
-                    self.remove_entry(header);
+
+            for (self.headers) |*header, index| {
+                // We must remove the header regardless of whether it is a prepare or reserved,
+                // since a reserved header may have been marked faulty for case @G, and
+                // since the caller expects the WAL to be truncated, with clean slots.
+                if (header.op >= op_min) {
+                    // TODO Explore scenarios where the data on disk may resurface after a crash.
+                    const slot = self.slot_for_op(header.op);
+                    assert(slot.index == index);
+                    self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
+                    self.dirty.clear(slot);
+                    self.faulty.clear(slot);
+                    self.prepare_inhabited[slot.index] = false;
+                    self.prepare_checksums[slot.index] = 0;
                 }
             }
-            self.assert_headers_reserved_from(op_min);
-
-            // TODO At startup we need to handle removed entries that reappear.
-            // This is because we do not call `write_headers_between()` here.
         }
 
         pub fn set_header_as_dirty(self: *Self, header: *const Header) void {
