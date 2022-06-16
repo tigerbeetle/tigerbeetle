@@ -6,11 +6,9 @@ const config = @import("config.zig");
 const tb = @import("tigerbeetle.zig");
 const Account = tb.Account;
 const Transfer = tb.Transfer;
-const Commit = tb.Commit;
 
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
-const CommitTransfersResult = tb.CommitTransfersResult;
 
 const IO = @import("io.zig").IO;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
@@ -115,17 +113,6 @@ pub fn on_create_transfers(
     _ = operation;
 
     print_results(CreateTransfersResult, results);
-}
-
-pub fn on_commit_transfers(
-    user_data: u128,
-    operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
-) void {
-    _ = user_data;
-    _ = operation;
-
-    print_results(CommitTransfersResult, results);
 }
 
 fn print_results(comptime Results: type, results: Client.Error![]const u8) void {

@@ -12,11 +12,13 @@ pub fn main() !void {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .user_data = 0,
-            .reserved = [_]u8{0} ** 32,
+            .reserved = 0,
+            .pending_id = 0,
+            .ledger = 1,
             .timeout = std.time.ns_per_hour,
             .code = 0,
             .flags = .{
-                .two_phase_commit = true,
+                .pending = true, // Set this transfer to be two-phase.
             },
             .amount = 9000,
         },
@@ -25,11 +27,13 @@ pub fn main() !void {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .user_data = 0,
-            .reserved = [_]u8{0} ** 32,
+            .reserved = 0, //[_]u8{0} ** 32,
+            .pending_id = 0,
+            .ledger = 1,
             .timeout = std.time.ns_per_hour,
             .code = 0,
             .flags = .{
-                .two_phase_commit = true,
+                .pending = true, // Set this transfer to be two-phase.
                 .linked = true, // Link this transfer with the next transfer 1003.
             },
             .amount = 1,
@@ -39,11 +43,13 @@ pub fn main() !void {
             .debit_account_id = 1,
             .credit_account_id = 2,
             .user_data = 0,
-            .reserved = [_]u8{0} ** 32,
+            .reserved = 0,
+            .pending_id = 0,
+            .ledger = 1,
             .timeout = std.time.ns_per_hour,
             .code = 0,
             .flags = .{
-                .two_phase_commit = true,
+                .pending = true, // Set this transfer to be two-phase.
                 // The last transfer in a linked chain has .linked set to false to close the chain.
                 // This transfer will succeed or fail together with transfer 1002 above.
             },
