@@ -2514,7 +2514,8 @@ pub fn main() !void {
 
     const data_file_size_min = @import("superblock.zig").data_file_size_min;
 
-    const storage_fd = try Storage.open("test_tree", data_file_size_min, true);
+    const dir_fd = try IO.open_dir(".");
+    const storage_fd = try IO.open_file(dir_fd, "test_tree", data_file_size_min, true);
     defer std.fs.cwd().deleteFile("test_tree") catch {};
 
     var io = try IO.init(128, 0);

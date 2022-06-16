@@ -8,7 +8,9 @@ const os = std.os;
 
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
+const IO = @import("io.zig").IO;
 
+// TODO Document --memory
 const usage = fmt.comptimePrint(
     \\Usage:
     \\
@@ -77,20 +79,32 @@ pub const Command = union(enum) {
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args(allocator: std.mem.Allocator) Command {
+pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var path: ?[:0]const u8 = null;
     var cluster: ?[]const u8 = null;
     var replica: ?[]const u8 = null;
     var addresses: ?[]const u8 = null;
     var memory: ?[]const u8 = null;
 
-    var args = std.process.args();
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
 
-    // Skip argv[0] which is the name of this executable.
-    _ = args.nextPosix();
+    // Keep track of the args from the ArgIterator above that were allocated
+    // then free them all at the end of the scope.
+    var args_allocated = std.ArrayList([:0]const u8).init(allocator);
+    defer {
+        for (args_allocated.items) |arg| allocator.free(arg);
+        args_allocated.deinit();
+    }
 
-    const raw_command = args.nextPosix() orelse
-        fatal("no command provided, expected 'start' or 'format'", .{});
+    // Skip argv[0] which is the name of this executable
+    const did_skip = args.skip();
+    assert(did_skip);
+
+    const raw_command = try (args.next(allocator) orelse
+        fatal("no command provided, expected 'start' or 'format'", .{}));
+    defer allocator.free(raw_command);
+
     if (mem.eql(u8, raw_command, "-h") or mem.eql(u8, raw_command, "--help")) {
         std.io.getStdOut().writeAll(usage) catch os.exit(1);
         os.exit(0);
@@ -98,7 +112,10 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
     const command = meta.stringToEnum(meta.Tag(Command), raw_command) orelse
         fatal("unknown command '{s}', expected 'start' or 'format'", .{raw_command});
 
-    while (args.nextPosix()) |arg| {
+    while (args.next(allocator)) |parsed_arg| {
+        const arg = try parsed_arg;
+        try args_allocated.append(arg);
+
         if (mem.startsWith(u8, arg, "--cluster")) {
             cluster = parse_flag("--cluster", arg);
         } else if (mem.startsWith(u8, arg, "--replica")) {
@@ -124,7 +141,7 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
             if (addresses != null) fatal("--addresses: supported only by 'start' command", .{});
             if (memory != null) fatal("--memory: supported only by 'start' command", .{});
 
-            return .{
+            return Command{
                 .format = .{
                     .cluster = parse_cluster(cluster orelse fatal("required: --cluster", .{})),
                     .replica = parse_replica(replica orelse fatal("required: --replica", .{})),
@@ -136,7 +153,7 @@ pub fn parse_args(allocator: std.mem.Allocator) Command {
             if (cluster != null) fatal("--cluster: supported only by 'format' command", .{});
             if (replica != null) fatal("--replica: supported only by 'format' command", .{});
 
-            return .{
+            return Command{
                 .start = .{
                     .addresses = parse_addresses(
                         allocator,
@@ -193,7 +210,7 @@ fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []ne
         error.PortOverflow => fatal("--addresses: port exceeds 65535", .{}),
         error.PortInvalid => fatal("--addresses: invalid port", .{}),
         error.AddressInvalid => fatal("--addresses: invalid IPv4 address", .{}),
-        error.OutOfMemory => fatal("--addresses: out of memory", .{}),
+        error.OutOfMemory => fatal("out of memory", .{}),
     };
 }
 

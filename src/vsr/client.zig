@@ -7,7 +7,8 @@ const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const Message = @import("../message_pool.zig").MessagePool.Message;
+const message_pool = @import("../message_pool.zig");
+const Message = message_pool.MessagePool.Message;
 
 const log = std.log.scoped(.client);
 
@@ -66,8 +67,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
         /// A client is allowed at most one inflight request at a time at the protocol layer.
         /// We therefore queue any further concurrent requests made by the application layer.
-        /// We must leave one message free to receive with.
-        request_queue: RingBuffer(Request, config.message_bus_messages_max - 1, .array) = .{},
+        request_queue: RingBuffer(Request, config.client_request_queue_max, .array) = .{},
 
         /// The number of ticks without a reply before the client resends the inflight request.
         /// Dynamically adjusted as a function of recent request round-trip time.
@@ -188,25 +188,25 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 @tagName(operation),
             });
 
+            if (self.request_queue.full()) {
+                callback(user_data, operation, error.TooManyOutstandingRequests);
+                return;
+            }
+
             const was_empty = self.request_queue.empty();
 
-            self.request_queue.push(.{
+            self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
                 .callback = callback,
                 .message = message.ref(),
-            }) catch |err| switch (err) {
-                error.NoSpaceLeft => {
-                    callback(user_data, operation, error.TooManyOutstandingRequests);
-                    return;
-                },
-            };
+            });
 
             // If the queue was empty, then there is no request inflight and we must send this one:
             if (was_empty) self.send_request_for_the_first_time(message);
         }
 
         /// Acquires a message from the message bus if one is available.
-        pub fn get_message(self: *Self) ?*Message {
+        pub fn get_message(self: *Self) *Message {
             return self.message_bus.get_message();
         }
 
@@ -383,12 +383,12 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_message_from_header(self: *Self, header: Header) ?*Message {
+        fn create_message_from_header(self: *Self, header: Header) *Message {
             assert(header.client == self.id);
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
 
-            const message = self.message_bus.pool.get_header_only_message() orelse return null;
+            const message = self.message_bus.pool.get_message();
             defer self.message_bus.unref(message);
 
             message.header.* = header;
@@ -402,8 +402,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         fn register(self: *Self) void {
             if (self.request_number > 0) return;
 
-            var message = self.message_bus.get_message() orelse
-                @panic("register: no message available to register a session with the cluster");
+            const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
             // We will set parent, context, view and checksums only when sending for the first time:
@@ -422,37 +421,24 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
             assert(self.request_queue.empty());
 
-            self.request_queue.push(.{
+            self.request_queue.push_assume_capacity(.{
                 .user_data = 0,
                 .callback = undefined,
                 .message = message.ref(),
-            }) catch |err| switch (err) {
-                error.NoSpaceLeft => unreachable, // This is the first request.
-            };
+            });
 
             self.send_request_for_the_first_time(message);
         }
 
         fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
-            const message = self.create_message_from_header(header) orelse {
-                log.err("{}: no header-only message available, dropping message to replica {}", .{
-                    self.id,
-                    replica,
-                });
-                return;
-            };
+            const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
             self.send_message_to_replica(replica, message);
         }
 
         fn send_header_to_replicas(self: *Self, header: Header) void {
-            const message = self.create_message_from_header(header) orelse {
-                log.err("{}: no header-only message available, dropping message to replicas", .{
-                    self.id,
-                });
-                return;
-            };
+            const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
             var replica: u8 = 0;

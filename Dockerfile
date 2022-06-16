@@ -1,4 +1,4 @@
-FROM ubuntu:20.10 AS build
+FROM ubuntu:20.04 AS build
 
 RUN  apt-get update \
   && apt-get install -y wget xz-utils

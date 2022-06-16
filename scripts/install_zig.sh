@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-ZIG_RELEASE_DEFAULT="0.9.0"
+ZIG_RELEASE_DEFAULT="0.9.1"
 
 # Default to the release build, or allow the latest dev build, or an explicit release version:
 if [ -z "$1" ]; then
@@ -40,9 +40,9 @@ ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"
 
 # Determine the build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
 if command -v wget &> /dev/null; then
-    ZIG_URL=`wget --quiet -O - https://ziglang.org/download/index.json | grep "$ZIG_TARGET" | grep "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
+    ZIG_URL=`wget --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
 else
-    ZIG_URL=`curl --silent https://ziglang.org/download/index.json | grep "$ZIG_TARGET" | grep "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
+    ZIG_URL=`curl --silent https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
 fi
 
 # Ensure that the release is actually hosted on the ziglang.org website:

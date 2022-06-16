@@ -1,6 +1,7 @@
 const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
+const log = std.log.scoped(.io_benchmark);
 
 const Time = @import("../time.zig").Time;
 const IO = @import("../io.zig").IO;
@@ -14,7 +15,7 @@ const run_duration = 1 * std.time.ns_per_s;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator();
     defer {
         const leaks = gpa.deinit();
         assert(!leaks);
@@ -24,37 +25,34 @@ pub fn main() !void {
     defer allocator.free(buffer);
     std.mem.set(u8, buffer, 0);
 
-    var timer = Time{};
-    const started = timer.monotonic();
     var self = Context{
         .io = try IO.init(32, 0),
-        .timer = &timer,
-        .started = started,
-        .current = started,
         .tx = .{ .buffer = buffer[0 * buffer_size ..][0..buffer_size] },
         .rx = .{ .buffer = buffer[1 * buffer_size ..][0..buffer_size] },
     };
+    defer self.io.deinit();
 
+    var timer = Time{};
+    const started = timer.monotonic();
     defer {
-        self.io.deinit();
-        const elapsed_ns = self.current - started;
+        const elapsed_ns = timer.monotonic() - started;
         const transferred_mb = @intToFloat(f64, self.transferred) / 1024 / 1024;
 
-        std.debug.print("IO throughput test: took {}ms @ {d:.2} MB/s\n", .{
+        log.info("took {}ms @ {d:.2} MB/s\n", .{
             elapsed_ns / std.time.ns_per_ms,
             transferred_mb / (@intToFloat(f64, elapsed_ns) / std.time.ns_per_s),
         });
     }
 
     // Setup the server socket
-    self.server.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+    self.server.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
     defer os.closeSocket(self.server.fd);
 
     const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
     try os.setsockopt(
         self.server.fd,
-        os.SOL_SOCKET,
-        os.SO_REUSEADDR,
+        os.SOL.SOCKET,
+        os.SO.REUSEADDR,
         &std.mem.toBytes(@as(c_int, 1)),
     );
     try os.bind(self.server.fd, &address.any, address.getOsSockLen());
@@ -70,7 +68,7 @@ pub fn main() !void {
     );
 
     // Setup the client connection
-    self.tx.socket.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+    self.tx.socket.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
     defer os.closeSocket(self.tx.socket.fd);
 
     self.io.connect(
@@ -82,22 +80,14 @@ pub fn main() !void {
         address,
     );
 
-    // Run the IO loop, calling either tick() or run_for_ns() at "pseudo-random"
-    // to benchmark each io-driving execution path
-    var tick: usize = 0xdeadbeef;
-    while (self.is_running()) : (tick +%= 1) {
-        if (tick % 61 == 0) {
-            const timeout_ns = tick % (10 * std.time.ns_per_ms);
-            try self.io.run_for_ns(@intCast(u63, timeout_ns));
-        } else {
-            try self.io.tick();
-        }
-    }
+    // Run the IO loop for the duration of the benchmark
+    log.info("running for {}", .{std.fmt.fmtDuration(run_duration)});
+    try self.io.run_for_ns(run_duration);
 
     // Assert that everything is connected
-    assert(self.server.fd != -1);
-    assert(self.tx.socket.fd != -1);
-    assert(self.rx.socket.fd != -1);
+    assert(self.server.fd != IO.INVALID_SOCKET);
+    assert(self.tx.socket.fd != IO.INVALID_SOCKET);
+    assert(self.rx.socket.fd != IO.INVALID_SOCKET);
 
     // Close the accepted client socket.
     // The actual client socket + server socket are closed by defer
@@ -108,14 +98,11 @@ const Context = struct {
     io: IO,
     tx: Pipe,
     rx: Pipe,
-    timer: *Time,
-    started: u64,
-    current: u64,
     server: Socket = .{},
     transferred: u64 = 0,
 
     const Socket = struct {
-        fd: os.socket_t = -1,
+        fd: os.socket_t = IO.INVALID_SOCKET,
         completion: IO.Completion = undefined,
     };
     const Pipe = struct {
@@ -124,21 +111,12 @@ const Context = struct {
         transferred: usize = 0,
     };
 
-    fn is_running(self: Context) bool {
-        // Make sure that we're connected
-        if (self.rx.socket.fd == -1) return true;
-
-        // Make sure that we haven't run too long as configured
-        const elapsed = self.current - self.started;
-        return elapsed < run_duration;
-    }
-
     fn on_accept(
         self: *Context,
         completion: *IO.Completion,
         result: IO.AcceptError!os.socket_t,
     ) void {
-        assert(self.rx.socket.fd == -1);
+        assert(self.rx.socket.fd == IO.INVALID_SOCKET);
         assert(&self.server.completion == completion);
         self.rx.socket.fd = result catch |err| std.debug.panic("accept error {}", .{err});
 
@@ -152,7 +130,9 @@ const Context = struct {
         completion: *IO.Completion,
         result: IO.ConnectError!void,
     ) void {
-        assert(self.tx.socket.fd != -1);
+        _ = result catch unreachable;
+
+        assert(self.tx.socket.fd != IO.INVALID_SOCKET);
         assert(&self.tx.socket.completion == completion);
 
         // Start sending data to the server's accepted client
@@ -161,8 +141,8 @@ const Context = struct {
     }
 
     const TransferType = enum {
-        read = 0,
-        write = 1,
+        read,
+        write,
     };
 
     fn do_transfer(
@@ -187,11 +167,6 @@ const Context = struct {
 
         assert(bytes <= buffer_size);
         self.transferred += bytes;
-
-        // Check in with the benchmark timer to stop sending/receiving data
-        self.current = self.timer.monotonic();
-        if (!self.is_running())
-            return;
 
         // Select which connection (tx or rx) depending on the type of transfer
         const pipe = &@field(self, pipe_name);

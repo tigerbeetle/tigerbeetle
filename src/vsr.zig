@@ -15,6 +15,8 @@ pub const Client = @import("vsr/client.zig").Client;
 pub const Clock = @import("vsr/clock.zig").Clock;
 pub const Journal = @import("vsr/journal.zig").Journal;
 
+pub const ProcessType = enum { replica, client };
+
 /// Viewstamped Replication protocol commands:
 pub const Command = enum(u8) {
     reserved,

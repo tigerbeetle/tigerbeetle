@@ -1,6 +1,6 @@
 @echo off
 
-set ZIG_RELEASE_DEFAULT=0.9.0
+set ZIG_RELEASE_DEFAULT=0.9.1
 
 :: Determine the Zig build:
 if "%~1"=="" (
@@ -39,7 +39,7 @@ if "%ZIG_RELEASE%"=="builds" (
 )
 
 :: Using variable modifiers to determine the directory and filename from the URL:
-:: %~ni Expands %i to a file name only and %~xi Expands %i to a file name extension only.
+:: %%~ni Expands %%i to a file name only and %%~xi Expands %%i to a file name extension only.
 for /f %%i in ("%ZIG_URL%") do (
     set ZIG_DIRECTORY=%%~ni
     set ZIG_TARBALL=%%~nxi
