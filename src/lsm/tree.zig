@@ -117,11 +117,12 @@ pub fn TreeType(comptime Table: type) type {
         compaction_table_immutable: CompactionTableImmutable,
         compaction_table_immutable_status: CompactionTableStatus,
 
-        /// The number of Compaction instances is divided by two as at any given compaction tick,
-        /// we're only compacting either even or odd levels, but never both.
-        /// The first compaction level is from the immutable-table into level 0,
-        /// while the remaining compactions are from one level n into level (n + 1).
-        compaction_table: [@divFloor(config.lsm_levels, 2)]CompactionTableData,
+        /// The number of Compaction instances is divided by two as, at any given compaction tick,
+        /// we're only compacting either even or odd levels but never both.
+        /// Uses div_ceil over divFloor to account for odd lsm_levels 
+        /// (e.g. ceil(5/2) = 3 for levels 0,2,4 when even and 1,3 when odd).
+        /// This means, that for odd lsm_levels, the last CompactionTable is unused.
+        compaction_table: [div_ceil(config.lsm_levels, 2)]CompactionTableData,
 
         compaction_tick: u64,
         compaction_io_pending: usize,
@@ -168,7 +169,7 @@ pub fn TreeType(comptime Table: type) type {
             var compaction_table_immutable = try CompactionTableImmutable.init(allocator);
             errdefer compaction_table_immutable.deinit(allocator);
 
-            var compaction_table: [@divFloor(config.lsm_levels, 2)]CompactionTableData = undefined;
+            var compaction_table: [div_ceil(config.lsm_levels, 2)]CompactionTableData = undefined;
             for (compaction_table) |*compaction, i| {
                 errdefer for (compaction_table[0..i]) |*c| c.table.deinit(allocator);
                 compaction.* = .{ .table = try CompactionTable.init(allocator) };
@@ -358,14 +359,13 @@ pub fn TreeType(comptime Table: type) type {
             }
 
             for (tree.compaction_table) |*compaction, index| {
+                const level = @intCast(u8, (index * 2) + @boolToInt(odd_levels));
+                if (level >= @intCast(u8, tree.compaction_table.len)) break;
+
                 // Start the table compactions if it's the first beat or the third beat.
                 if (do_reset) {
                     assert(compaction.status == .idle);
                     compaction.status = .compacting;
-
-                    const level = @intCast(u8, (index * 2) + @boolToInt(odd_levels));
-                    assert(level < @intCast(u8, tree.compaction_table.len));
-
                     compaction.level = level;
                     compaction.tree = tree;
 
@@ -441,7 +441,7 @@ pub fn TreeType(comptime Table: type) type {
             // Tick the table compactions when they're still running.
             for (tree.compaction_table) |*compaction, index| {
                 const level = @intCast(u8, (index * 2) + @boolToInt(odd_levels));
-                assert(level < @intCast(u8, tree.compaction_table.len));
+                if (level >= @intCast(u8, tree.compaction_table.len)) break;
 
                 if (compaction.status == .compacting) {
                     assert(compaction.level == level);
@@ -472,7 +472,7 @@ pub fn TreeType(comptime Table: type) type {
             // Mark compactions that reported done in their callback as "completed" (done = null).
             for (tree.compaction_table) |*compaction, index| {
                 const level = @intCast(u8, (index * 2) + @boolToInt(odd_levels));
-                assert(level < @intCast(u8, tree.compaction_table.len));
+                if (level >= @intCast(u8, tree.compaction_table.len)) break;
 
                 assert(compaction.tree == tree);
                 assert(compaction.level == level);
@@ -488,7 +488,8 @@ pub fn TreeType(comptime Table: type) type {
             if (tree.compact_tick == half_measure) {
                 for (tree.compaction_table) |*compaction, index| {
                     const level = @intCast(u8, (index * 2) + @boolToInt(odd_levels));
-                    assert(level < @intCast(u8, tree.compaction_table.len));
+                    if (level >= @intCast(u8, tree.compaction_table.len)) break;
+
                     assert(compaction.level == level);
                     assert(compaction.status == .idle);
                 }
