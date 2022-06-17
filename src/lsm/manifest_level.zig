@@ -577,12 +577,12 @@ pub fn ManifestLevel(
             }
         }
 
-        pub const NonVisibleIterator = struct {
+        pub const InvisibleIterator = struct {
             level: *const Self,
             inner: Tables.Iterator,
             snapshots: []const u64,
 
-            pub fn next(it: *NonVisibleIterator) ?*const TableInfo {
+            pub fn next(it: *InvisibleIterator) ?*const TableInfo {
                 while (it.inner.next()) |table| {
                     if (!table.visible_by_any(it.snapshots)) {
                         return table;
@@ -597,10 +597,10 @@ pub fn ManifestLevel(
         /// or lsm.snapshot_latest.
         /// TODO extend this API to take a key range if this is needed anywhere other than when
         /// snapshots are released and the entire level must be iterated.
-        pub fn non_visible_iterator(
+        pub fn invisible_iterator(
             level: *const Self,
             snapshots: []const u64,
-        ) NonVisibleIterator {
+        ) InvisibleIterator {
             return .{
                 .level = level,
                 .inner = level.tables.iterator(0, 0, .ascending),
