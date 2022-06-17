@@ -239,7 +239,7 @@ pub const lsm_manifest_node_size = 16 * 1024;
 /// means that the transfer tree's mutable table will be sized to 8191 * 4 = 32764 transfers.
 /// TODO Assert this relative to lsm_table_size_max.
 /// We want to ensure that a mutable table can be converted to an immutable table without overflow.
-pub const lsm_mutable_table_batch_multiple = 4;
+pub const lsm_batch_multiple = 4;
 
 pub const lsm_snapshots_max = 32;
 

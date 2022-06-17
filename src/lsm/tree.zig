@@ -316,9 +316,9 @@ pub fn TreeType(comptime Table: type) type {
             if (!tree.table_mutable.dirty) return tree.compact_done();
 
             tree.compaction_tick += 1;
-            assert(tree.compaction_tick <= config.lsm_mutable_table_batch_multiple);
+            assert(tree.compaction_tick <= config.lsm_batch_multiple);
 
-            const half_measure = @divFloor(config.lsm_mutable_table_batch_multiple, 2);
+            const half_measure = @divFloor(config.lsm_batch_multiple, 2);
             const odd_levels = tree.compaction_tick > half_measure;
 
             const do_reset = tree.compaction_tick == (@boolToInt(odd_levels) * half_measure) + 1;
@@ -407,7 +407,7 @@ pub fn TreeType(comptime Table: type) type {
             assert(tree.compaction_callback != null);
             assert(tree.compaction_tick != 0);
 
-            const half_measure = @divFloor(config.lsm_mutable_table_batch_multiple, 2);
+            const half_measure = @divFloor(config.lsm_batch_multiple, 2);
             const odd_levels = tree.compaction_tick > half_measure;
 
             // Tick the immutable table compaction if it's still running.
@@ -435,7 +435,7 @@ pub fn TreeType(comptime Table: type) type {
             tree.compaction_callback = null;
             defer callback(tree);
 
-            const half_measure = @divFloor(config.lsm_mutable_table_batch_multiple, 2);
+            const half_measure = @divFloor(config.lsm_batch_multiple, 2);
             const odd_levels = tree.compaction_tick > half_measure;
 
             // Mark immutable compaction that reported done in their callback as "completed".
@@ -469,7 +469,7 @@ pub fn TreeType(comptime Table: type) type {
             // - reset tick to zero which indicates an entire measure is over.
             // - assert: all visible levels haven't overflowed their max.
             // - convert mutable table to immutable tables for next measure.
-            if (tree.compaction_tick == config.lsm_mutable_table_batch_multiple) {
+            if (tree.compaction_tick == config.lsm_batch_multiple) {
                 tree.compaction_tick = 0;
                 assert(!tree.manifest.visible_levels_overflowed());
 
@@ -679,7 +679,7 @@ pub fn main() !void {
         u8,
         16,
         // This must be the greatest commit_count_max and value_size across trees:
-        commit_count_max * config.lsm_mutable_table_batch_multiple * 128,
+        commit_count_max * config.lsm_batch_multiple * 128,
         .exact,
     );
     defer allocator.free(sort_buffer);
