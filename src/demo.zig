@@ -31,7 +31,7 @@ pub fn request(
 ) !void {
     const allocator = std.heap.page_allocator;
     const client_id = std.crypto.random.int(u128);
-    const cluster_id: u32 = 0;
+    const cluster_id: u32 = 1;
     var addresses = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
     var io = try IO.init(32, 0);
@@ -118,8 +118,8 @@ pub fn on_create_transfers(
 fn print_results(comptime Results: type, results: Client.Error![]const u8) void {
     const body = results catch unreachable;
     const slice = std.mem.bytesAsSlice(Results, body);
-    for (slice) |result| {
-        std.debug.print("{}\n", .{result});
+    for (slice) |result, i| {
+        std.debug.print("\n[{d}] RESULT: {}\n", .{i, result});
     }
-    if (slice.len == 0) std.debug.print("OK\n", .{});
+    if (slice.len == 0) std.debug.print("\nOK\n", .{});
 }

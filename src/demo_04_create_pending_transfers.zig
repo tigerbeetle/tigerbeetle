@@ -14,13 +14,13 @@ pub fn main() !void {
             .user_data = 0,
             .reserved = 0,
             .pending_id = 0,
-            .ledger = 1,
             .timeout = std.time.ns_per_hour,
-            .code = 0,
+            .ledger = 710,
+            .code = 1,
             .flags = .{
                 .pending = true, // Set this transfer to be two-phase.
             },
-            .amount = 9000,
+            .amount = 8000,
         },
         Transfer{
             .id = 1002,
@@ -29,14 +29,14 @@ pub fn main() !void {
             .user_data = 0,
             .reserved = 0, //[_]u8{0} ** 32,
             .pending_id = 0,
-            .ledger = 1,
             .timeout = std.time.ns_per_hour,
-            .code = 0,
+            .ledger = 710,
+            .code = 1,
             .flags = .{
                 .pending = true, // Set this transfer to be two-phase.
                 .linked = true, // Link this transfer with the next transfer 1003.
             },
-            .amount = 1,
+            .amount = 500,
         },
         Transfer{
             .id = 1003,
@@ -45,15 +45,15 @@ pub fn main() !void {
             .user_data = 0,
             .reserved = 0,
             .pending_id = 0,
-            .ledger = 1,
             .timeout = std.time.ns_per_hour,
-            .code = 0,
+            .ledger = 710,
+            .code = 1,
             .flags = .{
                 .pending = true, // Set this transfer to be two-phase.
                 // The last transfer in a linked chain has .linked set to false to close the chain.
                 // This transfer will succeed or fail together with transfer 1002 above.
             },
-            .amount = 1,
+            .amount = 500,
         },
     };
 
