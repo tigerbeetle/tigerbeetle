@@ -15,7 +15,7 @@
 
 ```bash
 git clone https://github.com/coilhq/tigerbeetle.git
-cd tigerbeetle
+cd tigerbeetle/
 ```
 
 ## Install Zig and build TigerBeetle
@@ -48,9 +48,9 @@ Let's turn up the log level some more (and your favorite album) so you can see e
 
 * Start a single replica cluster:
 Init:
-`./tigerbeetle init --cluster=0 --replica=0 --directory=.`
+`./tigerbeetle init --cluster=1 --replica=0 --directory=.`
 Run:
-`./tigerbeetle start --cluster=0 --replica=0 --addresses=3001 --directory=. &`
+`./tigerbeetle start --cluster=1 --replica=0 --addresses=3001 --directory=. &`
 
 ### Demo 1, 2: Create and lookup accounts
 
@@ -73,6 +73,7 @@ Let's create some simple double-entry accounting journal entries:
 
 ```bash
 zig/zig run src/demo_03_create_transfers.zig
+# Now lets look at both accounts and the transfers for those accounts:
 zig/zig run src/demo_02_lookup_accounts.zig
 zig/zig run src/demo_07_lookup_transfers.zig
 ```
@@ -98,6 +99,7 @@ Again, the second transfer is rejected because it was never created.
 
 ```bash
 zig/zig run src/demo_05_post_pending_transfers.zig
+# At this point, Account[1] has reached its credit limit (no more debit transfers allowed).
 zig/zig run src/demo_02_lookup_accounts.zig
 ```
 
