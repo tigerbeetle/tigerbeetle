@@ -125,9 +125,9 @@ pub fn CompactionType(
             compaction: *Compaction,
             grid: *Grid,
             manifest: *Manifest,
+            drop_tombstones: bool,
             iterator_a_context: IteratorA.Context,
             iterator_b_context: IteratorB.Context,
-            drop_tombstones: bool,
         ) void {
             compaction.ticks = 0;
             assert(compaction.io_pending == 0);
@@ -155,7 +155,7 @@ pub fn CompactionType(
         /// The caller must call:
         ///
         /// 1. tick_io() across all trees,
-        /// 2. io.submit() to submit these I/O operations to the kernel,
+        /// 2. IO.tick() to submit these I/O operations to the kernel,
         /// 3. tick_cpu() across all trees.
         pub fn tick_io(compaction: *Compaction, callback: Callback) void {
             assert(!compaction.merge_done);
