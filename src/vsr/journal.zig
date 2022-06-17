@@ -1422,8 +1422,21 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
                     self.dirty.clear(slot);
                     self.faulty.clear(slot);
-                    self.prepare_inhabited[slot.index] = false;
-                    self.prepare_checksums[slot.index] = 0;
+                    // Do not clear `prepare_inhabited`/`prepare_checksums`. The prepare is
+                    // untouched on disk, and may be useful later. Consider this scenario:
+                    //
+                    // 1. Op 4 is received; start writing it.
+                    // 2. Op 4's prepare is written (setting `prepare_checksums`), start writing
+                    //    the headers.
+                    // 3. View change. Op 4 is discarded by `remove_entries_from`.
+                    // 4. View change. Op 4 (the same one from before) is back, marked as dirty. But
+                    //    we don't start a write, because `journal.writing()` says it is already in
+                    //    progress.
+                    // 5. Op 4's header write finishes (`write_prepare_on_write_header`).
+                    //
+                    // If `remove_entries_from` cleared `prepare_checksums`,
+                    // `write_prepare_on_write_header` would clear `dirty`/`faulty` for a slot with
+                    // `prepare_inhabited=false`.
                 }
             }
         }
@@ -1656,18 +1669,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            const slot = self.slot_with_header(message.header).?;
-            if (!self.prepare_inhabited[slot.index] or
-                self.prepare_checksums[slot.index] != message.header.checksum)
-            {
-                self.write_prepare_debug(message.header, "entry changed then restored while writing headers");
-                self.write_prepare_release(write, null);
-                return;
-            }
-
             self.write_prepare_debug(message.header, "complete, marking clean");
             // TODO Snapshots
 
+            const slot = self.slot_with_header(message.header).?;
             self.dirty.clear(slot);
             self.faulty.clear(slot);
 
