@@ -491,7 +491,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         pub fn has_clean(self: *const Self, header: *const Header) bool {
             // TODO Snapshots
-            return self.has(header) and !self.dirty.bit(self.slot_with_header(header).?);
+            if (self.slot_with_op_and_checksum(header.op, header.checksum)) |slot| {
+                if (!self.dirty.bit(slot)) {
+                    assert(self.prepare_inhabited[slot.index]);
+                    assert(self.prepare_checksums[slot.index] == header.checksum);
+                    return true;
+                }
+            }
+            return false;
         }
 
         pub fn has_dirty(self: *const Self, header: *const Header) bool {
