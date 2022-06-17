@@ -318,7 +318,7 @@ pub fn TreeType(comptime Table: type) type {
             tree.compaction_tick += 1;
             assert(tree.compaction_tick <= config.lsm_batch_multiple);
 
-            const half_measure = @divFloor(config.lsm_batch_multiple, 2);
+            const half_measure = @divExact(config.lsm_batch_multiple, 2);
             const odd_levels = tree.compaction_tick > half_measure;
 
             const do_reset = tree.compaction_tick == (@boolToInt(odd_levels) * half_measure) + 1;
@@ -407,7 +407,7 @@ pub fn TreeType(comptime Table: type) type {
             assert(tree.compaction_callback != null);
             assert(tree.compaction_tick != 0);
 
-            const half_measure = @divFloor(config.lsm_batch_multiple, 2);
+            const half_measure = @divExact(config.lsm_batch_multiple, 2);
             const odd_levels = tree.compaction_tick > half_measure;
 
             // Tick the immutable table compaction if it's still running.
@@ -435,7 +435,7 @@ pub fn TreeType(comptime Table: type) type {
             tree.compaction_callback = null;
             defer callback(tree);
 
-            const half_measure = @divFloor(config.lsm_batch_multiple, 2);
+            const half_measure = @divExact(config.lsm_batch_multiple, 2);
             const odd_levels = tree.compaction_tick > half_measure;
 
             // Mark immutable compaction that reported done in their callback as "completed".
