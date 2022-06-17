@@ -219,27 +219,41 @@ pub const Cluster = struct {
         // are trying to crash).
         // TODO Remove this workaround when VSR recovery protocol is disabled.
         if (cluster.options.replica_count != 1) {
+            var parent: u128 = undefined;
             const cluster_op_max = op_max: {
-                var op_max: u64 = 0;
-                for (cluster.replicas) |other_replica| {
-                    op_max = std.math.max(op_max, other_replica.op);
+                var v: ?u32 = null;
+                var op_max: ?u64 = null;
+                for (cluster.replicas) |other_replica, i| {
+                    if (cluster.health[i] == .down) continue;
+                    if (other_replica.status == .recovering) continue;
+
+                    if (v == null or other_replica.view_normal > v.? or
+                        (other_replica.view_normal == v.? and other_replica.op > op_max.?))
+                    {
+                        v = other_replica.view_normal;
+                        op_max = other_replica.op;
+                        parent = other_replica.journal.header_with_op(op_max.?).?.checksum;
+                    }
                 }
-                break :op_max op_max;
+                break :op_max op_max.?;
             };
 
             // TODO This workaround doesn't handle log wrapping correctly.
             assert(cluster_op_max < config.journal_slot_count);
 
-            var op: u64 = 0;
-            while (op <= cluster_op_max) : (op += 1) {
+            var op: u64 = cluster_op_max + 1;
+            while (op > 0) {
+                op -= 1;
+
                 var cluster_op_known: bool = false;
                 for (cluster.replicas) |other_replica, i| {
-                    // Ignore replicas that are eligable to assist recovery.
+                    // Ignore replicas that are ineligable to assist recovery.
                     if (replica_index == i) continue;
                     if (cluster.health[i] == .down) continue;
                     if (other_replica.status == .recovering) continue;
 
-                    if (other_replica.journal.slot_with_op(op) != null) {
+                    if (other_replica.journal.header_with_op_and_checksum(op, parent)) |header| {
+                        parent = header.parent;
                         if (!other_replica.journal.dirty.bit(.{ .index = op })) {
                             // The op is recoverable if this replica crashes.
                             break;
@@ -255,6 +269,10 @@ pub const Cluster = struct {
                     }
                 }
             }
+
+            // We can't crash this replica because without it we won't be able to repair a broken
+            // hash chain.
+            if (parent != 0) return false;
         }
 
         cluster.health[replica_index] = .{ .down = cluster.options.health_options.crash_stability };
