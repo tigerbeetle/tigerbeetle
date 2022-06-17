@@ -6,6 +6,7 @@ journal
 main
 simulator
 tigerbeetle
+tigerbeetle.exe
 *_*.tigerbeetle
 zig/
 zig-cache/
