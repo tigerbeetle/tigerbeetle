@@ -25,10 +25,10 @@ pub fn TableMutableType(comptime Table: type) type {
         dirty: bool = false,
 
         pub fn init(allocator: mem.Allocator, commit_count_max: u32) !TableMutable {
-            comptime assert(config.lsm_mutable_table_batch_multiple > 0);
+            comptime assert(config.lsm_batch_multiple > 0);
             assert(commit_count_max > 0);
 
-            const value_count_max = commit_count_max * config.lsm_mutable_table_batch_multiple;
+            const value_count_max = commit_count_max * config.lsm_batch_multiple;
             const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
             assert(data_block_count <= Table.data_block_count_max);
 
