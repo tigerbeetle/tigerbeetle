@@ -60,7 +60,6 @@ pub fn TableMutableType(comptime Table: type) type {
         pub fn remove(table: *TableMutable, key: Key) void {
             table.values.putAssumeCapacity(tombstone_from_key(key), {});
             assert(table.values.count() <= table.value_count_max);
-            table.dirty = true;
         }
 
         pub fn can_commit_batch(table: *TableMutable, batch_count: u32) bool {
