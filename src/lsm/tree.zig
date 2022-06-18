@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 const os = std.os;
+const log = std.log.scoped(.lsm);
 
 const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
@@ -317,13 +318,19 @@ pub fn TreeType(comptime Table: type) type {
             // Make sure there's no pending compact_io() then register the callback.
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
-            tree.compaction_callback = callback;
 
             // Only tick compactions if the mutable table changed since the last compact_io().
-            if (!tree.table_mutable.dirty) return tree.compact_done();
+            if (!tree.table_mutable.dirty) return callback();
 
             tree.compaction_tick += 1;
             assert(tree.compaction_tick <= config.lsm_batch_multiple);
+
+            tree.compaction_callback = callback;
+            log.debug("{*}: compaction tick {}/{} started", .{
+                tree,
+                tree.compaction_tick,
+                config.lsm_batch_multiple,
+            });
 
             const half_measure = @divExact(config.lsm_batch_multiple, 2);
             const odd_levels = tree.compaction_tick > half_measure;
@@ -342,6 +349,7 @@ pub fn TreeType(comptime Table: type) type {
                     assert(tree.compaction_table_immutable_status == .idle);
                     tree.compaction_table_immutable_status = .compacting;
 
+                    log.debug("{*}: started compacting immutable table to level 0", .{tree});
                     tree.compaction_table_immutable.reset(
                         tree.grid,
                         &tree.manifest,
@@ -355,6 +363,7 @@ pub fn TreeType(comptime Table: type) type {
                 if (tree.compaction_table_immutable_status == .compacting) {
                     tree.compaction_io_pending += 1;
                     tree.compaction_table_immutable.tick_io(Tree.compact_immutable_table_io_done);
+                    log.debug("{*}: queued compaction for immutable table to level 0", .{tree});
                 }
             }
 
@@ -369,6 +378,7 @@ pub fn TreeType(comptime Table: type) type {
                     compaction.level = level;
                     compaction.tree = tree;
 
+                    log.debug("{*}: started compacting level {d} to level {d}", .{ tree, level, level + 1 });
                     compaction.table.reset(
                         tree.grid,
                         &tree.manifest,
@@ -382,6 +392,7 @@ pub fn TreeType(comptime Table: type) type {
                 if (compaction.status == .compacting) {
                     tree.compaction_io_pending += 1;
                     compaction.table.tick_io(Tree.compact_table_io_done);
+                    log.debug("{*}: queued compaction for level {d} to level {d}", .{ tree, level, level + 1 });
                 }
             }
         }
@@ -393,7 +404,12 @@ pub fn TreeType(comptime Table: type) type {
             assert(tree.compaction_tick != 0);
 
             assert(tree.compaction_table_immutable_status == .compacting);
-            if (done) tree.compaction_table_immutable_status = .done;
+            log.debug("{*}: resolved compaction from immutable table to level 0", .{tree});
+
+            if (done) {
+                tree.compaction_table_immutable_status = .done;
+                log.debug("{*}: finished immutable table to level 0", .{tree});
+            }
 
             tree.compact_io_done();
         }
@@ -405,7 +421,20 @@ pub fn TreeType(comptime Table: type) type {
             assert(compaction.tree.compaction_tick != 0);
 
             assert(compaction.status == .compacting);
-            if (done) compaction.status = .done;
+            log.debug("{*}: resolved compaction from level {d} to level {d}", .{
+                compaction.tree,
+                compaction.level,
+                compaction.level + 1,
+            });
+
+            if (done) {
+                compaction.status = .done;
+                log.debug("{*}: finished compacting level {d} to level {d}", .{
+                    compaction.tree,
+                    compaction.level,
+                    compaction.level + 1,
+                });
+            }
 
             compaction.tree.compact_io_done();
         }
@@ -495,6 +524,7 @@ pub fn TreeType(comptime Table: type) type {
                 }
 
                 tree.manifest.update_after_even_compaction();
+                log.debug("{*}: finished compacting even-numbered levels", .{tree});
             }
 
             // At end of fourth measure:
@@ -503,6 +533,8 @@ pub fn TreeType(comptime Table: type) type {
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_tick == config.lsm_batch_multiple) {
                 tree.compaction_tick = 0;
+                log.debug("{*}: finished compacting immutable table and odd-numbered levels", .{tree});
+
                 assert(!tree.manifest.visible_levels_overflowed());
                 assert(tree.table_mutable.can_commit_batch(tree.options.commit_count_max));
 
