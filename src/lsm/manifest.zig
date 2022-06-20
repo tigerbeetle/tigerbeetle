@@ -153,6 +153,48 @@ pub fn ManifestType(comptime Table: type) type {
             };
         }
 
+        pub const Range = struct {
+            table_count: u32,
+            key_min: Key,
+            key_max: Key,
+        };
+
+        pub fn overlap(manifest: *const Manifest, level: u8, key_min: Key, key_max: Key) Range {
+            assert(level < config.lsm_levels);
+            assert(compare_keys(key_min, key_max) != .gt);
+
+            var range: Range = null;
+
+            var it = manifest.levels[level].iterator(snapshot_latest, key_min, key_max, .ascending);
+            if (it.next()) |table| {
+                assert(table.visible(snapshot_latest));
+                assert(compare_keys(table.key_min, table.key_max) != .gt);
+                assert(compare_keys(table.key_max, key_min) != .lt);
+                assert(compare_keys(table.key_min, key_max) != .gt);
+
+                if (range) |*r| {
+                    assert(compare_keys(table.key_min, r.key_max) == .gt);
+
+                    r.table_count += 1;
+                    r.key_max = table.key_max;
+                } else {
+                    range = .{
+                        .table_count = 1,
+                        .key_min = table.key_min,
+                        .key_max = table.key_max,
+                    };
+                }
+            }
+
+            if (range) |r| {
+                assert(r.table_count > 0);
+                assert(compare_keys(r.key_min, r.key_max) != .gt);
+                assert(compare_keys(r.key_max, key_min) != .lt);
+                assert(compare_keys(r.key_min, key_max) != .gt);
+            }
+            return range;
+        }
+
         /// Returns a unique snapshot, incrementing the greatest snapshot value seen so far,
         /// whether this was for a TableInfo.snapshot_min/snapshot_max or registered snapshot.
         pub fn take_snapshot(manifest: *Manifest) u64 {
