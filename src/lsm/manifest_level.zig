@@ -582,7 +582,7 @@ pub fn ManifestLevel(
             inner: Tables.Iterator,
             snapshots: []const u64,
 
-            pub fn visible(it: *IteratorVisibility) ?*const TableInfo {
+            pub fn next_visible(it: *IteratorVisibility) ?*const TableInfo {
                 while (it.inner.next()) |table| {
                     if (table.visible(it.snapshots)) return table;
                 }
@@ -590,7 +590,7 @@ pub fn ManifestLevel(
                 return null;
             }
 
-            pub fn invisible(it: *IteratorVisibility) ?*const TableInfo {
+            pub fn next_invisible(it: *IteratorVisibility) ?*const TableInfo {
                 while (it.inner.next()) |table| {
                     if (table.invisible(it.snapshots)) return table;
                 }
