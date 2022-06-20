@@ -73,7 +73,7 @@ Let's create some simple double-entry accounting journal entries:
 
 ```bash
 zig/zig run src/demo_03_create_transfers.zig
-# Now lets look at both accounts and the transfers for those accounts:
+# Now let's look at both accounts and the transfers for those accounts:
 zig/zig run src/demo_02_lookup_accounts.zig
 zig/zig run src/demo_07_lookup_transfers.zig
 ```

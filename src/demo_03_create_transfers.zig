@@ -4,7 +4,7 @@ const demo = @import("demo.zig");
 const Transfer = tb.Transfer;
 
 pub fn main() !void {
-    const transfer = [_]Transfer{
+    const transfers = [_]Transfer{
         Transfer{
             .id = 1,
             .debit_account_id = 1,
@@ -20,5 +20,5 @@ pub fn main() !void {
         },
     };
 
-    try demo.request(.create_transfers, transfer, demo.on_create_transfers);
+    try demo.request(.create_transfers, transfers, demo.on_create_transfers);
 }

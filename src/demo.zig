@@ -118,8 +118,8 @@ pub fn on_create_transfers(
 fn print_results(comptime Results: type, results: Client.Error![]const u8) void {
     const body = results catch unreachable;
     const slice = std.mem.bytesAsSlice(Results, body);
-    for (slice) |result, i| {
-        std.debug.print("\n[{d}] RESULT: {}\n", .{i, result});
+    for (slice) |result| {
+        std.debug.print("{}\n", .{result});
     }
-    if (slice.len == 0) std.debug.print("\nOK\n", .{});
+    if (slice.len == 0) std.debug.print("OK\n", .{});
 }
