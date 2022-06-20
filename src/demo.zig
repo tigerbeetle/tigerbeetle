@@ -31,7 +31,7 @@ pub fn request(
 ) !void {
     const allocator = std.heap.page_allocator;
     const client_id = std.crypto.random.int(u128);
-    const cluster_id: u32 = 0;
+    const cluster_id: u32 = 1;
     var addresses = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
     var io = try IO.init(32, 0);
@@ -51,7 +51,7 @@ pub fn request(
 
     message_bus.set_on_message(*Client, &client, Client.on_message);
 
-    var message = client.get_message();
+    const message = client.get_message();
     defer client.unref(message);
 
     const body = std.mem.asBytes(&batch);
