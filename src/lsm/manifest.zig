@@ -154,11 +154,15 @@ pub fn ManifestType(comptime Table: type) type {
         }
 
         pub const Range = struct {
-            table_count: u32,
+            table_count: usize,
             key_min: Key,
             key_max: Key,
         };
 
+        /// Returns the smallest visible range in a level that overlaps the candidate key range.
+        /// Returns null if there are no visible overlapping tables in the level.
+        /// For example, for a table in level 2, count how many tables overlap in level 3, and
+        /// determine the span of their complete key range, which may be broader or narrower.
         pub fn overlap(manifest: *const Manifest, level: u8, key_min: Key, key_max: Key) ?Range {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
@@ -193,6 +197,17 @@ pub fn ManifestType(comptime Table: type) type {
                 assert(compare_keys(r.key_min, key_max) != .gt);
             }
             return range;
+        }
+
+        /// Returns whether a level contains any visible table that overlaps the key range.
+        /// For example, this is useful when determining whether to drop tombstones when compacting,
+        /// because if no subsequent level has any overlap, then the tombstone may be dropped.
+        pub fn overlap_any(manifest: *const Manifest, level: u8, key_min: Key, key_max: Key) bool {
+            assert(level < config.lsm_levels);
+            assert(compare_keys(key_min, key_max) != .gt);
+
+            var it = manifest.levels[level].iterator(snapshot_latest, key_min, key_max, .ascending);
+            return it.next() != null;
         }
 
         /// Returns a unique snapshot, incrementing the greatest snapshot value seen so far,
