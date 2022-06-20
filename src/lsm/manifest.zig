@@ -159,7 +159,7 @@ pub fn ManifestType(comptime Table: type) type {
             key_max: Key,
         };
 
-        pub fn overlap(manifest: *const Manifest, level: u8, key_min: Key, key_max: Key) Range {
+        pub fn overlap(manifest: *const Manifest, level: u8, key_min: Key, key_max: Key) ?Range {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
