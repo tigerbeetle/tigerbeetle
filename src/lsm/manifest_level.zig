@@ -294,7 +294,7 @@ pub fn ManifestLevel(
             {
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 while (it.next()) |table| : (absolute_index += 1) {
-                    if (!table.visible_by_any(snapshots)) {
+                    if (table.invisible(snapshots)) {
                         assert(table.eql(&tables[0]));
                         break;
                     }
@@ -308,7 +308,7 @@ pub fn ManifestLevel(
             outer: while (safety_counter < tables.len) : (safety_counter += 1) {
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 inner: while (it.next()) |table| : (absolute_index += 1) {
-                    if (!table.visible_by_any(snapshots)) {
+                    if (table.invisible(snapshots)) {
                         assert(table.eql(&tables[i]));
 
                         const table_key_max = table.key_max;
@@ -577,30 +577,31 @@ pub fn ManifestLevel(
             }
         }
 
-        pub const InvisibleIterator = struct {
+        pub const IteratorVisibility = struct {
             level: *const Self,
             inner: Tables.Iterator,
             snapshots: []const u64,
 
-            pub fn next(it: *InvisibleIterator) ?*const TableInfo {
+            pub fn visible(it: *IteratorVisibility) ?*const TableInfo {
                 while (it.inner.next()) |table| {
-                    if (!table.visible_by_any(it.snapshots)) {
-                        return table;
-                    }
+                    if (table.visible(it.snapshots)) return table;
+                }
+                assert(it.inner.done);
+                return null;
+            }
+
+            pub fn invisible(it: *IteratorVisibility) ?*const TableInfo {
+                while (it.inner.next()) |table| {
+                    if (table.invisible(it.snapshots)) return table;
                 }
                 assert(it.inner.done);
                 return null;
             }
         };
 
-        /// Returns an iterator yielding all tables not visible by any of the given snapshots
-        /// or lsm.snapshot_latest.
-        /// TODO extend this API to take a key range if this is needed anywhere other than when
-        /// snapshots are released and the entire level must be iterated.
-        pub fn invisible_iterator(
-            level: *const Self,
-            snapshots: []const u64,
-        ) InvisibleIterator {
+        /// Returns an iterator yielding all tables that are visible/invisible to the snapshots.
+        /// Does not guarantee any key order in the tables that are yielded as they may overlap.
+        pub fn iterator_visibility(level: *const Self, snapshots: []const u64) IteratorVisibility {
             return .{
                 .level = level,
                 .inner = level.tables.iterator(0, 0, .ascending),
@@ -663,11 +664,10 @@ pub fn TestContext(
                 return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
             }
 
-            pub fn visible_by_any(table: *const TableInfo, snapshots: []const u64) bool {
-                for (snapshots) |snapshot| {
-                    if (table.visible(snapshot)) return true;
-                }
-                return table.visible(lsm.snapshot_latest);
+            pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
+                if (table.visible(lsm.snapshot_latest)) return false;
+                for (snapshots) |snapshot| if (table.visible(snapshot)) return false;
+                return true;
             }
 
             pub fn eql(table: *const TableInfo, other: *const TableInfo) bool {
@@ -955,7 +955,7 @@ pub fn TestContext(
                 defer to_remove.deinit();
 
                 for (context.reference.items[index..][0..count]) |table| {
-                    if (!table.visible_by_any(context.snapshots.slice())) {
+                    if (table.invisible(context.snapshots.slice())) {
                         try to_remove.append(table);
                     }
                 }

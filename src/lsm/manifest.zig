@@ -50,18 +50,19 @@ pub fn ManifestType(comptime Table: type) type {
                 return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
             }
 
-            pub fn visible_by_any(table: *const TableInfo, snapshots: []const u64) bool {
-                for (snapshots) |snapshot| {
-                    if (table.visible(snapshot)) return true;
-                }
-                return table.visible(snapshot_latest);
+            pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
+                // Return early and do not iterate all snapshots if the table was never deleted:
+                if (table.visible(snapshot_latest)) return false;
+                for (snapshots) |snapshot| if (table.visible(snapshot)) return false;
+                assert(table.snapshot_max < math.maxInt(u64));
+                return true;
             }
 
             pub fn eql(table: *const TableInfo, other: *const TableInfo) bool {
-                // TODO since the layout of TableInfo is well defined, a direct memcmp might
-                // be faster here. However, it's not clear if we can make the assumption that
-                // compare_keys() will return .eq exactly when the memory of the keys are
-                // equal. Consider defining the API to allow this and check the generated code.
+                // TODO Since the layout of TableInfo is well defined, a direct memcmp may be faster
+                // here. However, it's not clear if we can make the assumption that compare_keys()
+                // will return .eq exactly when the memory of the keys are equal.
+                // Consider defining the API to allow this.
                 return table.checksum == other.checksum and
                     table.address == other.address and
                     table.flags == other.flags and
