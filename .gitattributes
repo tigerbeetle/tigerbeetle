@@ -1,1 +1,2 @@
 *.zig text=auto eol=lf
+*.bat text=auto eol=crlf
