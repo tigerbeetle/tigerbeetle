@@ -363,6 +363,10 @@ pub fn ManifestLevel(
             ));
         }
 
+        inline fn root_keys(level: Self) []Key {
+            return level.root_keys_array[0..level.keys.node_count];
+        }
+
         pub const Iterator = struct {
             level: *const Self,
             inner: Tables.Iterator,
@@ -571,31 +575,17 @@ pub fn ManifestLevel(
             }
         }
 
-        pub const IteratorVisibility = struct {
-            level: *const Self,
-            inner: Tables.Iterator,
-            snapshots: []const u64,
-
-            pub fn next_visible(it: *IteratorVisibility) ?*const TableInfo {
-                while (it.inner.next()) |table| {
-                    if (table.visible(it.snapshots)) return table;
-                }
-                assert(it.inner.done);
-                return null;
-            }
-
-            pub fn next_invisible(it: *IteratorVisibility) ?*const TableInfo {
-                while (it.inner.next()) |table| {
-                    if (table.invisible(it.snapshots)) return table;
-                }
-                assert(it.inner.done);
-                return null;
-            }
+        pub const Visibility = enum {
+            visible,
+            invisible,
         };
 
         /// Returns an iterator yielding all tables that are visible/invisible to the snapshots.
-        /// Does not guarantee any key order in the tables that are yielded as they may overlap.
-        pub fn iterator_visibility(level: *const Self, snapshots: []const u64) IteratorVisibility {
+        pub fn iterator_visibility(
+            level: *const Self,
+            comptime visibility: Visibility,
+            snapshots: []const u64,
+        ) IteratorVisibilityType(visibility) {
             return .{
                 .level = level,
                 .inner = level.tables.iterator(0, 0, .ascending),
@@ -603,8 +593,25 @@ pub fn ManifestLevel(
             };
         }
 
-        inline fn root_keys(level: Self) []Key {
-            return level.root_keys_array[0..level.keys.node_count];
+        fn IteratorVisibilityType(comptime visibility: Visibility) type {
+            return struct {
+                const IteratorVisibility = @This();
+
+                level: *const Self,
+                inner: Tables.Iterator,
+                snapshots: []const u64,
+
+                pub fn next(it: *IteratorVisibility) ?*const TableInfo {
+                    while (it.inner.next()) |table| {
+                        switch (visibility) {
+                            .visible => if (table.visible(it.snapshots)) return table,
+                            .invisible => if (table.invisible(it.snapshots)) return table,
+                        }
+                    }
+                    assert(it.inner.done);
+                    return null;
+                }
+            };
         }
     };
 }
