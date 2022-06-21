@@ -343,14 +343,14 @@ pub fn TreeType(comptime Table: type) type {
                 assert(tree.compaction_table_immutable_status == .idle);
             } else {
                 // Start immutable table compaction to level 0 on the third beat (start for odds).
-                if (do_reset) blk: {
+                if (do_reset) start_compaction: {
                     assert(tree.compaction_tick == half_measure + 1);
                     assert(tree.compaction_table_immutable_status == .idle);
                     assert(!tree.table_immutable.free);
 
                     // Also, only start it if the immutable table has any values to compact.
                     const num_values = tree.table_immutable.values.len;
-                    if (num_values == 0) break :blk;
+                    if (num_values == 0) break :start_compaction;
 
                     tree.compaction_table_immutable_status = .compacting;
                     log.debug("{*}: started compacting immutable table to level 0", .{tree});
@@ -358,7 +358,7 @@ pub fn TreeType(comptime Table: type) type {
                     const level: u8 = 0;
                     const key_min = key_from_value(tree.table_immutable.values[0]);
                     const key_max = key_from_value(tree.table_immutable.values[num_values - 1]);
-                    const drop_tombstones = tree.manifest.overlap(level, key_min, key_max) == null;  
+                    const drop_tombstones = tree.manifest.overlap(level, key_min, key_max) == null;
 
                     tree.compaction_table_immutable.reset(
                         tree.grid,
@@ -385,27 +385,54 @@ pub fn TreeType(comptime Table: type) type {
 
             for (tree.compaction_table) |*compaction, index| {
                 const level = @intCast(u8, (index * 2) + @boolToInt(!even_levels));
-                if (level >= @intCast(u8, tree.compaction_table.len)) break;
+                if (level >= config.lsm_levels) break;
+
+                const next_level = level + 1;
+                assert(next_level <= config.lsm_levels);
 
                 // Start the table compactions if it's the first beat or the third beat.
-                if (do_reset) {
+                if (do_reset) start_compaction: {
                     assert(compaction.status == .idle);
-                    compaction.status = .compacting;
                     compaction.level = level;
                     compaction.tree = tree;
 
+                    // Do not start a compaction on this level if there's no qualifying table.
+                    const table_info = tree.manifest.choose_table_for_compaction(level) orelse {
+                        break start_compaction;
+                    };
+
+                    compaction.status = .compacting;
                     log.debug("{*}: started compacting level {d} to level {d}", .{
                         tree,
                         level,
-                        level + 1,
+                        next_level,
                     });
+
+                    // The last table will always drop tombstone as they cant be moved lower.
+                    const drop_tombstones = (next_level == config.lsm_levels) or blk: {
+                        break :blk tree.manifest.overlap(
+                            next_level,
+                            table_info.key_min,
+                            table_info.key_max,
+                        ) == null;
+                    };
 
                     compaction.table.reset(
                         tree.grid,
                         &tree.manifest,
-                        tree.manifest.drop_tombstones_for(.{ .level = level }),
-                        tree.manifest.get_table_iterator_context_for(.{ .level = level }),
-                        tree.manifest.get_level_iterator_context_for(.{ .level = level }),
+                        drop_tombstones,
+                        .{
+                            .grid = tree.grid,
+                            .address = table_info.address,
+                            .checksum = table_info.checksum,
+                        },
+                        .{
+                            .level = level,
+                            .key_min = table_info.key_min,
+                            .key_max = table_info.key_max,
+                            .grid = tree.grid,
+                            .manifest = &tree.manifest,
+                        },
                     );
                 }
 
@@ -417,7 +444,7 @@ pub fn TreeType(comptime Table: type) type {
                     log.debug("{*}: queued compaction for level {d} to level {d}", .{
                         tree,
                         level,
-                        level + 1,
+                        next_level,
                     });
                 }
             }
@@ -498,7 +525,7 @@ pub fn TreeType(comptime Table: type) type {
             // Tick the table compactions when they're still running.
             for (tree.compaction_table) |*compaction, index| {
                 const level = @intCast(u8, (index * 2) + @boolToInt(!even_levels));
-                if (level >= @intCast(u8, tree.compaction_table.len)) break;
+                if (level >= config.lsm_levels) break;
 
                 if (compaction.status == .compacting) {
                     assert(compaction.level == level);
@@ -532,7 +559,7 @@ pub fn TreeType(comptime Table: type) type {
             // Mark compactions that reported done in their callback as "completed" (done = null).
             for (tree.compaction_table) |*compaction, index| {
                 const level = @intCast(u8, (index * 2) + @boolToInt(!even_levels));
-                if (level >= @intCast(u8, tree.compaction_table.len)) break;
+                if (level >= config.lsm_levels) break;
 
                 assert(compaction.tree == tree);
                 assert(compaction.level == level);
@@ -548,7 +575,7 @@ pub fn TreeType(comptime Table: type) type {
             if (tree.compact_tick == half_measure) {
                 for (tree.compaction_table) |*compaction, index| {
                     const level = @intCast(u8, (index * 2) + @boolToInt(!even_levels));
-                    if (level >= @intCast(u8, tree.compaction_table.len)) break;
+                    if (level >= config.lsm_levels) break;
 
                     assert(compaction.level == level);
                     assert(compaction.status == .idle);
