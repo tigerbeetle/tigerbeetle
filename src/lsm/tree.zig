@@ -319,9 +319,6 @@ pub fn TreeType(comptime Table: type) type {
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
 
-            // Only tick compactions if the mutable table changed since the last compact_io().
-            if (!tree.table_mutable.dirty) return callback();
-
             tree.compaction_tick += 1;
             assert(tree.compaction_tick <= config.lsm_batch_multiple);
 
@@ -379,7 +376,12 @@ pub fn TreeType(comptime Table: type) type {
                     compaction.level = level;
                     compaction.tree = tree;
 
-                    log.debug("{*}: started compacting level {d} to level {d}", .{ tree, level, level + 1 });
+                    log.debug("{*}: started compacting level {d} to level {d}", .{
+                        tree,
+                        level,
+                        level + 1,
+                    });
+
                     compaction.table.reset(
                         tree.grid,
                         &tree.manifest,
@@ -393,7 +395,12 @@ pub fn TreeType(comptime Table: type) type {
                 if (compaction.status == .compacting) {
                     tree.compaction_io_pending += 1;
                     compaction.table.tick_io(Tree.compact_table_io_done);
-                    log.debug("{*}: queued compaction for level {d} to level {d}", .{ tree, level, level + 1 });
+
+                    log.debug("{*}: queued compaction for level {d} to level {d}", .{
+                        tree,
+                        level,
+                        level + 1,
+                    });
                 }
             }
         }
@@ -417,7 +424,8 @@ pub fn TreeType(comptime Table: type) type {
 
         fn compact_table_io_done(table: *CompactionTable, done: bool) void {
             const compaction = @fieldParentPtr(CompactionTableData, "table", table);
-            assert(compaction.tree.compaction_io_pending <= compaction.tree.compaction_table.len + 1);
+            assert(compaction.tree.compaction_io_pending <=
+                compaction.tree.compaction_table.len + 1);
             assert(compaction.tree.compaction_callback != null);
             assert(compaction.tree.compaction_tick != 0);
 
@@ -529,7 +537,7 @@ pub fn TreeType(comptime Table: type) type {
                 }
 
                 tree.manifest.update_after_even_compaction();
-                log.debug("{*}: finished compacting even-numbered levels", .{tree});
+                log.debug("{*}: finished compacting even levels", .{tree});
             }
 
             // At end of fourth measure:
@@ -538,7 +546,7 @@ pub fn TreeType(comptime Table: type) type {
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_tick == config.lsm_batch_multiple) {
                 tree.compaction_tick = 0;
-                log.debug("{*}: finished compacting immutable table and odd-numbered levels", .{tree});
+                log.debug("{*}: finished compacting immutable table and odd levels", .{tree});
 
                 assert(!tree.manifest.visible_levels_overflowed());
                 assert(tree.table_mutable.can_commit_batch(tree.options.commit_count_max));
@@ -579,6 +587,16 @@ pub fn TreeType(comptime Table: type) type {
             // For example, if all unique operations require the same two dependencies.
             tree.prefetch_keys.putAssumeCapacity(key, {});
         }
+
+        // get rid of compact_io() skip check
+        // alloc 5 -> default:1, compact_snapshot:1+5=6
+        // prefetch uses default:1 -> commit (create_snapshot -> default:1) -> compact (default=2)
+        // prefetch uses default:2 -> commit (lookup_account -> default:2) -> compact (default=3)
+        // prefetch uses default:3 -> commit (create_snapshot -> default:3) -> compact (default=4)
+        //  -> (half measure): 
+        //      checkpoint super-block
+        //      set_snapshot_max(compact_snapshot:6)
+        //      alloc 5 -> default:7, compact_snapshot:7+5=12
 
         /// Ensure keys enqueued by `prefetch_enqueue()` are in the cache when the callback returns.
         pub fn prefetch(tree: *Tree, callback: fn () void) void {
