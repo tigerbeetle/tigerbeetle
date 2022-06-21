@@ -129,16 +129,27 @@ pub fn CompactionType(
             iterator_a_context: IteratorA.Context,
             iterator_b_context: IteratorB.Context,
         ) void {
-            compaction.ticks = 0;
             assert(compaction.io_pending == 0);
-
-            compaction.merge_done = false;
-            compaction.drop_tombstones = drop_tombstones;
             assert(compaction.callback == null);
 
-            compaction.grid = grid;
-            compaction.manifest = manifest;
-            compaction.merge_iterator = undefined;
+            compaction.* = .{
+                .manifest = manifest,
+                .grid = grid,
+
+                .iterator_a = compaction.iterator_a,
+                .iterator_b = compaction.iterator_b,
+
+                .merge_done = false,
+                .ticks = 0,
+                .drop_tombstones = drop_tombstones,
+
+                .merge_iterator = undefined,
+                .table_builder = compaction.table_builder,
+
+                .index = compaction.index,
+                .filter = compaction.filter,
+                .data = compaction.data,
+            };
 
             // TODO Reset iterators and builder.
             compaction.iterator_a.reset(iterator_a_context, iterator_a_read_done);
