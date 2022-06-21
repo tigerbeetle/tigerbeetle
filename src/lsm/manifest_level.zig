@@ -214,25 +214,21 @@ pub fn ManifestLevel(
             }
         }
 
-        /// Set snapshot_max to new_snapshot_max for the given tables in the ManifestLevel.
+        /// Set snapshot_max for the given tables in the ManifestLevel.
         /// The tables slice must be sorted by table min/max key.
         /// Asserts that the tables currently have snapshot_max of math.maxInt(u64).
         /// Asserts that all tables in the ManifestLevel in the key range tables[0].key_min
         /// to tables[tables.len - 1].key_max are present in the tables slice.
-        pub fn set_snapshot_max(
-            level: Self,
-            new_snapshot_max: u64,
-            tables: []const TableInfo,
-        ) void {
-            assert(new_snapshot_max <= lsm.snapshot_latest);
+        pub fn set_snapshot_max(level: *Self, snapshot: u64, tables: []const TableInfo) void {
+            assert(snapshot < lsm.snapshot_latest);
             assert(tables.len > 0);
 
-            if (config.verify and tables.len > 1) {
+            {
                 var a = tables[0];
                 assert(compare_keys(a.key_min, a.key_max) != .gt);
                 for (tables[1..]) |b| {
-                    assert(compare_keys(a.key_max, b.key_min) == .lt);
                     assert(compare_keys(b.key_min, b.key_max) != .gt);
+                    assert(compare_keys(a.key_max, b.key_min) == .lt);
                     a = b;
                 }
             }
@@ -249,13 +245,11 @@ pub fn ManifestLevel(
                 // to avoid duplicating the iterator code in order to expose only a const iterator
                 // in the public API.
                 const table = @intToPtr(*TableInfo, @ptrToInt(table_const));
-
                 assert(table.eql(&tables[i]));
 
                 assert(table.snapshot_max == math.maxInt(u64));
-                table.snapshot_max = new_snapshot_max;
+                table.snapshot_max = snapshot;
             }
-
             assert(i == tables.len);
         }
 
@@ -930,20 +924,17 @@ pub fn TestContext(
                 std.debug.print("\n", .{});
             }
 
-            const new_snapshot_max = context.take_snapshot();
+            const snapshot = context.take_snapshot();
 
-            context.level.set_snapshot_max(
-                new_snapshot_max,
-                context.reference.items[index..][0..count],
-            );
+            context.level.set_snapshot_max(snapshot, context.reference.items[index..][0..count]);
             for (context.reference.items[index..][0..count]) |*table| {
-                table.snapshot_max = new_snapshot_max;
+                table.snapshot_max = snapshot;
             }
             for (context.snapshot_tables.slice()) |tables| {
                 for (tables.items) |*table| {
                     for (context.reference.items[index..][0..count]) |modified| {
                         if (table.address == modified.address) {
-                            table.snapshot_max = new_snapshot_max;
+                            table.snapshot_max = snapshot;
                             assert(table.eql(&modified));
                         }
                     }
