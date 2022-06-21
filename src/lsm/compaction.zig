@@ -55,6 +55,7 @@ pub fn CompactionType(
         ticks: u32 = 0,
         io_pending: u32 = 0,
         drop_tombstones: bool = false,
+        snapshot_min: u64 = undefined,
         callback: ?Callback = null,
 
         /// Private:
@@ -126,6 +127,7 @@ pub fn CompactionType(
             grid: *Grid,
             manifest: *Manifest,
             drop_tombstones: bool,
+            snapshot_min: u64,
             iterator_a_context: IteratorA.Context,
             iterator_b_context: IteratorB.Context,
         ) void {
@@ -142,6 +144,7 @@ pub fn CompactionType(
                 .merge_done = false,
                 .ticks = 0,
                 .drop_tombstones = drop_tombstones,
+                .snapshot_min = snapshot_min,
 
                 .merge_iterator = undefined,
                 .table_builder = compaction.table_builder,
@@ -303,7 +306,7 @@ pub fn CompactionType(
                     assert(compaction.drop_tombstones);
                     assert(tombstones_dropped > 0);
                 } else {
-                    const snapshot_min = compaction.manifest.take_snapshot();
+                    const snapshot_min = compaction.snapshot_min;
                     const info = compaction.table_builder.index_block_finish(snapshot_min);
                     swap_buffers(&compaction.index, &compaction.table_builder.index_block);
                     assert(compaction.index.ready);
