@@ -27,7 +27,7 @@ pub const StateMachine = struct {
     pub const Operation = enum(u8) {
         /// Operations reserved by VR protocol (for all state machines):
         reserved,
-        init,
+        root,
         register,
 
         /// Operations exported by TigerBeetle:
@@ -61,9 +61,6 @@ pub const StateMachine = struct {
         var posted = HashMapPosted.init(allocator);
         errdefer posted.deinit();
         try posted.ensureTotalCapacity(@intCast(u32, transfers_pending_max));
-
-        // TODO After recovery, set prepare_timestamp max(wall clock, op timestamp).
-        // TODO After recovery, set commit_timestamp max(wall clock, commit timestamp).
 
         return StateMachine{
             .allocator = allocator,
@@ -101,32 +98,25 @@ pub const StateMachine = struct {
         };
     }
 
-    pub fn prepare(self: *StateMachine, realtime: i64, operation: Operation, input: []u8) void {
+    /// Returns the header's timestamp.
+    pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) u64 {
         switch (operation) {
-            .init => unreachable,
+            .root => unreachable,
             .register => {},
-            .create_accounts => self.prepare_timestamps(realtime, .create_accounts, input),
-            .create_transfers => self.prepare_timestamps(realtime, .create_transfers, input),
+            .create_accounts => self.prepare_timestamps(.create_accounts, input),
+            .create_transfers => self.prepare_timestamps(.create_transfers, input),
             .lookup_accounts => {},
             .lookup_transfers => {},
             else => unreachable,
         }
+        return self.prepare_timestamp;
     }
 
     fn prepare_timestamps(
         self: *StateMachine,
-        realtime: i64,
         comptime operation: Operation,
         input: []u8,
     ) void {
-        // Guard against the wall clock going backwards by taking the max with timestamps issued:
-        self.prepare_timestamp = math.max(
-            // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
-            // may be our first prepare as a recently elected leader:
-            math.max(self.prepare_timestamp, self.commit_timestamp) + 1,
-            @intCast(u64, realtime),
-        );
-        assert(self.prepare_timestamp > self.commit_timestamp);
         var sum_reserved_timestamps: usize = 0;
         var events = mem.bytesAsSlice(Event(operation), input);
         for (events) |*event| {
@@ -148,9 +138,8 @@ pub const StateMachine = struct {
         output: []u8,
     ) usize {
         _ = client;
-
         return switch (operation) {
-            .init => unreachable,
+            .root => unreachable,
             .register => 0,
             .create_accounts => self.execute(.create_accounts, input, output),
             .create_transfers => self.execute(.create_transfers, input, output),
@@ -1103,7 +1092,7 @@ test "linked accounts" {
     const output = try testing.allocator.alloc(u8, 4096);
     defer testing.allocator.free(output);
 
-    state_machine.prepare(0, .create_accounts, input);
+    _ = state_machine.prepare(.create_accounts, input);
     const size = state_machine.commit(0, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
@@ -1184,7 +1173,7 @@ test "create/lookup/rollback transfers" {
     const output = try testing.allocator.alloc(u8, 4096);
     defer testing.allocator.free(output);
 
-    state_machine.prepare(0, .create_accounts, input);
+    _ = state_machine.prepare(.create_accounts, input);
     const size = state_machine.commit(0, .create_accounts, input, output);
 
     const errors = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
@@ -1812,7 +1801,7 @@ test "create/lookup/rollback 2-phase transfers" {
     const accounts_output = try testing.allocator.alloc(u8, 4096);
     defer testing.allocator.free(accounts_output);
 
-    state_machine.prepare(0, .create_accounts, accounts_input);
+    const accounts_timestamp = state_machine.prepare(.create_accounts, accounts_input);
     {
         const size = state_machine.commit(0, .create_accounts, accounts_input, accounts_output);
         const errors = mem.bytesAsSlice(CreateAccountsResult, accounts_output[0..size]);
@@ -1828,7 +1817,8 @@ test "create/lookup/rollback 2-phase transfers" {
     const transfers_output = try testing.allocator.alloc(u8, 4096);
     defer testing.allocator.free(transfers_output);
 
-    state_machine.prepare(0, .create_transfers, transfers_input);
+    const transfers_timestamp = state_machine.prepare(.create_transfers, transfers_input);
+    try testing.expect(transfers_timestamp > accounts_timestamp);
     {
         const size = state_machine.commit(0, .create_transfers, transfers_input, transfers_output);
         const errors = mem.bytesAsSlice(CreateTransfersResult, transfers_output[0..size]);

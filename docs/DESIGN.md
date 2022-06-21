@@ -238,7 +238,7 @@ The current TCP wire protocol is:
 HEADER (128 bytes)
 16 bytes CHECKSUM (of remaining HEADER)
 16 bytes CHECKSUM BODY
-[...see src/vr.zig for the rest of the Header definition...]
+[...see src/vsr.zig for the rest of the Header definition...]
 DATA (multiples of 64 bytes)
 ................................................................................
 ................................................................................

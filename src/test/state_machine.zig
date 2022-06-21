@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 
 const log = std.log.scoped(.state_machine);
 
@@ -6,13 +7,15 @@ pub const StateMachine = struct {
     pub const Operation = enum(u8) {
         /// Operations reserved by VR protocol (for all state machines):
         reserved,
-        init,
+        root,
         register,
 
         hash,
     };
 
     state: u128,
+    prepare_timestamp: u64 = 0,
+    commit_timestamp: u64 = 0,
 
     pub fn init(seed: u64) StateMachine {
         return .{ .state = hash(0, std.mem.asBytes(&seed)) };
@@ -20,15 +23,13 @@ pub const StateMachine = struct {
 
     pub fn prepare(
         state_machine: *StateMachine,
-        realtime: i64,
         operation: Operation,
         input: []u8,
-    ) void {
-        _ = state_machine;
-        _ = realtime;
+    ) u64 {
         _ = operation;
         _ = input;
-        // TODO: use realtime in some way to test the system
+
+        return state_machine.prepare_timestamp;
     }
 
     pub fn commit(
@@ -39,7 +40,7 @@ pub const StateMachine = struct {
         output: []u8,
     ) usize {
         switch (operation) {
-            .reserved, .init => unreachable,
+            .reserved, .root => unreachable,
             .register => return 0,
 
             // TODO: instead of always using the first 32 bytes of the output

@@ -86,6 +86,8 @@ pub const Storage = struct {
 
     memory: []align(config.sector_size) u8,
     size: u64,
+    /// Set bits correspond to faulty sectors. The underlying sectors of `memory` is left clean.
+    faults: std.DynamicBitSetUnmanaged,
 
     options: Options,
     replica_index: u8,
@@ -93,8 +95,11 @@ pub const Storage = struct {
 
     // We can't allow storage faults for the same message in a majority of
     // the replicas as that would make recovery impossible. Instead, we only
-    // allow faults in certian areas which differ between replicas.
+    // allow faults in certain areas which differ between replicas.
     faulty_areas: FaultyAreas,
+    /// Whether to enable faults (when false, this supersedes `faulty_areas`).
+    /// This is used to disable faults during the replica's first startup.
+    faulty: bool = true,
 
     reads: std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
     writes: std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
@@ -116,6 +121,12 @@ pub const Storage = struct {
         // TODO: random data
         mem.set(u8, memory, 0);
 
+        var faults = try std.DynamicBitSetUnmanaged.initEmpty(
+            allocator,
+            @divExact(size, config.sector_size),
+        );
+        errdefer faults.deinit(allocator);
+
         var reads = std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than).init(allocator, {});
         errdefer reads.deinit();
         try reads.ensureTotalCapacity(config.io_depth_read);
@@ -127,6 +138,7 @@ pub const Storage = struct {
         return Storage{
             .memory = memory,
             .size = size,
+            .faults = faults,
             .options = options,
             .replica_index = replica_index,
             .prng = std.rand.DefaultPrng.init(options.seed),
@@ -138,12 +150,18 @@ pub const Storage = struct {
 
     /// Cancel any currently in progress reads/writes but leave the stored data untouched.
     pub fn reset(storage: *Storage) void {
+        while (storage.writes.peek()) |write| {
+            _ = storage.writes.remove();
+            storage.fault_sectors(write.offset, write.buffer.len);
+        }
+
         storage.reads.len = 0;
-        storage.writes.len = 0;
+        assert(storage.writes.len == 0);
     }
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
         allocator.free(storage.memory);
+        storage.faults.deinit(allocator);
         storage.reads.deinit();
         storage.writes.deinit();
     }
@@ -185,24 +203,25 @@ pub const Storage = struct {
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
-        const faulty = storage.faulty_sectors(read.offset, read.buffer.len);
-        if (faulty.len > 0 and storage.x_in_100(storage.options.read_fault_probability)) {
-            // Randomly corrupt one of the faulty sectors the read targeted
-            // TODO: inject more realistic and varied storage faults as described above.
-            const sector_count = @divExact(faulty.len, config.sector_size);
-            const faulty_sector = storage.prng.random().uintLessThan(u64, sector_count);
-            const faulty_sector_offset = faulty_sector * config.sector_size;
-            const faulty_sector_bytes = faulty[faulty_sector_offset..][0..config.sector_size];
+        mem.copy(u8, read.buffer, storage.memory[read.offset..][0..read.buffer.len]);
 
-            log.info("corrupting sector at offset {} during read by replica {}", .{
-                faulty_sector_offset,
-                storage.replica_index,
-            });
-
-            storage.prng.random().bytes(faulty_sector_bytes);
+        if (storage.x_in_100(storage.options.read_fault_probability)) {
+            storage.fault_sectors(read.offset, read.buffer.len);
         }
 
-        mem.copy(u8, read.buffer, storage.memory[read.offset..][0..read.buffer.len]);
+        if (storage.faulty) {
+            // Corrupt faulty sectors.
+            const sector_min = @divExact(read.offset, config.sector_size);
+            var sector: usize = 0;
+            while (sector < @divExact(read.buffer.len, config.sector_size)) : (sector += 1) {
+                if (storage.faults.isSet(sector_min + sector)) {
+                    const faulty_sector_offset = sector * config.sector_size;
+                    const faulty_sector_bytes = read.buffer[faulty_sector_offset..][0..config.sector_size];
+                    storage.prng.random().bytes(faulty_sector_bytes);
+                }
+            }
+        }
+
         read.callback(read);
     }
 
@@ -214,6 +233,13 @@ pub const Storage = struct {
         offset: u64,
     ) void {
         storage.assert_bounds_and_alignment(buffer, offset);
+
+        // Verify that there are no concurrent overlapping writes.
+        var iterator = storage.writes.iterator();
+        while (iterator.next()) |other| {
+            assert(offset + buffer.len <= other.offset or
+                other.offset + other.buffer.len <= offset);
+        }
 
         write.* = .{
             .callback = callback,
@@ -229,27 +255,20 @@ pub const Storage = struct {
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
         mem.copy(u8, storage.memory[write.offset..][0..write.buffer.len], write.buffer);
 
-        const faulty = storage.faulty_sectors(write.offset, write.buffer.len);
-        if (faulty.len > 0 and storage.x_in_100(storage.options.write_fault_probability)) {
-            // Randomly corrupt one of the faulty sectors the write targeted
-            // TODO: inject more realistic and varied storage faults as described above.
-            const sector_count = @divExact(faulty.len, config.sector_size);
-            const faulty_sector = storage.prng.random().uintLessThan(u64, sector_count);
-            const faulty_sector_offset = faulty_sector * config.sector_size;
-            const faulty_sector_bytes = faulty[faulty_sector_offset..][0..config.sector_size];
-
-            log.info("corrupting sector at offset {} during write by replica {}", .{
-                faulty_sector_offset,
-                storage.replica_index,
-            });
-
-            storage.prng.random().bytes(faulty_sector_bytes);
+        {
+            const sector_min = @divExact(write.offset, config.sector_size);
+            const sector_max = @divExact(write.offset + write.buffer.len, config.sector_size);
+            var sector: usize = sector_min;
+            while (sector < sector_max) : (sector += 1) storage.faults.unset(sector);
         }
 
+        if (storage.x_in_100(storage.options.write_fault_probability)) {
+            storage.fault_sectors(write.offset, write.buffer.len);
+        }
         write.callback(write);
     }
 
-    fn assert_bounds_and_alignment(storage: *Storage, buffer: []const u8, offset: u64) void {
+    fn assert_bounds_and_alignment(storage: *const Storage, buffer: []const u8, offset: u64) void {
         assert(buffer.len > 0);
         assert(offset + buffer.len <= storage.size);
 
@@ -276,6 +295,10 @@ pub const Storage = struct {
     fn x_in_100(storage: *Storage, x: u8) bool {
         assert(x <= 100);
         return x > storage.prng.random().uintLessThan(u8, 100);
+    }
+
+    fn random_uint_between(storage: *Storage, comptime T: type, min: T, max: T) T {
+        return min + storage.prng.random().uintLessThan(T, max - min);
     }
 
     /// The return value is a slice into the provided out array.
@@ -355,13 +378,34 @@ pub const Storage = struct {
             else => unreachable,
         }
 
+        {
+            // Allow at most `f` faulty replicas to ensure the view change can succeed.
+            // TODO Allow more than `f` faulty replicas when the fault is to the right of the
+            // highest known replica.op (and to the left of the last checkpointed op).
+            const majority = @divFloor(replica_count, 2) + 1;
+            const quorum_replication = std.math.min(config.quorum_replication_max, majority);
+            const quorum_view_change = std.math.max(
+                replica_count - quorum_replication + 1,
+                majority,
+            );
+            var i: usize = quorum_view_change;
+            while (i < replica_count) : (i += 1) {
+                out[i].first_offset = size;
+            }
+        }
+
         prng.shuffle(FaultyAreas, out[0..replica_count]);
         return out[0..replica_count];
     }
 
-    /// Given an offest and size of a read/write, returns a slice into storage.memory of any
-    /// faulty sectors touched by the read/write
-    fn faulty_sectors(storage: *Storage, offset: u64, size: u64) []align(config.sector_size) u8 {
+    const SectorRange = struct {
+        min: usize, // inclusive sector index
+        max: usize, // exclusive sector index
+    };
+
+    /// Given an offset and size of a read/write, returns the range of any faulty sectors touched
+    /// by the read/write.
+    fn faulty_sectors(storage: *const Storage, offset: u64, size: u64) ?SectorRange {
         assert(size <= config.message_size_max);
         const message_size_max = config.message_size_max;
         const period = storage.faulty_areas.period;
@@ -371,9 +415,24 @@ pub const Storage = struct {
         const start = std.math.max(offset, faulty_offset);
         const end = std.math.min(offset + size, faulty_offset + message_size_max);
 
-        // The read/write does not touch any faulty sectors
-        if (start >= end) return &[0]u8{};
+        // The read/write does not touch any faulty sectors.
+        if (start >= end) return null;
 
-        return storage.memory[start..end];
+        return SectorRange{
+            .min = @divExact(start, config.sector_size),
+            .max = @divExact(end, config.sector_size),
+        };
+    }
+
+    fn fault_sectors(storage: *Storage, offset: u64, size: u64) void {
+        const faulty = storage.faulty_sectors(offset, size) orelse return;
+        // Randomly corrupt one of the faulty sectors the operation targeted.
+        // TODO: inject more realistic and varied storage faults as described above.
+        const faulty_sector = storage.random_uint_between(usize, faulty.min, faulty.max);
+        log.info("corrupting sector {} by replica {}", .{
+            faulty_sector,
+            storage.replica_index,
+        });
+        storage.faults.set(faulty_sector);
     }
 };

@@ -57,24 +57,22 @@ pub const transfers_max = switch (deployment_environment) {
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const transfers_pending_max = transfers_max;
 
+/// The maximum number of batch entries in the journal file:
+/// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
+/// We need this limit to allocate space for copies of batch headers at the start of the journal.
+/// These header copies enable us to disentangle corruption from crashes and recover accordingly.
+pub const journal_slot_count = switch (deployment_environment) {
+    .production => 1024,
+    else => 128,
+};
+
 /// The maximum size of the journal file:
 /// This is pre-allocated and zeroed for performance when initialized.
 /// Writes within this file never extend the filesystem inode size reducing the cost of fdatasync().
 /// This enables static allocation of disk space so that appends cannot fail with ENOSPC.
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
-pub const journal_size_max = switch (deployment_environment) {
-    .production => 128 * 1024 * 1024 * 1024,
-    else => 128 * 1024 * 1024,
-};
-
-/// The maximum number of batch entries in the journal file:
-/// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
-/// We need this limit to allocate space for copies of batch headers at the start of the journal.
-/// These header copies enable us to disentangle corruption from crashes and recover accordingly.
-pub const journal_headers_max = switch (deployment_environment) {
-    .production => 1024 * 1024,
-    else => 16384,
-};
+// TODO remove this; just allocate a part of the total storage for the journal
+pub const journal_size_max = journal_slot_count * (128 + message_size_max);
 
 /// The maximum number of connections that can be held open by the server at any time:
 pub const connections_max = replicas_max + clients_max;
@@ -224,6 +222,10 @@ pub const clock_synchronization_window_min_ms = 2000;
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = 20000;
 
+// TODO Move these to a separate "internal computed constants" file.
+pub const journal_size_headers = journal_slot_count * 128; // 128 == @sizeOf(Header)
+pub const journal_size_prepares = journal_slot_count * message_size_max;
+
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
@@ -232,4 +234,6 @@ comptime {
     // Avoid latency issues from setting sndbuf too high:
     assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
     assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
+
+    assert(journal_size_max == journal_size_headers + journal_size_prepares);
 }
