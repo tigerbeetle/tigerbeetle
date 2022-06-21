@@ -220,8 +220,8 @@ pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size
 // TODO Document and tune these LSM options:
 pub const lsm_trees = 30;
 
-/// Number of levels in an LSM tree.
-pub const lsm_levels = 8;
+/// The number of levels in an LSM tree.
+pub const lsm_levels = 7;
 
 pub const lsm_growth_factor = 8;
 
