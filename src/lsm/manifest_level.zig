@@ -43,6 +43,10 @@ pub fn ManifestLevel(
         keys: Keys,
         tables: Tables,
 
+        /// The number of tables visible to snapshot_latest.
+        /// Used to enforce table_count_max_for_level().
+        table_count_visible: u32 = 0,
+
         pub fn init(allocator: mem.Allocator) !Self {
             var root_keys_array = try allocator.create([Keys.node_count_max]Key);
             errdefer allocator.destroy(root_keys_array);
@@ -71,26 +75,26 @@ pub fn ManifestLevel(
             level.tables.deinit(allocator, node_pool);
         }
 
-        /// Insert a batch of tables into the tables segmented array then update the metadata/indexes.
+        /// Inserts an ordered batch of tables into the level, then rebuilds the indexes.
         pub fn insert_tables(level: *Self, node_pool: *NodePool, tables: []const TableInfo) void {
             assert(tables.len > 0);
             assert(level.keys.len() == level.tables.len());
 
-            if (config.verify and tables.len > 1) {
+            {
                 var a = tables[0];
                 assert(compare_keys(a.key_min, a.key_max) != .gt);
                 for (tables[1..]) |b| {
-                    assert(compare_keys(a.key_max, b.key_min) == .lt);
                     assert(compare_keys(b.key_min, b.key_max) != .gt);
+                    assert(compare_keys(a.key_max, b.key_min) == .lt);
                     a = b;
                 }
             }
 
-            // TODO: insert multiple elements at once into the segmented arrays if possible as an
-            // optimization. We can't always do this because we must maintain sorted order and
-            // there may be duplicate keys due to snapshots.
+            // Inserting multiple tables all at once is tricky due to duplicate keys via snapshots.
+            // We therefore insert tables one by one, and then rebuild the indexes.
 
             var absolute_index = level.absolute_index_for_insert(tables[0].key_max);
+
             var i: usize = 0;
             while (i < tables.len) : (i += 1) {
                 const table = &tables[i];
@@ -106,6 +110,8 @@ pub fn ManifestLevel(
 
                 level.keys.insert_elements(node_pool, absolute_index, &[_]Key{table.key_max});
                 level.tables.insert_elements(node_pool, absolute_index, tables[i..][0..1]);
+
+                if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;
             }
 
             assert(level.keys.len() == level.tables.len());
@@ -222,6 +228,7 @@ pub fn ManifestLevel(
         pub fn set_snapshot_max(level: *Self, snapshot: u64, tables: []const TableInfo) void {
             assert(snapshot < lsm.snapshot_latest);
             assert(tables.len > 0);
+            assert(level.table_count_visible >= tables.len);
 
             {
                 var a = tables[0];
@@ -250,7 +257,9 @@ pub fn ManifestLevel(
                 assert(table.snapshot_max == math.maxInt(u64));
                 table.snapshot_max = snapshot;
             }
+
             assert(i == tables.len);
+            level.table_count_visible -= tables.len;
         }
 
         /// Remove the given tables from the ManifestLevel, asserting that they are not visible
@@ -267,7 +276,7 @@ pub fn ManifestLevel(
         ) void {
             assert(tables.len > 0);
             assert(level.keys.len() == level.tables.len());
-            assert(level.keys.len() >= tables.len);
+            assert(level.keys.len() - level.table_count_visible >= tables.len);
 
             {
                 var a = tables[0];
