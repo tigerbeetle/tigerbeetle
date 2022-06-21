@@ -315,11 +315,12 @@ pub fn TreeType(comptime Table: type) type {
         //              - assert: all levels.visible haven't overflowed (<= their max)
         //              - convert mutable table to immut for next measure
 
-        pub fn compact_io(tree: *Tree, callback: fn (*Tree) void) void {
+        pub fn compact_io(tree: *Tree, snapshot_min: u64, callback: fn (*Tree) void) void {
             // Make sure there's no pending compact_io() then register the callback.
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
 
+            // Start a compaction tick
             tree.compaction_tick += 1;
             assert(tree.compaction_tick <= config.lsm_batch_multiple);
 
@@ -364,6 +365,7 @@ pub fn TreeType(comptime Table: type) type {
                         tree.grid,
                         &tree.manifest,
                         drop_tombstones,
+                        snapshot_min,
                         .{ .table = &tree.table_immutable },
                         .{
                             .level = level,
@@ -421,6 +423,7 @@ pub fn TreeType(comptime Table: type) type {
                         tree.grid,
                         &tree.manifest,
                         drop_tombstones,
+                        snapshot_min,
                         .{
                             .grid = tree.grid,
                             .address = table_info.address,
@@ -573,16 +576,16 @@ pub fn TreeType(comptime Table: type) type {
             // - assert: even compactions from previous tick are finished.
             // - update manifest table info that were compacted.
             if (tree.compact_tick == half_measure) {
+                log.debug("{*}: finished compacting even levels", .{tree});
+
                 for (tree.compaction_table) |*compaction, index| {
                     const level = @intCast(u8, (index * 2) + @boolToInt(!even_levels));
                     if (level >= config.lsm_levels) break;
 
+                    assert(compaction.tree == tree);
                     assert(compaction.level == level);
                     assert(compaction.status == .idle);
                 }
-
-                tree.manifest.update_after_even_compaction();
-                log.debug("{*}: finished compacting even levels", .{tree});
             }
 
             // At end of fourth measure:
@@ -590,8 +593,8 @@ pub fn TreeType(comptime Table: type) type {
             // - assert: all visible levels haven't overflowed their max.
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_tick == config.lsm_batch_multiple) {
-                tree.compaction_tick = 0;
                 log.debug("{*}: finished compacting immutable table and odd levels", .{tree});
+                tree.compaction_tick = 0;
 
                 assert(!tree.manifest.visible_levels_overflowed());
                 assert(tree.table_mutable.can_commit_batch(tree.options.commit_count_max));
