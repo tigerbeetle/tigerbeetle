@@ -50,6 +50,7 @@ pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, c
 pub fn TreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
+    const key_from_value = Table.key_from_value;
     const compare_keys = Table.compare_keys;
     const tombstone = Table.tombstone;
     const tombstone_from_key = Table.tombstone_from_key;
@@ -342,18 +343,35 @@ pub fn TreeType(comptime Table: type) type {
                 assert(tree.compaction_table_immutable_status == .idle);
             } else {
                 // Start immutable table compaction to level 0 on the third beat (start for odds).
-                if (do_reset) {
+                if (do_reset) blk: {
                     assert(tree.compaction_tick == half_measure + 1);
                     assert(tree.compaction_table_immutable_status == .idle);
-                    tree.compaction_table_immutable_status = .compacting;
+                    assert(!tree.table_immutable.free);
 
+                    // Also, only start it if the immutable table has any values to compact.
+                    const num_values = tree.table_immutable.values.len;
+                    if (num_values == 0) break :blk;
+
+                    tree.compaction_table_immutable_status = .compacting;
                     log.debug("{*}: started compacting immutable table to level 0", .{tree});
+
+                    const level: u8 = 0;
+                    const key_min = key_from_value(tree.table_immutable.values[0]);
+                    const key_max = key_from_value(tree.table_immutable.values[num_values - 1]);
+                    const drop_tombstones = tree.manifest.overlap(level, key_min, key_max) == null;  
+
                     tree.compaction_table_immutable.reset(
                         tree.grid,
                         &tree.manifest,
-                        tree.manifest.drop_tombstones_for(.immutable),
+                        drop_tombstones,
                         .{ .table = &tree.table_immutable },
-                        tree.manifest.get_level_iterator_context_for(.immutable),
+                        .{
+                            .level = level,
+                            .key_min = key_min,
+                            .key_max = key_max,
+                            .grid = tree.grid,
+                            .manifest = &tree.manifest,
+                        },
                     );
                 }
 
@@ -593,7 +611,7 @@ pub fn TreeType(comptime Table: type) type {
         // prefetch uses default:1 -> commit (create_snapshot -> default:1) -> compact (default=2)
         // prefetch uses default:2 -> commit (lookup_account -> default:2) -> compact (default=3)
         // prefetch uses default:3 -> commit (create_snapshot -> default:3) -> compact (default=4)
-        //  -> (half measure): 
+        //  -> (half measure):
         //      checkpoint super-block
         //      set_snapshot_max(compact_snapshot:6)
         //      alloc 5 -> default:7, compact_snapshot:7+5=12
