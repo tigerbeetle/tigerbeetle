@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 const table_count_max = @import("tree.zig").table_count_max;
+const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const ManifestLevel = @import("manifest_level.zig").ManifestLevel;
@@ -151,6 +152,33 @@ pub fn ManifestType(comptime Table: type) type {
                 .snapshot = snapshot,
                 .key = key,
             };
+        }
+
+        /// Returns the most optimal table for compaction from a level that is due for compaction.
+        /// Returns null if the level is not due for compaction (table_count_visible < count_max).
+        pub fn choose_table_for_compaction(manifest: *const Manifest, level: u8) ?*const TableInfo {
+            assert(level < config.lsm_levels - 1); // The last level is not compacted into another.
+
+            const manifest_level: *const Level = &manifest.levels[level];
+            const table_count_visible_max = table_count_max_for_level(level);
+
+            if (manifest_level.table_count_visible < table_count_visible_max) return null;
+            assert(manifest_level.table_count_visible == table_count_visible_max);
+
+            var chosen_table: ?*const TableInfo = null;
+            var chosen_range: ?Range = null;
+
+            const snapshots = [1]u64{snapshot_latest};
+
+            var it = manifest.levels[level].iterator_visibility(.visible, &snapshots);
+            if (it.next()) |candidate| {
+                const range = manifest.overlap(level + 1, candidate.key_min, candidate.key_max);
+
+                // TODO
+                @panic("WIP");
+            }
+
+            return chosen_table;
         }
 
         pub const Range = struct {
