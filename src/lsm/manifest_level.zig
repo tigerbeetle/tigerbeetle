@@ -269,18 +269,19 @@ pub fn ManifestLevel(
             assert(level.keys.len() == level.tables.len());
             assert(level.keys.len() >= tables.len);
 
-            if (config.verify and tables.len > 1) {
+            {
                 var a = tables[0];
                 assert(compare_keys(a.key_min, a.key_max) != .gt);
                 for (tables[1..]) |b| {
-                    assert(compare_keys(a.key_max, b.key_min) == .lt);
                     assert(compare_keys(b.key_min, b.key_max) != .gt);
+                    assert(compare_keys(a.key_max, b.key_min) == .lt);
                     a = b;
                 }
             }
 
             const key_min = tables[0].key_min;
             const key_max = tables[tables.len - 1].key_max;
+            // The batch may contain a single table, with a single key, i.e. key_min == key_max:
             assert(compare_keys(key_min, key_max) != .gt);
 
             var absolute_index = level.absolute_index_for_remove(key_min);
