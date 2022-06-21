@@ -247,7 +247,7 @@ pub const Cluster = struct {
 
                 var cluster_op_known: bool = false;
                 for (cluster.replicas) |other_replica, i| {
-                    // Ignore replicas that are ineligable to assist recovery.
+                    // Ignore replicas that are ineligible to assist recovery.
                     if (replica_index == i) continue;
                     if (cluster.health[i] == .down) continue;
                     if (other_replica.status == .recovering) continue;
