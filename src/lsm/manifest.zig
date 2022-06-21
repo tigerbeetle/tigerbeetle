@@ -58,7 +58,7 @@ pub fn ManifestType(comptime Table: type) type {
                 return true;
             }
 
-            pub fn eql(table: *const TableInfo, other: *const TableInfo) bool {
+            pub fn equal(table: *const TableInfo, other: *const TableInfo) bool {
                 // TODO Since the layout of TableInfo is well defined, a direct memcmp may be faster
                 // here. However, it's not clear if we can make the assumption that compare_keys()
                 // will return .eq exactly when the memory of the keys are equal.

@@ -245,7 +245,7 @@ pub fn ManifestLevel(
                 // to avoid duplicating the iterator code in order to expose only a const iterator
                 // in the public API.
                 const table = @intToPtr(*TableInfo, @ptrToInt(table_const));
-                assert(table.eql(&tables[i]));
+                assert(table.equal(&tables[i]));
 
                 assert(table.snapshot_max == math.maxInt(u64));
                 table.snapshot_max = snapshot;
@@ -290,7 +290,7 @@ pub fn ManifestLevel(
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 while (it.next()) |table| : (absolute_index += 1) {
                     if (table.invisible(snapshots)) {
-                        assert(table.eql(&tables[0]));
+                        assert(table.equal(&tables[0]));
                         break;
                     }
                 } else {
@@ -304,7 +304,7 @@ pub fn ManifestLevel(
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 inner: while (it.next()) |table| : (absolute_index += 1) {
                     if (table.invisible(snapshots)) {
-                        assert(table.eql(&tables[i]));
+                        assert(table.equal(&tables[i]));
 
                         const table_key_max = table.key_max;
                         level.keys.remove_elements(node_pool, absolute_index, 1);
@@ -943,7 +943,7 @@ pub fn TestContext(
                     for (context.reference.items[index..][0..count]) |modified| {
                         if (table.address == modified.address) {
                             table.snapshot_max = snapshot;
-                            assert(table.eql(&modified));
+                            assert(table.equal(&modified));
                         }
                     }
                 }
