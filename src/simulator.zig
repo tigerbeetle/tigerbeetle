@@ -20,6 +20,8 @@ const output = std.log.scoped(.state_checker);
 /// This will run much slower but will trace all logic across the cluster.
 const log_state_transitions_only = builtin.mode != .Debug;
 
+const log_health = std.log.scoped(.health);
+
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
 
@@ -64,7 +66,6 @@ pub fn main() !void {
     const node_count = replica_count + client_count;
 
     const ticks_max = 100_000_000;
-    const transitions_max = config.journal_size_max / config.message_size_max;
     const request_probability = 1 + random.uintLessThan(u8, 99);
     const idle_on_probability = random.uintLessThan(u8, 20);
     const idle_off_probability = 10 + random.uintLessThan(u8, 10);
@@ -101,9 +102,15 @@ pub fn main() !void {
             .read_latency_min = random.uintLessThan(u16, 3),
             .read_latency_mean = 3 + random.uintLessThan(u16, 10),
             .write_latency_min = random.uintLessThan(u16, 3),
-            .write_latency_mean = 3 + random.uintLessThan(u16, 10),
+            .write_latency_mean = 3 + random.uintLessThan(u16, 100),
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
+        },
+        .health_options = .{
+            .crash_probability = 0.0001,
+            .crash_stability = random.uintLessThan(u32, 1_000),
+            .restart_probability = 0.01,
+            .restart_stability = random.uintLessThan(u32, 1_000),
         },
     });
     defer cluster.destroy();
@@ -143,6 +150,10 @@ pub fn main() !void {
         \\          write_latency_mean={}
         \\          read_fault_probability={}%
         \\          write_fault_probability={}%
+        \\          crash_probability={d}%
+        \\          crash_stability={} ticks
+        \\          restart_probability={d}%
+        \\          restart_stability={} ticks
         \\
     , .{
         seed,
@@ -169,26 +180,105 @@ pub fn main() !void {
         cluster.options.storage_options.write_latency_mean,
         cluster.options.storage_options.read_fault_probability,
         cluster.options.storage_options.write_fault_probability,
+        cluster.options.health_options.crash_probability * 100,
+        cluster.options.health_options.crash_stability,
+        cluster.options.health_options.restart_probability * 100,
+        cluster.options.health_options.restart_stability,
     });
 
     var requests_sent: u64 = 0;
     var idle = false;
 
+    // The minimum number of healthy replicas required for a crashed replica to be able to recover.
+    const replica_normal_min = replicas: {
+        if (replica_count == 1) {
+            // A cluster of 1 can crash safely (as long as there is no disk corruption) since it
+            // does not run the recovery protocol.
+            break :replicas 0;
+        } else {
+            break :replicas cluster.replicas[0].quorum_view_change;
+        }
+    };
+
+    // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
+    for (cluster.storages) |*storage, i| {
+        storage.faulty = replica_normal_min <= i;
+    }
+
+    // TODO When storage is supported, run more transitions than fit in the journal.
+    const transitions_max = config.journal_slot_count / 2;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
-        for (cluster.storages) |*storage| storage.tick();
+        const health_options = &cluster.options.health_options;
+        // The maximum number of replicas that can crash, with the cluster still able to recover.
+        var crashes = cluster.replica_normal_count() -| replica_normal_min;
 
-        for (cluster.replicas) |*replica, i| {
-            replica.tick();
-            cluster.state_checker.check_state(@intCast(u8, i));
+        for (cluster.storages) |*storage, replica| {
+            if (cluster.replicas[replica].journal.recovered) {
+
+                // TODO Remove this workaround when VSR recovery protocol is disabled.
+                // When only the minimum number of replicas are healthy (no more crashes allowed),
+                // disable storage faults on all healthy replicas.
+                //
+                // This is a workaround to avoid the deadlock that occurs when (for example) in a
+                // cluster of 3 replicas, one is down, another has a corrupt prepare, and the last does
+                // not have the prepare. The two healthy replicas can never complete a view change,
+                // because two replicas are not enough to nack, and the unhealthy replica cannot
+                // complete the VSR recovery protocol either.
+                if (cluster.health[replica] == .up and crashes == 0) {
+                    storage.faulty = false;
+                } else {
+                    // When a journal recovers for the first time, enable its storage faults.
+                    // Future crashes will recover in the presence of faults.
+                    storage.faulty = true;
+                }
+            }
+            storage.tick();
         }
 
-        cluster.network.packet_simulator.tick();
+        for (cluster.replicas) |*replica| {
+            switch (cluster.health[replica.replica]) {
+                .up => |*ticks| {
+                    ticks.* -|= 1;
+                    replica.tick();
+                    cluster.state_checker.check_state(replica.replica);
+
+                    if (ticks.* != 0) continue;
+                    if (crashes == 0) continue;
+                    if (cluster.storages[replica.replica].writes.count() == 0) {
+                        if (!chance_f64(random, health_options.crash_probability)) continue;
+                    } else {
+                        if (!chance_f64(random, health_options.crash_probability * 10.0)) continue;
+                    }
+
+                    if (!try cluster.crash_replica(replica.replica)) continue;
+                    log_health.debug("crash replica={}", .{replica.replica});
+                    crashes -= 1;
+                },
+                .down => |*ticks| {
+                    ticks.* -|= 1;
+                    // Keep ticking the time so that it won't have diverged too far to synchronize
+                    // when the replica restarts.
+                    replica.clock.time.tick();
+                    assert(replica.status == .recovering);
+                    if (ticks.* == 0 and chance_f64(random, health_options.restart_probability)) {
+                        cluster.health[replica.replica] = .{ .up = health_options.restart_stability };
+                        log_health.debug("restart replica={}", .{replica.replica});
+                    }
+                },
+            }
+        }
+
+        cluster.network.packet_simulator.tick(cluster.health);
 
         for (cluster.clients) |*client| client.tick();
 
         if (cluster.state_checker.transitions == transitions_max) {
-            if (cluster.state_checker.convergence()) break;
+            if (cluster.state_checker.convergence() and
+                cluster.replica_up_count() == replica_count)
+            {
+                break;
+            }
             continue;
         } else {
             assert(cluster.state_checker.transitions < transitions_max);
@@ -220,6 +310,12 @@ pub fn main() !void {
 fn chance(random: std.rand.Random, p: u8) bool {
     assert(p <= 100);
     return random.uintLessThan(u8, 100) < p;
+}
+
+/// Returns true, `p` percent of the time, else false.
+fn chance_f64(random: std.rand.Random, p: f64) bool {
+    assert(p <= 100.0);
+    return random.float(f64) < p;
 }
 
 /// Returns the next argument for the simulator or null (if none available)

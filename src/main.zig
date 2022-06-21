@@ -53,12 +53,28 @@ fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
     assert(filename.len == filename_len);
 
     // TODO Expose data file size on the CLI.
-    _ = try io.open_file(
+    const fd = try io.open_file(
         dir_fd,
         filename,
-        config.journal_size_max, // TODO Double-check that we have space for redundant headers.
+        config.journal_size_max,
         true,
     );
+    std.os.close(fd);
+
+    const file = try (std.fs.Dir{ .fd = dir_fd }).openFile(filename, .{ .write = true });
+    defer file.close();
+
+    {
+        const write_size_max = 4 * 1024 * 1024;
+        var write: [write_size_max]u8 = undefined;
+        var offset: u64 = 0;
+        while (true) {
+            const write_size = vsr.format_journal(cluster, offset, &write);
+            if (write_size == 0) break;
+            try file.writeAll(write[0..write_size]);
+            offset += write_size;
+        }
+    }
 
     log.info("initialized data file", .{});
 }

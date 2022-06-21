@@ -133,7 +133,9 @@ pub const StateChecker = struct {
 
         const transitions_executed = state_checker.history.get(a).?;
         if (transitions_executed < state_checker.transitions) {
-            @panic("cluster reached convergence but on a regressed state");
+            // Cluster reached convergence but on a regressed state.
+            // A replica reached the transition limit, crashed, then repaired.
+            return false;
         } else {
             assert(transitions_executed == state_checker.transitions);
         }
