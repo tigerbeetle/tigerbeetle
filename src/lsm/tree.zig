@@ -117,14 +117,14 @@ pub fn TreeType(comptime Table: type) type {
         manifest: Manifest,
 
         compaction_table_immutable: CompactionTableImmutable,
-        compaction_table_immutable_status: CompactionTableStatus,
+        compaction_table_immutable_status: CompactionStatus,
 
         /// The number of Compaction instances is divided by two as, at any given compaction tick,
         /// we're only compacting either even or odd levels but never both.
         /// Uses div_ceil over divFloor to account for odd lsm_levels 
         /// (e.g. ceil(5/2) = 3 for levels 0,2,4 when even and 1,3 when odd).
         /// This means, that for odd lsm_levels, the last CompactionTable is unused.
-        compaction_table: [div_ceil(config.lsm_levels, 2)]CompactionTableData,
+        compaction_table: [div_ceil(config.lsm_levels, 2)]CompactionTableScope,
 
         compaction_tick: u64,
         compaction_io_pending: usize,
@@ -171,7 +171,7 @@ pub fn TreeType(comptime Table: type) type {
             var compaction_table_immutable = try CompactionTableImmutable.init(allocator);
             errdefer compaction_table_immutable.deinit(allocator);
 
-            var compaction_table: [div_ceil(config.lsm_levels, 2)]CompactionTableData = undefined;
+            var compaction_table: [div_ceil(config.lsm_levels, 2)]CompactionTableScope = undefined;
             for (compaction_table) |*compaction, i| {
                 errdefer for (compaction_table[0..i]) |*c| c.table.deinit(allocator);
                 compaction.* = .{ .table = try CompactionTable.init(allocator) };
@@ -471,29 +471,29 @@ pub fn TreeType(comptime Table: type) type {
         }
 
         fn compact_table_io_done(table: *CompactionTable, done: bool) void {
-            const compaction = @fieldParentPtr(CompactionTableData, "table", table);
-            assert(compaction.tree.compaction_io_pending <=
-                compaction.tree.compaction_table.len + 1);
-            assert(compaction.tree.compaction_callback != null);
-            assert(compaction.tree.compaction_tick != 0);
+            const scope = @fieldParentPtr(CompactionTableScope, "table", table);
 
-            assert(compaction.status == .compacting);
+            assert(scope.tree.compaction_io_pending <= scope.tree.compaction_table.len + 1);
+            assert(scope.tree.compaction_callback != null);
+            assert(scope.tree.compaction_tick != 0);
+
+            assert(scope.status == .compacting);
             log.debug("{*}: resolved compaction from level {d} to level {d}", .{
-                compaction.tree,
-                compaction.level,
-                compaction.level + 1,
+                scope.tree,
+                scope.level,
+                scope.level + 1,
             });
 
             if (done) {
-                compaction.status = .done;
+                scope.status = .done;
                 log.debug("{*}: finished compacting level {d} to level {d}", .{
-                    compaction.tree,
-                    compaction.level,
-                    compaction.level + 1,
+                    scope.tree,
+                    scope.level,
+                    scope.level + 1,
                 });
             }
 
-            compaction.tree.compact_io_done();
+            scope.tree.compact_io_done();
         }
 
         fn compact_io_done(tree: *Tree) void {
