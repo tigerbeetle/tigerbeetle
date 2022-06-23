@@ -79,8 +79,8 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage) void {
-        assert(storage.fd >= 0);
-        storage.fd = -1;
+        assert(storage.fd != IO.INVALID_FILE);
+        storage.fd = IO.INVALID_FILE;
     }
 
     pub fn read_sectors(

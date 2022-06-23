@@ -923,6 +923,8 @@ pub const IO = struct {
         return dir.fd;
     }
 
+    pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
+
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (required on windows).

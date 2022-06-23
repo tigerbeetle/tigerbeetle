@@ -639,6 +639,8 @@ pub const IO = struct {
         return os.open(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
     }
 
+    pub const INVALID_FILE: os.fd_t = -1;
+
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (required on darwin).
