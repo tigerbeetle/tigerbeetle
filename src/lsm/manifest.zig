@@ -154,6 +154,14 @@ pub fn ManifestType(comptime Table: type) type {
             };
         }
 
+        pub fn assert_visible_tables_are_in_range(manifest: *const Manifest) void {
+            for (manifest.levels) |*manifest_level, index| {
+                const level = @intCast(u8, index);
+                const table_count_visible_max = table_count_max_for_level(level);
+                assert(manifest_level.table_count_visible <= table_count_visible_max);
+            }
+        }
+
         /// Returns the most optimal table for compaction from a level that is due for compaction.
         /// Returns null if the level is not due for compaction (table_count_visible < count_max).
         pub fn choose_table_for_compaction(manifest: *const Manifest, level: u8) ?*const TableInfo {
@@ -163,7 +171,7 @@ pub fn ManifestType(comptime Table: type) type {
             const table_count_visible_max = table_count_max_for_level(level);
 
             if (manifest_level.table_count_visible < table_count_visible_max) return null;
-            assert(manifest_level.table_count_visible == table_count_visible_max);
+            assert(manifest_level.table_count_visible <= table_count_visible_max + 1);
 
             var chosen_table: ?*const TableInfo = null;
             var chosen_range: ?Range = null;
@@ -173,11 +181,13 @@ pub fn ManifestType(comptime Table: type) type {
             var it = manifest.levels[level].iterator_visibility(.visible, &snapshots);
             if (it.next()) |candidate| {
                 const range = manifest.overlap(level + 1, candidate.key_min, candidate.key_max);
+                _ = range;
 
                 // TODO
                 @panic("WIP");
             }
 
+            _ = chosen_range;
             return chosen_table;
         }
 

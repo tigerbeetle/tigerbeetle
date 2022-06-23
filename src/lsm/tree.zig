@@ -76,17 +76,17 @@ pub fn TreeType(comptime Table: type) type {
         const CompactionTable = CompactionType(Table, TableIteratorType);
         const CompactionTableImmutable = CompactionType(Table, TableImmutableIteratorType);
 
-        const CompactionTableStatus = enum {
+        const CompactionStatus = enum {
             idle,
             compacting,
             done,
         };
 
-        const CompactionTableData = struct {
+        const CompactionTableScope = struct {
             table: CompactionTable,
             tree: *Tree = undefined,
             level: u8 = undefined,
-            status: CompactionTableStatus = .idle,
+            status: CompactionStatus = .idle,
         };
 
         grid: *Grid,
@@ -288,7 +288,7 @@ pub fn TreeType(comptime Table: type) type {
         //  - only start compaction if mutable_table is dirty (was changed)
         //
         //  - assuming a batch_count_multiple=4 (i.e. 4-measure bar of compaction ticks):
-        //      - first beat of the bar:
+        //      - (first) down beat of the bar:
         //          - assert: no compactions are currently running
         //          - assert: mutable table can be empty with immut containing any sorted values
         //          - TODO think through mutable table being converted at the end of the bar?
@@ -296,7 +296,7 @@ pub fn TreeType(comptime Table: type) type {
         //          - check if even levels needs to compact or have space for one more table:
         //              - if so, "start" (choose which table best to compact) and tick compactions
         //              - note: allow level table_count_max to overflow.
-        //          - after end of first beat:
+        //          - after end of down beat:
         //              - one batch committed to mut table (at most 1/4 full)
         //              - effectively: even compactions started are at least half-way complete
         //
@@ -306,22 +306,28 @@ pub fn TreeType(comptime Table: type) type {
         //              - assert: even compactions are "finished"
         //              - atomically update manifest table-infos that were compacted/modified
         //
-        //      - third beat of the bar:
-        //          - swap to the odd table and do same as first beat
+        //      - (third) back beat of the bar:
+        //          - swap to the odd table and do same as down beat
         //
         //      - fourth beat of the bar:
         //          - swapped to the odd tables, so do the same as second beat
         //          - after end of fourth beat:
         //              - assert: all levels.visible haven't overflowed (<= their max)
         //              - convert mutable table to immut for next measure
+        //
+        // - glossary for stuff + "bar" -> "measure"
+        // - compaction_tick -> beat
 
-        pub fn compact_io(tree: *Tree, snapshot_min: u64, callback: fn (*Tree) void) void {
+        pub fn compact_io(tree: *Tree, op: u64, callback: fn (*Tree) void) void {
+            const snapshot = op;
+            assert(snapshot != snapshot_latest);
+
             // Make sure there's no pending compact_io() then register the callback.
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
 
-            // Start a compaction tick
-            tree.compaction_tick += 1;
+            // Start a compaction tick based on the snapshot
+            tree.compaction_tick = (op % config.lsm_batch_multiple) + 1;
             assert(tree.compaction_tick <= config.lsm_batch_multiple);
 
             tree.compaction_callback = callback;
@@ -343,7 +349,7 @@ pub fn TreeType(comptime Table: type) type {
                 // Make sure the immutable table only runs when we're compacting odd tables.
                 assert(tree.compaction_table_immutable_status == .idle);
             } else {
-                // Start immutable table compaction to level 0 on the third beat (start for odds).
+                // Start immutable table compaction to level 0 on the back beat (start for odds).
                 if (do_reset) start_compaction: {
                     assert(tree.compaction_tick == half_measure + 1);
                     assert(tree.compaction_table_immutable_status == .idle);
@@ -365,7 +371,7 @@ pub fn TreeType(comptime Table: type) type {
                         tree.grid,
                         &tree.manifest,
                         drop_tombstones,
-                        snapshot_min,
+                        snapshot,
                         .{ .table = &tree.table_immutable },
                         .{
                             .level = level,
@@ -392,7 +398,7 @@ pub fn TreeType(comptime Table: type) type {
                 const next_level = level + 1;
                 assert(next_level <= config.lsm_levels);
 
-                // Start the table compactions if it's the first beat or the third beat.
+                // Start the table compactions if it's the down beat or the back beat.
                 if (do_reset) start_compaction: {
                     assert(compaction.status == .idle);
                     compaction.level = level;
@@ -400,7 +406,7 @@ pub fn TreeType(comptime Table: type) type {
 
                     // Do not start a compaction on this level if there's no qualifying table.
                     const table_info = tree.manifest.choose_table_for_compaction(level) orelse {
-                        break start_compaction;
+                        break :start_compaction;
                     };
 
                     compaction.status = .compacting;
@@ -423,7 +429,7 @@ pub fn TreeType(comptime Table: type) type {
                         tree.grid,
                         &tree.manifest,
                         drop_tombstones,
-                        snapshot_min,
+                        snapshot,
                         .{
                             .grid = tree.grid,
                             .address = table_info.address,
@@ -503,8 +509,8 @@ pub fn TreeType(comptime Table: type) type {
 
             // compact_done() is called after all compaction tick_io()'s complete.
             // This function can be triggered asynchronously or by compact_cpu below in tick_cpu.
-            compaction.tree.compaction_io_pending -= 1;
-            if (compaction.tree.compaction_io_pending == 0) compaction.tree.compact_done();
+            tree.compaction_io_pending -= 1;
+            if (tree.compaction_io_pending == 0) tree.compact_done();
         }
 
         pub fn compact_cpu(tree: *Tree) void {
@@ -595,9 +601,7 @@ pub fn TreeType(comptime Table: type) type {
             if (tree.compaction_tick == config.lsm_batch_multiple) {
                 log.debug("{*}: finished compacting immutable table and odd levels", .{tree});
                 tree.compaction_tick = 0;
-
-                assert(!tree.manifest.visible_levels_overflowed());
-                assert(tree.table_mutable.can_commit_batch(tree.options.commit_count_max));
+                tree.manifest.assert_visible_tables_are_in_range();
 
                 // Ensure mutable table can be flushed into immutable table.
                 assert(tree.table_mutable.count() > 0);

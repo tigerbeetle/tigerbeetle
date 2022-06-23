@@ -1905,6 +1905,7 @@ pub fn Replica(
 
             const reply_body_size = @intCast(u32, self.state_machine.commit(
                 prepare.header.client,
+                prepare.header.op,
                 prepare.header.operation.cast(StateMachine),
                 prepare.buffer[@sizeOf(Header)..prepare.header.size],
                 reply.buffer[@sizeOf(Header)..],

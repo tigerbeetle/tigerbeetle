@@ -150,11 +150,13 @@ pub const StateMachine = struct {
     pub fn commit(
         self: *StateMachine,
         client: u128,
+        op_number: u64,
         operation: Operation,
         input: []const u8,
         output: []u8,
     ) usize {
         _ = client;
+        _ = op_number;
 
         return switch (operation) {
             .init => unreachable,
