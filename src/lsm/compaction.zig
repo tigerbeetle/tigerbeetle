@@ -293,10 +293,10 @@ pub fn CompactionType(
                     compaction.assert_read_iterators_empty();
                     break;
                 };
-                if (compaction.drop_tombstones and tombstone(value)) {
+                if (compaction.drop_tombstones and tombstone(&value)) {
                     tombstones_dropped += 1;
                 } else {
-                    compaction.table_builder.data_block_append(value);
+                    compaction.table_builder.data_block_append(&value);
                 }
             }
 

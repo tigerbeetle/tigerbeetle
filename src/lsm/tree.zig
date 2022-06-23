@@ -257,7 +257,7 @@ pub fn TreeType(comptime Table: type) type {
         /// We use tombstone values internally, but expose them as null to the user.
         /// This distinction enables us to cache a null result as a tombstone in our hash maps.
         inline fn unwrap_tombstone(value: ?*const Value) ?*const Value {
-            return if (value == null or tombstone(value.?.*)) null else value.?;
+            return if (value == null or tombstone(value.?)) null else value.?;
         }
 
         // TODO Notes for compaction
@@ -344,8 +344,8 @@ pub fn TreeType(comptime Table: type) type {
                     if (num_values == 0) break :start_compaction;
 
                     const target_level: u8 = 0;
-                    const key_min = key_from_value(tree.table_immutable.values[0]);
-                    const key_max = key_from_value(tree.table_immutable.values[num_values - 1]);
+                    const key_min = key_from_value(&tree.table_immutable.values[0]);
+                    const key_max = key_from_value(&tree.table_immutable.values[num_values - 1]);
 
                     const drop_tombstones = tree.manifest.overlap_any(
                         target_level,

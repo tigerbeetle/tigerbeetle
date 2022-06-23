@@ -241,7 +241,7 @@ pub fn TableIteratorType(comptime Table: type) type {
             assert(!it.read_pending);
             assert(!it.read_table_index);
 
-            if (it.values.head()) |value| return Table.key_from_value(value);
+            if (it.values.head_ptr_const()) |value| return Table.key_from_value(value);
 
             const block = it.blocks.head() orelse {
                 assert(it.block_index == Table.index_data_blocks_used(it.index));
@@ -249,7 +249,7 @@ pub fn TableIteratorType(comptime Table: type) type {
             };
 
             const values = Table.data_block_values_used(block);
-            return Table.key_from_value(values[it.value]);
+            return Table.key_from_value(&values[it.value]);
         }
 
         /// This is only safe to call after peek() has returned non-null.

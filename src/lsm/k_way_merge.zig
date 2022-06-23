@@ -9,7 +9,7 @@ pub fn KWayMergeIterator(
     comptime Context: type,
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     comptime k_max: u32,
     /// Peek the next key in the stream identified by stream_index.
@@ -72,7 +72,7 @@ pub fn KWayMergeIterator(
 
         pub fn pop(it: *Self) ?Value {
             while (it.pop_internal()) |value| {
-                const key = key_from_value(value);
+                const key = key_from_value(&value);
                 if (it.previous_key_popped) |previous| {
                     switch (compare_keys(previous, key)) {
                         .lt => assert(it.direction == .ascending),
@@ -193,7 +193,7 @@ fn TestContext(comptime k_max: u32) type {
             key: u32,
             version: u32,
 
-            inline fn to_key(v: Value) u32 {
+            inline fn to_key(v: *const Value) u32 {
                 return v.key;
             }
         };

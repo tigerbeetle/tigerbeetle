@@ -100,7 +100,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
         pub fn layout_from_keys_or_values(
             comptime Key: type,
             comptime Value: type,
-            comptime key_from_value: fn (Value) callconv(.Inline) Key,
+            comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
             /// This sentinel must compare greater than all actual keys.
             comptime sentinel_key: Key,
             values: []const Value,
@@ -121,7 +121,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
 
             for (tree) |values_index, i| {
                 if (values_index < values.len) {
-                    layout[i + 1] = key_from_value(values[values_index]);
+                    layout[i + 1] = key_from_value(&values[values_index]);
                 } else {
                     layout[i + 1] = sentinel_key;
                 }
@@ -299,7 +299,7 @@ const test_eytzinger = struct {
     const Value = extern struct {
         key: u32,
 
-        inline fn to_key(value: Value) u32 {
+        inline fn to_key(value: *const Value) u32 {
             return value.key;
         }
     };

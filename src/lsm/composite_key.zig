@@ -55,14 +55,14 @@ pub fn CompositeKey(comptime Secondary: type) type {
             }
         }
 
-        pub inline fn key_from_value(value: Value) Self {
+        pub inline fn key_from_value(value: *const Value) Self {
             return .{
                 .secondary = value.secondary,
                 .timestamp = @truncate(u63, value.timestamp),
             };
         }
 
-        pub inline fn tombstone(value: Value) bool {
+        pub inline fn tombstone(value: *const Value) bool {
             return value.timestamp & tombstone_bit != 0;
         }
 
