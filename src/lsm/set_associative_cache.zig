@@ -22,7 +22,7 @@ pub const Layout = struct {
 pub fn SetAssociativeCache(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
     comptime hash: fn (Key) callconv(.Inline) u64,
     comptime equal: fn (Key, Key) callconv(.Inline) bool,
     comptime layout: Layout,
@@ -183,7 +183,7 @@ pub fn SetAssociativeCache(
             var it = BitIterator(Ways){ .bits = ways };
             while (it.next()) |way| {
                 const count = self.counts.get(set.offset + way);
-                if (count > 0 and equal(key_from_value(set.values[way]), key)) {
+                if (count > 0 and equal(key_from_value(&set.values[way]), key)) {
                     return way;
                 }
             }
@@ -505,8 +505,8 @@ test "SetAssociativeCache: eviction" {
     const Value = u64;
 
     const context = struct {
-        inline fn key_from_value(value: Value) Key {
-            return value;
+        inline fn key_from_value(value: *const Value) Key {
+            return value.*;
         }
         inline fn hash(key: Key) u64 {
             return key;
@@ -524,8 +524,8 @@ test "SetAssociativeCache: hash collision" {
     const Value = u64;
 
     const context = struct {
-        inline fn key_from_value(value: Value) Key {
-            return value;
+        inline fn key_from_value(value: *const Value) Key {
+            return value.*;
         }
         /// This hash function is intentionally broken to simulate hash collision.
         inline fn hash(key: Key) u64 {
@@ -754,8 +754,8 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
     const log = false;
 
     const context = struct {
-        inline fn key_from_value(value: Value) Key {
-            return value;
+        inline fn key_from_value(value: *const Value) Key {
+            return value.*;
         }
         inline fn hash(key: Key) u64 {
             return key;

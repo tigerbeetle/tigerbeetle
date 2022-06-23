@@ -107,7 +107,7 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
-            return compare_keys(key_from_value(a), key_from_value(b)) == .lt;
+            return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
         }
     };
 }

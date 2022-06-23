@@ -185,7 +185,7 @@ pub fn LevelIteratorType(comptime Table: type) type {
         }
 
         pub fn peek(it: LevelIterator) ?Key {
-            if (it.values.head()) |value| return key_from_value(value);
+            if (it.values.head_ptr_const()) |value| return key_from_value(value);
 
             const scope = it.tables.head_ptr_const() orelse {
                 assert(it.buffered_all_values());

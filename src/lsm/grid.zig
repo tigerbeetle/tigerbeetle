@@ -24,7 +24,7 @@ pub fn GridType(comptime Storage: type) type {
     const SuperBlock = SuperBlockType(Storage);
 
     const cache_interface = struct {
-        inline fn address_from_block(block: [block_size]u8) u64 {
+        inline fn address_from_block(block: *const [block_size]u8) u64 {
             const header_bytes = block[0..@sizeOf(vsr.Header)];
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
             const address = header.op;

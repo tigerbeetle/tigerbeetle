@@ -23,11 +23,11 @@ pub fn TableType(
     comptime table_compare_keys: fn (TableKey, TableKey) callconv(.Inline) math.Order,
     /// Returns the key for a value. For example, given `object` returns `object.id`.
     /// Since most objects contain an id, this avoids duplicating the key when storing the value.
-    comptime table_key_from_value: fn (TableValue) callconv(.Inline) TableKey,
+    comptime table_key_from_value: fn (*const TableValue) callconv(.Inline) TableKey,
     /// Must compare greater than all other keys.
     comptime table_sentinel_key: TableKey,
     /// Returns whether a value is a tombstone value.
-    comptime table_tombstone: fn (TableValue) callconv(.Inline) bool,
+    comptime table_tombstone: fn (*const TableValue) callconv(.Inline) bool,
     /// Returns a tombstone value representation for a key.
     comptime table_tombstone_from_key: fn (TableKey) callconv(.Inline) TableValue,
 ) type {
@@ -49,11 +49,11 @@ pub fn TableType(
         // Export hashmap context for Key and Value
         pub const HashMapContextValue = struct {
             pub fn eql(_: HashMapContextValue, a: Value, b: Value) bool {
-                return compare_keys(key_from_value(a), key_from_value(b)) == .eq;
+                return compare_keys(key_from_value(&a), key_from_value(&b)) == .eq;
             }
 
             pub fn hash(_: HashMapContextValue, value: Value) u64 {
-                const key = key_from_value(value);
+                const key = key_from_value(&value);
                 return std.hash_map.getAutoHashFn(Key, HashMapContextValue)(.{}, key);
             }
         };
@@ -437,11 +437,11 @@ pub fn TableType(
                 // TODO
             }
 
-            pub fn data_block_append(builder: *Builder, value: Value) void {
+            pub fn data_block_append(builder: *Builder, value: *const Value) void {
                 const values_max = data_block_values(builder.data_block);
                 assert(values_max.len == data.value_count_max);
 
-                values_max[builder.value] = value;
+                values_max[builder.value] = value.*;
                 builder.value += 1;
 
                 const key = key_from_value(value);
@@ -489,8 +489,8 @@ pub fn TableType(
                 const values = values_max[0..builder.value];
 
                 if (config.verify) {
-                    var a = values[0];
-                    for (values[1..]) |b| {
+                    var a = &values[0];
+                    for (values[1..]) |*b| {
                         assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
                         a = b;
                     }
@@ -534,14 +534,14 @@ pub fn TableType(
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
-                const key_max = key_from_value(values[values.len - 1]);
+                const key_max = key_from_value(&values[values.len - 1]);
 
                 const current = builder.data_block_count;
                 index_data_keys(builder.index_block)[current] = key_max;
                 index_data_addresses(builder.index_block)[current] = address;
                 index_data_checksums(builder.index_block)[current] = header.checksum;
 
-                if (current == 0) builder.key_min = key_from_value(values[0]);
+                if (current == 0) builder.key_min = key_from_value(&values[0]);
                 builder.key_max = key_max;
 
                 if (current == 0 and values.len == 1) {

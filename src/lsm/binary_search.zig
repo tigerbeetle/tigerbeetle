@@ -13,7 +13,7 @@ const math = std.math;
 pub fn binary_search_values_raw(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key: Key,
@@ -29,12 +29,12 @@ pub fn binary_search_values_raw(
         // This trick seems to be what's needed to get llvm to emit branchless code for this,
         // a ternay-style if expression was generated as a jump here for whatever reason.
         const next_offsets = [_]usize{ offset, mid };
-        offset = next_offsets[@boolToInt(compare_keys(key_from_value(values[mid]), key) == .lt)];
+        offset = next_offsets[@boolToInt(compare_keys(key_from_value(&values[mid]), key) == .lt)];
 
         length -= half;
     }
 
-    return @intCast(u32, offset + @boolToInt(compare_keys(key_from_value(values[offset]), key) == .lt));
+    return @intCast(u32, offset + @boolToInt(compare_keys(key_from_value(&values[offset]), key) == .lt));
 }
 
 pub inline fn binary_search_keys_raw(
@@ -47,8 +47,8 @@ pub inline fn binary_search_keys_raw(
         Key,
         Key,
         struct {
-            inline fn key_from_key(k: Key) Key {
-                return k;
+            inline fn key_from_key(k: *const Key) Key {
+                return k.*;
             }
         }.key_from_key,
         compare_keys,
@@ -65,7 +65,7 @@ const BinarySearchResult = struct {
 pub inline fn binary_search_values(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key: Key,
@@ -73,7 +73,7 @@ pub inline fn binary_search_values(
     const index = binary_search_values_raw(Key, Value, key_from_value, compare_keys, values, key);
     return .{
         .index = index,
-        .exact = index < values.len and compare_keys(key_from_value(values[index]), key) == .eq,
+        .exact = index < values.len and compare_keys(key_from_value(&values[index]), key) == .eq,
     };
 }
 

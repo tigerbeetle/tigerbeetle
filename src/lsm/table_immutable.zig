@@ -65,8 +65,8 @@ pub fn TableImmutableType(comptime Table: type) type {
                 var i: usize = 1;
                 while (i < sorted_values.len) : (i += 1) {
                     assert(i > 0);
-                    const left_key = key_from_value(sorted_values[i - 1]);
-                    const right_key = key_from_value(sorted_values[i]);
+                    const left_key = key_from_value(&sorted_values[i - 1]);
+                    const right_key = key_from_value(&sorted_values[i]);
                     assert(compare_keys(left_key, right_key) != .gt);
                 }
             }
@@ -94,7 +94,7 @@ pub fn TableImmutableType(comptime Table: type) type {
                 );
                 if (result.exact) {
                     const value = &table.values[result.index];
-                    if (config.verify) assert(compare_keys(key, key_from_value(value.*)) == .eq);
+                    if (config.verify) assert(compare_keys(key, key_from_value(value)) == .eq);
                     return value;
                 }
             }
@@ -154,7 +154,7 @@ pub fn TableImmutableIteratorType(comptime Table: type) type {
 
         pub fn peek(it: *const TableImmutableIterator) ?Table.Key {
             if (it.values_index == it.table.values.len) return null;
-            return Table.key_from_value(it.table.values[it.values_index]);
+            return Table.key_from_value(&it.table.values[it.values_index]);
         }
 
         pub fn pop(it: *TableImmutableIterator) Table.Value {
