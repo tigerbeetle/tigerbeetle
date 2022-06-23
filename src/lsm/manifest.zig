@@ -166,76 +166,96 @@ pub fn ManifestType(comptime Table: type) type {
 
         /// Returns the most optimal table for compaction from a level that is due for compaction.
         /// Returns null if the level is not due for compaction (table_count_visible < count_max).
-        pub fn choose_table_for_compaction(manifest: *const Manifest, level: u8) ?*const TableInfo {
+        pub fn choose_table_for_compaction(manifest: *const Manifest, level: u8) ?TableRange {
             assert(level < config.lsm_levels - 1); // The last level is not compacted into another.
 
-            const manifest_level: *const Level = &manifest.levels[level];
             const table_count_visible_max = table_count_max_for_level(growth_factor, level);
+            assert(table_count_visible_max > 0);
 
+            const manifest_level: *const Level = &manifest.levels[level];
             if (manifest_level.table_count_visible < table_count_visible_max) return null;
+
+            // If even levels are compacted ahead of odd levels, then odd levels may burst.
             assert(manifest_level.table_count_visible <= table_count_visible_max + 1);
 
-            var chosen_table: ?*const TableInfo = null;
-            var chosen_range: ?Range = null;
+            var optimal: ?TableRange = null;
 
             const snapshots = [1]u64{snapshot_latest};
-
             var it = manifest.levels[level].iterator_visibility(.visible, &snapshots);
-            if (it.next()) |candidate| {
-                const range = manifest.overlap(level + 1, candidate.key_min, candidate.key_max);
-                _ = range;
+            var iterations: usize = 0;
 
-                // TODO
-                @panic("WIP");
+            if (it.next()) |table| {
+                const range = manifest.overlap(level + 1, table.key_min, table.key_max);
+
+                if (optimal == null or range.table_count < optimal.range.table_count) {
+                    optimal = .{
+                        .table = table,
+                        .range = range,
+                    };
+                }
+
+                iterations += 1;
             }
+            assert(iterations == manifest_level.table_count_visible);
 
-            _ = chosen_range;
-            return chosen_table;
+            return optimal;
         }
 
+        pub const TableRange = struct {
+            table: *const TableInfo,
+            range: Range,
+        };
+
         pub const Range = struct {
+            /// The total number of tables involved across both levels, always at least 1.
             table_count: usize,
+            /// The minimum key across both levels.
             key_min: Key,
+            /// The maximum key across both levels.
             key_max: Key,
         };
 
         /// Returns the smallest visible range in a level that overlaps the candidate key range.
-        /// Returns null if there are no visible overlapping tables in the level.
         /// For example, for a table in level 2, count how many tables overlap in level 3, and
         /// determine the span of their complete key range, which may be broader or narrower.
-        pub fn overlap(manifest: *const Manifest, level: u8, key_min: Key, key_max: Key) ?Range {
-            assert(level < config.lsm_levels);
+        pub fn overlap(manifest: *const Manifest, level_b: u8, key_min: Key, key_max: Key) Range {
+            assert(level_b < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
-            var range: ?Range = null;
+            var range = Range{
+                .table_count = 1,
+                .key_min = key_min,
+                .key_max = key_max,
+            };
 
-            var it = manifest.levels[level].iterator(snapshot_latest, key_min, key_max, .ascending);
+            var it = manifest.levels[level_b].iterator(
+                snapshot_latest,
+                key_min,
+                key_max,
+                .ascending,
+            );
+
             if (it.next()) |table| {
                 assert(table.visible(snapshot_latest));
                 assert(compare_keys(table.key_min, table.key_max) != .gt);
                 assert(compare_keys(table.key_max, key_min) != .lt);
                 assert(compare_keys(table.key_min, key_max) != .gt);
 
-                if (range) |*r| {
-                    assert(compare_keys(table.key_min, r.key_max) == .gt);
+                range.table_count += 1;
 
-                    r.table_count += 1;
-                    r.key_max = table.key_max;
-                } else {
-                    range = .{
-                        .table_count = 1,
-                        .key_min = table.key_min,
-                        .key_max = table.key_max,
-                    };
+                if (compare_keys(table.key_min, range.key_min) == .lt) {
+                    range.key_min = table.key_min;
+                }
+                if (compare_keys(table.key_max, range.key_max) == .gt) {
+                    range.key_max = table.key_max;
                 }
             }
 
-            if (range) |r| {
-                assert(r.table_count > 0);
-                assert(compare_keys(r.key_min, r.key_max) != .gt);
-                assert(compare_keys(r.key_max, key_min) != .lt);
-                assert(compare_keys(r.key_min, key_max) != .gt);
-            }
+            assert(range.table_count > 0);
+            assert(compare_keys(range.key_min, range.key_max) != .gt);
+            assert(compare_keys(range.key_max, key_min) != .lt);
+            assert(compare_keys(range.key_min, key_max) != .gt);
+
             return range;
         }
 
