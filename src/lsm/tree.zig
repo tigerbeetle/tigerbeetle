@@ -4,7 +4,8 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 const os = std.os;
-const log = std.log.scoped(.lsm);
+
+const log = std.log.scoped(.tree);
 
 const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
@@ -337,32 +338,34 @@ pub fn TreeType(comptime Table: type) type {
                 // Start immutable table compaction to level 0 on the back beat (start for odds).
                 if (do_start) start_compaction: {
                     assert(tree.compaction_tick == half_measure + 1);
-                    assert(!tree.table_immutable.free);
 
-                    // Also, only start it if the immutable table has any values to compact.
-                    const num_values = tree.table_immutable.values.len;
-                    if (num_values == 0) break :start_compaction;
+                    // Do not start compaction if the immutable table does not require compaction.
+                    if (tree.table_immutable.free) break :start_compaction;
 
-                    const target_level: u8 = 0;
+                    const values_count = tree.table_immutable.values.len;
+                    assert(values_count > 0);
+
+                    const level_b: u8 = 0;
+
+                    // TODO(King) Encapsulate these as table.key_min() and table.key_max():
                     const key_min = key_from_value(&tree.table_immutable.values[0]);
-                    const key_max = key_from_value(&tree.table_immutable.values[num_values - 1]);
+                    const key_max = key_from_value(&tree.table_immutable.values[values_count - 1]);
 
-                    const drop_tombstones = tree.manifest.overlap_any(
-                        target_level,
-                        key_min,
-                        key_max,
-                    );
+                    // TODO(Joran) Get overlapping range with B before deciding to drop_tombstones.
+
+                    // TODO(Joran) Check all subsequent levels.
+                    const drop_tombstones = tree.manifest.overlap_any(level_b, key_min, key_max);
 
                     log.debug("{*}: started compacting immutable table to level 0", .{tree});
                     tree.compaction_table_immutable.start(
                         tree.grid,
                         &tree.manifest,
-                        target_level,
+                        level_b,
                         snapshot,
                         drop_tombstones,
                         .{ .table = &tree.table_immutable },
                         .{
-                            .level = target_level,
+                            .level = level_b,
                             .key_min = key_min,
                             .key_max = key_max,
                             .grid = tree.grid,
@@ -383,48 +386,52 @@ pub fn TreeType(comptime Table: type) type {
             }
 
             for (tree.compaction_table) |*compaction, index| {
-                const level = @intCast(u8, (index * 2) + @boolToInt(!even_levels));
-                const target_level = level + 1;
+                const level_a = @intCast(u8, (index * 2) + @boolToInt(!even_levels));
+                const level_b = level_a + 1;
 
-                assert(target_level <= config.lsm_levels);
-                if (target_level >= config.lsm_levels) break;
+                // Do not compact if level A is the last level.
+                if (level_b == config.lsm_levels) break;
+                assert(level_b < config.lsm_levels);
 
-                // Start the table compactions if it's the down beat or the back beat.
+                // Start compaction only on the down beat or the back beat.
                 if (do_start) start_compaction: {
-                    // Do not start a compaction on this level if there's no qualifying table.
-                    const table_info = tree.manifest.choose_table_for_compaction(level) orelse {
+                    // Choose a table in level A with the least overlap with tables in level B.
+                    const table_range = tree.manifest.choose_table_for_compaction(level_a) orelse {
+                        // Do not start compaction if the level does not require compaction.
                         break :start_compaction;
                     };
 
-                    // The last table will always drop tombstone as they cant be moved lower.
-                    const drop_tombstones = (target_level == config.lsm_levels) or
-                        tree.manifest.overlap_any(
-                        target_level,
-                        table_info.key_min,
-                        table_info.key_max,
-                    );
+                    const table = table_range.table;
+                    const range = table_range.range;
+
+                    assert(compare_keys(range.key_min, table.key_min) != .gt);
+                    assert(compare_keys(range.key_max, table.key_max) != .lt);
+
+                    // TODO(Joran) Check all subsequent levels.
+                    const drop_tombstones = (level_b == config.lsm_levels - 1) or
+                        tree.manifest.overlap_any(level_b, range.key_min, range.key_max);
 
                     log.debug("{*}: started compacting level {d} to level {d}", .{
                         tree,
-                        level,
-                        target_level,
+                        level_a,
+                        level_b,
                     });
 
                     compaction.start(
                         tree.grid,
                         &tree.manifest,
-                        target_level,
+                        level_b,
                         snapshot,
                         drop_tombstones,
                         .{
                             .grid = tree.grid,
-                            .address = table_info.address,
-                            .checksum = table_info.checksum,
+                            .address = table.address,
+                            .checksum = table.checksum,
                         },
                         .{
-                            .level = target_level,
-                            .key_min = table_info.key_min,
-                            .key_max = table_info.key_max,
+                            .level = level_b,
+                            .key_min = range.key_min,
+                            .key_max = range.key_max,
                             .grid = tree.grid,
                             .manifest = &tree.manifest,
                             .table_info_callback = undefined, // TODO Should be in Compaction?
@@ -437,8 +444,8 @@ pub fn TreeType(comptime Table: type) type {
                     tree.compaction_io_pending += 1;
                     log.debug("{*}: queued compaction for level {d} to level {d}", .{
                         tree,
-                        level,
-                        target_level,
+                        level_a,
+                        level_b,
                     });
 
                     const io_done_callback = get_compact_io_done_callback(CompactionTable);
