@@ -24,11 +24,12 @@ pub fn CompactionType(
 
         const Grid = GridType(Table.Storage);
         const Manifest = ManifestType(Table);
+        const TableInfo = Manifest.TableInfo;
 
         const IteratorA = IteratorAType(Table);
         const IteratorB = LevelIteratorType(Table);
 
-        pub const Callback = fn (it: *Compaction, done: bool) void;
+        pub const Callback = fn (it: *Compaction) void;
 
         const k = 2;
         const MergeIterator = KWayMergeIterator(
@@ -49,6 +50,14 @@ pub fn CompactionType(
             ready: bool = false,
         };
 
+        const Status = enum {
+            idle,
+            compacting,
+            done,
+        };
+
+        target_level: u8,
+        status: Status,
         manifest: *Manifest,
         grid: *Grid,
 
@@ -72,6 +81,9 @@ pub fn CompactionType(
         filter: BlockWrite,
         data: BlockWrite,
 
+        table_info_queued: usize = 0,
+        table_info_buffer: []*const TableInfo,
+
         pub fn init(allocator: mem.Allocator) !Compaction {
             var iterator_a = try IteratorA.init(allocator);
             errdefer iterator_a.deinit(allocator);
@@ -91,8 +103,14 @@ pub fn CompactionType(
             const data = BlockWrite{ .block = try allocate_block(allocator) };
             errdefer allocator.free(data.block);
 
+            const table_info_buffer_size = 1 + config.lsm_growth_factor + 2;
+            const table_info_buffer = try allocator.alloc(*const TableInfo, table_info_buffer_size);
+            errdefer allocator.free(table_info_buffer);
+
             return Compaction{
                 // Provided on start()
+                .target_level = undefined,
+                .status = .idle,
                 .manifest = undefined,
                 .grid = undefined,
 
@@ -104,6 +122,8 @@ pub fn CompactionType(
                 .index = index,
                 .filter = filter,
                 .data = data,
+
+                .table_info_buffer = table_info_buffer,
             };
         }
 
@@ -120,21 +140,28 @@ pub fn CompactionType(
             allocator.free(compaction.index.block);
             allocator.free(compaction.filter.block);
             allocator.free(compaction.data.block);
+            allocator.free(compaction.table_info_buffer);
         }
 
         pub fn start(
             compaction: *Compaction,
             grid: *Grid,
             manifest: *Manifest,
-            drop_tombstones: bool,
+            target_level: u8,
             snapshot: u64,
+            drop_tombstones: bool,
             iterator_a_context: IteratorA.Context,
             iterator_b_context: IteratorB.Context,
         ) void {
             assert(compaction.io_pending == 0);
             assert(compaction.callback == null);
+            assert(compaction.status == .idle);
+            assert(compaction.table_info_queued == 0);
+            assert(target_level < config.lsm_levels);
 
             compaction.* = .{
+                .target_level = target_level,
+                .status = .compacting,
                 .manifest = manifest,
                 .grid = grid,
 
@@ -152,6 +179,8 @@ pub fn CompactionType(
                 .index = compaction.index,
                 .filter = compaction.filter,
                 .data = compaction.data,
+
+                .table_info_buffer = compaction.table_info_buffer,
             };
 
             // TODO Reset iterators and builder.
@@ -216,11 +245,12 @@ pub fn CompactionType(
 
         fn tick_done(compaction: *Compaction) void {
             assert(compaction.io_pending == 0);
+            assert(compaction.status == .compacting);
+            if (compaction.merge_done) compaction.status = .done;
 
             const callback = compaction.callback.?;
             compaction.callback = null;
-
-            callback(compaction, compaction.merge_done);
+            callback(compaction);
         }
 
         fn tick_io_read(compaction: *Compaction) void {
@@ -331,7 +361,6 @@ pub fn CompactionType(
 
         fn io_callback(compaction: *Compaction) void {
             compaction.io_pending -= 1;
-
             if (compaction.io_pending == 0) compaction.tick_done();
         }
 
@@ -414,6 +443,32 @@ pub fn CompactionType(
             // A stream_id of 0 indicates the level A iterator.
             // All tables in level A have higher precedence.
             return a == 0;
+        }
+
+        fn table_info_queue_insert(compaction: *Compaction, table_info: *const TableInfo) void {
+            assert(compaction.table_info_queued <= compaction.table_info_buffer.len);
+
+            if (compaction.table_info_queued == compaction.table_info_buffer.len) {
+                compaction.table_info_flush_queued();
+            }
+
+            compaction.table_info_buffer[compaction.table_info_queued] = table_info;
+            compaction.table_info_queued += 1;
+        }
+
+        fn table_info_flush_queued(compaction: *Compaction) void {
+            assert(compaction.table_info_queued <= compaction.table_info_buffer.len);
+            defer compaction.table_info.queued = 0;
+
+            const table_infos = compaction.table_info_buffer[0..compaction.table_info_queued];
+            if (table_infos.len == 0) return;
+
+            compaction.manifest.insert_tables(compaction.level, table_infos);
+            compaction.manifest.set_snapshot_max(
+                compaction.level,
+                compaction.snapshot,
+                table_infos,
+            );
         }
     };
 }
