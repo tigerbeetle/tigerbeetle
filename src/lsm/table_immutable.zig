@@ -73,7 +73,7 @@ pub fn TableImmutableType(comptime Table: type) type {
 
             table.* = .{
                 .value_count_max = table.value_count_max,
-                .values = sorted_values,
+                .values = table.values.ptr[0..sorted_values.len],
                 .snapshot_min = snapshot_min,
                 .free = false,
             };
