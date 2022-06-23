@@ -216,7 +216,7 @@ pub fn TableIteratorType(comptime Table: type) type {
             return it.block_index == data_blocks_used;
         }
 
-        fn buffered_value_count(it: TableIterator) u32 {
+        pub fn buffered_value_count(it: TableIterator) u32 {
             assert(!it.read_pending);
 
             var value_count = it.values.count;

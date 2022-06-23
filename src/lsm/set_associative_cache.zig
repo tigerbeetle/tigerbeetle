@@ -7,7 +7,8 @@ const mem = std.mem;
 const meta = std.meta;
 const Vector = meta.Vector;
 
-const verify = @import("tree.zig").verify;
+const config = @import("../config.zig");
+const verify = config.verify;
 
 pub const Layout = struct {
     ways: u64 = 16,
