@@ -174,7 +174,6 @@ pub fn ManifestType(comptime Table: type) type {
 
             const manifest_level: *const Level = &manifest.levels[level];
             if (manifest_level.table_count_visible < table_count_visible_max) return null;
-
             // If even levels are compacted ahead of odd levels, then odd levels may burst.
             assert(manifest_level.table_count_visible <= table_count_visible_max + 1);
 
@@ -185,20 +184,23 @@ pub fn ManifestType(comptime Table: type) type {
             var iterations: usize = 0;
 
             if (it.next()) |table| {
-                const range = manifest.overlap(level + 1, table.key_min, table.key_max);
+                iterations += 1;
 
+                const range = manifest.overlap(level + 1, table.key_min, table.key_max);
                 if (optimal == null or range.table_count < optimal.?.range.table_count) {
                     optimal = .{
                         .table = table,
                         .range = range,
                     };
                 }
-
-                iterations += 1;
+                // If the table can be moved directly between levels then that is already optimal.
+                if (optimal.?.range.table_count == 1) break;
             }
-            assert(iterations == manifest_level.table_count_visible);
+            assert(iterations > 0);
+            assert(iterations == manifest_level.table_count_visible or
+                optimal.?.range.table_count == 1);
 
-            return optimal;
+            return optimal.?;
         }
 
         pub const TableRange = struct {
