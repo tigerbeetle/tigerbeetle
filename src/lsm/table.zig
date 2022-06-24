@@ -34,6 +34,8 @@ pub fn TableType(
     return struct {
         const Table = @This();
         const Grid = GridType(Storage);
+        const BlockPtr = Grid.BlockPtr;
+        const BlockPtrConst = Grid.BlockPtrConst;
         const Manifest = ManifestType(Table);
 
         // Re-export all the generic arguments.
@@ -58,10 +60,7 @@ pub fn TableType(
             }
         };
 
-        // Taken from tree.zig
-        pub const block_size = config.block_size;
-        pub const BlockPtr = *align(config.sector_size) [block_size]u8;
-        pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
+        const block_size = config.block_size;
 
         pub const key_size = @sizeOf(Key);
         pub const value_size = @sizeOf(Value);
@@ -218,8 +217,8 @@ pub fn TableType(
             const padding_size = block_size - padding_offset;
         };
 
-        const filter = struct {
-            const data_block_count_max = layout.filter_data_block_count_max;
+        pub const filter = struct {
+            pub const data_block_count_max = layout.filter_data_block_count_max;
 
             const filter_offset = @sizeOf(vsr.Header);
             const filter_size = block_size - filter_offset;
@@ -685,7 +684,21 @@ pub fn TableType(
             );
         }
 
+        pub inline fn index_data_addresses_const(index_block: BlockPtrConst) []const u64 {
+            return mem.bytesAsSlice(
+                u64,
+                index_block[index.data_addresses_offset..][0..index.data_addresses_size],
+            );
+        }
+
         pub inline fn index_data_checksums(index_block: BlockPtr) []u128 {
+            return mem.bytesAsSlice(
+                u128,
+                index_block[index.data_checksums_offset..][0..index.data_checksums_size],
+            );
+        }
+
+        pub inline fn index_data_checksums_const(index_block: BlockPtrConst) []const u128 {
             return mem.bytesAsSlice(
                 u128,
                 index_block[index.data_checksums_offset..][0..index.data_checksums_size],
@@ -699,7 +712,21 @@ pub fn TableType(
             );
         }
 
+        pub inline fn index_filter_addresses_const(index_block: BlockPtrConst) []const u64 {
+            return mem.bytesAsSlice(
+                u64,
+                index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
+            );
+        }
+
         inline fn index_filter_checksums(index_block: BlockPtr) []u128 {
+            return mem.bytesAsSlice(
+                u128,
+                index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
+            );
+        }
+
+        pub inline fn index_filter_checksums_const(index_block: BlockPtrConst) []const u128 {
             return mem.bytesAsSlice(
                 u128,
                 index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
@@ -760,13 +787,17 @@ pub fn TableType(
             );
         }
 
-        pub inline fn data_block_values_used(data_block: BlockPtr) []const Value {
+        pub inline fn data_block_values_used(data_block: BlockPtrConst) []const Value {
             const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
             // TODO we should be able to cross-check this with the header size
             // for more safety.
             const used = @intCast(u32, header.request);
             assert(used <= data.value_count_max);
-            return data_block_values(data_block)[0..used];
+            const values = mem.bytesAsSlice(
+                Value,
+                data_block[data.values_offset..][0..data.values_size],
+            );
+            return values[0..used];
         }
 
         pub inline fn block_address(block: BlockPtrConst) u64 {
@@ -776,8 +807,50 @@ pub fn TableType(
             return address;
         }
 
-        inline fn filter_block_filter(filter_block: BlockPtr) []u8 {
+        pub inline fn filter_block_filter(filter_block: BlockPtr) []u8 {
             return filter_block[filter.filter_offset..][0..filter.filter_size];
+        }
+
+        pub inline fn filter_block_filter_const(filter_block: BlockPtrConst) []const u8 {
+            return filter_block[filter.filter_offset..][0..filter.filter_size];
+        }
+
+        pub fn data_block_search(data_block: BlockPtrConst, key: Key) ?*const Value {
+            assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
+            const key_layout_bytes = @alignCast(
+                @alignOf(Key),
+                data_block[data.key_layout_offset..][0..data.key_layout_size],
+            );
+            const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
+
+            const e = eytzinger(data.key_count, data.value_count_max);
+            const values = e.search_values(
+                Key,
+                Value,
+                compare_keys,
+                key_layout,
+                data_block_values_used(data_block),
+                key,
+            );
+
+            switch (values.len) {
+                0 => return null,
+                else => {
+                    const result = binary_search.binary_search_values(
+                        Key,
+                        Value,
+                        key_from_value,
+                        compare_keys,
+                        values,
+                        key,
+                    );
+                    if (result.exact) {
+                        return &values[result.index];
+                    } else {
+                        return null;
+                    }
+                },
+            }
         }
     };
 }

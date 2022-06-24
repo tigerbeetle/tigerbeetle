@@ -12,6 +12,7 @@ const div_ceil = @import("../util.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
+const bloom_filter = @import("bloom_filter.zig");
 
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
@@ -232,7 +233,13 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             tree.table_mutable.remove(value);
         }
 
-        pub fn lookup(tree: *Tree, snapshot: u64, key: Key, callback: fn (value: ?*const Value) void) void {
+        pub fn lookup(
+            tree: *Tree,
+            callback: fn (*LookupContext, ?*const Value) void,
+            context: *LookupContext,
+            snapshot: u64,
+            key: Key,
+        ) void {
             assert(tree.prefetch_keys.count() == 0);
             assert(tree.prefetch_keys_iterator == null);
 
@@ -246,31 +253,118 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 if (tree.table_mutable.get(key) orelse
                     tree.value_cache.?.getKeyPtr(tombstone_from_key(key))) |value|
                 {
-                    callback(unwrap_tombstone(value));
+                    callback(context, unwrap_tombstone(value));
+                    return;
+                }
+            }
+
+            if (!tree.table_immutable.free and tree.table_immutable.snapshot_min < snapshot) {
+                if (tree.table_immutable.get(key)) |value| {
+                    callback(context, unwrap_tombstone(value));
                     return;
                 }
             }
 
             // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
-            if (!tree.table_immutable.free and tree.table_immutable.snapshot_min < snapshot) {
-                if (tree.table_immutable.get(key)) |value| {
-                    callback(unwrap_tombstone(value));
+            const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
+
+            context.* = .{
+                .tree = tree,
+                .completion = undefined,
+                .fingerprint = fingerprint,
+                .it = tree.manifest.lookup(snapshot, key),
+                .callback = callback,
+            };
+
+            context.read_next_table();
+        }
+
+        const LookupContext = struct {
+            tree: *Tree,
+            completion: Grid.Read,
+            fingerprint: bloom_filter.Fingerprint,
+            it: Manifest.LookupIterator,
+
+            current_table: ?struct {
+                data_block_address: u64,
+                data_block_checksum: u128,
+            } = null,
+
+            callback: fn (*Tree.LookupContext, ?*const Value) void,
+
+            fn finish(context: *LookupContext, value: ?*const Value) void {
+                const callback = context.callback;
+                context.* = undefined;
+                callback(context, value);
+            }
+
+            fn read_next_table(context: *LookupContext) void {
+                assert(context.current_table == null);
+                const info = context.it.next() orelse {
+                    context.finish(null);
                     return;
+                };
+
+                assert(info.visible(context.it.snapshot));
+                assert(compare_keys(context.it.key, info.key_min) != .lt);
+                assert(compare_keys(context.it.key, info.key_max) != .gt);
+
+                context.tree.grid.read_block(
+                    read_index_callback,
+                    &context.completion,
+                    info.address,
+                    info.checksum,
+                );
+            }
+
+            fn read_index_callback(completion: *Grid.Read, index: Grid.BlockPtrConst) void {
+                const context = @fieldParentPtr(LookupContext, "completion", completion);
+                const data_block_index = Table.index_data_block_for_key(index, context.it.key);
+                const filter_block_index = data_block_index / Table.filter.data_block_count_max;
+
+                context.current_table = .{
+                    .data_block_address = Table.index_data_addresses_const(index)[data_block_index],
+                    .data_block_checksum = Table.index_data_checksums_const(index)[data_block_index],
+                };
+
+                context.tree.grid.read_block(
+                    read_filter_callback,
+                    completion,
+                    Table.index_filter_addresses_const(index)[filter_block_index],
+                    Table.index_filter_checksums_const(index)[filter_block_index],
+                );
+            }
+
+            fn read_filter_callback(completion: *Grid.Read, filter_block: Grid.BlockPtrConst) void {
+                const context = @fieldParentPtr(LookupContext, "completion", completion);
+
+                const filter_bytes = Table.filter_block_filter_const(filter_block);
+                if (bloom_filter.may_contain(context.fingerprint, filter_bytes)) {
+                    context.tree.grid.read_block(
+                        read_data_callback,
+                        completion,
+                        context.current_table.?.data_block_address,
+                        context.current_table.?.data_block_checksum,
+                    );
+                } else {
+                    // The key is not present in this table, move on.
+                    context.current_table = null;
+                    context.read_next_table();
                 }
             }
 
-            var it = tree.manifest.lookup(snapshot, key);
-            if (it.next()) |info| {
-                assert(info.visible(snapshot));
-                assert(compare_keys(key, info.key_min) != .lt);
-                assert(compare_keys(key, info.key_max) != .gt);
+            fn read_data_callback(completion: *Grid.Read, data_block: Grid.BlockPtrConst) void {
+                const context = @fieldParentPtr(LookupContext, "completion", completion);
 
-                // TODO
-            } else {
-                callback(null);
-                return;
+                if (Table.data_block_search(data_block, context.it.key)) |value| {
+                    context.finish(value);
+                } else {
+                    // The key is not present in this table, move on.
+                    context.current_table = null;
+                    context.read_next_table();
+                }
             }
-        }
+        };
 
         /// Returns null if the value is null or a tombstone, otherwise returns the value.
         /// We use tombstone values internally, but expose them as null to the user.
