@@ -187,7 +187,7 @@ pub fn ManifestType(comptime Table: type) type {
             if (it.next()) |table| {
                 const range = manifest.overlap(level + 1, table.key_min, table.key_max);
 
-                if (optimal == null or range.table_count < optimal.range.table_count) {
+                if (optimal == null or range.table_count < optimal.?.range.table_count) {
                     optimal = .{
                         .table = table,
                         .range = range,

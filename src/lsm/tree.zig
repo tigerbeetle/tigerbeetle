@@ -446,7 +446,8 @@ pub fn TreeType(comptime Table: type) type {
             assert(compaction.status == .compacting);
             tree.compaction_io_pending += 1;
 
-            if (compaction.level_b == 0) {
+            if (@TypeOf(compaction.*) == CompactionTableImmutable) {
+                assert(compaction.level_b == 0);
                 compaction.tick_io(Tree.compact_io_table_immutable_callback);
                 log.debug("{*}: queued compaction for immutable table to level 0", .{tree});
             } else {
