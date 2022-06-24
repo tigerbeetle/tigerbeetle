@@ -56,6 +56,48 @@ pub fn CompactionType(
             done,
         };
 
+        const TableInfoBuffer = struct {
+            count: usize = 0,
+            array: []TableInfo,
+
+            fn init(allocator: mem.Allocator) !TableInfoBuffer {
+                const array_size = 1 + config.lsm_growth_factor + 2;
+
+                const array = try allocator.alloc(TableInfo, array_size);
+                errdefer allocator.free(array);
+
+                return TableInfoBuffer{ .array = array };
+            }
+
+            fn deinit(buffer: *TableInfoBuffer, allocator: mem.Allocator) void {
+                allocator.free(buffer.array);
+            }
+
+            fn full(buffer: *const TableInfoBuffer) bool {
+                assert(buffer.count <= buffer.array.len);
+                return buffer.count == buffer.array.len;
+            }
+
+            fn push(buffer: *TableInfoBuffer, table: *const TableInfo) void {
+                assert(!buffer.full());
+                
+                // assert that table is sorted when pushing
+                if (buffer.count > 0) {
+                    const prev_table = &buffer.array[buffer.count - 1];
+                    assert(compare_keys(prev_table.key_min, table.key_min) != .lt)
+                }
+                
+                buffer.array[buffer.count] = table.*;
+                buffer.counter += 1;
+            }
+
+            fn drain(buffer: *TableInfoBuffer) []TableInfo {
+                assert(buffer.count <= buffer.array.len);
+                defer buffer.count = 0;
+                return buffer.array.ptr[0..buffer.count];
+            }
+        };
+
         target_level: u8,
         status: Status,
         manifest: *Manifest,
@@ -81,8 +123,9 @@ pub fn CompactionType(
         filter: BlockWrite,
         data: BlockWrite,
 
-        table_info_queued: usize = 0,
-        table_info_buffer: []*const TableInfo,
+        remove_level_a: ?*const TableInfo = null,
+        remove_level_b: TableInfoBuffer,
+        insert_level_b: TableInfoBuffer,
 
         pub fn init(allocator: mem.Allocator) !Compaction {
             var iterator_a = try IteratorA.init(allocator);
@@ -103,9 +146,11 @@ pub fn CompactionType(
             const data = BlockWrite{ .block = try allocate_block(allocator) };
             errdefer allocator.free(data.block);
 
-            const table_info_buffer_size = 1 + config.lsm_growth_factor + 2;
-            const table_info_buffer = try allocator.alloc(*const TableInfo, table_info_buffer_size);
-            errdefer allocator.free(table_info_buffer);
+            const remove_level_b = try TableInfoBuffer.init(allocator);
+            errdefer remove_level_b.deinit(allocator);
+
+            const insert_level_b = try TableInfoBuffer.init(allocator);
+            errdefer insert_level_b.deinit(allocator);
 
             return Compaction{
                 // Provided on start()
@@ -123,7 +168,8 @@ pub fn CompactionType(
                 .filter = filter,
                 .data = data,
 
-                .table_info_buffer = table_info_buffer,
+                .remove_level_b = remove_level_b,
+                .insert_level_b = insert_level_b,
             };
         }
 
@@ -179,8 +225,9 @@ pub fn CompactionType(
                 .index = compaction.index,
                 .filter = compaction.filter,
                 .data = compaction.data,
-
-                .table_info_buffer = compaction.table_info_buffer,
+                
+                .remove_level_b = remove_level_b,
+                .insert_level_b = insert_level_b,
             };
 
             // TODO Reset iterators and builder.
@@ -246,6 +293,7 @@ pub fn CompactionType(
         fn tick_done(compaction: *Compaction) void {
             assert(compaction.io_pending == 0);
             assert(compaction.status == .compacting);
+            
             if (compaction.merge_done) compaction.status = .done;
 
             const callback = compaction.callback.?;
@@ -443,32 +491,6 @@ pub fn CompactionType(
             // A stream_id of 0 indicates the level A iterator.
             // All tables in level A have higher precedence.
             return a == 0;
-        }
-
-        fn table_info_queue_insert(compaction: *Compaction, table_info: *const TableInfo) void {
-            assert(compaction.table_info_queued <= compaction.table_info_buffer.len);
-
-            if (compaction.table_info_queued == compaction.table_info_buffer.len) {
-                compaction.table_info_flush_queued();
-            }
-
-            compaction.table_info_buffer[compaction.table_info_queued] = table_info;
-            compaction.table_info_queued += 1;
-        }
-
-        fn table_info_flush_queued(compaction: *Compaction) void {
-            assert(compaction.table_info_queued <= compaction.table_info_buffer.len);
-            defer compaction.table_info.queued = 0;
-
-            const table_infos = compaction.table_info_buffer[0..compaction.table_info_queued];
-            if (table_infos.len == 0) return;
-
-            compaction.manifest.insert_tables(compaction.level, table_infos);
-            compaction.manifest.set_snapshot_max(
-                compaction.level,
-                compaction.snapshot,
-                table_infos,
-            );
         }
     };
 }
