@@ -85,7 +85,7 @@ pub fn LevelIteratorType(comptime Table: type) type {
             table_info_callback: fn (*LevelIterator, *const TableInfo) void,
         };
 
-        pub fn reset(
+        pub fn start(
             it: *LevelIterator,
             context: Context,
             read_callback: fn (*LevelIterator) void,
