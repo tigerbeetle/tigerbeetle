@@ -18,6 +18,7 @@ pub fn CompactionType(
     const Value = Table.Value;
     const BlockPtr = Table.BlockPtr;
     const tombstone = Table.tombstone;
+    const compare_keys = Table.compare_keys;
 
     return struct {
         const Compaction = @This();
@@ -80,13 +81,13 @@ pub fn CompactionType(
 
             fn push(buffer: *TableInfoBuffer, table: *const TableInfo) void {
                 assert(!buffer.full());
-                
+
                 // assert that table is sorted when pushing
                 if (buffer.count > 0) {
                     const prev_table = &buffer.array[buffer.count - 1];
-                    assert(compare_keys(prev_table.key_min, table.key_min) != .lt)
+                    assert(compare_keys(prev_table.key_min, table.key_min) != .lt);
                 }
-                
+
                 buffer.array[buffer.count] = table.*;
                 buffer.counter += 1;
             }
@@ -98,7 +99,7 @@ pub fn CompactionType(
             }
         };
 
-        target_level: u8,
+        level_b: u8,
         status: Status,
         manifest: *Manifest,
         grid: *Grid,
@@ -146,15 +147,15 @@ pub fn CompactionType(
             const data = BlockWrite{ .block = try allocate_block(allocator) };
             errdefer allocator.free(data.block);
 
-            const remove_level_b = try TableInfoBuffer.init(allocator);
+            var remove_level_b = try TableInfoBuffer.init(allocator);
             errdefer remove_level_b.deinit(allocator);
 
-            const insert_level_b = try TableInfoBuffer.init(allocator);
+            var insert_level_b = try TableInfoBuffer.init(allocator);
             errdefer insert_level_b.deinit(allocator);
 
             return Compaction{
                 // Provided on start()
-                .target_level = undefined,
+                .level_b = undefined,
                 .status = .idle,
                 .manifest = undefined,
                 .grid = undefined,
@@ -193,7 +194,7 @@ pub fn CompactionType(
             compaction: *Compaction,
             grid: *Grid,
             manifest: *Manifest,
-            target_level: u8,
+            level_b: u8,
             snapshot: u64,
             drop_tombstones: bool,
             iterator_a_context: IteratorA.Context,
@@ -202,11 +203,10 @@ pub fn CompactionType(
             assert(compaction.io_pending == 0);
             assert(compaction.callback == null);
             assert(compaction.status == .idle);
-            assert(compaction.table_info_queued == 0);
-            assert(target_level < config.lsm_levels);
+            assert(level_b < config.lsm_levels);
 
             compaction.* = .{
-                .target_level = target_level,
+                .level_b = level_b,
                 .status = .compacting,
                 .manifest = manifest,
                 .grid = grid,
@@ -225,9 +225,9 @@ pub fn CompactionType(
                 .index = compaction.index,
                 .filter = compaction.filter,
                 .data = compaction.data,
-                
-                .remove_level_b = remove_level_b,
-                .insert_level_b = insert_level_b,
+
+                .remove_level_b = compaction.remove_level_b,
+                .insert_level_b = compaction.insert_level_b,
             };
 
             // TODO Reset iterators and builder.
@@ -293,7 +293,7 @@ pub fn CompactionType(
         fn tick_done(compaction: *Compaction) void {
             assert(compaction.io_pending == 0);
             assert(compaction.status == .compacting);
-            
+
             if (compaction.merge_done) compaction.status = .done;
 
             const callback = compaction.callback.?;
