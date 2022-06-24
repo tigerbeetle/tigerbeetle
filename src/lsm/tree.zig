@@ -372,8 +372,12 @@ pub fn TreeType(comptime Table: type) type {
 
             // TODO(Joran) Get overlapping range with B before deciding to drop_tombstones.
 
-            // TODO(Joran) Check all subsequent levels.
-            const drop_tombstones = tree.manifest.overlap_any(level_b, key_min, key_max);
+            // TODO(Joran) Move this entirely into Compaction.start().
+            const drop_tombstones = tree.manifest.compaction_must_drop_tombstones(
+                level_b,
+                key_min,
+                key_max,
+            );
 
             log.debug("{*}: started compacting immutable table to level 0", .{tree});
             tree.compaction_table_immutable.start(
@@ -408,9 +412,12 @@ pub fn TreeType(comptime Table: type) type {
             assert(compare_keys(range.key_min, table.key_min) != .gt);
             assert(compare_keys(range.key_max, table.key_max) != .lt);
 
-            // TODO(Joran) Check all subsequent levels.
-            const drop_tombstones = (level_b == config.lsm_levels - 1) or
-                tree.manifest.overlap_any(level_b, range.key_min, range.key_max);
+            // TODO(Joran) Move this entirely into Compaction.start().
+            const drop_tombstones = tree.manifest.compaction_must_drop_tombstones(
+                level_b,
+                range.key_min,
+                range.key_max,
+            );
 
             log.debug("{*}: started compacting level {d} to level {d}", .{
                 tree,
