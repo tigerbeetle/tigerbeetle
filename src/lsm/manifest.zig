@@ -183,7 +183,7 @@ pub fn ManifestType(comptime Table: type) type {
             var it = manifest.levels[level].iterator_visibility(.visible, &snapshots);
             var iterations: usize = 0;
 
-            if (it.next()) |table| {
+            while (it.next()) |table| {
                 iterations += 1;
 
                 const range = manifest.overlap(level + 1, table.key_min, table.key_max);
