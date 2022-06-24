@@ -220,7 +220,7 @@ pub fn ManifestType(comptime Table: type) type {
         /// Returns the smallest visible range in a level that overlaps the candidate key range.
         /// For example, for a table in level 2, count how many tables overlap in level 3, and
         /// determine the span of their complete key range, which may be broader or narrower.
-        pub fn overlap(manifest: *const Manifest, level_b: u8, key_min: Key, key_max: Key) Range {
+        fn overlap(manifest: *const Manifest, level_b: u8, key_min: Key, key_max: Key) Range {
             assert(level_b < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
@@ -261,15 +261,33 @@ pub fn ManifestType(comptime Table: type) type {
             return range;
         }
 
-        /// Returns whether a level contains any visible table that overlaps the key range.
-        /// For example, this is useful when determining whether to drop tombstones when compacting,
-        /// because if no subsequent level has any overlap, then the tombstone may be dropped.
-        pub fn overlap_any(manifest: *const Manifest, level: u8, key_min: Key, key_max: Key) bool {
-            assert(level < config.lsm_levels);
-            assert(compare_keys(key_min, key_max) != .gt);
+        /// If no subsequent levels have any overlap, then tombstones must be dropped.
+        pub fn compaction_must_drop_tombstones(
+            manifest: *const Manifest,
+            level_b: u8,
+            range: Range,
+        ) bool {
+            assert(level_b < config.lsm_levels);
+            assert(range.table_count > 0);
+            assert(compare_keys(range.key_min, range.key_max) != .gt);
 
-            var it = manifest.levels[level].iterator(snapshot_latest, key_min, key_max, .ascending);
-            return it.next() != null;
+            var level_c: u8 = level_b + 1;
+            while (level_c < config.lsm_levels) : (level_c += 1) {
+                var it = manifest.levels[level_c].iterator(
+                    snapshot_latest,
+                    range.key_min,
+                    range.key_max,
+                    .ascending,
+                );
+                if (it.next() != null) {
+                    // If the range is being compacted into the last level then this is unreachable.
+                    assert(level_b != config.lsm_levels - 1);
+                    return false;
+                }
+            }
+
+            assert(level_c == config.lsm_levels);
+            return true;
         }
 
         /// Returns a unique snapshot, incrementing the greatest snapshot value seen so far,
