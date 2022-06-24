@@ -12,7 +12,9 @@ HEADERS_TARBALL=./build/`basename "$HEADERS_URL"`
 # Download, making sure we download to the same output document, without wget adding "-1" etc. if the file was previously partially downloaded:
 echo "Downloading $HEADERS_URL..."
 if command -v wget &> /dev/null; then
-    wget --quiet --show-progress --output-document=$HEADERS_TARBALL $HEADERS_URL
+    # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
+    # Only A records (for ipv4) are used in DNS:
+    wget -4 --quiet --show-progress --output-document=$HEADERS_TARBALL $HEADERS_URL
 else
     curl --silent --progress-bar --output $HEADERS_TARBALL $HEADERS_URL
 fi
