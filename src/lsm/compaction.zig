@@ -17,7 +17,6 @@ pub fn CompactionType(
 ) type {
     const Key = Table.Key;
     const Value = Table.Value;
-    const BlockPtr = Table.BlockPtr;
     const tombstone = Table.tombstone;
     const compare_keys = Table.compare_keys;
 
@@ -25,6 +24,7 @@ pub fn CompactionType(
         const Compaction = @This();
 
         const Grid = GridType(Table.Storage);
+        const BlockPtr = Grid.BlockPtr;
         const Manifest = ManifestType(Table);
         const TableInfo = Manifest.TableInfo;
 

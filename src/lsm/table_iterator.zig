@@ -26,7 +26,7 @@ pub fn TableIteratorType(comptime Table: type) type {
         address: u64,
         checksum: u128,
 
-        index: Table.BlockPtr,
+        index: Grid.BlockPtr,
         /// The index of the current block in the table index block.
         block_index: u32,
 
@@ -39,7 +39,7 @@ pub fn TableIteratorType(comptime Table: type) type {
         /// iteration is complete.
         values: ValuesRingBuffer,
 
-        blocks: RingBuffer(Table.BlockPtr, 2, .array),
+        blocks: RingBuffer(Grid.BlockPtr, 2, .array),
         /// The index of the current value in the head of the blocks ring buffer.
         value: u32,
 
@@ -161,7 +161,7 @@ pub fn TableIteratorType(comptime Table: type) type {
             it.grid.read_block(on_read, &it.read, address, checksum);
         }
 
-        fn on_read_table_index(read: *Grid.Read, block: Table.BlockPtrConst) void {
+        fn on_read_table_index(read: *Grid.Read, block: Grid.BlockPtrConst) void {
             const it = @fieldParentPtr(TableIterator, "read", read);
             assert(it.read_pending);
             it.read_pending = false;
@@ -178,7 +178,7 @@ pub fn TableIteratorType(comptime Table: type) type {
             assert(read_pending);
         }
 
-        fn on_read(read: *Grid.Read, block: Table.BlockPtrConst) void {
+        fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {
             const it = @fieldParentPtr(TableIterator, "read", read);
             assert(it.read_pending);
             it.read_pending = false;

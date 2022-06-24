@@ -18,9 +18,6 @@ const client_table_zone_size = config.message_size_max * config.clients_max * 2;
 
 pub fn GridType(comptime Storage: type) type {
     const block_size = config.block_size;
-    const BlockPtr = *align(config.sector_size) [block_size]u8;
-    const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
-
     const SuperBlock = SuperBlockType(Storage);
 
     const cache_interface = struct {
@@ -70,6 +67,9 @@ pub fn GridType(comptime Storage: type) type {
 
     return struct {
         const Grid = @This();
+
+        pub const BlockPtr = *align(config.sector_size) [block_size]u8;
+        pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
         pub const Write = struct {
             callback: fn (*Grid.Write) void,
