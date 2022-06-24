@@ -349,7 +349,7 @@ pub fn TreeType(comptime Table: type) type {
                 if (level_b == config.lsm_levels) break;
                 assert(level_b < config.lsm_levels);
 
-                if (do_start) tree.compact_io_table_start(level_a, level_b, snapshot);
+                if (do_start) tree.compact_io_table_start(snapshot, level_a, level_b);
                 if (compaction.status == .compacting) tree.compact_io_tick(compaction);
             }
         }
@@ -394,7 +394,7 @@ pub fn TreeType(comptime Table: type) type {
             );
         }
 
-        fn compact_io_table_start(tree: *Tree, level_a: u8, level_b: u8, snapshot: u64) void {
+        fn compact_io_table_start(tree: *Tree, snapshot: u64, level_a: u8, level_b: u8) void {
             // Choose a table in level A with the least overlap with tables in level B.
             const table_range = tree.manifest.choose_table_for_compaction(level_a) orelse return;
             const table = table_range.table;
