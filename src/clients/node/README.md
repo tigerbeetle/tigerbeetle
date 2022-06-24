@@ -20,40 +20,6 @@ or
 npm install tigerbeetle-node
 ```
 
-**Development**
-
-Follow these steps to get up and running when cloning the repo:
-```shell
-git clone --recurse-submodules https://github.com/coilhq/tigerbeetle-node.git
-cd tigerbeetle-node/
-yarn install --immutable
-```
-
-Build locally using `yarn`:
-```shell
-# Run the following from this directory:
-yarn && yarn build
-```
- 
-* **Please note: `yarn clean` will remove Zig and NodeAPI C headers, which mean you need to run:**
-```shell
-./scripts/postinstall.sh #Install Zig and NodeJS C Headers
-```
-
-***Yarn - Run Test***
-Ensure TigerBeetle (`init` & `start`) is running on the port configured in `test.ts`, then run:
-```shell
-./tigerbeetle init --cluster=1 --replica=0 --directory=.
-./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001
-yarn test
-```
-
-***Yarn - Run Benchmark***
-Run the benchmark (The `benchmark` will automatically start TigerBeetle on port `3001` _(single replica)_:
-```shell
-yarn benchmark
-```
-
 ## Usage
 A client needs to be configured with a `cluster_id` and `replica_addresses`. 
 This instantiates the client where memory is allocated to internally buffer events to be sent. 
@@ -121,7 +87,7 @@ The creation of an account can be linked to the successful creation of another b
   flags |= CreateAccountFlags.debits_must_not_exceed_credits
 ```
 
-### Account lookup
+### Account Lookup
 
 The `id` of the account is used for lookups. Only matched accounts are returned.
 ```js
@@ -145,7 +111,7 @@ The `id` of the account is used for lookups. Only matched accounts are returned.
    */
 ```
 
-### Creating a transfer
+### Creating a Transfer
 
 This creates a journal entry between two accounts.
 ```js
@@ -191,7 +157,7 @@ Transfers within a batch may also be linked (see [linked events](#linked-events)
   flags |= TransferFlags.pending
 ```
 
-### Post a Pending transfer (2-phase)
+### Post a Pending Transfer (2-Phase)
 
 With `flags = post_pending_transfer`, TigerBeetle will accept the transfer. TigerBeetle will atomically rollback the changes to `debits_pending` and `credits_pending` of the appropriate accounts and apply them to the `debits_posted` and `credits_posted` balances.
 ```js
@@ -204,7 +170,7 @@ const post = {
 const errors = await client.createTransfers([post])
 ```
 
-### Linked events
+### Linked Events
 
 When the `linked` flag is specified for the `createAccount`, `createTransfer`, `commitTransfer` event, it links an event with the next event in the batch, to create a chain of events, of arbitrary length, which all succeed or fail together. The tail of a chain is denoted by the first event without this flag. The last event in a batch may therefore never have the `linked` flag set as this would leave a chain open-ended. Multiple chains or individual events may coexist within a batch to succeed or fail independently. Events within a chain are executed within order, or are rolled back on error, so that the effect of each event in the chain is visible to the next, and so that the chain is either visible or invisible as a unit to subsequent events after the chain. The event that was the first to break the chain will have a unique error result. Other events in the chain will have their error result set to `linked_event_failed`.
 
@@ -247,4 +213,38 @@ const errors = await client.createTransfers(batch)
  *  { index: 7, error: 1 },  // linked_event_failed
  * ]
  */
+```
+
+### Development
+
+Follow these steps to get up and running when cloning the repo:
+```shell
+git clone --recurse-submodules https://github.com/coilhq/tigerbeetle-node.git
+cd tigerbeetle-node/
+yarn install --immutable
+```
+
+Build locally using `yarn`:
+```shell
+# Run the following from this directory:
+yarn && yarn build
+```
+
+* **Please note: `yarn clean` will remove Zig and NodeAPI C headers, which mean you need to run:**
+```shell
+./scripts/postinstall.sh #Install Zig and NodeJS C Headers
+```
+
+***Yarn - Run Test***
+Ensure TigerBeetle (`init` & `start`) is running on the port configured in `test.ts`, then run:
+```shell
+./tigerbeetle init --cluster=1 --replica=0 --directory=.
+./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001
+yarn test
+```
+
+***Yarn - Run Benchmark***
+Run the benchmark (The `benchmark` will automatically start TigerBeetle on port `3001` _(single replica)_:
+```shell
+yarn benchmark
 ```
