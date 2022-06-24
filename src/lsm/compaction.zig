@@ -45,16 +45,16 @@ pub fn CompactionType(
             stream_precedence,
         );
 
-        const BlockWrite = struct {
-            block: BlockPtr,
-            write: Grid.Write = undefined,
-            ready: bool = false,
-        };
-
         const Status = enum {
             idle,
             compacting,
             done,
+        };
+
+        const BlockWrite = struct {
+            block: BlockPtr,
+            write: Grid.Write = undefined,
+            ready: bool = false,
         };
 
         const TableInfoBuffer = struct {
@@ -107,24 +107,25 @@ pub fn CompactionType(
             }
         };
 
-        level_b: u8,
         status: Status,
-        manifest: *Manifest,
-        grid: *Grid,
 
+        grid: *Grid,
+        manifest: *Manifest,
+        level_b: u8,
+        snapshot: u64,
+        drop_tombstones: bool,
+
+        callback: ?Callback = null,
         ticks: u32 = 0,
         io_pending: u32 = 0,
-        drop_tombstones: bool = false,
-        snapshot: u64 = undefined,
-        callback: ?Callback = null,
+
+        iterator_a: IteratorA,
+        iterator_b: IteratorB,
 
         /// Private:
         /// The caller must use the Callback's `done` argument to know when compaction is done,
         /// because a write I/O may yet follow even after the merge is done.
         merge_done: bool = false,
-
-        iterator_a: IteratorA,
-        iterator_b: IteratorB,
         merge_iterator: MergeIterator,
         table_builder: Table.Builder,
 
@@ -209,24 +210,23 @@ pub fn CompactionType(
             iterator_a_context: IteratorA.Context,
             iterator_b_context: IteratorB.Context,
         ) void {
-            assert(compaction.io_pending == 0);
-            assert(compaction.callback == null);
             assert(compaction.status == .idle);
+            assert(compaction.callback == null);
+            assert(compaction.io_pending == 0);
             assert(level_b < config.lsm_levels);
+            assert(level_b < config.lsm_levels - 1 or drop_tombstones);
 
             compaction.* = .{
-                .level_b = level_b,
                 .status = .compacting,
-                .manifest = manifest,
+
                 .grid = grid,
+                .manifest = manifest,
+                .level_b = level_b,
+                .snapshot = snapshot,
+                .drop_tombstones = drop_tombstones,
 
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
-
-                .merge_done = false,
-                .ticks = 0,
-                .drop_tombstones = drop_tombstones,
-                .snapshot = snapshot,
 
                 .merge_iterator = undefined,
                 .table_builder = compaction.table_builder,
@@ -240,8 +240,8 @@ pub fn CompactionType(
             };
 
             // TODO Reset iterators and builder.
-            compaction.iterator_a.reset(iterator_a_context, iterator_a_read_done);
-            compaction.iterator_b.reset(iterator_b_context, iterator_b_read_done);
+            compaction.iterator_a.start(iterator_a_context, iterator_a_read_done);
+            compaction.iterator_b.start(iterator_b_context, iterator_b_read_done);
 
             assert(!compaction.data.ready);
             assert(!compaction.filter.ready);
@@ -257,10 +257,10 @@ pub fn CompactionType(
         /// 2. IO.tick() to submit these I/O operations to the kernel,
         /// 3. tick_cpu() across all trees.
         pub fn tick_io(compaction: *Compaction, callback: Callback) void {
-            assert(!compaction.merge_done);
-            assert(compaction.io_pending == 0);
-            assert(compaction.callback == null);
             assert(compaction.status == .compacting);
+            assert(compaction.callback == null);
+            assert(compaction.io_pending == 0);
+            assert(!compaction.merge_done);
 
             compaction.callback = callback;
 
@@ -271,10 +271,10 @@ pub fn CompactionType(
         }
 
         pub fn tick_cpu(compaction: *Compaction) void {
-            assert(!compaction.merge_done);
-            assert(compaction.io_pending >= 0);
-            assert(compaction.callback != null);
             assert(compaction.status == .compacting);
+            assert(compaction.callback != null);
+            assert(compaction.io_pending >= 0);
+            assert(!compaction.merge_done);
 
             if (compaction.ticks == 1) {
                 // We cannot initialize the merge until we can peek() a value from each stream,
@@ -302,8 +302,9 @@ pub fn CompactionType(
         }
 
         fn tick_done(compaction: *Compaction) void {
-            assert(compaction.io_pending == 0);
             assert(compaction.status == .compacting);
+            assert(compaction.callback != null);
+            assert(compaction.io_pending == 0);
 
             if (compaction.merge_done) compaction.status = .done;
 
@@ -312,8 +313,11 @@ pub fn CompactionType(
             callback(compaction);
         }
 
-        pub fn clear(compaction: *Compaction) void {
+        pub fn reset(compaction: *Compaction) void {
             assert(compaction.status == .done);
+            assert(compaction.callback == null);
+            assert(compaction.io_pending == 0);
+
             compaction.status = .idle;
         }
 

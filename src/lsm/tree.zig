@@ -555,7 +555,7 @@ pub fn TreeType(comptime Table: type) type {
                 assert(tree.compaction_table_immutable.status == .idle);
             } else {
                 if (tree.compaction_table_immutable.status == .done) {
-                    tree.compaction_table_immutable.clear();
+                    tree.compaction_table_immutable.reset();
                 }
             }
 
@@ -568,7 +568,7 @@ pub fn TreeType(comptime Table: type) type {
                 if (level_b >= config.lsm_levels) break;
 
                 assert(compaction.level_b == level_b);
-                if (compaction.status == .done) compaction.clear();
+                if (compaction.status == .done) compaction.reset();
             }
 
             // At the end of every beat, ensure mutable table can be flushed to immutable table.

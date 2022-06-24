@@ -130,7 +130,7 @@ pub fn TableImmutableIteratorType(comptime Table: type) type {
             table: *TableImmutable,
         };
 
-        pub fn reset(
+        pub fn start(
             it: *TableImmutableIterator,
             context: Context,
             read_done: fn (*TableImmutableIterator) void,
