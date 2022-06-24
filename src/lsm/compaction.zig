@@ -252,6 +252,7 @@ pub fn CompactionType(
             assert(!compaction.merge_done);
             assert(compaction.io_pending == 0);
             assert(compaction.callback == null);
+            assert(compaction.status == .compacting);
 
             compaction.callback = callback;
 
@@ -265,6 +266,7 @@ pub fn CompactionType(
             assert(!compaction.merge_done);
             assert(compaction.io_pending >= 0);
             assert(compaction.callback != null);
+            assert(compaction.status == .compacting);
 
             if (compaction.ticks == 1) {
                 // We cannot initialize the merge until we can peek() a value from each stream,
@@ -300,6 +302,11 @@ pub fn CompactionType(
             const callback = compaction.callback.?;
             compaction.callback = null;
             callback(compaction);
+        }
+
+        pub fn clear(compaction: *Compaction) void {
+            assert(compaction.status == .done);
+            compaction.status = .idle;
         }
 
         fn tick_io_read(compaction: *Compaction) void {
