@@ -183,11 +183,12 @@ pub fn CompactionType(
             compaction.iterator_a.deinit(allocator);
             compaction.iterator_b.deinit(allocator);
             compaction.table_builder.deinit(allocator);
+            compaction.remove_level_b.deinit(allocator);
+            compaction.insert_level_b.deinit(allocator);
 
             allocator.free(compaction.index.block);
             allocator.free(compaction.filter.block);
             allocator.free(compaction.data.block);
-            allocator.free(compaction.table_info_buffer);
         }
 
         pub fn start(
