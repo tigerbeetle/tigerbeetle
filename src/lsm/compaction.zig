@@ -58,13 +58,18 @@ pub fn CompactionType(
         };
 
         const TableInfoBuffer = struct {
-            count: usize = 0,
             array: []TableInfo,
+            count: usize = 0,
+
+            /// The average number of tables involved in a compaction is the 1 table from level A,
+            /// plus the growth_factor number of tables from level B, plus 1 on either side,
+            /// since the overlap may not be perfectly aligned to table boundaries.
+            /// However, the worst case number of tables may approach all tables in level B,
+            /// since key ranges may be skewed and not evenly distributed across a level.
+            const count_max = 1 + config.lsm_growth_factor + 2;
 
             fn init(allocator: mem.Allocator) !TableInfoBuffer {
-                const array_size = 1 + config.lsm_growth_factor + 2;
-
-                const array = try allocator.alloc(TableInfo, array_size);
+                const array = try allocator.alloc(TableInfo, count_max);
                 errdefer allocator.free(array);
 
                 return TableInfoBuffer{ .array = array };
@@ -75,17 +80,18 @@ pub fn CompactionType(
             }
 
             fn full(buffer: *const TableInfoBuffer) bool {
+                assert(buffer.count <= count_max);
                 assert(buffer.count <= buffer.array.len);
                 return buffer.count == buffer.array.len;
             }
 
+            /// Asserts that tables are pushed in sort order.
             fn push(buffer: *TableInfoBuffer, table: *const TableInfo) void {
                 assert(!buffer.full());
 
-                // assert that table is sorted when pushing
                 if (buffer.count > 0) {
-                    const prev_table = &buffer.array[buffer.count - 1];
-                    assert(compare_keys(prev_table.key_min, table.key_min) != .lt);
+                    const tail = &buffer.array[buffer.count - 1];
+                    assert(compare_keys(tail.key_max, table.key_min) == .lt);
                 }
 
                 buffer.array[buffer.count] = table.*;
@@ -93,7 +99,9 @@ pub fn CompactionType(
             }
 
             fn drain(buffer: *TableInfoBuffer) []TableInfo {
+                assert(buffer.count <= count_max);
                 assert(buffer.count <= buffer.array.len);
+
                 defer buffer.count = 0;
                 return buffer.array.ptr[0..buffer.count];
             }
