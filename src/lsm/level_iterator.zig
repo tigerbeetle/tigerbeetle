@@ -141,7 +141,8 @@ pub fn LevelIteratorType(comptime Table: type) type {
             _ = scope;
 
             // manifest = scope.level_iterator.manifest
-            // scope.table_info = manifest.choose_next
+            // scope.table_info = manifest.choose_next(if start: first, else: key_min=last_key_max)
+            // level_iterator.table_info_callback(scope.table_info)
 
             // TODO Implement get_next_address()
             //const address = table.parent.manifest.get_next_address() orelse return false;

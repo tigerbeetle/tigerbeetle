@@ -103,6 +103,8 @@ pub fn CompactionType(
                 assert(buffer.count <= buffer.array.len);
 
                 defer buffer.count = 0;
+                // Slice on array.ptr instead of array to avoid
+                // having stage1 give us an array.ptr=undefined when buffer.count=0.
                 return buffer.array.ptr[0..buffer.count];
             }
         };
@@ -163,14 +165,18 @@ pub fn CompactionType(
             errdefer insert_level_b.deinit(allocator);
 
             return Compaction{
-                // Provided on start()
-                .level_b = undefined,
                 .status = .idle,
-                .manifest = undefined,
+
+                // Provided on start():
                 .grid = undefined,
+                .manifest = undefined,
+                .level_b = undefined,
+                .snapshot = undefined,
+                .drop_tombstones = undefined,
 
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
+                
                 .merge_iterator = undefined, // This must be initialized at tick 1.
                 .table_builder = table_builder,
 
@@ -239,9 +245,15 @@ pub fn CompactionType(
                 .insert_level_b = compaction.insert_level_b,
             };
 
+            // TODO(King) Handle cases
+            // - if drop_tombstones -> always start compaction
+            // - if range.table_count == 1 -> set_snapshot(level_a) | insert_table(level_b) | .done
+            // - if compaction doesn't update table infos -> make sure handled correctly
+
+
             // TODO Reset iterators and builder.
-            compaction.iterator_a.start(iterator_a_context, iterator_a_read_done);
-            compaction.iterator_b.start(iterator_b_context, iterator_b_read_done);
+            compaction.iterator_a.start(iterator_a_context, iterator_a_read_callback);
+            compaction.iterator_b.start(iterator_b_context, iterator_b_read_callback);
 
             assert(!compaction.data.ready);
             assert(!compaction.filter.ready);
@@ -417,12 +429,12 @@ pub fn CompactionType(
             }
         }
 
-        fn iterator_a_read_done(iterator_a: *IteratorA) void {
+        fn iterator_a_read_callback(iterator_a: *IteratorA) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
             compaction.io_callback();
         }
 
-        fn iterator_b_read_done(iterator_b: *IteratorB) void {
+        fn iterator_b_read_callback(iterator_b: *IteratorB) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             compaction.io_callback();
         }
