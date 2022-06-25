@@ -87,14 +87,14 @@ pub fn TableIteratorType(comptime Table: type) type {
         }
 
         pub const Context = struct {
-            // TODO info to extract address address checksum on reset().
+            // TODO info to extract address address checksum on start().
             grid: *Grid,
 
             address: u64,
             checksum: u128,
         };
 
-        pub fn reset(
+        pub fn start(
             it: *TableIterator,
             context: Context,
             read_done: fn (*TableIterator) void,

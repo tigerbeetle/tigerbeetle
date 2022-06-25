@@ -40,7 +40,18 @@ pub fn TableImmutableType(comptime Table: type) type {
         }
 
         pub inline fn values_max(table: *const TableImmutable) []Value {
+            assert(table.values.len <= table.value_count_max);
             return table.values.ptr[0..table.value_count_max];
+        }
+
+        pub inline fn key_min(table: *const TableImmutable) Key {
+            assert(table.values.len > 0);
+            return key_from_value(&table.values[0]);
+        }
+
+        pub inline fn key_max(table: *const TableImmutable) Key {
+            assert(table.values.len > 0);
+            return key_from_value(&table.values[table.values.len - 1]);
         }
 
         pub fn deinit(table: *TableImmutable, allocator: mem.Allocator) void {

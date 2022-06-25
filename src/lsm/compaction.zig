@@ -176,7 +176,7 @@ pub fn CompactionType(
 
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
-                
+
                 .merge_iterator = undefined, // This must be initialized at tick 1.
                 .table_builder = table_builder,
 
@@ -249,7 +249,6 @@ pub fn CompactionType(
             // - if drop_tombstones -> always start compaction
             // - if range.table_count == 1 -> set_snapshot(level_a) | insert_table(level_b) | .done
             // - if compaction doesn't update table infos -> make sure handled correctly
-
 
             // TODO Reset iterators and builder.
             compaction.iterator_a.start(iterator_a_context, iterator_a_read_callback);
