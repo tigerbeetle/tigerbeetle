@@ -237,7 +237,7 @@ TypeScript within `node_modules`, as TypeScript is required by `npm run prepack`
 #### Benchmark
 
 ```shell
-yarn benchmark
+npm run benchmark
 ```
 
 #### Test
@@ -245,5 +245,5 @@ yarn benchmark
 ```shell
 ./tigerbeetle init --cluster=1 --replica=0 --directory=.
 ./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001
-yarn test
+npm run test
 ```
