@@ -33,7 +33,7 @@
   "scripts": {
     "benchmark": "./scripts/benchmark.sh",
     "test": "node dist/test",
-    "postinstall": "scripts/postinstall.sh npm run install_zig && npm run download_node_headers && npm run build_lib",
+    "postinstall": "npm run install_zig && npm run download_node_headers && npm run build_lib",
     "install_zig": "./src/tigerbeetle/scripts/install_zig.sh",
     "download_node_headers": "./scripts/download_node_headers.sh",
     "build": "npm run build_tsc && npm run build_lib",
