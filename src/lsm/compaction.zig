@@ -265,7 +265,7 @@ pub fn CompactionType(
                 .level = level_b,
                 .key_min = range.key_min,
                 .key_max = range.key_max,
-                .table_info_callback = undefined, // TODO
+                .table_info_callback = iterator_b_table_info_callback, // TODO
             };
 
             compaction.iterator_a.start(iterator_a_context, iterator_a_read_callback);
@@ -274,6 +274,38 @@ pub fn CompactionType(
             assert(!compaction.data.ready);
             assert(!compaction.filter.ready);
             assert(!compaction.index.ready);
+        }
+
+        fn iterator_b_table_info_callback(
+            iterator_b: *LevelIterator,
+            table: *const TableInfo,
+            remove: bool,
+        ) void {
+            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
+
+            const buffer = if (remove) &compaction.remove_level_b else &compaction.insert_level_b;
+            if (buffer.full()) compaction.table_info_flush(buffer);
+
+            assert(!buffer.full());
+            buffer.push(table_info);
+        }
+
+        fn table_info_flush(compaction: *Compaction, buffer: *TableInfoBuffer) void {
+            assert(buffer == &compaction.remove_level_b or buffer == &compaction.insert_level_b);
+            const remove = buffer == &compaction.remove_level_b;
+
+            const tables = buffer.drain();
+            if (tables.len == 0) return;
+            
+            const manifest = compaction.manifest;
+            const level = compaction.level_b;
+            const snapshot = compaction.snapshot;
+
+            if (remove) {
+                manifest.insert_tables(level, snapshot, tables);
+            } else {
+                manifest.remove_tables(level, snapshot, tables);
+            }
         }
 
         /// Submits all read/write I/O before starting the CPU-intensive k-way merge.
@@ -334,11 +366,18 @@ pub fn CompactionType(
             assert(compaction.callback != null);
             assert(compaction.io_pending == 0);
 
-            if (compaction.merge_done) compaction.status = .done;
-
+            // Consume the callback and invoke it one finished updating state below.
             const callback = compaction.callback.?;
             compaction.callback = null;
-            callback(compaction);
+            defer callback(compaction);
+
+            // Flush updates to the table infos discovered during compaction
+            // TODO Handle compaction.remove_level_a
+            compaction.table_info_flush(&compaction.remove_level_b);
+            compaction.table_info_flush(&compaction.insert_level_b);
+
+            // Once merge completes, the compaction is now officially over.
+            if (compaction.merge_done) compaction.status = .done;
         }
 
         pub fn reset(compaction: *Compaction) void {
