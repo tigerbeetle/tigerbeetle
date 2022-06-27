@@ -669,12 +669,9 @@ pub fn TableType(
             return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
         }
 
-        inline fn index_data_keys_const(index_block: BlockPtrConst) []const Key {
-            return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
-        }
-
-        inline fn index_data_keys_used_const(index_block: BlockPtrConst) []const Key {
-            return index_data_keys_const(index_block)[0..index_data_blocks_used(index_block)];
+        pub inline fn index_data_keys_used(index_block: BlockPtrConst) []const Key {
+            const keys = mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
+            return keys[0..index_data_blocks_used(index_block)];
         }
 
         pub inline fn index_data_addresses(index_block: BlockPtr) []u64 {
@@ -684,11 +681,12 @@ pub fn TableType(
             );
         }
 
-        pub inline fn index_data_addresses_const(index_block: BlockPtrConst) []const u64 {
-            return mem.bytesAsSlice(
+        pub inline fn index_data_addresses_used(index_block: BlockPtrConst) []const u64 {
+            const data_addresses = mem.bytesAsSlice(
                 u64,
                 index_block[index.data_addresses_offset..][0..index.data_addresses_size],
             );
+            return data_addresses[0..index_data_blocks_used(index_block)];
         }
 
         pub inline fn index_data_checksums(index_block: BlockPtr) []u128 {
@@ -698,11 +696,12 @@ pub fn TableType(
             );
         }
 
-        pub inline fn index_data_checksums_const(index_block: BlockPtrConst) []const u128 {
-            return mem.bytesAsSlice(
+        pub inline fn index_data_checksums_used(index_block: BlockPtrConst) []const u128 {
+            const data_checksums = mem.bytesAsSlice(
                 u128,
                 index_block[index.data_checksums_offset..][0..index.data_checksums_size],
             );
+            return data_checksums[0..index_data_blocks_used(index_block)];
         }
 
         inline fn index_filter_addresses(index_block: BlockPtr) []u64 {
@@ -712,11 +711,12 @@ pub fn TableType(
             );
         }
 
-        pub inline fn index_filter_addresses_const(index_block: BlockPtrConst) []const u64 {
-            return mem.bytesAsSlice(
+        pub inline fn index_filter_addresses_used(index_block: BlockPtrConst) []const u64 {
+            const filter_addresses = mem.bytesAsSlice(
                 u64,
                 index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
             );
+            return filter_addresses[0..index_filter_blocks_used(index_block)];
         }
 
         inline fn index_filter_checksums(index_block: BlockPtr) []u128 {
@@ -726,11 +726,12 @@ pub fn TableType(
             );
         }
 
-        pub inline fn index_filter_checksums_const(index_block: BlockPtrConst) []const u128 {
-            return mem.bytesAsSlice(
+        pub inline fn index_filter_checksums_used(index_block: BlockPtrConst) []const u128 {
+            const filter_checksums = mem.bytesAsSlice(
                 u128,
                 index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
             );
+            return filter_checksums[0..index_filter_blocks_used(index_block)];
         }
 
         inline fn index_snapshot_min(index_block: BlockPtrConst) u32 {
@@ -764,7 +765,7 @@ pub fn TableType(
 
         /// Returns the zero-based index of the data block that may contain the key.
         /// May be called on an index block only when the key is already in range of the table.
-        pub inline fn index_data_block_for_key(index_block: BlockPtrConst, key: Key) u32 {
+        inline fn index_data_block_for_key(index_block: BlockPtrConst, key: Key) u32 {
             // Because we store key_max in the index block we can use the raw binary search
             // here and avoid the extra comparison. If the search finds an exact match, we
             // want to return that data block. If the search does not find an exact match
@@ -773,11 +774,32 @@ pub fn TableType(
             const data_block_index = binary_search.binary_search_keys_raw(
                 Key,
                 compare_keys,
-                Table.index_data_keys_used_const(index_block),
+                Table.index_data_keys_used(index_block),
                 key,
             );
             assert(data_block_index < index_data_blocks_used(index_block));
             return data_block_index;
+        }
+
+        pub const IndexKeyInfo = struct {
+            filter_block_address: u64,
+            filter_block_checksum: u128,
+            data_block_address: u64,
+            data_block_checksum: u128,
+        };
+
+        /// Returns all data stored in the index block relating to a given key.
+        /// May be called on an index block only when the key is already in range of the table.
+        pub inline fn index_key_info(index_block: BlockPtrConst, key: Key) IndexKeyInfo {
+            const data_block_i = Table.index_data_block_for_key(index_block, key);
+            const filter_block_i = @divFloor(data_block_i, filter.data_block_count_max);
+
+            return .{
+                .filter_block_address = index_filter_addresses_used(index_block)[filter_block_i],
+                .filter_block_checksum = index_filter_checksums_used(index_block)[filter_block_i],
+                .data_block_address = index_data_addresses_used(index_block)[data_block_i],
+                .data_block_checksum = index_data_checksums_used(index_block)[data_block_i],
+            };
         }
 
         inline fn data_block_values(data_block: BlockPtr) []Value {

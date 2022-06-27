@@ -280,8 +280,11 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         }
 
         const LookupContext = struct {
+            const Read = Grid.Read;
+            const BlockPtrConst = Grid.BlockPtrConst;
+
             tree: *Tree,
-            completion: Grid.Read,
+            completion: Read,
             fingerprint: bloom_filter.Fingerprint,
             it: Manifest.LookupIterator,
 
@@ -300,66 +303,66 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
 
             fn read_next_table(context: *LookupContext) void {
                 assert(context.current_table == null);
-                const info = context.it.next() orelse {
+                const table = context.it.next() orelse {
                     context.finish(null);
                     return;
                 };
 
-                assert(info.visible(context.it.snapshot));
-                assert(compare_keys(context.it.key, info.key_min) != .lt);
-                assert(compare_keys(context.it.key, info.key_max) != .gt);
+                assert(table.visible(context.it.snapshot));
+                assert(compare_keys(table.key_min, context.it.key) != .gt);
+                assert(compare_keys(table.key_max, context.it.key) != .lt);
 
                 context.tree.grid.read_block(
-                    read_index_callback,
+                    read_index_block_callback,
                     &context.completion,
-                    info.address,
-                    info.checksum,
+                    table.address,
+                    table.checksum,
                 );
             }
 
-            fn read_index_callback(completion: *Grid.Read, index: Grid.BlockPtrConst) void {
+            fn read_index_block_callback(completion: *Read, index_block: BlockPtrConst) void {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
-                const data_block_index = Table.index_data_block_for_key(index, context.it.key);
-                const filter_block_index = data_block_index / Table.filter.data_block_count_max;
+
+                const key_info = Table.index_key_info(index_block, context.it.key);
 
                 context.current_table = .{
-                    .data_block_address = Table.index_data_addresses_const(index)[data_block_index],
-                    .data_block_checksum = Table.index_data_checksums_const(index)[data_block_index],
+                    .data_block_address = key_info.data_block_address,
+                    .data_block_checksum = key_info.data_block_checksum,
                 };
 
                 context.tree.grid.read_block(
-                    read_filter_callback,
+                    read_filter_block_callback,
                     completion,
-                    Table.index_filter_addresses_const(index)[filter_block_index],
-                    Table.index_filter_checksums_const(index)[filter_block_index],
+                    key_info.filter_block_address,
+                    key_info.filter_block_checksum,
                 );
             }
 
-            fn read_filter_callback(completion: *Grid.Read, filter_block: Grid.BlockPtrConst) void {
+            fn read_filter_block_callback(completion: *Read, filter_block: BlockPtrConst) void {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
 
                 const filter_bytes = Table.filter_block_filter_const(filter_block);
                 if (bloom_filter.may_contain(context.fingerprint, filter_bytes)) {
                     context.tree.grid.read_block(
-                        read_data_callback,
+                        read_data_block_callback,
                         completion,
                         context.current_table.?.data_block_address,
                         context.current_table.?.data_block_checksum,
                     );
                 } else {
-                    // The key is not present in this table, move on.
+                    // The key is not present in this table, check the next level.
                     context.current_table = null;
                     context.read_next_table();
                 }
             }
 
-            fn read_data_callback(completion: *Grid.Read, data_block: Grid.BlockPtrConst) void {
+            fn read_data_block_callback(completion: *Read, data_block: BlockPtrConst) void {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
 
                 if (Table.data_block_search(data_block, context.it.key)) |value| {
                     context.finish(value);
                 } else {
-                    // The key is not present in this table, move on.
+                    // The key is not present in this table, check the next level.
                     context.current_table = null;
                     context.read_next_table();
                 }
