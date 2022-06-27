@@ -10,15 +10,13 @@
   },
   "preferUnplugged": true,
   "files": [
-    ".yarn/releases",
-    ".yarnrc.yml",
     "LICENSE",
     "README.md",
     "dist",
     "!dist/client.node",
     "package.json",
+    "package-lock.json",
     "scripts/download_node_headers.sh",
-    "scripts/postinstall.sh",
     "src/c.zig",
     "src/benchmark.ts",
     "src/index.ts",
@@ -27,30 +25,30 @@
     "src/tigerbeetle/src",
     "src/tigerbeetle/scripts",
     "src/translate.zig",
-    "tsconfig.json",
-    "yarn.lock"
+    "tsconfig.json"
   ],
   "engines": {
     "node": ">=14.0.0"
   },
   "scripts": {
     "benchmark": "./scripts/benchmark.sh",
-    "build": "yarn build:tsc && yarn build:zig",
-    "build:tsc": "tsc",
-    "build:zig": "mkdir -p dist && zig/zig build-lib -mcpu=baseline -OReleaseSafe -dynamic -lc -isystem build/node-$(node --version)/include/node src/node.zig -fallow-shlib-undefined -femit-bin=dist/client.node",
-    "clean": "rm -rf build dist node_modules src/zig-cache zig",
-    "install:zig": "./src/tigerbeetle/scripts/install_zig.sh",
-    "postinstall": "./scripts/postinstall.sh",
-    "prepack": "git submodule deinit --all && git submodule update --init && yarn build:tsc",
-    "test": "yarn build && node dist/test"
+    "test": "node dist/test",
+    "postinstall": "scripts/postinstall.sh npm run install_zig && npm run download_node_headers && npm run build_lib",
+    "install_zig": "./src/tigerbeetle/scripts/install_zig.sh",
+    "download_node_headers": "./scripts/download_node_headers.sh",
+    "build": "npm run build_tsc && npm run build_lib",
+    "build_tsc": "./node_modules/typescript/bin/tsc",
+    "build_lib": "mkdir -p dist && zig/zig build-lib -mcpu=baseline -OReleaseSafe -dynamic -lc -isystem build/node-$(node --version)/include/node src/node.zig -fallow-shlib-undefined -femit-bin=dist/client.node",
+    "prepack": "git submodule deinit --all && git submodule update --init && npm run build_tsc",
+    "clean": "rm -rf build dist node_modules src/zig-cache zig"
   },
   "author": "Coil Technologies, Inc",
   "license": "Apache-2.0",
   "contributors": [
     "Donovan Changfoot <don@coil.com>",
     "Isaac Freund <isaac.freund@coil.com>",
-    "Joran Dirk Greef <joran@coil.com>",
-    "Jason Bruwer <jason.bruwer@coil.com>"
+    "Jason Bruwer <jason.bruwer@coil.com>",
+    "Joran Dirk Greef <joran@coil.com>"
   ],
   "devDependencies": {
     "@types/node": "^14.14.41",
