@@ -114,6 +114,7 @@ pub fn CompactionType(
         grid: *Grid,
         manifest: *Manifest,
         level_b: u8,
+        range: Manifest.CompactionRange,
         snapshot: u64,
         drop_tombstones: bool,
 
@@ -167,17 +168,18 @@ pub fn CompactionType(
             return Compaction{
                 .status = .idle,
 
-                // Provided on start():
+                // Assigned by start():
                 .grid = undefined,
                 .manifest = undefined,
                 .level_b = undefined,
+                .range = undefined,
                 .snapshot = undefined,
                 .drop_tombstones = undefined,
 
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
 
-                .merge_iterator = undefined, // This must be initialized at tick 1.
+                .merge_iterator = undefined, // This can only be initialized on tick 1.
                 .table_builder = table_builder,
 
                 .index = index,
@@ -210,17 +212,20 @@ pub fn CompactionType(
             compaction: *Compaction,
             grid: *Grid,
             manifest: *Manifest,
+            // TODO level_a_table: ?TableInfo,
             level_b: u8,
+            range: Manifest.CompactionRange,
             snapshot: u64,
-            drop_tombstones: bool,
             iterator_a_context: IteratorA.Context,
-            iterator_b_context: IteratorB.Context,
         ) void {
             assert(compaction.status == .idle);
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
             assert(level_b < config.lsm_levels);
-            assert(level_b < config.lsm_levels - 1 or drop_tombstones);
+            assert(range.table_count > 0);
+
+            const drop_tombstones = manifest.compaction_must_drop_tombstones(level_b, range);
+            assert(drop_tombstones or level_b < config.lsm_levels - 1);
 
             compaction.* = .{
                 .status = .compacting,
@@ -228,6 +233,7 @@ pub fn CompactionType(
                 .grid = grid,
                 .manifest = manifest,
                 .level_b = level_b,
+                .range = range,
                 .snapshot = snapshot,
                 .drop_tombstones = drop_tombstones,
 
@@ -248,9 +254,20 @@ pub fn CompactionType(
             // TODO(King) Handle cases
             // - if drop_tombstones -> always start compaction
             // - if range.table_count == 1 -> set_snapshot(level_a) | insert_table(level_b) | .done
+            // - cannot move immutable table directly to level 0 -> always start compaction
             // - if compaction doesn't update table infos -> make sure handled correctly
 
-            // TODO Reset iterators and builder.
+            // TODO Reset builder.
+
+            const iterator_b_context = .{
+                .grid = grid,
+                .manifest = manifest,
+                .level = level_b,
+                .key_min = range.key_min,
+                .key_max = range.key_max,
+                .table_info_callback = undefined, // TODO
+            };
+
             compaction.iterator_a.start(iterator_a_context, iterator_a_read_callback);
             compaction.iterator_b.start(iterator_b_context, iterator_b_read_callback);
 

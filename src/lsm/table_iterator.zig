@@ -20,6 +20,9 @@ pub fn TableIteratorType(comptime Table: type) type {
         grid: *Grid,
         read_done: fn (*TableIterator) void,
         read_table_index: bool,
+
+        /// We store only the address and checksum of the table's index block to save memory,
+        /// since TableIterator is used in every LevelIterator.
         address: u64,
         checksum: u128,
 
@@ -87,9 +90,7 @@ pub fn TableIteratorType(comptime Table: type) type {
         }
 
         pub const Context = struct {
-            // TODO info to extract address address checksum on start().
             grid: *Grid,
-
             address: u64,
             checksum: u128,
         };

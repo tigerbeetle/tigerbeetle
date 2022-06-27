@@ -77,11 +77,11 @@ pub fn LevelIteratorType(comptime Table: type) type {
         }
 
         pub const Context = struct {
+            grid: *Grid,
+            manifest: *Manifest,
             level: u8,
             key_min: Key,
             key_max: Key,
-            grid: *Grid,
-            manifest: *Manifest,
             table_info_callback: fn (*LevelIterator, *const TableInfo) void,
         };
 

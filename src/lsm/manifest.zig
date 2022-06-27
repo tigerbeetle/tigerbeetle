@@ -166,27 +166,27 @@ pub fn ManifestType(comptime Table: type) type {
 
         /// Returns the most optimal table for compaction from a level that is due for compaction.
         /// Returns null if the level is not due for compaction (table_count_visible < count_max).
-        pub fn choose_table_for_compaction(manifest: *const Manifest, level: u8) ?TableRange {
-            assert(level < config.lsm_levels - 1); // The last level is not compacted into another.
+        pub fn compaction_table(manifest: *const Manifest, level_a: u8) ?CompactionTableRange {
+            assert(level_a < config.lsm_levels - 1); // The last level is not compacted into another.
 
-            const table_count_visible_max = table_count_max_for_level(growth_factor, level);
+            const table_count_visible_max = table_count_max_for_level(growth_factor, level_a);
             assert(table_count_visible_max > 0);
 
-            const manifest_level: *const Level = &manifest.levels[level];
+            const manifest_level: *const Level = &manifest.levels[level_a];
             if (manifest_level.table_count_visible < table_count_visible_max) return null;
             // If even levels are compacted ahead of odd levels, then odd levels may burst.
             assert(manifest_level.table_count_visible <= table_count_visible_max + 1);
 
-            var optimal: ?TableRange = null;
+            var optimal: ?CompactionTableRange = null;
 
             const snapshots = [1]u64{snapshot_latest};
-            var it = manifest.levels[level].iterator_visibility(.visible, &snapshots);
+            var it = manifest.levels[level_a].iterator_visibility(.visible, &snapshots);
             var iterations: usize = 0;
 
             while (it.next()) |table| {
                 iterations += 1;
 
-                const range = manifest.overlap(level + 1, table.key_min, table.key_max);
+                const range = manifest.compaction_range(level_a + 1, table.key_min, table.key_max);
                 if (optimal == null or range.table_count < optimal.?.range.table_count) {
                     optimal = .{
                         .table = table,
@@ -203,13 +203,13 @@ pub fn ManifestType(comptime Table: type) type {
             return optimal.?;
         }
 
-        pub const TableRange = struct {
+        pub const CompactionTableRange = struct {
             table: *const TableInfo,
-            range: Range,
+            range: CompactionRange,
         };
 
-        pub const Range = struct {
-            /// The total number of tables involved across both levels, always at least 1.
+        pub const CompactionRange = struct {
+            /// The total number of tables in the compaction across both levels, always at least 1.
             table_count: usize,
             /// The minimum key across both levels.
             key_min: Key,
@@ -217,14 +217,29 @@ pub fn ManifestType(comptime Table: type) type {
             key_max: Key,
         };
 
-        /// Returns the smallest visible range in a level that overlaps the candidate key range.
+        /// Returns the smallest visible range across level A and B that overlaps key_min/max.
+        ///
         /// For example, for a table in level 2, count how many tables overlap in level 3, and
-        /// determine the span of their complete key range, which may be broader or narrower.
-        fn overlap(manifest: *const Manifest, level_b: u8, key_min: Key, key_max: Key) Range {
+        /// determine the span of their entire key range, which may be broader or narrower.
+        ///
+        /// The range.table_count includes the input table from level A represented by key_min/max.
+        /// Thus range.table_count=1 means that the table may be moved directly between levels.
+        ///
+        /// The range keys are guaranteed to encompass all the relevant level A and level B tables:
+        ///   range.key_min = min(a.key_min, b.key_min)
+        ///   range.key_max = max(a.key_max, b.key_max)
+        ///
+        /// This last invariant is critical to ensuring that tombstones are dropped correctly.
+        pub fn compaction_range(
+            manifest: *const Manifest,
+            level_b: u8,
+            key_min: Key,
+            key_max: Key,
+        ) CompactionRange {
             assert(level_b < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
-            var range = Range{
+            var range = CompactionRange{
                 .table_count = 1,
                 .key_min = key_min,
                 .key_max = key_max,
@@ -232,31 +247,37 @@ pub fn ManifestType(comptime Table: type) type {
 
             var it = manifest.levels[level_b].iterator(
                 snapshot_latest,
-                key_min,
-                key_max,
+                range.key_min,
+                range.key_max,
                 .ascending,
             );
 
-            if (it.next()) |table| {
+            while (it.next()) |table| : (range.table_count += 1) {
                 assert(table.visible(snapshot_latest));
                 assert(compare_keys(table.key_min, table.key_max) != .gt);
-                assert(compare_keys(table.key_max, key_min) != .lt);
-                assert(compare_keys(table.key_min, key_max) != .gt);
+                assert(compare_keys(table.key_max, range.key_min) != .lt);
+                assert(compare_keys(table.key_min, range.key_max) != .gt);
 
-                range.table_count += 1;
-
-                if (compare_keys(table.key_min, range.key_min) == .lt) {
-                    range.key_min = table.key_min;
-                }
-                if (compare_keys(table.key_max, range.key_max) == .gt) {
+                assert(range.table_count > 0);
+                if (range.table_count == 1) {
+                    // The first iterated table.key_min/max may overlap range.key_min/max entirely.
+                    if (compare_keys(table.key_min, range.key_min) == .lt) {
+                        range.key_min = table.key_min;
+                    }
+                    if (compare_keys(table.key_max, range.key_max) == .gt) {
+                        range.key_max = table.key_max;
+                    }
+                } else {
+                    // Thereafter, all iterated tables must extend the range in ascending order.
+                    assert(compare_keys(table.key_min, range.key_max) == .gt);
                     range.key_max = table.key_max;
                 }
             }
 
             assert(range.table_count > 0);
             assert(compare_keys(range.key_min, range.key_max) != .gt);
-            assert(compare_keys(range.key_max, key_min) != .lt);
-            assert(compare_keys(range.key_min, key_max) != .gt);
+            assert(compare_keys(range.key_min, key_min) != .gt);
+            assert(compare_keys(range.key_max, key_max) != .lt);
 
             return range;
         }
@@ -265,7 +286,7 @@ pub fn ManifestType(comptime Table: type) type {
         pub fn compaction_must_drop_tombstones(
             manifest: *const Manifest,
             level_b: u8,
-            range: Range,
+            range: CompactionRange,
         ) bool {
             assert(level_b < config.lsm_levels);
             assert(range.table_count > 0);
@@ -279,8 +300,9 @@ pub fn ManifestType(comptime Table: type) type {
                     range.key_max,
                     .ascending,
                 );
-                if (it.next() != null) {
-                    // If the range is being compacted into the last level then this is unreachable.
+                if (it.next() == null) {
+                    // If the range is being compacted into the last level then this is unreachable,
+                    // as the last level has no subsequent levels and must always drop tombstones.
                     assert(level_b != config.lsm_levels - 1);
                     return false;
                 }
