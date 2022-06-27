@@ -23,6 +23,12 @@ pub fn LevelIteratorType(comptime Table: type) type {
         const Manifest = ManifestType(Table);
 
         const TableInfo = Manifest.TableInfo;
+        const TableInfoCallback = fn (
+            it: *LevelIterator, 
+            table: *const TableInfo, 
+            remove: bool,
+        ) void;
+
         const TableIteratorScope = struct {
             table_iterator: TableIterator,
             level_iterator: *LevelIterator = undefined,
@@ -35,7 +41,7 @@ pub fn LevelIteratorType(comptime Table: type) type {
         grid: *Grid,
         manifest: *Manifest,
         read_callback: fn (*LevelIterator) void,
-        table_info_callback: fn (*LevelIterator, *const TableInfo) void,
+        table_info_callback: TableInfoCallback,
         level: u8,
         key_min: Key,
         key_max: Key,
@@ -82,7 +88,7 @@ pub fn LevelIteratorType(comptime Table: type) type {
             level: u8,
             key_min: Key,
             key_max: Key,
-            table_info_callback: fn (*LevelIterator, *const TableInfo) void,
+            table_info_callback: TableInfoCallback,
         };
 
         pub fn start(
@@ -138,19 +144,23 @@ pub fn LevelIteratorType(comptime Table: type) type {
 
         fn read_next_table(table: *TableIterator) void {
             const scope = @fieldParentPtr(TableIteratorScope, "table_iterator", table);
-            _ = scope;
 
-            // manifest = scope.level_iterator.manifest
-            // scope.table_info = manifest.choose_next(if start: first, else: key_min=last_key_max)
-            // level_iterator.table_info_callback(scope.table_info)
+            const table_info = scope.level_iterator.get_next_table_info(table);
+            scope.level_iterator.table_info_callback(table_info);
 
-            // TODO Implement get_next_address()
-            //const address = table.parent.manifest.get_next_address() orelse return false;
-            if (true) @panic("implement get_next_address()");
-            const address = 0;
-            table.reset(address);
+            const table_iterator_context = .{
+                .grid = scope.level_iterator.grid,
+                .address = table_info.address,
+                .checksum = table_info.checksum,
+            };
+            table.start(table_iterator_context, on_table_read_done);
+
             const read_pending = table.tick();
             assert(read_pending);
+        }
+
+        fn get_next_table_info(it: *LevelIterator) *const TableInfo {
+            @panic("TODO: find next TableInfo using it.(level|key_min|key_max)")
         }
 
         fn on_table_read_done(table: *TableIterator) void {

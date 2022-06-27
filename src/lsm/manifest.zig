@@ -139,13 +139,35 @@ pub fn ManifestType(comptime Table: type) type {
             }
         };
 
-        pub fn insert_tables(manifest: *Manifest, level: u8, tables: []const TableInfo) void {
+        pub fn insert_tables(
+            manifest: *Manifest, 
+            level: u8, 
+            snapshot: u64, 
+            tables: []const TableInfo,
+        ) void {
             assert(tables.len > 0);
 
             const manifest_level = &manifest.levels[level];
             manifest_level.insert_tables(manifest.node_pool, tables);
+            manifest_level.set_snapshot_max(snapshot, tables);
 
             // TODO Verify that tables can be found exactly before returning.
+        }
+
+        pub fn remove_tables(
+            manifest: *Manifest, 
+            level: u8, 
+            snapshot: u64,
+            tables: []const TableInfo,
+        ) void {
+            assert(tables.len > 0);
+
+            const manifest_level = &manifest.levels[level];
+            const snapshots = [_]u64{snapshot};
+            manifest_level.remove_tables(manifest.node_pool, &snapshots, tables);
+            manifest_level.set_snapshot_max(snapshot, tables);
+
+            // TODO Verify that tables cannot be foudn exactly before returning
         }
 
         pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key) LookupIterator {
