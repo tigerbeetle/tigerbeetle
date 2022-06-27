@@ -11,7 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/coilhq/tigerbeetle-go/pkg/types"
-	"github.com/stretchr/testify/assert"
+	"github.com/coilhq/tigerbeetle-go/assert"
 )
 
 const (
