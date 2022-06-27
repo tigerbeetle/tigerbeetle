@@ -833,24 +833,31 @@ pub fn TableType(
                 key,
             );
 
-            switch (values.len) {
-                0 => return null,
-                else => {
-                    const result = binary_search.binary_search_values(
-                        Key,
-                        Value,
-                        key_from_value,
-                        compare_keys,
-                        values,
-                        key,
-                    );
-                    if (result.exact) {
-                        return &values[result.index];
-                    } else {
-                        return null;
+            if (values.len > 0) {
+                const result = binary_search.binary_search_values(
+                    Key,
+                    Value,
+                    key_from_value,
+                    compare_keys,
+                    values,
+                    key,
+                );
+                if (result.exact) {
+                    const value = &values[result.index];
+                    if (config.verify) {
+                        assert(compare_keys(key, key_from_value(value)) == .eq);
                     }
-                },
+                    return value;
+                }
             }
+
+            if (config.verify) {
+                for (data_block_values_used(data_block)) |*value| {
+                    assert(compare_keys(key, key_from_value(value)) != .eq);
+                }
+            }
+
+            return null;
         }
     };
 }
