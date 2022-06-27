@@ -691,7 +691,7 @@ fn on_result(user_data: u128, operation: Operation, results: Client.Error![]cons
 
     if (results) |value| {
         const napi_results = switch (operation) {
-            .reserved, .init, .register => {
+            .reserved, .root, .register => {
                 translate.throw(env, "Reserved operation.") catch return;
             },
             .create_accounts => encode_napi_results_array(
