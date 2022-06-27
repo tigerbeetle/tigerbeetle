@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef uint8_t tb_uint128_t[16];
+typedef __uint128_t tb_uint128_t;
 
 
 typedef enum TB_ACCOUNT_FLAGS {
