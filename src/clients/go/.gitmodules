@@ -1,4 +1,4 @@
 [submodule "tigerbeetle"]
 	path = tigerbeetle
 	url = https://github.com/kprotty/tigerbeetle.git
-	branch = tb_client
+	branch = tb-client-cleanup
