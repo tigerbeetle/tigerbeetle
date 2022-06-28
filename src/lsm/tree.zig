@@ -265,18 +265,39 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 }
             }
 
+            var index_block_count: u8 = 0;
+            var index_block_addresses: [config.lsm_levels]u64 = undefined;
+            var index_block_checksums: [config.lsm_levels]u128 = undefined;
+            {
+                var it = tree.manifest.lookup(snapshot, key);
+                while (it.next()) |table| : (index_block_count += 1) {
+                    assert(table.visible(snapshot));
+                    assert(compare_keys(table.key_min, key) != .gt);
+                    assert(compare_keys(table.key_max, key) != .lt);
+
+                    index_block_addresses[index_block_count] = table.address;
+                    index_block_checksums[index_block_count] = table.checksum;
+                }
+            }
+
             // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
             const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
 
             context.* = .{
                 .tree = tree,
                 .completion = undefined,
+
+                .key = key,
                 .fingerprint = fingerprint,
-                .it = tree.manifest.lookup(snapshot, key),
+
+                .index_block_count = index_block_count,
+                .index_block_addresses = index_block_addresses,
+                .index_block_checksums = index_block_checksums,
+
                 .callback = callback,
             };
 
-            context.read_next_table();
+            context.read_index_block();
         }
 
         const LookupContext = struct {
@@ -285,12 +306,18 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
 
             tree: *Tree,
             completion: Read,
-            fingerprint: bloom_filter.Fingerprint,
-            it: Manifest.LookupIterator,
 
-            current_table: ?struct {
-                data_block_address: u64,
-                data_block_checksum: u128,
+            key: Key,
+            fingerprint: bloom_filter.Fingerprint,
+
+            index_block_current: u8 = 0,
+            index_block_count: u8,
+            index_block_addresses: [config.lsm_levels]u64,
+            index_block_checksums: [config.lsm_levels]u128,
+
+            data_block: ?struct {
+                address: u64,
+                checksum: u128,
             } = null,
 
             callback: fn (*Tree.LookupContext, ?*const Value) void,
@@ -301,33 +328,27 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 callback(context, value);
             }
 
-            fn read_next_table(context: *LookupContext) void {
-                assert(context.current_table == null);
-                const table = context.it.next() orelse {
-                    context.finish(null);
-                    return;
-                };
-
-                assert(table.visible(context.it.snapshot));
-                assert(compare_keys(table.key_min, context.it.key) != .gt);
-                assert(compare_keys(table.key_max, context.it.key) != .lt);
+            fn read_index_block(context: *LookupContext) void {
+                assert(context.data_block == null);
+                assert(context.index_block_current < context.index_block_count);
+                assert(context.index_block_count <= config.lsm_levels);
 
                 context.tree.grid.read_block(
                     read_index_block_callback,
                     &context.completion,
-                    table.address,
-                    table.checksum,
+                    context.index_block_addresses[context.index_block_current],
+                    context.index_block_checksums[context.index_block_current],
                 );
             }
 
             fn read_index_block_callback(completion: *Read, index_block: BlockPtrConst) void {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
 
-                const key_info = Table.index_key_info(index_block, context.it.key);
+                const key_info = Table.index_key_info(index_block, context.key);
 
-                context.current_table = .{
-                    .data_block_address = key_info.data_block_address,
-                    .data_block_checksum = key_info.data_block_checksum,
+                context.data_block = .{
+                    .address = key_info.data_block_address,
+                    .checksum = key_info.data_block_checksum,
                 };
 
                 context.tree.grid.read_block(
@@ -346,26 +367,39 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                     context.tree.grid.read_block(
                         read_data_block_callback,
                         completion,
-                        context.current_table.?.data_block_address,
-                        context.current_table.?.data_block_checksum,
+                        context.data_block.?.address,
+                        context.data_block.?.checksum,
                     );
                 } else {
                     // The key is not present in this table, check the next level.
-                    context.current_table = null;
-                    context.read_next_table();
+                    context.advance_to_next_level();
                 }
             }
 
             fn read_data_block_callback(completion: *Read, data_block: BlockPtrConst) void {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
 
-                if (Table.data_block_search(data_block, context.it.key)) |value| {
+                if (Table.data_block_search(data_block, context.key)) |value| {
                     context.finish(value);
                 } else {
                     // The key is not present in this table, check the next level.
-                    context.current_table = null;
-                    context.read_next_table();
+                    context.advance_to_next_level();
                 }
+            }
+
+            fn advance_to_next_level(context: *LookupContext) void {
+                assert(context.index_block_current < context.index_block_count);
+                assert(context.index_block_count <= config.lsm_levels);
+
+                context.index_block_current += 1;
+                if (context.index_block_current == context.index_block_count) {
+                    context.finish(null);
+                    return;
+                }
+                assert(context.index_block_current < context.index_block_count);
+
+                context.data_block = null;
+                context.read_index_block();
             }
         };
 
