@@ -343,6 +343,9 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
 
             fn read_index_block_callback(completion: *Read, index_block: BlockPtrConst) void {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
+                assert(context.data_block == null);
+                assert(context.index_block_current < context.index_block_count);
+                assert(context.index_block_count <= config.lsm_levels);
 
                 const key_info = Table.index_key_info(index_block, context.key);
 
@@ -361,6 +364,9 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
 
             fn read_filter_block_callback(completion: *Read, filter_block: BlockPtrConst) void {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
+                assert(context.data_block != null);
+                assert(context.index_block_current < context.index_block_count);
+                assert(context.index_block_count <= config.lsm_levels);
 
                 const filter_bytes = Table.filter_block_filter_const(filter_block);
                 if (bloom_filter.may_contain(context.fingerprint, filter_bytes)) {
@@ -378,6 +384,9 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
 
             fn read_data_block_callback(completion: *Read, data_block: BlockPtrConst) void {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
+                assert(context.data_block != null);
+                assert(context.index_block_current < context.index_block_count);
+                assert(context.index_block_count <= config.lsm_levels);
 
                 if (Table.data_block_search(data_block, context.key)) |value| {
                     context.finish(value);
@@ -388,6 +397,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             }
 
             fn advance_to_next_level(context: *LookupContext) void {
+                assert(context.data_block != null);
                 assert(context.index_block_current < context.index_block_count);
                 assert(context.index_block_count <= config.lsm_levels);
 
