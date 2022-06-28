@@ -1,16 +1,7 @@
-#https://yarnpkg.com/getting-started/qa#which-files-should-be-gitignored
-.yarn/*
-!.yarn/patches
-!.yarn/releases
-!.yarn/plugins
-!.yarn/versions
-.pnp.*
-
 build/
 dist/
 node_modules/
 tigerbeetle
-yarn-error.log
 zig/
 zig-cache/
 
