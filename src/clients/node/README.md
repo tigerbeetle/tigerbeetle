@@ -2,29 +2,27 @@
 [TigerBeetle](https://github.com/coilhq/tigerbeetle) client for Node.js.
 
 ## Installation
-The following steps will install the `tigerbeetle-node` module to your current working directory.
 
-### Prerequisites 
+Install the `tigerbeetle-node` module to your current working directory:
 
-* NodeJS >= `14.0.0`. _(If the correct version is not installed, an installation error will occur)_ 
-
-> Your operating system should be Linux (kernel >= v5.6) or macOS. Windows support is not yet available but is in the works.
-
-### YARN Package Manager Installation
-```shell
-yarn add tigerbeetle-node
-```
-or
-### NPM Package Manager Installation
 ```shell
 npm install tigerbeetle-node
 ```
 
+### Prerequisites
+
+* NodeJS >= `14.0.0`. _(If the correct version is not installed, an installation error will occur)_
+
+> Your operating system should be Linux (kernel >= v5.6) or macOS.
+> Windows support is not yet available.
+
 ## Usage
+
 A client needs to be configured with a `cluster_id` and `replica_addresses`. 
 This instantiates the client where memory is allocated to internally buffer events to be sent. 
 For the moment, only one client can be instantiated globally per process. 
 Future releases will allow multiple client instantiations.
+
 ```js
 import { createClient } from 'tigerbeetle-node'
 
@@ -217,34 +215,35 @@ const errors = await client.createTransfers(batch)
 
 ### Development
 
-Follow these steps to get up and running when cloning the repo:
+To get up and running when cloning the repo:
+
 ```shell
 git clone --recurse-submodules https://github.com/coilhq/tigerbeetle-node.git
 cd tigerbeetle-node/
-yarn install --immutable
+npm install --include dev # This will automatically install and build everything you need.
 ```
 
-Build locally using `yarn`:
+#### Rebuild
+
+To rebuild the TypeScript distribution, and to rebuild the native Node library, again after changes:
+
 ```shell
-# Run the following from this directory:
-yarn && yarn build
+npm run build
 ```
 
-* **Please note: `yarn clean` will remove Zig and NodeAPI C headers, which mean you need to run:**
+*If you ever run `npm run clean` then you will need to `npm install --include dev` to reinstall
+TypeScript within `node_modules`, as TypeScript is required by `npm run prepack` when publishing.*
+
+#### Benchmark
+
 ```shell
-./scripts/postinstall.sh #Install Zig and NodeJS C Headers
+npm run benchmark
 ```
 
-***Yarn - Run Test***
-Ensure TigerBeetle (`init` & `start`) is running on the port configured in `test.ts`, then run:
+#### Test
+
 ```shell
 ./tigerbeetle init --cluster=1 --replica=0 --directory=.
 ./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001
-yarn test
-```
-
-***Yarn - Run Benchmark***
-Run the benchmark (The `benchmark` will automatically start TigerBeetle on port `3001` _(single replica)_:
-```shell
-yarn benchmark
+npm run test
 ```
