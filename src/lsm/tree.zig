@@ -441,7 +441,7 @@ pub fn TreeType(comptime Table: type) type {
                 tree.grid,
                 &tree.manifest,
                 context.level_b,
-                range,
+                table_range,
                 snapshot,
                 .{
                     .grid = tree.grid,
@@ -575,7 +575,7 @@ pub fn TreeType(comptime Table: type) type {
             // - assert: even compactions from previous tick are finished.
             if (tree.compaction_beat == half_measure_beat_count - 1) {
                 log.debug("{*}: finished compacting even levels", .{tree});
-                
+
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
                 }
