@@ -474,7 +474,7 @@ pub fn TreeType(comptime Table: type) type {
         }
 
         fn compact_io_tick_callback_table_immutable(compaction: *CompactionTableImmutable) void {
-            assert(compaction.status == .compacting);
+            assert(compaction.status == .compacting or compaction.status == .done);
             assert(compaction.level_b < config.lsm_levels);
             assert(compaction.level_b == 0);
 
@@ -486,7 +486,7 @@ pub fn TreeType(comptime Table: type) type {
         }
 
         fn compact_io_tick_callback_table(compaction: *CompactionTable) void {
-            assert(compaction.status == .compacting);
+            assert(compaction.status == .compacting or compaction.status == .done);
             assert(compaction.level_b < config.lsm_levels);
             assert(compaction.level_b > 0);
 
@@ -507,7 +507,6 @@ pub fn TreeType(comptime Table: type) type {
         }
 
         fn compact_io_tick_done(tree: *Tree) void {
-            assert(tree.compaction_io_pending > 0);
             assert(tree.compaction_io_pending <= 1 + tree.compaction_table.len);
             assert(tree.compaction_callback != null);
 
