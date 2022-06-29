@@ -28,6 +28,9 @@ pub const log_level: std.log.Level = if (log_state_transitions_only) .info else 
 var cluster: *Cluster = undefined;
 
 pub fn main() !void {
+    // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
+    log_buffer.unbuffered_writer = std.io.getStdErr().writer();
+
     // TODO Use std.testing.allocator when all deinit() leaks are fixed.
     const allocator = std.heap.page_allocator;
 
@@ -398,6 +401,11 @@ fn parse_seed(bytes: []const u8) u64 {
     };
 }
 
+var log_buffer: std.io.BufferedWriter(4096, std.fs.File.Writer) = .{
+    // This is initialized in main(), as std.io.getStdErr() is not comptime known on e.g. Windows.
+    .unbuffered_writer = undefined,
+};
+
 pub fn log(
     comptime level: std.log.Level,
     comptime scope: @TypeOf(.EnumLiteral),
@@ -409,9 +417,11 @@ pub fn log(
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
     const prefix = if (log_state_transitions_only) "" else prefix_default;
 
-    // Print the message to stdout, silently ignoring any errors
-    const stderr = std.io.getStdErr().writer();
-    std.debug.getStderrMutex().lock();
-    defer std.debug.getStderrMutex().unlock();
-    nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
+    // Print the message to stderr using a buffer to avoid many small write() syscalls when
+    // providing many format arguments. Silently ignore failure.
+    log_buffer.writer().print(prefix ++ format ++ "\n", args) catch {};
+
+    // Flush the buffer before returning to ensure, for example, that a log message
+    // immediately before a failing assertion is fully printed.
+    log_buffer.flush() catch {};
 }
