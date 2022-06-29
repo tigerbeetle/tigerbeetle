@@ -2,49 +2,48 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 
-pub fn CompositeKey(comptime Secondary: type) type {
-    assert(Secondary == u128 or Secondary == u64);
+pub fn CompositeKey(comptime Field: type) type {
+    assert(Field == u128 or Field == u64);
 
     return extern struct {
         const Self = @This();
 
         pub const sentinel_key: Self = .{
-            .secondary = math.maxInt(Secondary),
+            .field = math.maxInt(Field),
             .timestamp = math.maxInt(u64),
         };
 
         const tombstone_bit = 1 << 63;
-        // If zeroed padding is needed after the timestamp field
-        const pad = Secondary == u128;
+
+        // If zeroed padding is needed after the timestamp field.
+        const pad = Field == u128;
 
         pub const Value = extern struct {
-            secondary: Secondary,
-            /// The most significant bit indicates if the value is a tombstone
+            field: Field,
+            /// The most significant bit indicates if the value is a tombstone.
             timestamp: u64,
             padding: (if (pad) u64 else void) = (if (pad) 0 else {}),
 
             comptime {
-                assert(@sizeOf(Value) == @sizeOf(Secondary) * 2);
-                assert(@alignOf(Value) == @alignOf(Secondary));
+                assert(@sizeOf(Value) == @sizeOf(Field) * 2);
+                assert(@alignOf(Value) == @alignOf(Field));
             }
         };
 
-        secondary: Secondary,
-        /// The most significant bit must be unset as it is used to indicate a tombstone
+        field: Field,
+        /// The most significant bit must be unset as it is used to indicate a tombstone.
         timestamp: u64,
         padding: (if (pad) u64 else void) = (if (pad) 0 else {}),
 
         comptime {
-            assert(@sizeOf(Self) == @sizeOf(Secondary) * 2);
-            assert(@alignOf(Self) == @alignOf(Secondary));
+            assert(@sizeOf(Self) == @sizeOf(Field) * 2);
+            assert(@alignOf(Self) == @alignOf(Field));
         }
 
-        // TODO: consider optimizing this by reinterpreting the raw memory in an advantageous way
-        // This may require modifying the struct layout.
         pub inline fn compare_keys(a: Self, b: Self) math.Order {
-            if (a.secondary < b.secondary) {
+            if (a.field < b.field) {
                 return .lt;
-            } else if (a.secondary > b.secondary) {
+            } else if (a.field > b.field) {
                 return .gt;
             } else if (a.timestamp < b.timestamp) {
                 return .lt;
@@ -57,18 +56,18 @@ pub fn CompositeKey(comptime Secondary: type) type {
 
         pub inline fn key_from_value(value: *const Value) Self {
             return .{
-                .secondary = value.secondary,
+                .field = value.field,
                 .timestamp = @truncate(u63, value.timestamp),
             };
         }
 
         pub inline fn tombstone(value: *const Value) bool {
-            return value.timestamp & tombstone_bit != 0;
+            return (value.timestamp & tombstone_bit) != 0;
         }
 
         pub inline fn tombstone_from_key(key: Self) Value {
             return .{
-                .secondary = key.secondary,
+                .field = key.field,
                 .timestamp = key.timestamp | tombstone_bit,
             };
         }
