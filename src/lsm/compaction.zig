@@ -214,7 +214,7 @@ pub fn CompactionType(
             manifest: *Manifest,
             // TODO level_a_table: ?TableInfo,
             level_b: u8,
-            range: Manifest.CompactionRange,
+            table_range: Manifest.CompactionTableRange,
             snapshot: u64,
             iterator_a_context: IteratorA.Context,
         ) void {
@@ -222,6 +222,9 @@ pub fn CompactionType(
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
             assert(level_b < config.lsm_levels);
+
+            const table = table_range.table;
+            const range = table_range.range;
             assert(range.table_count > 0);
 
             const drop_tombstones = manifest.compaction_must_drop_tombstones(level_b, range);
@@ -251,11 +254,26 @@ pub fn CompactionType(
                 .insert_level_b = compaction.insert_level_b,
             };
 
-            // TODO(King) Handle cases
-            // - if drop_tombstones -> always start compaction
-            // - if range.table_count == 1 -> set_snapshot(level_a) | insert_table(level_b) | .done
-            // - cannot move immutable table directly to level 0 -> always start compaction
-            // - if compaction doesn't update table infos -> make sure handled correctly
+            assert(!compaction.data.ready);
+            assert(!compaction.filter.ready);
+            assert(!compaction.index.ready);
+
+            // Perform a "compaction move" to the next level inline if certain factors allow:
+            // - Can only do the specialization if there's a single table to compact.
+            // - Cannot drop tombstones as we then have to go through normal the compaction path.
+            // - Cannot be performing the immutable table -> level 0 compaction
+            //   as it should always be dropping tombstones to level 0.
+            if (!drop_tombstones and compaction.range.table_count == 1) {
+                assert(compaction.level_b != 0);
+                assert(compaction.status == .compacting);
+
+                const tables = [_]TableInfo{ table.* };
+                compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
+                compaction.manifest.insert_tables(compaction.level_b, tables);
+
+                compaction.status = .done;
+                return;
+            }
 
             // TODO Reset builder.
 
@@ -270,10 +288,6 @@ pub fn CompactionType(
 
             compaction.iterator_a.start(iterator_a_context, iterator_a_read_callback);
             compaction.iterator_b.start(iterator_b_context, iterator_b_read_callback);
-
-            assert(!compaction.data.ready);
-            assert(!compaction.filter.ready);
-            assert(!compaction.index.ready);
         }
 
         fn iterator_b_table_info_callback(
@@ -300,7 +314,11 @@ pub fn CompactionType(
             const tables: []const TableInfo = buffer.drain();
             if (tables.len == 0) return;
 
-            // TODO assert tables are withing compaction.range (key_min <= x <= key_max)
+            // Ensure tables being updated are withing the compactions initial range
+            for (tables) |*table| {
+                assert(compaction.range.key_min <= table.key_min);
+                assert(compaction.range.key_max >= table.key_max);
+            }
 
             if (buffer == &compaction.remove_level_b) {
                 compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
