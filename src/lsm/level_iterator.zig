@@ -144,12 +144,13 @@ pub fn LevelIteratorType(comptime Table: type) type {
 
         fn read_next_table(table: *TableIterator) void {
             const scope = @fieldParentPtr(TableIteratorScope, "table_iterator", table);
+            const it = scope.level_iterator;
 
-            const table_info = scope.level_iterator.get_next_table_info(table);
-            scope.level_iterator.table_info_callback(table_info);
+            const table_info = it.get_next_table_info(table);
+            it.table_info_callback(table_info);
 
             const table_iterator_context = .{
-                .grid = scope.level_iterator.grid,
+                .grid = it.grid,
                 .address = table_info.address,
                 .checksum = table_info.checksum,
             };
@@ -160,7 +161,7 @@ pub fn LevelIteratorType(comptime Table: type) type {
         }
 
         fn get_next_table_info(it: *LevelIterator) *const TableInfo {
-            @panic("TODO: find next TableInfo using it.(level|key_min|key_max)")
+            @panic("TODO(Joran): find next TableInfo using it.(level|key_min|key_max)")
         }
 
         fn on_table_read_done(table: *TableIterator) void {

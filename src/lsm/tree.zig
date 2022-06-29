@@ -573,23 +573,25 @@ pub fn TreeType(comptime Table: type) type {
 
             // At end of second measure:
             // - assert: even compactions from previous tick are finished.
-            // - update manifest table info that were compacted.
             if (tree.compaction_beat == half_measure_beat_count - 1) {
                 log.debug("{*}: finished compacting even levels", .{tree});
-
-                var it = CompactionTableIterator{ .tree = tree };
+                
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
                 }
             }
 
             // At end of fourth measure:
-            // - reset tick to zero which indicates an entire measure is over.
+            // - assert: odd compactions from previous tick are finished.
             // - assert: all visible levels haven't overflowed their max.
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_beat == config.lsm_batch_multiple - 1) {
                 log.debug("{*}: finished compacting immutable table and odd levels", .{tree});
                 tree.manifest.assert_visible_tables_are_in_range();
+
+                while (it.next()) |context| {
+                    assert(context.compaction.status == .idle);
+                }
 
                 // Ensure mutable table can be flushed into immutable table.
                 assert(tree.table_mutable.count() > 0);
@@ -609,10 +611,11 @@ pub fn TreeType(comptime Table: type) type {
             }
         }
 
-        pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
-            // TODO Call tree.manifest.checkpoint() in parallel.
+        pub fn assert_checkpoint(tree: *Tree) void {
+            // TODO Call tree.manifest.checkpoint() in parallel (happens in Forest instead)
+            // TODO Assert no outstanding compaction work at this point
+            //      (not compaction callback, all idle, assert_visible_tables_are_in_range)
             _ = tree;
-            _ = callback;
         }
 
         /// This should be called by the state machine for every key that must be prefetched.

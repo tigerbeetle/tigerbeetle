@@ -279,34 +279,40 @@ pub fn CompactionType(
         fn iterator_b_table_info_callback(
             iterator_b: *LevelIterator,
             table: *const TableInfo,
-            remove: bool,
         ) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
-
-            const buffer = if (remove) &compaction.remove_level_b else &compaction.insert_level_b;
-            if (buffer.full()) compaction.table_info_flush(buffer);
-
-            assert(!buffer.full());
-            buffer.push(table_info);
+            compaction.queue_manifest_update(&compaction.remove_level_b, table);
         }
 
-        fn table_info_flush(compaction: *Compaction, buffer: *TableInfoBuffer) void {
+        fn queue_manifest_update(
+            compaction: *Compaction, 
+            buffer: *TableInfoBuffer, 
+            table: *const TableInfo,
+        ) void {
             assert(buffer == &compaction.remove_level_b or buffer == &compaction.insert_level_b);
-            const remove = buffer == &compaction.remove_level_b;
+            if (buffer.full()) compaction.update_manifest(buffer);
+            buffer.push(table);
+        }
 
-            const tables = buffer.drain();
+        fn update_manifest(compaction: *Compaction, buffer: *TableInfoBuffer) void {
+            assert(buffer == &compaction.remove_level_b or buffer == &compaction.insert_level_b);
+
+            const tables: []const TableInfo = buffer.drain();
             if (tables.len == 0) return;
-            
-            const manifest = compaction.manifest;
-            const level = compaction.level_b;
-            const snapshot = compaction.snapshot;
 
-            if (remove) {
-                manifest.insert_tables(level, snapshot, tables);
+            // TODO assert tables are withing compaction.range (key_min <= x <= key_max)
+
+            if (buffer == &compaction.remove_level_b) {
+                compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
             } else {
-                manifest.remove_tables(level, snapshot, tables);
+                compaction.manifest.insert_tables(compaction.level_b, tables);
             }
         }
+
+        /// Compaction.ticks stages at which each action may be performed.
+        const pipeline_tick_read = 0;
+        const pipeline_tick_merge = 1;
+        const pipeline_tick_write = 2;
 
         /// Submits all read/write I/O before starting the CPU-intensive k-way merge.
         /// This allows the I/O to happen in parallel with the merge.
@@ -324,8 +330,8 @@ pub fn CompactionType(
 
             compaction.callback = callback;
 
-            if (compaction.ticks >= 0) compaction.tick_io_read();
-            if (compaction.ticks >= 2) compaction.tick_io_write();
+            if (compaction.ticks >= pipeline_tick_read) compaction.tick_io_read();
+            if (compaction.ticks >= pipeline_tick_write) compaction.tick_io_write();
 
             // All values may be eclipsed by tombstones, with no write I/O pending here.
         }
@@ -336,13 +342,13 @@ pub fn CompactionType(
             assert(compaction.io_pending >= 0);
             assert(!compaction.merge_done);
 
-            if (compaction.ticks == 1) {
+            if (compaction.ticks == pipeline_tick_merge) {
                 // We cannot initialize the merge until we can peek() a value from each stream,
                 // which depends on tick 0 (to read blocks) having happened.
                 compaction.merge_iterator = MergeIterator.init(compaction, k, .ascending);
             }
 
-            if (compaction.ticks >= 1) {
+            if (compaction.ticks >= pipeline_tick_merge) {
                 if (compaction.merge_iterator.empty()) {
                     assert(!compaction.merge_done);
 
@@ -371,13 +377,15 @@ pub fn CompactionType(
             compaction.callback = null;
             defer callback(compaction);
 
-            // Flush updates to the table infos discovered during compaction
-            // TODO Handle compaction.remove_level_a
-            compaction.table_info_flush(&compaction.remove_level_b);
-            compaction.table_info_flush(&compaction.insert_level_b);
-
             // Once merge completes, the compaction is now officially over.
-            if (compaction.merge_done) compaction.status = .done;
+            if (compaction.merge_done) {
+                compaction.status = .done;
+
+                // Flush updates to the table infos discovered during compaction
+                // TODO Handle compaction.remove_level_a
+                compaction.update_manifest(&compaction.remove_level_b);
+                compaction.update_manifest(&compaction.insert_level_b);
+            }
         }
 
         pub fn reset(compaction: *Compaction) void {
@@ -399,7 +407,7 @@ pub fn CompactionType(
 
         fn tick_io_write(compaction: *Compaction) void {
             assert(compaction.callback != null);
-            assert(compaction.ticks >= 2);
+            assert(compaction.ticks >= pipeline_tick_write);
             // There may be no data block to write if all values are eclipsed by tombstones.
             assert(compaction.data.ready or !compaction.data.ready);
 
@@ -414,7 +422,7 @@ pub fn CompactionType(
 
         fn tick_cpu_merge(compaction: *Compaction) void {
             assert(compaction.callback != null);
-            assert(compaction.ticks >= 1);
+            assert(compaction.ticks >= pipeline_tick_merge);
             assert(!compaction.merge_done);
             assert(!compaction.merge_iterator.empty());
 
@@ -472,14 +480,11 @@ pub fn CompactionType(
                     assert(tombstones_dropped > 0);
                 } else {
                     const snapshot_min = compaction.snapshot;
-                    const info = compaction.table_builder.index_block_finish(snapshot_min);
-                    swap_buffers(&compaction.index, &compaction.table_builder.index_block);
-                    assert(compaction.index.ready);
+                    const table = compaction.table_builder.index_block_finish(snapshot_min);
+                    compaction.queue_manifest_update(&compaction.insert_level_b, table);
 
-                    // TODO Push to an array as we must wait until the compaction has finished
-                    // so that we can update the manifest atomically.
-                    // Otherwise, interleaved state machine operations will see side-effects.
-                    _ = info;
+                    swap_buffers(&compaction.index, &compaction.table_builder.index_block);
+                    assert(compaction.index.ready); 
                 }
             }
         }
