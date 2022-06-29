@@ -243,8 +243,8 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             return if (out_of_bounds) null else tree[upper - 1];
         }
 
-        // Returns one plus the index of the least significant 1-bit of x.
-        // If x is zero, returns zero.
+        /// Returns one plus the index of the least significant 1-bit of x.
+        /// Asserts that x is not 0.
         inline fn ffs(x: u32) u6 {
             // clang __builtin_ffs() output:
             //   bsf     ecx, edi
