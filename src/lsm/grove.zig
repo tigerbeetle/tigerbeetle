@@ -268,6 +268,9 @@ pub fn GroveType(
     return struct {
         const Grove = @This();
 
+        sync_pending: usize,
+        sync_callback: ?fn (*Grove) void,
+
         cache: ObjecTree.ValueCache,
         objects: ObjectTree,
         indexes: IndexTrees,
@@ -304,6 +307,15 @@ pub fn GroveType(
             // 8191 * 2 (accounts mutated per transfer) * 2 (old/new index value).
             commit_count_max: usize,
         ) !void {
+            grove.* = .{
+                .sync_pending = 0,
+                .sync_callback = null,
+
+                .cache = undefined,
+                .objects = undefined,
+                .indexes = undefined,
+            };
+
             // Initialize the value cache for the obejct LSM tree
             grove.cache = .{};
             try grove.cache.ensureTotalCapacity(allocator, cache_size);
@@ -349,6 +361,9 @@ pub fn GroveType(
         }
 
         pub fn deinit(grove: *Grove, allocator: mem.Allocator) void {
+            assert(grove.sync_pending == 0);
+            assert(grove.sync_callback == null);
+
             grove.cache.deinit(allocator);
             grove.objects.deinit(allocator);
 
@@ -430,18 +445,76 @@ pub fn GroveType(
             }
         }
 
-        pub fn compact_io(grove: *Grove, callback: fn (*Grove) void) void {
-            @panic("TODO: compact entire grove");
+        fn sync_register(grove: *Grove, callback: fn (*Grove) void) {
+            assert(grove.sync_pending == 0);
+            assert(grove.sync_callback == null);
+
+            grove.sync_pending = 1 + std.meta.fields(IndexTrees).len;
+            grove.sync_callback = callback;
+        }
+
+        fn sync_callback(
+            comptime Tree: type, 
+            comptime index_field_name: ?[]const u8,
+        ) fn (*Tree) void {
+            return struct {
+                fn tree_callback(tree: *Tree) void {
+                    // Get the grove from the tree.
+                    const grove = blk: {
+                        if (index_field_name) |field| {
+                            const indexes = @fieldParentPtr(IndexTrees, field, tree);
+                            break :blk @fieldParentPtr(Grove, "indexes", indexes);
+                        }
+
+                        assert(Tree == ObjectTree);
+                        break :blk @fieldParentPtr(Grove, "objects", tree);
+                    };
+
+                    // Make sure theres a callback registered.
+                    assert(grove.sync_callback <= 1 + std.meta.fields(IndexTrees).len);
+                    assert(grove.sync_pending > 0);
+                    assert(grove.sync_callback != null);
+
+                    // Check if we're the last tree callback to trigger the registered callback.
+                    grove.sync_pending -= 1;
+                    if (grove.sync_pending > 0) return;
+
+                    const callback = grove.sync_callback.?;
+                    grove.sync_callback = null;
+                    callback(grove);
+                }
+            }.tree_callback;
+        }
+
+        pub fn compact_io(grove: *Grove, op: u64, callback: fn (*Grove) void) void {
+            grove.sync_register(callback);
+
+            grove.objects.compact_io(op, sync_callback(ObjectTree, null));
+
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                const index = &@field(grove.indexes, field.name);
+                index.compact_io(op, sync_callback(@TypeOf(index.*), field.name));
+            }
         }
 
         pub fn compact_cpu(grove: *Grove) void {
-            @panic("TODO: compact entire grove");
+            assert(grove.sync_callback != null);
+
+            grove.objects.compact_cpu();
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                @field(grove.indexes, field.name).compact_cpu();
+            }
         }
 
         pub fn checkpoint(grove: *Grove, callback: fn (*Grove) void) void {
-            // The ManifestLog is in fact specific to each tree.
-            // So we need to call checkpoint on each tree to flush its manifest log.
-            @panic("TODO: checkpoint entire grove");
+            grove.sync_register(callback);
+
+            grove.objects.checkpoint(sync_callback(ObjectTree, null));
+
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                const index = &@field(grove.indexes, field.name);
+                index.checkpoint(sync_callback(@TypeOf(index.*), field.name));
+            }
         }
     };
 }

@@ -613,8 +613,8 @@ pub fn TreeType(comptime Table: type) type {
             }
         }
 
-        pub fn assert_checkpoint(tree: *Tree) void {
-            // TODO Call tree.manifest.checkpoint() in parallel (happens in Forest instead)
+        pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
+            // TODO Call tree.manifest.checkpoint() which calls manifest_log.checkpoint(callback)
             // TODO Assert no outstanding compaction work at this point
             //      (not compaction callback, all idle, assert_visible_tables_are_in_range)
             _ = tree;
