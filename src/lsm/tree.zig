@@ -49,14 +49,14 @@ pub const snapshot_latest = math.maxInt(u64) - 1;
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
 
 pub fn TreeType(comptime Table: type) type {
-    const Key = Table.Key;
-    const Value = Table.Value;
-    const compare_keys = Table.compare_keys;
-    const tombstone = Table.tombstone;
-    const tombstone_from_key = Table.tombstone_from_key;
-
     return struct {
         const Tree = @This();
+
+        pub const Key = Table.Key;
+        pub const Value = Table.Value;
+        const compare_keys = Table.compare_keys;
+        const tombstone = Table.tombstone;
+        const tombstone_from_key = Table.tombstone_from_key;
 
         const Grid = @import("grid.zig").GridType(Table.Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table);
