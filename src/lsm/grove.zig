@@ -12,10 +12,29 @@ const GridType = @import("grid.zig").GridType;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
+// TODO(King) Rename to IndexTreeType, since everything is in the LSM namespace.
+// TODO(King) Use a similar helper to construct an ObjectTreeType?
 fn LSMTreeType(
     comptime Storage: type, 
     comptime Struct: type,
 ) type {
+    // TODO(King) CompositeKey accepts only a u128 or u64 type.
+    // If the field is a u32 (e.g. ledger) or u16 (e.g. flags, code) then upgrade it to a u64 type.
+
+    // TODO(King) If this is an object tree, then the Key is a u64 timestamp, not a CompositeKey.
+    // The Value will then be the Object itself.
+    // i.e. The CompositeKey is only used for indexes.
+    //
+    // For an object tree:
+    //     Key is the u64 timestamp (e.g. account/transfer.timestamp, when the object was created).
+    //     Value is the Object itself.
+    //     compare_keys() compares timestamps directly as u64s.
+    //     key_from_value() returns object.timestamp.
+    //     sentinel_key should be math.maxInt(u64).
+    //
+    // TODO(King) Since an object tree can already find objects by timestamp, we do not need to
+    // create an index on the timestamp field of each object as this would be redundant.
+    // e.g. timestamp->timestamp.
     const Key = CompositeKey(Struct);
     const Table = TableType(
         Storage,
@@ -39,6 +58,16 @@ pub fn GroveType(
     
     // Generate index LSM trees from the struct fields
     inline for (std.meta.fields(Struct)) |field| {
+        // TODO(King) When constructing a tree type, also tell the tree it's comptime "hash" that
+        // can be used to identify the tree uniquely in our on disk structures (e.g. ManifestLog).
+        // This needs to be stable, even as we add more trees down the line, or reorder structs.
+        // So let's go with a Blake3 hash on "grove_name" + "tree_name", then truncate to u128.
+        // The motivation for Blake3 is only that we use it elsewhere. We could also use Sha256 if
+        // there's any comptime issue with Blake3.
+        // e.g. Hash("accounts")+Hash("id") and Hash("transfers")+Hash("id")
+
+        // TODO(King) Assert that no tree hash in the whole forest collides with that of another.
+
         const lsm_tree_type = LSMTreeType(Storage, field.field_type);
 
         index_fields = index_fields ++ [_]const builtin.TypeInfo.StructField{
@@ -142,6 +171,28 @@ pub fn GroveType(
             // Initialize index LSM trees
             inline for (std.meta.fields(Indexes)) |field| {
                 const lsm_tree_type = field.field_type;
+                // In general, the commit count max for a field, depends on the field's object,
+                // how many objects might be changed by a batch:
+                //   (config.message_size_max - sizeOf(vsr.header))
+                // For example, there are at most 8191 transfers in a batch.
+                // So commit_count_max=8191 for transfer objects and indexes.
+                //
+                // However, if a transfer is ever mutated, then this will double commit_count_max
+                // since the old index might need to be removed, and the new index inserted.
+                //
+                // A way to see this is by looking at the state machine. If a transfer is inserted,
+                // how many accounts and transfer put/removes will be generated?
+                //
+                // This also means looking at the state machine operation that will generate the
+                // most put/removes in the worst case.
+                // For example, create_accounts will put at most 8191 accounts.
+                // However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
+                // some of these accounts may exist, requiring a remove/put to update the index.
+                //
+                // TODO(King) Since this is state machine specific, let's expose `commit_count_max`
+                // as an option when creating the grove.
+                // Then, in our case, we'll create the Accounts grove with a commit_count_max of 
+                // 8191 * 2 (accounts mutated per transfer) * 2 (old/new index value).
                 const commit_count_max = @panic("TODO: commit count max for " ++ field.name);
 
                 @field(indexes, field.name) = try lsm_tree_type.init(
@@ -174,11 +225,15 @@ pub fn GroveType(
             }
         }
 
-        pub fn get(grove: *Grove, key: Objects.Key) ?*const Objecst.Value {
+        pub fn get(grove: *Grove, key: Objects.Key) ?*const Objects.Value {
             return grove.objects.get(key);
         }
 
         pub fn put(grove: *Grove, value: Objects.Value) void {
+            // TODO(King) Check if the object already exists, and if it does, diff the indexes.
+            // For example, when value_old.debits_pending=400 and value_new.debits_pending=450:
+            // If value_new.debits_pending == value_old.debits_pending -> do nothing (no put/remove)
+            // Otherwise remove(old field value) then put(new field value).
             grove.objects.put(value);
 
             // Insert the value's fields into the index LSM trees.
@@ -205,6 +260,12 @@ pub fn GroveType(
 
         pub fn compact_cpu(grove: *Grove) void {
             @panic("TODO: compact entire grove");
+        }
+
+        pub fn checkpoint(grove: *Grove, callback: fn (*Grove) void) void {
+            // The ManifestLog is in fact specific to each tree.
+            // So we need to call checkpoint on each tree to flush its manifest log.
+            @panic("TODO: checkpoint entire grove");
         }
     };
 }
