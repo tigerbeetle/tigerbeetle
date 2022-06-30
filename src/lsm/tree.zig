@@ -280,6 +280,11 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 }
             }
 
+            if (index_block_count == 0) {
+                callback(context, null);
+                return;
+            }
+
             // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
             const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
 
@@ -332,6 +337,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             fn read_index_block(context: *LookupContext) void {
                 assert(context.data_block == null);
                 assert(context.index_block < context.index_block_count);
+                assert(context.index_block_count > 0);
                 assert(context.index_block_count <= config.lsm_levels);
 
                 context.tree.grid.read_block(
@@ -346,6 +352,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
                 assert(context.data_block == null);
                 assert(context.index_block < context.index_block_count);
+                assert(context.index_block_count > 0);
                 assert(context.index_block_count <= config.lsm_levels);
 
                 const blocks = Table.index_blocks_for_key(index_block, context.key);
@@ -367,6 +374,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
                 assert(context.data_block != null);
                 assert(context.index_block < context.index_block_count);
+                assert(context.index_block_count > 0);
                 assert(context.index_block_count <= config.lsm_levels);
 
                 const filter_bytes = Table.filter_block_filter_const(filter_block);
@@ -387,6 +395,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
                 assert(context.data_block != null);
                 assert(context.index_block < context.index_block_count);
+                assert(context.index_block_count > 0);
                 assert(context.index_block_count <= config.lsm_levels);
 
                 if (Table.data_block_search(data_block, context.key)) |value| {
@@ -400,6 +409,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             fn advance_to_next_level(context: *LookupContext) void {
                 assert(context.data_block != null);
                 assert(context.index_block < context.index_block_count);
+                assert(context.index_block_count > 0);
                 assert(context.index_block_count <= config.lsm_levels);
 
                 context.index_block += 1;
