@@ -670,8 +670,8 @@ pub fn TableType(
         }
 
         pub inline fn index_data_keys_used(index_block: BlockPtrConst) []const Key {
-            const keys = mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
-            return keys[0..index_data_blocks_used(index_block)];
+            const slice = mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
+            return slice[0..index_data_blocks_used(index_block)];
         }
 
         pub inline fn index_data_addresses(index_block: BlockPtr) []u64 {
@@ -682,11 +682,11 @@ pub fn TableType(
         }
 
         pub inline fn index_data_addresses_used(index_block: BlockPtrConst) []const u64 {
-            const data_addresses = mem.bytesAsSlice(
+            const slice = mem.bytesAsSlice(
                 u64,
                 index_block[index.data_addresses_offset..][0..index.data_addresses_size],
             );
-            return data_addresses[0..index_data_blocks_used(index_block)];
+            return slice[0..index_data_blocks_used(index_block)];
         }
 
         pub inline fn index_data_checksums(index_block: BlockPtr) []u128 {
@@ -697,11 +697,11 @@ pub fn TableType(
         }
 
         pub inline fn index_data_checksums_used(index_block: BlockPtrConst) []const u128 {
-            const data_checksums = mem.bytesAsSlice(
+            const slice = mem.bytesAsSlice(
                 u128,
                 index_block[index.data_checksums_offset..][0..index.data_checksums_size],
             );
-            return data_checksums[0..index_data_blocks_used(index_block)];
+            return slice[0..index_data_blocks_used(index_block)];
         }
 
         inline fn index_filter_addresses(index_block: BlockPtr) []u64 {
@@ -712,11 +712,11 @@ pub fn TableType(
         }
 
         pub inline fn index_filter_addresses_used(index_block: BlockPtrConst) []const u64 {
-            const filter_addresses = mem.bytesAsSlice(
+            const slice = mem.bytesAsSlice(
                 u64,
                 index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
             );
-            return filter_addresses[0..index_filter_blocks_used(index_block)];
+            return slice[0..index_filter_blocks_used(index_block)];
         }
 
         inline fn index_filter_checksums(index_block: BlockPtr) []u128 {
@@ -727,11 +727,11 @@ pub fn TableType(
         }
 
         pub inline fn index_filter_checksums_used(index_block: BlockPtrConst) []const u128 {
-            const filter_checksums = mem.bytesAsSlice(
+            const slice = mem.bytesAsSlice(
                 u128,
                 index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
             );
-            return filter_checksums[0..index_filter_blocks_used(index_block)];
+            return slice[0..index_filter_blocks_used(index_block)];
         }
 
         inline fn index_snapshot_min(index_block: BlockPtrConst) u32 {
@@ -781,7 +781,7 @@ pub fn TableType(
             return data_block_index;
         }
 
-        pub const IndexKeyInfo = struct {
+        pub const IndexBlocks = struct {
             filter_block_address: u64,
             filter_block_checksum: u128,
             data_block_address: u64,
@@ -790,15 +790,15 @@ pub fn TableType(
 
         /// Returns all data stored in the index block relating to a given key.
         /// May be called on an index block only when the key is already in range of the table.
-        pub inline fn index_key_info(index_block: BlockPtrConst, key: Key) IndexKeyInfo {
-            const data_block_i = Table.index_data_block_for_key(index_block, key);
-            const filter_block_i = @divFloor(data_block_i, filter.data_block_count_max);
+        pub inline fn index_blocks_for_key(index_block: BlockPtrConst, key: Key) IndexBlocks {
+            const d = Table.index_data_block_for_key(index_block, key);
+            const f = @divFloor(d, filter.data_block_count_max);
 
             return .{
-                .filter_block_address = index_filter_addresses_used(index_block)[filter_block_i],
-                .filter_block_checksum = index_filter_checksums_used(index_block)[filter_block_i],
-                .data_block_address = index_data_addresses_used(index_block)[data_block_i],
-                .data_block_checksum = index_data_checksums_used(index_block)[data_block_i],
+                .filter_block_address = index_filter_addresses_used(index_block)[f],
+                .filter_block_checksum = index_filter_checksums_used(index_block)[f],
+                .data_block_address = index_data_addresses_used(index_block)[d],
+                .data_block_checksum = index_data_checksums_used(index_block)[d],
             };
         }
 
@@ -815,11 +815,11 @@ pub fn TableType(
             // for more safety.
             const used = @intCast(u32, header.request);
             assert(used <= data.value_count_max);
-            const values = mem.bytesAsSlice(
+            const slice = mem.bytesAsSlice(
                 Value,
                 data_block[data.values_offset..][0..data.values_size],
             );
-            return values[0..used];
+            return slice[0..used];
         }
 
         pub inline fn block_address(block: BlockPtrConst) u64 {
