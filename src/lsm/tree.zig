@@ -208,12 +208,12 @@ pub fn TreeType(comptime Table: type) type {
             return unwrap_tombstone(value);
         }
 
-        pub fn put(tree: *Tree, value: Value) void {
+        pub fn put(tree: *Tree, value: *const Value) void {
             tree.table_mutable.put(value);
         }
 
-        pub fn remove(tree: *Tree, key: Key) void {
-            tree.table_mutable.remove(key);
+        pub fn remove(tree: *Tree, value: *const Value) void {
+            tree.table_mutable.remove(key_from_value(value));
         }
 
         pub fn lookup(tree: *Tree, snapshot: u64, key: Key, callback: fn (value: ?*const Value) void) void {

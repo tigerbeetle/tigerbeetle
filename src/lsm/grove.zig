@@ -32,13 +32,16 @@ fn ObjectTreeType(comptime Storage: type, comptime Value: type) type {
         }
 
         const sentinel_key = std.math.maxInt(u64);
+        const tombstone_bit = 1 << (64 - 1);
 
         fn tombstone(value: *const Value) callconv(.Inline) bool {
-            @panic("TODO: check if value is tombstone")
+            return (value.timestamp & tombstone_bit) != 0;
         }
 
         fn tombstone_from_key(timestamp: u64) callconv(.Inline) Value {
-            @panic("TODO: return tombstone value from timestamp");
+            var value = std.mem.zeroes(Value); // Full zero-initialized Value.
+            value.timestamp = timestamp | tombstone_bit;
+            return value;
         }
     };
 
@@ -80,23 +83,18 @@ fn IndexCompositeKeyType(comptime Field: type) type {
     }
 }
 
-// TODO(King) CompositeKey accepts only a u128 or u64 type.
-// If the field is a u32 (e.g. ledger) or u16 (e.g. flags, code) then upgrade it to a u64 type.
+comptime {
+    assert(IndexCompositeKeyType(u16) == u64);
+    assert(IndexCompositeKeyType(enum(u16){}) == u64);
 
-// TODO(King) If this is an object tree, then the Key is a u64 timestamp, not a CompositeKey.
-// The Value will then be the Object itself.
-// i.e. The CompositeKey is only used for indexes.
-//
-// For an object tree:
-//     Key is the u64 timestamp (e.g. account/transfer.timestamp, when the object was created).
-//     Value is the Object itself.
-//     compare_keys() compares timestamps directly as u64s.
-//     key_from_value() returns object.timestamp.
-//     sentinel_key should be math.maxInt(u64).
-//
-// TODO(King) Since an object tree can already find objects by timestamp, we do not need to
-// create an index on the timestamp field of each object as this would be redundant.
-// e.g. timestamp->timestamp.
+    assert(IndexCompositeKeyType(u32) == u64);
+    assert(IndexCompositeKeyType(u63) == u64);
+    assert(IndexCompositeKeyType(u64) == u64);
+    
+    assert(IndexCompositeKeyType(enum(u65){}) == u128);
+    assert(IndexCompositeKeyType(u65) == u128);
+    assert(IndexCompositeKeyType(u128) == u128);
+}
 
 fn IndexTreeType(comptime Storage: type, comptime Field: type) type {
     const Key = CompositeKey(IndexCompositeKeyType(Field));
@@ -171,14 +169,14 @@ pub fn GroveType(
         
         // Make sure it has only one argument.
         if (derive_func_info.args.len != 1) {
-            @compileError("expected derive fn to take in *const " ++ @typeName(Struct));
+            @compileError("expected derive fn to take in *const " ++ @typeName(Object));
         }
 
         // Make sure the function takes in a reference to the Value.
         const derive_arg = derive_func_info.args[0];
         if (derive_arg.is_generic) @compileError("expected derive fn arg to not be generic");
-        if (derive_arg.arg_type != *const Struct) {
-           @compileError("expected derive fn to take in *const " ++ @typeName(Struct));
+        if (derive_arg.arg_type != *const Object) {
+           @compileError("expected derive fn to take in *const " ++ @typeName(Object));
         }
 
         // Get the return value from the derived field as the DerivedType.
@@ -212,8 +210,8 @@ pub fn GroveType(
     });
 
     /// Generate a helper function for interacting with an Index field type
-    const IndexTreeFieldHelper = struct {
-        fn Helper(comptime field_name: []const u8) type {
+    const IndexTreeFieldHelperType = struct {
+        fn HelperType(comptime field_name: []const u8) type {
             // Check if the index is derived.
             comptime var derived = false;
             inline for (derived_fields) |derived_field| {
@@ -249,19 +247,19 @@ pub fn GroveType(
                     };
                 }
 
-                pub fn from_composite_key(key: IndexKeyType) Value {
-                    return switch (@typeInfo(Value)) {
-                        .Enum => |e| @intToEnum(Value, @intCast(e.tag_type, key)),
-                        .Int => @intCast(Value, key),
-                        else => @compileError("Unsupported index value type"),
-                    };
-                }
+                // pub fn from_composite_key(key: IndexKeyType) Value {
+                //     return switch (@typeInfo(Value)) {
+                //         .Enum => |e| @intToEnum(Value, @intCast(e.tag_type, key)),
+                //         .Int => @intCast(Value, key),
+                //         else => @compileError("Unsupported index value type"),
+                //     };
+                // }
             };
         }
-    }.Helper;
+    }.HelperType;
 
     const Key = ObjectTree.Table.Key;
-    const Value = ObjecTree.Table.Value;
+    const Value = ObjectTree.Table.Value;
     const compare_keys = ObjectTree.Table.compare_keys;
     const key_from_value = ObjectTree.Table.key_from_value;
 
@@ -271,7 +269,7 @@ pub fn GroveType(
         sync_pending: usize,
         sync_callback: ?fn (*Grove) void,
 
-        cache: ObjecTree.ValueCache,
+        cache: ObjectTree.ValueCache,
         objects: ObjectTree,
         indexes: IndexTrees,
 
@@ -334,25 +332,23 @@ pub fn GroveType(
             );
             errdefer grove.objects.deinit(allocator);
 
-            var index_trees_initialized: usize = 0;
-            var index_trees: IndexTrees = undefined;
-
             // Make sure to deinit initialized index LSM trees on error
+            var index_trees_initialized: usize = 0;
             errdefer inline for (std.meta.fields(IndexTrees)) |field, field_index| {
                 if (index_trees_initialized >= field_index + 1) {
-                    @field(index_trees, field.name).deinit(allocator);
+                    @field(grove.indexes, field.name).deinit(allocator);
                 }
             }
 
             // Initialize index LSM trees
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(indexes, field.name) = try field.field_type.init(
+                @field(grove.indexes, field.name) = try field.field_type.init(
                     allocator,
                     grid,
                     node_pool,
                     null,
                     .{
-                        .prefetch_count_max = commit_count_max * 2,
+                        .prefetch_count_max = 0,
                         .commit_count_max = commit_count_max,
                     },
                 );
@@ -376,17 +372,17 @@ pub fn GroveType(
             return grove.objects.get(key);
         }
 
-        pub fn put(grove: *Grove, value: Value) void {
-            if (grove.get(key_from_value(&value))) |existing_value| {
-                grove.update(existing_value, &value);
+        pub fn put(grove: *Grove, value: *const Value) void {
+            if (grove.get(key_from_value(value))) |existing_value| {
+                grove.update(existing_value, value);
             } else {
-                grove.insert(&value);
+                grove.insert(value);
             }
         }
 
         /// Insert the value into the objects tree and its fields into the index trees.
         fn insert(grove: *Grove, value: *const Value) void {
-            grove.objects.put(value.*);
+            grove.objects.put(value);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelper(field.name);
@@ -400,40 +396,40 @@ pub fn GroveType(
 
         /// Update the object and index tress by diff'ing the old and new values.
         fn update(grove: *Grove, old: *const Value, new: *const Value) void {
-            // Update the object tree entry if any of the indexes changed.
-            var updated = false;
-            defer if (updated) {
+            // Update the object tree entry if any of the fields (even ignored) are different.
+            if (!std.mem.eql(u8, std.mem.asBytes(old), std.mem.asBytes(new))) {
                 grove.objects.remove(key_from_value(old));
-                grove.objects.put(new.*);
+                grove.objects.put(new);
             }
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelper(field.name);
+                const old_index = Helper.derive(old);
+                const new_index = Helper.derive(new);
 
-                // Derive the old and new index values
-                if (Helper.derive(old)) |old_index| {
-                    const new_index = Helper.derive(new).?;
+                if (old_index != new_index) {
+                    if (old_index) |value| {
+                        const old_composite_key = Helper.to_composite_key(value);
+                        @field(grove.indexes, field.name).remove(old_composite_key);
+                    }
 
-                    // Update the index values if they're not the same (diff).
-                    if (old_index != new_index) {
-                        const index_tree = &@field(grove.indexes, field.name);
-                        updated = true;
-
-                        const old_composite_key = Helper.to_composite_key(old_index);
-                        index_tree.remove(old_composite_key);
-
-                        const new_composite_key = Helper.to_composite_key(new_index);
-                        index_tree.put(.{
+                    if (new_index) |value| {
+                        const new_composite_key = Helper.to_composite_key(value);
+                        @field(grove.indexes, field.name).put(&.{
                             .field = new_composite_key,
-                            .timestamp = new.timestamp, // TODO(King) Is this correct?
+                            .timestamp = new.timestamp,
                         });
                     }
                 }
             }
         }
 
-        pub fn remove(grove: *Grove, value: Value) void {
-            grove.objects.remove(key_from_value(value));
+        pub fn remove(grove: *Grove, value: *const Value) void {
+            const key = key_from_value(value);
+            const existing_value = grove.objects.get(key).?;
+            assert(std.mem.eql(u8, std.mem.asBytes(existing_value), std.mem.asBytes(value)));
+            
+            grove.objects.remove(key);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelper(field.name);
@@ -501,6 +497,7 @@ pub fn GroveType(
             assert(grove.sync_callback != null);
 
             grove.objects.compact_cpu();
+            
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(grove.indexes, field.name).compact_cpu();
             }
