@@ -50,14 +50,15 @@ pub fn TableMutableType(comptime Table: type) type {
             return table.values.getKeyPtr(tombstone_from_key(key));
         }
 
-        pub fn put(table: *TableMutable, value: Value) void {
-            table.values.putAssumeCapacity(value, {});
+        pub fn put(table: *TableMutable, value: *const Value) void {
+            table.values.putAssumeCapacity(value.*, {});
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
             table.dirty = true;
         }
 
-        pub fn remove(table: *TableMutable, key: Key) void {
+        pub fn remove(table: *TableMutable, value: *const Value) void {
+            const key = key_from_value(value);
             table.values.putAssumeCapacity(tombstone_from_key(key), {});
             assert(table.values.count() <= table.value_count_max);
         }
