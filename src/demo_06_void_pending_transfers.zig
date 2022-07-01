@@ -4,21 +4,21 @@ const demo = @import("demo.zig");
 const Transfer = tb.Transfer;
 
 pub fn main() !void {
-    const transfers = [_]Transfer{
+    const commits = [_]Transfer{
         Transfer{
-            .id = 1,
+            .id = 2003,
             .debit_account_id = 1,
             .credit_account_id = 2,
             .user_data = 0,
             .reserved = 0,
-            .pending_id = 0,
+            .pending_id = 1003,
             .timeout = 0,
-            .ledger = 710, // Let's use the ISO-4217 Code Number for ZAR
-            .code = 1,
-            .flags = .{},
-            .amount = 1000,
+            .ledger = 0,
+            .code = 0,
+            .flags = .{ .void_pending_transfer = true },
+            .amount = 0,
         },
     };
 
-    try demo.request(.create_transfers, transfers, demo.on_create_transfers);
+    try demo.request(.create_transfers, commits, demo.on_create_transfers);
 }

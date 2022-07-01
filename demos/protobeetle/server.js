@@ -4,12 +4,12 @@ const PORT = process.env.PORT || 30000;
 
 const Node = {
   child: require('child_process'),
+  crypto: require('crypto'),
   fs: require('fs'),
   net: require('net'),
   process: process
 };
 
-const Crypto = require('@ronomon/crypto-async');
 const HashTable = require('@ronomon/hash-table');
 const Queue = require('@ronomon/queue');
 
@@ -104,6 +104,12 @@ const Equal = function(a, aOffset, b, bOffset, size) {
   while (size--) if (a[aOffset++] !== b[bOffset++]) return false;
   return true;
 };
+
+function Hash(algorithm, source, sourceOffset, sourceSize, target, targetOffset) {
+  var hash = Node.crypto.createHash(algorithm);
+  hash.update(source.slice(sourceOffset, sourceOffset + sourceSize));
+  return hash.digest().copy(target, targetOffset);
+}
 
 Logic.adjustParticipantPosition = function(amount, buffer, offset) {
   assert(Number.isSafeInteger(amount));
@@ -317,8 +323,9 @@ const AckHeader = function(request, header, data) {
   MAGIC.copy(header, NETWORK_HEADER_MAGIC_OFFSET);
   header.writeUInt32BE(COMMAND_ACK, NETWORK_HEADER_COMMAND_OFFSET);
   header.writeUInt32BE(data.length, NETWORK_HEADER_SIZE_OFFSET);
+  Node.crypto.createHash('sha256').update(data).digest();
   assert(
-    Crypto.hash(
+    Hash(
       'sha256',
       data,
       0,
@@ -336,7 +343,7 @@ const AckHeader = function(request, header, data) {
     ) === 16
   );
   assert(
-    Crypto.hash(
+    Hash(
       'sha256',
       header,
       NETWORK_HEADER_CHECKSUM_DATA_OFFSET,
@@ -401,7 +408,7 @@ const Server = Node.net.createServer(
             }
             // Verify header CHECKSUM_META:
             assert(
-              Crypto.hash(
+              Hash(
                 'sha256',
                 header,
                 NETWORK_HEADER_CHECKSUM_DATA_OFFSET,

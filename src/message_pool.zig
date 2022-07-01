@@ -26,7 +26,10 @@ pub const messages_max_replica = messages_max: {
     sum += config.clients_max; // Replica.client_table
     sum += 1; // Replica.loopback_queue
     sum += config.pipeline_max; // Replica.pipeline
-    sum += config.replicas_max; // Replica.do_view_change_from_all_replicas quorum (all others are bitsets)
+    // Replica.do_view_change_from_all_replicas quorum:
+    // Replica.recovery_response_quorum is only used for recovery and does not increase the limit.
+    // All other quorums are bitsets.
+    sum += config.replicas_max;
     sum += config.connections_max; // Connection.recv_message
     sum += config.connections_max * config.connection_send_queue_max_replica; // Connection.send_queue
     sum += 1; // Handle bursts (e.g. Connection.parse_message)

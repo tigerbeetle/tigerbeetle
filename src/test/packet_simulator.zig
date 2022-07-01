@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 
 const log = std.log.scoped(.packet_simulator);
+const ReplicaHealth = @import("./cluster.zig").ReplicaHealth;
 
 pub const PacketSimulatorOptions = struct {
     /// Mean for the exponential distribution used to calculate forward delay.
@@ -73,9 +74,11 @@ pub const PartitionMode = enum {
 pub const PacketStatistics = enum(u8) {
     dropped_due_to_partition,
     dropped_due_to_congestion,
+    dropped_due_to_crash,
     dropped,
     replay,
 };
+
 pub fn PacketSimulator(comptime Packet: type) type {
     return struct {
         const Self = @This();
@@ -145,6 +148,9 @@ pub fn PacketSimulator(comptime Packet: type) type {
                 queue.deinit();
             }
             allocator.free(self.paths);
+            allocator.free(self.path_clogged_till);
+            allocator.free(self.partition);
+            allocator.free(self.replicas);
         }
 
         fn order_packets(context: void, a: Data, b: Data) math.Order {
@@ -273,7 +279,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
                 self.partition[from] != self.partition[to];
         }
 
-        pub fn tick(self: *Self) void {
+        pub fn tick(self: *Self, cluster_health: []const ReplicaHealth) void {
             self.ticks += 1;
 
             if (self.stability > 0) {
@@ -316,6 +322,13 @@ pub fn PacketSimulator(comptime Packet: type) type {
                         if (self.should_drop()) {
                             self.stats[@enumToInt(PacketStatistics.dropped)] += 1;
                             log.err("dropped packet from={} to={}.", .{ from, to });
+                            data.packet.deinit(path);
+                            continue;
+                        }
+
+                        if (to < self.options.replica_count and cluster_health[to] == .down) {
+                            self.stats[@enumToInt(PacketStatistics.dropped_due_to_crash)] += 1;
+                            log.err("dropped packet (destination is crashed): from={} to={}", .{ from, to });
                             data.packet.deinit(path);
                             continue;
                         }

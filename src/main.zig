@@ -15,6 +15,7 @@ const IO = @import("io.zig").IO;
 const Time = @import("time.zig").Time;
 const Storage = @import("storage.zig").Storage;
 const SuperBlock = @import("lsm/superblock.zig").SuperBlockType(Storage);
+const superblock_zone_size = @import("lsm/superblock.zig").superblock_zone_size;
 
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const StateMachine = @import("state_machine.zig").StateMachine;
@@ -36,6 +37,32 @@ pub fn main() !void {
     }
 }
 
+// Pad the cluster id number and the replica index with 0s
+const filename_fmt = "cluster_{d:0>10}_replica_{d:0>3}.tigerbeetle";
+const filename_len = fmt.count(filename_fmt, .{ 0, 0 });
+
+/// Create a .tigerbeetle data file for the given args and exit
+fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
+    // Add 1 for the terminating null byte
+    var buffer: [filename_len + 1]u8 = undefined;
+    const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica }) catch unreachable;
+    assert(filename.len == filename_len);
+
+    // TODO Expose data file size on the CLI.
+    const fd = try io.open_file(
+        dir_fd,
+        filename,
+        config.journal_size_max,
+        true,
+    );
+    std.os.close(fd);
+
+    const file = try (std.fs.Dir{ .fd = dir_fd }).openFile(filename, .{ .write = true });
+    defer file.close();
+
+    log.info("initialized data file", .{});
+}
+
 const Command = struct {
     allocator: mem.Allocator,
     fd: os.fd_t,
@@ -49,6 +76,23 @@ const Command = struct {
     pub fn format(allocator: mem.Allocator, cluster: u32, replica: u8, path: [:0]const u8) !void {
         const fd = try open_file(path, true);
 
+        {
+            const write_size_max = 4 * 1024 * 1024;
+            var write: [write_size_max]u8 = undefined;
+            var offset: u64 = superblock_zone_size;
+            while (true) {
+                const write_size = vsr.format_journal(cluster, offset, &write);
+                if (write_size == 0) break;
+                {
+                    var written: usize = 0;
+                    while (written < write_size) {
+                        written += try os.write(fd, write[0..write_size][written..]);
+                    }
+                }
+                offset += write_size;
+            }
+        }
+
         var command: Command = undefined;
         try command.init(allocator, fd, null);
 
@@ -57,6 +101,7 @@ const Command = struct {
             .replica = replica,
             .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
         });
+
         try command.run();
     }
 

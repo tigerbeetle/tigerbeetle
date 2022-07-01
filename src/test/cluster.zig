@@ -32,6 +32,27 @@ pub const ClusterOptions = struct {
 
     network_options: NetworkOptions,
     storage_options: Storage.Options,
+    health_options: HealthOptions,
+};
+
+pub const HealthOptions = struct {
+    /// Probability per tick that a crash will occur.
+    crash_probability: f64,
+    /// Minimum duration of a crash.
+    crash_stability: u32,
+    /// Probability per tick that a crashed replica will recovery.
+    restart_probability: f64,
+    /// Minimum time a replica is up until it is crashed again.
+    restart_stability: u32,
+};
+
+pub const ReplicaHealth = union(enum) {
+    /// When >0, the replica cannot crash.
+    /// When =0, the replica may crash.
+    up: u32,
+    /// When >0, this is the ticks remaining until recovery is possible.
+    /// When =0, the replica may recover.
+    down: u32,
 };
 
 pub const Cluster = struct {
@@ -42,6 +63,7 @@ pub const Cluster = struct {
     storages: []Storage,
     times: []Time,
     replicas: []Replica,
+    health: []ReplicaHealth,
 
     clients: []Client,
     network: Network,
@@ -51,47 +73,57 @@ pub const Cluster = struct {
     on_change_state: fn (replica: *Replica) void = undefined,
 
     pub fn create(allocator: mem.Allocator, prng: std.rand.Random, options: ClusterOptions) !*Cluster {
+        assert(options.replica_count > 0);
+        assert(options.health_options.crash_probability < 1.0);
+        assert(options.health_options.crash_probability >= 0.0);
+        assert(options.health_options.restart_probability < 1.0);
+        assert(options.health_options.restart_probability >= 0.0);
+
         const cluster = try allocator.create(Cluster);
         errdefer allocator.destroy(cluster);
 
-        {
-            const state_machines = try allocator.alloc(StateMachine, options.replica_count);
-            errdefer allocator.free(state_machines);
+        const state_machines = try allocator.alloc(StateMachine, options.replica_count);
+        errdefer allocator.free(state_machines);
 
-            const storages = try allocator.alloc(Storage, options.replica_count);
-            errdefer allocator.free(storages);
+        const storages = try allocator.alloc(Storage, options.replica_count);
+        errdefer allocator.free(storages);
 
-            const times = try allocator.alloc(Time, options.replica_count);
-            errdefer allocator.free(times);
+        const times = try allocator.alloc(Time, options.replica_count);
+        errdefer allocator.free(times);
 
-            const replicas = try allocator.alloc(Replica, options.replica_count);
-            errdefer allocator.free(replicas);
+        const replicas = try allocator.alloc(Replica, options.replica_count);
+        errdefer allocator.free(replicas);
 
-            const clients = try allocator.alloc(Client, options.client_count);
-            errdefer allocator.free(clients);
+        const health = try allocator.alloc(ReplicaHealth, options.replica_count);
+        errdefer allocator.free(health);
+        mem.set(ReplicaHealth, health, .{ .up = 0 });
 
-            const network = try Network.init(
-                allocator,
-                options.replica_count,
-                options.client_count,
-                options.network_options,
-            );
-            errdefer network.deinit();
+        const clients = try allocator.alloc(Client, options.client_count);
+        errdefer allocator.free(clients);
 
-            cluster.* = .{
-                .allocator = allocator,
-                .options = options,
-                .state_machines = state_machines,
-                .storages = storages,
-                .times = times,
-                .replicas = replicas,
-                .clients = clients,
-                .network = network,
-            };
-        }
+        var network = try Network.init(
+            allocator,
+            options.replica_count,
+            options.client_count,
+            options.network_options,
+        );
+        errdefer network.deinit();
+
+        cluster.* = .{
+            .allocator = allocator,
+            .options = options,
+            .state_machines = state_machines,
+            .storages = storages,
+            .times = times,
+            .replicas = replicas,
+            .health = health,
+            .clients = clients,
+            .network = network,
+        };
 
         var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
         const faulty_areas = Storage.generate_faulty_areas(prng, config.journal_size_max, options.replica_count, &buffer);
+        assert(faulty_areas.len == options.replica_count);
 
         for (cluster.replicas) |*replica, replica_index| {
             cluster.times[replica_index] = .{
@@ -126,6 +158,15 @@ pub const Cluster = struct {
             message_bus.set_on_message(*Replica, replica, Replica.on_message);
         }
 
+        {
+            // Format the WAL (equivalent to "tigerbeetle init ...").
+            for (cluster.storages) |storage| {
+                const write_size = vsr.format_journal(options.cluster, 0, storage.memory);
+                assert(write_size == storage.memory.len);
+                assert(write_size == config.journal_size_max);
+            }
+        }
+
         for (cluster.clients) |*client| {
             const client_id = prng.int(u128);
             const client_message_bus = try cluster.network.init_message_bus(
@@ -151,6 +192,7 @@ pub const Cluster = struct {
 
         for (cluster.replicas) |*replica| replica.deinit(cluster.allocator);
         cluster.allocator.free(cluster.replicas);
+        cluster.allocator.free(cluster.health);
 
         for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
         cluster.allocator.free(cluster.storages);
@@ -163,11 +205,81 @@ pub const Cluster = struct {
     /// Reset a replica to its initial state, simulating a random crash/panic.
     /// Leave the persistent storage untouched, and leave any currently
     /// inflight messages to/from the replica in the network.
-    pub fn simulate_replica_crash(cluster: *Cluster, replica_index: u8) !void {
+    ///
+    /// Returns whether the replica was crashed.
+    pub fn crash_replica(cluster: *Cluster, replica_index: u8) !bool {
         const replica = &cluster.replicas[replica_index];
-        replica.deinit(cluster.allocator);
+        if (replica.op == 0) {
+            // Only crash when `replica.op > 0` — an empty WAL would skip recovery after a crash.
+            return false;
+        }
 
+        // Ensure that the replica can eventually recover without this replica.
+        // Verify that each op is recoverable by the current healthy cluster (minus the replica we
+        // are trying to crash).
+        // TODO Remove this workaround when VSR recovery protocol is disabled.
+        if (cluster.options.replica_count != 1) {
+            var parent: u128 = undefined;
+            const cluster_op_max = op_max: {
+                var v: ?u32 = null;
+                var op_max: ?u64 = null;
+                for (cluster.replicas) |other_replica, i| {
+                    if (cluster.health[i] == .down) continue;
+                    if (other_replica.status == .recovering) continue;
+
+                    if (v == null or other_replica.view_normal > v.? or
+                        (other_replica.view_normal == v.? and other_replica.op > op_max.?))
+                    {
+                        v = other_replica.view_normal;
+                        op_max = other_replica.op;
+                        parent = other_replica.journal.header_with_op(op_max.?).?.checksum;
+                    }
+                }
+                break :op_max op_max.?;
+            };
+
+            // TODO This workaround doesn't handle log wrapping correctly.
+            assert(cluster_op_max < config.journal_slot_count);
+
+            var op: u64 = cluster_op_max + 1;
+            while (op > 0) {
+                op -= 1;
+
+                var cluster_op_known: bool = false;
+                for (cluster.replicas) |other_replica, i| {
+                    // Ignore replicas that are ineligible to assist recovery.
+                    if (replica_index == i) continue;
+                    if (cluster.health[i] == .down) continue;
+                    if (other_replica.status == .recovering) continue;
+
+                    if (other_replica.journal.header_with_op_and_checksum(op, parent)) |header| {
+                        parent = header.parent;
+                        if (!other_replica.journal.dirty.bit(.{ .index = op })) {
+                            // The op is recoverable if this replica crashes.
+                            break;
+                        }
+                        cluster_op_known = true;
+                    }
+                } else {
+                    if (op == cluster_op_max and !cluster_op_known) {
+                        // The replica can crash; it will be able to truncate the last op.
+                    } else {
+                        // The op isn't recoverable if this replica is crashed.
+                        return false;
+                    }
+                }
+            }
+
+            // We can't crash this replica because without it we won't be able to repair a broken
+            // hash chain.
+            if (parent != 0) return false;
+        }
+
+        cluster.health[replica_index] = .{ .down = cluster.options.health_options.crash_stability };
+
+        // Reset the storage before the replica so that pending writes can (partially) finish.
         cluster.storages[replica_index].reset();
+        replica.deinit(cluster.allocator);
         cluster.state_machines[replica_index] = StateMachine.init(cluster.options.seed);
 
         // The message bus and network should be left alone, as messages
@@ -214,5 +326,26 @@ pub const Cluster = struct {
         );
         message_bus.set_on_message(*Replica, replica, Replica.on_message);
         replica.on_change_state = cluster.on_change_state;
+        return true;
+    }
+
+    /// Returns the number of replicas capable of helping a crashed node recover (i.e. with
+    /// replica.status=normal).
+    pub fn replica_normal_count(cluster: *Cluster) u8 {
+        var count: u8 = 0;
+        for (cluster.replicas) |*replica| {
+            if (replica.status == .normal) count += 1;
+        }
+        return count;
+    }
+
+    pub fn replica_up_count(cluster: *const Cluster) u8 {
+        var count: u8 = 0;
+        for (cluster.health) |health| {
+            if (health == .up) {
+                count += 1;
+            }
+        }
+        return count;
     }
 };
