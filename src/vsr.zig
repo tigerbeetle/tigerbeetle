@@ -11,9 +11,11 @@ const config = @import("config.zig");
 pub const Version: u8 = 0;
 
 pub const Replica = @import("vsr/replica.zig").Replica;
+pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
 pub const Clock = @import("vsr/clock.zig").Clock;
 pub const Journal = @import("vsr/journal.zig").Journal;
+pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 
 pub const ProcessType = enum { replica, client };
 
@@ -56,7 +58,7 @@ pub const Operation = enum(u8) {
     /// The value 0 is reserved to prevent a spurious zero from being interpreted as an operation.
     reserved = 0,
     /// The value 1 is reserved to initialize the cluster.
-    init = 1,
+    root = 1,
     /// The value 2 is reserved to register a client session with the cluster.
     register = 2,
 
@@ -77,8 +79,8 @@ pub const Operation = enum(u8) {
         if (!@hasField(Op, "reserved") or std.meta.fieldInfo(Op, .reserved).value != 0) {
             @compileError("StateMachine.Operation must have a 'reserved' field with value 0");
         }
-        if (!@hasField(Op, "init") or std.meta.fieldInfo(Op, .init).value != 1) {
-            @compileError("StateMachine.Operation must have an 'init' field with value 1");
+        if (!@hasField(Op, "root") or std.meta.fieldInfo(Op, .root).value != 1) {
+            @compileError("StateMachine.Operation must have an 'root' field with value 1");
         }
         if (!@hasField(Op, "register") or std.meta.fieldInfo(Op, .register).value != 2) {
             @compileError("StateMachine.Operation must have a 'register' field with value 2");
@@ -135,6 +137,7 @@ pub const Header = packed struct {
     /// * A `commit` sets this to the checksum of the latest committed prepare.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `nack_prepare` sets this to the checksum of the prepare being nacked.
+    /// * A `recovery` and `recovery_response` sets this to the nonce.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
@@ -165,10 +168,15 @@ pub const Header = packed struct {
     /// The commit number of the latest committed prepare. Committed ops are immutable.
     commit: u64 = 0,
 
-    /// The journal offset to which this message relates. This enables direct access to a prepare in
-    /// storage, without yet having any previous prepares. All prepares are of variable size, since
-    /// a prepare may contain any number of data structures (even if these are of fixed size).
-    offset: u64 = 0,
+    /// This field is used in various ways:
+    ///
+    /// * A `prepare` sets this to the leader's state machine `prepare_timestamp`.
+    ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
+    /// * A `do_view_change` sets this to the latest normal view number.
+    /// * A `pong` sets this to the sender's wall clock value.
+    /// * A `request_prepare` sets this to `1` when `context` is set to a checksum, and `0`
+    ///   otherwise.
+    timestamp: u64 = 0,
 
     /// The size of the Header structure (always), plus any associated body.
     size: u32 = @sizeOf(Header),
@@ -257,11 +265,9 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.cluster != 0) return "cluster != 0";
         if (self.view != 0) return "view != 0";
-        if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.replica != 0) return "replica != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -273,7 +279,7 @@ pub const Header = packed struct {
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -294,11 +300,11 @@ pub const Header = packed struct {
         if (self.client == 0) return "client == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.replica != 0) return "replica != 0";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
-            .init => return "operation == .init",
+            .root => return "operation == .root",
             .register => {
                 // The first request a client makes must be to register with the cluster:
                 if (self.parent != 0) return "parent != 0";
@@ -321,22 +327,23 @@ pub const Header = packed struct {
         assert(self.command == .prepare);
         switch (self.operation) {
             .reserved => return "operation == .reserved",
-            .init => {
-                if (self.parent != 0) return "init: parent != 0";
-                if (self.client != 0) return "init: client != 0";
-                if (self.context != 0) return "init: context != 0";
-                if (self.request != 0) return "init: request != 0";
-                if (self.view != 0) return "init: view != 0";
-                if (self.op != 0) return "init: op != 0";
-                if (self.commit != 0) return "init: commit != 0";
-                if (self.offset != 0) return "init: offset != 0";
-                if (self.size != @sizeOf(Header)) return "init: size != @sizeOf(Header)";
-                if (self.replica != 0) return "init: replica != 0";
+            .root => {
+                if (self.parent != 0) return "root: parent != 0";
+                if (self.client != 0) return "root: client != 0";
+                if (self.context != 0) return "root: context != 0";
+                if (self.request != 0) return "root: request != 0";
+                if (self.view != 0) return "root: view != 0";
+                if (self.op != 0) return "root: op != 0";
+                if (self.commit != 0) return "root: commit != 0";
+                if (self.timestamp != 0) return "root: timestamp != 0";
+                if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
+                if (self.replica != 0) return "root: replica != 0";
             },
             else => {
                 if (self.client == 0) return "client == 0";
                 if (self.op == 0) return "op == 0";
                 if (self.op <= self.commit) return "op <= commit";
+                if (self.timestamp == 0) return "timestamp == 0";
                 if (self.operation == .register) {
                     // Client session numbers are replaced by the reference to the previous prepare.
                     if (self.request != 0) return "request != 0";
@@ -354,16 +361,16 @@ pub const Header = packed struct {
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
-            .init => {
-                if (self.parent != 0) return "init: parent != 0";
-                if (self.client != 0) return "init: client != 0";
-                if (self.context != 0) return "init: context != 0";
-                if (self.request != 0) return "init: request != 0";
-                if (self.view != 0) return "init: view != 0";
-                if (self.op != 0) return "init: op != 0";
-                if (self.commit != 0) return "init: commit != 0";
-                if (self.offset != 0) return "init: offset != 0";
-                if (self.replica != 0) return "init: replica != 0";
+            .root => {
+                if (self.parent != 0) return "root: parent != 0";
+                if (self.client != 0) return "root: client != 0";
+                if (self.context != 0) return "root: context != 0";
+                if (self.request != 0) return "root: request != 0";
+                if (self.view != 0) return "root: view != 0";
+                if (self.op != 0) return "root: op != 0";
+                if (self.commit != 0) return "root: commit != 0";
+                if (self.timestamp != 0) return "root: timestamp != 0";
+                if (self.replica != 0) return "root: replica != 0";
             },
             else => {
                 if (self.client == 0) return "client == 0";
@@ -385,6 +392,7 @@ pub const Header = packed struct {
         if (self.client == 0) return "client == 0";
         if (self.context != 0) return "context != 0";
         if (self.op != self.commit) return "op != commit";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation == .register) {
             // In this context, the commit number is the newly registered session number.
             // The `0` commit number is reserved for cluster initialization.
@@ -403,7 +411,7 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -416,7 +424,7 @@ pub const Header = packed struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -437,20 +445,31 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
 
     fn invalid_recovery(self: *const Header) ?[]const u8 {
         assert(self.command == .recovery);
-        // TODO implement validation once the message is actually used.
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
 
     fn invalid_recovery_response(self: *const Header) ?[]const u8 {
         assert(self.command == .recovery_response);
-        // TODO implement validation once the message is actually used.
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
 
@@ -462,7 +481,7 @@ pub const Header = packed struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -473,9 +492,7 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.offset != 0) return "offset != 0";
-        // TODO Add local recovery mechanism for repairing the cluster initialization "zero" op.
-        if (self.op == 0) return "op == 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.commit > self.op) return "op_min > op_max";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -487,7 +504,11 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        switch (self.timestamp) {
+            0 => if (self.context != 0) return "context != 0",
+            1 => {}, // context is a checksum, which may be 0.
+            else => return "timestamp > 1",
+        }
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -499,7 +520,7 @@ pub const Header = packed struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -510,7 +531,7 @@ pub const Header = packed struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -522,7 +543,7 @@ pub const Header = packed struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.offset != 0) return "offset != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -555,8 +576,27 @@ pub const Header = packed struct {
         }
     }
 
-    pub fn reserved() Header {
-        var header = Header{ .command = .reserved, .cluster = 0 };
+    pub fn reserved(cluster: u32, slot: u64) Header {
+        assert(slot < config.journal_slot_count);
+
+        var header = Header{
+            .command = .reserved,
+            .cluster = cluster,
+            .op = slot,
+        };
+        header.set_checksum_body(&[0]u8{});
+        header.set_checksum();
+        assert(header.invalid() == null);
+        return header;
+    }
+
+    pub fn root_prepare(cluster: u32) Header {
+        var header = Header{
+            .cluster = cluster,
+            .size = @sizeOf(Header),
+            .command = .prepare,
+            .operation = .root,
+        };
         header.set_checksum_body(&[0]u8{});
         header.set_checksum();
         assert(header.invalid() == null);
@@ -871,4 +911,118 @@ pub fn checksum(source: []const u8) u128 {
     var target: [32]u8 = undefined;
     std.crypto.hash.Blake3.hash(source, target[0..], .{});
     return @bitCast(u128, target[0..@sizeOf(u128)].*);
+}
+
+/// Returns the number of bytes written to `target`.
+pub fn format_journal(cluster: u32, offset: u64, target: []u8) usize {
+    assert(offset <= config.journal_size_max);
+    assert(offset % config.sector_size == 0);
+    assert(target.len > 0);
+    assert(target.len % config.sector_size == 0);
+
+    const sector_max = @divExact(config.journal_size_max, config.sector_size);
+    var sectors = std.mem.bytesAsSlice([config.sector_size]u8, target);
+    for (sectors) |*sector_data, i| {
+        const sector = @divExact(offset, config.sector_size) + i;
+        if (sector == sector_max) {
+            if (i == 0) {
+                assert(offset == config.journal_size_max);
+            }
+            return i * config.sector_size;
+        } else {
+            format_journal_sector(cluster, sector, sector_data);
+        }
+    }
+    return target.len;
+}
+
+fn format_journal_sector(cluster: u32, sector: usize, sector_data: *[config.sector_size]u8) void {
+    assert(sector < @divExact(config.journal_size_max, config.sector_size));
+
+    const headers_per_sector = @divExact(config.sector_size, @sizeOf(Header));
+    const slot_count = config.journal_slot_count;
+    var sector_headers = std.mem.bytesAsSlice(Header, sector_data);
+
+    if (sector * headers_per_sector < slot_count) {
+        for (sector_headers) |*header, i| {
+            const slot = sector * headers_per_sector + i;
+            if (sector == 0 and i == 0) {
+                header.* = Header.root_prepare(cluster);
+            } else {
+                header.* = Header.reserved(cluster, slot);
+            }
+        }
+        return;
+    }
+
+    const sectors_per_message = config.message_size_max / config.sector_size;
+    const sector_in_prepares = sector - slot_count / headers_per_sector;
+    const message_slot = sector_in_prepares / sectors_per_message;
+    if (message_slot < slot_count) {
+        std.mem.set(u8, sector_data, 0);
+        if (sector_in_prepares % sectors_per_message == 0) {
+            // First sector of the message.
+            if (message_slot == 0) {
+                sector_headers[0] = Header.root_prepare(cluster);
+            } else {
+                sector_headers[0] = Header.reserved(cluster, message_slot);
+            }
+        }
+        return;
+    }
+
+    unreachable;
+}
+
+test "format_journal" {
+    const cluster = 123;
+    const write_sizes = [_]usize{
+        config.sector_size,
+        config.sector_size * 2,
+        config.sector_size * 3,
+        config.journal_size_max,
+    };
+
+    for (write_sizes) |write_size_max| {
+        var wal_data = try std.testing.allocator.alloc(u8, config.journal_size_max);
+        defer std.testing.allocator.free(wal_data);
+
+        var write_data = try std.testing.allocator.alloc(u8, write_size_max);
+        defer std.testing.allocator.free(write_data);
+
+        var headers_ring = std.mem.bytesAsSlice(Header, wal_data[0..config.journal_size_headers]);
+        var prepare_ring = std.mem.bytesAsSlice([config.message_size_max]u8, wal_data[config.journal_size_headers..]);
+        try std.testing.expectEqual(@as(usize, config.journal_slot_count), headers_ring.len);
+        try std.testing.expectEqual(@as(usize, config.journal_slot_count), prepare_ring.len);
+
+        var offset: u64 = 0;
+        while (true) {
+            const write_size = format_journal(cluster, offset, write_data);
+            if (write_size == 0) break;
+            std.mem.copy(u8, wal_data[offset..][0..write_size], write_data[0..write_size]);
+            offset += write_size;
+        }
+
+        for (headers_ring) |*header, slot| {
+            try std.testing.expect(header.valid_checksum());
+            try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
+            try std.testing.expectEqual(header.invalid(), null);
+            try std.testing.expectEqual(header.cluster, cluster);
+            try std.testing.expectEqual(header.op, slot);
+            try std.testing.expectEqual(header.size, @sizeOf(Header));
+            if (slot == 0) {
+                try std.testing.expectEqual(header.command, .prepare);
+                try std.testing.expectEqual(header.operation, .root);
+            } else {
+                try std.testing.expectEqual(header.command, .reserved);
+            }
+
+            const prepare_bytes = prepare_ring[slot];
+            const prepare_header = std.mem.bytesAsValue(Header, prepare_bytes[0..@sizeOf(Header)]);
+            const prepare_body = prepare_bytes[@sizeOf(Header)..];
+
+            try std.testing.expectEqual(header.*, prepare_header.*);
+            for (prepare_body) |byte| try std.testing.expectEqual(byte, 0);
+        }
+    }
 }

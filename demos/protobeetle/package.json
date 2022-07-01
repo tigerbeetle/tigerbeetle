@@ -1,11 +1,11 @@
 {
-  "name": "tiger-beetle",
+  "name": "tigerbeetle",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jorangreef/tiger-beetle.git"
+    "url": "git+https://github.com/coilhq/tigerbeetle.git"
   },
   "contributors": [
     "Joran Dirk Greef <joran@ronomon.com>",
@@ -13,16 +13,15 @@
   ],
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/jorangreef/tiger-beetle/issues"
+    "url": "https://github.com/coilhq/tigerbeetle/issues"
   },
-  "homepage": "https://github.com/jorangreef/tiger-beetle#readme",
+  "homepage": "https://github.com/coilhq/tigerbeetle#readme",
   "scripts": {
     "start": "node index.js 1",
     "start:fast-ml-api-adapter": "node fast-ml-api-adapter.js"
   },
   "dependencies": {
-    "@ronomon/crypto-async": "^5.0.1",
-    "@ronomon/hash-table": "^2.0.7",
+    "@ronomon/hash-table": "^2.0.8",
     "@ronomon/queue": "^3.0.1"
   }
 }

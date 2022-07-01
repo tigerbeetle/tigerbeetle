@@ -1,12 +1,11 @@
 const assert = require('assert');
 
 const Node = {
+  crypto: require('crypto'),
   fs: require('fs'),
   net: require('net'),
   process: process
 };
-
-const Crypto = require('@ronomon/crypto-async');
 
 const HOST = '127.0.0.1';
 const PORT = 30000;
@@ -46,6 +45,12 @@ const CHECKSUM = Buffer.alloc(32); // We truncate 256-bit checksums to 128-bit.
 const transfers = Node.fs.readFileSync('transfers');
 assert(transfers.length % TRANSFER === 0);
 
+function Hash(algorithm, source, sourceOffset, sourceSize, target, targetOffset) {
+  var hash = Node.crypto.createHash(algorithm);
+  hash.update(source.slice(sourceOffset, sourceOffset + sourceSize));
+  return hash.digest().copy(target, targetOffset);
+}
+
 const start = Date.now();
 
 var id = 0;
@@ -71,7 +76,7 @@ function sendBatch(socket) {
   header.writeUInt32BE(COMMAND_CREATE_TRANSFERS, NETWORK_HEADER_COMMAND_OFFSET);
   header.writeUInt32BE(data.length, NETWORK_HEADER_SIZE_OFFSET);
   assert(
-    Crypto.hash(
+    Hash(
       'sha256',
       data,
       0,
@@ -89,7 +94,7 @@ function sendBatch(socket) {
     ) === 16
   );
   assert(
-    Crypto.hash(
+    Hash(
       'sha256',
       header,
       NETWORK_HEADER_CHECKSUM_DATA_OFFSET,
@@ -133,7 +138,7 @@ function acceptTransfers(source, socket) {
   header.writeUInt32BE(COMMAND_ACCEPT_TRANSFERS, NETWORK_HEADER_COMMAND_OFFSET);
   header.writeUInt32BE(data.length, NETWORK_HEADER_SIZE_OFFSET);
   assert(
-    Crypto.hash(
+    Hash(
       'sha256',
       data,
       0,
@@ -151,7 +156,7 @@ function acceptTransfers(source, socket) {
     ) === 16
   );
   assert(
-    Crypto.hash(
+    Hash(
       'sha256',
       header,
       NETWORK_HEADER_CHECKSUM_DATA_OFFSET,

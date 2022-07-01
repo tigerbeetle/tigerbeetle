@@ -6,11 +6,9 @@ const config = @import("config.zig");
 const tb = @import("tigerbeetle.zig");
 const Account = tb.Account;
 const Transfer = tb.Transfer;
-const Commit = tb.Commit;
 
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
-const CommitTransfersResult = tb.CommitTransfersResult;
 
 const IO = @import("io.zig").IO;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
@@ -33,7 +31,7 @@ pub fn request(
 ) !void {
     const allocator = std.heap.page_allocator;
     const client_id = std.crypto.random.int(u128);
-    const cluster_id: u32 = 0;
+    const cluster_id: u32 = 1;
     var addresses = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
     var io = try IO.init(32, 0);
@@ -53,7 +51,7 @@ pub fn request(
 
     message_bus.set_on_message(*Client, &client, Client.on_message);
 
-    var message = client.get_message();
+    const message = client.get_message();
     defer client.unref(message);
 
     const body = std.mem.asBytes(&batch);
@@ -115,17 +113,6 @@ pub fn on_create_transfers(
     _ = operation;
 
     print_results(CreateTransfersResult, results);
-}
-
-pub fn on_commit_transfers(
-    user_data: u128,
-    operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
-) void {
-    _ = user_data;
-    _ = operation;
-
-    print_results(CommitTransfersResult, results);
 }
 
 fn print_results(comptime Results: type, results: Client.Error![]const u8) void {

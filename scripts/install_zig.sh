@@ -40,7 +40,9 @@ ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"
 
 # Determine the build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
 if command -v wget &> /dev/null; then
-    ZIG_URL=`wget --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
+    # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
+    # Only A records (for ipv4) are used in DNS:
+    ZIG_URL=`wget -4 --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
 else
     ZIG_URL=`curl --silent https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g'`
 fi
@@ -58,7 +60,9 @@ ZIG_DIRECTORY=`basename "$ZIG_TARBALL" .tar.xz`
 # Download, making sure we download to the same output document, without wget adding "-1" etc. if the file was previously partially downloaded:
 echo "Downloading $ZIG_URL..."
 if command -v wget &> /dev/null; then
-    wget --quiet --show-progress --output-document=$ZIG_TARBALL $ZIG_URL
+    # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
+    # Only A records (for ipv4) are used in DNS:
+    wget -4 --quiet --show-progress --output-document=$ZIG_TARBALL $ZIG_URL
 else
     curl --silent --progress-bar --output $ZIG_TARBALL $ZIG_URL
 fi
