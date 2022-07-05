@@ -267,7 +267,7 @@ pub fn CompactionType(
                 assert(compaction.level_b != 0);
                 assert(compaction.status == .compacting);
 
-                const tables = [_]TableInfo{ table.* };
+                const tables = [_]TableInfo{table.*};
                 compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
                 compaction.manifest.insert_tables(compaction.level_b, tables);
 
@@ -286,21 +286,18 @@ pub fn CompactionType(
                 .table_info_callback = iterator_b_table_info_callback, // TODO
             };
 
-            compaction.iterator_a.start(iterator_a_context, iterator_a_read_callback);
-            compaction.iterator_b.start(iterator_b_context, iterator_b_read_callback);
+            compaction.iterator_a.start(iterator_a_context, iterator_a_callback);
+            compaction.iterator_b.start(iterator_b_context, iterator_b_callback);
         }
 
-        fn iterator_b_table_info_callback(
-            iterator_b: *LevelIterator,
-            table: *const TableInfo,
-        ) void {
+        fn iterator_b_table_info_callback(iterator_b: *IteratorB, table: *const TableInfo) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             compaction.queue_manifest_update(&compaction.remove_level_b, table);
         }
 
         fn queue_manifest_update(
-            compaction: *Compaction, 
-            buffer: *TableInfoBuffer, 
+            compaction: *Compaction,
+            buffer: *TableInfoBuffer,
             table: *const TableInfo,
         ) void {
             assert(buffer == &compaction.remove_level_b or buffer == &compaction.insert_level_b);
@@ -314,10 +311,9 @@ pub fn CompactionType(
             const tables: []const TableInfo = buffer.drain();
             if (tables.len == 0) return;
 
-            // Ensure tables being updated are withing the compactions initial range
-            for (tables) |*table| {
-                assert(compaction.range.key_min <= table.key_min);
-                assert(compaction.range.key_max >= table.key_max);
+            for (tables) |table| {
+                assert(compare_keys(table.key_min, compaction.range.key_min) != .lt);
+                assert(compare_keys(table.key_max, compaction.range.key_max) != .gt);
             }
 
             if (buffer == &compaction.remove_level_b) {
@@ -502,17 +498,17 @@ pub fn CompactionType(
                     compaction.queue_manifest_update(&compaction.insert_level_b, table);
 
                     swap_buffers(&compaction.index, &compaction.table_builder.index_block);
-                    assert(compaction.index.ready); 
+                    assert(compaction.index.ready);
                 }
             }
         }
 
-        fn iterator_a_read_callback(iterator_a: *IteratorA) void {
+        fn iterator_a_callback(iterator_a: *IteratorA) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
             compaction.io_callback();
         }
 
-        fn iterator_b_read_callback(iterator_b: *IteratorB) void {
+        fn iterator_b_callback(iterator_b: *IteratorB) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             compaction.io_callback();
         }

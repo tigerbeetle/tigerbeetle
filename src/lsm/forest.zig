@@ -9,5 +9,5 @@ const config = @import("../config.zig");
 pub fn ForestType(comptime grove_fields_config: anytype) type {
     // TODO: expose all grove fields in the config while also adding decls somehow
     // forest.groves.transfers.put()
-    
+
 }

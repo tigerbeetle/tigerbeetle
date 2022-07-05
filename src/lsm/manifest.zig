@@ -140,8 +140,8 @@ pub fn ManifestType(comptime Table: type) type {
         };
 
         pub fn insert_tables(
-            manifest: *Manifest, 
-            level: u8, 
+            manifest: *Manifest,
+            level: u8,
             tables: []const TableInfo,
         ) void {
             assert(tables.len > 0);
@@ -153,8 +153,8 @@ pub fn ManifestType(comptime Table: type) type {
         }
 
         pub fn update_tables(
-            manifest: *Manifest, 
-            level: u8, 
+            manifest: *Manifest,
+            level: u8,
             snapshot: u64,
             tables: []const TableInfo,
         ) void {
