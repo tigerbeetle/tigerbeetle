@@ -213,7 +213,7 @@ pub fn TreeType(comptime Table: type) type {
         }
 
         pub fn remove(tree: *Tree, value: *const Value) void {
-            tree.table_mutable.remove(key_from_value(value));
+            tree.table_mutable.remove(value);
         }
 
         pub fn lookup(tree: *Tree, snapshot: u64, key: Key, callback: fn (value: ?*const Value) void) void {
@@ -618,6 +618,7 @@ pub fn TreeType(comptime Table: type) type {
             // TODO Assert no outstanding compaction work at this point
             //      (not compaction callback, all idle, assert_visible_tables_are_in_range)
             _ = tree;
+            _ = callback;
         }
 
         /// This should be called by the state machine for every key that must be prefetched.

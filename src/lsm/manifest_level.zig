@@ -259,7 +259,7 @@ pub fn ManifestLevel(
             }
 
             assert(i == tables.len);
-            level.table_count_visible -= tables.len;
+            level.table_count_visible -= @intCast(u32, tables.len);
         }
 
         /// Remove the given tables from the ManifestLevel, asserting that they are not visible
