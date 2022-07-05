@@ -48,7 +48,7 @@ pub const snapshot_latest = math.maxInt(u64) - 1;
 
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
 
-pub fn TreeType(comptime Table: type) type {
+pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
@@ -58,8 +58,14 @@ pub fn TreeType(comptime Table: type) type {
     return struct {
         const Tree = @This();
 
-        // Expose the table for the free for the Grove.
+        // Expose the Table & hash for the Grove.
         pub const TableType = Table;
+        pub const name = tree_name;
+        pub const hash = blk: {
+            var hash: u256 = undefined;
+            std.crypto.Blake3.hash(tree_name, std.mem.asBytes(&hash), .{});
+            break :blk hash;
+        };
 
         const Grid = @import("grid.zig").GridType(Table.Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table);

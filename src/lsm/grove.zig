@@ -56,7 +56,8 @@ fn ObjectTreeType(comptime Storage: type, comptime Value: type) type {
         ValueKeyHelpers.tombstone_from_key,
     );
 
-    return TreeType(Table);
+    const tree_name = @typeName(Value);
+    return TreeType(Table, tree_name);
 }
 
 /// Normalizes index tree field types into either u64 or u128 for CompositeKey
@@ -96,7 +97,11 @@ comptime {
     assert(IndexCompositeKeyType(u128) == u128);
 }
 
-fn IndexTreeType(comptime Storage: type, comptime Field: type) type {
+fn IndexTreeType(
+    comptime Storage: type, 
+    comptime Field: type, 
+    comptime tree_name: []const u8,
+) type {
     const Key = CompositeKey(IndexCompositeKeyType(Field));
     const Table = TableType(
         Storage,
@@ -108,7 +113,8 @@ fn IndexTreeType(comptime Storage: type, comptime Field: type) type {
         Key.tombstone,
         Key.tombstone_from_key,
     );
-    return TreeType(Table);
+
+    return TreeType(Table, tree_name);
 }
 
 /// A Grove is a collection of LSM trees auto generated for fields on a struct type
@@ -128,26 +134,17 @@ pub fn GroveType(
 ) type {
     comptime var index_fields: []const builtin.TypeInfo.StructField = &.{};
     
-    // Generate index LSM trees from the struct fields
+    // Generate index LSM trees from the struct fields.
     inline for (std.meta.fields(Object)) |field| {
-        // See if we should ignore this field from the options
-        var ignore = false;
+        // See if we should ignore this field from the options.
+        var ignored = false;
         inline for (options.ignored) |ignored_field_name| {
-            ignore = ignore or std.mem.eql(u8, field.name, ignored_field_name);
+            ignored = ignored or std.mem.eql(u8, field.name, ignored_field_name);
         }
 
-        // TODO(King) When constructing a tree type, also tell the tree it's comptime "hash" that
-        // can be used to identify the tree uniquely in our on disk structures (e.g. ManifestLog).
-        // This needs to be stable, even as we add more trees down the line, or reorder structs.
-        // So let's go with a Blake3 hash on "grove_name" + "tree_name", then truncate to u128.
-        // The motivation for Blake3 is only that we use it elsewhere. We could also use Sha256 if
-        // there's any comptime issue with Blake3.
-        // e.g. Hash.update("accounts")+Hash.update("id") and Hash("transfers")+Hash("id")
-
-        // TODO(King) Assert that no tree hash in the whole forest collides with that of another.
-
         if (!ignored) {
-            const IndexTree = IndexTreeType(Storage, field.field_type);
+            const tree_name = @typeName(Object) ++ "." ++ field.name;
+            const IndexTree = IndexTreeType(Storage, field.field_type, tree_name);
             index_fields = index_fields ++ [_]const builtin.TypeInfo.StructField{
                 .{
                     .name = field.name,
@@ -172,7 +169,7 @@ pub fn GroveType(
             @compileError("expected derive fn to take in *const " ++ @typeName(Object));
         }
 
-        // Make sure the function takes in a reference to the Value.
+        // Make sure the function takes in a reference to the Value:
         const derive_arg = derive_func_info.args[0];
         if (derive_arg.is_generic) @compileError("expected derive fn arg to not be generic");
         if (derive_arg.arg_type != *const Object) {
@@ -184,9 +181,11 @@ pub fn GroveType(
             @compileError("expected derive fn to return valid tree index type");
         };
 
-        // Create an IndexTree for the DerivedType.
+        // Create an IndexTree for the DerivedType:
+        const tree_name = @typeName(Object) ++ "." ++ field.name;
         const DerivedType = @typeInfo(derive_return_type).Optional.child;
-        const IndexTree = IndexTreeType(Storage, DerivedType);
+        const IndexTree = IndexTreeType(Storage, DerivedType, tree_name);
+
         index_fields = index_fields ++ [_]const builtin.TypeInfo.StructField{
             .{
                 .name = field.name,
@@ -208,6 +207,21 @@ pub fn GroveType(
             .is_tuple = false,
         },
     });
+
+    // Verify no hash collisions between all the trees:
+    comptime var hashes: []const u256 = &.{ ObjectTree.hash };
+    inline for (std.meta.fields(IndexTrees)) |field| {
+        const IndexTree = @TypeOf(@field(@as(IndexTrees, undefined), field.name));
+        assert(std.mem.containsAtLeast(u256, hashes, 0, IndexTree.hash));
+        hashes = hashes ++ &.{ IndexTree.hash };
+    }
+
+    // Verify grove index count:
+    const indexes_count_actual = std.meta.fields(IndexTrees).len;
+    const indexes_count_expect = std.meta.fields(Object).len
+        - options.ignored.len
+        + std.meta.fields(@TypeOf(options.derived)).len;
+    assert(indexes_count_actual == indexes_count_expect);
 
     /// Generate a helper function for interacting with an Index field type
     const IndexTreeFieldHelperType = struct {
@@ -497,7 +511,7 @@ pub fn GroveType(
             assert(grove.sync_callback != null);
 
             grove.objects.compact_cpu();
-            
+
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(grove.indexes, field.name).compact_cpu();
             }
