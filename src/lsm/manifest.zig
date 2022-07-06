@@ -10,6 +10,7 @@ const table_count_max = @import("tree.zig").table_count_max;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
+const Direction = @import("direction.zig").Direction;
 const ManifestLevel = @import("manifest_level.zig").ManifestLevel;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
@@ -178,6 +179,58 @@ pub fn ManifestType(comptime Table: type) type {
                 const table_count_visible_max = table_count_max_for_level(growth_factor, level);
                 assert(manifest_level.table_count_visible <= table_count_visible_max);
             }
+        }
+
+        /// Returns the next table in the range, after `key_exclusive` if provided.
+        pub fn next_table(
+            manifest: *const Manifest,
+            level: u8,
+            snapshot: u64,
+            key_min: Key,
+            key_max: Key,
+            key_exclusive: ?Key,
+            direction: Direction,
+        ) ?*const TableInfo {
+            assert(level < config.lsm_levels);
+            assert(compare_keys(key_min, key_max) != .gt);
+
+            if (key_exclusive == null) {
+                return manifest.levels[level].iterator(
+                    snapshot,
+                    key_min,
+                    key_max,
+                    direction,
+                ).next();
+            }
+
+            assert(compare_keys(key_exclusive.?, key_min) != .lt);
+            assert(compare_keys(key_exclusive.?, key_max) != .gt);
+
+            const key_min_exclusive = if (direction == .ascending) key_exclusive.? else key_min;
+            const key_max_exclusive = if (direction == .descending) key_exclusive.? else key_max;
+            assert(compare_keys(key_min_exclusive, key_max_exclusive) != .gt);
+
+            var it = manifest.levels[level].iterator(
+                snapshot,
+                key_min_exclusive,
+                key_max_exclusive,
+                direction,
+            );
+
+            while (it.next()) |table| {
+                assert(table.visible(snapshot));
+                assert(compare_keys(table.key_min, table.key_max) != .gt);
+                assert(compare_keys(table.key_max, key_min_exclusive) != .lt);
+                assert(compare_keys(table.key_min, key_max_exclusive) != .gt);
+
+                const next = switch (direction) {
+                    .ascending => compare_keys(table.key_min, key_exclusive.?) == .gt,
+                    .descending => compare_keys(table.key_max, key_exclusive.?) == .lt,
+                };
+                if (next) return table;
+            }
+
+            return null;
         }
 
         /// Returns the most optimal table for compaction from a level that is due for compaction.
