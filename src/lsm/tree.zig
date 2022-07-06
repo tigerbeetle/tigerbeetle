@@ -64,7 +64,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         pub const hash = blk: {
             var hash: u256 = undefined;
             std.crypto.Blake3.hash(tree_name, std.mem.asBytes(&hash), .{});
-            break :blk hash;
+            break :blk @truncate(u128, hash);
         };
 
         const Grid = @import("grid.zig").GridType(Table.Storage);
@@ -280,7 +280,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         // After `compact_io` is called, `compact_cpu` should be called to enable pipelining.
         // The compaction beat completes when the `compact_io` callback is invoked.
         //
-        // A measure is split in half according to the "down/first" beat and "back/middle" beat.
+        // A measure is split in half according to the "first" down beat and "middle" down beat.
         // The first half of the measure compacts even levels while the latter compacts odd levels.
         // Mutable table changes are sorted and compacted into the immutable table.
         // The immutable table is compacted into level 0 during the odd level half of the measure.
@@ -292,6 +292,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         // Assuming a measure/`lsm_batch_multiple` of 4, the invariants can be described as follows:
         //  * assert: at the end of every beat, there's space in mutable table for the next beat.
         //  * manifest info for the tables compacted are updating during the compaction.
+        //  * manifest is compacted at the end of every beat.
         //
         //  - (first) down beat of the measure:
         //      * assert: no compactions are currently running.
@@ -299,11 +300,11 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         //      * allow level visible table counts to overflow if needed.
         //      * start even level compactions if there's any tables to compact.
         //
-        //  - (second) middle beat of the measure:
+        //  - (second) up beat of the measure:
         //      * finish ticking running even-level compactions.
         //      * assert: on callback completion, all compactions should be completed.
         //
-        //  - (third) back beat of the measure:
+        //  - (third) down beat of the measure:
         //      * assert: no compactions are currently running.
         //      * start odd level and immutable table compactions.
         //
@@ -449,7 +450,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 tree.grid,
                 &tree.manifest,
                 context.level_b,
-                table_range,
+                table_range.range,
                 snapshot,
                 .{
                     .grid = tree.grid,
@@ -592,28 +593,32 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_beat == config.lsm_batch_multiple - 1) {
                 log.debug(tree_name ++ ": finished compacting immutable table and odd levels", .{});
-                tree.manifest.assert_visible_tables_are_in_range();
 
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
                 }
 
-                // Ensure mutable table can be flushed into immutable table.
-                assert(tree.table_mutable.count() > 0);
-                assert(tree.table_immutable.free);
-
-                // Sort the mutable table values directly into the immutable table's array.
-                const values_max = tree.table_immutable.values_max();
-                const values = tree.table_mutable.sort_into_values_and_clear(values_max);
-                assert(values.ptr == values_max.ptr);
-
-                // Take a manifest snapshot and setup the immutable table with the sorted values.
-                const snapshot_min = tree.compaction_table_immutable.snapshot;
-                tree.table_immutable.reset_with_sorted_values(snapshot_min, values);
-
-                assert(tree.table_mutable.count() == 0);
-                assert(!tree.table_immutable.free);
+                tree.manifest.assert_visible_tables_are_in_range();
+                tree.compact_mutable_table_into_immutable();
             }
+        }
+
+        fn compact_mutable_table_into_immutable(tree: *Tree) void {
+            // Ensure mutable table can be flushed into immutable table.
+            assert(tree.table_mutable.count() > 0);
+            assert(tree.table_immutable.free);
+
+            // Sort the mutable table values directly into the immutable table's array.
+            const values_max = tree.table_immutable.values_max();
+            const values = tree.table_mutable.sort_into_values_and_clear(values_max);
+            assert(values.ptr == values_max.ptr);
+
+            // Take a manifest snapshot and setup the immutable table with the sorted values.
+            const snapshot_min = tree.compaction_table_immutable.snapshot;
+            tree.table_immutable.reset_with_sorted_values(snapshot_min, values);
+
+            assert(tree.table_mutable.count() == 0);
+            assert(!tree.table_immutable.free);
         }
 
         pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
