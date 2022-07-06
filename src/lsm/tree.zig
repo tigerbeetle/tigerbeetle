@@ -369,8 +369,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             const snapshot = op + half_measure_beat_count - 1; // -1 converts the count to an index.
             assert(snapshot != snapshot_latest);
 
-            log.debug("{*}: compaction beat {}/{}", .{
-                tree,
+            log.debug(tree_name ++ ": compaction beat {d}/{d}", .{
                 tree.compaction_beat,
                 config.lsm_batch_multiple,
             });
@@ -413,7 +412,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             assert(compare_keys(range.key_min, tree.table_immutable.key_min()) != .gt);
             assert(compare_keys(range.key_max, tree.table_immutable.key_max()) != .lt);
 
-            log.debug("{*}: compacting immutable table to level 0", .{tree});
+            log.debug(tree_name ++ ": compacting immutable table to level 0", .{});
 
             tree.compaction_table_immutable.start(
                 tree.grid,
@@ -440,8 +439,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             assert(compare_keys(range.key_min, table.key_min) != .gt);
             assert(compare_keys(range.key_max, table.key_max) != .lt);
 
-            log.debug("{*}: compacting level {d} to level {d}", .{
-                tree,
+            log.debug(tree_name ++ ": compacting level {d} to level {d}", .{
                 context.level_a,
                 context.level_b,
             });
@@ -471,11 +469,10 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             if (@TypeOf(compaction.*) == CompactionTableImmutable) {
                 assert(compaction.level_b == 0);
                 compaction.tick_io(Tree.compact_io_tick_callback_table_immutable);
-                log.debug("{*}: queued compaction for immutable table to level 0", .{tree});
+                log.debug(tree_name ++ ": queued compaction for immutable table to level 0", .{});
             } else {
                 compaction.tick_io(Tree.compact_io_tick_callback_table);
-                log.debug("{*}: queued compaction for level {d} to level {d}", .{
-                    tree,
+                log.debug(tree_name ++ ": queued compaction for level {d} to level {d}", .{
                     compaction.level_b - 1,
                     compaction.level_b,
                 });
@@ -490,7 +487,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             const tree = @fieldParentPtr(Tree, "compaction_table_immutable", compaction);
             assert(tree.compaction_beat >= half_measure_beat_count);
 
-            log.debug("{*} compact_io complete for immutable table to level 0", .{tree});
+            log.debug(tree_name ++ ": compact_io complete for immutable table to level 0", .{});
             tree.compact_io_tick_done();
         }
 
@@ -506,8 +503,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             const table: *[table_size]CompactionTable = table_ptr[0..table_size];
 
             const tree = @fieldParentPtr(Tree, "compaction_table", table);
-            log.debug("{*} compact_io complete for level {d} to level {d}", .{
-                tree,
+            log.debug(tree_name ++ ": compact_io complete for level {d} to level {d}", .{
                 compaction.level_b - 1,
                 compaction.level_b,
             });
@@ -582,7 +578,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             // At end of second measure:
             // - assert: even compactions from previous tick are finished.
             if (tree.compaction_beat == half_measure_beat_count - 1) {
-                log.debug("{*}: finished compacting even levels", .{tree});
+                log.debug(tree_name ++ ": finished compacting even levels", .{});
 
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
@@ -594,7 +590,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             // - assert: all visible levels haven't overflowed their max.
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_beat == config.lsm_batch_multiple - 1) {
-                log.debug("{*}: finished compacting immutable table and odd levels", .{tree});
+                log.debug(tree_name ++ ": finished compacting immutable table and odd levels", .{});
                 tree.manifest.assert_visible_tables_are_in_range();
 
                 while (it.next()) |context| {
