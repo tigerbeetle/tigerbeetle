@@ -269,48 +269,49 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             return if (value == null or tombstone(value.?)) null else value.?;
         }
 
-        // TODO Notes for compaction
+        // Tree compaction runs to the sound of music!
         //
-        // if no compactions, should we start one?
-        //  - (highlevel) impl note: replica.zig: compact all tress in forest + compact manifest log
-        //  - note: even-tables (level-a): 0-2-4-6 odd-tables (level-b): immut-1-3-5-7
-        //          this avoids having 1 table being involved in multiple compactioss (t in 0-1 & 1-2)
-        //          so even-tables compact in 0-1, 2-3, 4-5, 6-7
-        //          and odd-tables compact in immut-0, 1-2, 3-4, 5-6, (ignore) 7
-        //  - note: beats of the bar are completed when all compaction callbacks are joined
-        //  - note: assert: at the end of every beat; theres space in mut table for next commit/beat
-        //  - only start compaction if mutable_table is dirty (was changed)
+        // Compacting LSM trees involves merging and moving tables into the next levels as needed.
+        // To avoid write amplification stalls and bound latency, compaction is done incrementally.
         //
-        //  - assuming a batch_count_multiple=4 (i.e. 4-measure bar of compaction ticks):
-        //      - (first) down beat of the bar:
-        //          - assert: no compactions are currently running
-        //          - assert: mutable table can be empty with immut containing any sorted values
-        //          - TODO think through mutable table being converted at the end of the bar?
+        // A full compaction phase is denoted as a bar or measure, using terms from music notation.
+        // Each measure consists of `lsm_batch_multiple` beats or "compaction ticks" of work.
+        // A compaction beat is started asynchronously with `compact_io` which takes a callback.
+        // After `compact_io` is called, `compact_cpu` should be called to enable pipelining.
+        // The compaction beat completes when the `compact_io` callback is invoked.
         //
-        //          - check if even levels needs to compact or have space for one more table:
-        //              - if so, "start" (choose which table best to compact) and tick compactions
-        //              - note: allow level table_count_max to overflow.
-        //          - after end of down beat:
-        //              - one batch committed to mut table (at most 1/4 full)
-        //              - effectively: even compactions started are at least half-way complete
+        // A measure is split in half according to the "down/first" beat and "back/middle" beat.
+        // The first half of the measure compacts even levels while the latter compacts odd levels.
+        // Mutable table changes are sorted and compacted into the immutable table.
+        // The immutable table is compacted into level 0 during the odd level half of the measure.
         //
-        //      - second+ beat of the bar:
-        //          - don't start any new compactions, but tick existing started even ones
-        //          - after end of second beat:
-        //              - assert: even compactions are "finished"
-        //              - atomically update manifest table-infos that were compacted/modified
+        // At any given point, there's only levels/2 max compactions happening concurrently.
+        // The source level is denoted as `level_a` with the target level being `level_b`.
+        // The last level in the LSM tree has no target level so it's not compaction-from.
+        //  
+        // Assuming a measure/`lsm_batch_multiple` of 4, the invariants can be described as follows:
+        //  * assert: at the end of every beat, there's space in mutable table for the next beat.
+        //  * manifest info for the tables compacted are updating during the compaction.
         //
-        //      - (third) back beat of the bar:
-        //          - swap to the odd table and do same as down beat
+        //  - (first) down beat of the measure:
+        //      * assert: no compactions are currently running.
+        //      * compact immutable table if contains any sorted values (could be empty).
+        //      * allow level visible table counts to overflow if needed.
+        //      * start even level compactions if there's any tables to compact.
         //
-        //      - fourth beat of the bar:
-        //          - swapped to the odd tables, so do the same as second beat
-        //          - after end of fourth beat:
-        //              - assert: all levels.visible haven't overflowed (<= their max)
-        //              - convert mutable table to immut for next measure
+        //  - (second) middle beat of the measure:
+        //      * finish ticking running even-level compactions.
+        //      * assert: on callback completion, all compactions should be completed.
         //
-        // - glossary for stuff + "bar" -> "measure"
-        // - compaction_beat -> beat
+        //  - (third) back beat of the measure:
+        //      * assert: no compactions are currently running.
+        //      * start odd level and immutable table compactions.
+        //
+        //  - (fourth) last beat of the measure:
+        //      * finish ticking running odd-level and immutable table compactions.
+        //      * assert: on callback completion, all compactions should be completed.
+        //      * assert: on callback completion, all level visible table counts shouldn't overflow.
+        //      * flush, clear, and sort mutable table values into immutable table for next measure.
 
         const half_measure_beat_count = @divExact(config.lsm_batch_multiple, 2);
 
