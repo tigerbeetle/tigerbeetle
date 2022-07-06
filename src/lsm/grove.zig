@@ -209,10 +209,10 @@ pub fn GroveType(
     });
 
     // Verify no hash collisions between all the trees:
-    comptime var hashes: []const u256 = &.{ ObjectTree.hash };
+    comptime var hashes: []const u128 = &.{ ObjectTree.hash };
     inline for (std.meta.fields(IndexTrees)) |field| {
         const IndexTree = @TypeOf(@field(@as(IndexTrees, undefined), field.name));
-        assert(std.mem.containsAtLeast(u256, hashes, 0, IndexTree.hash));
+        assert(std.mem.containsAtLeast(u128, hashes, 0, IndexTree.hash));
         hashes = hashes ++ &.{ IndexTree.hash };
     }
 
