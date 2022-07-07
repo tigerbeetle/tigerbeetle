@@ -556,17 +556,11 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         }
 
         fn compact_done(tree: *Tree) void {
-            assert(tree.compaction_io_pending <= tree.compaction_table.len + 1);
+            assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback != null);
 
-            // Invoke the compact_io() callback after everything below.
-            const callback = tree.compaction_callback.?;
-            tree.compaction_callback = null;
-            defer callback(tree);
-
-            const even_levels = tree.compaction_beat < half_measure_beat_count;
-
             // Mark immutable compaction that reported done in their callback as "completed".
+            const even_levels = tree.compaction_beat < half_measure_beat_count;
             if (even_levels) {
                 assert(tree.compaction_table_immutable.status == .idle);
             } else {
@@ -603,7 +597,6 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_beat == config.lsm_batch_multiple - 1) {
                 log.debug(tree_name ++ ": finished compacting immutable table and odd levels", .{});
-
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
                 }
@@ -611,7 +604,10 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 tree.manifest.assert_visible_tables_are_in_range();
                 tree.compact_mutable_table_into_immutable();
             }
-        }
+
+            // At the end of every beat, call manifest.compact before invoking the compact callback.
+            tree.manifest.compact(manifest_compact_callback);
+        }        
 
         fn compact_mutable_table_into_immutable(tree: *Tree) void {
             // Ensure mutable table can be flushed into immutable table.
@@ -629,6 +625,17 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
 
             assert(tree.table_mutable.count() == 0);
             assert(!tree.table_immutable.free);
+        }
+
+        fn manifest_compact_callback(manifest: *Manifest) void {
+            const tree = @fieldParentPtr(Tree, "manifest", manifest);
+            assert(tree.compaction_io_pending == 0);
+            assert(tree.compaction_callback != null);
+
+            // Invoke the compact_io() callback after the manifest compacts at the end of the beat.
+            const callback = tree.compaction_callback.?;
+            tree.compaction_callback = null;
+            callback(tree);
         }
 
         pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
