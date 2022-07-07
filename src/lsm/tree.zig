@@ -68,6 +68,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         };
 
         const Grid = @import("grid.zig").GridType(Table.Storage);
+        const SuperBlock = @import("superblock.zig").SuperBlockType(Table.Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table);
         const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
@@ -135,8 +136,9 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
 
         pub fn init(
             allocator: mem.Allocator,
-            grid: *Grid,
             node_pool: *NodePool,
+            grid: *Grid,
+            superblock: *SuperBlock,
             value_cache: ?*ValueCache,
             options: Options,
         ) !Tree {
@@ -160,7 +162,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
             var table_immutable = try TableImmutable.init(allocator, options.commit_count_max);
             errdefer table_immutable.deinit(allocator);
 
-            var manifest = try Manifest.init(allocator, node_pool);
+            var manifest = try Manifest.init(allocator, node_pool, superblock, grid, tree_hash);
             errdefer manifest.deinit(allocator);
 
             var compaction_table_immutable = try CompactionTableImmutable.init(allocator);

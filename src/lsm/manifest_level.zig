@@ -13,7 +13,7 @@ const Direction = @import("direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
-pub fn ManifestLevel(
+pub fn ManifestLevelType(
     comptime NodePool: type,
     comptime Key: type,
     comptime TableInfo: type,
@@ -707,7 +707,7 @@ pub fn TestContext(
         const NodePool = @import("node_pool.zig").NodePool;
 
         const TestPool = NodePool(node_size, @alignOf(TableInfo));
-        const TestLevel = ManifestLevel(TestPool, Key, TableInfo, compare_keys, table_count_max);
+        const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, compare_keys, table_count_max);
 
         random: std.rand.Random,
 
