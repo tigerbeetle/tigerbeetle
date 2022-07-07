@@ -471,7 +471,10 @@ pub fn CompactionType(
                 assert(compaction.drop_tombstones);
                 assert(tombstones_dropped > 0);
             } else {
-                compaction.table_builder.data_block_finish();
+                compaction.table_builder.data_block_finish(.{
+                    .cluster = compaction.grid.superblock.working.cluster,
+                    .address = compaction.grid.acquire(),
+                });
                 swap_buffers(&compaction.data, &compaction.table_builder.data_block);
                 assert(compaction.data.ready);
 
@@ -490,7 +493,10 @@ pub fn CompactionType(
                     assert(compaction.drop_tombstones);
                     assert(tombstones_dropped > 0);
                 } else {
-                    compaction.table_builder.filter_block_finish();
+                    compaction.table_builder.filter_block_finish(.{
+                        .cluster = compaction.grid.superblock.working.cluster,
+                        .address = compaction.grid.acquire(),
+                    });
                     swap_buffers(&compaction.filter, &compaction.table_builder.filter_block);
                     assert(compaction.filter.ready);
                 }
@@ -504,7 +510,11 @@ pub fn CompactionType(
                     assert(tombstones_dropped > 0);
                 } else {
                     const snapshot_min = compaction.snapshot;
-                    const table = compaction.table_builder.index_block_finish(snapshot_min);
+                    const table = compaction.table_builder.index_block_finish(.{
+                        .cluster = compaction.grid.superblock.working.cluster,
+                        .address = compaction.grid.acquire(),
+                        .snapshot_min = snapshot_min,
+                    });
                     compaction.queue_manifest_update(&compaction.insert_level_b, &table);
 
                     swap_buffers(&compaction.index, &compaction.table_builder.index_block);
