@@ -12,7 +12,6 @@ const div_ceil = @import("../util.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
-const GridType = @import("grid.zig").GridType;
 const ManifestType = @import("manifest.zig").ManifestType;
 
 pub fn TableType(
@@ -33,9 +32,6 @@ pub fn TableType(
 ) type {
     return struct {
         const Table = @This();
-        const Grid = GridType(Storage);
-        const BlockPtr = Grid.BlockPtr;
-        const BlockPtrConst = Grid.BlockPtrConst;
         const TableInfo = ManifestType(Table).TableInfo;
 
         // Re-export all the generic arguments.
@@ -61,6 +57,8 @@ pub fn TableType(
         };
 
         const block_size = config.block_size;
+        const BlockPtr = *align(config.sector_size) [block_size]u8;
+        const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
         pub const key_size = @sizeOf(Key);
         pub const value_size = @sizeOf(Value);
@@ -408,7 +406,6 @@ pub fn TableType(
         }
 
         pub const Builder = struct {
-            grid: *Grid,
             key_min: Key = undefined,
             key_max: Key = undefined,
 
@@ -422,7 +419,7 @@ pub fn TableType(
             filter_block_count: u32 = 0,
             data_blocks_in_filter: u32 = 0,
 
-            pub fn init(allocator: mem.Allocator, grid: *Grid) !Builder {
+            pub fn init(allocator: mem.Allocator) !Builder {
                 const index_block = try allocator.alignedAlloc(u8, config.sector_size, block_size);
                 errdefer allocator.free(index_block);
 
@@ -433,7 +430,6 @@ pub fn TableType(
                 errdefer allocator.free(data_block);
 
                 return Builder{
-                    .grid = grid,
                     .index_block = index_block[0..block_size],
                     .filter_block = filter_block[0..block_size],
                     .data_block = data_block[0..block_size],
@@ -487,7 +483,12 @@ pub fn TableType(
                 return builder.value == data.value_count_max;
             }
 
-            pub fn data_block_finish(builder: *Builder) void {
+            const DataFinishOptions = struct {
+                cluster: u32,
+                address: u64,
+            };
+
+            pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
                 // For each block we write the sorted values, initialize the Eytzinger layout,
                 // complete the block header, and add the block's max key to the table index.
 
@@ -532,11 +533,9 @@ pub fn TableType(
                 const header_bytes = block[0..@sizeOf(vsr.Header)];
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                const address = builder.grid.acquire();
-
                 header.* = .{
-                    .cluster = builder.grid.superblock.working.cluster,
-                    .op = address,
+                    .cluster = options.cluster,
+                    .op = options.address,
                     .request = @intCast(u32, values.len),
                     .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
                     .command = .block,
@@ -549,7 +548,7 @@ pub fn TableType(
 
                 const current = builder.data_block_count;
                 index_data_keys(builder.index_block)[current] = key_max;
-                index_data_addresses(builder.index_block)[current] = address;
+                index_data_addresses(builder.index_block)[current] = options.address;
                 index_data_checksums(builder.index_block)[current] = header.checksum;
 
                 if (current == 0) builder.key_min = key_from_value(&values[0]);
@@ -577,16 +576,19 @@ pub fn TableType(
                 return builder.data_blocks_in_filter == filter.data_block_count_max;
             }
 
-            pub fn filter_block_finish(builder: *Builder) void {
-                assert(!builder.filter_block_empty());
+            const FilterFinishOptions = struct {
+                cluster: u32,
+                address: u64,
+            };
 
-                const address = builder.grid.acquire();
+            pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
+                assert(!builder.filter_block_empty());
 
                 const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
                 header.* = .{
-                    .cluster = builder.grid.superblock.working.cluster,
-                    .op = address,
+                    .cluster = options.cluster,
+                    .op = options.address,
                     .size = block_size - filter.padding_size,
                     .command = .block,
                 };
@@ -596,7 +598,7 @@ pub fn TableType(
                 header.set_checksum();
 
                 const current = builder.filter_block_count;
-                index_filter_addresses(builder.index_block)[current] = address;
+                index_filter_addresses(builder.index_block)[current] = options.address;
                 index_filter_checksums(builder.index_block)[current] = header.checksum;
 
                 builder.filter_block_count += 1;
@@ -613,7 +615,13 @@ pub fn TableType(
                 return builder.data_block_count == data_block_count_max;
             }
 
-            pub fn index_block_finish(builder: *Builder, snapshot_min: u64) TableInfo {
+            const IndexFinishOptions = struct {
+                cluster: u32,
+                address: u64,
+                snapshot_min: u64,
+            };
+
+            pub fn index_block_finish(builder: *Builder, options: IndexFinishOptions) TableInfo {
                 assert(builder.data_block_count > 0);
                 assert(builder.value == 0);
                 assert(builder.data_blocks_in_filter == 0);
@@ -638,12 +646,9 @@ pub fn TableType(
                 const header_bytes = index_block[0..@sizeOf(vsr.Header)];
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-                const address = builder.grid.acquire();
-                _ = snapshot_min;
-
                 header.* = .{
-                    .cluster = builder.grid.superblock.working.cluster,
-                    .op = address,
+                    .cluster = options.cluster,
+                    .op = options.address,
                     .commit = builder.filter_block_count,
                     .request = builder.data_block_count,
                     // .offset = snapshot_min, // TODO(King) not sure what to replace this with.
@@ -655,8 +660,8 @@ pub fn TableType(
 
                 const info: TableInfo = .{
                     .checksum = header.checksum,
-                    .address = address,
-                    .snapshot_min = snapshot_min,
+                    .address = options.address,
+                    .snapshot_min = options.snapshot_min,
                     .key_min = builder.key_min,
                     .key_max = builder.key_max,
                 };
@@ -665,7 +670,6 @@ pub fn TableType(
 
                 // Reset the builder to its initial state, leaving the buffers untouched.
                 builder.* = .{
-                    .grid = builder.grid,
                     .key_min = undefined,
                     .key_max = undefined,
                     .index_block = builder.index_block,
