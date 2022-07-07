@@ -11,7 +11,10 @@ const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const Direction = @import("direction.zig").Direction;
-const ManifestLevel = @import("manifest_level.zig").ManifestLevel;
+const GridType = @import("grid.zig").GridType;
+const SuperBlockType = @import("superblock.zig").SuperBlockType;
+const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
+const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 
@@ -21,6 +24,9 @@ pub fn ManifestType(comptime Table: type) type {
 
     return struct {
         const Manifest = @This();
+
+        const Grid = GridType(Table.Storage);
+        const SuperBlock = SuperBlockType(Table.Storage);
 
         pub const TableInfo = extern struct {
             checksum: u128,
@@ -79,7 +85,9 @@ pub fn ManifestType(comptime Table: type) type {
 
         /// Levels beyond level 0 have tables with disjoint key ranges.
         /// Here, we use a structure with indexes over the segmented array for performance.
-        const Level = ManifestLevel(NodePool, Key, TableInfo, compare_keys, table_count_max);
+        const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
+
+        const ManifestLog = ManifestLogType(Table.Storage, TableInfo);
 
         node_pool: *NodePool,
 
@@ -90,22 +98,45 @@ pub fn ManifestType(comptime Table: type) type {
         // registered snapshot seen so far.
         snapshot_max: u64 = 1,
 
-        pub fn init(allocator: mem.Allocator, node_pool: *NodePool) !Manifest {
-            var levels: [config.lsm_levels]Level = undefined;
+        manifest_log: ManifestLog,
 
+        pub fn init(
+            allocator: mem.Allocator, 
+            node_pool: *NodePool,
+            superblock: *Superblock,
+            grid: *Grid,
+            tree_hash: u128,
+        ) !Manifest {
+            var levels: [config.lsm_levels]Level = undefined;
             for (levels) |*level, i| {
                 errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
                 level.* = try Level.init(allocator);
             }
 
+            const tree: u8 = blk: {
+                _ = tree_hash;
+                break :blk @panic("TODO(Joran): ManifestLog.tree from tree_hash");
+            };
+
+            var manifest_log = try ManifestLog.init(
+                allocator,
+                superblock,
+                grid,
+                tree,
+            );
+            errdefer manifest_log.deinit(allocator);
+
             return Manifest{
                 .node_pool = node_pool,
                 .levels = levels,
+                .manifest_log = manifest_log,
             };
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
             for (manifest.levels) |*l| l.deinit(allocator, manifest.node_pool);
+
+            manifest.manifest_log.deinit(allocator);
         }
 
         pub const LookupIterator = struct {
@@ -164,7 +195,7 @@ pub fn ManifestType(comptime Table: type) type {
             const manifest_level = &manifest.levels[level];
             manifest_level.set_snapshot_max(snapshot, tables);
         }
-        
+
         /// Moves the table at the address/checksum pair from one level to another.
         /// Unlike `update_tables`, this avoids leaving the same TableInfo with different snapshots
         /// in both levels by removing it from level_a before inserting to level_b.

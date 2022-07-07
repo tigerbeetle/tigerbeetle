@@ -9,6 +9,7 @@ const config = @import("../config.zig");
 const TableType = @import("table.zig").TableType;
 const TreeType = @import("tree.zig").TreeType;
 const GridType = @import("grid.zig").GridType;
+const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
@@ -197,7 +198,6 @@ pub fn GroveType(
         };
     }
 
-    const Grid = GridType(Storage);
     const ObjectTree = ObjectTreeType(Storage, Object);
     const IndexTrees = @Type(.{
         .Struct = .{
@@ -280,6 +280,9 @@ pub fn GroveType(
     return struct {
         const Grove = @This();
 
+        const Grid = GridType(Storage);
+        const SuperBlock = SuperBlockType(Storage);
+
         sync_pending: usize,
         sync_callback: ?fn (*Grove) void,
 
@@ -289,9 +292,10 @@ pub fn GroveType(
 
         pub fn init(
             grove: *Grove,
-            allocator: mem.Allocator, 
-            grid: *Grid,
+            allocator: mem.Allocator,
             node_pool: *NodePool,
+            grid: *Grid,
+            superblock: *SuperBlock,
             // The cache size is meant to be computed based on the left over available memory
             // that tigerbeetle was given to allocate from CLI arguments.
             cache_size: usize,
@@ -336,8 +340,9 @@ pub fn GroveType(
             // Intialize the object LSM tree
             grove.objects = try ObjectTree.init(
                 allocator,
-                grid,
                 node_pool,
+                grid,
+                superblock,
                 &grove.cache,
                 .{
                     .prefetch_count_max = commit_count_max * 2,
@@ -358,9 +363,10 @@ pub fn GroveType(
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(grove.indexes, field.name) = try field.field_type.init(
                     allocator,
-                    grid,
                     node_pool,
-                    null,
+                    grid,
+                    superblock,
+                    null, // no value cache for index trees
                     .{
                         .prefetch_count_max = 0,
                         .commit_count_max = commit_count_max,
