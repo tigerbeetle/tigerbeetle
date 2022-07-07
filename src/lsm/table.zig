@@ -793,6 +793,8 @@ test "Table" {
         Key.compare_keys,
         Key.key_from_value,
         Key.sentinel_key,
+        Key.tombstone,
+        Key.tombstone_from_key,
     );
 
     _ = Table;

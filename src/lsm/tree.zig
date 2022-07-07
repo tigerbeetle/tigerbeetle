@@ -56,6 +56,9 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
     const tombstone_from_key = Table.tombstone_from_key;
 
     const tree_hash = blk: {
+        // Blake3 has does alot at comptime..
+        @setEvalBranchQuota(10000);
+
         var hash: u256 = undefined;
         std.crypto.hash.Blake3.hash(tree_name, std.mem.asBytes(&hash), .{});
         break :blk @truncate(u128, hash);
