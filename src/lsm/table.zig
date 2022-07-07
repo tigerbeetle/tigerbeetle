@@ -628,13 +628,14 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
                 const address = builder.grid.acquire();
+                _ = snapshot_min;
 
                 header.* = .{
                     .cluster = builder.grid.superblock.working.cluster,
                     .op = address,
                     .commit = builder.filter_block_count,
                     .request = builder.data_block_count,
-                    .offset = snapshot_min,
+                    // .offset = snapshot_min, // TODO(King) not sure what to replace this with.
                     .size = index.size,
                     .command = .block,
                 };

@@ -96,7 +96,7 @@ pub fn CompactionType(
                 }
 
                 buffer.array[buffer.count] = table.*;
-                buffer.counter += 1;
+                buffer.count += 1;
             }
 
             fn drain(buffer: *TableInfoBuffer) []TableInfo {
@@ -505,7 +505,7 @@ pub fn CompactionType(
                 } else {
                     const snapshot_min = compaction.snapshot;
                     const table = compaction.table_builder.index_block_finish(snapshot_min);
-                    compaction.queue_manifest_update(&compaction.insert_level_b, table);
+                    compaction.queue_manifest_update(&compaction.insert_level_b, &table);
 
                     swap_buffers(&compaction.index, &compaction.table_builder.index_block);
                     assert(compaction.index.ready);
