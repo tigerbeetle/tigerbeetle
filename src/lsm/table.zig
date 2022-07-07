@@ -36,7 +36,7 @@ pub fn TableType(
         const Grid = GridType(Storage);
         const BlockPtr = Grid.BlockPtr;
         const BlockPtrConst = Grid.BlockPtrConst;
-        const Manifest = ManifestType(Table);
+        const TableInfo = ManifestType(Table).TableInfo;
 
         // Re-export all the generic arguments.
         pub const Storage = TableStorage;
@@ -422,18 +422,30 @@ pub fn TableType(
             filter_block_count: u32 = 0,
             data_blocks_in_filter: u32 = 0,
 
-            pub fn init(allocator: mem.Allocator) !Builder {
-                _ = allocator;
+            pub fn init(allocator: mem.Allocator, grid: *Grid) !Builder {
+                const index_block = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                errdefer allocator.free(index_block);
 
-                // TODO
-                return error.ToDo;
+                const filter_block = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                errdefer allocator.free(filter_block);
+
+                const data_block = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                errdefer allocator.free(data_block);
+
+                return Builder{
+                    .grid = grid,
+                    .index_block = index_block[0..block_size],
+                    .filter_block = filter_block[0..block_size],
+                    .data_block = data_block[0..block_size],
+                };
             }
 
             pub fn deinit(builder: *Builder, allocator: mem.Allocator) void {
-                _ = builder;
-                _ = allocator;
+                allocator.free(builder.index_block);
+                allocator.free(builder.filter_block);
+                allocator.free(builder.data_block);
 
-                // TODO
+                builder.* = undefined;
             }
 
             pub fn data_block_append(builder: *Builder, value: *const Value) void {
@@ -458,7 +470,7 @@ pub fn TableType(
                 mem.copy(Value, values_max[builder.value..], values);
                 builder.value += @intCast(u32, values.len);
 
-                for (values) |value| {
+                for (values) |*value| {
                     const key = key_from_value(value);
                     const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
                     bloom_filter.add(fingerprint, filter_block_filter(builder.filter_block));
@@ -601,7 +613,7 @@ pub fn TableType(
                 return builder.data_block_count == data_block_count_max;
             }
 
-            pub fn index_block_finish(builder: *Builder, snapshot_min: u64) Manifest.TableInfo {
+            pub fn index_block_finish(builder: *Builder, snapshot_min: u64) TableInfo {
                 assert(builder.data_block_count > 0);
                 assert(builder.value == 0);
                 assert(builder.data_blocks_in_filter == 0);
@@ -641,7 +653,7 @@ pub fn TableType(
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
-                const info: Manifest.TableInfo = .{
+                const info: TableInfo = .{
                     .checksum = header.checksum,
                     .address = address,
                     .snapshot_min = snapshot_min,
@@ -900,4 +912,5 @@ test "Table" {
     );
 
     _ = Table;
+    std.testing.refAllDecls(Table.Builder);
 }
