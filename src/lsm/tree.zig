@@ -131,6 +131,8 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         compaction_io_pending: usize,
         compaction_callback: ?fn (*Tree) void,
 
+        checkpoint_callback: ?fn (*Tree) void,
+
         pub const Options = struct {
             /// The maximum number of keys that may need to be prefetched before commit.
             prefetch_count_max: u32,
@@ -194,6 +196,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
                 .compaction_beat = 0,
                 .compaction_io_pending = 0,
                 .compaction_callback = null,
+                .checkpoint_callback = null,
             };
         }
 
@@ -629,11 +632,32 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         }
 
         pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
-            // TODO Call tree.manifest.checkpoint() which calls manifest_log.checkpoint(callback)
-            // TODO Assert no outstanding compaction work at this point
-            //      (not compaction callback, all idle, assert_visible_tables_are_in_range)
-            _ = tree;
-            _ = callback;
+            // Assert no outstanding compact_io() work..
+            assert(tree.compaction_io_pending == 0);
+            assert(tree.compaction_callback == null);
+
+            // Assert no outstanding compactions.
+            assert(tree.compaction_table_immutable.status == .idle);
+            for (tree.compaction_table) |*compaction| {
+                assert(compaction.status == .idle);
+            }
+
+            // Assert all manifest tables are in range.
+            tree.manifest.assert_visible_tables_are_in_range();
+
+            // Start an asynchronous checkpoint on the manifest.
+            assert(tree.checkpoint_callback == null);
+            tree.checkpoint_callback = callback;
+            tree.manifest.checkpoint(manifest_checkpoint_callback);
+        }
+
+        fn manifest_checkpoint_callback(manifest: *Manifest) void {
+            const tree = @fieldParentPtr(Tree, "manifest", manifest);
+            assert(tree.checkpoint_callback != null);
+
+            const callback = tree.checkpoint_callback.?;
+            tree.checkpoint_callback = null;
+            callback(tree);
         }
 
         /// This should be called by the state machine for every key that must be prefetched.
