@@ -89,6 +89,8 @@ pub fn ManifestType(comptime Table: type) type {
 
         const ManifestLog = ManifestLogType(Table.Storage, TableInfo);
 
+        const Callback = fn (*Manifest) void;
+
         node_pool: *NodePool,
 
         levels: [config.lsm_levels]Level,
@@ -99,6 +101,8 @@ pub fn ManifestType(comptime Table: type) type {
         snapshot_max: u64 = 1,
 
         manifest_log: ManifestLog,
+
+        checkpoint_callback: ?Callback = null,
 
         pub fn init(
             allocator: mem.Allocator, 
@@ -436,6 +440,22 @@ pub fn ManifestType(comptime Table: type) type {
 
             assert(level_c == config.lsm_levels);
             return true;
+        }
+
+        pub fn checkpoint(manifest: *Manifest, callback: Callback) void {
+            assert(manifest.checkpoint_callback == null);
+            manifest.checkpoint_callback = callback;
+
+            manifest.manifest_log.checkpoint(manifest_log_checkpoint_callback);
+        }
+
+        fn manifest_log_checkpoint_callback(manifest_log: *ManifestLog) void {
+            const manifest = @fieldParentPtr(Manifest, "manifest_log", manifest_log);
+            assert(manifest.checkpoint_callback != null);
+
+            const callback = manifest.checkpoint_callback.?;
+            manifest.checkpoint_callback = null;
+            callback(manifest);
         }
 
         /// Returns a unique snapshot, incrementing the greatest snapshot value seen so far,
