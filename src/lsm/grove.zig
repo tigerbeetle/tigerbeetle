@@ -48,7 +48,7 @@ fn ObjectTreeType(comptime Storage: type, comptime Value: type) type {
 
     const Table = TableType(
         Storage,
-        Key,
+        u64, // key = timestamp
         Value,
         ValueKeyHelpers.compare_keys,
         ValueKeyHelpers.key_from_value,
@@ -87,13 +87,13 @@ fn IndexCompositeKeyType(comptime Field: type) type {
 
 comptime {
     assert(IndexCompositeKeyType(u16) == u64);
-    assert(IndexCompositeKeyType(enum(u16){}) == u64);
+    assert(IndexCompositeKeyType(enum(u16){x}) == u64);
 
     assert(IndexCompositeKeyType(u32) == u64);
     assert(IndexCompositeKeyType(u63) == u64);
     assert(IndexCompositeKeyType(u64) == u64);
     
-    assert(IndexCompositeKeyType(enum(u65){}) == u128);
+    assert(IndexCompositeKeyType(enum(u65){x}) == u128);
     assert(IndexCompositeKeyType(u65) == u128);
     assert(IndexCompositeKeyType(u128) == u128);
 }
@@ -133,7 +133,7 @@ pub fn GroveType(
     ///     but can be derived from an Object instance using the field's corresponding function.
     comptime options: anytype,
 ) type {
-    comptime var index_fields: []const builtin.TypeInfo.StructField = &.{};
+    comptime var index_fields: []const std.builtin.TypeInfo.StructField = &.{};
     
     // Generate index LSM trees from the struct fields.
     inline for (std.meta.fields(Object)) |field| {
@@ -146,7 +146,7 @@ pub fn GroveType(
         if (!ignored) {
             const tree_name = @typeName(Object) ++ "." ++ field.name;
             const IndexTree = IndexTreeType(Storage, field.field_type, tree_name);
-            index_fields = index_fields ++ [_]const builtin.TypeInfo.StructField{
+            index_fields = index_fields ++ [_]std.builtin.TypeInfo.StructField{
                 .{
                     .name = field.name,
                     .field_type = IndexTree,
@@ -187,7 +187,7 @@ pub fn GroveType(
         const DerivedType = @typeInfo(derive_return_type).Optional.child;
         const IndexTree = IndexTreeType(Storage, DerivedType, tree_name);
 
-        index_fields = index_fields ++ [_]const builtin.TypeInfo.StructField{
+        index_fields = index_fields ++ &.{
             .{
                 .name = field.name,
                 .field_type = IndexTree,
@@ -202,7 +202,7 @@ pub fn GroveType(
     const IndexTrees = @Type(.{
         .Struct = .{
             .layout = .Auto,
-            .fields = index_field_types,
+            .fields = index_fields,
             .decls = &.{},
             .is_tuple = false,
         },
@@ -223,7 +223,7 @@ pub fn GroveType(
         + std.meta.fields(@TypeOf(options.derived)).len;
     assert(indexes_count_actual == indexes_count_expect);
 
-    /// Generate a helper function for interacting with an Index field type
+    // Generate a helper function for interacting with an Index field type
     const IndexTreeFieldHelperType = struct {
         fn HelperType(comptime field_name: []const u8) type {
             // Check if the index is derived.
@@ -235,11 +235,11 @@ pub fn GroveType(
             // Get the index value type.
             const Value = blk: {
                 if (!derived) {
-                    break @TypeOf(@field(@as(Object, undefined), field_name));
+                    break :blk @TypeOf(@field(@as(Object, undefined), field_name));
                 }
 
                 const derived_fn = @TypeOf(@field(options.derived, field_name));
-                break :blk @typeInfo(derive_fn).Fn.return_type.?.Optional.child;
+                break :blk @typeInfo(derived_fn).Fn.return_type.?.Optional.child;
             };
 
             return struct {
@@ -274,7 +274,6 @@ pub fn GroveType(
 
     const Key = ObjectTree.Table.Key;
     const Value = ObjectTree.Table.Value;
-    const compare_keys = ObjectTree.Table.compare_keys;
     const key_from_value = ObjectTree.Table.key_from_value;
 
     return struct {
@@ -357,7 +356,7 @@ pub fn GroveType(
                 if (index_trees_initialized >= field_index + 1) {
                     @field(grove.indexes, field.name).deinit(allocator);
                 }
-            }
+            };
 
             // Initialize index LSM trees
             inline for (std.meta.fields(IndexTrees)) |field| {
@@ -405,7 +404,7 @@ pub fn GroveType(
             grove.objects.put(value);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const Helper = IndexTreeFieldHelper(field.name);
+                const Helper = IndexTreeFieldHelperType(field.name);
 
                 if (Helper.derive(value)) |index| {
                     const composite_key = Helper.to_composite_key(index);
@@ -423,7 +422,7 @@ pub fn GroveType(
             }
 
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const Helper = IndexTreeFieldHelper(field.name);
+                const Helper = IndexTreeFieldHelperType(field.name);
                 const old_index = Helper.derive(old);
                 const new_index = Helper.derive(new);
 
@@ -452,7 +451,7 @@ pub fn GroveType(
             grove.objects.remove(key);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const Helper = IndexTreeFieldHelper(field.name);
+                const Helper = IndexTreeFieldHelperType(field.name);
 
                 if (Helper.derive(value)) |index| {
                     const composite_key = Helper.to_composite_key(index);
@@ -461,7 +460,7 @@ pub fn GroveType(
             }
         }
 
-        fn sync_register(grove: *Grove, callback: fn (*Grove) void) {
+        fn sync_register(grove: *Grove, callback: fn (*Grove) void) void {
             assert(grove.sync_pending == 0);
             assert(grove.sync_callback == null);
 
@@ -534,4 +533,29 @@ pub fn GroveType(
             }
         }
     };
+}
+
+test "Grove" {
+    const Transfer = @import("../tigerbeetle.zig").Transfer;
+    const Storage = @import("../storage.zig").Storage;
+
+    const Grove = GroveType(
+        Storage,
+        Transfer,
+        .{
+            .ignored = [_][]const u8{ "reserved", "user_data" },
+            .derived = &.{},
+        },
+    );
+
+    _ = Grove.init;
+    _ = Grove.deinit;
+
+    _ = Grove.get;
+    _ = Grove.put;
+    _ = Grove.remove;
+
+    _ = Grove.compact_io;
+    _ = Grove.compact_cpu;
+    _ = Grove.checkpoint;
 }
