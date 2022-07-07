@@ -8,6 +8,7 @@ const config = @import("../config.zig");
 const GridType = @import("grid.zig").GridType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
+const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
 const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
 
 pub fn CompactionType(
@@ -214,7 +215,7 @@ pub fn CompactionType(
             manifest: *Manifest,
             // TODO level_a_table: ?TableInfo,
             level_b: u8,
-            table_range: Manifest.CompactionTableRange,
+            range: Manifest.CompactionRange,
             snapshot: u64,
             iterator_a_context: IteratorA.Context,
         ) void {
@@ -222,9 +223,6 @@ pub fn CompactionType(
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
             assert(level_b < config.lsm_levels);
-
-            const table = table_range.table;
-            const range = table_range.range;
             assert(range.table_count > 0);
 
             const drop_tombstones = manifest.compaction_must_drop_tombstones(level_b, range);
@@ -258,31 +256,43 @@ pub fn CompactionType(
             assert(!compaction.filter.ready);
             assert(!compaction.index.ready);
 
+            // TODO Reset builder.
+
             // Perform a "compaction move" to the next level inline if certain factors allow:
             // - Can only do the specialization if there's a single table to compact.
-            // - Cannot drop tombstones as we then have to go through normal the compaction path.
+            // - Must be compacting from a table iterator which has an address and checksum.
+            // - Cannot drop tombstones as then we have to go through the normal compaction path.
             // - Cannot be performing the immutable table -> level 0 compaction
-            //   as it should always be dropping tombstones to level 0.
-            if (!drop_tombstones and compaction.range.table_count == 1) {
-                assert(compaction.level_b != 0);
-                assert(compaction.status == .compacting);
+            //   as it requires the table being moved to reside on disk (tracked by manifest).
+            if (IteratorA.Context == TableIteratorType(Table)) {
+                if (!drop_tombstones and range.table_count == 1) {
+                    assert(compaction.level_b != 0);
+                    assert(compaction.status == .compacting);
 
-                const tables = [_]TableInfo{table.*};
-                compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
-                compaction.manifest.insert_tables(compaction.level_b, tables);
+                    const level_a = level_b - 1;
+                    assert(level_a < config.lsm_levels - 1);
 
-                compaction.status = .done;
-                return;
+                    compaction.manifest.move_table(
+                        level_a, 
+                        level_b,
+                        snapshot,
+                        iterator_a_context.address,
+                        iterator_a_context.checksum,
+                    );
+
+                    compaction.status = .done;
+                    return;
+                }        
             }
-
-            // TODO Reset builder.
 
             const iterator_b_context = .{
                 .grid = grid,
                 .manifest = manifest,
                 .level = level_b,
+                .snapshot = snapshot,
                 .key_min = range.key_min,
                 .key_max = range.key_max,
+                .direction = .ascending,
                 .table_info_callback = iterator_b_table_info_callback, // TODO
             };
 

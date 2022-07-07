@@ -164,6 +164,32 @@ pub fn ManifestType(comptime Table: type) type {
             const manifest_level = &manifest.levels[level];
             manifest_level.set_snapshot_max(snapshot, tables);
         }
+        
+        /// Moves the table at the address/checksum pair from one level to another.
+        /// Unlike `update_tables`, this avoids leaving the same TableInfo with different snapshots
+        /// in both levels by removing it from level_a before inserting to level_b.
+        pub fn move_table(
+            manifest: *Manifest,
+            level_a: u8,
+            level_b: u8,
+            snapshot: u64,
+            address: u64,
+            checksum: u128,
+        ) void {
+            assert(tables.len > 0);
+            assert(level_a < config.lsm_levels);
+            assert(level_b < config.lsm_levels);
+            assert(level_a + 1 == level_b);
+
+            const table_info: *const TableInfo = @panic("TODO(Joran): use address/checksum");
+            const tables = [_]TableInfo{ table_info.* };
+
+            manifest.levels[level_a].remove_tables(manifest.node_pool, &.{ snapshot }, &tables);
+            manifest.levels[level_b].insert_tables(manifest.node_pool, &tables);
+
+            const manifest_level_a = &manifest.levels[level_a];
+            const manifest_level_b = &manifest.levels[level_b];
+        }
 
         pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key) LookupIterator {
             return .{
