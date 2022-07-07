@@ -103,7 +103,7 @@ pub fn ManifestType(comptime Table: type) type {
         pub fn init(
             allocator: mem.Allocator, 
             node_pool: *NodePool,
-            superblock: *Superblock,
+            superblock: *SuperBlock,
             grid: *Grid,
             tree_hash: u128,
         ) !Manifest {
@@ -207,19 +207,19 @@ pub fn ManifestType(comptime Table: type) type {
             address: u64,
             checksum: u128,
         ) void {
-            assert(tables.len > 0);
             assert(level_a < config.lsm_levels);
             assert(level_b < config.lsm_levels);
             assert(level_a + 1 == level_b);
 
-            const table_info: *const TableInfo = @panic("TODO(Joran): use address/checksum");
-            const tables = [_]TableInfo{ table_info.* };
+            const table_info: *const TableInfo = blk: {
+                _ = address;
+                _ = checksum;
+                break :blk @panic("TODO(Joran): lookup using address/checksum");
+            };
 
+            const tables = [_]TableInfo{ table_info.* };
             manifest.levels[level_a].remove_tables(manifest.node_pool, &.{ snapshot }, &tables);
             manifest.levels[level_b].insert_tables(manifest.node_pool, &tables);
-
-            const manifest_level_a = &manifest.levels[level_a];
-            const manifest_level_b = &manifest.levels[level_b];
         }
 
         pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key) LookupIterator {

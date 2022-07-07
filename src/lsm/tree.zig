@@ -55,17 +55,19 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
     const tombstone = Table.tombstone;
     const tombstone_from_key = Table.tombstone_from_key;
 
+    const tree_hash = blk: {
+        var hash: u256 = undefined;
+        std.crypto.hash.Blake3.hash(tree_name, std.mem.asBytes(&hash), .{});
+        break :blk @truncate(u128, hash);
+    };
+
     return struct {
         const Tree = @This();
 
         // Expose the Table & hash for the Grove.
         pub const TableType = Table;
         pub const name = tree_name;
-        pub const hash = blk: {
-            var hash: u256 = undefined;
-            std.crypto.Blake3.hash(tree_name, std.mem.asBytes(&hash), .{});
-            break :blk @truncate(u128, hash);
-        };
+        pub const hash = tree_hash;
 
         const Grid = @import("grid.zig").GridType(Table.Storage);
         const SuperBlock = @import("superblock.zig").SuperBlockType(Table.Storage);
@@ -391,7 +393,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
 
             var it = CompactionTableIterator{ .tree = tree };
             while (it.next()) |context| {
-                if (start) tree.compaction_io_start_table(snapshot, context);
+                if (start) tree.compact_io_start_table(snapshot, context);
                 tree.compact_io_tick(context.compaction);
             }
         }
@@ -798,7 +800,7 @@ pub fn main() !void {
         Key.tombstone_from_key,
     );
 
-    const Tree = TreeType(Table);
+    const Tree = TreeType(Table, "test_table");
 
     // Check out our spreadsheet to see how we calculate node_count for a forest of trees.
     const node_count = 1024;
@@ -829,8 +831,9 @@ pub fn main() !void {
 
     var tree = try Tree.init(
         allocator,
-        &grid,
         &node_pool,
+        &grid,
+        &superblock,
         &value_cache,
         .{
             .prefetch_count_max = commit_count_max * 2,
