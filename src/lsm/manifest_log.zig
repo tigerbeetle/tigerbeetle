@@ -382,6 +382,15 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         pub fn compact(manifest_log: *ManifestLog, callback: Callback) void {
+            assert(!manifest_log.reading);
+            manifest_log.read_callback = callback;
+            manifest_log.flush(flush_callback);
+        }
+
+        fn flush_callback(manifest_log: *ManifestLog) void {
+            const callback = manifest_log.read_callback;
+            manifest_log.read_callback = undefined;
+            
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
