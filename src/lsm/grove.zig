@@ -281,9 +281,13 @@ pub fn GroveType(
 
         const Grid = GridType(Storage);
         const SuperBlock = SuperBlockType(Storage);
-    
-        sync_pending: usize,
-        sync_callback: ?fn (*Grove) void,
+
+        const SyncOp = enum { compacting, checkpoint };
+        pub const Callback = fn (*Grove) void;
+
+        sync_op: ?SyncOp = null,
+        sync_pending: usize = 0,
+        sync_callback: ?Callback = null,
 
         cache: *ObjectTree.ValueCache,
         objects: ObjectTree,
@@ -377,6 +381,7 @@ pub fn GroveType(
         }
 
         pub fn deinit(grove: *Grove, allocator: mem.Allocator) void {
+            assert(grove.sync_op == null);
             assert(grove.sync_pending == 0);
             assert(grove.sync_callback == null);            
 
@@ -464,59 +469,78 @@ pub fn GroveType(
             }
         }
 
-        fn sync_register(grove: *Grove, callback: fn (*Grove) void) void {
-            assert(grove.sync_pending == 0);
-            assert(grove.sync_callback == null);
+        /// Maximum number of pending sync callbacks (ObjecTree + IndexTrees).
+        const sync_pending_max = 1 + std.meta.fields(IndexTrees).len;
 
-            grove.sync_pending = 1 + std.meta.fields(IndexTrees).len;
-            grove.sync_callback = callback;
-        }
-
-        fn sync_callback(
-            comptime Tree: type, 
-            comptime index_field_name: ?[]const u8,
-        ) fn (*Tree) void {
+        fn SyncType(comptime sync_op: SyncOp) type {
             return struct {
-                fn tree_callback(tree: *Tree) void {
-                    // Get the grove from the tree.
-                    const grove = blk: {
-                        if (index_field_name) |field| {
-                            const indexes = @fieldParentPtr(IndexTrees, field, tree);
-                            break :blk @fieldParentPtr(Grove, "indexes", indexes);
-                        }
-
-                        assert(Tree == ObjectTree);
-                        break :blk @fieldParentPtr(Grove, "objects", tree);
-                    };
-
-                    // Make sure theres a callback registered.
-                    assert(grove.sync_callback <= 1 + std.meta.fields(IndexTrees).len);
-                    assert(grove.sync_pending > 0);
-                    assert(grove.sync_callback != null);
-
-                    // Check if we're the last tree callback to trigger the registered callback.
-                    grove.sync_pending -= 1;
-                    if (grove.sync_pending > 0) return;
-
-                    const callback = grove.sync_callback.?;
-                    grove.sync_callback = null;
-                    callback(grove);
+                pub fn start(grove: *Grove, sync_callback: Callback) void {
+                    // Make sure no sync op is currently running.
+                    assert(grove.sync_op == null);
+                    assert(grove.sync_pending == 0);
+                    assert(grove.sync_callback == null);
+                    
+                    // Start the sync operations
+                    grove.sync_op = sync_op;
+                    grove.sync_callback = sync_callback;
+                    grove.sync_pending = sync_pending_max;
                 }
-            }.tree_callback;
+
+                pub fn callback(
+                    comptime Tree: type, 
+                    comptime index_field_name: ?[]const u8,
+                ) fn (*Tree) void {
+                    return struct {
+                        fn tree_callback(tree: *Tree) void {
+                            // Derive the grove pointer from the tree using the index_field_name.
+                            const grove = blk: {
+                                const index_field = index_field_name orelse {
+                                    assert(Tree == ObjectTree);
+                                    break :blk @fieldParentPtr(Grove, "objects", tree);
+                                };
+
+                                const indexes = @fieldParentPtr(IndexTrees, index_field, tree);
+                                break :blk @fieldParentPtr(Grove, "indexes", indexes);
+                            };
+
+                            // Make sure the sync operation is currently running.
+                            assert(grove.sync_op == sync_op);
+                            assert(grove.sync_callback != null);
+                            assert(grove.sync_pending <= sync_pending_max);
+                            
+                            // Guard until all pending sync ops complete.
+                            grove.sync_pending -= 1;
+                            if (grove.sync_pending > 0) return;
+
+                            const sync_callback = grove.sync_callback.?;
+                            grove.sync_op = null;
+                            grove.sync_callback = null;
+                            sync_callback(grove);
+                        }
+                    }.tree_callback;
+                }
+            };
         }
 
-        pub fn compact_io(grove: *Grove, op: u64, callback: fn (*Grove) void) void {
-            grove.sync_register(callback);
+        pub fn compact_io(grove: *Grove, op: u64, callback: Callback) void {
+            // Start a compacting sync operation.
+            const Sync = SyncType(.compacting);
+            Sync.start(grove, callback);
+            
+            // Compact the ObjectTree.
+            grove.objects.compact_io(op, Sync.callback(ObjectTree, null));
 
-            grove.objects.compact_io(op, sync_callback(ObjectTree, null));
-
+            // Compact the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const index = &@field(grove.indexes, field.name);
-                index.compact_io(op, sync_callback(@TypeOf(index.*), field.name));
+                const index_tree = &@field(grove.indexes, field.name);
+                index_tree.compact_io(op, Sync.callback(@TypeOf(index_tree.*), field.name));
             }
         }
 
         pub fn compact_cpu(grove: *Grove) void {
+            // Make sure a compacting sync operation is running
+            assert(grove.sync_op == .compacting);
+            assert(grove.sync_pending <= sync_pending_max);
             assert(grove.sync_callback != null);
 
             grove.objects.compact_cpu();
@@ -527,13 +551,17 @@ pub fn GroveType(
         }
 
         pub fn checkpoint(grove: *Grove, callback: fn (*Grove) void) void {
-            grove.sync_register(callback);
+            // Start a checkpoint sync operation.
+            const Sync = SyncType(.checkpoint);
+            Sync.start(grove, callback);
+            
+            // Checkpoint the ObjectTree.
+            grove.objects.checkpoint(Sync.callback(ObjectTree, null));
 
-            grove.objects.checkpoint(sync_callback(ObjectTree, null));
-
+            // Checkpoint the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const index = &@field(grove.indexes, field.name);
-                index.checkpoint(sync_callback(@TypeOf(index.*), field.name));
+                const index_tree = &@field(grove.indexes, field.name);
+                index_tree.checkpoint(Sync.callback(@TypeOf(index_tree.*), field.name));
             }
         }
     };
