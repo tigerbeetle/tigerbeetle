@@ -281,16 +281,15 @@ pub fn GroveType(
 
         const Grid = GridType(Storage);
         const SuperBlock = SuperBlockType(Storage);
-
+    
         sync_pending: usize,
         sync_callback: ?fn (*Grove) void,
 
-        cache: ObjectTree.ValueCache,
+        cache: *ObjectTree.ValueCache,
         objects: ObjectTree,
         indexes: IndexTrees,
 
         pub fn init(
-            grove: *Grove,
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
@@ -321,46 +320,42 @@ pub fn GroveType(
             // Then, in our case, we'll create the Accounts grove with a commit_count_max of 
             // 8191 * 2 (accounts mutated per transfer) * 2 (old/new index value).
             commit_count_max: usize,
-        ) !void {
-            grove.* = .{
-                .sync_pending = 0,
-                .sync_callback = null,
+        ) !Grove {
+            // Cache is dynamically allocated to pass a pointer into the Object tree
+            const cache = try allocator.create(ObjectTree.ValueCache);
+            errdefer allocator.destroy(cache);
 
-                .cache = undefined,
-                .objects = undefined,
-                .indexes = undefined,
-            };
+            cache.* = .{};
+            try cache.ensureTotalCapacity(allocator, cache_size);
+            errdefer cache.deinit(allocator);
 
-            // Initialize the value cache for the obejct LSM tree
-            grove.cache = .{};
-            try grove.cache.ensureTotalCapacity(allocator, cache_size);
-            errdefer grove.cache.deinit(allocator);
-            
             // Intialize the object LSM tree
-            grove.objects = try ObjectTree.init(
+            var object_tree = try ObjectTree.init(
                 allocator,
                 node_pool,
                 grid,
                 superblock,
-                &grove.cache,
+                cache,
                 .{
                     .prefetch_count_max = commit_count_max * 2,
                     .commit_count_max = commit_count_max,
                 },
             );
-            errdefer grove.objects.deinit(allocator);
+            errdefer object_tree.deinit(allocator);
+
+            var index_trees_initialized: usize = 0;
+            var index_trees: IndexTrees = undefined;
 
             // Make sure to deinit initialized index LSM trees on error
-            var index_trees_initialized: usize = 0;
             errdefer inline for (std.meta.fields(IndexTrees)) |field, field_index| {
                 if (index_trees_initialized >= field_index + 1) {
-                    @field(grove.indexes, field.name).deinit(allocator);
+                    @field(index_trees, field.name).deinit(allocator);
                 }
             };
 
             // Initialize index LSM trees
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(grove.indexes, field.name) = try field.field_type.init(
+                @field(index_trees, field.name) = try field.field_type.init(
                     allocator,
                     node_pool,
                     grid,
@@ -373,18 +368,27 @@ pub fn GroveType(
                 );
                 index_trees_initialized += 1;
             }
+
+            return Grove{
+                .cache = cache,
+                .objects = object_tree,
+                .indexes = index_trees,
+            };
         }
 
         pub fn deinit(grove: *Grove, allocator: mem.Allocator) void {
             assert(grove.sync_pending == 0);
-            assert(grove.sync_callback == null);
-
-            grove.cache.deinit(allocator);
-            grove.objects.deinit(allocator);
+            assert(grove.sync_callback == null);            
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(grove.indexes, field.name).deinit(allocator);
             }
+
+            grove.objects.deinit(allocator);
+            grove.cache.deinit(allocator);
+            
+            allocator.destroy(grove.cache);
+            grove.* = undefined;
         }
 
         pub fn get(grove: *Grove, key: Key) ?*const Value {
