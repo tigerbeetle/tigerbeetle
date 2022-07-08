@@ -47,7 +47,6 @@ fn ObjectTreeType(comptime Storage: type, comptime Value: type) type {
     };
 
     const Table = TableType(
-        Storage,
         u64, // key = timestamp
         Value,
         ValueKeyHelpers.compare_keys,
@@ -58,7 +57,7 @@ fn ObjectTreeType(comptime Storage: type, comptime Value: type) type {
     );
 
     const tree_name = @typeName(Value);
-    return TreeType(Table, tree_name);
+    return TreeType(Table, Storage, tree_name);
 }
 
 /// Normalizes index tree field types into either u64 or u128 for CompositeKey
@@ -105,7 +104,6 @@ fn IndexTreeType(
 ) type {
     const Key = CompositeKey(IndexCompositeKeyType(Field));
     const Table = TableType(
-        Storage,
         Key,
         Key.Value,
         Key.compare_keys,
@@ -115,7 +113,7 @@ fn IndexTreeType(
         Key.tombstone_from_key,
     );
 
-    return TreeType(Table, tree_name);
+    return TreeType(Table, Storage, tree_name);
 }
 
 /// A Grove is a collection of LSM trees auto generated for fields on a struct type

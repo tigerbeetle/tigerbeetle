@@ -12,10 +12,9 @@ const div_ceil = @import("../util.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
-const ManifestType = @import("manifest.zig").ManifestType;
+const TableInfoType = @import("manifest.zig").TableInfoType;
 
 pub fn TableType(
-    comptime TableStorage: type,
     comptime TableKey: type,
     comptime TableValue: type,
     /// Returns the sort order between two keys.
@@ -32,10 +31,8 @@ pub fn TableType(
 ) type {
     return struct {
         const Table = @This();
-        const TableInfo = ManifestType(Table).TableInfo;
 
         // Re-export all the generic arguments.
-        pub const Storage = TableStorage;
         pub const Key = TableKey;
         pub const Value = TableValue;
         pub const compare_keys = table_compare_keys;
@@ -406,6 +403,8 @@ pub fn TableType(
         }
 
         pub const Builder = struct {
+            const TableInfo = TableInfoType(Table);
+
             key_min: Key = undefined,
             key_max: Key = undefined,
 
@@ -902,10 +901,8 @@ pub fn TableType(
 
 test "Table" {
     const Key = @import("composite_key.zig").CompositeKey(u128);
-    const Storage = @import("../storage.zig").Storage;
 
     const Table = TableType(
-        Storage,
         Key,
         Key.Value,
         Key.compare_keys,

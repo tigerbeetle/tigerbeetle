@@ -9,12 +9,12 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
-pub fn TableIteratorType(comptime Table: type) type {
+pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
     return struct {
         const TableIterator = @This();
 
-        const Grid = GridType(Table.Storage);
-        const Manifest = ManifestType(Table);
+        const Grid = GridType(Storage);
+        const Manifest = ManifestType(Table, Storage);
         const ValuesRingBuffer = RingBuffer(Table.Value, Table.data.value_count_max, .pointer);
 
         grid: *Grid,

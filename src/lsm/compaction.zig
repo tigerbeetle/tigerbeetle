@@ -13,7 +13,8 @@ const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
-    comptime IteratorAType: anytype, // fn (Table: type) type
+    comptime Storage: type,
+    comptime IteratorAType: anytype, // fn (Table: type, Storage: type) type
 ) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -23,13 +24,13 @@ pub fn CompactionType(
     return struct {
         const Compaction = @This();
 
-        const Grid = GridType(Table.Storage);
+        const Grid = GridType(Storage);
         const BlockPtr = Grid.BlockPtr;
         const Manifest = ManifestType(Table);
         const TableInfo = Manifest.TableInfo;
 
-        const IteratorA = IteratorAType(Table);
-        const IteratorB = LevelIteratorType(Table);
+        const IteratorA = IteratorAType(Table, Storage);
+        const IteratorB = LevelIteratorType(Table, Storage);
 
         pub const Callback = fn (it: *Compaction) void;
 
@@ -264,7 +265,7 @@ pub fn CompactionType(
             // - Cannot drop tombstones as then we have to go through the normal compaction path.
             // - Cannot be performing the immutable table -> level 0 compaction
             //   as it requires the table being moved to reside on disk (tracked by manifest).
-            if (IteratorA.Context == TableIteratorType(Table)) {
+            if (IteratorA.Context == TableIteratorType(Table, Storage)) {
                 if (!drop_tombstones and range.table_count == 1) {
                     assert(compaction.level_b != 0);
                     assert(compaction.status == .compacting);
@@ -273,7 +274,7 @@ pub fn CompactionType(
                     assert(level_a < config.lsm_levels - 1);
 
                     compaction.manifest.move_table(
-                        level_a, 
+                        level_a,
                         level_b,
                         snapshot,
                         iterator_a_context.address,
@@ -282,7 +283,7 @@ pub fn CompactionType(
 
                     compaction.status = .done;
                     return;
-                }        
+                }
             }
 
             const iterator_b_context = .{

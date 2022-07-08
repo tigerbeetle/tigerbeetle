@@ -49,7 +49,7 @@ pub const snapshot_latest = math.maxInt(u64) - 1;
 
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
 
-pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
+pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name: []const u8) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
@@ -73,8 +73,8 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         pub const name = tree_name;
         pub const hash = tree_hash;
 
-        const Grid = @import("grid.zig").GridType(Table.Storage);
-        const SuperBlock = @import("superblock.zig").SuperBlockType(Table.Storage);
+        const Grid = @import("grid.zig").GridType(Storage);
+        const SuperBlock = @import("superblock.zig").SuperBlockType(Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table);
         const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
@@ -89,8 +89,8 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         pub const ValueCache = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, 70);
 
         // NOTE these are above their fields as zig-fmt rejects decls in the middle of fields
-        const CompactionTable = CompactionType(Table, TableIteratorType);
-        const CompactionTableImmutable = CompactionType(Table, TableImmutableIteratorType);
+        const CompactionTable = CompactionType(Table, Storage, TableIteratorType);
+        const CompactionTableImmutable = CompactionType(Table, Storage, TableImmutableIteratorType);
 
         grid: *Grid,
         options: Options,
@@ -450,7 +450,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
         // At any given point, there's only levels/2 max compactions happening concurrently.
         // The source level is denoted as `level_a` with the target level being `level_b`.
         // The last level in the LSM tree has no target level so it's not compaction-from.
-        //  
+        //
         // Assuming a measure/`lsm_batch_multiple` of 4, the invariants can be described as follows:
         //  * assert: at the end of every beat, there's space in mutable table for the next beat.
         //  * manifest info for the tables compacted are updating during the compaction.
@@ -759,7 +759,7 @@ pub fn TreeType(comptime Table: type, comptime tree_name: []const u8) type {
 
             // At the end of every beat, call manifest.compact before invoking the compact callback.
             tree.manifest.compact(manifest_compact_callback);
-        }        
+        }
 
         fn compact_mutable_table_into_immutable(tree: *Tree) void {
             // Ensure mutable table can be flushed into immutable table.
@@ -976,7 +976,6 @@ pub fn main() !void {
 
     const Key = CompositeKey(u128);
     const Table = @import("table.zig").TableType(
-        Storage,
         Key,
         Key.Value,
         Key.compare_keys,
