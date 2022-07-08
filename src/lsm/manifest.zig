@@ -18,76 +18,82 @@ const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 
-pub fn ManifestType(comptime Table: type) type {
+pub fn TableInfoType(comptime Table: type) type {
+    return extern struct {
+        const TableInfo = @This();
+
+        checksum: u128,
+        address: u64,
+        flags: u64 = 0,
+
+        /// The minimum snapshot that can see this table (with exclusive bounds).
+        /// This value is set to the current snapshot tick on table creation.
+        snapshot_min: u64,
+
+        /// The maximum snapshot that can see this table (with exclusive bounds).
+        /// This value is set to the current snapshot tick on table deletion.
+        snapshot_max: u64 = math.maxInt(u64),
+
+        key_min: Key,
+        key_max: Key,
+
+        comptime {
+            assert(@sizeOf(TableInfo) == 48 + Table.key_size * 2);
+            assert(@alignOf(TableInfo) == 16);
+        }
+
+        pub fn visible(table: *const TableInfo, snapshot: u64) bool {
+            assert(table.address != 0);
+            assert(table.snapshot_min < table.snapshot_max);
+            assert(snapshot <= snapshot_latest);
+
+            assert(snapshot != table.snapshot_min);
+            assert(snapshot != table.snapshot_max);
+
+            return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
+        }
+
+        pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
+            // Return early and do not iterate all snapshots if the table was never deleted:
+            if (table.visible(snapshot_latest)) return false;
+            for (snapshots) |snapshot| if (table.visible(snapshot)) return false;
+            assert(table.snapshot_max < math.maxInt(u64));
+            return true;
+        }
+
+        pub fn equal(table: *const TableInfo, other: *const TableInfo) bool {
+            // TODO Since the layout of TableInfo is well defined, a direct memcmp may be faster
+            // here. However, it's not clear if we can make the assumption that compare_keys()
+            // will return .eq exactly when the memory of the keys are equal.
+            // Consider defining the API to allow this.
+            return table.checksum == other.checksum and
+                table.address == other.address and
+                table.flags == other.flags and
+                table.snapshot_min == other.snapshot_min and
+                table.snapshot_max == other.snapshot_max and
+                compare_keys(table.key_min, other.key_min) == .eq and
+                compare_keys(table.key_max, other.key_max) == .eq;
+        }
+    };
+}
+
+pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
     const Key = Table.Key;
     const compare_keys = Table.compare_keys;
 
     return struct {
         const Manifest = @This();
 
-        const Grid = GridType(Table.Storage);
-        const SuperBlock = SuperBlockType(Table.Storage);
+        pub const TableInfo = TableInfoType(Table);
 
-        pub const TableInfo = extern struct {
-            checksum: u128,
-            address: u64,
-            flags: u64 = 0,
-
-            /// The minimum snapshot that can see this table (with exclusive bounds).
-            /// This value is set to the current snapshot tick on table creation.
-            snapshot_min: u64,
-
-            /// The maximum snapshot that can see this table (with exclusive bounds).
-            /// This value is set to the current snapshot tick on table deletion.
-            snapshot_max: u64 = math.maxInt(u64),
-
-            key_min: Key,
-            key_max: Key,
-
-            comptime {
-                assert(@sizeOf(TableInfo) == 48 + Table.key_size * 2);
-                assert(@alignOf(TableInfo) == 16);
-            }
-
-            pub fn visible(table: *const TableInfo, snapshot: u64) bool {
-                assert(table.address != 0);
-                assert(table.snapshot_min < table.snapshot_max);
-                assert(snapshot <= snapshot_latest);
-
-                assert(snapshot != table.snapshot_min);
-                assert(snapshot != table.snapshot_max);
-
-                return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
-            }
-
-            pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
-                // Return early and do not iterate all snapshots if the table was never deleted:
-                if (table.visible(snapshot_latest)) return false;
-                for (snapshots) |snapshot| if (table.visible(snapshot)) return false;
-                assert(table.snapshot_max < math.maxInt(u64));
-                return true;
-            }
-
-            pub fn equal(table: *const TableInfo, other: *const TableInfo) bool {
-                // TODO Since the layout of TableInfo is well defined, a direct memcmp may be faster
-                // here. However, it's not clear if we can make the assumption that compare_keys()
-                // will return .eq exactly when the memory of the keys are equal.
-                // Consider defining the API to allow this.
-                return table.checksum == other.checksum and
-                    table.address == other.address and
-                    table.flags == other.flags and
-                    table.snapshot_min == other.snapshot_min and
-                    table.snapshot_max == other.snapshot_max and
-                    compare_keys(table.key_min, other.key_min) == .eq and
-                    compare_keys(table.key_max, other.key_max) == .eq;
-            }
-        };
+        const Grid = GridType(Storage);
+        const SuperBlock = SuperBlockType(Storage);
 
         /// Levels beyond level 0 have tables with disjoint key ranges.
         /// Here, we use a structure with indexes over the segmented array for performance.
         const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
 
-        const ManifestLog = ManifestLogType(Table.Storage, TableInfo);
+        const ManifestLog = ManifestLogType(Storage, TableInfo);
 
         const Callback = fn (*Manifest) void;
 
@@ -106,7 +112,7 @@ pub fn ManifestType(comptime Table: type) type {
         checkpoint_callback: ?Callback = null,
 
         pub fn init(
-            allocator: mem.Allocator, 
+            allocator: mem.Allocator,
             node_pool: *NodePool,
             superblock: *SuperBlock,
             grid: *Grid,
@@ -222,8 +228,8 @@ pub fn ManifestType(comptime Table: type) type {
                 break :blk @panic("TODO(Joran): lookup using address/checksum");
             };
 
-            const tables = [_]TableInfo{ table_info.* };
-            manifest.levels[level_a].remove_tables(manifest.node_pool, &.{ snapshot }, &tables);
+            const tables = [_]TableInfo{table_info.*};
+            manifest.levels[level_a].remove_tables(manifest.node_pool, &.{snapshot}, &tables);
             manifest.levels[level_b].insert_tables(manifest.node_pool, &tables);
         }
 

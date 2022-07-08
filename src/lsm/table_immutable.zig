@@ -115,7 +115,9 @@ pub fn TableImmutableType(comptime Table: type) type {
     };
 }
 
-pub fn TableImmutableIteratorType(comptime Table: type) type {
+pub fn TableImmutableIteratorType(comptime Table: type, comptime Storage: type) type {
+    _ = Storage;
+
     return struct {
         const TableImmutableIterator = @This();
         const TableImmutable = TableImmutableType(Table);

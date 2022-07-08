@@ -11,17 +11,17 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
-pub fn LevelIteratorType(comptime Table: type) type {
+pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const key_from_value = Table.key_from_value;
 
     return struct {
         const LevelIterator = @This();
-        const TableIterator = TableIteratorType(Table);
+        const TableIterator = TableIteratorType(Table, Storage);
 
-        const Grid = GridType(Table.Storage);
-        const Manifest = ManifestType(Table);
+        const Grid = GridType(Storage);
+        const Manifest = ManifestType(Table, Storage);
 
         const TableInfo = Manifest.TableInfo;
         const TableInfoCallback = fn (it: *LevelIterator, table: *const TableInfo) void;
