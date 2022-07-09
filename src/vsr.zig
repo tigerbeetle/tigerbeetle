@@ -199,6 +199,9 @@ pub const Header = extern struct {
     op: u64 = 0,
 
     /// The commit number of the latest committed prepare. Committed ops are immutable.
+    ///
+    /// * A `do_view_change` sets this to `commit_min`.
+    /// * A `start_view` sets this to `commit_max`.
     commit: u64 = 0,
 
     /// This field is used in various ways:
