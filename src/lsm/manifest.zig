@@ -12,7 +12,6 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const Direction = @import("direction.zig").Direction;
 const GridType = @import("grid.zig").GridType;
-const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
@@ -87,7 +86,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub const TableInfo = TableInfoType(Table);
 
         const Grid = GridType(Storage);
-        const SuperBlock = SuperBlockType(Storage);
 
         /// Levels beyond level 0 have tables with disjoint key ranges.
         /// Here, we use a structure with indexes over the segmented array for performance.
@@ -114,7 +112,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn init(
             allocator: mem.Allocator,
             node_pool: *NodePool,
-            superblock: *SuperBlock,
             grid: *Grid,
             tree_hash: u128,
         ) !Manifest {
@@ -129,12 +126,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 break :blk @panic("TODO(Joran): ManifestLog.tree from tree_hash");
             };
 
-            var manifest_log = try ManifestLog.init(
-                allocator,
-                superblock,
-                grid,
-                tree,
-            );
+            var manifest_log = try ManifestLog.init(allocator, grid, tree);
             errdefer manifest_log.deinit(allocator);
 
             return Manifest{

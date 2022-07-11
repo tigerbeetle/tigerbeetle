@@ -102,7 +102,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         pub fn init(
             allocator: mem.Allocator,
-            superblock: *SuperBlock,
             grid: *Grid,
             tree: u8,
         ) !ManifestLog {
@@ -118,7 +117,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             errdefer allocator.free(b);
 
             return ManifestLog{
-                .superblock = superblock,
+                .superblock = grid.superblock,
                 .grid = grid,
                 .tree = tree,
                 .blocks = .{
@@ -648,10 +647,10 @@ fn ManifestLogTestType(
         manifest_log: ManifestLog,
         pending: usize = 0,
 
-        fn init(allocator: mem.Allocator, superblock: *SuperBlock, grid: *Grid) !ManifestLogTest {
+        fn init(allocator: mem.Allocator, grid: *Grid) !ManifestLogTest {
             const tree = 1;
 
-            var manifest_log = try ManifestLog.init(allocator, superblock, grid, tree);
+            var manifest_log = try ManifestLog.init(allocator, grid, tree);
             errdefer manifest_log.deinit(allocator);
 
             return ManifestLogTest{
