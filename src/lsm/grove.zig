@@ -221,7 +221,7 @@ pub fn GroveType(
         + std.meta.fields(@TypeOf(options.derived)).len;
     assert(indexes_count_actual == indexes_count_expect);
 
-    // Generate a helper function for interacting with an Index field type
+    // Generate a helper function for interacting with an Index field type.
     const IndexTreeFieldHelperType = struct {
         fn HelperType(comptime field_name: []const u8) type {
             // Check if the index is derived.
@@ -258,14 +258,6 @@ pub fn GroveType(
                         else => @compileError("Unsupported index value type"),
                     };
                 }
-
-                // pub fn from_composite_key(key: IndexKeyType) Value {
-                //     return switch (@typeInfo(Value)) {
-                //         .Enum => |e| @intToEnum(Value, @intCast(e.tag_type, key)),
-                //         .Int => @intCast(Value, key),
-                //         else => @compileError("Unsupported index value type"),
-                //     };
-                // }
             };
         }
     }.HelperType;
@@ -321,7 +313,7 @@ pub fn GroveType(
             // 8191 * 2 (accounts mutated per transfer) * 2 (old/new index value).
             commit_count_max: usize,
         ) !Grove {
-            // Cache is dynamically allocated to pass a pointer into the Object tree
+            // Cache is dynamically allocated to pass a pointer into the Object tree.
             const cache = try allocator.create(ObjectTree.ValueCache);
             errdefer allocator.destroy(cache);
 
@@ -329,7 +321,7 @@ pub fn GroveType(
             try cache.ensureTotalCapacity(allocator, cache_size);
             errdefer cache.deinit(allocator);
 
-            // Intialize the object LSM tree
+            // Intialize the object LSM tree.
             var object_tree = try ObjectTree.init(
                 allocator,
                 node_pool,
@@ -345,20 +337,20 @@ pub fn GroveType(
             var index_trees_initialized: usize = 0;
             var index_trees: IndexTrees = undefined;
 
-            // Make sure to deinit initialized index LSM trees on error
+            // Make sure to deinit initialized index LSM trees on error.
             errdefer inline for (std.meta.fields(IndexTrees)) |field, field_index| {
                 if (index_trees_initialized >= field_index + 1) {
                     @field(index_trees, field.name).deinit(allocator);
                 }
             };
 
-            // Initialize index LSM trees
+            // Initialize index LSM trees.
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(index_trees, field.name) = try field.field_type.init(
                     allocator,
                     node_pool,
                     grid,
-                    null, // no value cache for index trees
+                    null, // No value cache for index trees.
                     .{
                         .prefetch_count_max = 0,
                         .commit_count_max = commit_count_max,

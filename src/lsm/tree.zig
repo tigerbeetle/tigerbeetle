@@ -57,7 +57,8 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
     const tombstone_from_key = Table.tombstone_from_key;
 
     const tree_hash = blk: {
-        // Blake3 has does alot at comptime..
+        // Blake3 hash does alot at comptime..
+        // TODO(King) Binary search a more ideal value.
         @setEvalBranchQuota(10000);
 
         var hash: u256 = undefined;

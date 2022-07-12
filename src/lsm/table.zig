@@ -650,7 +650,7 @@ pub fn TableType(
                     .op = options.address,
                     .commit = builder.filter_block_count,
                     .request = builder.data_block_count,
-                    // .offset = snapshot_min, // TODO(King) not sure what to replace this with.
+                    .timestamp = snapshot_min,
                     .size = index.size,
                     .command = .block,
                 };
