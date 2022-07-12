@@ -167,12 +167,6 @@ const Command = struct {
             });
         }
 
-        var state_machine = try StateMachine.init(
-            command.allocator,
-            config.accounts_max,
-            config.transfers_max,
-            config.commits_max,
-        );
         var time: Time = .{};
         var message_bus = try MessageBus.init(
             command.allocator,
@@ -189,7 +183,11 @@ const Command = struct {
             &time,
             &command.storage,
             &message_bus,
-            &state_machine,
+            .{
+                .accounts_max = config.accounts_max,
+                .transfers_max = config.transfers_max,
+                .transfers_pending_max = config.commits_max,
+            },
         );
         message_bus.set_on_message(*Replica, &replica, Replica.on_message);
 

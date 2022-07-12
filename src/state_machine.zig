@@ -37,6 +37,12 @@ pub const StateMachine = struct {
         lookup_transfers,
     };
 
+    pub const Config = struct {
+        accounts_max: usize,
+        transfers_max: usize,
+        transfers_pending_max: usize,
+    };
+
     allocator: mem.Allocator,
     prepare_timestamp: u64,
     commit_timestamp: u64,
@@ -46,21 +52,19 @@ pub const StateMachine = struct {
 
     pub fn init(
         allocator: mem.Allocator,
-        accounts_max: usize,
-        transfers_max: usize,
-        transfers_pending_max: usize,
+        config: Config,
     ) !StateMachine {
         var accounts = HashMapAccounts.init(allocator);
         errdefer accounts.deinit();
-        try accounts.ensureTotalCapacity(@intCast(u32, accounts_max));
+        try accounts.ensureTotalCapacity(@intCast(u32, config.accounts_max));
 
         var transfers = HashMapTransfers.init(allocator);
         errdefer transfers.deinit();
-        try transfers.ensureTotalCapacity(@intCast(u32, transfers_max));
+        try transfers.ensureTotalCapacity(@intCast(u32, config.transfers_max));
 
         var posted = HashMapPosted.init(allocator);
         errdefer posted.deinit();
-        try posted.ensureTotalCapacity(@intCast(u32, transfers_pending_max));
+        try posted.ensureTotalCapacity(@intCast(u32, config.transfers_pending_max));
 
         return StateMachine{
             .allocator = allocator,
@@ -1024,7 +1028,11 @@ test "create/lookup/rollback accounts" {
         },
     };
 
-    var state_machine = try StateMachine.init(testing.allocator, vectors.len, 0, 0);
+    var state_machine = try StateMachine.init(testing.allocator, .{
+        .accounts_max = vectors.len,
+        .transfers_max = 0,
+        .transfers_pending_max = 0,
+    });
     defer state_machine.deinit();
 
     for (vectors) |vector, i| {
@@ -1084,9 +1092,11 @@ test "linked accounts" {
 
     var state_machine = try StateMachine.init(
         testing.allocator,
-        accounts_max,
-        transfers_max,
-        transfers_pending_max,
+        .{
+            .accounts_max = accounts_max,
+            .transfers_max = transfers_max,
+            .transfers_pending_max = transfers_pending_max,
+        },
     );
     defer state_machine.deinit();
 
@@ -1168,7 +1178,11 @@ test "create/lookup/rollback transfers" {
         }),
     };
 
-    var state_machine = try StateMachine.init(testing.allocator, accounts.len, 1, 0);
+    var state_machine = try StateMachine.init(testing.allocator, .{
+        .accounts_max = accounts.len,
+        .transfers_max = 1,
+        .transfers_pending_max = 0,
+    });
     defer state_machine.deinit();
 
     const input = mem.asBytes(&accounts);
@@ -1795,7 +1809,11 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
     };
 
-    var state_machine = try StateMachine.init(testing.allocator, accounts.len, 100, 1);
+    var state_machine = try StateMachine.init(testing.allocator, .{
+        .accounts_max = accounts.len,
+        .transfers_max = 100,
+        .transfers_pending_max = 1,
+    });
     defer state_machine.deinit();
 
     // Create accounts:
