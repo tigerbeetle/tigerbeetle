@@ -650,7 +650,7 @@ pub fn TableType(
                     .op = options.address,
                     .commit = builder.filter_block_count,
                     .request = builder.data_block_count,
-                    .timestamp = snapshot_min,
+                    .timestamp = options.snapshot_min,
                     .size = index.size,
                     .command = .block,
                 };

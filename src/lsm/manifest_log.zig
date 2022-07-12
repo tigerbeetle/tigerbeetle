@@ -654,7 +654,7 @@ fn ManifestLogTestType(
             errdefer manifest_log.deinit(allocator);
 
             return ManifestLogTest{
-                .superblock = superblock,
+                .superblock = grid.superblock,
                 .manifest_log = manifest_log,
             };
         }
