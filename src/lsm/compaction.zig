@@ -26,7 +26,7 @@ pub fn CompactionType(
 
         const Grid = GridType(Storage);
         const BlockPtr = Grid.BlockPtr;
-        const Manifest = ManifestType(Table);
+        const Manifest = ManifestType(Table, Storage);
         const TableInfo = Manifest.TableInfo;
 
         const IteratorA = IteratorAType(Table, Storage);

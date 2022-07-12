@@ -136,7 +136,7 @@ pub fn GrooveType(
     // Generate index LSM trees from the struct fields.
     inline for (std.meta.fields(Object)) |field| {
         // See if we should ignore this field from the options.
-        var ignored = false;
+        comptime var ignored = false;
         inline for (options.ignored) |ignored_field_name| {
             ignored = ignored or std.mem.eql(u8, field.name, ignored_field_name);
         }
@@ -208,10 +208,13 @@ pub fn GrooveType(
 
     // Verify no hash collisions between all the trees:
     comptime var hashes: []const u128 = &.{ ObjectTree.hash };
+
     inline for (std.meta.fields(IndexTrees)) |field| {
         const IndexTree = @TypeOf(@field(@as(IndexTrees, undefined), field.name));
-        assert(std.mem.containsAtLeast(u128, hashes, 0, IndexTree.hash));
-        hashes = hashes ++ &.{ IndexTree.hash };
+        const hash: []const u128 = &.{ IndexTree.hash };
+
+        assert(std.mem.containsAtLeast(u128, hashes, 0, hash));
+        hashes = hashes ++ hash;
     }
 
     // Verify groove index count:
@@ -231,7 +234,7 @@ pub fn GrooveType(
             }
 
             // Get the index value type.
-            const Value = blk: {
+            const Value: type = blk: {
                 if (!derived) {
                     break :blk @TypeOf(@field(@as(Object, undefined), field_name));
                 }
@@ -262,9 +265,9 @@ pub fn GrooveType(
         }
     }.HelperType;
 
-    const Key = ObjectTree.Table.Key;
-    const Value = ObjectTree.Table.Value;
-    const key_from_value = ObjectTree.Table.key_from_value;
+    const Key = ObjectTree.TableType.Key;
+    const Value = ObjectTree.TableType.Value;
+    const key_from_value = ObjectTree.TableType.key_from_value;
 
     return struct {
         const Groove = @This();
@@ -274,7 +277,7 @@ pub fn GrooveType(
         const Callback = fn (*Groove) void;
         const JoinOp = enum { compacting, checkpoint };
 
-        join_op: ?SyncOp = null,
+        join_op: ?JoinOp = null,
         join_pending: usize = 0,
         join_callback: ?Callback = null,
 
@@ -288,7 +291,7 @@ pub fn GrooveType(
             grid: *Grid,
             // The cache size is meant to be computed based on the left over available memory
             // that tigerbeetle was given to allocate from CLI arguments.
-            cache_size: usize,
+            cache_size: u32,
             // In general, the commit count max for a field, depends on the field's object,
             // how many objects might be changed by a batch:
             //   (config.message_size_max - sizeOf(vsr.header))
@@ -367,9 +370,9 @@ pub fn GrooveType(
         }
 
         pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {
-            assert(groove.sync_op == null);
-            assert(groove.sync_pending == 0);
-            assert(groove.sync_callback == null);            
+            assert(groove.join_op == null);
+            assert(groove.join_pending == 0);
+            assert(groove.join_callback == null);            
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(groove.indexes, field.name).deinit(allocator);
@@ -412,7 +415,7 @@ pub fn GrooveType(
         fn update(groove: *Groove, old: *const Value, new: *const Value) void {
             // Update the object tree entry if any of the fields (even ignored) are different.
             if (!std.mem.eql(u8, std.mem.asBytes(old), std.mem.asBytes(new))) {
-                groove.objects.remove(key_from_value(old));
+                groove.objects.remove(old);
                 groove.objects.put(new);
             }
 
@@ -456,26 +459,26 @@ pub fn GrooveType(
         }
 
         /// Maximum number of pending sync callbacks (ObjecTree + IndexTrees).
-        const sync_pending_max = 1 + std.meta.fields(IndexTrees).len;
+        const join_pending_max = 1 + std.meta.fields(IndexTrees).len;
 
-        fn SyncType(comptime sync_op: SyncOp) type {
+        fn JoinType(comptime join_op: JoinOp) type {
             return struct {
-                pub fn start(groove: *Groove, sync_callback: Callback) void {
+                pub fn start(groove: *Groove, join_callback: Callback) void {
                     // Make sure no sync op is currently running.
-                    assert(groove.sync_op == null);
-                    assert(groove.sync_pending == 0);
-                    assert(groove.sync_callback == null);
+                    assert(groove.join_op == null);
+                    assert(groove.join_pending == 0);
+                    assert(groove.join_callback == null);
                     
                     // Start the sync operations
-                    groove.sync_op = sync_op;
-                    groove.sync_callback = sync_callback;
-                    groove.sync_pending = sync_pending_max;
+                    groove.join_op = join_op;
+                    groove.join_callback = join_callback;
+                    groove.join_pending = join_pending_max;
                 }
 
                 /// Returns LSM tree type for the given index field name (or ObjectTree if null).
                 fn TreeFor(comptime index_field_name: ?[]const u8) type {
                     const index_field = index_field_name orelse return ObjectTree;
-                    return @TypeOf(@field(@as(IndexTress, undefined), index_field));
+                    return @TypeOf(@field(@as(IndexTrees, undefined), index_field));
                 }
 
                 pub fn tree_callback(
@@ -494,17 +497,17 @@ pub fn GrooveType(
                             };
 
                             // Make sure the sync operation is currently running.
-                            assert(groove.sync_op == sync_op);
-                            assert(groove.sync_callback != null);
-                            assert(groove.sync_pending <= sync_pending_max);
+                            assert(groove.join_op == join_op);
+                            assert(groove.join_callback != null);
+                            assert(groove.join_pending <= join_pending_max);
                             
                             // Guard until all pending sync ops complete.
-                            groove.sync_pending -= 1;
-                            if (groove.sync_pending > 0) return;
+                            groove.join_pending -= 1;
+                            if (groove.join_pending > 0) return;
 
-                            const callback = groove.sync_callback.?;
-                            groove.sync_op = null;
-                            groove.sync_callback = null;
+                            const callback = groove.join_callback.?;
+                            groove.join_op = null;
+                            groove.join_callback = null;
                             callback(groove);
                         }
                     }.tree_cb;
@@ -513,24 +516,24 @@ pub fn GrooveType(
         }
 
         pub fn compact_io(groove: *Groove, op: u64, callback: Callback) void {
-            // Start a compacting sync operation.
-            const Sync = SyncType(.compacting);
-            Sync.start(groove, callback);
+            // Start a compacting join operation.
+            const Join = JoinType(.compacting);
+            Join.start(groove, callback);
             
             // Compact the ObjectTree.
-            groove.objects.compact_io(op, Sync.tree_callback(null));
+            groove.objects.compact_io(op, Join.tree_callback(null));
 
             // Compact the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(groove.indexes, field.name).compact_io(op, Sync.callback(field.name));
+                @field(groove.indexes, field.name).compact_io(op, Join.tree_callback(field.name));
             }
         }
 
         pub fn compact_cpu(groove: *Groove) void {
-            // Make sure a compacting sync operation is running
-            assert(groove.sync_op == .compacting);
-            assert(groove.sync_pending <= sync_pending_max);
-            assert(groove.sync_callback != null);
+            // Make sure a compacting join operation is running
+            assert(groove.join_op == .compacting);
+            assert(groove.join_pending <= join_pending_max);
+            assert(groove.join_callback != null);
 
             groove.objects.compact_cpu();
 
@@ -540,16 +543,16 @@ pub fn GrooveType(
         }
 
         pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
-            // Start a checkpoint sync operation.
-            const Sync = SyncType(.checkpoint);
-            Sync.start(groove, callback);
+            // Start a checkpoint join operation.
+            const Join = JoinType(.checkpoint);
+            Join.start(groove, callback);
             
             // Checkpoint the ObjectTree.
-            groove.objects.checkpoint(Sync.callback(null));
+            groove.objects.checkpoint(Join.tree_callback(null));
 
             // Checkpoint the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(groove.indexes, field.name).checkpoint(Sync.callback(field.name));
+                @field(groove.indexes, field.name).checkpoint(Join.tree_callback(field.name));
             }
         }
     };
@@ -563,8 +566,8 @@ test "Groove" {
         Storage,
         Transfer,
         .{
-            .ignored = [_][]const u8{ "reserved", "user_data" },
-            .derived = &.{},
+            .ignored = [_][]const u8{ "reserved", "user_data", "flags" },
+            .derived = .{},
         },
     );
 

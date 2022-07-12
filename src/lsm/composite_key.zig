@@ -19,9 +19,9 @@ pub fn CompositeKey(comptime Field: type) type {
         const pad = Field == u128;
 
         pub const Value = packed struct {
-            field: Field,
+            field: Field align(@alignOf(Field)),
             /// The most significant bit indicates if the value is a tombstone.
-            timestamp: u64,
+            timestamp: u64 align(@alignOf(u64)),
             padding: (if (pad) u64 else void) = (if (pad) 0 else {}),
 
             comptime {
@@ -30,9 +30,9 @@ pub fn CompositeKey(comptime Field: type) type {
             }
         };
 
-        field: Field,
+        field: Field align(@alignOf(Field)),
         /// The most significant bit must be unset as it is used to indicate a tombstone.
-        timestamp: u64,
+        timestamp: u64 align(@alignOf(u64)),
         padding: (if (pad) u64 else void) = (if (pad) 0 else {}),
 
         comptime {

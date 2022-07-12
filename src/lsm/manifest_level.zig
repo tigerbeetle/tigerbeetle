@@ -1114,7 +1114,7 @@ pub fn TestContext(
             }
         }
 
-        inline fn key_min_from_table(table: TableInfo) Key {
+        inline fn key_min_from_table(table: *const TableInfo) Key {
             return table.key_min;
         }
     };

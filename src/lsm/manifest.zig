@@ -18,6 +18,10 @@ const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 
 pub fn TableInfoType(comptime Table: type) type {
+    const Key = Table.Key;
+    const compare_keys = Table.compare_keys;
+    
+
     return extern struct {
         const TableInfo = @This();
 
