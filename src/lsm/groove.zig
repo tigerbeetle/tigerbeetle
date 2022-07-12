@@ -271,12 +271,12 @@ pub fn GrooveType(
 
         const Grid = GridType(Storage);
 
-        const SyncOp = enum { compacting, checkpoint };
-        pub const Callback = fn (*Groove) void;
+        const Callback = fn (*Groove) void;
+        const JoinOp = enum { compacting, checkpoint };
 
-        sync_op: ?SyncOp = null,
-        sync_pending: usize = 0,
-        sync_callback: ?Callback = null,
+        join_op: ?SyncOp = null,
+        join_pending: usize = 0,
+        join_callback: ?Callback = null,
 
         cache: *ObjectTree.ValueCache,
         objects: ObjectTree,
@@ -472,16 +472,20 @@ pub fn GrooveType(
                     groove.sync_pending = sync_pending_max;
                 }
 
-                pub fn callback(
-                    comptime Tree: type, 
+                /// Returns LSM tree type for the given index field name (or ObjectTree if null).
+                fn TreeFor(comptime index_field_name: ?[]const u8) type {
+                    const index_field = index_field_name orelse return ObjectTree;
+                    return @TypeOf(@field(@as(IndexTress, undefined), index_field));
+                }
+
+                pub fn tree_callback(
                     comptime index_field_name: ?[]const u8,
-                ) fn (*Tree) void {
+                ) fn (*TreeFor(index_field_name)) void {
                     return struct {
-                        fn tree_callback(tree: *Tree) void {
+                        fn tree_cb(tree: *TreeFor(index_field_name)) void {
                             // Derive the groove pointer from the tree using the index_field_name.
                             const groove = blk: {
                                 const index_field = index_field_name orelse {
-                                    assert(Tree == ObjectTree);
                                     break :blk @fieldParentPtr(Groove, "objects", tree);
                                 };
 
@@ -498,12 +502,12 @@ pub fn GrooveType(
                             groove.sync_pending -= 1;
                             if (groove.sync_pending > 0) return;
 
-                            const sync_callback = groove.sync_callback.?;
+                            const callback = groove.sync_callback.?;
                             groove.sync_op = null;
                             groove.sync_callback = null;
-                            sync_callback(groove);
+                            callback(groove);
                         }
-                    }.tree_callback;
+                    }.tree_cb;
                 }
             };
         }
@@ -514,12 +518,11 @@ pub fn GrooveType(
             Sync.start(groove, callback);
             
             // Compact the ObjectTree.
-            groove.objects.compact_io(op, Sync.callback(ObjectTree, null));
+            groove.objects.compact_io(op, Sync.tree_callback(null));
 
             // Compact the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const index_tree = &@field(groove.indexes, field.name);
-                index_tree.compact_io(op, Sync.callback(@TypeOf(index_tree.*), field.name));
+                @field(groove.indexes, field.name).compact_io(op, Sync.callback(field.name));
             }
         }
 
@@ -542,12 +545,11 @@ pub fn GrooveType(
             Sync.start(groove, callback);
             
             // Checkpoint the ObjectTree.
-            groove.objects.checkpoint(Sync.callback(ObjectTree, null));
+            groove.objects.checkpoint(Sync.callback(null));
 
             // Checkpoint the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const index_tree = &@field(groove.indexes, field.name);
-                index_tree.checkpoint(Sync.callback(@TypeOf(index_tree.*), field.name));
+                @field(groove.indexes, field.name).checkpoint(Sync.callback(field.name));
             }
         }
     };
