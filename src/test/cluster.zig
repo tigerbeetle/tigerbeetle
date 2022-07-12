@@ -33,6 +33,7 @@ pub const ClusterOptions = struct {
     network_options: NetworkOptions,
     storage_options: Storage.Options,
     health_options: HealthOptions,
+    state_machine_options: StateMachine.Options,
 };
 
 pub const HealthOptions = struct {
@@ -59,7 +60,6 @@ pub const Cluster = struct {
     allocator: mem.Allocator,
     options: ClusterOptions,
 
-    state_machines: []StateMachine,
     storages: []Storage,
     times: []Time,
     replicas: []Replica,
@@ -81,9 +81,6 @@ pub const Cluster = struct {
 
         const cluster = try allocator.create(Cluster);
         errdefer allocator.destroy(cluster);
-
-        const state_machines = try allocator.alloc(StateMachine, options.replica_count);
-        errdefer allocator.free(state_machines);
 
         const storages = try allocator.alloc(Storage, options.replica_count);
         errdefer allocator.free(storages);
@@ -112,7 +109,6 @@ pub const Cluster = struct {
         cluster.* = .{
             .allocator = allocator,
             .options = options,
-            .state_machines = state_machines,
             .storages = storages,
             .times = times,
             .replicas = replicas,
@@ -132,7 +128,6 @@ pub const Cluster = struct {
                 .offset_coefficient_A = 0,
                 .offset_coefficient_B = 0,
             };
-            cluster.state_machines[replica_index] = StateMachine.init(options.seed);
             cluster.storages[replica_index] = try Storage.init(
                 allocator,
                 config.journal_size_max,
@@ -153,7 +148,7 @@ pub const Cluster = struct {
                 &cluster.times[replica_index],
                 &cluster.storages[replica_index],
                 message_bus,
-                &cluster.state_machines[replica_index],
+                cluster.options.state_machine_options,
             );
             message_bus.set_on_message(*Replica, replica, Replica.on_message);
         }
@@ -280,7 +275,6 @@ pub const Cluster = struct {
         // Reset the storage before the replica so that pending writes can (partially) finish.
         cluster.storages[replica_index].reset();
         replica.deinit(cluster.allocator);
-        cluster.state_machines[replica_index] = StateMachine.init(cluster.options.seed);
 
         // The message bus and network should be left alone, as messages
         // may still be inflight to/from this replica. However, we should
@@ -322,7 +316,7 @@ pub const Cluster = struct {
             &cluster.times[replica_index],
             &cluster.storages[replica_index],
             message_bus,
-            &cluster.state_machines[replica_index],
+            cluster.options.state_machine_options,
         );
         message_bus.set_on_message(*Replica, replica, Replica.on_message);
         replica.on_change_state = cluster.on_change_state;
