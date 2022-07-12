@@ -12,7 +12,7 @@ const GridType = @import("grid.zig").GridType;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
-/// Creates an LSM tree type for the Grove's Object tree (where Value = Account or Transfer).
+/// Creates an LSM tree type for the Groove's Object tree (where Value = Account or Transfer).
 fn ObjectTreeType(comptime Storage: type, comptime Value: type) type {
     if (!@hasField(Value, "timestamp")) {
         @compileError(@typeName(Value) ++ " must have timestamp field as the key");
@@ -116,9 +116,9 @@ fn IndexTreeType(
     return TreeType(Table, Storage, tree_name);
 }
 
-/// A Grove is a collection of LSM trees auto generated for fields on a struct type
+/// A Groove is a collection of LSM trees auto generated for fields on a struct type
 /// as well as custom derived fields from said struct type.
-pub fn GroveType(
+pub fn GrooveType(
     comptime Storage: type,
     comptime Object: type,
     /// An anonymous struct instance which contains the following:
@@ -214,7 +214,7 @@ pub fn GroveType(
         hashes = hashes ++ &.{ IndexTree.hash };
     }
 
-    // Verify grove index count:
+    // Verify groove index count:
     const indexes_count_actual = std.meta.fields(IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len
         - options.ignored.len
@@ -267,12 +267,12 @@ pub fn GroveType(
     const key_from_value = ObjectTree.Table.key_from_value;
 
     return struct {
-        const Grove = @This();
+        const Groove = @This();
 
         const Grid = GridType(Storage);
 
         const SyncOp = enum { compacting, checkpoint };
-        pub const Callback = fn (*Grove) void;
+        pub const Callback = fn (*Groove) void;
 
         sync_op: ?SyncOp = null,
         sync_pending: usize = 0,
@@ -308,11 +308,11 @@ pub fn GroveType(
             // some of these accounts may exist, requiring a remove/put to update the index.
             //
             // TODO(King) Since this is state machine specific, let's expose `commit_count_max`
-            // as an option when creating the grove.
-            // Then, in our case, we'll create the Accounts grove with a commit_count_max of 
+            // as an option when creating the groove.
+            // Then, in our case, we'll create the Accounts groove with a commit_count_max of 
             // 8191 * 2 (accounts mutated per transfer) * 2 (old/new index value).
             commit_count_max: usize,
-        ) !Grove {
+        ) !Groove {
             // Cache is dynamically allocated to pass a pointer into the Object tree.
             const cache = try allocator.create(ObjectTree.ValueCache);
             errdefer allocator.destroy(cache);
@@ -359,61 +359,61 @@ pub fn GroveType(
                 index_trees_initialized += 1;
             }
 
-            return Grove{
+            return Groove{
                 .cache = cache,
                 .objects = object_tree,
                 .indexes = index_trees,
             };
         }
 
-        pub fn deinit(grove: *Grove, allocator: mem.Allocator) void {
-            assert(grove.sync_op == null);
-            assert(grove.sync_pending == 0);
-            assert(grove.sync_callback == null);            
+        pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {
+            assert(groove.sync_op == null);
+            assert(groove.sync_pending == 0);
+            assert(groove.sync_callback == null);            
 
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(grove.indexes, field.name).deinit(allocator);
+                @field(groove.indexes, field.name).deinit(allocator);
             }
 
-            grove.objects.deinit(allocator);
-            grove.cache.deinit(allocator);
+            groove.objects.deinit(allocator);
+            groove.cache.deinit(allocator);
             
-            allocator.destroy(grove.cache);
-            grove.* = undefined;
+            allocator.destroy(groove.cache);
+            groove.* = undefined;
         }
 
-        pub fn get(grove: *Grove, key: Key) ?*const Value {
-            return grove.objects.get(key);
+        pub fn get(groove: *Groove, key: Key) ?*const Value {
+            return groove.objects.get(key);
         }
 
-        pub fn put(grove: *Grove, value: *const Value) void {
-            if (grove.get(key_from_value(value))) |existing_value| {
-                grove.update(existing_value, value);
+        pub fn put(groove: *Groove, value: *const Value) void {
+            if (groove.get(key_from_value(value))) |existing_value| {
+                groove.update(existing_value, value);
             } else {
-                grove.insert(value);
+                groove.insert(value);
             }
         }
 
         /// Insert the value into the objects tree and its fields into the index trees.
-        fn insert(grove: *Grove, value: *const Value) void {
-            grove.objects.put(value);
+        fn insert(groove: *Groove, value: *const Value) void {
+            groove.objects.put(value);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
 
                 if (Helper.derive(value)) |index| {
                     const composite_key = Helper.to_composite_key(index);
-                    @field(grove.indexes, field.name).put(composite_key);
+                    @field(groove.indexes, field.name).put(composite_key);
                 }
             }
         }
 
         /// Update the object and index tress by diff'ing the old and new values.
-        fn update(grove: *Grove, old: *const Value, new: *const Value) void {
+        fn update(groove: *Groove, old: *const Value, new: *const Value) void {
             // Update the object tree entry if any of the fields (even ignored) are different.
             if (!std.mem.eql(u8, std.mem.asBytes(old), std.mem.asBytes(new))) {
-                grove.objects.remove(key_from_value(old));
-                grove.objects.put(new);
+                groove.objects.remove(key_from_value(old));
+                groove.objects.put(new);
             }
 
             inline for (std.meta.fields(IndexTrees)) |field| {
@@ -424,12 +424,12 @@ pub fn GroveType(
                 if (old_index != new_index) {
                     if (old_index) |value| {
                         const old_composite_key = Helper.to_composite_key(value);
-                        @field(grove.indexes, field.name).remove(old_composite_key);
+                        @field(groove.indexes, field.name).remove(old_composite_key);
                     }
 
                     if (new_index) |value| {
                         const new_composite_key = Helper.to_composite_key(value);
-                        @field(grove.indexes, field.name).put(&.{
+                        @field(groove.indexes, field.name).put(&.{
                             .field = new_composite_key,
                             .timestamp = new.timestamp,
                         });
@@ -438,19 +438,19 @@ pub fn GroveType(
             }
         }
 
-        pub fn remove(grove: *Grove, value: *const Value) void {
+        pub fn remove(groove: *Groove, value: *const Value) void {
             const key = key_from_value(value);
-            const existing_value = grove.objects.get(key).?;
+            const existing_value = groove.objects.get(key).?;
             assert(std.mem.eql(u8, std.mem.asBytes(existing_value), std.mem.asBytes(value)));
             
-            grove.objects.remove(key);
+            groove.objects.remove(key);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
 
                 if (Helper.derive(value)) |index| {
                     const composite_key = Helper.to_composite_key(index);
-                    @field(grove.indexes, field.name).remove(composite_key);
+                    @field(groove.indexes, field.name).remove(composite_key);
                 }
             }
         }
@@ -460,16 +460,16 @@ pub fn GroveType(
 
         fn SyncType(comptime sync_op: SyncOp) type {
             return struct {
-                pub fn start(grove: *Grove, sync_callback: Callback) void {
+                pub fn start(groove: *Groove, sync_callback: Callback) void {
                     // Make sure no sync op is currently running.
-                    assert(grove.sync_op == null);
-                    assert(grove.sync_pending == 0);
-                    assert(grove.sync_callback == null);
+                    assert(groove.sync_op == null);
+                    assert(groove.sync_pending == 0);
+                    assert(groove.sync_callback == null);
                     
                     // Start the sync operations
-                    grove.sync_op = sync_op;
-                    grove.sync_callback = sync_callback;
-                    grove.sync_pending = sync_pending_max;
+                    groove.sync_op = sync_op;
+                    groove.sync_callback = sync_callback;
+                    groove.sync_pending = sync_pending_max;
                 }
 
                 pub fn callback(
@@ -478,86 +478,86 @@ pub fn GroveType(
                 ) fn (*Tree) void {
                     return struct {
                         fn tree_callback(tree: *Tree) void {
-                            // Derive the grove pointer from the tree using the index_field_name.
-                            const grove = blk: {
+                            // Derive the groove pointer from the tree using the index_field_name.
+                            const groove = blk: {
                                 const index_field = index_field_name orelse {
                                     assert(Tree == ObjectTree);
-                                    break :blk @fieldParentPtr(Grove, "objects", tree);
+                                    break :blk @fieldParentPtr(Groove, "objects", tree);
                                 };
 
                                 const indexes = @fieldParentPtr(IndexTrees, index_field, tree);
-                                break :blk @fieldParentPtr(Grove, "indexes", indexes);
+                                break :blk @fieldParentPtr(Groove, "indexes", indexes);
                             };
 
                             // Make sure the sync operation is currently running.
-                            assert(grove.sync_op == sync_op);
-                            assert(grove.sync_callback != null);
-                            assert(grove.sync_pending <= sync_pending_max);
+                            assert(groove.sync_op == sync_op);
+                            assert(groove.sync_callback != null);
+                            assert(groove.sync_pending <= sync_pending_max);
                             
                             // Guard until all pending sync ops complete.
-                            grove.sync_pending -= 1;
-                            if (grove.sync_pending > 0) return;
+                            groove.sync_pending -= 1;
+                            if (groove.sync_pending > 0) return;
 
-                            const sync_callback = grove.sync_callback.?;
-                            grove.sync_op = null;
-                            grove.sync_callback = null;
-                            sync_callback(grove);
+                            const sync_callback = groove.sync_callback.?;
+                            groove.sync_op = null;
+                            groove.sync_callback = null;
+                            sync_callback(groove);
                         }
                     }.tree_callback;
                 }
             };
         }
 
-        pub fn compact_io(grove: *Grove, op: u64, callback: Callback) void {
+        pub fn compact_io(groove: *Groove, op: u64, callback: Callback) void {
             // Start a compacting sync operation.
             const Sync = SyncType(.compacting);
-            Sync.start(grove, callback);
+            Sync.start(groove, callback);
             
             // Compact the ObjectTree.
-            grove.objects.compact_io(op, Sync.callback(ObjectTree, null));
+            groove.objects.compact_io(op, Sync.callback(ObjectTree, null));
 
             // Compact the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const index_tree = &@field(grove.indexes, field.name);
+                const index_tree = &@field(groove.indexes, field.name);
                 index_tree.compact_io(op, Sync.callback(@TypeOf(index_tree.*), field.name));
             }
         }
 
-        pub fn compact_cpu(grove: *Grove) void {
+        pub fn compact_cpu(groove: *Groove) void {
             // Make sure a compacting sync operation is running
-            assert(grove.sync_op == .compacting);
-            assert(grove.sync_pending <= sync_pending_max);
-            assert(grove.sync_callback != null);
+            assert(groove.sync_op == .compacting);
+            assert(groove.sync_pending <= sync_pending_max);
+            assert(groove.sync_callback != null);
 
-            grove.objects.compact_cpu();
+            groove.objects.compact_cpu();
 
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(grove.indexes, field.name).compact_cpu();
+                @field(groove.indexes, field.name).compact_cpu();
             }
         }
 
-        pub fn checkpoint(grove: *Grove, callback: fn (*Grove) void) void {
+        pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
             // Start a checkpoint sync operation.
             const Sync = SyncType(.checkpoint);
-            Sync.start(grove, callback);
+            Sync.start(groove, callback);
             
             // Checkpoint the ObjectTree.
-            grove.objects.checkpoint(Sync.callback(ObjectTree, null));
+            groove.objects.checkpoint(Sync.callback(ObjectTree, null));
 
             // Checkpoint the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const index_tree = &@field(grove.indexes, field.name);
+                const index_tree = &@field(groove.indexes, field.name);
                 index_tree.checkpoint(Sync.callback(@TypeOf(index_tree.*), field.name));
             }
         }
     };
 }
 
-test "Grove" {
+test "Groove" {
     const Transfer = @import("../tigerbeetle.zig").Transfer;
     const Storage = @import("../storage.zig").Storage;
 
-    const Grove = GroveType(
+    const Groove = GrooveType(
         Storage,
         Transfer,
         .{
@@ -566,14 +566,14 @@ test "Grove" {
         },
     );
 
-    _ = Grove.init;
-    _ = Grove.deinit;
+    _ = Groove.init;
+    _ = Groove.deinit;
 
-    _ = Grove.get;
-    _ = Grove.put;
-    _ = Grove.remove;
+    _ = Groove.get;
+    _ = Groove.put;
+    _ = Groove.remove;
 
-    _ = Grove.compact_io;
-    _ = Grove.compact_cpu;
-    _ = Grove.checkpoint;
+    _ = Groove.compact_io;
+    _ = Groove.compact_cpu;
+    _ = Groove.checkpoint;
 }
