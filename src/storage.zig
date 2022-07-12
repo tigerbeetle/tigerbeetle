@@ -83,6 +83,10 @@ pub const Storage = struct {
         storage.fd = IO.INVALID_FILE;
     }
 
+    pub fn tick(storage: *Storage) void {
+        storage.io.tick();
+    }
+
     pub fn read_sectors(
         self: *Storage,
         callback: fn (read: *Storage.Read) void,

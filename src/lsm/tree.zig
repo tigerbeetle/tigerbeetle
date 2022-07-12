@@ -69,13 +69,13 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
     return struct {
         const Tree = @This();
 
-        // Expose the Table & hash for the Grove.
+        // Expose the Table & hash for the Groove.
         pub const TableType = Table;
         pub const name = tree_name;
         pub const hash = tree_hash;
 
         const Grid = @import("grid.zig").GridType(Storage);
-        const Manifest = @import("manifest.zig").ManifestType(Table);
+        const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
         const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
 
