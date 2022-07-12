@@ -220,6 +220,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 break :blk @panic("TODO(Joran): lookup using address/checksum");
             };
 
+            // TODO(Joran): Verify if the compaction snapshot should be used for remove_tables().
             const tables = [_]TableInfo{table_info.*};
             manifest.levels[level_a].remove_tables(manifest.node_pool, &.{snapshot}, &tables);
             manifest.levels[level_b].insert_tables(manifest.node_pool, &tables);
