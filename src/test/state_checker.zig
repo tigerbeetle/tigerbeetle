@@ -36,10 +36,11 @@ pub const StateChecker = struct {
     transitions: u64 = 0,
 
     pub fn init(allocator: mem.Allocator, cluster: *Cluster) !StateChecker {
-        const state = cluster.state_machines[0].state;
+        const state = cluster.replicas[0].state_machine.state;
 
         var state_machine_states: [config.replicas_max]u128 = undefined;
-        for (cluster.state_machines) |state_machine, i| {
+        for (cluster.replicas) |*replica, i| {
+            const state_machine = &replica.state_machine;
             assert(state_machine.state == state);
             state_machine_states[i] = state_machine.state;
         }
@@ -66,7 +67,7 @@ pub const StateChecker = struct {
         const cluster = @fieldParentPtr(Cluster, "state_checker", state_checker);
 
         const a = state_checker.state_machine_states[replica];
-        const b = cluster.state_machines[replica].state;
+        const b = cluster.replicas[replica].state_machine.state;
 
         if (b == a) return;
         state_checker.state_machine_states[replica] = b;

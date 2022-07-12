@@ -328,7 +328,6 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
 }
 
 fn on_change_replica(replica: *Replica) void {
-    assert(cluster.state_machines[replica.replica].state == replica.state_machine.state);
     cluster.state_checker.check_state(replica.replica);
 }
 

@@ -122,7 +122,7 @@ pub fn Replica(
         message_bus: *MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
-        state_machine: *StateMachine,
+        state_machine: StateMachine,
 
         /// The client table records for each client the latest session and the latest committed reply.
         client_table: ClientTable,
@@ -244,7 +244,7 @@ pub fn Replica(
             time: *Time,
             storage: *Storage,
             message_bus: *MessageBus,
-            state_machine: *StateMachine,
+            state_machine_config: StateMachine.Config,
         ) !Self {
             assert(replica_count > 0);
             assert(replica < replica_count);
@@ -294,6 +294,9 @@ pub fn Replica(
 
             const journal = try Journal.init(allocator, storage, replica);
             errdefer journal.deinit(allocator);
+
+            var state_machine = try StateMachine.init(allocator, state_machine_config);
+            errdefer state_machine_config.deinit();
 
             const recovery_nonce = blk: {
                 var nonce: [@sizeOf(Nonce)]u8 = undefined;
@@ -389,6 +392,7 @@ pub fn Replica(
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
+            self.state_machine.deinit();
 
             {
                 var it = self.client_table.iterator();

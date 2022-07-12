@@ -13,13 +13,19 @@ pub const StateMachine = struct {
         hash,
     };
 
+    pub const Config = struct {
+        seed: u64,
+    };
+
     state: u128,
     prepare_timestamp: u64 = 0,
     commit_timestamp: u64 = 0,
 
-    pub fn init(seed: u64) StateMachine {
-        return .{ .state = hash(0, std.mem.asBytes(&seed)) };
+    pub fn init(_: std.mem.Allocator, config: Config) !StateMachine {
+        return StateMachine{ .state = hash(0, std.mem.asBytes(&config.seed)) };
     }
+
+    pub fn deinit(_: *StateMachine) void {}
 
     pub fn prepare(
         state_machine: *StateMachine,
@@ -35,10 +41,13 @@ pub const StateMachine = struct {
     pub fn commit(
         state_machine: *StateMachine,
         client: u128,
+        op_number: u64,
         operation: Operation,
         input: []const u8,
         output: []u8,
     ) usize {
+        _ = op_number;
+
         switch (operation) {
             .reserved, .root => unreachable,
             .register => return 0,
