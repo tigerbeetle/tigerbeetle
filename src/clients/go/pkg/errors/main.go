@@ -1,30 +1,32 @@
 package errors
 
-type ErrUnexpected struct {}
+type ErrUnexpected struct{}
 
 func (s ErrUnexpected) Error() string { return "Unexpected internal error." }
 
-type ErrOutOfMemory struct {}
+type ErrOutOfMemory struct{}
 
 func (s ErrOutOfMemory) Error() string { return "Internal client ran out of memory." }
 
-type ErrSystemResources struct {}
+type ErrSystemResources struct{}
 
 func (s ErrSystemResources) Error() string { return "Internal client ran out of system resources." }
 
-type ErrNetworkSubsystem struct {}
+type ErrNetworkSubsystem struct{}
 
-func (s ErrNetworkSubsystem) Error() string { return "Internal client had unexpected networking issues." }
+func (s ErrNetworkSubsystem) Error() string {
+	return "Internal client had unexpected networking issues."
+}
 
-type ErrInvalidAddress struct {}
+type ErrInvalidAddress struct{}
 
 func (s ErrInvalidAddress) Error() string { return "Invalid client cluster address." }
 
-type ErrClientClosed struct {}
+type ErrClientClosed struct{}
 
 func (s ErrClientClosed) Error() string { return "Client was closed." }
 
-type ErrInvalidOperation struct {}
+type ErrInvalidOperation struct{}
 
 func (s ErrInvalidOperation) Error() string { return "internal operation provided was invalid." }
 
