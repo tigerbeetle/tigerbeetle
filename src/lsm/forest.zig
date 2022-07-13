@@ -11,6 +11,7 @@ const GrooveType = @import("groove.zig").GrooveType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
 fn assert_struct_field_names_strict_equal(object_a: anytype, object_b: anytype) void {
+    // TODO: union of object_a and object_b
     inline for (std.meta.fields(@TypeOf(object_a))) |field_a| {
         comptime var in_object_b = false;
 
@@ -61,6 +62,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         join_pending: usize = 0,
         join_callback: ?Callback = null,
 
+        grid: *Grid,
         grooves: Grooves,
         node_pool: *NodePool,
 
@@ -96,7 +98,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                     @field(groove_options, field.name),
                     .{ 
                         .cache_size = @as(u32, 0), 
-                        .commit_count_max = @as(usize, 0),
+                        .commit_count_max = @as(u32, 0),
                     },
                 );
 
@@ -113,6 +115,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             }
 
             return Forest{
+                .grid = grid,
                 .grooves = grooves,
                 .node_pool = node_pool,
             };
@@ -148,7 +151,9 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                 ) fn (*GrooveFor(groove_field_name)) void {
                     return struct {
                         fn groove_cb(groove: *GrooveFor(groove_field_name)) void {
-                            const forest = @fieldParentPtr(Grooves, groove_field_name, groove);
+                            const grooves = @fieldParentPtr(Grooves, groove_field_name, groove);
+                            const forest = @fieldParentPtr(Forest, "grooves", grooves);
+
                             assert(forest.join_op == join_op);
                             assert(forest.join_callback != null);
                             assert(forest.join_pending <= std.meta.fields(Grooves).len);
@@ -177,7 +182,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             }
 
             // Tick the storage backend to start processing the IO.
-            forest.grid.storage.tick();
+            forest.grid.superblock.storage.tick();
 
             // While IO is processing, run/pipeline the CPU work on the grooves.
             inline for (std.meta.fields(Grooves)) |field| {
@@ -206,7 +211,7 @@ test "Forest" {
             Storage,
             Account,
             .{
-                .ignored = &[_][]const u8{"reserved", "flags", "user_data"},
+                .ignored = &[_][]const u8{"reserved", "flags"},
                 .derived = .{},
             },
         ),
@@ -214,7 +219,7 @@ test "Forest" {
             Storage,
             Transfer,
             .{
-                .ignored = &[_][]const u8{"reserved", "flags", "user_data"},
+                .ignored = &[_][]const u8{"reserved", "flags"},
                 .derived = .{},
             },
         ),

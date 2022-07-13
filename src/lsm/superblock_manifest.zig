@@ -395,7 +395,7 @@ fn test_codec(manifest: *Manifest) !void {
     );
 
     // The decoded instance must match the original instance:
-    var decoded = try Manifest.init(testing.allocator, manifest.count_max);
+    var decoded = try Manifest.init(testing.allocator, manifest.count_max, 8);
     defer decoded.deinit(testing.allocator);
 
     decoded.decode(mem.sliceAsBytes(&target_a)[0..size_a]);
@@ -422,7 +422,7 @@ test {
     const expectEqual = testing.expectEqual;
     const BlockReference = Manifest.BlockReference;
 
-    var manifest = try Manifest.init(testing.allocator, 3);
+    var manifest = try Manifest.init(testing.allocator, 3, 8);
     defer manifest.deinit(testing.allocator);
 
     for (manifest.checksums) |checksum| try expectEqual(@as(u128, 0), checksum);

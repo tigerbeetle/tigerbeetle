@@ -84,7 +84,10 @@ pub const Storage = struct {
     }
 
     pub fn tick(storage: *Storage) void {
-        storage.io.tick();
+        storage.io.tick() catch |err| {
+            log.warn("tick: {}", .{err});
+            std.debug.panic("storage tick: {}", .{err});
+        };
     }
 
     pub fn read_sectors(

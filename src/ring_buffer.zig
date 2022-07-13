@@ -369,7 +369,7 @@ test "RingBuffer: push/pop high level interface" {
 }
 
 test "RingBuffer: pop_tail" {
-    var lifo = RingBuffer(u32, 3){};
+    var lifo = RingBuffer(u32, 3, .array){};
     try lifo.push(1);
     try lifo.push(2);
     try lifo.push(3);
