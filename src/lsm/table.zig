@@ -48,6 +48,8 @@ pub fn TableType(
             }
 
             pub fn hash(_: HashMapContextValue, value: Value) u64 {
+                // TODO(King): this erros out with "unable to hash type void" due to
+                // CompositeKey(T) struct containing .padding which may be void at comptime.
                 const key = key_from_value(&value);
                 return std.hash_map.getAutoHashFn(Key, HashMapContextValue)(.{}, key);
             }

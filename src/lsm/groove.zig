@@ -136,8 +136,12 @@ pub fn GrooveType(
     // Generate index LSM trees from the struct fields.
     inline for (std.meta.fields(Object)) |field| {
         // See if we should ignore this field from the options.
-        comptime var ignored = false;
+        //
+        // By default, we ignore the "timestamp" field since it's a special identifier.
+        // Since the "timestamp" is ignored by default, it shouldn't be provided in options.ignored.
+        comptime var ignored = std.mem.eql(u8, field.name, "timestamp");
         inline for (options.ignored) |ignored_field_name| {
+            comptime assert(!std.mem.eql(u8, ignored_field_name, "timestamp"));
             ignored = ignored or std.mem.eql(u8, field.name, ignored_field_name);
         }
 
@@ -221,44 +225,57 @@ pub fn GrooveType(
     const indexes_count_actual = std.meta.fields(IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len
         - options.ignored.len
+        - 1 // The timestamp field is implicitly ignored since it's the primary key for ObjectTree.
         + std.meta.fields(@TypeOf(options.derived)).len;
+
     assert(indexes_count_actual == indexes_count_expect);
 
     // Generate a helper function for interacting with an Index field type.
     const IndexTreeFieldHelperType = struct {
-        fn HelperType(comptime field_name: []const u8) type {
-            // Check if the index is derived.
+        /// Returns true if the field is a derived field.
+        fn is_derived(comptime field_name: []const u8) bool {
             comptime var derived = false;
             inline for (derived_fields) |derived_field| {
                 derived = derived or std.mem.eql(u8, derived_field.name, field_name);
             }
+            return derived;
+        }
 
-            // Get the index value type.
-            const Value: type = blk: {
-                if (!derived) {
-                    break :blk @TypeOf(@field(@as(Object, undefined), field_name));
-                }
+        /// Gets the index type from the index name (even if the index is derived).
+        fn IndexType(comptime field_name: []const u8) type {
+            if (!is_derived(field_name)) {
+                return @TypeOf(@field(@as(Object, undefined), field_name));
+            }
 
-                const derived_fn = @TypeOf(@field(options.derived, field_name));
-                break :blk @typeInfo(derived_fn).Fn.return_type.?.Optional.child;
-            };
+            const derived_fn = @TypeOf(@field(options.derived, field_name));
+            return @typeInfo(derived_fn).Fn.return_type.?.Optional.child;
+        }
 
+        fn HelperType(comptime field_name: []const u8) type {
             return struct {
-                pub const Key = IndexCompositeKeyType(Value);
+                const Index = IndexType(field_name);
 
-                pub fn derive(object: *const Object) ?Value {
-                    if (derived) {
+                /// Try to extract an index from the object, deriving it when necessary.
+                pub fn derive_index(object: *const Object) ?Index {
+                    if (comptime is_derived(field_name)) {
                         return @field(options.derived, field_name)(object);
                     } else {
                         return @field(object, field_name);
                     }
                 }
 
-                pub fn to_composite_key(value: Value) Key {
-                    return switch (@typeInfo(Value)) {
-                        .Enum => @enumToInt(value),
-                        .Int => value,
-                        else => @compileError("Unsupported index value type"),
+                /// Create a Value from the index that can be used in the IndexTree.
+                pub fn derive_value(
+                    object: *const Object, 
+                    index: Index,
+                ) CompositeKey(IndexCompositeKeyType(Index)).Value {
+                    return .{
+                        .timestamp = object.timestamp,
+                        .field = switch (@typeInfo(Index)) {
+                            .Int => index,
+                            .Enum => @enumToInt(index),
+                            else => @compileError("Unsupported index type for " ++ field_name),
+                        },
                     };
                 }
             };
@@ -314,7 +331,7 @@ pub fn GrooveType(
             // as an option when creating the groove.
             // Then, in our case, we'll create the Accounts groove with a commit_count_max of 
             // 8191 * 2 (accounts mutated per transfer) * 2 (old/new index value).
-            commit_count_max: usize,
+            commit_count_max: u32,
         ) !Groove {
             // Cache is dynamically allocated to pass a pointer into the Object tree.
             const cache = try allocator.create(ObjectTree.ValueCache);
@@ -404,9 +421,9 @@ pub fn GrooveType(
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
 
-                if (Helper.derive(value)) |index| {
-                    const composite_key = Helper.to_composite_key(index);
-                    @field(groove.indexes, field.name).put(composite_key);
+                if (Helper.derive_index(value)) |index| {
+                    const index_value = Helper.derive_value(value, index);
+                    @field(groove.indexes, field.name).put(&index_value);
                 }
             }
         }
@@ -421,39 +438,37 @@ pub fn GrooveType(
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
-                const old_index = Helper.derive(old);
-                const new_index = Helper.derive(new);
+                const old_index = Helper.derive_index(old);
+                const new_index = Helper.derive_index(new);
 
-                if (old_index != new_index) {
-                    if (old_index) |value| {
-                        const old_composite_key = Helper.to_composite_key(value);
-                        @field(groove.indexes, field.name).remove(old_composite_key);
+                // Only update the indexes that change.
+                if (!std.meta.eql(old_index, new_index)) {
+                    if (old_index) |index| {
+                        const old_index_value = Helper.derive_value(old, index);
+                        @field(groove.indexes, field.name).remove(&old_index_value);
                     }
 
-                    if (new_index) |value| {
-                        const new_composite_key = Helper.to_composite_key(value);
-                        @field(groove.indexes, field.name).put(&.{
-                            .field = new_composite_key,
-                            .timestamp = new.timestamp,
-                        });
+                    if (new_index) |index| {
+                        const new_index_value = Helper.derive_value(new, index);
+                        @field(groove.indexes, field.name).put(&new_index_value);
                     }
                 }
             }
         }
 
         pub fn remove(groove: *Groove, value: *const Value) void {
-            const key = key_from_value(value);
-            const existing_value = groove.objects.get(key).?;
+            // Make sure the given value exists in the object tree.
+            const existing_value = groove.objects.get(key_from_value(value)).?;
             assert(std.mem.eql(u8, std.mem.asBytes(existing_value), std.mem.asBytes(value)));
-            
-            groove.objects.remove(key);
+
+            groove.objects.remove(value);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
 
-                if (Helper.derive(value)) |index| {
-                    const composite_key = Helper.to_composite_key(index);
-                    @field(groove.indexes, field.name).remove(composite_key);
+                if (Helper.derive_index(value)) |index| {
+                    const index_value = Helper.derive_value(value, index);
+                    @field(groove.indexes, field.name).remove(&index_value);
                 }
             }
         }
@@ -531,7 +546,7 @@ pub fn GrooveType(
 
         pub fn compact_cpu(groove: *Groove) void {
             // Make sure a compacting join operation is running
-            assert(groove.join_op == .compacting);
+            assert(groove.join_op == JoinOp.compacting);
             assert(groove.join_pending <= join_pending_max);
             assert(groove.join_callback != null);
 

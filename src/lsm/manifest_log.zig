@@ -200,8 +200,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             verify_block(block, block_reference.checksum, block_reference.address);
 
             const entry_count = block_entry_count(block);
-            const labels_used = labels(block)[0..entry_count];
-            const tables_used = tables(block)[0..entry_count];
+            const labels_used = labels_const(block)[0..entry_count];
+            const tables_used = tables_const(block)[0..entry_count];
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
@@ -407,7 +407,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 manifest_log.grid.read_block(
                     compact_callback,
                     &manifest_log.read,
-                    manifest_log.blocks.buffer[0], // TODO Grid to provide BlockPtr.
                     block.address,
                     block.checksum,
                 );
@@ -416,20 +415,18 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
         }
 
-        fn compact_callback(read: *Grid.Read) void {
+        fn compact_callback(read: *Grid.Read, block: BlockPtrConst) void {
             const manifest_log = @fieldParentPtr(ManifestLog, "read", read);
             assert(manifest_log.opened);
             assert(manifest_log.reading);
             assert(!manifest_log.writing);
 
-            const block: BlockPtr = manifest_log.blocks.buffer[0]; // TODO Grid to provide BlockPtr.
             const block_reference = manifest_log.read_block_reference.?;
-
             verify_block(block, block_reference.checksum, block_reference.address);
 
             const entry_count = block_entry_count(block);
-            const labels_used = labels(block)[0..entry_count];
-            const tables_used = tables(block)[0..entry_count];
+            const labels_used = labels_const(block)[0..entry_count];
+            const tables_used = tables_const(block)[0..entry_count];
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
             assert(manifest.tables.count() > 0);
@@ -610,18 +607,32 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             return @sizeOf(vsr.Header) + labels_size + tables_size;
         }
 
-        fn labels(block: BlockPtr) *[entry_count_max]Label {
-            const labels_size_max = entry_count_max * @sizeOf(Label);
+        const labels_size_max = entry_count_max * @sizeOf(Label);
 
+        fn labels(block: BlockPtr) *[entry_count_max]Label {
             return mem.bytesAsSlice(
                 Label,
                 block[@sizeOf(vsr.Header)..][0..labels_size_max],
             )[0..entry_count_max];
         }
 
-        fn tables(block: BlockPtr) *[entry_count_max]TableInfo {
-            const tables_size_max = entry_count_max * @sizeOf(TableInfo);
+        fn labels_const(block: BlockPtrConst) *const [entry_count_max]Label {
+            return mem.bytesAsSlice(
+                Label,
+                block[@sizeOf(vsr.Header)..][0..labels_size_max],
+            )[0..entry_count_max];
+        }
 
+        const tables_size_max = entry_count_max * @sizeOf(TableInfo);
+
+        fn tables(block: BlockPtr) *[entry_count_max]TableInfo {
+            return mem.bytesAsSlice(
+                TableInfo,
+                block[@sizeOf(vsr.Header) + entry_count_max ..][0..tables_size_max],
+            )[0..entry_count_max];
+        }
+
+        fn tables_const(block: BlockPtrConst) *const [entry_count_max]TableInfo {
             return mem.bytesAsSlice(
                 TableInfo,
                 block[@sizeOf(vsr.Header) + entry_count_max ..][0..tables_size_max],

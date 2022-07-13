@@ -46,6 +46,7 @@ pub const StateMachine = struct {
 
     pub fn init(
         allocator: mem.Allocator,
+        grid: *Grid,
         accounts_max: usize,
         transfers_max: usize,
         transfers_pending_max: usize,

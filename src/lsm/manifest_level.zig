@@ -620,9 +620,7 @@ pub fn ManifestLevelType(
                                 }
                             },
                             .invisible => {
-                                for (it.snapshots) |snapshot| {
-                                    if (table.invisible(snapshot)) return table;
-                                }
+                                if (table.invisible(it.snapshots)) return table;
                             },
                         }
                     }
@@ -689,7 +687,7 @@ pub fn TestContext(
                 return true;
             }
 
-            pub fn eql(table: *const TableInfo, other: *const TableInfo) bool {
+            pub fn equal(table: *const TableInfo, other: *const TableInfo) bool {
                 // TODO since the layout of TableInfo is well defined, a direct memcmp might
                 // be faster here. However, it's not clear if we can make the assumption that
                 // compare_keys() will return .eq exactly when the memory of the keys are
@@ -916,7 +914,7 @@ pub fn TestContext(
             tables.clearRetainingCapacity();
 
             {
-                var it = context.level.non_visible_iterator(context.snapshots.slice());
+                var it = context.level.iterator_visibility(.invisible, context.snapshots.slice());
                 while (it.next()) |table| {
                     try tables.append(table.*);
                 }
