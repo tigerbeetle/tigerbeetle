@@ -41,7 +41,6 @@ import (
 type Client interface {
 	CreateAccounts(accounts []types.Account) ([]types.EventResult, error)
 	CreateTransfers(transfers []types.Transfer) ([]types.EventResult, error)
-	CommitTransfers(commits []types.Commit) ([]types.EventResult, error)
 	LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
 	LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
 	Nop() error
@@ -143,8 +142,6 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 		return unsafe.Sizeof(types.Account{})
 	case C.TB_OP_CREATE_TRANSFERS:
 		return unsafe.Sizeof(types.Transfer{})
-	case C.TB_OP_COMMIT_TRANSFERS:
-		return unsafe.Sizeof(types.Commit{})
 	case C.TB_OP_LOOKUP_ACCOUNTS:
 		fallthrough
 	case C.TB_OP_LOOKUP_TRANSFERS:
@@ -159,8 +156,6 @@ func getResultSize(op C.TB_OPERATION) uintptr {
 	case C.TB_OP_CREATE_ACCOUNTS:
 		fallthrough
 	case C.TB_OP_CREATE_TRANSFERS:
-		fallthrough
-	case C.TB_OP_COMMIT_TRANSFERS:
 		return unsafe.Sizeof(types.EventResult{})
 	case C.TB_OP_LOOKUP_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
@@ -294,10 +289,6 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.EventResult
 
 func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.EventResult, error) {
 	return c.doCreate(C.TB_OP_CREATE_TRANSFERS, unsafe.Pointer(&transfers[0]), len(transfers))
-}
-
-func (c *c_client) CommitTransfers(commits []types.Commit) ([]types.EventResult, error) {
-	return c.doCreate(C.TB_OP_COMMIT_TRANSFERS, unsafe.Pointer(&commits[0]), len(commits))
 }
 
 func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error) {
