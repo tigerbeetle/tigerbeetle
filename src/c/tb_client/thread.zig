@@ -29,7 +29,6 @@ pub fn ThreadType(
             const allowed_operations = [_]Operation{
                 .create_accounts,
                 .create_transfers,
-                .commit_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
             };
@@ -283,7 +282,12 @@ pub fn ThreadType(
             InvalidDataSize,
         };
 
-        fn on_complete(self: *Self, packet: *Packet, message: ?*Message, result: PacketError![]const u8) void {
+        fn on_complete(
+            self: *Self,
+            packet: *Packet,
+            message: ?*Message,
+            result: PacketError![]const u8,
+        ) void {
             // Mark the message as completed
             if (message) |m| self.client.unref(m);
             assert(self.available_messages < message_pool.messages_max_client);
@@ -292,7 +296,9 @@ pub fn ThreadType(
             const bytes = result catch |err| {
                 packet.status = switch (err) {
                     // If there's too many requests, (re)try submitting the packet later
-                    error.TooManyOutstandingRequests => return self.retry.push(Packet.List.from(packet)),
+                    error.TooManyOutstandingRequests => {
+                        return self.retry.push(Packet.List.from(packet));
+                    },
                     error.TooMuchData => .too_much_data,
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,

@@ -195,7 +195,7 @@ pub const Signal = struct {
         }
     }
 
-    /// Returns true if the Signal was marked disabled and should no longer fire on_signal callbacks.
+    /// Return true if the Signal was marked disabled and should no longer fire on_signal callbacks.
     /// Safe to call from multiple threads.
     pub fn is_shutdown(self: *const Signal) bool {
         return self.state.load(.Acquire) == .shutdown;
