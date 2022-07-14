@@ -68,11 +68,6 @@ type AccountEventResult struct {
 
 type AccountResult uint32
 
-// Valid returns true if the result is known to the driver. If not it might be time to update.
-func (ar AccountResult) Valid() bool {
-	return ar > 0 && ar < accountResultSentinel
-}
-
 //go:generate stringer -type=AccountResult -trimprefix=Account
 
 const (
@@ -96,7 +91,6 @@ const (
 	AccountExistsWithDifferentCreditsPending AccountResult = 18
 	AccountExistsWithDifferentCreditsPosted  AccountResult = 19
 	AccountExists                            AccountResult = 20
-	accountResultSentinel
 )
 
 type Transfer struct {
@@ -151,11 +145,6 @@ type TransferEventResult struct {
 
 type TransferResult uint32
 
-// Valid returns true if the result is known to the driver. If not it might be time to update.
-func (tr TransferResult) Valid() bool {
-	return tr > 0 && tr < transferSentinel
-}
-
 //go:generate stringer -type=TransferResult -trimprefix=Transfer
 
 const (
@@ -208,5 +197,4 @@ const (
 	TransferPendingTransferAlreadyPosted               TransferResult = 47
 	TransferPendingTransferAlreadyVoided               TransferResult = 48
 	TransferPendingTransferExpired                     TransferResult = 49
-	transferSentinel                                   TransferResult = 50 // Must be last for validation
 )
