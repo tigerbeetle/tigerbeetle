@@ -329,6 +329,14 @@ pub fn CompactionType(
 
             if (buffer == &compaction.remove_level_b) {
                 compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
+                // TODO(King): find tables that are invisible to all snapshots: table.invisible([])
+                // then remove them and make sure all their block addrs are released back to grid.
+                //
+                // The TableInfo only has address of index block,
+                // but the index block can be used to get the addresses of the filter/data blocks.
+                //
+                // TODO In future, prefetch could be running concurrently to compact and we need to
+                // ensure that prefetch completes before the tables are removed from the manifest.
             } else {
                 compaction.manifest.insert_tables(compaction.level_b, tables);
             }

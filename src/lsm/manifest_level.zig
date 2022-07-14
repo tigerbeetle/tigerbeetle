@@ -603,7 +603,7 @@ pub fn ManifestLevelType(
             };
         }
 
-        fn IteratorVisibilityType(comptime visibility: Visibility) type {
+        pub fn IteratorVisibilityType(comptime visibility: Visibility) type {
             return struct {
                 const IteratorVisibility = @This();
 

@@ -190,6 +190,14 @@ pub fn GridType(comptime Storage: type) type {
             grid.superblock.free_set.release(address);
         }
 
+        pub fn release_at_checkpoint(grid: *Grid, address: u64) void {
+            grid.assert_not_writing(address, null);
+            grid.assert_not_reading(address, null);
+
+            grid.cache.remove(address);
+            grid.superblock.free_set.release_at_checkpoint(address);
+        }
+
         /// Assert that the address is not currently being written to.
         /// Assert that the block pointer is not being used for any write if non-null.
         fn assert_not_writing(grid: *Grid, address: u64, block: ?BlockPtrConst) void {

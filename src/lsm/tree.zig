@@ -88,7 +88,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
         pub const ValueCache = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, 70);
 
-        // NOTE these are above their fields as zig-fmt rejects decls in the middle of fields
         const CompactionTable = CompactionType(Table, Storage, TableIteratorType);
         const CompactionTableImmutable = CompactionType(Table, Storage, TableImmutableIteratorType);
 
@@ -789,10 +788,15 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             callback(tree);
         }
 
-        pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
+        pub fn checkpoint(tree: *Tree, op: u64, callback: fn (*Tree) void) void {
             // Assert no outstanding compact_io() work..
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
+
+            // Avoid checkpointing if this is not the last beat in the compaction measure.
+            assert(tree.compaction_beat == op % config.lsm_batch_multiple);
+            const last_beat_in_measure = config.lsm_batch_multiple - 1;
+            if (tree.compaction_beat != last_beat_in_measure) return;
 
             // Assert no outstanding compactions.
             assert(tree.compaction_table_immutable.status == .idle);
@@ -806,7 +810,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             // Start an asynchronous checkpoint on the manifest.
             assert(tree.checkpoint_callback == null);
             tree.checkpoint_callback = callback;
-            tree.manifest.checkpoint(manifest_checkpoint_callback);
+            tree.manifest.checkpoint(op, manifest_checkpoint_callback);
         }
 
         fn manifest_checkpoint_callback(manifest: *Manifest) void {
