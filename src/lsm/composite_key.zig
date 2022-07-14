@@ -22,7 +22,7 @@ pub fn CompositeKey(comptime Field: type) type {
             field: Field align(@alignOf(Field)),
             /// The most significant bit indicates if the value is a tombstone.
             timestamp: u64 align(@alignOf(u64)),
-            padding: (if (pad) u64 else void) = (if (pad) 0 else {}),
+            padding: (if (pad) u64 else u0) = 0,
 
             comptime {
                 assert(@sizeOf(Value) == @sizeOf(Field) * 2);
@@ -33,7 +33,7 @@ pub fn CompositeKey(comptime Field: type) type {
         field: Field align(@alignOf(Field)),
         /// The most significant bit must be unset as it is used to indicate a tombstone.
         timestamp: u64 align(@alignOf(u64)),
-        padding: (if (pad) u64 else void) = (if (pad) 0 else {}),
+        padding: (if (pad) u64 else u0) = 0,
 
         comptime {
             assert(@sizeOf(Self) == @sizeOf(Field) * 2);
