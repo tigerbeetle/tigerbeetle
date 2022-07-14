@@ -55,26 +55,26 @@ func (f AccountFlags) ToUint16() uint16 {
 }
 
 const (
-	AccountLinkedEventFailed                 uint32 = 0
-	AccountReservedFlag                      uint32 = 1
-	AccountReservedField                     uint32 = 2
-	AccountIdMustNotBeZero                   uint32 = 3
-	AccountLedgerMustNotBeZero               uint32 = 4
-	AccountCodeMustNotBeZero                 uint32 = 5
-	AccountMutuallyExclusiveFlags            uint32 = 6
-	AccountOverflowsDebits                   uint32 = 7
-	AccountOverflowsCredits                  uint32 = 8
-	AccountExceedsCredits                    uint32 = 9
-	AccountExceedsDebits                     uint32 = 10
-	AccountExistsWithDifferentFlags          uint32 = 11
-	AccountExistsWithDifferentUserData       uint32 = 12
-	AccountExistsWithDifferentLedger         uint32 = 13
-	AccountExistsWithDifferentCode           uint32 = 14
-	AccountExistsWithDifferentDebitsPending  uint32 = 15
-	AccountExistsWithDifferentDebitsPosted   uint32 = 16
-	AccountExistsWithDifferentCreditsPending uint32 = 17
-	AccountExistsWithDifferentCreditsPosted  uint32 = 18
-	AccountExists                            uint32 = 19
+	AccountLinkedEventFailed                 uint32 = 1
+	AccountReservedFlag                      uint32 = 2
+	AccountReservedField                     uint32 = 3
+	AccountIdMustNotBeZero                   uint32 = 4
+	AccountLedgerMustNotBeZero               uint32 = 5
+	AccountCodeMustNotBeZero                 uint32 = 6
+	AccountMutuallyExclusiveFlags            uint32 = 7
+	AccountOverflowsDebits                   uint32 = 8
+	AccountOverflowsCredits                  uint32 = 9
+	AccountExceedsCredits                    uint32 = 10
+	AccountExceedsDebits                     uint32 = 11
+	AccountExistsWithDifferentFlags          uint32 = 12
+	AccountExistsWithDifferentUserData       uint32 = 13
+	AccountExistsWithDifferentLedger         uint32 = 14
+	AccountExistsWithDifferentCode           uint32 = 15
+	AccountExistsWithDifferentDebitsPending  uint32 = 16
+	AccountExistsWithDifferentDebitsPosted   uint32 = 17
+	AccountExistsWithDifferentCreditsPending uint32 = 18
+	AccountExistsWithDifferentCreditsPosted  uint32 = 19
+	AccountExists                            uint32 = 20
 )
 
 // An EventResult is returned from TB only when an error occurred processing it.
@@ -102,7 +102,7 @@ type TransferFlags struct {
 	Linked              bool
 	Pending             bool
 	PostPendingTransfer bool
-	VodiPendingTransfer bool
+	VoidPendingTransfer bool
 }
 
 func (f TransferFlags) ToUint16() uint16 {
@@ -120,7 +120,7 @@ func (f TransferFlags) ToUint16() uint16 {
 		ret |= (1 << 2)
 	}
 
-	if f.VodiPendingTransfer {
+	if f.VoidPendingTransfer {
 		ret |= (1 << 3)
 	}
 
@@ -128,53 +128,53 @@ func (f TransferFlags) ToUint16() uint16 {
 }
 
 const (
-	TransferLinkedEventFailed                          uint32 = 0
-	TransferReservedFlag                               uint32 = 1
-	TransferReservedField                              uint32 = 2
-	TransferIdMustNotBeZero                            uint32 = 3
-	TransferDebitAccountIdMustNotBeZero                uint32 = 4
-	TransferCreditAccountIdMustNotBeZero               uint32 = 5
-	TransferAccountsMustBeDifferent                    uint32 = 6
-	TransferPendingIdMustBeZero                        uint32 = 7
-	TransferPendingTransferMustTimeout                 uint32 = 8
-	TransferLedgerMustNotBeZero                        uint32 = 9
-	TransferCodeMustNotBeZero                          uint32 = 10
-	TransferAmountMustNotBeZero                        uint32 = 11
-	TransferDebitAccountNotFound                       uint32 = 12
-	TransferCreditAccountNotFound                      uint32 = 13
-	TransferAccountsMustHaveTheSameLedger              uint32 = 14
-	TransferTransferMustHaveTheSameLedgerAsAccounts    uint32 = 15
-	TransferExistsWithDifferentFlags                   uint32 = 16
-	TransferExistsWithDifferentDebitAccountId          uint32 = 17
-	TransferExistsWithDifferentCreditAccountId         uint32 = 18
-	TransferExistsWithDifferentUserData                uint32 = 19
-	TransferExistsWithDifferentPendingId               uint32 = 20
-	TransferExistsWithDifferentTimeout                 uint32 = 21
-	TransferExistsWithDifferentCode                    uint32 = 22
-	TransferExistsWithDifferentAmount                  uint32 = 23
-	TransferExists                                     uint32 = 24
-	TransferOverflowsDebitsPending                     uint32 = 25
-	TransferOverflowsCreditsPending                    uint32 = 26
-	TransferOverflowsDebitsPosted                      uint32 = 27
-	TransferOverflowsCreditsPosted                     uint32 = 28
-	TransferOverflowsDebits                            uint32 = 29
-	TransferOverflowsCredits                           uint32 = 30
-	TransferExceedsCredits                             uint32 = 31
-	TransferExceedsDebits                              uint32 = 32
-	TransferCannotPostAndVoidPendingTransfer           uint32 = 33
-	TransferPendingTransferCannotPostOrVoidAnother     uint32 = 34
-	TransferTimeoutReservedForPendingTransfer          uint32 = 35
-	TransferPendingIdMustNotBeZero                     uint32 = 36
-	TransferPendingIdMustBeDifferent                   uint32 = 37
-	TransferPendingTransferNotFound                    uint32 = 38
-	TransferPendingTransferNotPending                  uint32 = 39
-	TransferPendingTransferHasDifferentDebitAccountId  uint32 = 40
-	TransferPendingTransferHasDifferentCreditAccountId uint32 = 41
-	TransferPendingTransferHasDifferentLedger          uint32 = 42
-	TransferPendingTransferHasDifferentCode            uint32 = 43
-	TransferExceedsPendingTransferAmount               uint32 = 44
-	TransferPendingTransferHasDifferentAmount          uint32 = 45
-	TransferPendingTransferAlreadyPosted               uint32 = 46
-	TransferPendingTransferAlreadyVoided               uint32 = 47
-	TransferPendingTransferExpired                     uint32 = 48
+	TransferLinkedEventFailed                          uint32 = 1
+	TransferReservedFlag                               uint32 = 2
+	TransferReservedField                              uint32 = 3
+	TransferIdMustNotBeZero                            uint32 = 4
+	TransferDebitAccountIdMustNotBeZero                uint32 = 5
+	TransferCreditAccountIdMustNotBeZero               uint32 = 6
+	TransferAccountsMustBeDifferent                    uint32 = 7
+	TransferPendingIdMustBeZero                        uint32 = 8
+	TransferPendingTransferMustTimeout                 uint32 = 9
+	TransferLedgerMustNotBeZero                        uint32 = 10
+	TransferCodeMustNotBeZero                          uint32 = 11
+	TransferAmountMustNotBeZero                        uint32 = 12
+	TransferDebitAccountNotFound                       uint32 = 13
+	TransferCreditAccountNotFound                      uint32 = 14
+	TransferAccountsMustHaveTheSameLedger              uint32 = 15
+	TransferTransferMustHaveTheSameLedgerAsAccounts    uint32 = 16
+	TransferExistsWithDifferentFlags                   uint32 = 17
+	TransferExistsWithDifferentDebitAccountId          uint32 = 18
+	TransferExistsWithDifferentCreditAccountId         uint32 = 19
+	TransferExistsWithDifferentUserData                uint32 = 20
+	TransferExistsWithDifferentPendingId               uint32 = 21
+	TransferExistsWithDifferentTimeout                 uint32 = 22
+	TransferExistsWithDifferentCode                    uint32 = 23
+	TransferExistsWithDifferentAmount                  uint32 = 24
+	TransferExists                                     uint32 = 25
+	TransferOverflowsDebitsPending                     uint32 = 26
+	TransferOverflowsCreditsPending                    uint32 = 27
+	TransferOverflowsDebitsPosted                      uint32 = 28
+	TransferOverflowsCreditsPosted                     uint32 = 29
+	TransferOverflowsDebits                            uint32 = 30
+	TransferOverflowsCredits                           uint32 = 31
+	TransferExceedsCredits                             uint32 = 32
+	TransferExceedsDebits                              uint32 = 33
+	TransferCannotPostAndVoidPendingTransfer           uint32 = 34
+	TransferPendingTransferCannotPostOrVoidAnother     uint32 = 35
+	TransferTimeoutReservedForPendingTransfer          uint32 = 36
+	TransferPendingIdMustNotBeZero                     uint32 = 37
+	TransferPendingIdMustBeDifferent                   uint32 = 38
+	TransferPendingTransferNotFound                    uint32 = 39
+	TransferPendingTransferNotPending                  uint32 = 40
+	TransferPendingTransferHasDifferentDebitAccountId  uint32 = 41
+	TransferPendingTransferHasDifferentCreditAccountId uint32 = 42
+	TransferPendingTransferHasDifferentLedger          uint32 = 43
+	TransferPendingTransferHasDifferentCode            uint32 = 44
+	TransferExceedsPendingTransferAmount               uint32 = 45
+	TransferPendingTransferHasDifferentAmount          uint32 = 46
+	TransferPendingTransferAlreadyPosted               uint32 = 47
+	TransferPendingTransferAlreadyVoided               uint32 = 48
+	TransferPendingTransferExpired                     uint32 = 49
 )
