@@ -557,17 +557,17 @@ pub fn GrooveType(
             }
         }
 
-        pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
+        pub fn checkpoint(groove: *Groove, op: u64, callback: fn (*Groove) void) void {
             // Start a checkpoint join operation.
             const Join = JoinType(.checkpoint);
             Join.start(groove, callback);
             
             // Checkpoint the ObjectTree.
-            groove.objects.checkpoint(Join.tree_callback(null));
+            groove.objects.checkpoint(op, Join.tree_callback(null));
 
             // Checkpoint the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(groove.indexes, field.name).checkpoint(Join.tree_callback(field.name));
+                @field(groove.indexes, field.name).checkpoint(op, Join.tree_callback(field.name));
             }
         }
     };

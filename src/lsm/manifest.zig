@@ -475,7 +475,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .callback = invisible_blocks_collected_callback,
                 .it = .{
                     .manifest = manifest,
-                    .snapshot = shapsnot,
+                    .snapshot = snapshot,
                 },
             };
 
@@ -483,7 +483,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         fn invisible_blocks_collected_callback(collector: *InvisibleBlockCollector) void {
-            const manifest = @fieldParentPtr(InvisibleBlockCollector, "block_collector", collector);
+            const manifest = @fieldParentPtr(Manifest, "block_collector", collector);
             assert(manifest.checkpoint_callback != null);
 
             manifest.manifest_log.checkpoint(manifest_log_checkpoint_callback);
@@ -499,7 +499,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         const InvisibleBlockCollector = struct {
-            callback: ?fn (*Manifest) void,
+            callback: ?fn (*InvisibleBlockCollector) void,
             it: InvisibleBlockIterator,            
             read: Grid.Read = undefined,
             
@@ -509,7 +509,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 const table = collector.it.next() orelse {
                     const callback = collector.callback.?;
                     collector.callback = null;
-                    return callback(collector.it.manifest);
+                    return callback(collector);
                 };
 
                 assert(table.invisible(&.{ collector.it.snapshot }));
@@ -526,7 +526,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 const collector = @fieldParentPtr(InvisibleBlockCollector, "read", read);
                 assert(collector.callback != null);
 
-                const addresses = Table.index_data_addresses(index_block);
+                const addresses = Table.index_data_addresses_used(index_block);
                 for (addresses) |address| {
                     collector.it.manifest.manifest_log.grid.release_at_checkpoint(address);
                 }
