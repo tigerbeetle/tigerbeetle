@@ -112,6 +112,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         compact_callback: ?Callback = null,
         checkpoint_callback: ?Callback = null,
 
+        block_collector: InvisibleBlockCollector = .{
+            .callback = null,
+            .it = undefined,
+        },
+
         pub fn init(
             allocator: mem.Allocator,
             node_pool: *NodePool,
@@ -461,9 +466,25 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             callback(manifest);
         }
 
-        pub fn checkpoint(manifest: *Manifest, callback: Callback) void {
+        pub fn checkpoint(manifest: *Manifest, snapshot: u64, callback: Callback) void {
             assert(manifest.checkpoint_callback == null);
             manifest.checkpoint_callback = callback;
+
+            assert(manifest.block_collector.callback == null);
+            manifest.block_collector = InvisibleBlockCollector{
+                .callback = invisible_blocks_collected_callback,
+                .it = .{
+                    .manifest = manifest,
+                    .snapshot = shapsnot,
+                },
+            };
+
+            manifest.block_collector.collect();
+        }
+
+        fn invisible_blocks_collected_callback(collector: *InvisibleBlockCollector) void {
+            const manifest = @fieldParentPtr(InvisibleBlockCollector, "block_collector", collector);
+            assert(manifest.checkpoint_callback != null);
 
             manifest.manifest_log.checkpoint(manifest_log_checkpoint_callback);
         }
@@ -476,6 +497,66 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.checkpoint_callback = null;
             callback(manifest);
         }
+
+        const InvisibleBlockCollector = struct {
+            callback: ?fn (*Manifest) void,
+            it: InvisibleBlockIterator,            
+            read: Grid.Read = undefined,
+            
+            fn collect(collector: *InvisibleBlockCollector) void {
+                assert(collector.callback != null);
+
+                const table = collector.it.next() orelse {
+                    const callback = collector.callback.?;
+                    collector.callback = null;
+                    return callback(collector.it.manifest);
+                };
+
+                assert(table.invisible(&.{ collector.it.snapshot }));
+
+                collector.it.manifest.manifest_log.grid.read_block(
+                    grid_read_block_callback,
+                    &collector.read,
+                    table.address,
+                    table.checksum,
+                );
+            }
+
+            fn grid_read_block_callback(read: *Grid.Read, index_block: Grid.BlockPtrConst) void {
+                const collector = @fieldParentPtr(InvisibleBlockCollector, "read", read);
+                assert(collector.callback != null);
+
+                const addresses = Table.index_data_addresses(index_block);
+                for (addresses) |address| {
+                    collector.it.manifest.manifest_log.grid.release_at_checkpoint(address);
+                }
+
+                collector.collect();
+            }
+        };
+
+        const InvisibleBlockIterator = struct {
+            manifest: *Manifest,
+            snapshot: u64,
+            level: u8 = 0,
+            level_it: ?Level.IteratorVisibilityType(.invisible) = null,
+
+            fn next(it: *InvisibleBlockIterator) ?*const TableInfo {
+                while (true) {
+                    if (it.level_it) |*level_it| {
+                        if (level_it.next()) |table| return table;
+                        it.level_it = null;
+                    }
+
+                    assert(it.level <= config.lsm_levels);
+                    if (it.level == config.lsm_levels) return null;
+
+                    const manifest_level = &it.manifest.levels[it.level];
+                    it.level_it = manifest_level.iterator_visibility(.invisible, &.{ it.snapshot });
+                    it.level += 1;
+                }
+            }
+        };
 
         /// Returns a unique snapshot, incrementing the greatest snapshot value seen so far,
         /// whether this was for a TableInfo.snapshot_min/snapshot_max or registered snapshot.
