@@ -360,6 +360,8 @@ pub const IO = struct {
                                 .NOTCONN => error.SocketNotConnected,
                                 .NOTSOCK => error.FileDescriptorNotASocket,
                                 .CONNRESET => error.ConnectionResetByPeer,
+                                .TIMEDOUT => error.ConnectionTimedOut,
+                                .OPNOTSUPP => error.OperationNotSupported,
                                 else => |errno| os.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -683,6 +685,8 @@ pub const IO = struct {
         SystemResources,
         SocketNotConnected,
         FileDescriptorNotASocket,
+        ConnectionTimedOut,
+        OperationNotSupported,
     } || os.UnexpectedError;
 
     pub fn recv(
