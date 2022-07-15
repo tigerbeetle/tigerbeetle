@@ -295,7 +295,7 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEven
 
 	resp := make([]types.AccountEventResult, len(res))
 	for i, r := range res {
-		resp[i] = types.AccountEventResult{Code: r.Code, Index: r.Index}
+		resp[i] = types.AccountEventResult{Code: types.CreateAccountResult(r.Code), Index: r.Index}
 	}
 
 	return resp, nil
@@ -313,7 +313,7 @@ func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.Transfer
 
 	resp := make([]types.TransferEventResult, len(res))
 	for i, r := range res {
-		resp[i] = types.TransferEventResult{Code: r.Code, Index: r.Index}
+		resp[i] = types.TransferEventResult{Code: types.CreateTransferResult(r.Code), Index: r.Index}
 	}
 
 	return resp, nil

@@ -1,9 +1,9 @@
 package assert
 
 import (
-	"testing"
-	"reflect"
 	"bytes"
+	"reflect"
+	"testing"
 )
 
 func isEmpty(obj interface{}) bool {
@@ -12,6 +12,9 @@ func isEmpty(obj interface{}) bool {
 	}
 
 	value := reflect.ValueOf(obj)
+	if value.IsNil() {
+		return true
+	}
 	switch value.Kind() {
 	case reflect.Chan, reflect.Map, reflect.Slice:
 		return value.Len() == 0
@@ -21,7 +24,7 @@ func isEmpty(obj interface{}) bool {
 }
 
 func Empty(t *testing.T, obj interface{}) {
-	if isEmpty(obj) {
+	if !isEmpty(obj) {
 		t.Errorf("%v is not empty", obj)
 	}
 }
@@ -56,7 +59,7 @@ func isObjectEqual(a, b interface{}) bool {
 	binaryB, ok := b.([]byte)
 	if !ok {
 		return false
-	}	
+	}
 
 	if binaryA == nil || binaryB == nil {
 		return binaryA == nil && binaryB == nil

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/coilhq/tigerbeetle-go/pkg/types"
 	"github.com/coilhq/tigerbeetle-go/assert"
+	"github.com/coilhq/tigerbeetle-go/pkg/types"
 )
 
 const (
@@ -157,6 +157,8 @@ func doTestClient(s *testing.T, client Client) {
 				CreditAccountID: accountA.ID,
 				DebitAccountID:  accountB.ID,
 				Amount:          100,
+				Ledger:          1,
+				Code:            1,
 			},
 		})
 		if err != nil {
@@ -192,6 +194,7 @@ func doTestClient(s *testing.T, client Client) {
 			Amount:          50,
 			Flags:           types.TransferFlags{Linked: true}.ToUint16(), // points to transfer 2
 			Code:            1,
+			Ledger:          1,
 		}
 		transfer2 := types.Transfer{
 			ID:              *toU128("d"),
@@ -200,8 +203,9 @@ func doTestClient(s *testing.T, client Client) {
 			Amount:          50,
 			// Does not have linked flag as it is the end of the chain.
 			// This will also cause it to fail as this is now a duplicate with different flags
-			Flags: 0,
-			Code:  1,
+			Flags:  0,
+			Code:   1,
+			Ledger: 1,
 		}
 		results, err := client.CreateTransfers([]types.Transfer{transfer1, transfer2})
 		if err != nil {
@@ -209,8 +213,8 @@ func doTestClient(s *testing.T, client Client) {
 		}
 		assert.Len(t, results, 2)
 		assert.Equal(t, unsafe.Sizeof(transfer1), 128)
-		assert.Equal(t, types.EventResult{Index: 0, Code: types.TransferLinkedEventFailed}, results[0])
-		assert.Equal(t, types.EventResult{Index: 1, Code: types.TransferExistsWithDifferentFlags}, results[1])
+		assert.Equal(t, types.TransferEventResult{Index: 0, Code: types.TransferLinkedEventFailed}, results[0])
+		assert.Equal(t, types.TransferEventResult{Index: 1, Code: types.TransferExistsWithDifferentFlags}, results[1])
 
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
@@ -219,7 +223,7 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Len(t, accounts, 2)
 
 		accountA = accounts[0]
-		assert.Equal(t, uint64(150), accountA.CreditsPosted)
+		assert.Equal(t, uint64(100), accountA.CreditsPosted)
 		assert.Equal(t, uint64(0), accountA.CreditsPending)
 		assert.Equal(t, uint64(0), accountA.DebitsPosted)
 		assert.Equal(t, uint64(0), accountA.DebitsPending)
@@ -227,7 +231,7 @@ func doTestClient(s *testing.T, client Client) {
 		accountB = accounts[1]
 		assert.Equal(t, uint64(0), accountB.CreditsPosted)
 		assert.Equal(t, uint64(0), accountB.CreditsPending)
-		assert.Equal(t, uint64(150), accountB.DebitsPosted)
+		assert.Equal(t, uint64(100), accountB.DebitsPosted)
 		assert.Equal(t, uint64(0), accountB.DebitsPending)
 	})
 }
