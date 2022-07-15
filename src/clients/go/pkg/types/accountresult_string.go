@@ -28,7 +28,6 @@ func _() {
 	_ = x[AccountExistsWithDifferentCreditsPending-18]
 	_ = x[AccountExistsWithDifferentCreditsPosted-19]
 	_ = x[AccountExists-20]
-	_ = x[accountResultSentinel-20]
 }
 
 const _AccountResult_name = "LinkedEventFailedReservedFlagReservedFieldIdMustNotBeZeroLedgerMustNotBeZeroCodeMustNotBeZeroMutuallyExclusiveFlagsOverflowsDebitsOverflowsCreditsExceedsCreditsExceedsDebitsExistsWithDifferentFlagsExistsWithDifferentUserDataExistsWithDifferentLedgerExistsWithDifferentCodeExistsWithDifferentDebitsPendingExistsWithDifferentDebitsPostedExistsWithDifferentCreditsPendingExistsWithDifferentCreditsPostedExists"
