@@ -19,7 +19,7 @@ type Uint128 C.tb_uint128_t
 // EventResult is returned from TB only when an error occurred processing it.
 type EventResult struct {
 	Index uint32
-	Code  AccountResult
+	Code  uint32
 }
 
 type Account struct {
@@ -140,7 +140,7 @@ func (f TransferFlags) ToUint16() uint16 {
 // TransferEventResult is returned from TB only when an error occurred processing it.
 type TransferEventResult struct {
 	Index uint32
-	Code  AccountResult
+	Code  TransferResult
 }
 
 type TransferResult uint32
