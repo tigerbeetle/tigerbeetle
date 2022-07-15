@@ -16,6 +16,12 @@ const (
 
 type Uint128 C.tb_uint128_t
 
+// EventResult is returned from TB only when an error occurred processing it.
+type EventResult struct {
+	Index uint32
+	Code  uint32
+}
+
 type Account struct {
 	ID             Uint128
 	UserData       Uint128
@@ -54,34 +60,38 @@ func (f AccountFlags) ToUint16() uint16 {
 	return ret
 }
 
-const (
-	AccountLinkedEventFailed                 uint32 = 1
-	AccountReservedFlag                      uint32 = 2
-	AccountReservedField                     uint32 = 3
-	AccountIdMustNotBeZero                   uint32 = 4
-	AccountLedgerMustNotBeZero               uint32 = 5
-	AccountCodeMustNotBeZero                 uint32 = 6
-	AccountMutuallyExclusiveFlags            uint32 = 7
-	AccountOverflowsDebits                   uint32 = 8
-	AccountOverflowsCredits                  uint32 = 9
-	AccountExceedsCredits                    uint32 = 10
-	AccountExceedsDebits                     uint32 = 11
-	AccountExistsWithDifferentFlags          uint32 = 12
-	AccountExistsWithDifferentUserData       uint32 = 13
-	AccountExistsWithDifferentLedger         uint32 = 14
-	AccountExistsWithDifferentCode           uint32 = 15
-	AccountExistsWithDifferentDebitsPending  uint32 = 16
-	AccountExistsWithDifferentDebitsPosted   uint32 = 17
-	AccountExistsWithDifferentCreditsPending uint32 = 18
-	AccountExistsWithDifferentCreditsPosted  uint32 = 19
-	AccountExists                            uint32 = 20
-)
-
-// An EventResult is returned from TB only when an error occurred processing it.
-type EventResult struct {
+// AccountEventResult is the wrapper of EventResult that with the Code casted to and spesified type.
+type AccountEventResult struct {
 	Index uint32
-	Code  uint32
+	Code  AccountResult
 }
+
+type AccountResult uint32
+
+//go:generate stringer -type=AccountResult -trimprefix=Account
+
+const (
+	AccountLinkedEventFailed                 AccountResult = 1
+	AccountReservedFlag                      AccountResult = 2
+	AccountReservedField                     AccountResult = 3
+	AccountIdMustNotBeZero                   AccountResult = 4
+	AccountLedgerMustNotBeZero               AccountResult = 5
+	AccountCodeMustNotBeZero                 AccountResult = 6
+	AccountMutuallyExclusiveFlags            AccountResult = 7
+	AccountOverflowsDebits                   AccountResult = 8
+	AccountOverflowsCredits                  AccountResult = 9
+	AccountExceedsCredits                    AccountResult = 10
+	AccountExceedsDebits                     AccountResult = 11
+	AccountExistsWithDifferentFlags          AccountResult = 12
+	AccountExistsWithDifferentUserData       AccountResult = 13
+	AccountExistsWithDifferentLedger         AccountResult = 14
+	AccountExistsWithDifferentCode           AccountResult = 15
+	AccountExistsWithDifferentDebitsPending  AccountResult = 16
+	AccountExistsWithDifferentDebitsPosted   AccountResult = 17
+	AccountExistsWithDifferentCreditsPending AccountResult = 18
+	AccountExistsWithDifferentCreditsPosted  AccountResult = 19
+	AccountExists                            AccountResult = 20
+)
 
 type Transfer struct {
 	ID              Uint128
@@ -127,54 +137,64 @@ func (f TransferFlags) ToUint16() uint16 {
 	return ret
 }
 
+// TransferEventResult is returned from TB only when an error occurred processing it.
+type TransferEventResult struct {
+	Index uint32
+	Code  TransferResult
+}
+
+type TransferResult uint32
+
+//go:generate stringer -type=TransferResult -trimprefix=Transfer
+
 const (
-	TransferLinkedEventFailed                          uint32 = 1
-	TransferReservedFlag                               uint32 = 2
-	TransferReservedField                              uint32 = 3
-	TransferIdMustNotBeZero                            uint32 = 4
-	TransferDebitAccountIdMustNotBeZero                uint32 = 5
-	TransferCreditAccountIdMustNotBeZero               uint32 = 6
-	TransferAccountsMustBeDifferent                    uint32 = 7
-	TransferPendingIdMustBeZero                        uint32 = 8
-	TransferPendingTransferMustTimeout                 uint32 = 9
-	TransferLedgerMustNotBeZero                        uint32 = 10
-	TransferCodeMustNotBeZero                          uint32 = 11
-	TransferAmountMustNotBeZero                        uint32 = 12
-	TransferDebitAccountNotFound                       uint32 = 13
-	TransferCreditAccountNotFound                      uint32 = 14
-	TransferAccountsMustHaveTheSameLedger              uint32 = 15
-	TransferTransferMustHaveTheSameLedgerAsAccounts    uint32 = 16
-	TransferExistsWithDifferentFlags                   uint32 = 17
-	TransferExistsWithDifferentDebitAccountId          uint32 = 18
-	TransferExistsWithDifferentCreditAccountId         uint32 = 19
-	TransferExistsWithDifferentUserData                uint32 = 20
-	TransferExistsWithDifferentPendingId               uint32 = 21
-	TransferExistsWithDifferentTimeout                 uint32 = 22
-	TransferExistsWithDifferentCode                    uint32 = 23
-	TransferExistsWithDifferentAmount                  uint32 = 24
-	TransferExists                                     uint32 = 25
-	TransferOverflowsDebitsPending                     uint32 = 26
-	TransferOverflowsCreditsPending                    uint32 = 27
-	TransferOverflowsDebitsPosted                      uint32 = 28
-	TransferOverflowsCreditsPosted                     uint32 = 29
-	TransferOverflowsDebits                            uint32 = 30
-	TransferOverflowsCredits                           uint32 = 31
-	TransferExceedsCredits                             uint32 = 32
-	TransferExceedsDebits                              uint32 = 33
-	TransferCannotPostAndVoidPendingTransfer           uint32 = 34
-	TransferPendingTransferCannotPostOrVoidAnother     uint32 = 35
-	TransferTimeoutReservedForPendingTransfer          uint32 = 36
-	TransferPendingIdMustNotBeZero                     uint32 = 37
-	TransferPendingIdMustBeDifferent                   uint32 = 38
-	TransferPendingTransferNotFound                    uint32 = 39
-	TransferPendingTransferNotPending                  uint32 = 40
-	TransferPendingTransferHasDifferentDebitAccountId  uint32 = 41
-	TransferPendingTransferHasDifferentCreditAccountId uint32 = 42
-	TransferPendingTransferHasDifferentLedger          uint32 = 43
-	TransferPendingTransferHasDifferentCode            uint32 = 44
-	TransferExceedsPendingTransferAmount               uint32 = 45
-	TransferPendingTransferHasDifferentAmount          uint32 = 46
-	TransferPendingTransferAlreadyPosted               uint32 = 47
-	TransferPendingTransferAlreadyVoided               uint32 = 48
-	TransferPendingTransferExpired                     uint32 = 49
+	TransferLinkedEventFailed                          TransferResult = 1
+	TransferReservedFlag                               TransferResult = 2
+	TransferReservedField                              TransferResult = 3
+	TransferIdMustNotBeZero                            TransferResult = 4
+	TransferDebitAccountIdMustNotBeZero                TransferResult = 5
+	TransferCreditAccountIdMustNotBeZero               TransferResult = 6
+	TransferAccountsMustBeDifferent                    TransferResult = 7
+	TransferPendingIdMustBeZero                        TransferResult = 8
+	TransferPendingTransferMustTimeout                 TransferResult = 9
+	TransferLedgerMustNotBeZero                        TransferResult = 10
+	TransferCodeMustNotBeZero                          TransferResult = 11
+	TransferAmountMustNotBeZero                        TransferResult = 12
+	TransferDebitAccountNotFound                       TransferResult = 13
+	TransferCreditAccountNotFound                      TransferResult = 14
+	TransferAccountsMustHaveTheSameLedger              TransferResult = 15
+	TransferTransferMustHaveTheSameLedgerAsAccounts    TransferResult = 16
+	TransferExistsWithDifferentFlags                   TransferResult = 17
+	TransferExistsWithDifferentDebitAccountId          TransferResult = 18
+	TransferExistsWithDifferentCreditAccountId         TransferResult = 19
+	TransferExistsWithDifferentUserData                TransferResult = 20
+	TransferExistsWithDifferentPendingId               TransferResult = 21
+	TransferExistsWithDifferentTimeout                 TransferResult = 22
+	TransferExistsWithDifferentCode                    TransferResult = 23
+	TransferExistsWithDifferentAmount                  TransferResult = 24
+	TransferExists                                     TransferResult = 25
+	TransferOverflowsDebitsPending                     TransferResult = 26
+	TransferOverflowsCreditsPending                    TransferResult = 27
+	TransferOverflowsDebitsPosted                      TransferResult = 28
+	TransferOverflowsCreditsPosted                     TransferResult = 29
+	TransferOverflowsDebits                            TransferResult = 30
+	TransferOverflowsCredits                           TransferResult = 31
+	TransferExceedsCredits                             TransferResult = 32
+	TransferExceedsDebits                              TransferResult = 33
+	TransferCannotPostAndVoidPendingTransfer           TransferResult = 34
+	TransferPendingTransferCannotPostOrVoidAnother     TransferResult = 35
+	TransferTimeoutReservedForPendingTransfer          TransferResult = 36
+	TransferPendingIdMustNotBeZero                     TransferResult = 37
+	TransferPendingIdMustBeDifferent                   TransferResult = 38
+	TransferPendingTransferNotFound                    TransferResult = 39
+	TransferPendingTransferNotPending                  TransferResult = 40
+	TransferPendingTransferHasDifferentDebitAccountId  TransferResult = 41
+	TransferPendingTransferHasDifferentCreditAccountId TransferResult = 42
+	TransferPendingTransferHasDifferentLedger          TransferResult = 43
+	TransferPendingTransferHasDifferentCode            TransferResult = 44
+	TransferExceedsPendingTransferAmount               TransferResult = 45
+	TransferPendingTransferHasDifferentAmount          TransferResult = 46
+	TransferPendingTransferAlreadyPosted               TransferResult = 47
+	TransferPendingTransferAlreadyVoided               TransferResult = 48
+	TransferPendingTransferExpired                     TransferResult = 49
 )
