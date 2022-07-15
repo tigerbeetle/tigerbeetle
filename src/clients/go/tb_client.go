@@ -39,8 +39,8 @@ import (
 ///////////////////////////////////////////////////////////////
 
 type Client interface {
-	CreateAccounts(accounts []types.Account) ([]types.EventResult, error)
-	CreateTransfers(transfers []types.Transfer) ([]types.EventResult, error)
+	CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error)
+	CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error)
 	LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
 	LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
 	Nop() error
@@ -283,12 +283,40 @@ func (c *c_client) doCreate(
 	return results[0:resultCount], nil
 }
 
-func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.EventResult, error) {
-	return c.doCreate(C.TB_OP_CREATE_ACCOUNTS, unsafe.Pointer(&accounts[0]), len(accounts))
+func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error) {
+	res, err := c.doCreate(C.TB_OP_CREATE_ACCOUNTS, unsafe.Pointer(&accounts[0]), len(accounts))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(res) == 0 {
+		return nil, nil
+	}
+
+	resp := make([]types.AccountEventResult, len(res))
+	for i, r := range res {
+		resp[i] = types.AccountEventResult{Code: r.Code, Index: r.Index}
+	}
+
+	return resp, nil
 }
 
-func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.EventResult, error) {
-	return c.doCreate(C.TB_OP_CREATE_TRANSFERS, unsafe.Pointer(&transfers[0]), len(transfers))
+func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error) {
+	res, err := c.doCreate(C.TB_OP_CREATE_TRANSFERS, unsafe.Pointer(&transfers[0]), len(transfers))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(res) == 0 {
+		return nil, nil
+	}
+
+	resp := make([]types.TransferEventResult, len(res))
+	for i, r := range res {
+		resp[i] = types.TransferEventResult{Code: r.Code, Index: r.Index}
+	}
+
+	return resp, nil
 }
 
 func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error) {
