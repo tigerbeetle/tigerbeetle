@@ -528,7 +528,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
                 const addresses = Table.index_data_addresses_used(index_block);
                 for (addresses) |address| {
-                    collector.it.manifest.manifest_log.grid.release_at_checkpoint(address);
+                    collector.it.manifest.manifest_log.grid.release(address);
                 }
 
                 collector.collect();
