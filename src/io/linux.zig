@@ -999,7 +999,7 @@ pub const IO = struct {
         defer dir.deleteFile(path) catch {};
 
         while (true) {
-            const res = os.system.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
+            const res = os.linux.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
             switch (os.linux.getErrno(res)) {
                 .SUCCESS => {
                     os.close(@intCast(os.fd_t, res));
