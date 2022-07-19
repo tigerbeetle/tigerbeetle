@@ -70,9 +70,12 @@ pub fn TableType(
             assert(@bitSizeOf(Key) == @sizeOf(Key) * 8);
             assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
 
-            // We can relax these if necessary. These impact our calculation of the superblock trailer size.
+            // These impact our calculation of:
+            // * the superblock trailer size, and
+            // * the manifest log layout for alignment.
             assert(key_size >= 8);
             assert(key_size <= 32);
+            assert(key_size == 8 or key_size == 16 or key_size == 24 or key_size == 32);
         }
 
         const address_size = @sizeOf(u64);
