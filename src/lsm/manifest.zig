@@ -145,38 +145,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.manifest_log.deinit(allocator);
         }
 
-        pub const LookupIterator = struct {
-            manifest: *Manifest,
-            snapshot: u64,
-            key: Key,
-            level: u8 = 0,
-            inner: ?Level.Iterator = null,
-            precedence: ?u64 = null,
-
-            pub fn next(it: *LookupIterator) ?*const TableInfo {
-                while (it.level < config.lsm_levels) : (it.level += 1) {
-                    const level = &it.manifest.levels[it.level];
-
-                    var inner = level.iterator(it.snapshot, it.key, it.key, .ascending);
-                    if (inner.next()) |table| {
-                        if (it.precedence) |p| assert(p > table.snapshot_min);
-                        it.precedence = table.snapshot_min;
-
-                        assert(table.visible(it.snapshot));
-                        assert(compare_keys(it.key, table.key_min) != .lt);
-                        assert(compare_keys(it.key, table.key_max) != .gt);
-                        assert(inner.next() == null);
-
-                        it.level += 1;
-                        return table;
-                    }
-                }
-
-                assert(it.level == config.lsm_levels);
-                return null;
-            }
-        };
-
         pub fn insert_tables(
             manifest: *Manifest,
             level: u8,
@@ -244,12 +212,17 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             
             var count: u32 = 0;
             var tables: [64]TableInfo = undefined;
-            var it = manifest_level.iterator_visibility(.invisible, &snapshots);
+            var it = manifest_level.iterator(
+                .invisible, 
+                &snapshots,
+                .ascending,
+                .{ .key_min = key_min, .key_max = key_max },
+            );
 
             while (it.next()) |table| {
-                assert(table.invisible(&snapshots));
-                assert(compare_keys(key_min, table.key_min) != .gt);
-                assert(compare_keys(key_max, table.key_max) != .lt);
+                // assert(table.invisible(&snapshots));
+                // assert(compare_keys(key_min, table.key_min) != .gt);
+                // assert(compare_keys(key_max, table.key_max) != .lt);
 
                 if (count > 0) {
                     manifest_level.remove_tables(manifest.node_pool, &snapshots, tables[0..count]);
@@ -269,10 +242,48 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key) LookupIterator {
             return .{
                 .manifest = manifest,
-                .snapshot = snapshot,
+                .snapshots = snapshot,
                 .key = key,
             };
         }
+
+        pub const LookupIterator = struct {
+            manifest: *Manifest,
+            snapshot: u64,
+            key: Key,
+            level: u8 = 0,
+            inner: ?Level.Iterator = null,
+            precedence: ?u64 = null,
+
+            pub fn next(it: *LookupIterator) ?*const TableInfo {
+                while (it.level < config.lsm_levels) : (it.level += 1) {
+                    const level = &it.manifest.levels[it.level];
+
+                    var inner = level.iterator(
+                        .visible,
+                        @as(*[1]const u64, &it.snapshot),
+                        .ascending,
+                        .{ .key_min = it.key, .key_max = it.key},
+                    );
+                    
+                    if (inner.next()) |table| {
+                        if (it.precedence) |p| assert(p > table.snapshot_min);
+                        it.precedence = table.snapshot_min;
+
+                        assert(table.visible(it.snapshot));
+                        assert(compare_keys(it.key, table.key_min) != .lt);
+                        assert(compare_keys(it.key, table.key_max) != .gt);
+                        assert(inner.next() == null);
+
+                        it.level += 1;
+                        return table;
+                    }
+                }
+
+                assert(it.level == config.lsm_levels);
+                return null;
+            }
+        };
 
         pub fn assert_level_table_counts(manifest: *const Manifest) void {
             for (manifest.levels) |*manifest_level, index| {
@@ -295,12 +306,14 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
+            const snapshots = [_]u64{ snapshot };
+
             if (key_exclusive == null) {
                 return manifest.levels[level].iterator(
-                    snapshot,
-                    key_min,
-                    key_max,
+                    .visible,
+                    &snapshots,
                     direction,
+                    .{ .key_min = key_min, .key_max = key_max },
                 ).next();
             }
 
@@ -312,10 +325,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(compare_keys(key_min_exclusive, key_max_exclusive) != .gt);
 
             var it = manifest.levels[level].iterator(
-                snapshot,
-                key_min_exclusive,
-                key_max_exclusive,
+                .visible,
+                &snapshots,
                 direction,
+                .{ .key_min = key_min_exclusive, .key_max = key_max_exclusive },
             );
 
             while (it.next()) |table| {
@@ -350,8 +363,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             var optimal: ?CompactionTableRange = null;
 
             const snapshots = [1]u64{snapshot_latest};
-            var it = manifest.levels[level_a].iterator_visibility(.visible, &snapshots, null);
             var iterations: usize = 0;
+            var it = manifest.levels[level_a].iterator(
+                .visible, 
+                &snapshots, 
+                .ascending,
+                null, // all visible iterators so no key range filter
+            );
 
             while (it.next()) |table| {
                 iterations += 1;
@@ -415,11 +433,12 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .key_max = key_max,
             };
 
+            const snapshots = [_]u64{ snapshot_latest };
             var it = manifest.levels[level_b].iterator(
-                snapshot_latest,
-                range.key_min,
-                range.key_max,
+                .visible,
+                &snapshots,
                 .ascending,
+                .{ .key_min = range.key_min, .key_max = range.key_max },
             );
 
             while (it.next()) |table| : (range.table_count += 1) {
@@ -464,11 +483,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             var level_c: u8 = level_b + 1;
             while (level_c < config.lsm_levels) : (level_c += 1) {
+                const snapshots = [_]u64{ snapshot_latest };
+
                 var it = manifest.levels[level_c].iterator(
-                    snapshot_latest,
-                    range.key_min,
-                    range.key_max,
+                    .visible,
+                    &snapshots,
                     .ascending,
+                    .{ .key_min = range.key_min, .key_max = range.key_max },
                 );
                 if (it.next() == null) {
                     // If the range is being compacted into the last level then this is unreachable,
