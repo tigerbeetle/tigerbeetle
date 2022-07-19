@@ -245,7 +245,13 @@ pub fn ManifestLevelType(
             assert(compare_keys(key_min, key_max) != .gt);
 
             var i: u32 = 0;
-            var it = level.iterator(lsm.snapshot_latest, key_min, key_max, .ascending);
+            var it = level.iterator(
+                .visible,
+                @as(*[1]const u64, &lsm.snapshot_latest),
+                .ascending,
+                .{ .key_min = key_min, .key_max = key_max },
+            );
+
             while (it.next()) |table_const| : (i += 1) {
                 // This const cast is safe as we know that the memory pointed to is in fact
                 // mutable. That is, the table is not in the .text or .rodata section. We do this
@@ -377,53 +383,120 @@ pub fn ManifestLevelType(
             return level.root_keys_array[0..level.keys.node_count];
         }
 
+        pub const Visibility = enum {
+            visible,
+            invisible,
+        };
+
+        pub const KeyRange = struct {
+            key_min: Key,
+            key_max: Key,
+        };
+
+        pub fn iterator(
+            level: *const Self,
+            visibility: Visibility,
+            snapshots: []const u64,
+            direction: Direction,
+            key_range: ?KeyRange,
+        ) Iterator {
+            for (snapshots) |snapshot| {
+                assert(snapshot <= lsm.snapshot_latest);
+            }
+
+            const inner = blk: {
+                if (key_range) |range| {
+                    assert(compare_keys(range.key_min, range.key_max) != .gt);
+
+                    if (level.iterator_start(range.key_min, range.key_max, direction)) |start| {
+                        break :blk level.tables.iterator(
+                            level.keys.absolute_index_for_cursor(start),
+                            level.iterator_start_table_node_for_key_node(start.node, direction),
+                            direction,
+                        );
+                    }
+                }
+
+                break :blk Tables.Iterator{
+                    .array = &level.tables,
+                    .direction = direction,
+                    .cursor = .{ .node = 0, .relative_index = 0 },
+                    .done = true,
+                };
+            };
+
+            return .{
+                .level = level,
+                .inner = inner,
+                .visibility = visibility,
+                .snapshots = snapshots,
+                .direction = direction,
+                .key_range = key_range,
+            };
+        }
+
         pub const Iterator = struct {
             level: *const Self,
             inner: Tables.Iterator,
-            snapshot: u64,
-            key_min: Key,
-            key_max: Key,
+            visibility: Visibility,
+            snapshots: []const u64,
             direction: Direction,
+            key_range: ?KeyRange,
 
             pub fn next(it: *Iterator) ?*const TableInfo {
                 while (it.inner.next()) |table| {
                     // We can't assert !it.inner.done as inner.next() may set done before returning.
-
-                    if (!table.visible(it.snapshot)) continue;
-
-                    switch (it.direction) {
-                        .ascending => {
-                            // Assert that the table is not out of bounds to the left.
-                            //
-                            // We can assert this as it is exactly the same key comparison when we
-                            // binary search in iterator_start(), and since we move in ascending
-                            // order this also remains true beyond the first iteration.
-                            assert(compare_keys(table.key_max, it.key_min) != .lt);
-
-                            // Check if the table is out of bounds to the right.
-                            if (compare_keys(table.key_min, it.key_max) == .gt) {
-                                it.inner.done = true;
-                                return null;
-                            }
+                    
+                    // Skip tables that don't match the provided visibility interests.
+                    switch (it.visibility) {
+                        .invisible => blk: {
+                            if (table.invisible(it.snapshots)) break :blk;
+                            continue;
                         },
-                        .descending => {
-                            // Check if the table is out of bounds to the right.
-                            //
-                            // Unlike in the ascending case, it is not guaranteed that
-                            // table.key_min is less than or equal to it.key_max on the
-                            // first iteration as only the key_max of a table is stored in our
-                            // root/key nodes. On subsequent iterations this check will always
-                            // be false.
-                            if (compare_keys(table.key_min, it.key_max) == .gt) {
-                                continue;
+                        .visible => blk: {
+                            for (it.snapshots) |snapshot| {
+                                if (table.visible(snapshot)) break :blk;
                             }
-
-                            // Check if the table is out of bounds to the left.
-                            if (compare_keys(table.key_max, it.key_min) == .lt) {
-                                it.inner.done = true;
-                                return null;
-                            }
+                            continue;
                         },
+                    }
+
+                    // Filter the table using the key range if provided.
+                    if (it.key_range) |key_range| {
+                        switch (it.direction) {
+                            .ascending => {
+                                // Assert that the table is not out of bounds to the left.
+                                //
+                                // We can assert this as it is exactly the same key comparison when 
+                                // we binary search in iterator_start(), and since we move in 
+                                // ascending order this remains true beyond the first iteration.
+                                assert(compare_keys(table.key_max, key_range.key_min) != .lt);
+
+                                // Check if the table is out of bounds to the right.
+                                if (compare_keys(table.key_min, key_range.key_max) == .gt) {
+                                    it.inner.done = true;
+                                    return null;
+                                }
+                            },
+                            .descending => {
+                                // Check if the table is out of bounds to the right.
+                                //
+                                // Unlike in the ascending case, it is not guaranteed that
+                                // table.key_min is less than or equal to key_range.key_max on the
+                                // first iteration as only the key_max of a table is stored in our
+                                // root/key nodes. On subsequent iterations this check will always
+                                // be false.
+                                if (compare_keys(table.key_min, key_range.key_max) == .gt) {
+                                    continue;
+                                }
+
+                                // Check if the table is out of bounds to the left.
+                                if (compare_keys(table.key_max, key_range.key_min) == .lt) {
+                                    it.inner.done = true;
+                                    return null;
+                                }
+                            },
+                        }
                     }
 
                     return table;
@@ -433,43 +506,6 @@ pub fn ManifestLevelType(
                 return null;
             }
         };
-
-        pub fn iterator(
-            level: *const Self,
-            snapshot: u64,
-            key_min: Key,
-            key_max: Key,
-            direction: Direction,
-        ) Iterator {
-            assert(snapshot <= lsm.snapshot_latest);
-            assert(compare_keys(key_min, key_max) != .gt);
-
-            const inner = blk: {
-                if (level.iterator_start(key_min, key_max, direction)) |start| {
-                    break :blk level.tables.iterator(
-                        level.keys.absolute_index_for_cursor(start),
-                        level.iterator_start_table_node_for_key_node(start.node, direction),
-                        direction,
-                    );
-                } else {
-                    break :blk Tables.Iterator{
-                        .array = &level.tables,
-                        .direction = direction,
-                        .cursor = .{ .node = 0, .relative_index = 0 },
-                        .done = true,
-                    };
-                }
-            };
-
-            return .{
-                .level = level,
-                .inner = inner,
-                .snapshot = snapshot,
-                .key_min = key_min,
-                .key_max = key_max,
-                .direction = direction,
-            };
-        }
 
         /// Returns the table segmented array cursor at which iteration should be started.
         /// May return null if there is nothing to iterate because we know for sure that the key
@@ -506,7 +542,7 @@ pub fn ManifestLevelType(
                     // on this level.
                     .ascending => return null,
                     // The key_max of the target range is greater than the key_max of the last
-                    // table in the level and we are desceneding, so we need to start iteration
+                    // table in the level and we are descending, so we need to start iteration
                     // at the last table in the level.
                     .descending => return level.keys.last(),
                 }
@@ -583,51 +619,6 @@ pub fn ManifestLevelType(
                     }
                 },
             }
-        }
-
-        pub const Visibility = enum {
-            visible,
-            invisible,
-        };
-
-        /// Returns an iterator yielding all tables that are visible/invisible to the snapshots.
-        pub fn iterator_visibility(
-            level: *const Self,
-            comptime visibility: Visibility,
-            snapshots: []const u64,
-        ) IteratorVisibilityType(visibility) {
-            return .{
-                .level = level,
-                .inner = level.tables.iterator(0, 0, .ascending),
-                .snapshots = snapshots,
-            };
-        }
-
-        pub fn IteratorVisibilityType(comptime visibility: Visibility) type {
-            return struct {
-                const IteratorVisibility = @This();
-
-                level: *const Self,
-                inner: Tables.Iterator,
-                snapshots: []const u64,
-
-                pub fn next(it: *IteratorVisibility) ?*const TableInfo {
-                    while (it.inner.next()) |table| {
-                        switch (visibility) {
-                            .visible => {
-                                for (it.snapshots) |snapshot| {
-                                    if (table.visible(snapshot)) return table;
-                                }
-                            },
-                            .invisible => {
-                                if (table.invisible(it.snapshots)) return table;
-                            },
-                        }
-                    }
-                    assert(it.inner.done);
-                    return null;
-                }
-            };
         }
     };
 }
@@ -913,8 +904,9 @@ pub fn TestContext(
             // Use this memory as a scratch buffer since it's conveniently already allocated.
             tables.clearRetainingCapacity();
 
+            const snapshots = context.snapshots.slice();
             {
-                var it = context.level.iterator_visibility(.invisible, context.snapshots.slice());
+                var it = context.level.iterator(.invisible, snapshots, .ascending, null);
                 while (it.next()) |table| {
                     try tables.append(table.*);
                 }
@@ -923,7 +915,7 @@ pub fn TestContext(
             if (tables.items.len > 0) {
                 context.level.remove_tables(
                     &context.pool,
-                    context.snapshots.slice(),
+                    snapshots,
                     tables.items,
                 );
             }
@@ -1025,10 +1017,10 @@ pub fn TestContext(
 
                 std.debug.print("\nactual: ", .{});
                 var it = context.level.iterator(
-                    snapshot,
-                    0,
-                    math.maxInt(Key),
+                    .visible,
+                    @as(*[1]const u64, &snapshot),
                     .ascending,
+                    .{ .key_min = 0, .key_max = math.maxInt(Key) },
                 );
                 while (it.next()) |t| std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
                 std.debug.print("\n", .{});
@@ -1036,10 +1028,10 @@ pub fn TestContext(
 
             {
                 var it = context.level.iterator(
-                    snapshot,
-                    0,
-                    math.maxInt(Key),
+                    .visible,
+                    @as(*[1]const u64, &snapshot),
                     .ascending,
+                    .{ .key_min = 0, .key_max = math.maxInt(Key) },
                 );
 
                 for (reference) |expect| {
@@ -1051,10 +1043,10 @@ pub fn TestContext(
 
             {
                 var it = context.level.iterator(
-                    snapshot,
-                    0,
-                    math.maxInt(Key),
+                    .visible,
+                    @as(*[1]const u64, &snapshot),
                     .descending,
+                    .{ .key_min = 0, .key_max = math.maxInt(Key) },
                 );
 
                 var i = reference.len;
@@ -1078,10 +1070,10 @@ pub fn TestContext(
 
                 {
                     var it = context.level.iterator(
-                        snapshot,
-                        key_min,
-                        key_max,
+                        .visible,
+                        @as(*[1]const u64, &snapshot),
                         .ascending,
+                        .{ .key_min = key_min, .key_max = key_max },
                     );
 
                     for (reference[start .. end + 1]) |expect| {
@@ -1093,10 +1085,10 @@ pub fn TestContext(
 
                 {
                     var it = context.level.iterator(
-                        snapshot,
-                        key_min,
-                        key_max,
+                        .visible,
+                        @as(*[1]const u64, &snapshot),
                         .descending,
+                        .{ .key_min = key_min, .key_max = key_max },
                     );
 
                     var i = end + 1;
