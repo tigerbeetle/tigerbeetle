@@ -238,11 +238,31 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         ) void {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
+            
+            const snapshots = [_]u64{ snapshot };
+            const manifest_level = &manifest.levels[level];
+            
+            var count: u32 = 0;
+            var tables: [64]TableInfo = undefined;
+            var it = manifest_level.iterator_visibility(.invisible, &snapshots);
 
-            var it = manifest.levels[level].iterator(snapshot, key_min, key_max, .ascending);
-            while (it.next()) {
-                assert(table.invisible(&.{ snapshot }));
+            while (it.next()) |table| {
+                assert(table.invisible(&snapshots));
+                assert(compare_keys(key_min, table.key_min) != .gt);
+                assert(compare_keys(key_max, table.key_max) != .lt);
 
+                if (count > 0) {
+                    manifest_level.remove_tables(manifest.node_pool, &snapshots, tables[0..count]);
+                    count = 0;
+                }
+                
+                assert(count < tables.len);
+                tables[count] = table.*;
+                count += 1;
+            }
+
+            if (count > 0) {
+                manifest_level.remove_tables(manifest.node_pool, &snapshots, tables[0..count]);
             }
         }
 
@@ -254,7 +274,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             };
         }
 
-        pub fn assert_visible_tables_are_in_range(manifest: *const Manifest) void {
+        pub fn assert_level_table_counts(manifest: *const Manifest) void {
             for (manifest.levels) |*manifest_level, index| {
                 const level = @intCast(u8, index);
                 const table_count_visible_max = table_count_max_for_level(growth_factor, level);
@@ -478,7 +498,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             callback(manifest);
         }        
 
-        pub fn checkpoint(manifest: *Manifest, snapshot: u64, callback: Callback) void {
+        pub fn checkpoint(manifest: *Manifest, op: u64, callback: Callback) void {
+            _ = op;
+
             assert(manifest.checkpoint_callback == null);
             manifest.checkpoint_callback = callback;
 
