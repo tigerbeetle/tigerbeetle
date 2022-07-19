@@ -139,7 +139,7 @@ pub fn CompactionType(
         data: BlockWrite,
 
         remove_level_a: ?*const TableInfo = null,
-        remove_level_b: TableInfoBuffer,
+        update_level_b: TableInfoBuffer,
         insert_level_b: TableInfoBuffer,
 
         pub fn init(allocator: mem.Allocator) !Compaction {
@@ -161,8 +161,8 @@ pub fn CompactionType(
             const data = BlockWrite{ .block = try allocate_block(allocator) };
             errdefer allocator.free(data.block);
 
-            var remove_level_b = try TableInfoBuffer.init(allocator);
-            errdefer remove_level_b.deinit(allocator);
+            var update_level_b = try TableInfoBuffer.init(allocator);
+            errdefer update_level_b.deinit(allocator);
 
             var insert_level_b = try TableInfoBuffer.init(allocator);
             errdefer insert_level_b.deinit(allocator);
@@ -188,7 +188,7 @@ pub fn CompactionType(
                 .filter = filter,
                 .data = data,
 
-                .remove_level_b = remove_level_b,
+                .update_level_b = update_level_b,
                 .insert_level_b = insert_level_b,
             };
         }
@@ -202,7 +202,7 @@ pub fn CompactionType(
             compaction.iterator_a.deinit(allocator);
             compaction.iterator_b.deinit(allocator);
             compaction.table_builder.deinit(allocator);
-            compaction.remove_level_b.deinit(allocator);
+            compaction.update_level_b.deinit(allocator);
             compaction.insert_level_b.deinit(allocator);
 
             allocator.free(compaction.index.block);
@@ -249,7 +249,7 @@ pub fn CompactionType(
                 .filter = compaction.filter,
                 .data = compaction.data,
 
-                .remove_level_b = compaction.remove_level_b,
+                .update_level_b = compaction.update_level_b,
                 .insert_level_b = compaction.insert_level_b,
             };
 
@@ -301,9 +301,26 @@ pub fn CompactionType(
             compaction.iterator_b.start(iterator_b_context, iterator_b_callback);
         }
 
-        fn iterator_b_table_info_callback(iterator_b: *IteratorB, table: *const TableInfo) void {
+        fn iterator_b_table_info_callback(
+            iterator_b: *IteratorB, 
+            table: *const TableInfo,
+            index_block: Table.BlockPtrConst,
+        ) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
-            compaction.queue_manifest_update(&compaction.remove_level_b, table);
+            compaction.queue_manifest_update(&compaction.update_level_b, table);
+
+            // Release a tables block addresses if it will be invisible to the compaction.
+            if (table.invisible(&.{ compaction.snapshot })) {
+                compaction.grid.release(Table.index_block_address(index_block));
+
+                for (Table.index_filter_addresses_used(index_block)) |address| {
+                    compaction.grid.release(address);
+                }
+
+                for (Table.index_data_addresses_used(index_block)) |address| {
+                    compaction.grid.release(address);
+                }
+            }
         }
 
         fn queue_manifest_update(
@@ -311,13 +328,13 @@ pub fn CompactionType(
             buffer: *TableInfoBuffer,
             table: *const TableInfo,
         ) void {
-            assert(buffer == &compaction.remove_level_b or buffer == &compaction.insert_level_b);
+            assert(buffer == &compaction.update_level_b or buffer == &compaction.insert_level_b);
             if (buffer.full()) compaction.update_manifest(buffer);
             buffer.push(table);
         }
 
         fn update_manifest(compaction: *Compaction, buffer: *TableInfoBuffer) void {
-            assert(buffer == &compaction.remove_level_b or buffer == &compaction.insert_level_b);
+            assert(buffer == &compaction.update_level_b or buffer == &compaction.insert_level_b);
 
             const tables: []const TableInfo = buffer.drain();
             if (tables.len == 0) return;
@@ -327,7 +344,7 @@ pub fn CompactionType(
                 assert(compare_keys(table.key_max, compaction.range.key_max) != .gt);
             }
 
-            if (buffer == &compaction.remove_level_b) {
+            if (buffer == &compaction.update_level_b) {
                 compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
                 // TODO(King): find tables that are invisible to all snapshots: table.invisible([])
                 // then remove them and make sure all their block addrs are released back to grid.
@@ -416,17 +433,20 @@ pub fn CompactionType(
 
                 // Flush updates to the table infos discovered during compaction
                 // TODO Handle compaction.remove_level_a
-                compaction.update_manifest(&compaction.remove_level_b);
+                compaction.update_manifest(&compaction.update_level_b);
                 compaction.update_manifest(&compaction.insert_level_b);
             }
         }
 
         pub fn reset(compaction: *Compaction) void {
-            assert(compaction.status == .done);
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
 
+            assert(compaction.status == .done);
             compaction.status = .idle;
+
+            assert(compaction.update_level_b.drain().len == 0);
+            assert(compaction.insert_level_b.drain().len == 0);  
         }
 
         fn tick_io_read(compaction: *Compaction) void {
