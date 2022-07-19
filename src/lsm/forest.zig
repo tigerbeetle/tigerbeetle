@@ -96,8 +96,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                 // Ensure the options for this groove only contain cache_size and commit_count_max.
                 comptime assert_struct_field_names_strict_equal(
                     @field(groove_options, field.name),
-                    .{ 
-                        .cache_size = @as(u32, 0), 
+                    .{
+                        .cache_size = @as(u32, 0),
                         .commit_count_max = @as(u32, 0),
                     },
                 );
@@ -169,7 +169,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                     }.groove_cb;
                 }
             };
-        }        
+        }
 
         pub fn compact(forest: *Forest, op: u46, callback: Callback) void {
             // Start a compacting join.
@@ -211,7 +211,7 @@ test "Forest" {
             Storage,
             Account,
             .{
-                .ignored = &[_][]const u8{"reserved", "flags"},
+                .ignored = &[_][]const u8{ "reserved", "flags" },
                 .derived = .{},
             },
         ),
@@ -219,7 +219,7 @@ test "Forest" {
             Storage,
             Transfer,
             .{
-                .ignored = &[_][]const u8{"reserved", "flags"},
+                .ignored = &[_][]const u8{ "reserved", "flags" },
                 .derived = .{},
             },
         ),

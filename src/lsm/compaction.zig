@@ -302,7 +302,7 @@ pub fn CompactionType(
         }
 
         fn iterator_b_table_info_callback(
-            iterator_b: *IteratorB, 
+            iterator_b: *IteratorB,
             table: *const TableInfo,
             index_block: Table.BlockPtrConst,
         ) void {
@@ -310,7 +310,7 @@ pub fn CompactionType(
             compaction.queue_manifest_update(&compaction.update_level_b, table);
 
             // Release a tables block addresses if it will be invisible to the compaction.
-            if (table.invisible(&.{ compaction.snapshot })) {
+            if (table.invisible(&.{compaction.snapshot})) {
                 compaction.grid.release(Table.index_block_address(index_block));
 
                 for (Table.index_filter_addresses_used(index_block)) |address| {
@@ -446,7 +446,7 @@ pub fn CompactionType(
             compaction.status = .idle;
 
             assert(compaction.update_level_b.drain().len == 0);
-            assert(compaction.insert_level_b.drain().len == 0);  
+            assert(compaction.insert_level_b.drain().len == 0);
         }
 
         fn tick_io_read(compaction: *Compaction) void {
