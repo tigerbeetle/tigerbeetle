@@ -25,7 +25,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
         const TableInfo = Manifest.TableInfo;
         const TableInfoCallback = fn (
-            it: *LevelIterator, 
+            it: *LevelIterator,
             table: *const TableInfo,
             index_block: Table.BlockPtrConst,
         ) void;
@@ -219,7 +219,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         }
 
         fn table_iterator_index_callback(
-            table_iterator: *TableIterator, 
+            table_iterator: *TableIterator,
             index_block: Table.BlockPtrConst,
         ) void {
             const scope = @fieldParentPtr(TableIteratorScope, "table_iterator", table_iterator);

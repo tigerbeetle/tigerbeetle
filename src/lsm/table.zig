@@ -698,7 +698,7 @@ pub fn TableType(
 
         pub inline fn index_data_keys_used(index_block: BlockPtrConst) []const Key {
             const slice = mem.bytesAsSlice(
-                Key, 
+                Key,
                 index_block[index.keys_offset..][0..index.keys_size],
             );
             return slice[0..index_data_blocks_used(index_block)];

@@ -744,7 +744,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                         context.compaction.snapshot,
                         context.compaction.key_min,
                         context.compaction.key_max,
-                    ); 
+                    );
                 }
             }
 
@@ -763,7 +763,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                         context.compaction.snapshot,
                         context.compaction.key_min,
                         context.compaction.key_max,
-                    ); 
+                    );
                 }
 
                 tree.manifest.assert_level_table_counts();

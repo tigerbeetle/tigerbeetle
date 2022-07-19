@@ -23,22 +23,22 @@ fn ObjectTreeType(comptime Storage: type, comptime Value: type) type {
     }
 
     const ValueKeyHelpers = struct {
-        fn compare_keys(timestamp_a: u64, timestamp_b: u64) callconv(.Inline) std.math.Order {
+        inline fn compare_keys(timestamp_a: u64, timestamp_b: u64) std.math.Order {
             return std.math.order(timestamp_a, timestamp_b);
         }
 
-        fn key_from_value(value: *const Value) callconv(.Inline) u64 {
+        inline fn key_from_value(value: *const Value) u64 {
             return value.timestamp;
         }
 
         const sentinel_key = std.math.maxInt(u64);
         const tombstone_bit = 1 << (64 - 1);
 
-        fn tombstone(value: *const Value) callconv(.Inline) bool {
+        inline fn tombstone(value: *const Value) bool {
             return (value.timestamp & tombstone_bit) != 0;
         }
 
-        fn tombstone_from_key(timestamp: u64) callconv(.Inline) Value {
+        inline fn tombstone_from_key(timestamp: u64) Value {
             var value = std.mem.zeroes(Value); // Full zero-initialized Value.
             value.timestamp = timestamp | tombstone_bit;
             return value;
@@ -86,20 +86,20 @@ fn IndexCompositeKeyType(comptime Field: type) type {
 comptime {
     assert(IndexCompositeKeyType(u1) == u64);
     assert(IndexCompositeKeyType(u16) == u64);
-    assert(IndexCompositeKeyType(enum(u16){x}) == u64);
+    assert(IndexCompositeKeyType(enum(u16) { x }) == u64);
 
     assert(IndexCompositeKeyType(u32) == u64);
     assert(IndexCompositeKeyType(u63) == u64);
     assert(IndexCompositeKeyType(u64) == u64);
-    
-    assert(IndexCompositeKeyType(enum(u65){x}) == u128);
+
+    assert(IndexCompositeKeyType(enum(u65) { x }) == u128);
     assert(IndexCompositeKeyType(u65) == u128);
     assert(IndexCompositeKeyType(u128) == u128);
 }
 
 fn IndexTreeType(
-    comptime Storage: type, 
-    comptime Field: type, 
+    comptime Storage: type,
+    comptime Field: type,
     comptime tree_name: []const u8,
 ) type {
     const Key = CompositeKey(IndexCompositeKeyType(Field));
@@ -132,7 +132,7 @@ pub fn GrooveType(
     comptime options: anytype,
 ) type {
     comptime var index_fields: []const std.builtin.TypeInfo.StructField = &.{};
-    
+
     // Generate index LSM trees from the struct fields.
     inline for (std.meta.fields(Object)) |field| {
         // See if we should ignore this field from the options.
@@ -166,7 +166,7 @@ pub fn GrooveType(
         // Get the function info for the derived field.
         const derive_func = @field(options.derived, field.name);
         const derive_func_info = @typeInfo(@TypeOf(derive_func)).Fn;
-        
+
         // Make sure it has only one argument.
         if (derive_func_info.args.len != 1) {
             @compileError("expected derive fn to take in *const " ++ @typeName(Object));
@@ -176,7 +176,7 @@ pub fn GrooveType(
         const derive_arg = derive_func_info.args[0];
         if (derive_arg.is_generic) @compileError("expected derive fn arg to not be generic");
         if (derive_arg.arg_type != *const Object) {
-           @compileError("expected derive fn to take in *const " ++ @typeName(Object));
+            @compileError("expected derive fn to take in *const " ++ @typeName(Object));
         }
 
         // Get the return value from the derived field as the DerivedType.
@@ -211,11 +211,11 @@ pub fn GrooveType(
     });
 
     // Verify no hash collisions between all the trees:
-    comptime var hashes: []const u128 = &.{ ObjectTree.hash };
+    comptime var hashes: []const u128 = &.{ObjectTree.hash};
 
     inline for (std.meta.fields(IndexTrees)) |field| {
         const IndexTree = @TypeOf(@field(@as(IndexTrees, undefined), field.name));
-        const hash: []const u128 = &.{ IndexTree.hash };
+        const hash: []const u128 = &.{IndexTree.hash};
 
         assert(std.mem.containsAtLeast(u128, hashes, 0, hash));
         hashes = hashes ++ hash;
@@ -223,10 +223,11 @@ pub fn GrooveType(
 
     // Verify groove index count:
     const indexes_count_actual = std.meta.fields(IndexTrees).len;
-    const indexes_count_expect = std.meta.fields(Object).len
-        - options.ignored.len
-        - 1 // The timestamp field is implicitly ignored since it's the primary key for ObjectTree.
-        + std.meta.fields(@TypeOf(options.derived)).len;
+    const indexes_count_expect = std.meta.fields(Object).len -
+        options.ignored.len -
+        // The timestamp field is implicitly ignored since it's the primary key for ObjectTree:
+        1 +
+        std.meta.fields(@TypeOf(options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);
 
@@ -266,7 +267,7 @@ pub fn GrooveType(
 
                 /// Create a Value from the index that can be used in the IndexTree.
                 pub fn derive_value(
-                    object: *const Object, 
+                    object: *const Object,
                     index: Index,
                 ) CompositeKey(IndexCompositeKeyType(Index)).Value {
                     return .{
@@ -329,7 +330,7 @@ pub fn GrooveType(
             //
             // TODO(King) Since this is state machine specific, let's expose `commit_count_max`
             // as an option when creating the groove.
-            // Then, in our case, we'll create the Accounts groove with a commit_count_max of 
+            // Then, in our case, we'll create the Accounts groove with a commit_count_max of
             // 8191 * 2 (accounts mutated per transfer) * 2 (old/new index value).
             commit_count_max: u32,
         ) !Groove {
@@ -389,7 +390,7 @@ pub fn GrooveType(
         pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {
             assert(groove.join_op == null);
             assert(groove.join_pending == 0);
-            assert(groove.join_callback == null);            
+            assert(groove.join_callback == null);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(groove.indexes, field.name).deinit(allocator);
@@ -397,7 +398,7 @@ pub fn GrooveType(
 
             groove.objects.deinit(allocator);
             groove.cache.deinit(allocator);
-            
+
             allocator.destroy(groove.cache);
             groove.* = undefined;
         }
@@ -483,7 +484,7 @@ pub fn GrooveType(
                     assert(groove.join_op == null);
                     assert(groove.join_pending == 0);
                     assert(groove.join_callback == null);
-                    
+
                     // Start the sync operations
                     groove.join_op = join_op;
                     groove.join_callback = join_callback;
@@ -515,7 +516,7 @@ pub fn GrooveType(
                             assert(groove.join_op == join_op);
                             assert(groove.join_callback != null);
                             assert(groove.join_pending <= join_pending_max);
-                            
+
                             // Guard until all pending sync ops complete.
                             groove.join_pending -= 1;
                             if (groove.join_pending > 0) return;
@@ -534,7 +535,7 @@ pub fn GrooveType(
             // Start a compacting join operation.
             const Join = JoinType(.compacting);
             Join.start(groove, callback);
-            
+
             // Compact the ObjectTree.
             groove.objects.compact_io(op, Join.tree_callback(null));
 
@@ -561,7 +562,7 @@ pub fn GrooveType(
             // Start a checkpoint join operation.
             const Join = JoinType(.checkpoint);
             Join.start(groove, callback);
-            
+
             // Checkpoint the ObjectTree.
             groove.objects.checkpoint(op, Join.tree_callback(null));
 
