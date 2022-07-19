@@ -731,32 +731,58 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             // At the end of every beat, ensure mutable table can be flushed to immutable table.
             assert(tree.table_mutable.can_commit_batch(tree.options.commit_count_max));
 
-            // At end of second measure:
+            // At end of second/half measure:
             // - assert: even compactions from previous tick are finished.
+            // - remove tables made invisible during compaction of even levels.
             if (tree.compaction_beat == half_measure_beat_count - 1) {
                 log.debug(tree_name ++ ": finished compacting even levels", .{});
 
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
+                    tree.manifest.remove_invisible_tables(
+                        context.level_a,
+                        context.compaction.snapshot,
+                        context.compaction.key_min,
+                        context.compaction.key_max,
+                    ); 
                 }
             }
 
-            // At end of fourth measure:
+            // At end of fourth/last measure:
             // - assert: odd compactions from previous tick are finished.
+            // - remove tables made invisible during compaction of odd levels.
             // - assert: all visible levels haven't overflowed their max.
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_beat == config.lsm_batch_multiple - 1) {
                 log.debug(tree_name ++ ": finished compacting immutable table and odd levels", .{});
+
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
+                    tree.manifest.remove_invisible_tables(
+                        context.level_a,
+                        context.compaction.snapshot,
+                        context.compaction.key_min,
+                        context.compaction.key_max,
+                    ); 
                 }
 
-                tree.manifest.assert_visible_tables_are_in_range();
+                tree.manifest.assert_level_table_counts();
                 tree.compact_mutable_table_into_immutable();
             }
 
             // At the end of every beat, call manifest.compact before invoking the compact callback.
-            tree.manifest.compact(manifest_compact_callback);
+            tree.manifest.compact(compact_manifest_callback);
+        }
+
+        fn compact_manifest_callback(manifest: *Manifest) void {
+            const tree = @fieldParentPtr(Tree, "manifest", manifest);
+            assert(tree.compaction_io_pending == 0);
+            assert(tree.compaction_callback != null);
+
+            // Invoke the compact_io() callback after the manifest compacts at the end of the beat.
+            const callback = tree.compaction_callback.?;
+            tree.compaction_callback = null;
+            callback(tree);
         }
 
         fn compact_mutable_table_into_immutable(tree: *Tree) void {
@@ -777,17 +803,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(!tree.table_immutable.free);
         }
 
-        fn manifest_compact_callback(manifest: *Manifest) void {
-            const tree = @fieldParentPtr(Tree, "manifest", manifest);
-            assert(tree.compaction_io_pending == 0);
-            assert(tree.compaction_callback != null);
-
-            // Invoke the compact_io() callback after the manifest compacts at the end of the beat.
-            const callback = tree.compaction_callback.?;
-            tree.compaction_callback = null;
-            callback(tree);
-        }
-
         pub fn checkpoint(tree: *Tree, op: u64, callback: fn (*Tree) void) void {
             // Assert no outstanding compact_io() work..
             assert(tree.compaction_io_pending == 0);
@@ -804,8 +819,11 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 assert(compaction.status == .idle);
             }
 
-            // Assert all manifest tables are in range.
-            tree.manifest.assert_visible_tables_are_in_range();
+            // Assert all manifest levels haven't overflowed their table counts.
+            tree.manifest.assert_level_table_counts();
+
+            // Assert chcekpointing after invisible tables have been released.
+            if (config.verify) tree.manifest.assert_no_invisible_tables(op);
 
             // Start an asynchronous checkpoint on the manifest.
             assert(tree.checkpoint_callback == null);
