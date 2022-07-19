@@ -124,12 +124,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 level.* = try Level.init(allocator);
             }
 
-            const tree: u8 = blk: {
-                _ = tree_hash;
-                break :blk @panic("TODO(Joran): ManifestLog.tree from tree_hash");
-            };
-
-            var manifest_log = try ManifestLog.init(allocator, grid, tree);
+            var manifest_log = try ManifestLog.init(allocator, grid, tree_hash);
             errdefer manifest_log.deinit(allocator);
 
             return Manifest{

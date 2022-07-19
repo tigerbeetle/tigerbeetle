@@ -56,25 +56,39 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             event: enum(u1) { insert, remove },
         };
 
+        const alignment = 16;
+
         comptime {
             // Bit 7 is reserved to indicate whether the event is an insert or remove.
             assert(config.lsm_levels <= math.maxInt(u7) + 1);
 
             assert(@sizeOf(Label) == @sizeOf(u8));
 
-            // All tables should already be 16-byte aligned because of the leading checksum.
-            assert(@alignOf(TableInfo) == 16);
+            // All TableInfo's should already be 16-byte aligned because of the leading checksum.
+            assert(@alignOf(TableInfo) == alignment);
+
+            // For keys { 8, 16, 24, 32 } all TableInfo's should be a multiple of the alignment.
+            // However, we still store Label ahead of TableInfo to save space on the network.
+            // This means we store fewer entries per manifest block, to gain less padding,
+            // since we must store entry_count_max of whichever array is first in the layout.
+            // For a better understanding of this decision, see block_size() below.
+            assert(@sizeOf(TableInfo) % alignment == 0);
         }
 
-        const alignment = 16;
         const block_body_size = config.block_size - @sizeOf(vsr.Header);
         const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);
         const entry_count_max_unaligned = @divFloor(block_body_size, entry_size);
         const entry_count_max = @divFloor(entry_count_max_unaligned, alignment) * alignment;
 
+        comptime {
+            assert(entry_count_max > 0);
+            assert((entry_count_max * @sizeOf(Label)) % alignment == 0);
+            assert((entry_count_max * @sizeOf(TableInfo)) % alignment == 0);
+        }
+
         superblock: *SuperBlock,
         grid: *Grid,
-        tree: u8,
+        tree_hash: u128,
 
         /// The head block is used to accumulate a full block, to be written at the next flush.
         /// The remaining blocks must accommodate all further appends.
@@ -100,11 +114,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         write: Grid.Write = undefined,
         write_callback: Callback = undefined,
 
-        pub fn init(
-            allocator: mem.Allocator,
-            grid: *Grid,
-            tree: u8,
-        ) !ManifestLog {
+        pub fn init(allocator: mem.Allocator, grid: *Grid, tree_hash: u128) !ManifestLog {
             // TODO RingBuffer for .pointer should be extended to take care of alignment:
 
             const a = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
@@ -119,7 +129,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             return ManifestLog{
                 .superblock = grid.superblock,
                 .grid = grid,
-                .tree = tree,
+                .tree_hash = tree_hash,
                 .blocks = .{
                     .buffer = .{
                         a[0..config.block_size],
@@ -147,7 +157,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             manifest_log.open_event = event;
             manifest_log.open_iterator = manifest_log.superblock.manifest.iterator_reverse(
-                manifest_log.tree,
+                manifest_log.tree_hash,
             );
 
             manifest_log.reading = true;
@@ -164,7 +174,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             manifest_log.read_block_reference = manifest_log.open_iterator.next();
 
             if (manifest_log.read_block_reference) |block| {
-                assert(block.tree == manifest_log.tree);
+                assert(block.tree == manifest_log.tree_hash);
                 assert(block.address > 0);
 
                 manifest_log.grid.read_block(
@@ -222,7 +232,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 }
             }
 
-            log.debug("opened: checksum={x} address={} entries={}", .{
+            log.debug("{}: opened: checksum={} address={} entries={}", .{
+                manifest_log.tree_hash,
                 block_reference.checksum,
                 block_reference.address,
                 entry_count,
@@ -264,17 +275,19 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.entry_count < entry_count_max);
             assert(manifest_log.blocks.count - manifest_log.blocks_closed == 1);
 
-            // TODO Use format specifier to pad checksum hex string.
-            log.debug("{s}: tree={} level={} checksum={x} address={} flags={} snapshot={}..{}", .{
-                @tagName(label.event),
-                manifest_log.tree,
-                label.level,
-                table.checksum,
-                table.address,
-                table.flags,
-                table.snapshot_min,
-                table.snapshot_max,
-            });
+            log.debug(
+                "{}: {s}: level={} checksum={} address={} flags={} snapshot={}..{}",
+                .{
+                    manifest_log.tree_hash,
+                    @tagName(label.event),
+                    label.level,
+                    table.checksum,
+                    table.address,
+                    table.flags,
+                    table.snapshot_min,
+                    table.snapshot_max,
+                },
+            );
 
             const block: BlockPtr = manifest_log.blocks.tail().?;
             const entry = manifest_log.entry_count;
@@ -302,7 +315,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             manifest_log.writing = true;
             manifest_log.write_callback = callback;
 
-            log.debug("flush: writing {} block(s)", .{manifest_log.blocks_closed});
+            log.debug("{}: flush: writing {} block(s)", .{
+                manifest_log.tree_hash,
+                manifest_log.blocks_closed,
+            });
             manifest_log.write_block();
         }
 
@@ -342,7 +358,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 assert(entry_count == entry_count_max);
             }
 
-            log.debug("write_block: checksum={x} address={} entries={}", .{
+            log.debug("{}: write_block: checksum={} address={} entries={}", .{
+                manifest_log.tree_hash,
                 header.checksum,
                 address,
                 entry_count,
@@ -370,7 +387,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
-            manifest.append(manifest_log.tree, header.checksum, address);
+            manifest.append(manifest_log.tree_hash, header.checksum, address);
             if (block_entry_count(block) < entry_count_max) manifest.queue_for_compaction(address);
 
             manifest_log.blocks_closed -= 1;
@@ -389,15 +406,15 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         fn flush_callback(manifest_log: *ManifestLog) void {
             const callback = manifest_log.read_callback;
             manifest_log.read_callback = undefined;
-            
+
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
-            if (manifest.oldest_block_queued_for_compaction(manifest_log.tree)) |block| {
-                assert(block.tree == manifest_log.tree);
+            if (manifest.oldest_block_queued_for_compaction(manifest_log.tree_hash)) |block| {
+                assert(block.tree == manifest_log.tree_hash);
                 assert(block.address > 0);
 
                 manifest_log.reading = true;
@@ -455,7 +472,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 }
             }
 
-            log.debug("compacted: checksum={x} address={} frees={}/{}", .{
+            log.debug("{}: compacted: checksum={} address={} frees={}/{}", .{
+                manifest_log.tree_hash,
                 block_reference.checksum,
                 block_reference.address,
                 frees,
@@ -467,7 +485,11 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(frees > 0 or entry_count < entry_count_max);
 
             assert(manifest.queued_for_compaction(block_reference.address));
-            manifest.remove(manifest_log.tree, block_reference.checksum, block_reference.address);
+            manifest.remove(
+                manifest_log.tree_hash,
+                block_reference.checksum,
+                block_reference.address,
+            );
             assert(!manifest.queued_for_compaction(block_reference.address));
 
             manifest_log.superblock.free_set.release_at_checkpoint(block_reference.address);
@@ -532,7 +554,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // Zero unused labels:
             mem.set(u8, mem.sliceAsBytes(labels(block)[entry_count..]), 0);
 
-            // Zero unused tables and padding:
+            // Zero unused tables, and padding:
             mem.set(u8, block[header.size..], 0);
 
             header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
@@ -541,7 +563,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             verify_block(block, null, null);
             assert(block_entry_count(block) == entry_count);
 
-            log.debug("close_block: checksum={x} address={} entries={}", .{
+            log.debug("{}: close_block: checksum={} address={} entries={}", .{
+                manifest_log.tree_hash,
                 header.checksum,
                 block_address(block),
                 entry_count,
@@ -601,6 +624,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(entry_count > 0);
             assert(entry_count <= entry_count_max);
 
+            // Encode the smaller type first because this will be multiplied by entry_count_max.
             const labels_size = entry_count_max * @sizeOf(Label);
             const tables_size = entry_count * @sizeOf(TableInfo);
 
@@ -659,9 +683,9 @@ fn ManifestLogTestType(
         pending: usize = 0,
 
         fn init(allocator: mem.Allocator, grid: *Grid) !ManifestLogTest {
-            const tree = 1;
+            const tree_hash: u128 = std.math.maxInt(u128);
 
-            var manifest_log = try ManifestLog.init(allocator, grid, tree);
+            var manifest_log = try ManifestLog.init(allocator, grid, tree_hash);
             errdefer manifest_log.deinit(allocator);
 
             return ManifestLogTest{
@@ -708,9 +732,9 @@ fn ManifestLogTestType(
 
         fn open_event(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
             log.debug(
-                "open_event: tree={} level={} checksum={x} address={} flags={} snapshot={}..{}",
+                "{}: open_event: level={} checksum={} address={} flags={} snapshot={}..{}",
                 .{
-                    manifest_log.tree,
+                    manifest_log.tree_hash,
                     level,
                     table.checksum,
                     table.address,
@@ -800,7 +824,7 @@ fn ManifestLogTestType(
             const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
             t.pending -= 1;
 
-            const tree = t.manifest_log.tree;
+            const tree = t.manifest_log.tree_hash;
             if (t.manifest_log.superblock.manifest.oldest_block_queued_for_compaction(tree)) |_| {
                 t.compact();
             } else {
@@ -839,13 +863,13 @@ pub fn main() !void {
     };
 
     const size_max = 2 * 1024 * 1024 * 1024;
-    const storage_fd = try Storage.open(dir_fd, "test_manifest_log", size_max, true);
+    const storage_fd = try IO.open_file(dir_fd, "test_manifest_log", size_max, true);
     defer std.fs.cwd().deleteFile("test_manifest_log") catch {};
 
     var io = try IO.init(128, 0);
     defer io.deinit();
 
-    var storage = try Storage.init(&io, size_max, storage_fd);
+    var storage = try Storage.init(&io, storage_fd);
     defer storage.deinit();
 
     var superblock = try SuperBlock.init(allocator, &storage);
@@ -875,7 +899,7 @@ pub fn main() !void {
 
     const ManifestLogTest = ManifestLogTestType(Storage, TableInfo);
 
-    var t = try ManifestLogTest.init(allocator, &superblock, &grid);
+    var t = try ManifestLogTest.init(allocator, &grid);
     defer t.deinit(allocator);
 
     t.format_superblock();
