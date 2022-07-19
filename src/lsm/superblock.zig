@@ -291,19 +291,14 @@ pub const superblock_trailer_size_max = blk: {
     break :blk superblock_trailer_manifest_size_max + superblock_trailer_free_set_size_max;
 };
 
-// A manifest block reference of 25 bytes contains a checksum, address and tree identifier.
-// We store these references back to back in the trailer.
-// A 4 KiB sector can contain 163.84 of these references.
-// A manifest block of 64 KiB in turn can store 511 TableInfos (32 byte keys, plus tree/level meta).
-// Therefore a 1126400 byte manifest trailer equates to 45056 manifest blocks or 23 million tables.
-// This allows room for switching from 64 KiB to a smaller block size without limiting table count.
-// It is also not material in comparison to the size of the trailer's encoded block free set.
+// A manifest block reference of 40 bytes contains a tree hash, checksum, and address.
+// These references are stored in struct-of-arrays layout in the trailer for the sake of alignment.
 pub const superblock_trailer_manifest_size_max = blk: {
-    assert(SuperBlockManifest.BlockReferenceSize == 25);
+    assert(SuperBlockManifest.BlockReferenceSize == 16 + 16 + 8);
 
-    // Use a common multiple so that the maximum size is exactly divisible without padding:
-    const multiple = config.sector_size * SuperBlockManifest.BlockReferenceSize;
-    break :blk div_ceil(1024 * 1024, multiple) * multiple;
+    // Use a multiple of sector * reference so that the size is exactly divisible without padding:
+    // For example, this 2.5 MiB manifest trailer == 65536 references == 65536 * 511 or 34m tables.
+    break :blk 16 * config.sector_size * SuperBlockManifest.BlockReferenceSize;
 };
 
 pub const superblock_trailer_free_set_size_max = blk: {
