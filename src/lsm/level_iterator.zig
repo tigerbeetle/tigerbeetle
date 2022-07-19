@@ -163,7 +163,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             const table_iterator = it.next_table_iterator();
             assert(it.tables.tail_ptr().?.it == it);
 
-            asser(it.table_indexing == null);
+            assert(it.table_indexing == null);
             it.table_indexing = table;
 
             const table_iterator_context = .{
