@@ -682,12 +682,22 @@ pub fn TableType(
             }
         };
 
+        pub inline fn index_block_address(index_block: BlockPtrConst) u64 {
+            const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
+            const address = header.op;
+            assert(address > 0);
+            return address;
+        }
+
         pub inline fn index_data_keys(index_block: BlockPtr) []Key {
             return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
         }
 
         pub inline fn index_data_keys_used(index_block: BlockPtrConst) []const Key {
-            const slice = mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
+            const slice = mem.bytesAsSlice(
+                Key, 
+                index_block[index.keys_offset..][0..index.keys_size],
+            );
             return slice[0..index_data_blocks_used(index_block)];
         }
 
