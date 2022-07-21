@@ -93,6 +93,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         /// Levels beyond level 0 have tables with disjoint key ranges.
         /// Here, we use a structure with indexes over the segmented array for performance.
         const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
+        const KeyRange = Level.KeyRange;
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);
 
@@ -193,25 +194,25 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn remove_invisible_tables(
-            manifest: *Manifest, 
-            level: u8, 
+            manifest: *Manifest,
+            level: u8,
             snapshot: u64,
             key_min: Key,
             key_max: Key,
         ) void {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
-            
-            const snapshots = [_]u64{ snapshot };
+
+            const snapshots = [_]u64{snapshot};
             const manifest_level = &manifest.levels[level];
-            
+
             var count: u32 = 0;
             var tables: [64]TableInfo = undefined;
             var it = manifest_level.iterator(
-                .invisible, 
+                .invisible,
                 &snapshots,
                 .ascending,
-                .{ .key_min = key_min, .key_max = key_max },
+                KeyRange{ .key_min = key_min, .key_max = key_max },
             );
 
             while (it.next()) |table| {
@@ -223,7 +224,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     manifest_level.remove_tables(manifest.node_pool, &snapshots, tables[0..count]);
                     count = 0;
                 }
-                
+
                 assert(count < tables.len);
                 tables[count] = table.*;
                 count += 1;
@@ -256,11 +257,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
                     var inner = level.iterator(
                         .visible,
-                        @as(*[1]const u64, &it.snapshot),
+                        @as(*const [1]u64, &it.snapshot),
                         .ascending,
-                        .{ .key_min = it.key, .key_max = it.key},
+                        KeyRange{ .key_min = it.key, .key_max = it.key },
                     );
-                    
+
                     if (inner.next()) |table| {
                         if (it.precedence) |p| assert(p > table.snapshot_min);
                         it.precedence = table.snapshot_min;
@@ -288,6 +289,18 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
         }
 
+        pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshot: u64) void {
+            for (manifest.levels) |*manifest_level| {
+                var it = manifest_level.iterator(
+                    .invisible,
+                    @as(*const [1]u64, &snapshot),
+                    .ascending,
+                    null,
+                );
+                assert(it.next() == null);
+            }
+        }
+
         /// Returns the next table in the range, after `key_exclusive` if provided.
         pub fn next_table(
             manifest: *const Manifest,
@@ -301,14 +314,14 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
-            const snapshots = [_]u64{ snapshot };
+            const snapshots = [_]u64{snapshot};
 
             if (key_exclusive == null) {
                 return manifest.levels[level].iterator(
                     .visible,
                     &snapshots,
                     direction,
-                    .{ .key_min = key_min, .key_max = key_max },
+                    KeyRange{ .key_min = key_min, .key_max = key_max },
                 ).next();
             }
 
@@ -323,7 +336,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .visible,
                 &snapshots,
                 direction,
-                .{ .key_min = key_min_exclusive, .key_max = key_max_exclusive },
+                KeyRange{ .key_min = key_min_exclusive, .key_max = key_max_exclusive },
             );
 
             while (it.next()) |table| {
@@ -360,8 +373,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const snapshots = [1]u64{snapshot_latest};
             var iterations: usize = 0;
             var it = manifest.levels[level_a].iterator(
-                .visible, 
-                &snapshots, 
+                .visible,
+                &snapshots,
                 .ascending,
                 null, // all visible iterators so no key range filter
             );
@@ -428,12 +441,12 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .key_max = key_max,
             };
 
-            const snapshots = [_]u64{ snapshot_latest };
+            const snapshots = [_]u64{snapshot_latest};
             var it = manifest.levels[level_b].iterator(
                 .visible,
                 &snapshots,
                 .ascending,
-                .{ .key_min = range.key_min, .key_max = range.key_max },
+                KeyRange{ .key_min = range.key_min, .key_max = range.key_max },
             );
 
             while (it.next()) |table| : (range.table_count += 1) {
@@ -478,13 +491,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             var level_c: u8 = level_b + 1;
             while (level_c < config.lsm_levels) : (level_c += 1) {
-                const snapshots = [_]u64{ snapshot_latest };
+                const snapshots = [_]u64{snapshot_latest};
 
                 var it = manifest.levels[level_c].iterator(
                     .visible,
                     &snapshots,
                     .ascending,
-                    .{ .key_min = range.key_min, .key_max = range.key_max },
+                    KeyRange{ .key_min = range.key_min, .key_max = range.key_max },
                 );
                 if (it.next() == null) {
                     // If the range is being compacted into the last level then this is unreachable,
@@ -512,7 +525,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const callback = manifest.compact_callback.?;
             manifest.compact_callback = null;
             callback(manifest);
-        }        
+        }
 
         pub fn checkpoint(manifest: *Manifest, op: u64, callback: Callback) void {
             _ = op;

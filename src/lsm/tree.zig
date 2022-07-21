@@ -24,7 +24,7 @@ const SuperBlockType = @import("superblock.zig").SuperBlockType;
 /// Since we ensure and assert that a query snapshot never exactly matches
 /// the snapshot_min/snapshot_max of a table, we must use maxInt(u64) - 1
 /// to query all non-deleted tables.
-pub const snapshot_latest = math.maxInt(u64) - 1;
+pub const snapshot_latest: u64 = math.maxInt(u64) - 1;
 
 // StateMachine:
 //
@@ -742,8 +742,8 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                     tree.manifest.remove_invisible_tables(
                         context.level_a,
                         context.compaction.snapshot,
-                        context.compaction.key_min,
-                        context.compaction.key_max,
+                        context.compaction.range.key_min,
+                        context.compaction.range.key_max,
                     );
                 }
             }
@@ -761,8 +761,8 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                     tree.manifest.remove_invisible_tables(
                         context.level_a,
                         context.compaction.snapshot,
-                        context.compaction.key_min,
-                        context.compaction.key_max,
+                        context.compaction.range.key_min,
+                        context.compaction.range.key_max,
                     );
                 }
 
@@ -822,7 +822,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             // Assert all manifest levels haven't overflowed their table counts.
             tree.manifest.assert_level_table_counts();
 
-            // Assert chcekpointing after invisible tables have been released.
+            // Assert chcekpointing after invisible tables have been removed.
             if (config.verify) tree.manifest.assert_no_invisible_tables(op);
 
             // Start an asynchronous checkpoint on the manifest.
