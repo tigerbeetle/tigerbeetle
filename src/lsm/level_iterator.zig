@@ -23,11 +23,13 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         const Grid = GridType(Storage);
         const Manifest = ManifestType(Table, Storage);
 
+        const BlockPtrConst = *align(config.sector_size) const [config.block_size]u8;
+
         const TableInfo = Manifest.TableInfo;
         const TableInfoCallback = fn (
             it: *LevelIterator,
             table: *const TableInfo,
-            index_block: Table.BlockPtrConst,
+            index_block: BlockPtrConst,
         ) void;
 
         const TableIteratorScope = struct {
@@ -170,7 +172,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
                 .grid = it.grid,
                 .address = table.?.address,
                 .checksum = table.?.checksum,
-                .table_index_callback = table_iterator_index_callback,
+                .index_block_callback = table_iterator_index_callback,
             };
             table_iterator.start(table_iterator_context, table_iterator_callback);
 
@@ -220,7 +222,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
         fn table_iterator_index_callback(
             table_iterator: *TableIterator,
-            index_block: Table.BlockPtrConst,
+            index_block: BlockPtrConst,
         ) void {
             const scope = @fieldParentPtr(TableIteratorScope, "table_iterator", table_iterator);
             const it = scope.it;
@@ -229,7 +231,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             const table = it.table_indexing.?;
             it.table_indexing = null;
 
-            it.table_info_callback(table, index_block);
+            it.table_info_callback(it, table, index_block);
         }
 
         fn table_iterator_callback(table_iterator: *TableIterator) void {

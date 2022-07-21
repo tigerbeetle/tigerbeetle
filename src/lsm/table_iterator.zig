@@ -17,7 +17,8 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         const Manifest = ManifestType(Table, Storage);
         const ValuesRingBuffer = RingBuffer(Table.Value, Table.data.value_count_max, .pointer);
 
-        const IndexBlockCallback = fn (it: *TableIterator, index_block: Table.BlockPtrConst) void;
+        const BlockPtrConst = *align(config.sector_size) const [config.block_size]u8;
+        const IndexBlockCallback = fn (it: *TableIterator, index_block: BlockPtrConst) void;
 
         grid: *Grid,
         read_done: fn (*TableIterator) void,
@@ -97,7 +98,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
             grid: *Grid,
             address: u64,
             checksum: u128,
-            index_block_callback: IndexBlockCallback,
+            index_block_callback: ?IndexBlockCallback = null,
         };
 
         pub fn start(
@@ -177,10 +178,10 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
             assert(it.read_table_index);
             it.read_table_index = false;
 
-            assert(it.index_block_callback != null);
-            const callback = it.index_block_callback.?;
-            it.index_block_callback = null;
-            callback(it, block);
+            if (it.index_block_callback) |callback| {
+                it.index_block_callback = null;
+                callback(it, block);
+            }
 
             // Copy the bytes read into a buffer owned by the iterator since the Grid
             // only guarantees the provided pointer to be valid in this callback.

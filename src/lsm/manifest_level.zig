@@ -247,9 +247,9 @@ pub fn ManifestLevelType(
             var i: u32 = 0;
             var it = level.iterator(
                 .visible,
-                @as(*[1]const u64, &lsm.snapshot_latest),
+                @as(*const [1]u64, &lsm.snapshot_latest),
                 .ascending,
-                .{ .key_min = key_min, .key_max = key_max },
+                KeyRange{ .key_min = key_min, .key_max = key_max },
             );
 
             while (it.next()) |table_const| : (i += 1) {
@@ -446,7 +446,7 @@ pub fn ManifestLevelType(
             pub fn next(it: *Iterator) ?*const TableInfo {
                 while (it.inner.next()) |table| {
                     // We can't assert !it.inner.done as inner.next() may set done before returning.
-                    
+
                     // Skip tables that don't match the provided visibility interests.
                     switch (it.visibility) {
                         .invisible => blk: {
@@ -467,8 +467,8 @@ pub fn ManifestLevelType(
                             .ascending => {
                                 // Assert that the table is not out of bounds to the left.
                                 //
-                                // We can assert this as it is exactly the same key comparison when 
-                                // we binary search in iterator_start(), and since we move in 
+                                // We can assert this as it is exactly the same key comparison when
+                                // we binary search in iterator_start(), and since we move in
                                 // ascending order this remains true beyond the first iteration.
                                 assert(compare_keys(table.key_max, key_range.key_min) != .lt);
 
@@ -697,6 +697,7 @@ pub fn TestContext(
 
         const TestPool = NodePool(node_size, @alignOf(TableInfo));
         const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, compare_keys, table_count_max);
+        const KeyRange = TestLevel.KeyRange;
 
         random: std.rand.Random,
 
@@ -1018,9 +1019,9 @@ pub fn TestContext(
                 std.debug.print("\nactual: ", .{});
                 var it = context.level.iterator(
                     .visible,
-                    @as(*[1]const u64, &snapshot),
+                    @as(*const [1]u64, &snapshot),
                     .ascending,
-                    .{ .key_min = 0, .key_max = math.maxInt(Key) },
+                    KeyRange{ .key_min = 0, .key_max = math.maxInt(Key) },
                 );
                 while (it.next()) |t| std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
                 std.debug.print("\n", .{});
@@ -1029,9 +1030,9 @@ pub fn TestContext(
             {
                 var it = context.level.iterator(
                     .visible,
-                    @as(*[1]const u64, &snapshot),
+                    @as(*const [1]u64, &snapshot),
                     .ascending,
-                    .{ .key_min = 0, .key_max = math.maxInt(Key) },
+                    KeyRange{ .key_min = 0, .key_max = math.maxInt(Key) },
                 );
 
                 for (reference) |expect| {
@@ -1044,9 +1045,9 @@ pub fn TestContext(
             {
                 var it = context.level.iterator(
                     .visible,
-                    @as(*[1]const u64, &snapshot),
+                    @as(*const [1]u64, &snapshot),
                     .descending,
-                    .{ .key_min = 0, .key_max = math.maxInt(Key) },
+                    KeyRange{ .key_min = 0, .key_max = math.maxInt(Key) },
                 );
 
                 var i = reference.len;
@@ -1071,9 +1072,9 @@ pub fn TestContext(
                 {
                     var it = context.level.iterator(
                         .visible,
-                        @as(*[1]const u64, &snapshot),
+                        @as(*const [1]u64, &snapshot),
                         .ascending,
-                        .{ .key_min = key_min, .key_max = key_max },
+                        KeyRange{ .key_min = key_min, .key_max = key_max },
                     );
 
                     for (reference[start .. end + 1]) |expect| {
@@ -1086,9 +1087,9 @@ pub fn TestContext(
                 {
                     var it = context.level.iterator(
                         .visible,
-                        @as(*[1]const u64, &snapshot),
+                        @as(*const [1]u64, &snapshot),
                         .descending,
-                        .{ .key_min = key_min, .key_max = key_max },
+                        KeyRange{ .key_min = key_min, .key_max = key_max },
                     );
 
                     var i = end + 1;

@@ -53,6 +53,7 @@ pub fn CompactionType(
             done,
         };
 
+        const BlockPtrConst = *align(config.sector_size) const [config.block_size]u8;
         const BlockWrite = struct {
             block: BlockPtr,
             write: Grid.Write = undefined,
@@ -304,7 +305,7 @@ pub fn CompactionType(
         fn iterator_b_table_info_callback(
             iterator_b: *IteratorB,
             table: *const TableInfo,
-            index_block: Table.BlockPtrConst,
+            index_block: BlockPtrConst,
         ) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             compaction.queue_manifest_update(&compaction.update_level_b, table);
