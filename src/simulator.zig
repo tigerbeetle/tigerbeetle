@@ -243,6 +243,7 @@ pub fn main() !void {
             switch (cluster.health[replica.replica]) {
                 .up => |*ticks| {
                     ticks.* -|= 1;
+                    replica.state_machine.tick();
                     replica.tick();
                     cluster.state_checker.check_state(replica.replica);
 

@@ -21,11 +21,26 @@ pub const StateMachine = struct {
     prepare_timestamp: u64 = 0,
     commit_timestamp: u64 = 0,
 
+    callback: ?fn(*StateMachine) void = null,
+    callback_ticks: usize = 0,
+
     pub fn init(_: std.mem.Allocator, config: Config) !StateMachine {
         return StateMachine{ .state = hash(0, std.mem.asBytes(&config.seed)) };
     }
 
     pub fn deinit(_: *StateMachine) void {}
+
+    // TODO Is this part of StateMachine's API?
+    pub fn tick(self: *StateMachine) void {
+        if (self.callback) |callback| {
+            if (self.callback_ticks == 0) {
+                self.callback = null;
+                callback(self);
+            } else {
+                self.callback_ticks -= 1;
+            }
+        }
+    }
 
     pub fn prepare(
         state_machine: *StateMachine,
@@ -36,6 +51,30 @@ pub const StateMachine = struct {
         _ = input;
 
         return state_machine.prepare_timestamp;
+    }
+
+    pub fn prefetch(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
+        _ = op_number;
+        assert(self.callback == null);
+        assert(self.callback_ticks == 0);
+        self.callback = callback;
+        self.callback_ticks = 100; // TODO vary delay
+    }
+
+    pub fn compact(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
+        _ = op_number;
+        assert(self.callback == null);
+        assert(self.callback_ticks == 0);
+        self.callback = callback;
+        self.callback_ticks = 100; // TODO vary delay
+    }
+
+    pub fn checkpoint(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
+        _ = op_number;
+        assert(self.callback == null);
+        assert(self.callback_ticks == 0);
+        self.callback = callback;
+        self.callback_ticks = 100; // TODO vary delay
     }
 
     pub fn commit(
