@@ -236,6 +236,9 @@ pub fn Replica(
 
         on_change_state: ?fn (replica: *Self) void = null,
 
+        commit_callback: ?fn (*Self) void = null,
+        commit_prepare: ?*Message = null,
+
         pub fn init(
             allocator: Allocator,
             cluster: u32,
@@ -2147,7 +2150,7 @@ pub fn Replica(
                 self.commit_max = commit;
             }
 
-            // Guard against multiple concurrent invocations of commit_ops():
+            // Guard against multiple concurrent invocations of commit_ops()/commit_pipeline():
             if (self.committing) {
                 log.debug("{}: commit_ops: already committing...", .{self.replica});
                 return;
@@ -2250,20 +2253,65 @@ pub fn Replica(
                 return;
             }
 
-            self.commit_op(prepare.?);
+            self.commit_op_hooks(prepare.?, commit_ops_commit_callback);
+        }
 
-            assert(self.commit_min == op);
+        fn commit_ops_commit_callback(self: *Self) void {
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
+            assert(!self.committing);
             self.committing = true;
+
             self.commit_ops_read();
+        }
+
+        fn commit_op_hooks(
+            self: *Self,
+            prepare: *Message,
+            callback: fn(*Self) void,
+        ) void {
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.replica_count == 1));
+            assert(prepare.header.command == .prepare);
+            assert(prepare.header.operation != .root);
+            assert(prepare.header.op == self.commit_min + 1);
+            assert(prepare.header.op <= self.op);
+            assert(self.commit_prepare == null);
+            assert(self.commit_callback == null);
+
+            self.commit_prepare = prepare.ref();
+            self.commit_callback = callback;
+            self.state_machine.prefetch(self.commit_min + 1, commit_op_prefetch_callback);
+        }
+
+        fn commit_op_prefetch_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(self.commit_prepare != null);
+            assert(self.commit_callback != null);
+
+            const commit_min_before = self.commit_min;
+            self.commit_op(self.commit_prepare.?);
+            const commit_min_after = self.commit_min;
+            assert(commit_min_after == commit_min_before + 1);
+
+            self.state_machine.compact(commit_min_after, commit_op_compact_callback);
+        }
+
+        fn commit_op_compact_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            const callback = self.commit_callback.?;
+
+            self.message_bus.unref(self.commit_prepare.?);
+            self.commit_prepare = null;
+            self.commit_callback = null;
+            callback(self);
         }
 
         fn commit_op(self: *Self, prepare: *const Message) void {
             // TODO Can we add more checks around allowing commit_op() during a view change?
-            assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.replica_count == 1));
+            assert(self.commit_prepare != null);
+            assert(self.commit_callback != null);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
@@ -2346,7 +2394,13 @@ pub fn Replica(
             assert(self.leader());
             assert(self.pipeline.count > 0);
 
-            while (self.pipeline.head_ptr()) |prepare| {
+            // Guard against multiple concurrent invocations of commit_ops()/commit_pipeline():
+            if (self.committing) {
+                log.debug("{}: commit_pipeline: already committing...", .{self.replica});
+                return;
+            }
+
+            if (self.pipeline.head_ptr()) |prepare| {
                 assert(self.pipeline.count > 0);
                 assert(self.commit_min == self.commit_max);
                 assert(self.commit_max + self.pipeline.count == self.op);
@@ -2362,26 +2416,35 @@ pub fn Replica(
                 assert(count >= self.quorum_replication);
                 assert(count <= self.replica_count);
 
-                self.commit_op(prepare.message);
+                self.committing = true;
+                self.commit_op_hooks(prepare.message, commit_pipeline_callback);
+            }
+        }
 
-                assert(self.commit_min == self.commit_max);
-                assert(self.commit_max == prepare.message.header.op);
+        fn commit_pipeline_callback(self: *Self) void {
+            const prepare = self.pipeline.pop().?;
 
-                self.message_bus.unref(self.pipeline.pop().?.message);
+            assert(self.committing);
+            assert(self.commit_min == self.commit_max);
+            assert(self.commit_max == prepare.message.header.op);
 
-                if (self.replica_count == 1) {
-                    if (self.pipeline.head_ptr()) |head| {
-                        // Write the next message in the queue.
-                        // A cluster-of-one writes prepares sequentially to avoid gaps in the WAL.
-                        self.write_prepare(head.message, .append);
-                        // The loop will wrap around and exit when `!ok_quorum_received`.
-                    }
+            self.message_bus.unref(prepare.message);
+            self.committing = false;
+
+            if (self.replica_count == 1) {
+                if (self.pipeline.head_ptr()) |head| {
+                    // Write the next message in the queue.
+                    // A cluster-of-one writes prepares sequentially to avoid gaps in the WAL.
+                    self.write_prepare(head.message, .append);
                 }
             }
 
-            assert(self.prepare_timeout.ticking);
-
-            if (self.pipeline.count == 0) self.prepare_timeout.stop();
+            if (self.pipeline.count > 0) {
+                self.commit_pipeline();
+            } else {
+                assert(self.prepare_timeout.ticking);
+                self.prepare_timeout.stop();
+            }
         }
 
         fn copy_latest_headers_and_set_size(
