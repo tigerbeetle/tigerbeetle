@@ -43,7 +43,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         grid: *Grid,
         manifest: *Manifest,
         callback: fn (*LevelIterator) void,
-        table_indexing: ?*const TableInfo,
+        table_info: ?*const TableInfo,
         table_info_callback: TableInfoCallback,
         level: u8,
         snapshot: u64,
@@ -80,7 +80,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
                 .grid = undefined,
                 .manifest = undefined,
                 .callback = undefined,
-                .table_indexing = null,
+                .table_info = null,
                 .table_info_callback = undefined,
                 .level = undefined,
                 .snapshot = undefined,
@@ -127,7 +127,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
                 .grid = context.grid,
                 .manifest = context.manifest,
                 .callback = callback,
-                .table_indexing = null,
+                .table_info = null,
                 .table_info_callback = context.table_info_callback,
                 .level = context.level,
                 .snapshot = context.snapshot,
@@ -165,8 +165,8 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             const table_iterator = it.next_table_iterator();
             assert(it.tables.tail_ptr().?.it == it);
 
-            assert(it.table_indexing == null);
-            it.table_indexing = table;
+            assert(it.table_info == null);
+            it.table_info = table;
 
             const table_iterator_context = .{
                 .grid = it.grid,
@@ -227,9 +227,9 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             const scope = @fieldParentPtr(TableIteratorScope, "table_iterator", table_iterator);
             const it = scope.it;
 
-            assert(it.table_indexing != null);
-            const table = it.table_indexing.?;
-            it.table_indexing = null;
+            assert(it.table_info != null);
+            const table = it.table_info.?;
+            it.table_info = null;
 
             it.table_info_callback(it, table, index_block);
         }

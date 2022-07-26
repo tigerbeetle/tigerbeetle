@@ -822,7 +822,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             // Assert all manifest levels haven't overflowed their table counts.
             tree.manifest.assert_level_table_counts();
 
-            // Assert chcekpointing after invisible tables have been removed.
+            // Assert checkpointing after invisible tables have been removed.
             if (config.verify) tree.manifest.assert_no_invisible_tables(op);
 
             // Start an asynchronous checkpoint on the manifest.

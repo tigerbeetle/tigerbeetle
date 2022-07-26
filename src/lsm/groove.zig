@@ -327,11 +327,6 @@ pub fn GrooveType(
             // For example, create_accounts will put at most 8191 accounts.
             // However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
             // some of these accounts may exist, requiring a remove/put to update the index.
-            //
-            // TODO(King) Since this is state machine specific, let's expose `commit_count_max`
-            // as an option when creating the groove.
-            // Then, in our case, we'll create the Accounts groove with a commit_count_max of
-            // 8191 * 2 (accounts mutated per transfer) * 2 (old/new index value).
             commit_count_max: u32,
         ) !Groove {
             // Cache is dynamically allocated to pass a pointer into the Object tree.

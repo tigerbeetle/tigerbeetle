@@ -29,10 +29,10 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         address: u64,
         checksum: u128,
 
-        index: Grid.BlockPtr,
+        index_block: Grid.BlockPtr,
         index_block_callback: ?IndexBlockCallback,
         /// The index of the current block in the table index block.
-        block_index: u32,
+        data_block_index: u32,
 
         /// This ring buffer is used to hold not yet popped values in the case that we run
         /// out of blocks in the blocks ring buffer but haven't buffered a full block of
@@ -52,8 +52,8 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         read_pending: bool = false,
 
         pub fn init(allocator: mem.Allocator) !TableIterator {
-            const index = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
-            errdefer allocator.free(index);
+            const index_block = try allocator.alignedAlloc(u8, config.sector_size, config.block_size,);
+            errdefer allocator.free(index_block);
 
             var values = try ValuesRingBuffer.init(allocator);
             errdefer values.deinit(allocator);
@@ -71,11 +71,11 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
                 // Use 0 so that we can assert(address != 0) in tick().
                 .address = 0,
                 .checksum = undefined,
-                .index = index[0..config.block_size],
+                .index_block = index_block[0..config.block_size],
                 .index_block_callback = null,
-                .block_index = undefined,
+                .data_block_index = undefined,
                 .values = values,
-                .blocks = .{
+                .data_blocks = .{
                     .buffer = .{
                         block_a[0..config.block_size],
                         block_b[0..config.block_size],
@@ -88,9 +88,9 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         pub fn deinit(it: *TableIterator, allocator: mem.Allocator) void {
             assert(!it.read_pending);
 
-            allocator.free(it.index);
+            allocator.free(it.index_block);
             it.values.deinit(allocator);
-            for (it.blocks.buffer) |block| allocator.free(block);
+            for (it.data_blocks.buffer) |block| allocator.free(block);
             it.* = undefined;
         }
 
@@ -115,16 +115,16 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
                 .read_table_index = true,
                 .address = context.address,
                 .checksum = context.checksum,
-                .index = it.index,
+                .index_block = it.index_block,
                 .index_block_callback = context.index_block_callback,
-                .block_index = 0,
+                .data_block_index = 0,
                 .values = .{ .buffer = it.values.buffer },
-                .blocks = .{ .buffer = it.blocks.buffer },
+                .data_blocks = .{ .buffer = it.data_blocks.buffer },
                 .value = 0,
             };
 
             assert(it.values.empty());
-            assert(it.blocks.empty());
+            assert(it.data_blocks.empty());
         }
 
         /// Try to buffer at least a full block of values to be peek()'d.
@@ -158,12 +158,12 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
         fn read_next_data_block(it: *TableIterator) void {
             assert(!it.read_table_index);
-            assert(it.block_index < Table.index_data_blocks_used(it.index));
+            assert(it.data_block_index < Table.index_data_blocks_used(it.index_block));
 
-            const addresses = Table.index_data_addresses(it.index);
-            const checksums = Table.index_data_checksums(it.index);
-            const address = addresses[it.block_index];
-            const checksum = checksums[it.block_index];
+            const addresses = Table.index_data_addresses(it.index_block);
+            const checksums = Table.index_data_checksums(it.index_block);
+            const address = addresses[it.data_block_index];
+            const checksum = checksums[it.data_block_index];
 
             assert(!it.read_pending);
             it.read_pending = true;
@@ -185,7 +185,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             // Copy the bytes read into a buffer owned by the iterator since the Grid
             // only guarantees the provided pointer to be valid in this callback.
-            mem.copy(u8, it.index, block);
+            mem.copy(u8, it.index_block, block);
 
             const read_pending = it.tick();
             // After reading the table index, we always read at least one data block.
@@ -201,20 +201,20 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             // If there is not currently a buffer available, copy remaining values to
             // an overflow ring buffer to make space.
-            if (it.blocks.next_tail() == null) {
-                const values = Table.data_block_values_used(it.blocks.head().?);
+            if (it.data_blocks.next_tail() == null) {
+                const values = Table.data_block_values_used(it.data_blocks.head().?);
                 const values_remaining = values[it.value..];
                 it.values.push_slice(values_remaining) catch unreachable;
                 it.value = 0;
-                it.blocks.advance_head();
+                it.data_blocks.advance_head();
             }
 
             // Copy the bytes read into a buffer owned by the iterator since the Grid
             // only guarantees the provided pointer to be valid in this callback.
-            mem.copy(u8, it.blocks.next_tail().?, block);
+            mem.copy(u8, it.data_blocks.next_tail().?, block);
 
-            it.blocks.advance_tail();
-            it.block_index += 1;
+            it.data_blocks.advance_tail();
+            it.data_block_index += 1;
 
             if (!it.tick()) {
                 assert(it.buffered_enough_values());
@@ -226,16 +226,16 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         pub fn buffered_all_values(it: TableIterator) bool {
             assert(!it.read_pending);
 
-            const data_blocks_used = Table.index_data_blocks_used(it.index);
-            assert(it.block_index <= data_blocks_used);
-            return it.block_index == data_blocks_used;
+            const data_blocks_used = Table.index_data_blocks_used(it.index_block);
+            assert(it.data_block_index <= data_blocks_used);
+            return it.data_block_index == data_blocks_used;
         }
 
         pub fn buffered_value_count(it: TableIterator) u32 {
             assert(!it.read_pending);
 
             var value_count = it.values.count;
-            var blocks_it = it.blocks.iterator();
+            var blocks_it = it.data_blocks.iterator();
             while (blocks_it.next()) |block| {
                 value_count += Table.data_block_values_used(block).len;
             }
@@ -258,8 +258,8 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             if (it.values.head_ptr_const()) |value| return Table.key_from_value(value);
 
-            const block = it.blocks.head() orelse {
-                assert(it.block_index == Table.index_data_blocks_used(it.index));
+            const block = it.data_blocks.head() orelse {
+                assert(it.data_block_index == Table.index_data_blocks_used(it.index_block));
                 return null;
             };
 
@@ -274,7 +274,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             if (it.values.pop()) |value| return value;
 
-            const block = it.blocks.head().?;
+            const block = it.data_blocks.head().?;
 
             const values = Table.data_block_values_used(block);
             const value = values[it.value];
@@ -282,7 +282,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
             it.value += 1;
             if (it.value == values.len) {
                 it.value = 0;
-                it.blocks.advance_head();
+                it.data_blocks.advance_head();
             }
 
             return value;

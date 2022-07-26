@@ -141,15 +141,29 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.manifest_log.deinit(allocator);
         }
 
+        pub const InsertIntent = enum {
+            append_to_log,
+            just_insert,
+        };
+
         pub fn insert_tables(
             manifest: *Manifest,
             level: u8,
             tables: []const TableInfo,
+            intent: InsertIntent,
         ) void {
             assert(tables.len > 0);
 
             const manifest_level = &manifest.levels[level];
             manifest_level.insert_tables(manifest.node_pool, tables);
+            
+            // Appends insert changes to the manifest log
+            if (intent == .append_to_log) {
+                for (tables) |*table| {
+                    const log_level = @intCast(u7, level);
+                    manifest.manifest_log.insert(log_level, table);
+                }
+            }
 
             // TODO Verify that tables can be found exactly before returning.
         }
@@ -164,6 +178,12 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             const manifest_level = &manifest.levels[level];
             manifest_level.set_snapshot_max(snapshot, tables);
+        
+            // Appends update changes to the manifest log
+            for (tables) |*table| {
+                const log_level = @intCast(u7, level);
+                manifest.manifest_log.insert(log_level, table);
+            }
         }
 
         /// Moves the table at the address/checksum pair from one level to another.
@@ -181,16 +201,21 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(level_b < config.lsm_levels);
             assert(level_a + 1 == level_b);
 
-            const table_info: *const TableInfo = blk: {
+            const table_info: TableInfo = blk: {
                 _ = address;
                 _ = checksum;
                 break :blk @panic("TODO(Joran): lookup using address/checksum");
             };
 
-            // TODO(Joran): Verify if the compaction snapshot should be used for remove_tables().
-            const tables = [_]TableInfo{table_info.*};
+            const tables = [_]TableInfo{table_info};
             manifest.levels[level_a].remove_tables(manifest.node_pool, &.{snapshot}, &tables);
             manifest.levels[level_b].insert_tables(manifest.node_pool, &tables);
+
+            // Appends move changes to the manifest log. (A move is only recorded as an insert).
+            for (tables) |*table| {
+                const log_level = @intCast(u7, level);
+                manifest.manifest_log.insert(log_level, table);
+            }
         }
 
         pub fn remove_invisible_tables(
@@ -216,9 +241,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             );
 
             while (it.next()) |table| {
-                // assert(table.invisible(&snapshots));
-                // assert(compare_keys(key_min, table.key_min) != .gt);
-                // assert(compare_keys(key_max, table.key_max) != .lt);
+                assert(table.invisible(&snapshots));
+                assert(compare_keys(key_min, table.key_min) != .gt);
+                assert(compare_keys(key_max, table.key_max) != .lt);
+
+                // Append remove changes to the manifest log.
+                const log_level = @intCast(u7, level);
+                manifest.manifest_log.remove(log_level, table);
 
                 if (count > 0) {
                     manifest_level.remove_tables(manifest.node_pool, &snapshots, tables[0..count]);
@@ -376,7 +405,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .visible,
                 &snapshots,
                 .ascending,
-                null, // all visible iterators so no key range filter
+                null, // All visible tables in the level therefore no KeyRange filter.
             );
 
             while (it.next()) |table| {
