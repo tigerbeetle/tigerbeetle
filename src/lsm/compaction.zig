@@ -259,14 +259,16 @@ pub fn CompactionType(
             assert(!compaction.index.ready);
 
             // TODO Reset builder.
-
+            
+            // TODO: Enable when move_table() can fetch TableInfo from address/checksum.
+            //
             // Perform a "compaction move" to the next level inline if certain factors allow:
             // - Can only do the specialization if there's a single table to compact.
             // - Must be compacting from a table iterator which has an address and checksum.
             // - Cannot drop tombstones as then we have to go through the normal compaction path.
             // - Cannot be performing the immutable table -> level 0 compaction
             //   as it requires the table being moved to reside on disk (tracked by manifest).
-            if (IteratorA.Context == TableIteratorType(Table, Storage)) {
+            if (false and IteratorA.Context == TableIteratorType(Table, Storage)) {
                 if (!drop_tombstones and range.table_count == 1) {
                     assert(compaction.level_b != 0);
                     assert(compaction.status == .compacting);
@@ -310,7 +312,7 @@ pub fn CompactionType(
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             compaction.queue_manifest_update(&compaction.update_level_b, table);
 
-            // Release a tables block addresses if it will be invisible to the compaction.
+            // Release the table's block addresses if it's invisible to the compaction.
             if (table.invisible(&.{compaction.snapshot})) {
                 compaction.grid.release(Table.index_block_address(index_block));
 
@@ -347,16 +349,8 @@ pub fn CompactionType(
 
             if (buffer == &compaction.update_level_b) {
                 compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
-                // TODO(King): find tables that are invisible to all snapshots: table.invisible([])
-                // then remove them and make sure all their block addrs are released back to grid.
-                //
-                // The TableInfo only has address of index block,
-                // but the index block can be used to get the addresses of the filter/data blocks.
-                //
-                // TODO In future, prefetch could be running concurrently to compact and we need to
-                // ensure that prefetch completes before the tables are removed from the manifest.
             } else {
-                compaction.manifest.insert_tables(compaction.level_b, tables);
+                compaction.manifest.insert_tables(compaction.level_b, tables, .append_to_log);
             }
         }
 
