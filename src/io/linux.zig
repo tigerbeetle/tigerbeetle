@@ -334,6 +334,7 @@ pub const IO = struct {
                                 .NXIO => error.Unseekable,
                                 .OVERFLOW => error.Unseekable,
                                 .SPIPE => error.Unseekable,
+                                .TIMEDOUT => error.ConnectionTimedOut,
                                 else => |errno| os.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -396,6 +397,7 @@ pub const IO = struct {
                                 .NOTSOCK => error.FileDescriptorNotASocket,
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PIPE => error.BrokenPipe,
+                                .TIMEDOUT => error.ConnectionTimedOut,
                                 else => |errno| os.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -639,6 +641,7 @@ pub const IO = struct {
         IsDir,
         SystemResources,
         Unseekable,
+        ConnectionTimedOut,
     } || os.UnexpectedError;
 
     pub fn read(
@@ -737,6 +740,7 @@ pub const IO = struct {
         FileDescriptorNotASocket,
         OperationNotSupported,
         BrokenPipe,
+        ConnectionTimedOut,
     } || os.UnexpectedError;
 
     pub fn send(
