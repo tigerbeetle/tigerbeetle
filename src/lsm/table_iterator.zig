@@ -43,7 +43,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         /// iteration is complete.
         values: ValuesRingBuffer,
 
-        blocks: RingBuffer(Grid.BlockPtr, 2, .array),
+        data_blocks: RingBuffer(Grid.BlockPtr, 2, .array),
         /// The index of the current value in the head of the blocks ring buffer.
         value: u32,
 
@@ -52,7 +52,11 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         read_pending: bool = false,
 
         pub fn init(allocator: mem.Allocator) !TableIterator {
-            const index_block = try allocator.alignedAlloc(u8, config.sector_size, config.block_size,);
+            const index_block = try allocator.alignedAlloc(
+                u8,
+                config.sector_size,
+                config.block_size,
+            );
             errdefer allocator.free(index_block);
 
             var values = try ValuesRingBuffer.init(allocator);
