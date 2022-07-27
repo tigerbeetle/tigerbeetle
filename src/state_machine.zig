@@ -134,18 +134,29 @@ pub const StateMachine = struct {
         assert(sum_reserved_timestamps == 0);
     }
 
-    pub fn prefetch(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
+    pub fn prefetch(
+        self: *StateMachine,
+        op_number: u64,
+        operation: Operation,
+        input: []const u8,
+        callback: fn(*StateMachine) void,
+    ) void {
         // TODO
+        _ = op_number;
+        _ = operation;
+        _ = input;
         callback(self);
     }
 
     pub fn compact(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
         // TODO self.forest.compact(op_number, callback);
+        _ = op_number;
         callback(self);
     }
 
     pub fn checkpoint(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
         // TODO self.forest.checkpoint(op_number, checkpoint_callback);
+        _ = op_number;
         callback(self);
     }
 
