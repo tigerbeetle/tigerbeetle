@@ -58,8 +58,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
     const tree_hash = blk: {
         // Blake3 hash does alot at comptime..
-        // TODO(King) Binary search a more ideal value.
-        @setEvalBranchQuota(10000);
+        @setEvalBranchQuota(tree_name.len * 8);
 
         var hash: u256 = undefined;
         std.crypto.hash.Blake3.hash(tree_name, std.mem.asBytes(&hash), .{});
@@ -1006,7 +1005,7 @@ pub fn main() !void {
         Key.tombstone_from_key,
     );
 
-    const Tree = TreeType(Table, "test_table");
+    const Tree = TreeType(Table, Storage, @typeName(Table) ++ "_test");
 
     // Check out our spreadsheet to see how we calculate node_count for a forest of trees.
     const node_count = 1024;
@@ -1039,7 +1038,6 @@ pub fn main() !void {
         allocator,
         &node_pool,
         &grid,
-        &superblock,
         &value_cache,
         .{
             .prefetch_count_max = commit_count_max * 2,

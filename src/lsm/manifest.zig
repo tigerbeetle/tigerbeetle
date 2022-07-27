@@ -267,7 +267,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key) LookupIterator {
             return .{
                 .manifest = manifest,
-                .snapshots = snapshot,
+                .snapshot = snapshot,
                 .key = key,
             };
         }

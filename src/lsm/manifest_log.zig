@@ -180,7 +180,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 manifest_log.grid.read_block(
                     open_read_block_callback,
                     &manifest_log.read,
-                    manifest_log.blocks.buffer[0], // TODO Grid to provide BlockPtr.
                     block.address,
                     block.checksum,
                 );
@@ -198,15 +197,13 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
         }
 
-        fn open_read_block_callback(read: *Grid.Read) void {
+        fn open_read_block_callback(read: *Grid.Read, block: Grid.BlockPtrConst) void {
             const manifest_log = @fieldParentPtr(ManifestLog, "read", read);
             assert(!manifest_log.opened);
             assert(manifest_log.reading);
             assert(!manifest_log.writing);
 
-            const block: BlockPtr = manifest_log.blocks.buffer[0]; // TODO Grid to provide BlockPtr.
             const block_reference = manifest_log.read_block_reference.?;
-
             verify_block(block, block_reference.checksum, block_reference.address);
 
             const entry_count = block_entry_count(block);
