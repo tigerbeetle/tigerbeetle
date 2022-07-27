@@ -259,7 +259,7 @@ pub fn CompactionType(
             assert(!compaction.index.ready);
 
             // TODO Reset builder.
-            
+
             // TODO: Enable when move_table() can fetch TableInfo from address/checksum.
             //
             // Perform a "compaction move" to the next level inline if certain factors allow:

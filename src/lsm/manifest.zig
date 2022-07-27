@@ -156,7 +156,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             const manifest_level = &manifest.levels[level];
             manifest_level.insert_tables(manifest.node_pool, tables);
-            
+
             // Appends insert changes to the manifest log
             if (intent == .append_to_log) {
                 for (tables) |*table| {
@@ -178,7 +178,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             const manifest_level = &manifest.levels[level];
             manifest_level.set_snapshot_max(snapshot, tables);
-        
+
             // Appends update changes to the manifest log
             for (tables) |*table| {
                 const log_level = @intCast(u7, level);
@@ -213,7 +213,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             // Appends move changes to the manifest log. (A move is only recorded as an insert).
             for (tables) |*table| {
-                const log_level = @intCast(u7, level);
+                const log_level = @intCast(u7, level_b);
                 manifest.manifest_log.insert(log_level, table);
             }
         }

@@ -5,25 +5,8 @@ const math = std.math;
 const mem = std.mem;
 
 const config = @import("../config.zig");
-
 const GridType = @import("grid.zig").GridType;
-const GrooveType = @import("groove.zig").GrooveType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
-
-fn assert_struct_field_names_strict_equal(object_a: anytype, object_b: anytype) void {
-    // TODO: union of object_a and object_b
-    inline for (std.meta.fields(@TypeOf(object_a))) |field_a| {
-        comptime var in_object_b = false;
-
-        inline for (std.meta.fields(@TypeOf(object_b))) |field_b| {
-            in_object_b = in_object_b or std.mem.eql(u8, field_a.name, field_b.name);
-        }
-
-        if (!in_object_b) {
-            @compileError(@typeName(@TypeOf(object_a)) ++ " with invalid field " ++ field_a.name);
-        }
-    }
-}
 
 pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type {
     comptime var groove_fields: []const std.builtin.TypeInfo.StructField = &.{};
@@ -58,6 +41,11 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         const Callback = fn (*Forest) void;
         const JoinOp = enum { compacting, checkpoint };
 
+        const GrooveOptions = struct {
+            cache_size: u32,
+            commit_count_max: u32,
+        };
+
         join_op: ?JoinOp = null,
         join_pending: usize = 0,
         join_callback: ?Callback = null,
@@ -69,22 +57,27 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         pub fn init(
             allocator: mem.Allocator,
             grid: *Grid,
-            // .{ .transfers = .{ cache_size = 128, com_count_max }, .accounts = 64 }
-            groove_options: anytype,
+            // (e.g.) .{ .transfers = .{ cache_size = 128, com_count_max = n }, .accounts = same }
+            all_groove_options: anytype,
         ) !Forest {
             // NodePool must be allocated to pass in a stable address for the Grooves.
             const node_pool = try allocator.create(NodePool);
             errdefer allocator.destroy(node_pool);
 
-            // Use lsm_tables_max for the node_count.
-            node_pool.* = try NodePool.init(allocator, config.lsm_tables_max);
+            // Use lsm_table_size_max for the node_count.
+            node_pool.* = try NodePool.init(allocator, config.lsm_table_size_max);
             errdefer node_pool.deinit(allocator);
+
+            // Ensure options contains options for all Groove types in the Grooves object.
+            inline for (std.meta.fields(Grooves)) |field| {
+                comptime assert(@hasField(@TypeOf(all_groove_options), field.name));
+            }
+            inline for (std.meta.fields(@TypeOf(all_groove_options))) |field| {
+                comptime assert(@hasField(Grooves, field.name));
+            }
 
             var grooves: Grooves = undefined;
             var grooves_initialized: usize = 0;
-
-            // Ensure groove_options contains optiosn for all Groove types in the Grooves object.
-            comptime assert_struct_field_names_strict_equal(groove_options, Grooves);
 
             errdefer inline for (std.meta.fields(Grooves)) |field, field_index| {
                 if (grooves_initialized >= field_index + 1) {
@@ -92,23 +85,16 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                 }
             };
 
-            inline for (std.meta.fields(Grooves)) |field| {
-                // Ensure the options for this groove only contain cache_size and commit_count_max.
-                comptime assert_struct_field_names_strict_equal(
-                    @field(groove_options, field.name),
-                    .{
-                        .cache_size = @as(u32, 0),
-                        .commit_count_max = @as(u32, 0),
-                    },
-                );
+            inline for (std.meta.fields(Grooves)) |groove_field| {
+                const groove_options: GrooveOptions = @field(all_groove_options, groove_field.name);
+                const groove = &@field(grooves, groove_field.name);
 
-                const groove = &@field(grooves, field.name);
                 groove.* = try @TypeOf(groove.*).init(
                     allocator,
                     node_pool,
                     grid,
-                    @field(groove_options, field.name).cache_size,
-                    @field(groove_options, field.name).commit_count_max,
+                    groove_options.cache_size,
+                    groove_options.commit_count_max,
                 );
 
                 grooves_initialized += 1;
@@ -201,10 +187,15 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
     };
 }
 
-test "Forest" {
+const TestContext = struct {
     const Transfer = @import("../tigerbeetle.zig").Transfer;
     const Account = @import("../tigerbeetle.zig").Account;
     const Storage = @import("../storage.zig").Storage;
+    const IO = @import("../io.zig").IO;
+
+    const Grid = GridType(Storage);
+    const GrooveType = @import("groove.zig").GrooveType;
+    const SuperBlock = @import("superblock.zig").SuperBlockType(Storage);
 
     const Forest = ForestType(Storage, .{
         .accounts = GrooveType(
@@ -225,9 +216,55 @@ test "Forest" {
         ),
     });
 
+    fn run() !void {
+        const testing = std.testing;
+        const allocator = testing.allocator;
+
+        const dir_path = ".";
+        const dir_fd = try IO.open_dir(dir_path);
+        defer std.os.close(dir_fd);
+
+        const must_create = true;
+        const fd = try IO.open_file(dir_fd, "test_forest", 512 * 1024 * 1024, must_create);
+        defer std.os.close(fd);
+
+        var io = try IO.init(128, 0);
+        defer io.deinit();
+
+        var storage = try Storage.init(&io, fd);
+        defer storage.deinit();
+
+        var superblock = try SuperBlock.init(allocator, &storage);
+        defer superblock.deinit(allocator);
+
+        var grid = try Grid.init(allocator, &superblock);
+        defer grid.deinit(allocator);
+
+        const cache_size = 2 * 1024 * 1024;
+        const forest_config = .{
+            .transfers = .{
+                .cache_size = cache_size,
+                .commit_count_max = 8191 * 2,
+            },
+            .accounts = .{
+                .cache_size = cache_size,
+                .commit_count_max = 8191,
+            },
+        };
+
+        var forest = try Forest.init(allocator, &grid, forest_config);
+        defer forest.deinit(allocator);
+    }
+};
+
+test "Forest" {
+    const Forest = TestContext.Forest;
     _ = Forest.init;
     _ = Forest.deinit;
-
     _ = Forest.compact;
     _ = Forest.checkpoint;
+}
+
+pub fn main() !void {
+    try TestContext.run();
 }
