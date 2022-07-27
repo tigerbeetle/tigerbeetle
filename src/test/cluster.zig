@@ -33,6 +33,7 @@ pub const ClusterOptions = struct {
     network_options: NetworkOptions,
     storage_options: Storage.Options,
     health_options: HealthOptions,
+    state_machine_options: StateMachine.Options,
 };
 
 pub const HealthOptions = struct {
@@ -147,7 +148,10 @@ pub const Cluster = struct {
                 &cluster.times[replica_index],
                 &cluster.storages[replica_index],
                 message_bus,
-                .{ .seed = cluster.options.seed },
+                .{
+                    .seed = cluster.options.seed,
+                    .options = cluster.options.state_machine_options,
+                },
             );
             message_bus.set_on_message(*Replica, replica, Replica.on_message);
         }
@@ -315,7 +319,10 @@ pub const Cluster = struct {
             &cluster.times[replica_index],
             &cluster.storages[replica_index],
             message_bus,
-            .{ .seed = cluster.options.seed },
+            .{
+                .seed = cluster.options.seed,
+                .options = cluster.options.state_machine_options,
+            },
         );
         message_bus.set_on_message(*Replica, replica, Replica.on_message);
         replica.on_change_state = cluster.on_change_state;

@@ -154,6 +154,14 @@ pub fn Replica(
         commit_max: u64,
 
         /// Whether we are reading a prepare from storage in order to commit.
+        /// Guards against concurrent commits.
+        ///
+        /// While committing, a replica may not:
+        ///
+        /// * send a `do_view_change` message, or
+        /// * start a view as the new leader
+        ///
+        /// because `commit_min` will be modified when the commit finishes.
         committing: bool = false,
 
         /// Whether we are reading a prepare from storage in order to push to the pipeline.
@@ -411,6 +419,13 @@ pub fn Replica(
                 assert(loopback_message.next == null);
                 self.message_bus.unref(loopback_message);
                 self.loopback_queue = null;
+            }
+
+            if (self.commit_prepare) |committing_message| {
+                assert(self.committing);
+                assert(self.commit_callback != null);
+                self.message_bus.unref(committing_message);
+                self.commit_prepare = null;
             }
 
             for (self.do_view_change_from_all_replicas) |message| {
@@ -976,6 +991,18 @@ pub fn Replica(
             assert(!self.do_view_change_quorum);
             self.start_view_change_quorum = true;
 
+            if (self.committing) {
+                // Don't send a `do_view_change` while committing, because when the commit finishes
+                // `commit_min` will increment, so a retried `do_view_change` would have a different
+                // `commit`.
+                log.debug("{}: on_start_view_change: view={} ignoring (committing, commit_min={})", .{
+                    self.replica,
+                    self.view,
+                    self.commit_min,
+                });
+                return;
+            }
+
             // When replica i receives start_view_change messages for its view from f other replicas,
             // it sends a ⟨do_view_change v, l, v’, n, k, i⟩ message to the node that will be the
             // primary in the new view. Here v is its view, l is its log, v′ is the view number of the
@@ -1009,8 +1036,9 @@ pub fn Replica(
             // We may receive a `do_view_change` quorum from other replicas, which already have a
             // `start_view_change_quorum`, before we receive a `start_view_change_quorum`:
             if (!self.start_view_change_quorum) {
-                log.debug("{}: on_do_view_change: waiting for start_view_change quorum", .{
+                log.debug("{}: on_do_view_change: waiting for start_view_change quorum (view={})", .{
                     self.replica,
+                    self.view,
                 });
                 return;
             }
@@ -1024,6 +1052,16 @@ pub fn Replica(
                 message,
                 threshold,
             ) orelse return;
+
+            // We may not have a `do_view_change` from ourselves (yet) if we are busy committing:
+            if (self.do_view_change_from_all_replicas[self.replica] == null) {
+                assert(self.committing);
+                log.debug("{}: on_do_view_change: still committing (view={})", .{
+                    self.replica,
+                    self.view,
+                });
+                return;
+            }
 
             assert(count == threshold);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
@@ -1901,7 +1939,7 @@ pub fn Replica(
             if (!self.do_view_change_quorum) self.send_start_view_change();
 
             // It is critical that a `do_view_change` message implies a `start_view_change_quorum`:
-            if (self.start_view_change_quorum) {
+            if (self.start_view_change_quorum and !self.committing) {
                 // The leader need not retry to send a `do_view_change` message to itself:
                 // We assume the MessageBus will not drop messages sent by a replica to itself.
                 if (self.leader_index(self.view) != self.replica) self.send_do_view_change();
@@ -1956,7 +1994,11 @@ pub fn Replica(
                 assert(m.header.commit == message.header.commit);
                 assert(m.header.checksum_body == message.header.checksum_body);
                 assert(m.header.checksum == message.header.checksum);
-                log.debug("{}: on_{s}: ignoring (duplicate message)", .{ self.replica, command });
+                log.debug("{}: on_{s}: ignoring (duplicate message replica={})", .{
+                    self.replica,
+                    command,
+                    message.header.replica,
+                });
                 return null;
             }
 
@@ -2180,8 +2222,8 @@ pub fn Replica(
             assert(self.commit_min <= self.op);
 
             if (!self.valid_hash_chain("commit_ops_read")) {
-                self.committing = false;
                 assert(self.replica_count > 1);
+                self.commit_done();
                 return;
             }
             assert(self.op >= self.commit_max);
@@ -2193,7 +2235,7 @@ pub fn Replica(
                 const checksum = self.journal.header_with_op(op).?.checksum;
                 self.journal.read_prepare(commit_ops_commit, op, checksum, null);
             } else {
-                self.committing = false;
+                self.commit_done();
                 // This is an optimization to expedite the view change before the `repair_timeout`:
                 if (self.status == .view_change and self.repairs_allowed()) self.repair();
 
@@ -2211,11 +2253,10 @@ pub fn Replica(
 
         fn commit_ops_commit(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
             assert(destination_replica == null);
-
             assert(self.committing);
-            self.committing = false;
 
             if (prepare == null) {
+                self.commit_done();
                 log.debug("{}: commit_ops_commit: prepare == null", .{self.replica});
                 if (self.replica_count == 1) @panic("cannot recover corrupt prepare");
                 return;
@@ -2225,6 +2266,7 @@ pub fn Replica(
                 .normal => {},
                 .view_change => {
                     if (self.leader_index(self.view) != self.replica) {
+                        self.commit_done();
                         log.debug("{}: commit_ops_commit: no longer leader", .{self.replica});
                         assert(self.replica_count > 1);
                         return;
@@ -2242,12 +2284,14 @@ pub fn Replica(
             const op = self.commit_min + 1;
 
             if (prepare.?.header.op != op) {
+                self.commit_done();
                 log.debug("{}: commit_ops_commit: op changed", .{self.replica});
                 assert(self.replica_count > 1);
                 return;
             }
 
             if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
+                self.commit_done();
                 log.debug("{}: commit_ops_commit: checksum changed", .{self.replica});
                 assert(self.replica_count > 1);
                 return;
@@ -2257,11 +2301,9 @@ pub fn Replica(
         }
 
         fn commit_ops_commit_callback(self: *Self) void {
+            assert(self.committing);
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
-
-            assert(!self.committing);
-            self.committing = true;
 
             self.commit_ops_read();
         }
@@ -2279,14 +2321,21 @@ pub fn Replica(
             assert(prepare.header.op <= self.op);
             assert(self.commit_prepare == null);
             assert(self.commit_callback == null);
+            // TODO assert self.committing
 
             self.commit_prepare = prepare.ref();
             self.commit_callback = callback;
-            self.state_machine.prefetch(self.commit_min + 1, commit_op_prefetch_callback);
+            self.state_machine.prefetch(
+                self.commit_min + 1,
+                prepare.header.operation.cast(StateMachine),
+                prepare.buffer[@sizeOf(Header)..prepare.header.size],
+                commit_op_prefetch_callback,
+            );
         }
 
         fn commit_op_prefetch_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(self.committing);
             assert(self.commit_prepare != null);
             assert(self.commit_callback != null);
 
@@ -2294,6 +2343,30 @@ pub fn Replica(
             self.commit_op(self.commit_prepare.?);
             const commit_min_after = self.commit_min;
             assert(commit_min_after == commit_min_before + 1);
+
+            if (self.pipeline.head()) |pipeline_head| {
+                if (self.status == .normal and self.leader() and
+                    self.commit_min == pipeline_head.message.header.op)
+                {
+                    const prepare = self.pipeline.pop().?;
+
+                    assert(self.commit_min == self.commit_max);
+                    assert(self.commit_max == prepare.message.header.op);
+
+                    self.message_bus.unref(prepare.message);
+
+                    if (self.replica_count == 1) {
+                        if (self.pipeline.head_ptr()) |next| {
+                            // Write the next message in the queue.
+                            // A cluster-of-one writes prepares sequentially to avoid gaps in the WAL.
+                            self.write_prepare(next.message, .append);
+                        }
+                    }
+
+                    assert(self.prepare_timeout.ticking);
+                    if (self.pipeline.count == 0) self.prepare_timeout.stop();
+                }
+            }
 
             self.state_machine.compact(commit_min_after, commit_op_compact_callback);
         }
@@ -2310,6 +2383,7 @@ pub fn Replica(
 
         fn commit_op(self: *Self, prepare: *const Message) void {
             // TODO Can we add more checks around allowing commit_op() during a view change?
+            assert(self.committing);
             assert(self.commit_prepare != null);
             assert(self.commit_callback != null);
             assert(prepare.header.command == .prepare);
@@ -2400,6 +2474,15 @@ pub fn Replica(
                 return;
             }
 
+            self.committing = true;
+            self.commit_pipeline_next();
+        }
+
+        fn commit_pipeline_next(self: *Self) void {
+            assert(self.status == .normal);
+            assert(self.leader());
+            assert(self.committing);
+
             if (self.pipeline.head_ptr()) |prepare| {
                 assert(self.pipeline.count > 0);
                 assert(self.commit_min == self.commit_max);
@@ -2409,6 +2492,7 @@ pub fn Replica(
                 if (!prepare.ok_quorum_received) {
                     // Eventually handled by on_prepare_timeout().
                     log.debug("{}: commit_pipeline: waiting for quorum", .{self.replica});
+                    self.commit_done();
                     return;
                 }
 
@@ -2418,32 +2502,41 @@ pub fn Replica(
 
                 self.committing = true;
                 self.commit_op_hooks(prepare.message, commit_pipeline_callback);
+            } else {
+                self.commit_done();
             }
         }
 
         fn commit_pipeline_callback(self: *Self) void {
-            const prepare = self.pipeline.pop().?;
-
             assert(self.committing);
-            assert(self.commit_min == self.commit_max);
-            assert(self.commit_max == prepare.message.header.op);
+            // TODO assert pipeline was popped
 
-            self.message_bus.unref(prepare.message);
+            if (self.status == .normal and self.leader()) {
+                self.commit_pipeline_next();
+            } else {
+                self.commit_done();
+            }
+        }
+
+        fn commit_done(self: *Self) void {
+            assert(self.committing);
             self.committing = false;
 
-            if (self.replica_count == 1) {
-                if (self.pipeline.head_ptr()) |head| {
-                    // Write the next message in the queue.
-                    // A cluster-of-one writes prepares sequentially to avoid gaps in the WAL.
-                    self.write_prepare(head.message, .append);
-                }
-            }
-
-            if (self.pipeline.count > 0) {
-                self.commit_pipeline();
-            } else {
-                assert(self.prepare_timeout.ticking);
-                self.prepare_timeout.stop();
+            if (self.status == .view_change and self.start_view_change_quorum and
+                !self.do_view_change_quorum)
+            {
+                // We couldn't send a `do_view_change` earlier (in `on_start_view_change`).
+                // We can send it now that we are finished committing.
+                //
+                // * When `self.replica != leader_index(self.view)` this is an optimization, so
+                //   that we don't need to wait for the `view_change_message_timeout`.
+                // * When `self.replica == leader_index(self.view)` this is required, because
+                //   `on_view_change_message_timeout` does not retry `do_view_change` messages
+                //   to ourself.
+                assert(self.view_change_message_timeout.ticking);
+                self.view_change_message_timeout.reset();
+                self.send_do_view_change();
+                defer self.flush_loopback_queue();
             }
         }
 
@@ -3536,7 +3629,6 @@ pub fn Replica(
 
             if (self.status == .view_change and self.leader_index(self.view) == self.replica) {
                 if (self.repair_pipeline_op() != null) return self.repair_pipeline();
-
                 // Start the view as the new leader:
                 self.start_view_as_the_new_leader();
             }
@@ -4354,6 +4446,7 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.start_view_change_quorum);
             assert(!self.do_view_change_quorum);
+            assert(!self.committing);
 
             const count_start_view_change = self.start_view_change_from_other_replicas.count();
             assert(count_start_view_change >= self.quorum_view_change - 1);
@@ -4661,6 +4754,16 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
+
+            if (self.committing) {
+                log.debug("{}: start_view_as_the_new_leader: still committing (view={} commit_min={} commit_max={})", .{
+                    self.replica,
+                    self.view,
+                    self.commit_min,
+                    self.commit_max,
+                });
+                return;
+            }
 
             assert(!self.committing);
             assert(!self.repairing_pipeline);

@@ -15,9 +15,23 @@ pub const StateMachine = struct {
 
     pub const Config = struct {
         seed: u64,
+        options: Options,
     };
 
+    /// Minimum/mean number of ticks to perform the specified operation.
+    /// Each mean must be greater-or-equal-to their respective minimum.
+    pub const Options = struct {
+        commit_prefetch_min: u64,
+        commit_prefetch_mean: u64,
+        commit_compact_min: u64,
+        commit_compact_mean: u64,
+        commit_checkpoint_min: u64,
+        commit_checkpoint_mean: u64,
+    };
+
+    options: Options,
     state: u128,
+    prng: std.rand.DefaultPrng,
     prepare_timestamp: u64 = 0,
     commit_timestamp: u64 = 0,
 
@@ -25,7 +39,15 @@ pub const StateMachine = struct {
     callback_ticks: usize = 0,
 
     pub fn init(_: std.mem.Allocator, config: Config) !StateMachine {
-        return StateMachine{ .state = hash(0, std.mem.asBytes(&config.seed)) };
+        assert(config.options.commit_prefetch_mean >= config.options.commit_prefetch_min);
+        assert(config.options.commit_compact_mean >= config.options.commit_compact_min);
+        assert(config.options.commit_checkpoint_mean >= config.options.commit_checkpoint_min);
+
+        return StateMachine{
+            .state = hash(0, std.mem.asBytes(&config.seed)),
+            .options = config.options,
+            .prng = std.rand.DefaultPrng.init(config.seed),
+        };
     }
 
     pub fn deinit(_: *StateMachine) void {}
@@ -53,12 +75,23 @@ pub const StateMachine = struct {
         return state_machine.prepare_timestamp;
     }
 
-    pub fn prefetch(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
+    pub fn prefetch(
+        self: *StateMachine,
+        op_number: u64,
+        operation: Operation,
+        input: []const u8,
+        callback: fn(*StateMachine) void,
+    ) void {
         _ = op_number;
+        _ = operation;
+        _ = input;
         assert(self.callback == null);
         assert(self.callback_ticks == 0);
         self.callback = callback;
-        self.callback_ticks = 100; // TODO vary delay
+        self.callback_ticks = self.latency(
+            self.options.commit_prefetch_min,
+            self.options.commit_prefetch_mean,
+        );
     }
 
     pub fn compact(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
@@ -66,7 +99,10 @@ pub const StateMachine = struct {
         assert(self.callback == null);
         assert(self.callback_ticks == 0);
         self.callback = callback;
-        self.callback_ticks = 100; // TODO vary delay
+        self.callback_ticks = self.latency(
+            self.options.commit_compact_min,
+            self.options.commit_compact_mean,
+        );
     }
 
     pub fn checkpoint(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
@@ -74,7 +110,10 @@ pub const StateMachine = struct {
         assert(self.callback == null);
         assert(self.callback_ticks == 0);
         self.callback = callback;
-        self.callback_ticks = 100; // TODO vary delay
+        self.callback_ticks = self.latency(
+            self.options.commit_checkpoint_min,
+            self.options.commit_checkpoint_mean,
+        );
     }
 
     pub fn commit(
@@ -120,5 +159,9 @@ pub const StateMachine = struct {
         var target: [32]u8 = undefined;
         std.crypto.hash.Blake3.hash(input, &target, .{ .key = key });
         return @bitCast(u128, target[0..16].*);
+    }
+
+    fn latency(state_machine: *StateMachine, min: u64, mean: u64) u64 {
+        return min + @floatToInt(u64, @intToFloat(f64, mean - min) * state_machine.prng.random().floatExp(f64));
     }
 };
