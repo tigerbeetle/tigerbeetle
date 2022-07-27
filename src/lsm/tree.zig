@@ -396,7 +396,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 assert(context.index_block_count <= config.lsm_levels);
 
                 if (Table.data_block_search(data_block, context.key)) |value| {
-                    context.finish(value);
+                    context.finish(unwrap_tombstone(value));
                 } else {
                     // The key is not present in this table, check the next level.
                     context.advance_to_next_level();
