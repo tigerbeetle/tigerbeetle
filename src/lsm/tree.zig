@@ -82,9 +82,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
         const TableImmutableIteratorType = @import("table_immutable.zig").TableImmutableIteratorType;
 
-        pub const PrefetchKeys = std.AutoHashMapUnmanaged(Key, void);
-        pub const PrefetchValues = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, 70);
-
         pub const ValueCache = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, 70);
 
         const CompactionTable = CompactionType(Table, Storage, TableIteratorType);
@@ -92,18 +89,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
         grid: *Grid,
         options: Options,
-
-        /// Keys enqueued to be prefetched.
-        /// Prefetching ensures that point lookups against the latest snapshot are synchronous.
-        /// This shields state machine implementations from the challenges of concurrency and I/O,
-        /// and enables simple state machine function signatures that commit writes atomically.
-        prefetch_keys: PrefetchKeys,
-
-        prefetch_keys_iterator: ?PrefetchKeys.KeyIterator = null,
-
-        /// A separate hash map for prefetched values not found in the mutable table or value cache.
-        /// This is required for correctness, to not evict other prefetch hits from the value cache.
-        prefetch_values: PrefetchValues,
 
         /// TODO(ifreund) Replace this with SetAssociativeCache:
         /// A set associative cache of values shared by trees with the same key/value sizes.
@@ -133,9 +118,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         checkpoint_callback: ?fn (*Tree) void,
 
         pub const Options = struct {
-            /// The maximum number of keys that may need to be prefetched before commit.
-            prefetch_count_max: u32,
-
             /// The maximum number of keys that may be committed per batch.
             commit_count_max: u32,
         };
@@ -147,20 +129,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             value_cache: ?*ValueCache,
             options: Options,
         ) !Tree {
-            if (value_cache == null) {
-                assert(options.prefetch_count_max == 0);
-            } else {
-                assert(options.prefetch_count_max > 0);
-            }
-
-            var prefetch_keys = PrefetchKeys{};
-            try prefetch_keys.ensureTotalCapacity(allocator, options.prefetch_count_max);
-            errdefer prefetch_keys.deinit(allocator);
-
-            var prefetch_values = PrefetchValues{};
-            try prefetch_values.ensureTotalCapacity(allocator, options.prefetch_count_max);
-            errdefer prefetch_values.deinit(allocator);
-
             var table_mutable = try TableMutable.init(allocator, options.commit_count_max);
             errdefer table_mutable.deinit(allocator);
 
@@ -183,8 +151,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             return Tree{
                 .grid = grid,
                 .options = options,
-                .prefetch_keys = prefetch_keys,
-                .prefetch_values = prefetch_values,
                 .value_cache = value_cache,
                 .table_mutable = table_mutable,
                 .table_immutable = table_immutable,
@@ -203,23 +169,18 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             for (tree.compaction_table) |*compaction| compaction.deinit(allocator);
 
             // TODO Consider whether we should release blocks acquired from Grid.block_free_set.
-            tree.prefetch_keys.deinit(allocator);
-            tree.prefetch_values.deinit(allocator);
             tree.table_mutable.deinit(allocator);
             tree.table_immutable.deinit(allocator);
             tree.manifest.deinit(allocator);
         }
 
-        pub fn get(tree: *Tree, key: Key) ?*const Value {
-            // Ensure that prefetch() was called and completed if any keys were enqueued:
-            assert(tree.prefetch_keys.count() == 0);
-            assert(tree.prefetch_keys_iterator == null);
-
+        /// Get a cached value/tombstone for the given key.
+        /// Returns null if no value/tombstone for the given key is cached.
+        pub fn get_cached(tree: *Tree, key: Key) ?*const Value {
             const value = tree.table_mutable.get(key) orelse
-                tree.value_cache.?.getKeyPtr(tombstone_from_key(key)) orelse
-                tree.prefetch_values.getKeyPtr(tombstone_from_key(key));
+                tree.value_cache.?.getKeyPtr(tombstone_from_key(key));
 
-            return unwrap_tombstone(value);
+            return value;
         }
 
         pub fn put(tree: *Tree, value: *const Value) void {
@@ -837,61 +798,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             const callback = tree.checkpoint_callback.?;
             tree.checkpoint_callback = null;
             callback(tree);
-        }
-
-        /// This should be called by the state machine for every key that must be prefetched.
-        pub fn prefetch_enqueue(tree: *Tree, key: Key) void {
-            assert(tree.value_cache != null);
-            assert(tree.prefetch_keys_iterator == null);
-
-            if (tree.table_mutable.get(key) != null) return;
-            if (tree.value_cache.?.contains(tombstone_from_key(key))) return;
-
-            // We tolerate duplicate keys enqueued by the state machine.
-            // For example, if all unique operations require the same two dependencies.
-            tree.prefetch_keys.putAssumeCapacity(key, {});
-        }
-
-        // get rid of compact_io() skip check
-        // alloc 5 -> default:1, compact_snapshot:1+5=6
-        // prefetch uses default:1 -> commit (create_snapshot -> default:1) -> compact (default=2)
-        // prefetch uses default:2 -> commit (lookup_account -> default:2) -> compact (default=3)
-        // prefetch uses default:3 -> commit (create_snapshot -> default:3) -> compact (default=4)
-        //  -> (half measure):
-        //      checkpoint super-block
-        //      set_snapshot_max(compact_snapshot:6)
-        //      alloc 5 -> default:7, compact_snapshot:7+5=12
-
-        /// Ensure keys enqueued by `prefetch_enqueue()` are in the cache when the callback returns.
-        pub fn prefetch(tree: *Tree, callback: fn () void) void {
-            assert(tree.value_cache != null);
-            assert(tree.prefetch_keys_iterator == null);
-
-            // Ensure that no stale values leak through from the previous prefetch batch.
-            tree.prefetch_values.clearRetainingCapacity();
-            assert(tree.prefetch_values.count() == 0);
-
-            tree.prefetch_keys_iterator = tree.prefetch_keys.keyIterator();
-
-            // After finish:
-            _ = callback;
-
-            // Ensure that no keys leak through into the next prefetch batch.
-            tree.prefetch_keys.clearRetainingCapacity();
-            assert(tree.prefetch_keys.count() == 0);
-
-            tree.prefetch_keys_iterator = null;
-        }
-
-        fn prefetch_key(tree: *Tree, key: Key) bool {
-            assert(tree.value_cache != null);
-
-            if (config.verify) {
-                assert(tree.table_mutable.get(key) == null);
-                assert(!tree.value_cache.?.contains(tombstone_from_key(key)));
-            }
-
-            return true; // TODO
         }
 
         pub const RangeQuery = union(enum) {

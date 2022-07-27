@@ -52,21 +52,23 @@ pub fn GridType(comptime Storage: type) type {
         },
     );
 
-    const read_iops_max = 15;
-    // This + 1 ensures that it is always possible for writes to add the written block
-    // to the cache on completion, even if the maximum number of concurrent reads are in
-    // progress and have locked all but one way in the target set.
-    assert(read_iops_max + 1 <= set_associative_cache_ways);
-
-    // TODO put more thought into how low/high this limit should be.
-    const write_iops_max = 16;
-
     const grid_offset: u64 = superblock_zone_size +
         write_ahead_log_zone_size +
         client_table_zone_size;
 
     return struct {
         const Grid = @This();
+
+        pub const read_iops_max = 15;
+        comptime {
+            // This + 1 ensures that it is always possible for writes to add the written block
+            // to the cache on completion, even if the maximum number of concurrent reads are in
+            // progress and have locked all but one way in the target set.
+            assert(read_iops_max + 1 <= set_associative_cache_ways);
+        }
+
+        // TODO put more thought into how low/high this limit should be.
+        pub const write_iops_max = 16;
 
         pub const BlockPtr = *align(config.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
