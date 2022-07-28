@@ -41,7 +41,11 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         const Grid = GridType(Storage);
 
         const Callback = fn (*Forest) void;
-        const JoinOp = enum { compacting, checkpoint };
+        const JoinOp = enum {
+            compacting,
+            checkpoint,
+            open,
+        };
 
         const GrooveOptions = struct {
             cache_size: u32,
@@ -159,6 +163,15 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             };
         }
 
+        pub fn open(forest: *Forest, callback: Callback) void {
+            const Join = JoinType(.open);
+            Join.start(forest, callback);
+
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).open(Join.groove_callback(field.name));
+            }
+        }
+
         pub fn compact(forest: *Forest, op: u46, callback: Callback) void {
             // Start a compacting join.
             const Join = JoinType(.compacting);
@@ -263,6 +276,8 @@ test "Forest" {
     const Forest = TestContext.Forest;
     _ = Forest.init;
     _ = Forest.deinit;
+
+    _ = Forest.open;
     _ = Forest.compact;
     _ = Forest.checkpoint;
 }
