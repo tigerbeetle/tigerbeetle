@@ -13,7 +13,7 @@ const Message = MessagePool.Message;
 const Network = @import("network.zig").Network;
 const NetworkOptions = @import("network.zig").NetworkOptions;
 
-pub const StateMachine = @import("state_machine.zig").StateMachine;
+pub const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;
