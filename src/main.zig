@@ -16,7 +16,7 @@ const Time = @import("time.zig").Time;
 const Storage = @import("storage.zig").Storage;
 
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
-const StateMachine = @import("state_machine.zig").StateMachine;
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
 const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
