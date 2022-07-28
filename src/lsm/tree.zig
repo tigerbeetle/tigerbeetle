@@ -116,6 +116,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         compaction_callback: ?fn (*Tree) void,
 
         checkpoint_callback: ?fn (*Tree) void,
+        open_callback: ?fn (*Tree) void,
 
         pub const Options = struct {
             /// The maximum number of keys that may be committed per batch.
@@ -161,6 +162,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 .compaction_io_pending = 0,
                 .compaction_callback = null,
                 .checkpoint_callback = null,
+                .open_callback = null,
             };
         }
 
@@ -387,6 +389,22 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         /// This distinction enables us to cache a null result as a tombstone in our hash maps.
         inline fn unwrap_tombstone(value: ?*const Value) ?*const Value {
             return if (value == null or tombstone(value.?)) null else value.?;
+        }
+
+        pub fn open(tree: *Tree, callback: fn (*Tree) void) void {
+            assert(tree.open_callback == null);
+            tree.open_callback = callback;
+
+            tree.manifest.open(manifest_open_callback);
+        }
+
+        fn manifest_open_callback(manifest: *Manifest) void {
+            const tree = @fieldParentPtr(Tree, "manifest", manifest);
+            assert(tree.open_callback != null);
+
+            const callback = tree.open_callback.?;
+            tree.open_callback = null;
+            callback(tree);
         }
 
         // Tree compaction runs to the sound of music!

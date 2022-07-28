@@ -60,57 +60,7 @@ pub fn CompactionType(
             ready: bool = false,
         };
 
-        const TableInfoBuffer = struct {
-            array: []TableInfo,
-            count: usize = 0,
-
-            /// The average number of tables involved in a compaction is the 1 table from level A,
-            /// plus the growth_factor number of tables from level B, plus 1 on either side,
-            /// since the overlap may not be perfectly aligned to table boundaries.
-            /// However, the worst case number of tables may approach all tables in level B,
-            /// since key ranges may be skewed and not evenly distributed across a level.
-            const count_max = 1 + config.lsm_growth_factor + 2;
-
-            fn init(allocator: mem.Allocator) !TableInfoBuffer {
-                const array = try allocator.alloc(TableInfo, count_max);
-                errdefer allocator.free(array);
-
-                return TableInfoBuffer{ .array = array };
-            }
-
-            fn deinit(buffer: *TableInfoBuffer, allocator: mem.Allocator) void {
-                allocator.free(buffer.array);
-            }
-
-            fn full(buffer: *const TableInfoBuffer) bool {
-                assert(buffer.count <= count_max);
-                assert(buffer.count <= buffer.array.len);
-                return buffer.count == buffer.array.len;
-            }
-
-            /// Asserts that tables are pushed in sort order.
-            fn push(buffer: *TableInfoBuffer, table: *const TableInfo) void {
-                assert(!buffer.full());
-
-                if (buffer.count > 0) {
-                    const tail = &buffer.array[buffer.count - 1];
-                    assert(compare_keys(tail.key_max, table.key_min) == .lt);
-                }
-
-                buffer.array[buffer.count] = table.*;
-                buffer.count += 1;
-            }
-
-            fn drain(buffer: *TableInfoBuffer) []TableInfo {
-                assert(buffer.count <= count_max);
-                assert(buffer.count <= buffer.array.len);
-
-                defer buffer.count = 0;
-                // Slice on array.ptr instead of array to avoid
-                // having stage1 give us an array.ptr=undefined when buffer.count=0.
-                return buffer.array.ptr[0..buffer.count];
-            }
-        };
+        const TableInfoBuffer = @import("manifest.zig").TableInfoBufferType(Table, .ascending);
 
         status: Status,
 
@@ -162,10 +112,17 @@ pub fn CompactionType(
             const data = BlockWrite{ .block = try allocate_block(allocator) };
             errdefer allocator.free(data.block);
 
-            var update_level_b = try TableInfoBuffer.init(allocator);
+            /// The average number of tables involved in a compaction is the 1 table from level A,
+            /// plus the growth_factor number of tables from level B, plus 1 on either side,
+            /// since the overlap may not be perfectly aligned to table boundaries.
+            /// However, the worst case number of tables may approach all tables in level B,
+            /// since key ranges may be skewed and not evenly distributed across a level.
+            const table_buffer_count_max = 1 + config.lsm_growth_factor + 2;
+
+            var update_level_b = try TableInfoBuffer.init(allocator, table_buffer_count_max);
             errdefer update_level_b.deinit(allocator);
 
-            var insert_level_b = try TableInfoBuffer.init(allocator);
+            var insert_level_b = try TableInfoBuffer.init(allocator, table_buffer_count_max);
             errdefer insert_level_b.deinit(allocator);
 
             return Compaction{
@@ -350,7 +307,7 @@ pub fn CompactionType(
             if (buffer == &compaction.update_level_b) {
                 compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
             } else {
-                compaction.manifest.insert_tables(compaction.level_b, tables, .append_to_log);
+                compaction.manifest.insert_tables(compaction.level_b, tables);
             }
         }
 
