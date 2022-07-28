@@ -2311,7 +2311,7 @@ pub fn Replica(
         fn commit_op_hooks(
             self: *Self,
             prepare: *Message,
-            callback: fn(*Self) void,
+            callback: fn (*Self) void,
         ) void {
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
@@ -2341,39 +2341,42 @@ pub fn Replica(
 
             const commit_min_before = self.commit_min;
             self.commit_op(self.commit_prepare.?);
-            const commit_min_after = self.commit_min;
-            assert(commit_min_after == commit_min_before + 1);
+            assert(self.commit_min == commit_min_before + 1);
+            assert(self.commit_min <= self.commit_max);
 
-            if (self.pipeline.head()) |pipeline_head| {
-                if (self.status == .normal and self.leader() and
-                    self.commit_min == pipeline_head.message.header.op)
-                {
-                    const prepare = self.pipeline.pop().?;
-
+            if (self.status == .normal and self.leader()) {
+                if (self.pipeline.pop()) |prepare| {
                     assert(self.commit_min == self.commit_max);
+                    assert(self.commit_min == prepare.message.header.op);
                     assert(self.commit_max == prepare.message.header.op);
+                    assert(self.prepare_timeout.ticking);
 
                     self.message_bus.unref(prepare.message);
 
-                    if (self.replica_count == 1) {
-                        if (self.pipeline.head_ptr()) |next| {
+                    if (self.pipeline.head_ptr()) |next| {
+                        assert(next.message.header.op == self.commit_min + 1);
+
+                        if (self.replica_count == 1) {
                             // Write the next message in the queue.
-                            // A cluster-of-one writes prepares sequentially to avoid gaps in the WAL.
+                            // A cluster-of-one writes prepares sequentially to avoid gaps in the
+                            // WAL caused by reordered writes.
                             self.write_prepare(next.message, .append);
                         }
+                    } else {
+                        // When the pipeline is empty, stop the prepare timeout.
+                        // The timeout will be restarted when another entry arrives for the pipeline.
+                        self.prepare_timeout.stop();
                     }
-
-                    assert(self.prepare_timeout.ticking);
-                    if (self.pipeline.count == 0) self.prepare_timeout.stop();
                 }
             }
 
-            self.state_machine.compact(commit_min_after, commit_op_compact_callback);
+            self.state_machine.compact(self.commit_min, commit_op_compact_callback);
         }
 
         fn commit_op_compact_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
             const callback = self.commit_callback.?;
+            assert(self.committing);
 
             self.message_bus.unref(self.commit_prepare.?);
             self.commit_prepare = null;
@@ -2461,8 +2464,8 @@ pub fn Replica(
         }
 
         /// Commits, frees and pops as many prepares at the head of the pipeline as have quorum.
+        /// Can be called only when the replica is the leader.
         /// Can be called only when the pipeline has at least one prepare.
-        /// Stops the prepare timeout and resets the timeouts counter if the pipeline becomes empty.
         fn commit_pipeline(self: *Self) void {
             assert(self.status == .normal);
             assert(self.leader());
@@ -2479,15 +2482,14 @@ pub fn Replica(
         }
 
         fn commit_pipeline_next(self: *Self) void {
+            assert(self.committing);
             assert(self.status == .normal);
             assert(self.leader());
-            assert(self.committing);
 
             if (self.pipeline.head_ptr()) |prepare| {
-                assert(self.pipeline.count > 0);
                 assert(self.commit_min == self.commit_max);
-                assert(self.commit_max + self.pipeline.count == self.op);
-                assert(self.commit_max + 1 == prepare.message.header.op);
+                assert(self.commit_min + 1 == prepare.message.header.op);
+                assert(self.commit_min + self.pipeline.count == self.op);
 
                 if (!prepare.ok_quorum_received) {
                     // Eventually handled by on_prepare_timeout().
@@ -2500,7 +2502,6 @@ pub fn Replica(
                 assert(count >= self.quorum_replication);
                 assert(count <= self.replica_count);
 
-                self.committing = true;
                 self.commit_op_hooks(prepare.message, commit_pipeline_callback);
             } else {
                 self.commit_done();
@@ -2509,9 +2510,13 @@ pub fn Replica(
 
         fn commit_pipeline_callback(self: *Self) void {
             assert(self.committing);
-            // TODO assert pipeline was popped
+            assert(self.commit_min <= self.commit_max);
+            assert(self.commit_min <= self.op);
 
             if (self.status == .normal and self.leader()) {
+                if (self.pipeline.head_ptr()) |pipeline_head| {
+                    assert(pipeline_head.message.header.op == self.commit_min + 1);
+                }
                 self.commit_pipeline_next();
             } else {
                 self.commit_done();
@@ -2892,8 +2897,8 @@ pub fn Replica(
         }
 
         fn flush_loopback_queue(self: *Self) void {
-            // There are three cases where a replica will send a message to itself:
-            // However, of these three cases, only two cases will call send_message_to_replica().
+            // There are five cases where a replica will send a message to itself:
+            // However, of these five cases, all but one call send_message_to_replica().
             //
             // 1. In on_request(), the leader sends a synchronous prepare to itself, but this is
             //    done by calling on_prepare() directly, and subsequent prepare timeout retries will
@@ -2902,6 +2907,10 @@ pub fn Replica(
             //    asynchronous prepare_ok to itself.
             // 3. In on_start_view_change(), after receiving a quorum of start_view_change
             //    messages, the new leader sends a synchronous do_view_change to itself.
+            // 4. In commit_done(), if a quorum of start_view_change messages was received while
+            //    committing, the new leader sends a synchronous do_view_change to itself.
+            // 5. In start_view_as_the_new_leader(), the new leader sends itself a prepare_ok
+            //    message for each uncommitted message.
             if (self.loopback_queue) |message| {
                 defer self.message_bus.unref(message);
 
@@ -4803,6 +4812,7 @@ pub fn Replica(
         fn transition_to_normal_from_recovering_status(self: *Self, new_view: u32) void {
             assert(self.status == .recovering);
             assert(self.view == 0);
+            assert(!self.committing);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
