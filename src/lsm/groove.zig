@@ -338,7 +338,11 @@ pub fn GrooveType(
         const Grid = GridType(Storage);
 
         const Callback = fn (*Groove) void;
-        const JoinOp = enum { compacting, checkpoint };
+        const JoinOp = enum {
+            compacting,
+            checkpoint,
+            open,
+        };
 
         const PrefetchIDs = std.AutoHashMapUnmanaged(u128, void);
 
@@ -819,6 +823,17 @@ pub fn GrooveType(
                     }.tree_cb;
                 }
             };
+        }
+
+        pub fn open(groove: *Groove, callback: fn (*Groove) void) void {
+            const Join = JoinType(.open);
+            Join.start(groove, callback);
+
+            groove.objects.open(Join.tree_callback(null));
+
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                @field(groove.indexes, field.name).open(Join.tree_callback(field.name));
+            }
         }
 
         pub fn compact_io(groove: *Groove, op: u64, callback: Callback) void {

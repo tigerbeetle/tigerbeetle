@@ -79,6 +79,59 @@ pub fn TableInfoType(comptime Table: type) type {
     };
 }
 
+pub fn TableInfoBufferType(comptime Table: type, comptime sort_direction: ?Direction) type {
+    return struct {
+        array: []TableInfo,
+        count: usize = 0,
+
+        const TableInfoBuffer = @This();
+
+        pub fn init(allocator: mem.Allocator, count_max: usize) !TableInfoBuffer {
+            const array = try allocator.alloc(TableInfo, count_max);
+            errdefer allocator.free(array);
+
+            return TableInfoBuffer{ .array = array };
+        }
+
+        pub fn deinit(buffer: *TableInfoBuffer, allocator: mem.Allocator) void {
+            allocator.free(buffer.array);
+        }
+
+        pub fn full(buffer: *const TableInfoBuffer) bool {
+            assert(buffer.count <= buffer.array.len);
+            return buffer.count == buffer.array.len;
+        }
+
+        /// Asserts that tables are pushed in sort order.
+        pub fn push(buffer: *TableInfoBuffer, table: *const TableInfo) void {
+            assert(!buffer.full());
+
+            if (sort_direction) |direction| {
+                if (buffer.count > 0) {
+                    const tail = &buffer.array[buffer.count - 1];
+                    switch (direction) {
+                        .ascending => assert(compare_keys(table.key_min, tail.key_min) != .lt),
+                        .descending => assert(compare_keys(table.key_max, tail.key_max) != .gt),
+                    }
+                }
+            }
+
+            buffer.array[buffer.count] = table.*;
+            buffer.count += 1;
+        }
+
+        pub fn drain(buffer: *TableInfoBuffer) []TableInfo {
+            assert(buffer.count <= count_max);
+            assert(buffer.count <= buffer.array.len);
+
+            defer buffer.count = 0;
+            // Slice on array.ptr instead of array to avoid
+            // having stage1 give us an array.ptr=undefined when buffer.count=0.
+            return buffer.array.ptr[0..buffer.count];
+        }
+    };
+}
+
 pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
     const Key = Table.Key;
     const compare_keys = Table.compare_keys;
@@ -87,8 +140,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         const Manifest = @This();
 
         pub const TableInfo = TableInfoType(Table);
+        const TableInfoBuffer = TableInfoBufferType(Table, null);
 
         const Grid = GridType(Storage);
+        const Callback = fn (*Manifest) void;
 
         /// Levels beyond level 0 have tables with disjoint key ranges.
         /// Here, we use a structure with indexes over the segmented array for performance.
@@ -97,11 +152,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);
 
-        const Callback = fn (*Manifest) void;
-
         node_pool: *NodePool,
 
         levels: [config.lsm_levels]Level,
+
+        open_buffers: [config.lsm_levels]TableInfoBuffer,
 
         // TODO Set this at startup when reading in the manifest.
         // This should be the greatest TableInfo.snapshot_min/snapshot_max (if deleted) or
@@ -110,6 +165,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         manifest_log: ManifestLog,
 
+        open_callback: ?Callback = null,
         compact_callback: ?Callback = null,
         checkpoint_callback: ?Callback = null,
 
@@ -124,6 +180,14 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
                 level.* = try Level.init(allocator);
             }
+            errdefer for (levels) |*l| l.deinit(allocator, node_pool);
+
+            var open_buffers: [config.lsm_levels]TableInfoBuffer = undefined;
+            for (open_buffers) |*buffer, i| {
+                errdefer for (open_buffers[0..i]) |*b| b.deinit(allocator);
+                buffer.* = try TableInfoBuffer.init(allocator, 32);
+            }
+            errdefer for (open_buffers) |*b| b.deinit(allocator);
 
             var manifest_log = try ManifestLog.init(allocator, grid, tree_hash);
             errdefer manifest_log.deinit(allocator);
@@ -132,25 +196,64 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .node_pool = node_pool,
                 .levels = levels,
                 .manifest_log = manifest_log,
+                .open_buffer = open_buffer,
             };
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
             for (manifest.levels) |*l| l.deinit(allocator, manifest.node_pool);
+            for (manifest.open_buffers) |*b| b.deinit(allocator);
 
             manifest.manifest_log.deinit(allocator);
         }
 
-        pub const InsertIntent = enum {
-            append_to_log,
-            just_insert,
-        };
+        pub fn open(manifest: *Manifest, callback: Callback) void {
+            assert(manifest.open_callback == null);
+            manifest.open_callback = callback;
+
+            manifest.manifest_log.open(manifest_log_open_event, manifest_log_open_callback);
+        }
+
+        fn manifest_log_open_event(
+            maniest_log: *ManifestLog,
+            level: u7,
+            table: *const TableInfo,
+        ) void {
+            const manifest = @fieldParentPtr(Manifest, "manifest_log", manifest_log);
+            assert(manifest.open_callback != null);
+
+            assert(level < config.lsm_levels);
+            const buffer = &manifest.open_buffers[level];
+
+            // Make sure theres room in the open buffer to push the table to.
+            if (buffer.full()) {
+                const tables = buffer.drain();
+                manifest.levels[level].insert_tables(manifest.node_pool, tables);
+            }
+
+            buffer.push(table);
+        }
+
+        fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
+            const manifest = @fieldParentPtr(Manifest, "manifest_log", manifest_log);
+            assert(manifest.open_callback != null);
+
+            // Insert all left-over pushed open tables into the ManifestLevels.
+            for (manifest.open_buffers) |*buffer, level| {
+                const tables = buffer.drain();
+                if (tables.len == 0) continue;
+                manifest.levels[level].insert_tables(manifest.node_pool, tables);
+            }
+
+            const callback = manifest.open_callback.?;
+            manifest.open_callback = null;
+            callback(manifest);
+        }
 
         pub fn insert_tables(
             manifest: *Manifest,
             level: u8,
             tables: []const TableInfo,
-            intent: InsertIntent,
         ) void {
             assert(tables.len > 0);
 
@@ -158,11 +261,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest_level.insert_tables(manifest.node_pool, tables);
 
             // Appends insert changes to the manifest log
-            if (intent == .append_to_log) {
-                for (tables) |*table| {
-                    const log_level = @intCast(u7, level);
-                    manifest.manifest_log.insert(log_level, table);
-                }
+            for (tables) |*table| {
+                const log_level = @intCast(u7, level);
+                manifest.manifest_log.insert(log_level, table);
             }
 
             // TODO Verify that tables can be found exactly before returning.
