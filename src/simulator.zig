@@ -116,12 +116,9 @@ pub fn main() !void {
             .restart_stability = random.uintLessThan(u32, 1_000),
         },
         .state_machine_options = .{
-            .commit_prefetch_min = random.uintLessThan(u64, 10),
-            .commit_prefetch_mean = 10 + random.uintLessThan(u64, 10),
-            .commit_compact_min = random.uintLessThan(u64, 10),
-            .commit_compact_mean = 10 + random.uintLessThan(u64, 10),
-            .commit_checkpoint_min = random.uintLessThan(u64, 10),
-            .commit_checkpoint_mean = 10 + random.uintLessThan(u64, 10),
+            .commit_prefetch_mean = 5 + random.uintLessThan(u64, 10),
+            .commit_compact_mean = 5 + random.uintLessThan(u64, 10),
+            .commit_checkpoint_mean = 5 + random.uintLessThan(u64, 10),
         },
     });
     defer cluster.destroy();
@@ -165,6 +162,10 @@ pub fn main() !void {
         \\          crash_stability={} ticks
         \\          restart_probability={d}%
         \\          restart_stability={} ticks
+        \\          commit_prefetch_mean={} ticks
+        \\          commit_compact_mean={} ticks
+        \\          commit_checkpoint_mean={} ticks
+        \\
     , .{
         seed,
         replica_count,
@@ -194,22 +195,8 @@ pub fn main() !void {
         cluster.options.health_options.crash_stability,
         cluster.options.health_options.restart_probability * 100,
         cluster.options.health_options.restart_stability,
-    });
-    // Split because "32 arguments max are supported per format call".
-    output.info(
-        \\          commit_prefetch_mean={} ticks
-        \\          commit_prefetch_min={} ticks
-        \\          commit_compact_mean={} ticks
-        \\          commit_compact_min={} ticks
-        \\          commit_checkpoint_mean={} ticks
-        \\          commit_checkpoint_min={} ticks
-        \\
-    , .{
-        cluster.options.state_machine_options.commit_prefetch_min,
         cluster.options.state_machine_options.commit_prefetch_mean,
-        cluster.options.state_machine_options.commit_compact_min,
         cluster.options.state_machine_options.commit_compact_mean,
-        cluster.options.state_machine_options.commit_checkpoint_min,
         cluster.options.state_machine_options.commit_checkpoint_mean,
     });
 
