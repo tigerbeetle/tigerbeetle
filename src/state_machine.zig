@@ -44,6 +44,8 @@ pub const StateMachine = struct {
     transfers: HashMapTransfers,
     posted: HashMapPosted,
 
+    grid: *Grid, // currently needed for access to superblock from replica
+
     pub fn init(
         allocator: mem.Allocator,
         grid: *Grid,
@@ -70,6 +72,7 @@ pub const StateMachine = struct {
             .accounts = accounts,
             .transfers = transfers,
             .posted = posted,
+            .grid = grid,
         };
     }
 
