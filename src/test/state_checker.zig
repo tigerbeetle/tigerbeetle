@@ -6,7 +6,8 @@ const config = @import("../config.zig");
 
 const Cluster = @import("cluster.zig").Cluster;
 const Network = @import("network.zig").Network;
-const StateMachine = @import("state_machine.zig").StateMachine;
+const Storage = @import("storage.zig").Storage;
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
