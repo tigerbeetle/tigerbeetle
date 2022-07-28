@@ -228,7 +228,9 @@ pub const journal_size_prepares = journal_slot_count * message_size_max;
 
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
-    _ = std.net.Address.parseIp4(address, 0) catch unreachable;
+    if (!@import("builtin").cpu.arch.isWasm()) {
+        _ = std.net.Address.parseIp4(address, 0) catch unreachable;
+    }
     _ = @as(u16, port);
 
     // Avoid latency issues from setting sndbuf too high:
