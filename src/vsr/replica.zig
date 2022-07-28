@@ -1474,8 +1474,8 @@ pub fn Replica(
                 return;
             }
 
-            if (self.journal.prepare_inhabited[slot.index]) {
-                const prepare_checksum = self.journal.prepare_checksums[slot.index];
+            if (self.journal.prepare_inhabited[@intCast(usize, slot.index)]) {
+                const prepare_checksum = self.journal.prepare_checksums[@intCast(usize, slot.index)];
                 // Consult `journal.prepare_checksums` (rather than `journal.headers`):
                 // the former may have the prepare we want — even if journal recovery marked the
                 // slot as faulty and left the in-memory header as reserved.
@@ -1547,8 +1547,8 @@ pub fn Replica(
                     assert(self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot));
                 }
 
-                if (self.journal.prepare_inhabited[slot.index]) {
-                    assert(self.journal.prepare_checksums[slot.index] != checksum.?);
+                if (self.journal.prepare_inhabited[@intCast(usize, slot.index)]) {
+                    assert(self.journal.prepare_checksums[@intCast(usize, slot.index)] != checksum.?);
                 }
 
                 log.debug("{}: on_request_prepare: op={} checksum={} nacking", .{
@@ -3152,7 +3152,7 @@ pub fn Replica(
             while (iterator.next()) |slot| {
                 // The command is `reserved` when the entry was found faulty during WAL recovery.
                 // Faults found after WAL recovery are not relevant, because we know their op.
-                if (self.journal.headers[slot.index].command == .reserved) {
+                if (self.journal.headers[@intCast(usize, slot.index)].command == .reserved) {
                     if (slot_op_checkpoint == slot_op or
                         !slot_known_range.contains(slot))
                     {
@@ -3261,7 +3261,7 @@ pub fn Replica(
             if (op < head_op) return null;
             if (op > tail_op) return null;
 
-            const pipeline_prepare = self.pipeline.get_ptr(op - head_op).?;
+            const pipeline_prepare = self.pipeline.get_ptr(@intCast(usize, op - head_op)).?;
             assert(pipeline_prepare.message.header.op == op);
 
             if (checksum == null or pipeline_prepare.message.header.checksum == checksum.?) {
@@ -3870,7 +3870,7 @@ pub fn Replica(
                 // The op is known, and this is the first WAL cycle.
                 // Therefore, any faulty ops to the right of `replica.op` are corrupt reserved
                 // entries from the initial format.
-                var op: usize = self.op + 1;
+                var op: usize = @intCast(usize, self.op + 1);
                 while (op < config.journal_slot_count) : (op += 1) {
                     const slot = self.journal.slot_for_op(op);
                     assert(slot.index == op);

@@ -912,7 +912,7 @@ pub fn format_journal(cluster: u32, offset: u64, target: []u8) usize {
     const sector_max = @divExact(config.journal_size_max, config.sector_size);
     var sectors = std.mem.bytesAsSlice([config.sector_size]u8, target);
     for (sectors) |*sector_data, i| {
-        const sector = @divExact(offset, config.sector_size) + i;
+        const sector = @intCast(usize, @divExact(offset, config.sector_size) + i);
         if (sector == sector_max) {
             if (i == 0) {
                 assert(offset == config.journal_size_max);

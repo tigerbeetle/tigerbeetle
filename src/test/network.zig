@@ -160,7 +160,7 @@ pub const Network = struct {
             if (message.header.size != sector_ceil) {
                 assert(message.header.size < sector_ceil);
                 assert(message.buffer.len == config.message_size_max + config.sector_size);
-                mem.set(u8, message.buffer[message.header.size..sector_ceil], 0);
+                mem.set(u8, message.buffer[message.header.size..@intCast(usize, sector_ceil)], 0);
             }
         }
 

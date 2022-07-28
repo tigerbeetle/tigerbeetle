@@ -389,7 +389,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         pub fn header_for_op(self: *const Self, op: u64) ?*const Header {
             // TODO Snapshots
             const slot = self.slot_for_op(op);
-            const existing = &self.headers[slot.index];
+            const existing = &self.headers[@intCast(usize, slot.index)];
             switch (existing.command) {
                 .prepare => {
                     assert(self.slot_for_op(existing.op).index == slot.index);
@@ -475,7 +475,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(header.command == .prepare);
             // TODO Snapshots
             const slot = self.slot_for_op(header.op);
-            const existing = &self.headers[slot.index];
+            const existing = &self.headers[@intCast(usize, slot.index)];
             if (existing.command == .reserved) {
                 return false;
             } else {
@@ -493,8 +493,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // TODO Snapshots
             if (self.slot_with_op_and_checksum(header.op, header.checksum)) |slot| {
                 if (!self.dirty.bit(slot)) {
-                    assert(self.prepare_inhabited[slot.index]);
-                    assert(self.prepare_checksums[slot.index] == header.checksum);
+                    assert(self.prepare_inhabited[@intCast(usize, slot.index)]);
+                    assert(self.prepare_checksums[@intCast(usize, slot.index)] == header.checksum);
                     return true;
                 }
             }
@@ -732,8 +732,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const replica = @fieldParentPtr(Replica, "journal", self);
             const slot = self.slot_for_op(op);
             assert(self.recovered);
-            assert(self.prepare_inhabited[slot.index]);
-            assert(self.prepare_checksums[slot.index] == checksum);
+            assert(self.prepare_inhabited[@intCast(usize, slot.index)]);
+            assert(self.prepare_checksums[@intCast(usize, slot.index)] == checksum);
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
@@ -794,8 +794,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            const checksum_inhabited = self.prepare_inhabited[self.slot_for_op(op).index];
-            const checksum_match = self.prepare_checksums[self.slot_for_op(op).index] == checksum;
+            const checksum_inhabited = self.prepare_inhabited[@intCast(usize, self.slot_for_op(op).index)];
+            const checksum_match = self.prepare_checksums[@intCast(usize, self.slot_for_op(op).index)] == checksum;
             if (!checksum_inhabited or !checksum_match) {
                 self.read_prepare_log(op, checksum, "prepare changed during read");
                 read.callback(replica, null, null);
@@ -974,7 +974,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
             std.mem.copy(
                 Header,
-                self.headers_redundant[@divExact(offset, @sizeOf(Header))..][0..buffer_headers.len],
+                self.headers_redundant[@intCast(usize, @divExact(offset, @sizeOf(Header)))..][0..@intCast(usize, buffer_headers.len)],
                 buffer_headers,
             );
 
@@ -1057,7 +1057,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (read.message.header.valid_checksum() and
                 read.message.header.valid_checksum_body(read.message.body()))
             {
-                self.headers[slot.index] = read.message.header.*;
+                self.headers[@intCast(usize, slot.index)] = read.message.header.*;
             }
 
             replica.message_bus.unref(read.message);
@@ -1170,8 +1170,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
             if (self.recover_torn_prepare(&cases)) |torn_slot| {
-                assert(cases[torn_slot.index].decision(replica.replica_count) == .vsr);
-                cases[torn_slot.index] = &case_cut;
+                assert(cases[@intCast(usize, torn_slot.index)].decision(replica.replica_count) == .vsr);
+                cases[@intCast(usize, torn_slot.index)] = &case_cut;
             }
 
             for (cases) |case, index| self.recover_slot(Slot{ .index = index }, case);
@@ -1216,11 +1216,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const torn_op = op_max + 1;
             const torn_slot = self.slot_for_op(torn_op);
 
-            const torn_prepare_untrusted = &self.headers[torn_slot.index];
+            const torn_prepare_untrusted = &self.headers[@intCast(usize, torn_slot.index)];
             if (torn_prepare_untrusted.valid_checksum()) return null;
             // The prepare is at least corrupt, possibly torn, but not valid and simply misdirected.
 
-            const header_untrusted = &self.headers_redundant[torn_slot.index];
+            const header_untrusted = &self.headers_redundant[@intCast(usize, torn_slot.index)];
             const header = header_ok(replica.cluster, torn_slot, header_untrusted) orelse return null;
             // The redundant header is valid, also for the correct cluster and not misdirected.
 
@@ -1243,7 +1243,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const checkpoint_index = self.slot_for_op(replica.op_checkpoint).index;
             if (checkpoint_index == torn_slot.index) {
                 // The checkpoint and the torn op are in the same slot.
-                assert(cases[checkpoint_index].decision(replica.replica_count) == .vsr);
+                assert(cases[@intCast(usize, checkpoint_index)].decision(replica.replica_count) == .vsr);
                 assert(slot_count > 1);
                 assert(op_max >= replica.op_checkpoint);
                 assert(torn_op == op_max + 1);
@@ -1271,9 +1271,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             // The prepare is torn.
-            assert(!self.prepare_inhabited[torn_slot.index]);
+            assert(!self.prepare_inhabited[@intCast(usize, torn_slot.index)]);
             assert(!torn_prepare_untrusted.valid_checksum());
-            assert(cases[torn_slot.index].decision(replica.replica_count) == .vsr);
+            assert(cases[@intCast(usize, torn_slot.index)].decision(replica.replica_count) == .vsr);
             return torn_slot;
         }
 
@@ -1286,17 +1286,17 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.dirty.bit(slot));
             assert(self.faulty.bit(slot));
 
-            const header = header_ok(cluster, slot, &self.headers_redundant[slot.index]);
-            const prepare = header_ok(cluster, slot, &self.headers[slot.index]);
+            const header = header_ok(cluster, slot, &self.headers_redundant[@intCast(usize, slot.index)]);
+            const prepare = header_ok(cluster, slot, &self.headers[@intCast(usize, slot.index)]);
             const decision = case.decision(replica.replica_count);
             switch (decision) {
                 .eql => {
                     assert(header.?.command == .prepare);
                     assert(prepare.?.command == .prepare);
                     assert(header.?.checksum == prepare.?.checksum);
-                    assert(self.prepare_inhabited[slot.index]);
-                    assert(self.prepare_checksums[slot.index] == prepare.?.checksum);
-                    self.headers[slot.index] = header.?.*;
+                    assert(self.prepare_inhabited[@intCast(usize, slot.index)]);
+                    assert(self.prepare_checksums[@intCast(usize, slot.index)] == prepare.?.checksum);
+                    self.headers[@intCast(usize, slot.index)] = header.?.*;
                     self.dirty.clear(slot);
                     self.faulty.clear(slot);
                 },
@@ -1305,9 +1305,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     assert(prepare.?.command == .reserved);
                     assert(header.?.checksum == prepare.?.checksum);
                     assert(header.?.checksum == Header.reserved(cluster, slot.index).checksum);
-                    assert(!self.prepare_inhabited[slot.index]);
-                    assert(self.prepare_checksums[slot.index] == 0);
-                    self.headers[slot.index] = header.?.*;
+                    assert(!self.prepare_inhabited[@intCast(usize, slot.index)]);
+                    assert(self.prepare_checksums[@intCast(usize, slot.index)] == 0);
+                    self.headers[@intCast(usize, slot.index)] = header.?.*;
                     self.dirty.clear(slot);
                     self.faulty.clear(slot);
                 },
@@ -1316,10 +1316,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     // The header may be valid or invalid.
                     // The header may be reserved or a prepare.
                     assert(prepare.?.command == .prepare);
-                    assert(self.prepare_inhabited[slot.index]);
-                    assert(self.prepare_checksums[slot.index] == prepare.?.checksum);
+                    assert(self.prepare_inhabited[@intCast(usize, slot.index)]);
+                    assert(self.prepare_checksums[@intCast(usize, slot.index)] == prepare.?.checksum);
 
-                    self.headers[slot.index] = prepare.?.*;
+                    self.headers[@intCast(usize, slot.index)] = prepare.?.*;
                     self.faulty.clear(slot);
                     if (replica.replica_count == 1) {
                         // @E, @F, @G, @H, @K:
@@ -1332,16 +1332,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     }
                 },
                 .vsr => {
-                    self.headers[slot.index] = Header.reserved(cluster, slot.index);
+                    self.headers[@intCast(usize, slot.index)] = Header.reserved(cluster, slot.index);
                     assert(self.dirty.bit(slot));
                     assert(self.faulty.bit(slot));
                 },
                 .cut => {
                     assert(header != null);
                     assert(prepare == null);
-                    assert(!self.prepare_inhabited[slot.index]);
-                    assert(self.prepare_checksums[slot.index] == 0);
-                    self.headers[slot.index] = Header.reserved(cluster, slot.index);
+                    assert(!self.prepare_inhabited[@intCast(usize, slot.index)]);
+                    assert(self.prepare_checksums[@intCast(usize, slot.index)] == 0);
+                    self.headers[@intCast(usize, slot.index)] = Header.reserved(cluster, slot.index);
                     self.dirty.clear(slot);
                     self.faulty.clear(slot);
                 },
@@ -1419,7 +1419,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     // TODO Explore scenarios where the data on disk may resurface after a crash.
                     const slot = self.slot_for_op(header.op);
                     assert(slot.index == index);
-                    self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
+                    self.headers[@intCast(usize, slot.index)] = Header.reserved(replica.cluster, slot.index);
                     self.dirty.clear(slot);
                     self.faulty.clear(slot);
                     // Do not clear `prepare_inhabited`/`prepare_checksums`. The prepare is
@@ -1456,7 +1456,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(self.dirty.bit(slot));
                 // Do not clear any faulty bit for the same entry.
             } else {
-                self.headers[slot.index] = header.*;
+                self.headers[@intCast(usize, slot.index)] = header.*;
                 self.dirty.set(slot);
                 self.faulty.clear(slot);
             }
@@ -1486,8 +1486,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (!self.dirty.bit(slot)) {
                 // Any function that sets the faulty bit should also set the dirty bit:
                 assert(!self.faulty.bit(slot));
-                assert(self.prepare_inhabited[slot.index]);
-                assert(self.prepare_checksums[slot.index] == message.header.checksum);
+                assert(self.prepare_inhabited[@intCast(usize, slot.index)]);
+                assert(self.prepare_checksums[@intCast(usize, slot.index)] == message.header.checksum);
                 self.write_prepare_debug(message.header, "skipping (clean)");
                 callback(replica, message, trigger);
                 return;
@@ -1512,7 +1512,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
 
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
-            const buffer = message.buffer[0..vsr.sector_ceil(message.header.size)];
+            const buffer = message.buffer[0..@intCast(usize, vsr.sector_ceil(message.header.size))];
             const offset = offset_physical(.prepares, slot);
 
             if (builtin.mode == .Debug) {
@@ -1522,8 +1522,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(sum_of_sector_padding_bytes == 0);
             }
 
-            self.prepare_inhabited[slot.index] = false;
-            self.prepare_checksums[slot.index] = 0;
+            self.prepare_inhabited[@intCast(usize, slot.index)] = false;
+            self.prepare_checksums[@intCast(usize, slot.index)] = 0;
 
             assert_bounds(.prepares, offset, buffer.len);
             self.write_sectors(write_prepare_header, write, buffer, offset);
@@ -1537,9 +1537,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(self.recovered);
 
             if (self.slot_with_op_and_checksum(message.header.op, message.header.checksum)) |slot| {
-                assert(!self.prepare_inhabited[slot.index]);
-                self.prepare_inhabited[slot.index] = true;
-                self.prepare_checksums[slot.index] = message.header.checksum;
+                assert(!self.prepare_inhabited[@intCast(usize, slot.index)]);
+                self.prepare_inhabited[@intCast(usize, slot.index)] = true;
+                self.prepare_checksums[@intCast(usize, slot.index)] = message.header.checksum;
             } else {
                 self.write_prepare_debug(message.header, "entry changed while writing sectors");
                 self.write_prepare_release(write, null);
@@ -1612,7 +1612,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     };
                     assert(!buffer_headers[i].valid_checksum());
                 } else if (message.header.op < slot_count and
-                    !self.prepare_inhabited[slot.index] and
+                    !self.prepare_inhabited[@intCast(usize, slot.index)] and
                     message.header.command == .prepare and
                     self.dirty.bit(slot))
                 {
@@ -1637,7 +1637,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     //   local repair.
                     buffer_headers[i] = Header.reserved(replica.cluster, slot.index);
                 } else {
-                    buffer_headers[i] = self.headers[slot.index];
+                    buffer_headers[i] = self.headers[@intCast(usize, slot.index)];
                 }
             }
 
@@ -1900,21 +1900,21 @@ pub const BitSet = struct {
 
     /// Clear the bit for a slot (idempotent):
     pub fn clear(self: *BitSet, slot: Slot) void {
-        if (self.bits.isSet(slot.index)) {
-            self.bits.unset(slot.index);
+        if (self.bits.isSet(@intCast(usize, slot.index))) {
+            self.bits.unset(@intCast(usize, slot.index));
             self.count -= 1;
         }
     }
 
     /// Whether the bit for a slot is set:
     pub fn bit(self: *const BitSet, slot: Slot) bool {
-        return self.bits.isSet(slot.index);
+        return self.bits.isSet(@intCast(usize, slot.index));
     }
 
     /// Set the bit for a slot (idempotent):
     pub fn set(self: *BitSet, slot: Slot) void {
-        if (!self.bits.isSet(slot.index)) {
-            self.bits.set(slot.index);
+        if (!self.bits.isSet(@intCast(usize, slot.index))) {
+            self.bits.set(@intCast(usize, slot.index));
             self.count += 1;
             assert(self.count <= self.bits.bit_length);
         }

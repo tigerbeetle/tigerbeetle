@@ -368,7 +368,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
             const queue = self.path_queue(path);
             var queue_length = queue.count();
             if (queue_length + 1 > queue.capacity()) {
-                const index = self.prng.random().uintLessThanBiased(u64, queue_length);
+                const index = self.prng.random().uintLessThanBiased(usize, queue_length);
                 const data = queue.removeIndex(index);
                 data.packet.deinit(path);
                 log.err("submit_packet: {} reached capacity, dropped packet={}", .{

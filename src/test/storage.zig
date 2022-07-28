@@ -116,14 +116,14 @@ pub const Storage = struct {
         assert(options.write_latency_mean >= options.write_latency_min);
         assert(options.read_latency_mean >= options.read_latency_min);
 
-        const memory = try allocator.allocAdvanced(u8, config.sector_size, size, .exact);
+        const memory = try allocator.allocAdvanced(u8, config.sector_size, @intCast(usize, size), .exact);
         errdefer allocator.free(memory);
         // TODO: random data
         mem.set(u8, memory, 0);
 
         var faults = try std.DynamicBitSetUnmanaged.initEmpty(
             allocator,
-            @divExact(size, config.sector_size),
+            @intCast(usize, @divExact(size, config.sector_size)),
         );
         errdefer faults.deinit(allocator);
 
@@ -203,7 +203,7 @@ pub const Storage = struct {
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
-        mem.copy(u8, read.buffer, storage.memory[read.offset..][0..read.buffer.len]);
+        mem.copy(u8, read.buffer, storage.memory[@intCast(usize, read.offset)..][0..@intCast(usize, read.buffer.len)]);
 
         if (storage.x_in_100(storage.options.read_fault_probability)) {
             storage.fault_sectors(read.offset, read.buffer.len);
@@ -211,7 +211,7 @@ pub const Storage = struct {
 
         if (storage.faulty) {
             // Corrupt faulty sectors.
-            const sector_min = @divExact(read.offset, config.sector_size);
+            const sector_min = @intCast(usize, @divExact(read.offset, config.sector_size));
             var sector: usize = 0;
             while (sector < @divExact(read.buffer.len, config.sector_size)) : (sector += 1) {
                 if (storage.faults.isSet(sector_min + sector)) {
@@ -253,11 +253,11 @@ pub const Storage = struct {
     }
 
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
-        mem.copy(u8, storage.memory[write.offset..][0..write.buffer.len], write.buffer);
+        mem.copy(u8, storage.memory[@intCast(usize, write.offset)..][0..@intCast(usize, write.buffer.len)], write.buffer);
 
         {
-            const sector_min = @divExact(write.offset, config.sector_size);
-            const sector_max = @divExact(write.offset + write.buffer.len, config.sector_size);
+            const sector_min = @intCast(usize, @divExact(write.offset, config.sector_size));
+            const sector_max = @intCast(usize, @divExact(write.offset + write.buffer.len, config.sector_size));
             var sector: usize = sector_min;
             while (sector < sector_max) : (sector += 1) storage.faults.unset(sector);
         }
@@ -419,8 +419,8 @@ pub const Storage = struct {
         if (start >= end) return null;
 
         return SectorRange{
-            .min = @divExact(start, config.sector_size),
-            .max = @divExact(end, config.sector_size),
+            .min = @intCast(usize, @divExact(start, config.sector_size)),
+            .max = @intCast(usize, @divExact(end, config.sector_size)),
         };
     }
 
