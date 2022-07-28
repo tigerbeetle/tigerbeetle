@@ -1,5 +1,6 @@
 #!/bin/bash
-set -e
+set -eEuo pipefail
+
 scripts/install_zig.sh
 echo "Building TigerBeetle..."
 zig/zig build -Dcpu=baseline -Drelease-safe
