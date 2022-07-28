@@ -1465,7 +1465,7 @@ pub fn Replica(
             // This saves us from going to disk. And we don't need to worry that the WAL's copy
             // of an uncommitted prepare is lost/corrupted.
             if (self.pipeline_prepare_for_op_and_checksum(op, checksum)) |prepare| {
-                log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
+                log.debug("{}: on_request_prepare: op={} checksum={any} reply from pipeline", .{
                     self.replica,
                     op,
                     checksum,
@@ -1480,7 +1480,7 @@ pub fn Replica(
                 // the former may have the prepare we want — even if journal recovery marked the
                 // slot as faulty and left the in-memory header as reserved.
                 if (checksum == null or checksum.? == prepare_checksum) {
-                    log.debug("{}: on_request_prepare: op={} checksum={} reading", .{
+                    log.debug("{}: on_request_prepare: op={} checksum={any} reading", .{
                         self.replica,
                         op,
                         checksum,
@@ -1551,7 +1551,7 @@ pub fn Replica(
                     assert(self.journal.prepare_checksums[@intCast(usize, slot.index)] != checksum.?);
                 }
 
-                log.debug("{}: on_request_prepare: op={} checksum={} nacking", .{
+                log.debug("{}: on_request_prepare: op={} checksum={any} nacking", .{
                     self.replica,
                     op,
                     checksum,
@@ -2881,7 +2881,7 @@ pub fn Replica(
             assert(message.header.command == .request);
 
             if (self.status != .normal) {
-                log.debug("{}: on_request: ignoring ({s})", .{ self.replica, self.status });
+                log.debug("{}: on_request: ignoring ({})", .{ self.replica, self.status });
                 return true;
             }
 
@@ -4135,7 +4135,7 @@ pub fn Replica(
                 received.* = null;
             }
             assert(count <= self.replica_count);
-            log.debug("{}: reset {} {s} message(s) from view={}", .{
+            log.debug("{}: reset {} {s} message(s) from view={any}", .{
                 self.replica,
                 count,
                 @tagName(command),

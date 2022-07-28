@@ -877,7 +877,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn read_prepare_log(self: *Self, op: u64, checksum: ?u128, notice: []const u8) void {
             log.info(
-                "{}: read_prepare: op={} checksum={}: {s}",
+                "{}: read_prepare: op={} checksum={any}: {s}",
                 .{ self.replica, op, checksum, notice },
             );
         }

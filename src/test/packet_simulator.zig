@@ -288,12 +288,12 @@ pub fn PacketSimulator(comptime Packet: type) type {
                 if (self.is_partitioned) {
                     if (self.should_unpartition()) {
                         self.unpartition_network();
-                        log.err("unpartitioned network: partition={d}", .{self.partition});
+                        log.err("unpartitioned network: partition={any}", .{self.partition});
                     }
                 } else {
                     if (self.options.replica_count > 1 and self.should_partition()) {
                         self.partition_network();
-                        log.err("partitioned network: partition={d}", .{self.partition});
+                        log.err("partitioned network: partition={any}", .{self.partition});
                     }
                 }
             }
