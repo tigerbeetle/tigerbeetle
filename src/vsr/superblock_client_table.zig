@@ -5,7 +5,7 @@ const mem = std.mem;
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
 
-const MessageBus = @import("../message_bus.zig").MessageBusReplica;
+const MessagePool = @import("../message_pool.zig").MessagePool;
 
 pub const ClientTable = struct {
     /// We found two bugs in the VRR paper relating to the client table:
@@ -29,16 +29,16 @@ pub const ClientTable = struct {
         session: u64,
 
         /// The reply sent to the client's latest committed request.
-        reply: *vsr.Message,
+        reply: *MessagePool.Message,
     };
 
     const Entries = std.AutoHashMapUnmanaged(u128, Entry);
 
     entries: Entries,
     sorted: []*const Entry,
-    message_bus: *MessageBus,
+    message_pool: *MessagePool,
 
-    pub fn init(allocator: mem.Allocator, message_bus: *MessageBus) !ClientTable {
+    pub fn init(allocator: mem.Allocator, message_pool: *MessagePool) !ClientTable {
         var entries: Entries = .{};
         errdefer entries.deinit(allocator);
 
@@ -51,7 +51,7 @@ pub const ClientTable = struct {
         return ClientTable{
             .entries = entries,
             .sorted = sorted,
-            .message_bus = message_bus,
+            .message_pool = message_pool,
         };
     }
 
@@ -59,7 +59,7 @@ pub const ClientTable = struct {
         {
             var it = client_table.iterator();
             while (it.next()) |entry| {
-                client_table.message_bus.unref(entry.reply);
+                client_table.message_pool.unref(entry.reply);
             }
         }
 
@@ -111,18 +111,18 @@ pub const ClientTable = struct {
         // The entries must be collected and sorted into a separate buffer first before iteration.
         // This avoids relying on iteration order of AutoHashMapUnmanaged which may change between 
         // zig versions.
-        var count: u32 = 0;
+        var num_entries: u32 = 0;
         {
             var it = client_table.iterator();
-            while (it.next()) |entry| : (count += 1) {
-                assert(count < client_table.sorted.len);
-                client_table.sorted[count] = entry;
-                count += 1;
+            while (it.next()) |entry| : (num_entries += 1) {
+                assert(num_entries < client_table.sorted.len);
+                client_table.sorted[num_entries] = entry;
+                num_entries += 1;
             }
         }
 
-        assert(count <= client_table.sorted.len);
-        const entries = client_table.sorted[0..count];
+        assert(num_entries <= client_table.sorted.len);
+        const entries = client_table.sorted[0..num_entries];
         std.sort.sort(*const Entry, entries, {}, sort_entries_less_than);
 
         var size: u64 = 0;
@@ -151,7 +151,7 @@ pub const ClientTable = struct {
         }
 
         // Finally write the entry count
-        mem.writeIntLittle(u32, target[size..][0..@sizeOf(u32)], count);
+        mem.copy(u8, target[size..], mem.asBytes(&num_entries));
         size += @sizeOf(u32);
 
         assert(size <= encode_size_max);
@@ -160,26 +160,30 @@ pub const ClientTable = struct {
 
     pub fn decode(client_table: *ClientTable, source: []align(@alignOf(vsr.Header)) const u8) void {
         // Read the entry count at the end of the buffer to determine how many there are.
-        const count = mem.readIntLittle(u32, source[source.len - @sizeOf(u32)..][0..@sizeOf(u32)];
-        assert(count <= client_table.sorted.len);
-        if (count == 0) return;
+        var num_entries: u32 = undefined;
+        mem.copy(u8, mem.asBytes(&num_entries), source[source.len - @sizeOf(u32)..]);
 
-        var offset: u64 = 0;
+        assert(num_entries <= client_table.sorted.len);
+        if (num_entries == 0) return;
 
-        var headers = mem.bytesAsSlice(vsr.Header, source[offset..(count * @sizeOf(vsr.Header))]);
-        offset += mem.sliceAsBytes(headers).len;
+        var size: u64 = 0;
+        assert(source.len > 0);
+        assert(source.len <= encode_size_max);
 
-        var sessions = mem.bytesAsSlice(u64, source[offset..(count * @sizeOf(u64))]);
-        offset += mem.sliceAsBytes(sessions).len;
+        var headers = mem.bytesAsSlice(vsr.Header, source[size..num_entries * @sizeOf(vsr.Header)]);
+        size += mem.sliceAsBytes(headers).len;
 
-        var bodies = source[offset..];
+        var sessions = mem.bytesAsSlice(u64, source[size..num_entries * @sizeOf(u64)]);
+        size += mem.sliceAsBytes(sessions).len;
+
+        var bodies = source[size..];
         assert(bodies.len > 0);
 
         var i: u32 = 0;
-        while (i < count) : (i += 1) {
+        while (i < num_entries) : (i += 1) {
             // Prepare the entry with a message.
             var entry: Entry = undefined;
-            entry.reply = client_table.message_bus.get_message();
+            entry.reply = client_table.message_pool.get_message();
 
             // Read the header and session for the entry.
             entry.reply.header.* = headers[i];

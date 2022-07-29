@@ -80,6 +80,9 @@ pub fn TableInfoType(comptime Table: type) type {
 }
 
 pub fn TableInfoBufferType(comptime Table: type, comptime sort_direction: ?Direction) type {
+    const TableInfo = TableInfoType(Table);
+    const compare_keys = Table.compare_keys;
+
     return struct {
         array: []TableInfo,
         count: usize = 0,
@@ -121,7 +124,6 @@ pub fn TableInfoBufferType(comptime Table: type, comptime sort_direction: ?Direc
         }
 
         pub fn drain(buffer: *TableInfoBuffer) []TableInfo {
-            assert(buffer.count <= count_max);
             assert(buffer.count <= buffer.array.len);
 
             defer buffer.count = 0;
@@ -196,7 +198,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .node_pool = node_pool,
                 .levels = levels,
                 .manifest_log = manifest_log,
-                .open_buffer = open_buffer,
+                .open_buffers = open_buffers,
             };
         }
 
@@ -215,7 +217,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         fn manifest_log_open_event(
-            maniest_log: *ManifestLog,
+            manifest_log: *ManifestLog,
             level: u7,
             table: *const TableInfo,
         ) void {
