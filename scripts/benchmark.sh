@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eEuo pipefail
 
-# Runber of replicas to benchmark
+# Number of replicas to benchmark
 REPLICAS=${REPLICAS:-0}
 
 # Install Zig if it does not already exist:
