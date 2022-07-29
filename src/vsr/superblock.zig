@@ -10,7 +10,7 @@ const div_ceil = @import("../util.zig").div_ceil;
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
 
-const MessageBus = @import("../message_bus.zig").MessageBusReplica;
+const MessagePool = @import("../message_pool.zig").MessagePool;
 
 pub const SuperBlockManifest = @import("superblock_manifest.zig").Manifest;
 pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
@@ -92,7 +92,7 @@ pub const SuperBlockSector = extern struct {
     /// The size of the client table entries stored in the superblock trailer.
     client_table_size: u32,
 
-    reserved: [2168]u8 = [_]u8{0} ** 2168,
+    reserved: [3160]u8 = [_]u8{0} ** 3160,
 
     pub const VSRState = extern struct {
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
@@ -298,7 +298,7 @@ pub const superblock_trailer_client_table_size_max = blk: {
     assert(encode_size_max > 0);
 
     // Round up to the nearest sector:
-    break :blk div_ceil(client_table_size_max, config.sector_size) * config.sector_size;
+    break :blk div_ceil(encode_size_max, config.sector_size) * config.sector_size;
 };
 
 pub const data_file_size_min = blk: {
@@ -399,7 +399,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         pub fn init(
             allocator: mem.Allocator, 
             storage: *Storage,
-            message_bus: *MessageBus,
+            message_pool: *MessagePool,
         ) !SuperBlock {
             const a = try allocator.allocAdvanced(SuperBlockSector, config.sector_size, 1, .exact);
             errdefer allocator.free(a);
@@ -424,14 +424,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     superblock_trailer_manifest_size_max,
                     Manifest.BlockReferenceSize,
                 ),
-                @import("tree.zig").table_count_max,
+                @import("../lsm/tree.zig").table_count_max,
             );
             errdefer manifest.deinit(allocator);
 
             var free_set = try FreeSet.init(allocator, config.block_count_max);
             errdefer free_set.deinit(allocator);
 
-            var client_table = try ClientTable.init(allocator, message_bus);
+            var client_table = try ClientTable.init(allocator, message_pool);
             errdefer client_table.deinit(allocator);
 
             const manifest_buffer = try allocator.allocAdvanced(

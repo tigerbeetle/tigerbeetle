@@ -203,6 +203,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 }
 
 const TestContext = struct {
+    const MessagePool = @import("../message_pool.zig").MessagePool;
     const Transfer = @import("../tigerbeetle.zig").Transfer;
     const Account = @import("../tigerbeetle.zig").Account;
     const Storage = @import("../storage.zig").Storage;
@@ -249,7 +250,9 @@ const TestContext = struct {
         var storage = try Storage.init(&io, fd);
         defer storage.deinit();
 
-        var superblock = try SuperBlock.init(allocator, &storage);
+        var message_pool = try MessagePool.init(allocator, .replica);
+
+        var superblock = try SuperBlock.init(allocator, &storage, &message_pool);
         defer superblock.deinit(allocator);
 
         var grid = try Grid.init(allocator, &superblock);
