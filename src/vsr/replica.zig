@@ -6,6 +6,7 @@ const config = @import("../config.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const ClientTable = @import("../lsm/superblock_client_table.zig").ClientTable;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -37,32 +38,6 @@ pub const Status = enum {
     //
     // TODO document snapshot recovery in this progression
     recovering,
-};
-
-pub const ClientTable = std.AutoHashMapUnmanaged(u128, ClientTableEntry);
-
-/// We found two bugs in the VRR paper relating to the client table:
-///
-/// 1. a correctness bug, where successive client crashes may cause request numbers to collide for
-/// different request payloads, resulting in requests receiving the wrong reply, and
-///
-/// 2. a liveness bug, where if the client table is updated for request and prepare messages with
-/// the client's latest request number, then the client may be locked out from the cluster if the
-/// request is ever reordered through a view change.
-///
-/// We therefore take a different approach with the implementation of our client table, to:
-///
-/// 1. register client sessions explicitly through the state machine to ensure that client session
-/// numbers always increase, and
-///
-/// 2. make a more careful distinction between uncommitted and committed request numbers,
-/// considering that uncommitted requests may not survive a view change.
-pub const ClientTableEntry = struct {
-    /// The client's session number as committed to the cluster by a register request.
-    session: u64,
-
-    /// The reply sent to the client's latest committed request.
-    reply: *Message,
 };
 
 const Nonce = u128;
@@ -380,14 +355,6 @@ pub fn Replica(
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
-
-            {
-                var it = self.client_table().iterator();
-                while (it.next()) |entry| {
-                    self.message_bus.unref(entry.value_ptr.reply);
-                }
-                self.client_table().deinit(allocator);
-            }
 
             while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
 
@@ -2477,7 +2444,7 @@ pub fn Replica(
             if (clients == config.clients_max) {
                 var evictee: ?*Message = null;
                 var iterated: usize = 0;
-                var iterator = self.client_table().valueIterator();
+                var iterator = self.client_table().iterator();
                 while (iterator.next()) |entry| : (iterated += 1) {
                     assert(entry.reply.header.command == .reply);
                     assert(entry.reply.header.context == 0);
@@ -2503,7 +2470,6 @@ pub fn Replica(
                     evictee.?.header.client,
                 });
                 assert(self.client_table().remove(evictee.?.header.client));
-                assert(!self.client_table().contains(evictee.?.header.client));
                 self.message_bus.unref(evictee.?);
             }
 
@@ -2516,7 +2482,7 @@ pub fn Replica(
 
             // Any duplicate .register requests should have received the same session number if the
             // client table entry already existed, or been dropped if a session was being committed:
-            self.client_table().putAssumeCapacityNoClobber(reply.header.client, .{
+            self.client_table().put(&.{
                 .session = session,
                 .reply = reply.ref(),
             });
@@ -2914,7 +2880,7 @@ pub fn Replica(
             assert(message.header.context == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
 
-            if (self.client_table().getPtr(message.header.client)) |entry| {
+            if (self.client_table().get(message.header.client)) |entry| {
                 assert(entry.reply.header.command == .reply);
                 assert(entry.reply.header.client == message.header.client);
 
@@ -4779,7 +4745,7 @@ pub fn Replica(
             assert(reply.header.commit > 0);
             assert(reply.header.request > 0);
 
-            if (self.client_table().getPtr(reply.header.client)) |entry| {
+            if (self.client_table().get(reply.header.client)) |entry| {
                 assert(entry.reply.header.command == .reply);
                 assert(entry.reply.header.context == 0);
                 assert(entry.reply.header.op == entry.reply.header.commit);
