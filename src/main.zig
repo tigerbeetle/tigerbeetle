@@ -14,8 +14,6 @@ const fatal = cli.fatal;
 const IO = @import("io.zig").IO;
 const Time = @import("time.zig").Time;
 const Storage = @import("storage.zig").Storage;
-const SuperBlock = @import("lsm/superblock.zig").SuperBlockType(Storage);
-const superblock_zone_size = @import("lsm/superblock.zig").superblock_zone_size;
 
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const StateMachine = @import("state_machine.zig").StateMachine;
@@ -23,7 +21,9 @@ const StateMachine = @import("state_machine.zig").StateMachine;
 const vsr = @import("vsr.zig");
 const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
 
-const data_file_size_min = @import("lsm/superblock.zig").data_file_size_min;
+const SuperBlock = vsr.SuperBlockType(Storage);
+const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
+const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

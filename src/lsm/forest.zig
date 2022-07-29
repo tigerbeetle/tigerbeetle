@@ -5,6 +5,8 @@ const math = std.math;
 const mem = std.mem;
 
 const config = @import("../config.zig");
+const vsr = @import("../vsr.zig");
+
 const GridType = @import("grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
@@ -195,7 +197,7 @@ const TestContext = struct {
 
     const Grid = GridType(Storage);
     const GrooveType = @import("groove.zig").GrooveType;
-    const SuperBlock = @import("superblock.zig").SuperBlockType(Storage);
+    const SuperBlock = vsr.SuperBlockType(Storage);
 
     const Forest = ForestType(Storage, .{
         .accounts = GrooveType(

@@ -17,7 +17,7 @@ const bloom_filter = @import("bloom_filter.zig");
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const SuperBlockType = @import("superblock.zig").SuperBlockType;
+const SuperBlockType = vsr.SuperBlockType;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
@@ -982,7 +982,7 @@ pub fn main() !void {
     const Storage = @import("../storage.zig").Storage;
     const Grid = @import("grid.zig").GridType(Storage);
 
-    const data_file_size_min = @import("superblock.zig").data_file_size_min;
+    const data_file_size_min = @import("../vsr/superblock.zig").data_file_size_min;
 
     const dir_fd = try IO.open_dir(".");
     const storage_fd = try IO.open_file(dir_fd, "test_tree", data_file_size_min, true);

@@ -24,14 +24,14 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const SuperBlockType = @import("superblock.zig").SuperBlockType;
-const GridType = @import("grid.zig").GridType;
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-
 const log = std.log.scoped(.manifest_log);
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
+
+const SuperBlockType = vsr.SuperBlockType;
+const GridType = @import("grid.zig").GridType;
+const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
     return struct {
@@ -850,7 +850,7 @@ pub fn main() !void {
     const os = std.os;
     const IO = @import("../io.zig").IO;
     const Storage = @import("../storage.zig").Storage;
-    const SuperBlock = @import("superblock.zig").SuperBlockType(Storage);
+    const SuperBlock = SuperBlockType(Storage);
     const Grid = @import("grid.zig").GridType(Storage);
 
     const dir_path = ".";
