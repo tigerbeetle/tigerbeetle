@@ -2223,7 +2223,7 @@ pub fn Replica(
 
             if (!self.valid_hash_chain("commit_ops_read")) {
                 assert(self.replica_count > 1);
-                self.commit_done();
+                self.commit_ops_done();
                 return;
             }
             assert(self.op >= self.commit_max);
@@ -2235,7 +2235,7 @@ pub fn Replica(
                 const checksum = self.journal.header_with_op(op).?.checksum;
                 self.journal.read_prepare(commit_ops_commit, op, checksum, null);
             } else {
-                self.commit_done();
+                self.commit_ops_done();
                 // This is an optimization to expedite the view change before the `repair_timeout`:
                 if (self.status == .view_change and self.repairs_allowed()) self.repair();
 
@@ -2252,11 +2252,11 @@ pub fn Replica(
         }
 
         fn commit_ops_commit(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
-            assert(destination_replica == null);
             assert(self.committing);
+            assert(destination_replica == null);
 
             if (prepare == null) {
-                self.commit_done();
+                self.commit_ops_done();
                 log.debug("{}: commit_ops_commit: prepare == null", .{self.replica});
                 if (self.replica_count == 1) @panic("cannot recover corrupt prepare");
                 return;
@@ -2266,7 +2266,7 @@ pub fn Replica(
                 .normal => {},
                 .view_change => {
                     if (self.leader_index(self.view) != self.replica) {
-                        self.commit_done();
+                        self.commit_ops_done();
                         log.debug("{}: commit_ops_commit: no longer leader", .{self.replica});
                         assert(self.replica_count > 1);
                         return;
@@ -2284,14 +2284,14 @@ pub fn Replica(
             const op = self.commit_min + 1;
 
             if (prepare.?.header.op != op) {
-                self.commit_done();
+                self.commit_ops_done();
                 log.debug("{}: commit_ops_commit: op changed", .{self.replica});
                 assert(self.replica_count > 1);
                 return;
             }
 
             if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
-                self.commit_done();
+                self.commit_ops_done();
                 log.debug("{}: commit_ops_commit: checksum changed", .{self.replica});
                 assert(self.replica_count > 1);
                 return;
@@ -2313,15 +2313,15 @@ pub fn Replica(
             prepare: *Message,
             callback: fn (*Self) void,
         ) void {
+            assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
+            assert(self.commit_prepare == null);
+            assert(self.commit_callback == null);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
-            assert(self.commit_prepare == null);
-            assert(self.commit_callback == null);
-            // TODO assert self.committing
 
             self.commit_prepare = prepare.ref();
             self.commit_callback = callback;
@@ -2490,11 +2490,12 @@ pub fn Replica(
                 assert(self.commit_min == self.commit_max);
                 assert(self.commit_min + 1 == prepare.message.header.op);
                 assert(self.commit_min + self.pipeline.count == self.op);
+                assert(self.journal.has(prepare.message.header));
 
                 if (!prepare.ok_quorum_received) {
                     // Eventually handled by on_prepare_timeout().
                     log.debug("{}: commit_pipeline: waiting for quorum", .{self.replica});
-                    self.commit_done();
+                    self.commit_ops_done();
                     return;
                 }
 
@@ -2504,7 +2505,7 @@ pub fn Replica(
 
                 self.commit_op_hooks(prepare.message, commit_pipeline_callback);
             } else {
-                self.commit_done();
+                self.commit_ops_done();
             }
         }
 
@@ -2519,11 +2520,11 @@ pub fn Replica(
                 }
                 self.commit_pipeline_next();
             } else {
-                self.commit_done();
+                self.commit_ops_done();
             }
         }
 
-        fn commit_done(self: *Self) void {
+        fn commit_ops_done(self: *Self) void {
             assert(self.committing);
             self.committing = false;
 
@@ -2698,6 +2699,7 @@ pub fn Replica(
 
             // We may send a start_view message in normal status to resolve a follower's view jump:
             assert(self.status == .normal or self.status == .view_change);
+            assert(!self.committing or command == .start_view);
 
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
@@ -2907,7 +2909,7 @@ pub fn Replica(
             //    asynchronous prepare_ok to itself.
             // 3. In on_start_view_change(), after receiving a quorum of start_view_change
             //    messages, the new leader sends a synchronous do_view_change to itself.
-            // 4. In commit_done(), if a quorum of start_view_change messages was received while
+            // 4. In commit_ops_done(), if a quorum of start_view_change messages was received while
             //    committing, the new leader sends a synchronous do_view_change to itself.
             // 5. In start_view_as_the_new_leader(), the new leader sends itself a prepare_ok
             //    message for each uncommitted message.
@@ -4813,6 +4815,7 @@ pub fn Replica(
             assert(self.status == .recovering);
             assert(self.view == 0);
             assert(!self.committing);
+            assert(self.replica_count > 1 or new_view == 0);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
