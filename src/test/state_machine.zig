@@ -45,14 +45,13 @@ pub const StateMachine = struct {
 
     pub fn deinit(_: *StateMachine) void {}
 
-    // TODO Is this part of StateMachine's API?
-    pub fn tick(self: *StateMachine) void {
-        if (self.callback) |callback| {
-            if (self.callback_ticks == 0) {
-                self.callback = null;
-                callback(self);
+    pub fn tick(state_machine: *StateMachine) void {
+        if (state_machine.callback) |callback| {
+            if (state_machine.callback_ticks == 0) {
+                state_machine.callback = null;
+                callback(state_machine);
             } else {
-                self.callback_ticks -= 1;
+                state_machine.callback_ticks -= 1;
             }
         }
     }
@@ -69,7 +68,7 @@ pub const StateMachine = struct {
     }
 
     pub fn prefetch(
-        self: *StateMachine,
+        state_machine: *StateMachine,
         op_number: u64,
         operation: Operation,
         input: []const u8,
@@ -78,26 +77,26 @@ pub const StateMachine = struct {
         _ = op_number;
         _ = operation;
         _ = input;
-        assert(self.callback == null);
-        assert(self.callback_ticks == 0);
-        self.callback = callback;
-        self.callback_ticks = self.latency(self.options.commit_prefetch_mean);
+        assert(state_machine.callback == null);
+        assert(state_machine.callback_ticks == 0);
+        state_machine.callback = callback;
+        state_machine.callback_ticks = state_machine.latency(state_machine.options.commit_prefetch_mean);
     }
 
-    pub fn compact(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
+    pub fn compact(state_machine: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
         _ = op_number;
-        assert(self.callback == null);
-        assert(self.callback_ticks == 0);
-        self.callback = callback;
-        self.callback_ticks = self.latency(self.options.commit_compact_mean);
+        assert(state_machine.callback == null);
+        assert(state_machine.callback_ticks == 0);
+        state_machine.callback = callback;
+        state_machine.callback_ticks = state_machine.latency(state_machine.options.commit_compact_mean);
     }
 
-    pub fn checkpoint(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
+    pub fn checkpoint(state_machine: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
         _ = op_number;
-        assert(self.callback == null);
-        assert(self.callback_ticks == 0);
-        self.callback = callback;
-        self.callback_ticks = self.latency(self.options.commit_checkpoint_mean);
+        assert(state_machine.callback == null);
+        assert(state_machine.callback_ticks == 0);
+        state_machine.callback = callback;
+        state_machine.callback_ticks = state_machine.latency(state_machine.options.commit_checkpoint_mean);
     }
 
     pub fn commit(
@@ -145,7 +144,7 @@ pub const StateMachine = struct {
         return @bitCast(u128, target[0..16].*);
     }
 
-    fn latency(self: *StateMachine, mean: u64) u64 {
-        return self.prng.random().uintLessThan(u64, 2 * mean);
+    fn latency(state_machine: *StateMachine, mean: u64) u64 {
+        return state_machine.prng.random().uintLessThan(u64, 2 * mean);
     }
 };
