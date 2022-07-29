@@ -1,9 +1,9 @@
 #!/bin/bash
-set -e
+set -eEuo pipefail
 
 # Assert that we are only upgrading the kernel for Ubuntu, and not another distribution:
-DISTRIBUTION=`lsb_release -i | awk '{print $3}'`
-if [ $DISTRIBUTION != "Ubuntu" ]; then
+DISTRIBUTION=$(lsb_release -i | awk '{print $3}')
+if [ "$DISTRIBUTION" != "Ubuntu" ]; then
     echo "This script must be run on Ubuntu."
     exit 1
 fi
