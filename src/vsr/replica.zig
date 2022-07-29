@@ -6,7 +6,7 @@ const config = @import("../config.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const ClientTable = @import("../lsm/superblock_client_table.zig").ClientTable;
+const ClientTable = @import("superblock_client_table.zig").ClientTable;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
