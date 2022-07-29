@@ -737,6 +737,7 @@ pub const IO = struct {
         IsDir,
         SystemResources,
         Unseekable,
+        ConnectionTimedOut,
     } || os.UnexpectedError;
 
     pub fn read(
