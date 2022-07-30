@@ -482,6 +482,7 @@ pub const IO = struct {
                             .NXIO => error.Unseekable,
                             .OVERFLOW => error.Unseekable,
                             .SPIPE => error.Unseekable,
+                            .TIMEDOUT => error.ConnectionTimedOut,
                             else => |err| os.unexpectedErrno(err),
                         };
                     }
