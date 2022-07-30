@@ -5,14 +5,14 @@ const mem = std.mem;
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
 
-const SuperBlockType = @import("superblock.zig").SuperBlockType;
+const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
 const log = std.log.scoped(.grid);
 
-const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
+const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
 const write_ahead_log_zone_size = config.message_size_max * 1024; // TODO Use journal_slot_count.
 const client_table_zone_size = config.message_size_max * config.clients_max * 2;
 
