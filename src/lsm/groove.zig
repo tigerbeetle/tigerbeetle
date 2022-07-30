@@ -16,9 +16,9 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 fn ObjectTreeHelpers(comptime Object: type) type {
     assert(@hasField(Object, "id"));
-    assert(std.meta.fieldInfo(.id).field_type == u128);
+    assert(std.meta.fieldInfo(Object, .id).field_type == u128);
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(.timestamp).field_type == u64);
+    assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
 
     return struct {
         inline fn compare_keys(timestamp_a: u64, timestamp_b: u64) std.math.Order {
@@ -146,9 +146,9 @@ pub fn GrooveType(
     comptime options: anytype,
 ) type {
     assert(@hasField(Object, "id"));
-    assert(std.meta.fieldInfo(.id).field_type == u128);
+    assert(std.meta.fieldInfo(Object, .id).field_type == u128);
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(.timestamp).field_type == u64);
+    assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
 
     comptime var index_fields: []const std.builtin.TypeInfo.StructField = &.{};
 
@@ -274,8 +274,8 @@ pub fn GrooveType(
     const indexes_count_actual = std.meta.fields(IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len -
         options.ignored.len -
-        // The timestamp field is implicitly ignored since it's the primary key for ObjectTree:
-        1 +
+        // The id/timestamp field is implicitly ignored since it's the primary key for ObjectTree:
+        2 +
         std.meta.fields(@TypeOf(options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);
@@ -348,7 +348,7 @@ pub fn GrooveType(
 
         const PrefetchObjectsContext = struct {
             pub fn hash(_: PrefetchObjectsContext, object: Object) u64 {
-                return std.hash.Wyhash(0, mem.asBytes(&object.id));
+                return std.hash.Wyhash.hash(0, mem.asBytes(&object.id));
             }
 
             pub fn eql(_: PrefetchObjectsContext, a: Object, b: Object) bool {
@@ -357,7 +357,7 @@ pub fn GrooveType(
         };
         const PrefetchObjectsAdapter = struct {
             pub fn hash(_: PrefetchObjectsAdapter, id: u128) u64 {
-                return std.hash.Wyhash(0, mem.asBytes(&id));
+                return std.hash.Wyhash.hash(0, mem.asBytes(&id));
             }
 
             pub fn eql(_: PrefetchObjectsAdapter, a_id: u128, b_object: Object) bool {
@@ -497,6 +497,9 @@ pub fn GrooveType(
                 .ids = id_tree,
 
                 .indexes = index_trees,
+
+                .prefetch_ids = prefetch_ids,
+                .prefetch_objects = prefetch_objects,
             };
         }
 
