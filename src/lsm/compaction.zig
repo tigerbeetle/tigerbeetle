@@ -112,11 +112,11 @@ pub fn CompactionType(
             const data = BlockWrite{ .block = try allocate_block(allocator) };
             errdefer allocator.free(data.block);
 
-            /// The average number of tables involved in a compaction is the 1 table from level A,
-            /// plus the growth_factor number of tables from level B, plus 1 on either side,
-            /// since the overlap may not be perfectly aligned to table boundaries.
-            /// However, the worst case number of tables may approach all tables in level B,
-            /// since key ranges may be skewed and not evenly distributed across a level.
+            // The average number of tables involved in a compaction is the 1 table from level A,
+            // plus the growth_factor number of tables from level B, plus 1 on either side,
+            // since the overlap may not be perfectly aligned to table boundaries.
+            // However, the worst case number of tables may approach all tables in level B,
+            // since key ranges may be skewed and not evenly distributed across a level.
             const table_buffer_count_max = 1 + config.lsm_growth_factor + 2;
 
             var update_level_b = try TableInfoBuffer.init(allocator, table_buffer_count_max);

@@ -6,6 +6,7 @@ const config = @import("../config.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const ClientTable = @import("superblock_client_table.zig").ClientTable;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -37,32 +38,6 @@ pub const Status = enum {
     //
     // TODO document snapshot recovery in this progression
     recovering,
-};
-
-const ClientTable = std.AutoHashMapUnmanaged(u128, ClientTableEntry);
-
-/// We found two bugs in the VRR paper relating to the client table:
-///
-/// 1. a correctness bug, where successive client crashes may cause request numbers to collide for
-/// different request payloads, resulting in requests receiving the wrong reply, and
-///
-/// 2. a liveness bug, where if the client table is updated for request and prepare messages with
-/// the client's latest request number, then the client may be locked out from the cluster if the
-/// request is ever reordered through a view change.
-///
-/// We therefore take a different approach with the implementation of our client table, to:
-///
-/// 1. register client sessions explicitly through the state machine to ensure that client session
-/// numbers always increase, and
-///
-/// 2. make a more careful distinction between uncommitted and committed request numbers,
-/// considering that uncommitted requests may not survive a view change.
-const ClientTableEntry = struct {
-    /// The client's session number as committed to the cluster by a register request.
-    session: u64,
-
-    /// The reply sent to the client's latest committed request.
-    reply: *Message,
 };
 
 const Nonce = u128;
@@ -123,9 +98,6 @@ pub fn Replica(
 
         /// For executing service up-calls after an operation has been committed:
         state_machine: *StateMachine,
-
-        /// The client table records for each client the latest session and the latest committed reply.
-        client_table: ClientTable,
 
         /// The current view, initially 0:
         view: u32,
@@ -277,11 +249,6 @@ pub fn Replica(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
-            var client_table: ClientTable = .{};
-            errdefer client_table.deinit(allocator);
-            try client_table.ensureTotalCapacity(allocator, @intCast(u32, config.clients_max));
-            assert(client_table.capacity() >= config.clients_max);
-
             const root_prepare = Header.root_prepare(cluster);
 
             var clock = try Clock.init(
@@ -314,7 +281,6 @@ pub fn Replica(
                 .journal = journal,
                 .message_bus = message_bus,
                 .state_machine = state_machine,
-                .client_table = client_table,
                 .view = root_prepare.view,
                 .view_normal = root_prepare.view,
                 .op = root_prepare.op,
@@ -375,7 +341,7 @@ pub fn Replica(
             // always overallocate capacity by a factor of two.
             log.debug("{}: init: client_table.capacity()={} for config.clients_max={} entries", .{
                 self.replica,
-                self.client_table.capacity(),
+                self.client_table().capacity(),
                 config.clients_max,
             });
 
@@ -389,14 +355,6 @@ pub fn Replica(
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
-
-            {
-                var it = self.client_table.iterator();
-                while (it.next()) |entry| {
-                    self.message_bus.unref(entry.value_ptr.reply);
-                }
-                self.client_table.deinit(allocator);
-            }
 
             while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
 
@@ -413,6 +371,11 @@ pub fn Replica(
             for (self.recovery_response_from_other_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
             }
+        }
+
+        /// The client table records for each client the latest session and the latest committed reply.
+        inline fn client_table(self: *Self) *ClientTable {
+            return &self.state_machine.grid.superblock.client_table;
         }
 
         /// Time is measured in logical ticks that are incremented on every call to tick().
@@ -2476,12 +2439,12 @@ pub fn Replica(
             // we do require that all entries have different commit numbers and are iterated.
             // This ensures that we will always pick the entry with the oldest commit number.
             // We also check that a client has only one entry in the hash map (or it's buggy).
-            const clients = self.client_table.count();
+            const clients = self.client_table().count();
             assert(clients <= config.clients_max);
             if (clients == config.clients_max) {
                 var evictee: ?*Message = null;
                 var iterated: usize = 0;
-                var iterator = self.client_table.valueIterator();
+                var iterator = self.client_table().iterator();
                 while (iterator.next()) |entry| : (iterated += 1) {
                     assert(entry.reply.header.command == .reply);
                     assert(entry.reply.header.context == 0);
@@ -2506,8 +2469,7 @@ pub fn Replica(
                     config.clients_max,
                     evictee.?.header.client,
                 });
-                assert(self.client_table.remove(evictee.?.header.client));
-                assert(!self.client_table.contains(evictee.?.header.client));
+                assert(self.client_table().remove(evictee.?.header.client));
                 self.message_bus.unref(evictee.?);
             }
 
@@ -2520,11 +2482,11 @@ pub fn Replica(
 
             // Any duplicate .register requests should have received the same session number if the
             // client table entry already existed, or been dropped if a session was being committed:
-            self.client_table.putAssumeCapacityNoClobber(reply.header.client, .{
+            self.client_table().put(&.{
                 .session = session,
                 .reply = reply.ref(),
             });
-            assert(self.client_table.count() <= config.clients_max);
+            assert(self.client_table().count() <= config.clients_max);
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -2918,7 +2880,7 @@ pub fn Replica(
             assert(message.header.context == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
 
-            if (self.client_table.getPtr(message.header.client)) |entry| {
+            if (self.client_table().get(message.header.client)) |entry| {
                 assert(entry.reply.header.command == .reply);
                 assert(entry.reply.header.client == message.header.client);
 
@@ -4783,7 +4745,7 @@ pub fn Replica(
             assert(reply.header.commit > 0);
             assert(reply.header.request > 0);
 
-            if (self.client_table.getPtr(reply.header.client)) |entry| {
+            if (self.client_table().get(reply.header.client)) |entry| {
                 assert(entry.reply.header.command == .reply);
                 assert(entry.reply.header.context == 0);
                 assert(entry.reply.header.op == entry.reply.header.commit);

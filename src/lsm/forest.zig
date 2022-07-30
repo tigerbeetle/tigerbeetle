@@ -5,6 +5,8 @@ const math = std.math;
 const mem = std.mem;
 
 const config = @import("../config.zig");
+const vsr = @import("../vsr.zig");
+
 const GridType = @import("grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
@@ -61,6 +63,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         pub fn init(
             allocator: mem.Allocator,
             grid: *Grid,
+            node_count: u32,
             // (e.g.) .{ .transfers = .{ cache_size = 128, com_count_max = n }, .accounts = same }
             all_groove_options: anytype,
         ) !Forest {
@@ -68,8 +71,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             const node_pool = try allocator.create(NodePool);
             errdefer allocator.destroy(node_pool);
 
-            // Use lsm_table_size_max for the node_count.
-            node_pool.* = try NodePool.init(allocator, config.lsm_table_size_max);
+            // TODO: look into using lsm_table_size_max for the node_count.
+            node_pool.* = try NodePool.init(allocator, node_count);
             errdefer node_pool.deinit(allocator);
 
             // Ensure options contains options for all Groove types in the Grooves object.
@@ -200,7 +203,22 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
     };
 }
 
+test "Forest" {
+    const Forest = TestContext.Forest;
+    _ = Forest.init;
+    _ = Forest.deinit;
+
+    _ = Forest.open;
+    _ = Forest.compact;
+    _ = Forest.checkpoint;
+}
+
+pub fn main() !void {
+    try TestContext.run();
+}
+
 const TestContext = struct {
+    const MessagePool = @import("../message_pool.zig").MessagePool;
     const Transfer = @import("../tigerbeetle.zig").Transfer;
     const Account = @import("../tigerbeetle.zig").Account;
     const Storage = @import("../storage.zig").Storage;
@@ -208,7 +226,7 @@ const TestContext = struct {
 
     const Grid = GridType(Storage);
     const GrooveType = @import("groove.zig").GrooveType;
-    const SuperBlock = @import("superblock.zig").SuperBlockType(Storage);
+    const SuperBlock = vsr.SuperBlockType(Storage);
 
     const Forest = ForestType(Storage, .{
         .accounts = GrooveType(
@@ -229,10 +247,10 @@ const TestContext = struct {
         ),
     });
 
-    fn run() !void {
-        const testing = std.testing;
-        const allocator = testing.allocator;
+    const testing = std.testing;
+    const allocator = testing.allocator;
 
+    fn run() !void {
         const dir_path = ".";
         const dir_fd = try IO.open_dir(dir_path);
         defer std.os.close(dir_fd);
@@ -247,12 +265,15 @@ const TestContext = struct {
         var storage = try Storage.init(&io, fd);
         defer storage.deinit();
 
-        var superblock = try SuperBlock.init(allocator, &storage);
+        var message_pool = try MessagePool.init(allocator, .replica);
+
+        var superblock = try SuperBlock.init(allocator, &storage, &message_pool);
         defer superblock.deinit(allocator);
 
         var grid = try Grid.init(allocator, &superblock);
         defer grid.deinit(allocator);
 
+        const node_count = 1024;
         const cache_size = 2 * 1024 * 1024;
         const forest_config = .{
             .transfers = .{
@@ -265,21 +286,11 @@ const TestContext = struct {
             },
         };
 
-        var forest = try Forest.init(allocator, &grid, forest_config);
+        var forest = try Forest.init(allocator, &grid, node_count, forest_config);
         defer forest.deinit(allocator);
+
+        
     }
 };
 
-test "Forest" {
-    const Forest = TestContext.Forest;
-    _ = Forest.init;
-    _ = Forest.deinit;
 
-    _ = Forest.open;
-    _ = Forest.compact;
-    _ = Forest.checkpoint;
-}
-
-pub fn main() !void {
-    try TestContext.run();
-}

@@ -47,6 +47,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         accounts: HashMapAccounts,
         transfers: HashMapTransfers,
         posted: HashMapPosted,
+        grid: *Grid, // this is needed for Replica to access SuperBlock
 
         pub fn init(
             allocator: mem.Allocator,
@@ -74,6 +75,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .accounts = accounts,
                 .transfers = transfers,
                 .posted = posted,
+                .grid = grid,
             };
         }
 

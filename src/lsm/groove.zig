@@ -16,28 +16,28 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 fn ObjectTreeHelpers(comptime Object: type) type {
     assert(@hasField(Object, "id"));
-    assert(std.meta.fieldInfo(.id).field_type == u128);
+    assert(std.meta.fieldInfo(Object, .id).field_type == u128);
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(.timestamp).field_type == u64);
+    assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
 
     return struct {
         inline fn compare_keys(timestamp_a: u64, timestamp_b: u64) std.math.Order {
             return std.math.order(timestamp_a, timestamp_b);
         }
 
-        inline fn key_from_value(value: *const Value) u64 {
+        inline fn key_from_value(value: *const Object) u64 {
             return value.timestamp;
         }
 
         const sentinel_key = std.math.maxInt(u64);
         const tombstone_bit = 1 << (64 - 1);
 
-        inline fn tombstone(value: *const Value) bool {
+        inline fn tombstone(value: *const Object) bool {
             return (value.timestamp & tombstone_bit) != 0;
         }
 
-        inline fn tombstone_from_key(timestamp: u64) Value {
-            var value = std.mem.zeroes(Value); // Full zero-initialized Value.
+        inline fn tombstone_from_key(timestamp: u64) Object {
+            var value = std.mem.zeroes(Object); // Full zero-initialized Value.
             value.timestamp = timestamp | tombstone_bit;
             return value;
         }
@@ -146,9 +146,9 @@ pub fn GrooveType(
     comptime options: anytype,
 ) type {
     assert(@hasField(Object, "id"));
-    assert(std.meta.fieldInfo(.id).field_type == u128);
+    assert(std.meta.fieldInfo(Object, .id).field_type == u128);
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(.timestamp).field_type == u64);
+    assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
 
     comptime var index_fields: []const std.builtin.TypeInfo.StructField = &.{};
 
@@ -274,8 +274,8 @@ pub fn GrooveType(
     const indexes_count_actual = std.meta.fields(IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len -
         options.ignored.len -
-        // The timestamp field is implicitly ignored since it's the primary key for ObjectTree:
-        1 +
+        // The id/timestamp field is implicitly ignored since it's the primary key for ObjectTree:
+        2 +
         std.meta.fields(@TypeOf(options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);
@@ -348,7 +348,7 @@ pub fn GrooveType(
 
         const PrefetchObjectsContext = struct {
             pub fn hash(_: PrefetchObjectsContext, object: Object) u64 {
-                return std.hash.Wyhash(0, mem.asBytes(&object.id));
+                return std.hash.Wyhash.hash(0, mem.asBytes(&object.id));
             }
 
             pub fn eql(_: PrefetchObjectsContext, a: Object, b: Object) bool {
@@ -357,7 +357,7 @@ pub fn GrooveType(
         };
         const PrefetchObjectsAdapter = struct {
             pub fn hash(_: PrefetchObjectsAdapter, id: u128) u64 {
-                return std.hash.Wyhash(0, mem.asBytes(&id));
+                return std.hash.Wyhash.hash(0, mem.asBytes(&id));
             }
 
             pub fn eql(_: PrefetchObjectsAdapter, a_id: u128, b_object: Object) bool {
@@ -436,7 +436,7 @@ pub fn GrooveType(
             errdefer object_tree.deinit(allocator);
 
             // Cache is dynamically allocated to pass a pointer into the ID tree.
-            const ids_cache = try allocator.create(IdIndexTree.ValueCache);
+            const ids_cache = try allocator.create(IdTree.ValueCache);
             errdefer allocator.destroy(ids_cache);
 
             ids_cache.* = .{};
@@ -497,6 +497,9 @@ pub fn GrooveType(
                 .ids = id_tree,
 
                 .indexes = index_trees,
+
+                .prefetch_ids = prefetch_ids,
+                .prefetch_objects = prefetch_objects,
             };
         }
 
@@ -553,7 +556,7 @@ pub fn GrooveType(
 
             // We tolerate duplicate IDs enqueued by the state machine.
             // For example, if all unique operations require the same two dependencies.
-            tree.prefetch_ids.putAssumeCapacity(id, {});
+            groove.prefetch_ids.putAssumeCapacity(id, {});
         }
 
         /// Ensure the objects corresponding to all ids enqueued with prefetch_enqueue() are
@@ -583,13 +586,13 @@ pub fn GrooveType(
             /// I/O depth of the Grid.
             workers: [Grid.read_iops_max]PrefetchWorker = undefined,
             /// The number of workers that are currently running in parallel.
-            workers_busy = 0,
+            workers_busy: u32 = 0,
 
             fn start_workers(context: *PrefetchContext) void {
                 assert(context.workers_busy == 0);
 
                 while (context.workers_busy < context.workers.len) : (context.workers_busy += 1) {
-                    const worker = &workers[context.workers_busy];
+                    const worker = &context.workers[context.workers_busy];
                     worker.* = .{ .contex = context };
                     if (!worker.lookup_start()) break;
                 }
@@ -604,7 +607,7 @@ pub fn GrooveType(
                 assert(context.groove.prefetch_ids.count() == 0);
 
                 context.workers_busy -= 0;
-                if (workers_busy == 0) context.finish();
+                if (context.workers_busy == 0) context.finish();
             }
 
             fn finish(context: *PrefetchContext) void {
