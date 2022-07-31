@@ -206,9 +206,9 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                 }
             }
 
-            if (config.tcp_user_timeout > 0) {
+            if (config.tcp_user_timeout_ms > 0) {
                 if (is_linux) {
-                    try set(fd, os.IPPROTO.TCP, os.TCP.USER_TIMEOUT, config.tcp_user_timeout);
+                    try set(fd, os.IPPROTO.TCP, os.TCP.USER_TIMEOUT, config.tcp_user_timeout_ms);
                 }
             }
 
