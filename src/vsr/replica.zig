@@ -255,7 +255,7 @@ pub fn Replica(
             time: *Time,
             storage: *Storage,
             message_bus: *MessageBus,
-            state_machine_config: StateMachine.Config,
+            state_machine_options: StateMachine.Options,
         ) !Self {
             assert(replica_count > 0);
             assert(replica < replica_count);
@@ -306,8 +306,8 @@ pub fn Replica(
             const journal = try Journal.init(allocator, storage, replica);
             errdefer journal.deinit(allocator);
 
-            var state_machine = try StateMachine.init(allocator, state_machine_config);
-            errdefer state_machine_config.deinit();
+            var state_machine = try StateMachine.init(allocator, state_machine_options);
+            errdefer state_machine.deinit();
 
             const recovery_nonce = blk: {
                 var nonce: [@sizeOf(Nonce)]u8 = undefined;
@@ -421,11 +421,13 @@ pub fn Replica(
                 self.loopback_queue = null;
             }
 
-            if (self.commit_prepare) |committing_message| {
+            if (self.commit_prepare) |message| {
                 assert(self.committing);
                 assert(self.commit_callback != null);
-                self.message_bus.unref(committing_message);
+                self.message_bus.unref(message);
                 self.commit_prepare = null;
+            } else {
+                assert(self.commit_callback == null);
             }
 
             for (self.do_view_change_from_all_replicas) |message| {
@@ -447,6 +449,7 @@ pub fn Replica(
             assert(self.loopback_queue == null);
 
             self.clock.tick();
+            self.state_machine.tick();
 
             if (!self.journal.recovered) {
                 if (!self.journal.recovering) self.journal.recover();
@@ -2116,9 +2119,15 @@ pub fn Replica(
                 // In a cluster-of-one, the prepares must always be written to the WAL sequentially
                 // (never concurrently). This ensures that there will be no gaps in the WAL during
                 // crash recovery.
-                log.debug("{}: append: serializing append op={}", .{ self.replica, message.header.op });
+                log.debug("{}: append: serializing append op={}", .{
+                    self.replica,
+                    message.header.op,
+                });
             } else {
-                log.debug("{}: append: appending to journal", .{self.replica});
+                log.debug("{}: append: appending to journal op={}", .{
+                    self.replica,
+                    message.header.op,
+                });
                 self.write_prepare(message, .append);
             }
         }
@@ -2326,7 +2335,7 @@ pub fn Replica(
             self.commit_prepare = prepare.ref();
             self.commit_callback = callback;
             self.state_machine.prefetch(
-                self.commit_min + 1,
+                prepare.header.op,
                 prepare.header.operation.cast(StateMachine),
                 prepare.buffer[@sizeOf(Header)..prepare.header.size],
                 commit_op_prefetch_callback,
@@ -2338,39 +2347,43 @@ pub fn Replica(
             assert(self.committing);
             assert(self.commit_prepare != null);
             assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.commit_min + 1);
 
-            const commit_min_before = self.commit_min;
             self.commit_op(self.commit_prepare.?);
-            assert(self.commit_min == commit_min_before + 1);
+            assert(self.commit_min == self.commit_prepare.?.header.op);
             assert(self.commit_min <= self.commit_max);
 
             if (self.status == .normal and self.leader()) {
-                if (self.pipeline.pop()) |prepare| {
-                    assert(self.commit_min == self.commit_max);
-                    assert(self.commit_min == prepare.message.header.op);
-                    assert(self.commit_max == prepare.message.header.op);
-                    assert(self.prepare_timeout.ticking);
+                const prepare = self.pipeline.pop().?;
+                assert(self.commit_min == self.commit_max);
+                assert(self.commit_min == prepare.message.header.op);
+                assert(self.commit_max == prepare.message.header.op);
+                assert(self.prepare_timeout.ticking);
 
-                    self.message_bus.unref(prepare.message);
+                self.message_bus.unref(prepare.message);
 
-                    if (self.pipeline.head_ptr()) |next| {
-                        assert(next.message.header.op == self.commit_min + 1);
+                if (self.pipeline.head_ptr()) |next| {
+                    assert(next.message.header.op == self.commit_min + 1);
+                    assert(next.message.header.op == self.commit_prepare.?.header.op + 1);
 
-                        if (self.replica_count == 1) {
-                            // Write the next message in the queue.
-                            // A cluster-of-one writes prepares sequentially to avoid gaps in the
-                            // WAL caused by reordered writes.
-                            self.write_prepare(next.message, .append);
-                        }
-                    } else {
-                        // When the pipeline is empty, stop the prepare timeout.
-                        // The timeout will be restarted when another entry arrives for the pipeline.
-                        self.prepare_timeout.stop();
+                    if (self.replica_count == 1) {
+                        // Write the next message in the queue.
+                        // A cluster-of-one writes prepares sequentially to avoid gaps in the
+                        // WAL caused by reordered writes.
+                        log.debug("{}: append: appending to journal op={}", .{
+                            self.replica,
+                            next.message.header.op,
+                        });
+                        self.write_prepare(next.message, .append);
                     }
+                } else {
+                    // When the pipeline is empty, stop the prepare timeout.
+                    // The timeout will be restarted when another entry arrives for the pipeline.
+                    self.prepare_timeout.stop();
                 }
             }
 
-            self.state_machine.compact(self.commit_min, commit_op_compact_callback);
+            self.state_machine.compact(self.commit_prepare.?.header.op, commit_op_compact_callback);
         }
 
         fn commit_op_compact_callback(state_machine: *StateMachine) void {

@@ -186,7 +186,7 @@ const Command = struct {
             .{
                 .accounts_max = config.accounts_max,
                 .transfers_max = config.transfers_max,
-                .transfers_pending_max = config.commits_max,
+                .transfers_pending_max = config.transfers_pending_max,
             },
         );
         message_bus.set_on_message(*Replica, &replica, Replica.on_message);

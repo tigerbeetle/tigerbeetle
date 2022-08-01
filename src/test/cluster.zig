@@ -148,10 +148,7 @@ pub const Cluster = struct {
                 &cluster.times[replica_index],
                 &cluster.storages[replica_index],
                 message_bus,
-                .{
-                    .seed = cluster.options.seed,
-                    .options = cluster.options.state_machine_options,
-                },
+                cluster.options.state_machine_options,
             );
             message_bus.set_on_message(*Replica, replica, Replica.on_message);
         }
@@ -319,10 +316,7 @@ pub const Cluster = struct {
             &cluster.times[replica_index],
             &cluster.storages[replica_index],
             message_bus,
-            .{
-                .seed = cluster.options.seed,
-                .options = cluster.options.state_machine_options,
-            },
+            cluster.options.state_machine_options,
         );
         message_bus.set_on_message(*Replica, replica, Replica.on_message);
         replica.on_change_state = cluster.on_change_state;
