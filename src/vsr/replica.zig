@@ -158,7 +158,6 @@ pub fn Replica(
         ///
         /// While committing, a replica may not:
         ///
-        /// * send a `do_view_change` message, or
         /// * start a view as the new leader
         ///
         /// because `commit_min` will be modified when the commit finishes.
@@ -994,18 +993,6 @@ pub fn Replica(
             assert(!self.do_view_change_quorum);
             self.start_view_change_quorum = true;
 
-            if (self.committing) {
-                // Don't send a `do_view_change` while committing, because when the commit finishes
-                // `commit_min` will increment, so a retried `do_view_change` would have a different
-                // `commit`.
-                log.debug("{}: on_start_view_change: view={} ignoring (committing, commit_min={})", .{
-                    self.replica,
-                    self.view,
-                    self.commit_min,
-                });
-                return;
-            }
-
             // When replica i receives start_view_change messages for its view from f other replicas,
             // it sends a ⟨do_view_change v, l, v’, n, k, i⟩ message to the node that will be the
             // primary in the new view. Here v is its view, l is its log, v′ is the view number of the
@@ -1050,42 +1037,11 @@ pub fn Replica(
             assert(self.replica_count > 1);
             const threshold = self.quorum_view_change;
 
-            // A committing replica defers sending their `do_view_change`.
-            // If that replica is the new leader, that delay might allow more than `threshold - 1`
-            // other `do_view_change` messages to arrive, which would put `count > threshold`.
-            //
-            // To avoid this, reject `do_view_change` messages that would put us over the limit.
-            if (self.do_view_change_from_all_replicas[self.replica] == null and
-                self.replica != message.header.replica and
-                self.count_quorum(
-                    &self.do_view_change_from_all_replicas,
-                    .do_view_change,
-                    message.header.context,
-                ) + 1 == threshold)
-            {
-                assert(self.committing);
-                log.debug("{}: on_do_view_change: still committing (view={})", .{
-                    self.replica,
-                    self.view,
-                });
-                return;
-            }
-
             const count = self.reference_message_and_receive_quorum_exactly_once(
                 &self.do_view_change_from_all_replicas,
                 message,
                 threshold,
             ) orelse return;
-
-            // We may not have a `do_view_change` from ourselves (yet) if we are busy committing:
-            if (self.do_view_change_from_all_replicas[self.replica] == null) {
-                assert(self.committing);
-                log.debug("{}: on_do_view_change: still committing (view={})", .{
-                    self.replica,
-                    self.view,
-                });
-                return;
-            }
 
             assert(count == threshold);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
@@ -1963,7 +1919,7 @@ pub fn Replica(
             if (!self.do_view_change_quorum) self.send_start_view_change();
 
             // It is critical that a `do_view_change` message implies a `start_view_change_quorum`:
-            if (self.start_view_change_quorum and !self.committing) {
+            if (self.start_view_change_quorum) {
                 // The leader need not retry to send a `do_view_change` message to itself:
                 // We assume the MessageBus will not drop messages sent by a replica to itself.
                 if (self.leader_index(self.view) != self.replica) self.send_do_view_change();
@@ -2015,9 +1971,35 @@ pub fn Replica(
                 assert(m.header.replica == message.header.replica);
                 assert(m.header.view == message.header.view);
                 assert(m.header.op == message.header.op);
-                assert(m.header.commit == message.header.commit);
                 assert(m.header.checksum_body == message.header.checksum_body);
-                assert(m.header.checksum == message.header.checksum);
+
+                if (message.header.command == .do_view_change) {
+                    // A replica may resend a `do_view_change` with a different commit if it was
+                    // committing originally. Keep the one with the highest commit.
+                    if (m.header.commit < message.header.commit) {
+                        log.debug("{}: on_{s}: replacing (newer message replica={} commit={}..{})", .{
+                            self.replica,
+                            command,
+                            message.header.replica,
+                            m.header.commit,
+                            message.header.commit,
+                        });
+                        self.message_bus.unref(m);
+                        messages[message.header.replica] = message.ref();
+                    } else if (m.header.commit > message.header.commit) {
+                        log.debug("{}: on_{s}: ignoring (older message replica={})", .{
+                            self.replica,
+                            command,
+                            message.header.replica,
+                        });
+                    } else {
+                        assert(m.header.checksum == message.header.checksum);
+                    }
+                } else {
+                    assert(m.header.commit == message.header.commit);
+                    assert(m.header.checksum == message.header.checksum);
+                }
+
                 log.debug("{}: on_{s}: ignoring (duplicate message replica={})", .{
                     self.replica,
                     command,
@@ -2561,23 +2543,6 @@ pub fn Replica(
         fn commit_ops_done(self: *Self) void {
             assert(self.committing);
             self.committing = false;
-
-            if (self.status == .view_change and self.start_view_change_quorum and
-                !self.do_view_change_quorum)
-            {
-                // We couldn't send a `do_view_change` earlier (in `on_start_view_change`).
-                // We can send it now that we are finished committing.
-                //
-                // * When `self.replica != leader_index(self.view)` this is an optimization, so
-                //   that we don't need to wait for the `view_change_message_timeout`.
-                // * When `self.replica == leader_index(self.view)` this is required, because
-                //   `on_view_change_message_timeout` does not retry `do_view_change` messages
-                //   to ourself.
-                assert(self.view_change_message_timeout.ticking);
-                self.view_change_message_timeout.reset();
-                self.send_do_view_change();
-                defer self.flush_loopback_queue();
-            }
         }
 
         fn copy_latest_headers_and_set_size(
@@ -2733,7 +2698,6 @@ pub fn Replica(
 
             // We may send a start_view message in normal status to resolve a follower's view jump:
             assert(self.status == .normal or self.status == .view_change);
-            assert(!self.committing or command == .start_view);
 
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
@@ -2933,7 +2897,7 @@ pub fn Replica(
         }
 
         fn flush_loopback_queue(self: *Self) void {
-            // There are five cases where a replica will send a message to itself:
+            // There are four cases where a replica will send a message to itself:
             // However, of these five cases, all but one call send_message_to_replica().
             //
             // 1. In on_request(), the leader sends a synchronous prepare to itself, but this is
@@ -2943,9 +2907,7 @@ pub fn Replica(
             //    asynchronous prepare_ok to itself.
             // 3. In on_start_view_change(), after receiving a quorum of start_view_change
             //    messages, the new leader sends a synchronous do_view_change to itself.
-            // 4. In commit_ops_done(), if a quorum of start_view_change messages was received while
-            //    committing, the new leader sends a synchronous do_view_change to itself.
-            // 5. In start_view_as_the_new_leader(), the new leader sends itself a prepare_ok
+            // 4. In start_view_as_the_new_leader(), the new leader sends itself a prepare_ok
             //    message for each uncommitted message.
             if (self.loopback_queue) |message| {
                 defer self.message_bus.unref(message);
@@ -4491,7 +4453,6 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.start_view_change_quorum);
             assert(!self.do_view_change_quorum);
-            assert(!self.committing);
 
             const count_start_view_change = self.start_view_change_from_other_replicas.count();
             assert(count_start_view_change >= self.quorum_view_change - 1);
