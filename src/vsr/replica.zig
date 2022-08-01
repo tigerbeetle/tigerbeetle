@@ -1050,6 +1050,27 @@ pub fn Replica(
             assert(self.replica_count > 1);
             const threshold = self.quorum_view_change;
 
+            // A committing replica defers sending their `do_view_change`.
+            // If that replica is the new leader, that delay might allow more than `threshold - 1`
+            // other `do_view_change` messages to arrive, which would put `count > threshold`.
+            //
+            // To avoid this, reject `do_view_change` messages that would put us over the limit.
+            if (self.do_view_change_from_all_replicas[self.replica] == null and
+                self.replica != message.header.replica and
+                self.count_quorum(
+                    &self.do_view_change_from_all_replicas,
+                    .do_view_change,
+                    message.header.context,
+                ) + 1 == threshold)
+            {
+                assert(self.committing);
+                log.debug("{}: on_do_view_change: still committing (view={})", .{
+                    self.replica,
+                    self.view,
+                });
+                return;
+            }
+
             const count = self.reference_message_and_receive_quorum_exactly_once(
                 &self.do_view_change_from_all_replicas,
                 message,
