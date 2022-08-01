@@ -1,8 +1,11 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 
+const is_wasm = builtin.target.isWasm();
+
 /// Whether development or production:
-pub const deployment_environment = .development;
+pub const deployment_environment = if (is_wasm) .simulator_frontend else .development;
 
 /// The maximum log level in increasing order of verbosity (emergency=0, debug=3):
 pub const log_level = 2;
@@ -63,6 +66,7 @@ pub const transfers_pending_max = transfers_max;
 /// These header copies enable us to disentangle corruption from crashes and recover accordingly.
 pub const journal_slot_count = switch (deployment_environment) {
     .production => 1024,
+    .simulator_frontend => 64,
     else => 128,
 };
 
@@ -85,7 +89,10 @@ pub const connections_max = replicas_max + clients_max;
 /// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
 /// For a 1 Gbps NIC = 125 MiB/s throughput: 2 MiB / 125 * 1000ms = 16ms for the next request.
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const message_size_max = 1 * 1024 * 1024;
+pub const message_size_max = switch (deployment_environment) {
+    .simulator_frontend => 4 * 1024,
+    else => 1 * 1024 * 1024,
+};
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
