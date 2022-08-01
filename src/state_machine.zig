@@ -17,16 +17,38 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
-const LookupAccountResult = tb.LookupAccountResult;
-
-const HashMapAccounts = std.AutoHashMap(u128, Account);
-const HashMapTransfers = std.AutoHashMap(u128, Transfer);
-const HashMapPosted = std.AutoHashMap(u128, bool);
 
 pub fn StateMachineType(comptime Storage: type) type {
-    _ = Storage;
     return struct {
         const StateMachine = @This();
+
+        const Grid = @import("lsm/grid.zig").GridType(Storage);
+        const GrooveType = @import("lsm/groove.zig").GrooveType;
+        const ForestType = @import("lsm/forest.zig").ForestType;
+
+        const AccountsGroove = GrooveType(
+            Storage,
+            Account,
+            .{
+                .ignored = &[_][]const u8{ "reserved", "flags" },
+                .derived = .{},
+            },
+        );
+        const TransfersGroove = GrooveType(
+            Storage,
+            Transfer,
+            .{
+                .ignored = &[_][]const u8{ "reserved", "flags" },
+                .derived = .{},
+            },
+        );
+        const PostedGroove = @import("lsm/posted_groove.zig").PostedGrooveType(Storage);
+
+        const Forest = ForestType(Storage, .{
+            .accounts = AccountsGroove,
+            .transfers = TransfersGroove,
+            .posted = PostedGroove,
+        });
 
         pub const Operation = enum(u8) {
             /// Operations reserved by VR protocol (for all state machines):
@@ -41,48 +63,57 @@ pub fn StateMachineType(comptime Storage: type) type {
             lookup_transfers,
         };
 
-        allocator: mem.Allocator,
+        pub const Options = struct {
+            lsm_forest_node_count: u32,
+            cache_size_accounts: u32,
+            cache_size_transfers: u32,
+            cache_size_posted: u32,
+        };
+
         prepare_timestamp: u64,
         commit_timestamp: u64,
-        accounts: HashMapAccounts,
-        transfers: HashMapTransfers,
-        posted: HashMapPosted,
-        grid: *Grid, // this is needed for Replica to access SuperBlock
+        forest: Forest,
 
-        pub fn init(
-            allocator: mem.Allocator,
-            grid: *Grid,
-            accounts_max: usize,
-            transfers_max: usize,
-            transfers_pending_max: usize,
-        ) !StateMachine {
-            var accounts = HashMapAccounts.init(allocator);
-            errdefer accounts.deinit();
-            try accounts.ensureTotalCapacity(@intCast(u32, accounts_max));
+        prefetch_input: ?[]align(16) const u8 = null,
+        prefetch_callback: ?fn (*StateMachine) void = null,
+        // TODO(ifreund): use a union for these to save memory, likely an extern union
+        // so that we can safetly @ptrCast() until @fieldParentPtr() is implemented
+        // for unions. See: https://github.com/ziglang/zig/issues/6611
+        prefetch_accounts_context: AccountsGroove.PrefetchContext = undefined,
+        prefetch_transfers_context: TransfersGroove.PrefetchContext = undefined,
+        prefetch_posted_context: PostedGroove.PrefetchContext = undefined,
 
-            var transfers = HashMapTransfers.init(allocator);
-            errdefer transfers.deinit();
-            try transfers.ensureTotalCapacity(@intCast(u32, transfers_max));
-
-            var posted = HashMapPosted.init(allocator);
-            errdefer posted.deinit();
-            try posted.ensureTotalCapacity(@intCast(u32, transfers_pending_max));
+        pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !StateMachine {
+            var forest = try Forest.init(
+                allocator,
+                grid,
+                options.lsm_forest_node_count,
+                .{
+                    .accounts = .{
+                        .cache_size = options.cache_size_accounts,
+                        .commit_count_max = 8191,
+                    },
+                    .transfers = .{
+                        .cache_size = options.cache_size_transfers,
+                        .commit_count_max = 8191 * 2,
+                    },
+                    .posted = .{
+                        .cache_size = options.cache_size_posted,
+                        .commit_count_max = 8191 * 2,
+                    },
+                },
+            );
+            errdefer forest.deinit(allocator);
 
             return StateMachine{
-                .allocator = allocator,
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
-                .accounts = accounts,
-                .transfers = transfers,
-                .posted = posted,
-                .grid = grid,
+                .forest = forest,
             };
         }
 
-        pub fn deinit(self: *StateMachine) void {
-            self.accounts.deinit();
-            self.transfers.deinit();
-            self.posted.deinit();
+        pub fn deinit(self: *StateMachine, allocator: mem.Allocator) void {
+            self.forest.deinit(allocator);
         }
 
         pub fn Event(comptime operation: Operation) type {
@@ -137,6 +168,148 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(sum_reserved_timestamps == 0);
         }
 
+        pub fn prefetch(
+            self: *StateMachine,
+            callback: fn (*StateMachine) void,
+            operation: Operation,
+            input: []align(16) const u8,
+        ) void {
+            assert(self.prefetch_input == null);
+            assert(self.prefetch_callback == null);
+            self.prefetch_input = input;
+            self.prefetch_callback = callback;
+
+            return switch (operation) {
+                .reserved, .root => unreachable,
+                .register => return,
+                .create_accounts => {
+                    self.prefetch_create_accounts(mem.bytesAsSlice(Account, input));
+                },
+                .create_transfers => {
+                    self.prefetch_create_transfers(mem.bytesAsSlice(Transfer, input));
+                },
+                .lookup_accounts => {
+                    self.prefetch_lookup_accounts(mem.bytesAsSlice(u128, input));
+                },
+                .lookup_transfers => {
+                    self.prefetch_lookup_transfers(mem.bytesAsSlice(u128, input));
+                },
+            };
+        }
+
+        fn prefetch_finish(self: *StateMachine) void {
+            assert(self.prefetch_input != null);
+            const callback = self.prefetch_callback.?;
+            self.prefetch_input = null;
+            self.prefetch_callback = null;
+            callback(self);
+        }
+
+        fn prefetch_create_accounts(self: *StateMachine, accounts: []const Account) void {
+            for (accounts) |*a| {
+                self.forest.grooves.accounts.prefetch_enqueue(a.id);
+            }
+            self.forest.grooves.accounts.prefetch(
+                prefetch_create_accounts_callback,
+                &self.prefetch_accounts_context,
+            );
+        }
+
+        fn prefetch_create_accounts_callback(completion: *AccountsGroove.PrefetchContext) void {
+            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_context", completion);
+
+            self.prefetch_finish();
+        }
+
+        fn prefetch_create_transfers(self: *StateMachine, transfers: []const Transfer) void {
+            for (transfers) |*t| {
+                self.forest.grooves.transfers.prefetch_enqueue(t.id);
+
+                if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
+                    self.forest.grooves.transfers.prefetch_enqueue(t.pending_id);
+                    // This prefetch isn't run yet, but enqueue it here as well to save an extra
+                    // iteration over transfers.
+                    self.forest.grooves.posted.prefetch_enqueue(t.pending_id);
+                }
+            }
+
+            self.forest.grooves.transfers.prefetch(
+                prefetch_create_transfers_callback_transfers,
+                &self.prefetch_transfers_context,
+            );
+        }
+
+        fn prefetch_create_transfers_callback_transfers(completion: *TransfersGroove.PrefetchContext) void {
+            const self = @fieldParentPtr(StateMachine, "prefetch_transfers_context", completion);
+
+            const transfers = mem.bytesAsSlice(Event(.create_transfers), self.prefetch_input.?);
+            for (transfers) |*t| {
+                if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
+                    if (self.forest.grooves.transfers.get(t.pending_id)) |p| {
+                        self.forest.grooves.accounts.prefetch_enqueue(p.debit_account_id);
+                        self.forest.grooves.accounts.prefetch_enqueue(p.credit_account_id);
+                    }
+                } else {
+                    self.forest.grooves.accounts.prefetch_enqueue(t.debit_account_id);
+                    self.forest.grooves.accounts.prefetch_enqueue(t.credit_account_id);
+                }
+            }
+
+            self.forest.grooves.accounts.prefetch(
+                prefetch_create_transfers_callback_accounts,
+                &self.prefetch_accounts_context,
+            );
+        }
+
+        fn prefetch_create_transfers_callback_accounts(completion: *AccountsGroove.PrefetchContext) void {
+            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_context", completion);
+
+            self.forest.grooves.posted.prefetch(
+                prefetch_create_transfers_callback_posted,
+                &self.prefetch_posted_context,
+            );
+        }
+
+        fn prefetch_create_transfers_callback_posted(completion: *PostedGroove.PrefetchContext) void {
+            const self = @fieldParentPtr(StateMachine, "prefetch_posted_context", completion);
+
+            self.prefetch_finish();
+        }
+
+        fn prefetch_lookup_accounts(self: *StateMachine, ids: []const u128) void {
+            for (ids) |id| {
+                self.forest.grooves.accounts.prefetch_enqueue(id);
+            }
+
+            self.forest.grooves.accounts.prefetch(
+                prefetch_lookup_accounts_callback,
+                &self.prefetch_accounts_context,
+            );
+        }
+
+        fn prefetch_lookup_accounts_callback(completion: *AccountsGroove.PrefetchContext) void {
+            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_context", completion);
+
+            self.prefetch_finish();
+        }
+
+        fn prefetch_lookup_transfers(self: *StateMachine, ids: []const u128) void {
+            for (ids) |id| {
+                self.forest.grooves.transfers.prefetch_enqueue(id);
+            }
+
+            self.forest.grooves.transfers.prefetch(
+                prefetch_lookup_transfers_callback,
+                &self.prefetch_transfers_context,
+            );
+        }
+
+        fn prefetch_lookup_transfers_callback(completion: *TransfersGroove.PrefetchContext) void {
+            const self = @fieldParentPtr(StateMachine, "prefetch_transfers_context", completion);
+
+            self.prefetch_finish();
+        }
+
         pub fn commit(
             self: *StateMachine,
             client: u128,
@@ -148,7 +321,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             _ = client;
             _ = op_number;
 
-            return switch (operation) {
+            const result = switch (operation) {
                 .root => unreachable,
                 .register => 0,
                 .create_accounts => self.execute(.create_accounts, input, output),
@@ -157,6 +330,12 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
                 else => unreachable,
             };
+
+            self.forest.grooves.accounts.prefetch_clear();
+            self.forest.grooves.transfers.prefetch_clear();
+            self.forest.grooves.posted.prefetch_clear();
+
+            return result;
         }
 
         fn execute(
@@ -314,14 +493,14 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             if (self.get_account(a.id)) |e| return create_account_exists(a, e);
 
-            self.accounts.putAssumeCapacityNoClobber(a.id, a.*);
+            self.forest.grooves.accounts.put(a);
 
             self.commit_timestamp = a.timestamp;
             return .ok;
         }
 
         fn create_account_rollback(self: *StateMachine, a: *const Account) void {
-            assert(self.accounts.remove(a.id));
+            self.forest.grooves.accounts.remove(a);
         }
 
         fn create_account_exists(a: *const Account, e: *const Account) CreateAccountResult {
@@ -401,15 +580,19 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
             if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
 
-            self.transfers.putAssumeCapacityNoClobber(t.id, t.*);
+            self.forest.grooves.transfers.put_no_clobber(t);
 
+            var dr_new = dr.*;
+            var cr_new = cr.*;
             if (t.flags.pending) {
-                dr.debits_pending += t.amount;
-                cr.credits_pending += t.amount;
+                dr_new.debits_pending += t.amount;
+                cr_new.credits_pending += t.amount;
             } else {
-                dr.debits_posted += t.amount;
-                cr.credits_posted += t.amount;
+                dr_new.debits_posted += t.amount;
+                cr_new.credits_posted += t.amount;
             }
+            self.forest.grooves.accounts.put(&dr_new);
+            self.forest.grooves.accounts.put(&cr_new);
 
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -420,8 +603,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                 return self.post_or_void_pending_transfer_rollback(t);
             }
 
-            const dr = self.get_account(t.debit_account_id).?;
-            const cr = self.get_account(t.credit_account_id).?;
+            var dr = self.get_account(t.debit_account_id).?.*;
+            var cr = self.get_account(t.credit_account_id).?.*;
             assert(dr.id == t.debit_account_id);
             assert(cr.id == t.credit_account_id);
 
@@ -432,7 +615,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 dr.debits_posted -= t.amount;
                 cr.credits_posted -= t.amount;
             }
-            assert(self.transfers.remove(t.id));
+            self.forest.grooves.accounts.put(&dr);
+            self.forest.grooves.accounts.put(&cr);
+
+            self.forest.grooves.transfers.remove(t);
         }
 
         fn create_transfer_exists(t: *const Transfer, e: *const Transfer) CreateTransferResult {
@@ -511,7 +697,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(p.timeout > 0);
             if (p.timestamp + p.timeout <= t.timestamp) return .pending_transfer_expired;
 
-            self.transfers.putAssumeCapacityNoClobber(t.id, .{
+            self.forest.grooves.transfers.put_no_clobber(&Transfer{
                 .id = t.id,
                 .debit_account_id = p.debit_account_id,
                 .credit_account_id = p.credit_account_id,
@@ -526,17 +712,23 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .amount = amount,
             });
 
-            self.posted.putAssumeCapacityNoClobber(t.pending_id, t.flags.post_pending_transfer);
+            self.forest.grooves.posted.put_no_clobber(t.pending_id, t.flags.post_pending_transfer);
 
-            dr.debits_pending -= p.amount;
-            cr.credits_pending -= p.amount;
+            var dr_new = dr.*;
+            var cr_new = cr.*;
+
+            dr_new.debits_pending -= p.amount;
+            cr_new.credits_pending -= p.amount;
 
             if (t.flags.post_pending_transfer) {
                 assert(amount > 0);
                 assert(amount <= p.amount);
-                dr.debits_posted += amount;
-                cr.credits_posted += amount;
+                dr_new.debits_posted += amount;
+                cr_new.credits_posted += amount;
             }
+
+            self.forest.grooves.accounts.put(&dr_new);
+            self.forest.grooves.accounts.put(&cr_new);
 
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -552,8 +744,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(p.debit_account_id > 0);
             assert(p.credit_account_id > 0);
 
-            const dr = self.get_account(p.debit_account_id).?;
-            const cr = self.get_account(p.credit_account_id).?;
+            var dr = self.get_account(p.debit_account_id).?.*;
+            var cr = self.get_account(p.credit_account_id).?.*;
             assert(dr.id == p.debit_account_id);
             assert(cr.id == p.credit_account_id);
 
@@ -567,8 +759,11 @@ pub fn StateMachineType(comptime Storage: type) type {
             dr.debits_pending += p.amount;
             cr.credits_pending += p.amount;
 
-            assert(self.posted.remove(t.pending_id));
-            assert(self.transfers.remove(t.id));
+            self.forest.grooves.accounts.put(&dr);
+            self.forest.grooves.accounts.put(&cr);
+
+            self.forest.grooves.posted.remove(t.pending_id);
+            self.forest.grooves.transfers.remove(t);
         }
 
         fn post_or_void_pending_transfer_exists(
@@ -624,24 +819,17 @@ pub fn StateMachineType(comptime Storage: type) type {
             return .exists;
         }
 
-        /// This is our core private method for changing balances.
-        /// Returns a live pointer to an Account in the accounts hash map.
-        /// This is intended to lookup an Account and modify balances directly by reference.
-        /// This pointer is invalidated if the hash map is resized by another insert, e.g. if we get a
-        /// pointer, insert another account without capacity, and then modify this pointer... BOOM!
-        /// This is a sharp tool but replaces a lookup, copy and update with a single lookup.
-        fn get_account(self: *const StateMachine, id: u128) ?*Account {
-            return self.accounts.getPtr(id);
+        fn get_account(self: *StateMachine, id: u128) ?*const Account {
+            return self.forest.grooves.accounts.get(id);
         }
 
-        /// See the comment for get_account().
-        fn get_transfer(self: *const StateMachine, id: u128) ?*Transfer {
-            return self.transfers.getPtr(id);
+        fn get_transfer(self: *StateMachine, id: u128) ?*const Transfer {
+            return self.forest.grooves.transfers.get(id);
         }
 
         /// Returns whether a pending transfer, if it exists, has already been posted or voided.
-        fn get_posted(self: *const StateMachine, pending_id: u128) ?bool {
-            return self.posted.get(pending_id);
+        fn get_posted(self: *StateMachine, pending_id: u128) ?bool {
+            return self.forest.grooves.posted.get(pending_id);
         }
     };
 }
@@ -1032,6 +1220,8 @@ test "create/lookup/rollback accounts" {
         },
     };
 
+    const Storage = @import("storage.zig").Storage;
+    const StateMachine = StateMachineType(Storage);
     var state_machine = try StateMachine.init(testing.allocator, vectors.len, 0, 0);
     defer state_machine.deinit();
 
@@ -1090,6 +1280,8 @@ test "linked accounts" {
         mem.zeroInit(Account, .{ .id = 4, .code = 1, .ledger = 1 }),
     };
 
+    const Storage = @import("storage.zig").Storage;
+    const StateMachine = StateMachineType(Storage);
     var state_machine = try StateMachine.init(
         testing.allocator,
         accounts_max,
@@ -1176,6 +1368,8 @@ test "create/lookup/rollback transfers" {
         }),
     };
 
+    const Storage = @import("storage.zig").Storage;
+    const StateMachine = StateMachineType(Storage);
     var state_machine = try StateMachine.init(testing.allocator, accounts.len, 1, 0);
     defer state_machine.deinit();
 
@@ -1715,6 +1909,8 @@ test "create/lookup/rollback transfers" {
         }
     }
 
+    const test_account_balances = test_helpers(StateMachine).test_account_balances;
+
     // Transfer 3:
     try test_account_balances(&state_machine, 1, 100 + 123, 200 + 3, 0, 7);
     try test_account_balances(&state_machine, 3, 0, 7, 110 + 123, 210 + 3);
@@ -1803,6 +1999,8 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
     };
 
+    const Storage = @import("storage.zig").Storage;
+    const StateMachine = StateMachineType(Storage);
     var state_machine = try StateMachine.init(testing.allocator, accounts.len, 100, 1);
     defer state_machine.deinit();
 
@@ -1838,6 +2036,10 @@ test "create/lookup/rollback 2-phase transfers" {
     for (transfers) |transfer| {
         try expectEqual(transfer, state_machine.get_transfer(transfer.id).?.*);
     }
+
+    const helpers = test_helpers(StateMachine);
+    const test_account_balances = helpers.test_account_balances;
+    const test_transfer_rollback = helpers.test_transfer_rollback;
 
     // Test balances before posting:
     try test_account_balances(&state_machine, 1, 52, 15, 0, 0);
@@ -2401,30 +2603,34 @@ fn print_test_vector(
     });
 }
 
-fn test_account_balances(
-    state_machine: *const StateMachine,
-    account_id: u128,
-    debits_pending: u64,
-    debits_posted: u64,
-    credits_pending: u64,
-    credits_posted: u64,
-) !void {
-    const account = state_machine.get_account(account_id).?.*;
-    try expectEqual(debits_pending, account.debits_pending);
-    try expectEqual(debits_posted, account.debits_posted);
-    try expectEqual(credits_pending, account.credits_pending);
-    try expectEqual(credits_posted, account.credits_posted);
-}
+fn test_helpers(comptime StateMachine: type) type {
+    return struct {
+        fn test_account_balances(
+            state_machine: *const StateMachine,
+            account_id: u128,
+            debits_pending: u64,
+            debits_posted: u64,
+            credits_pending: u64,
+            credits_posted: u64,
+        ) !void {
+            const account = state_machine.get_account(account_id).?.*;
+            try expectEqual(debits_pending, account.debits_pending);
+            try expectEqual(debits_posted, account.debits_posted);
+            try expectEqual(credits_pending, account.credits_pending);
+            try expectEqual(credits_posted, account.credits_posted);
+        }
 
-fn test_transfer_rollback(state_machine: *StateMachine, transfer: *const Transfer) !void {
-    assert(state_machine.get_transfer(transfer.id) != null);
+        fn test_transfer_rollback(state_machine: *StateMachine, transfer: *const Transfer) !void {
+            assert(state_machine.get_transfer(transfer.id) != null);
 
-    state_machine.create_transfer_rollback(transfer);
+            state_machine.create_transfer_rollback(transfer);
 
-    try expect(state_machine.get_transfer(transfer.id) == null);
-    if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
-        try expect(state_machine.get_posted(transfer.pending_id) == null);
-    }
+            try expect(state_machine.get_transfer(transfer.id) == null);
+            if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
+                try expect(state_machine.get_posted(transfer.pending_id) == null);
+            }
+        }
+    };
 }
 
 test "zeroed_32_bytes" {
@@ -2478,4 +2684,11 @@ fn test_equal_n_bytes(comptime n: usize) !void {
         b[i] = 0;
     }
     try expectEqual(true, routine(a, b));
+}
+
+test "StateMachine: ref all decls" {
+    const Storage = @import("storage.zig").Storage;
+    const StateMachine = StateMachineType(Storage);
+
+    std.testing.refAllDecls(StateMachine);
 }

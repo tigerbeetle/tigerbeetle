@@ -700,6 +700,11 @@ pub fn GrooveType(
             }
         };
 
+        pub fn put_no_clobber(groove: *Groove, object: *const Object) void {
+            assert(groove.get(object.id) == null);
+            groove.insert(object);
+        }
+
         pub fn put(groove: *Groove, object: *const Object) void {
             if (groove.get(object.id)) |existing_object| {
                 groove.update(existing_object, object);
