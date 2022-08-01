@@ -209,7 +209,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             context: *PrefetchContext,
         ) void {
             context.* = .{
-                .posted = groove,
+                .groove = groove,
                 .callback = callback,
                 .id_iterator = groove.prefetch_ids.keyIterator(),
             };
@@ -234,25 +234,25 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
                 while (context.workers_busy < context.workers.len) : (context.workers_busy += 1) {
                     const worker = &context.workers[context.workers_busy];
-                    worker.* = .{ .contex = context };
+                    worker.* = .{ .context = context };
                     if (!worker.lookup_start()) break;
                 }
 
                 if (context.workers_busy == 0) {
-                    assert(context.posted.prefetch_ids.count() == 0);
+                    assert(context.groove.prefetch_ids.count() == 0);
                     context.finish();
                 }
             }
 
             fn worker_finished(context: *PrefetchContext) void {
-                assert(context.posted.prefetch_ids.count() == 0);
+                assert(context.groove.prefetch_ids.count() == 0);
 
                 context.workers_busy -= 0;
                 if (context.workers_busy == 0) context.finish();
             }
 
             fn finish(context: *PrefetchContext) void {
-                assert(context.posted.prefetch_ids.count() == 0);
+                assert(context.groove.prefetch_ids.count() == 0);
 
                 const callback = context.callback;
                 context.* = undefined;
@@ -267,7 +267,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             /// Returns true if asynchronous I/O has been started.
             /// Returns false if there are no more IDs to prefetch.
             fn lookup_start(worker: *PrefetchWorker) bool {
-                const groove = worker.context.posted;
+                const groove = worker.context.groove;
 
                 const id = worker.context.id_iterator.next() orelse {
                     assert(groove.prefetch_ids.count() == 0);
@@ -385,4 +385,11 @@ test "PostedGroove" {
     _ = PostedGroove.compact_io;
     _ = PostedGroove.compact_cpu;
     _ = PostedGroove.checkpoint;
+
+    _ = PostedGroove.prefetch_enqueue;
+    _ = PostedGroove.prefetch;
+    _ = PostedGroove.prefetch_clear;
+
+    std.testing.refAllDecls(PostedGroove.PrefetchWorker);
+    std.testing.refAllDecls(PostedGroove.PrefetchContext);
 }

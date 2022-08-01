@@ -531,7 +531,7 @@ pub fn GrooveType(
                 if (id_tree_value.tombstone()) {
                     return null;
                 } else {
-                    const object = groove.objects.get_cached(id_tree_value.timestamp);
+                    const object = groove.objects.get_cached(id_tree_value.timestamp).?;
                     assert(!ObjectTreeHelpers(Object).tombstone(object));
                     return object;
                 }
@@ -593,7 +593,7 @@ pub fn GrooveType(
 
                 while (context.workers_busy < context.workers.len) : (context.workers_busy += 1) {
                     const worker = &context.workers[context.workers_busy];
-                    worker.* = .{ .contex = context };
+                    worker.* = .{ .context = context };
                     if (!worker.lookup_start()) break;
                 }
 
@@ -632,31 +632,28 @@ pub fn GrooveType(
             fn lookup_start(worker: *PrefetchWorker) bool {
                 const groove = worker.context.groove;
 
-                while (worker.context.id_iterator.next()) |id| {
-                    // Objects cached by the LSM tree don't need to be added to the auxillary
-                    // prefetch_objects hash map.
-                    if (groove.ids.get_cached(id.*)) |id_tree_value| {
-                        if (config.verify) {
-                            assert(groove.objects.get_cached(id_tree_value.timestamp) != null);
-                        }
-                        continue;
-                    }
+                const id = worker.context.id_iterator.next() orelse {
+                    assert(groove.prefetch_ids.count() == 0);
+                    return false;
+                };
 
-                    // If not in the LSM tree's cache, the object must be read from disk and added
-                    // to the auxillary prefetch_objects hash map.
-                    // TODO: this LSM tree function needlessly checks the LSM tree's cache a
-                    // second time. Adding API to the LSM tree to avoid this may be worthwhile.
-                    groove.ids.lookup(
-                        lookup_id_callback,
-                        &worker.lookup_id,
-                        snapshot_latest,
-                        id.*,
-                    );
-                    return true;
+                if (config.verify) {
+                    // This is checked in prefetch_enqueue()
+                    const id_tree_value = groove.ids.get_cached(id.*).?;
+                    assert(groove.objects.get_cached(id_tree_value.timestamp) != null);
                 }
 
-                assert(groove.prefetch_ids.count() == 0);
-                return false;
+                // If not in the LSM tree's cache, the object must be read from disk and added
+                // to the auxillary prefetch_objects hash map.
+                // TODO: this LSM tree function needlessly checks the LSM tree's cache a
+                // second time. Adding API to the LSM tree to avoid this may be worthwhile.
+                groove.ids.lookup(
+                    lookup_id_callback,
+                    &worker.lookup_id,
+                    snapshot_latest,
+                    id.*,
+                );
+                return true;
             }
 
             fn lookup_id_callback(
@@ -666,12 +663,16 @@ pub fn GrooveType(
                 const worker = @fieldParentPtr(PrefetchWorker, "lookup_id", completion);
 
                 if (result) |id_tree_value| {
-                    worker.groove.objects.lookup(
-                        lookup_object_callback,
-                        &worker.lookup_object,
-                        snapshot_latest,
-                        id_tree_value.timestamp,
-                    );
+                    if (!id_tree_value.tombstone()) {
+                        worker.context.groove.objects.lookup(
+                            lookup_object_callback,
+                            &worker.lookup_object,
+                            snapshot_latest,
+                            id_tree_value.timestamp,
+                        );
+                    } else {
+                        worker.lookup_finish();
+                    }
                 } else {
                     worker.lookup_finish();
                 }
@@ -905,4 +906,11 @@ test "Groove" {
     _ = Groove.compact_io;
     _ = Groove.compact_cpu;
     _ = Groove.checkpoint;
+
+    _ = Groove.prefetch_enqueue;
+    _ = Groove.prefetch;
+    _ = Groove.prefetch_clear;
+
+    std.testing.refAllDecls(Groove.PrefetchWorker);
+    std.testing.refAllDecls(Groove.PrefetchContext);
 }
