@@ -200,9 +200,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             snapshot: u64,
             key: Key,
         ) void {
-            assert(tree.prefetch_keys.count() == 0);
-            assert(tree.prefetch_keys_iterator == null);
-
             assert(snapshot <= snapshot_latest);
             if (snapshot == snapshot_latest) {
                 // The mutable table is converted to an immutable table when a snapshot is created.
@@ -265,7 +262,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             context.read_index_block();
         }
 
-        const LookupContext = struct {
+        pub const LookupContext = struct {
             const Read = Grid.Read;
             const BlockPtrConst = Grid.BlockPtrConst;
 
