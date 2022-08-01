@@ -116,9 +116,10 @@ pub fn main() !void {
             .restart_stability = random.uintLessThan(u32, 1_000),
         },
         .state_machine_options = .{
-            .commit_prefetch_mean = 5 + random.uintLessThan(u64, 10),
-            .commit_compact_mean = 5 + random.uintLessThan(u64, 10),
-            .commit_checkpoint_mean = 5 + random.uintLessThan(u64, 10),
+            .seed = random.int(u64),
+            .prefetch_mean = 5 + random.uintLessThan(u64, 10),
+            .compact_mean = 5 + random.uintLessThan(u64, 10),
+            .checkpoint_mean = 5 + random.uintLessThan(u64, 10),
         },
     });
     defer cluster.destroy();
@@ -162,9 +163,9 @@ pub fn main() !void {
         \\          crash_stability={} ticks
         \\          restart_probability={d}%
         \\          restart_stability={} ticks
-        \\          commit_prefetch_mean={} ticks
-        \\          commit_compact_mean={} ticks
-        \\          commit_checkpoint_mean={} ticks
+        \\          prefetch_mean={} ticks
+        \\          compact_mean={} ticks
+        \\          checkpoint_mean={} ticks
         \\
     , .{
         seed,
@@ -195,9 +196,9 @@ pub fn main() !void {
         cluster.options.health_options.crash_stability,
         cluster.options.health_options.restart_probability * 100,
         cluster.options.health_options.restart_stability,
-        cluster.options.state_machine_options.commit_prefetch_mean,
-        cluster.options.state_machine_options.commit_compact_mean,
-        cluster.options.state_machine_options.commit_checkpoint_mean,
+        cluster.options.state_machine_options.prefetch_mean,
+        cluster.options.state_machine_options.compact_mean,
+        cluster.options.state_machine_options.checkpoint_mean,
     });
 
     var requests_sent: u64 = 0;
@@ -254,7 +255,6 @@ pub fn main() !void {
             switch (cluster.health[replica.replica]) {
                 .up => |*ticks| {
                     ticks.* -|= 1;
-                    replica.state_machine.tick();
                     replica.tick();
                     cluster.state_checker.check_state(replica.replica);
 

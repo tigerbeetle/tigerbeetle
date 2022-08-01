@@ -37,7 +37,7 @@ pub const StateMachine = struct {
         lookup_transfers,
     };
 
-    pub const Config = struct {
+    pub const Options = struct {
         accounts_max: usize,
         transfers_max: usize,
         transfers_pending_max: usize,
@@ -52,19 +52,19 @@ pub const StateMachine = struct {
 
     pub fn init(
         allocator: mem.Allocator,
-        config: Config,
+        options: Options,
     ) !StateMachine {
         var accounts = HashMapAccounts.init(allocator);
         errdefer accounts.deinit();
-        try accounts.ensureTotalCapacity(@intCast(u32, config.accounts_max));
+        try accounts.ensureTotalCapacity(@intCast(u32, options.accounts_max));
 
         var transfers = HashMapTransfers.init(allocator);
         errdefer transfers.deinit();
-        try transfers.ensureTotalCapacity(@intCast(u32, config.transfers_max));
+        try transfers.ensureTotalCapacity(@intCast(u32, options.transfers_max));
 
         var posted = HashMapPosted.init(allocator);
         errdefer posted.deinit();
-        try posted.ensureTotalCapacity(@intCast(u32, config.transfers_pending_max));
+        try posted.ensureTotalCapacity(@intCast(u32, options.transfers_pending_max));
 
         return StateMachine{
             .allocator = allocator,
@@ -80,6 +80,10 @@ pub const StateMachine = struct {
         self.accounts.deinit();
         self.transfers.deinit();
         self.posted.deinit();
+    }
+
+    pub fn tick(self: *StateMachine) void {
+        _ = self;
     }
 
     pub fn Event(comptime operation: Operation) type {
@@ -136,40 +140,28 @@ pub const StateMachine = struct {
 
     pub fn prefetch(
         self: *StateMachine,
-        op_number: u64,
+        op: u64,
         operation: Operation,
         input: []const u8,
-        callback: fn(*StateMachine) void,
+        callback: fn (*StateMachine) void,
     ) void {
         // TODO
-        _ = op_number;
+        _ = op;
         _ = operation;
         _ = input;
-        callback(self);
-    }
-
-    pub fn compact(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
-        // TODO self.forest.compact(op_number, callback);
-        _ = op_number;
-        callback(self);
-    }
-
-    pub fn checkpoint(self: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
-        // TODO self.forest.checkpoint(op_number, checkpoint_callback);
-        _ = op_number;
         callback(self);
     }
 
     pub fn commit(
         self: *StateMachine,
         client: u128,
-        op_number: u64,
+        op: u64,
         operation: Operation,
         input: []const u8,
         output: []u8,
     ) usize {
         _ = client;
-        _ = op_number;
+        _ = op;
 
         return switch (operation) {
             .root => unreachable,
@@ -180,6 +172,18 @@ pub const StateMachine = struct {
             .lookup_transfers => self.execute_lookup_transfers(input, output),
             else => unreachable,
         };
+    }
+
+    pub fn compact(self: *StateMachine, op: u64, callback: fn (*StateMachine) void) void {
+        // TODO self.forest.compact(op, callback);
+        _ = op;
+        callback(self);
+    }
+
+    pub fn checkpoint(self: *StateMachine, op: u64, callback: fn (*StateMachine) void) void {
+        // TODO self.forest.checkpoint(op, checkpoint_callback);
+        _ = op;
+        callback(self);
     }
 
     fn execute(

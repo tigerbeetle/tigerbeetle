@@ -13,17 +13,13 @@ pub const StateMachine = struct {
         hash,
     };
 
-    pub const Config = struct {
-        seed: u64,
-        options: Options,
-    };
-
     /// Minimum/mean number of ticks to perform the specified operation.
     /// Each mean must be greater-or-equal-to their respective minimum.
     pub const Options = struct {
-        commit_prefetch_mean: u64,
-        commit_compact_mean: u64,
-        commit_checkpoint_mean: u64,
+        seed: u64,
+        prefetch_mean: u64,
+        compact_mean: u64,
+        checkpoint_mean: u64,
     };
 
     options: Options,
@@ -32,14 +28,14 @@ pub const StateMachine = struct {
     prepare_timestamp: u64 = 0,
     commit_timestamp: u64 = 0,
 
-    callback: ?fn(*StateMachine) void = null,
+    callback: ?fn (*StateMachine) void = null,
     callback_ticks: usize = 0,
 
-    pub fn init(_: std.mem.Allocator, config: Config) !StateMachine {
+    pub fn init(_: std.mem.Allocator, options: Options) !StateMachine {
         return StateMachine{
-            .state = hash(0, std.mem.asBytes(&config.seed)),
-            .options = config.options,
-            .prng = std.rand.DefaultPrng.init(config.seed),
+            .state = hash(0, std.mem.asBytes(&options.seed)),
+            .options = options,
+            .prng = std.rand.DefaultPrng.init(options.seed),
         };
     }
 
@@ -69,45 +65,29 @@ pub const StateMachine = struct {
 
     pub fn prefetch(
         state_machine: *StateMachine,
-        op_number: u64,
+        op: u64,
         operation: Operation,
         input: []const u8,
-        callback: fn(*StateMachine) void,
+        callback: fn (*StateMachine) void,
     ) void {
-        _ = op_number;
+        _ = op;
         _ = operation;
         _ = input;
         assert(state_machine.callback == null);
         assert(state_machine.callback_ticks == 0);
         state_machine.callback = callback;
-        state_machine.callback_ticks = state_machine.latency(state_machine.options.commit_prefetch_mean);
-    }
-
-    pub fn compact(state_machine: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
-        _ = op_number;
-        assert(state_machine.callback == null);
-        assert(state_machine.callback_ticks == 0);
-        state_machine.callback = callback;
-        state_machine.callback_ticks = state_machine.latency(state_machine.options.commit_compact_mean);
-    }
-
-    pub fn checkpoint(state_machine: *StateMachine, op_number: u64, callback: fn(*StateMachine) void) void {
-        _ = op_number;
-        assert(state_machine.callback == null);
-        assert(state_machine.callback_ticks == 0);
-        state_machine.callback = callback;
-        state_machine.callback_ticks = state_machine.latency(state_machine.options.commit_checkpoint_mean);
+        state_machine.callback_ticks = state_machine.latency(state_machine.options.prefetch_mean);
     }
 
     pub fn commit(
         state_machine: *StateMachine,
         client: u128,
-        op_number: u64,
+        op: u64,
         operation: Operation,
         input: []const u8,
         output: []u8,
     ) usize {
-        _ = op_number;
+        _ = op;
 
         switch (operation) {
             .reserved, .root => unreachable,
@@ -134,6 +114,22 @@ pub const StateMachine = struct {
                 return @sizeOf(@TypeOf(state_machine.state));
             },
         }
+    }
+
+    pub fn compact(state_machine: *StateMachine, op: u64, callback: fn (*StateMachine) void) void {
+        _ = op;
+        assert(state_machine.callback == null);
+        assert(state_machine.callback_ticks == 0);
+        state_machine.callback = callback;
+        state_machine.callback_ticks = state_machine.latency(state_machine.options.compact_mean);
+    }
+
+    pub fn checkpoint(state_machine: *StateMachine, op: u64, callback: fn (*StateMachine) void) void {
+        _ = op;
+        assert(state_machine.callback == null);
+        assert(state_machine.callback_ticks == 0);
+        state_machine.callback = callback;
+        state_machine.callback_ticks = state_machine.latency(state_machine.options.checkpoint_mean);
     }
 
     pub fn hash(state: u128, input: []const u8) u128 {
