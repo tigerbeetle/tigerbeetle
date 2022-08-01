@@ -155,12 +155,6 @@ pub fn Replica(
 
         /// Whether we are reading a prepare from storage in order to commit.
         /// Guards against concurrent commits.
-        ///
-        /// While committing, a replica may not:
-        ///
-        /// * start a view as the new leader
-        ///
-        /// because `commit_min` will be modified when the commit finishes.
         committing: bool = false,
 
         /// Whether we are reading a prepare from storage in order to push to the pipeline.
@@ -1092,6 +1086,24 @@ pub fn Replica(
 
                     if (k == null or m.header.commit > k.?) k = m.header.commit;
                 }
+            }
+
+            // Consider the case:
+            // 1. Start committing op=N.
+            // 2. Send `do_view_change` to self.
+            // 3. Finish committing op=N.
+            // 4. Remaining `do_view_change` arrives, quorum complete.
+            // In this scenario, the our own `do_view_change`'s commit is `N-1`, but `commit_min=N`.
+            // Don't let the commit backtrack.
+            if (k.? < self.commit_min) {
+                assert(k.? == self.do_view_change_from_all_replicas[self.replica].?.header.commit);
+                log.debug("{}: on_do_view_change: bump view view={} commit={}..{}", .{
+                    self.replica,
+                    self.view,
+                    k,
+                    self.commit_min,
+                });
+                k = self.commit_min;
             }
 
             self.set_latest_op_and_k(&latest, k.?, "on_do_view_change");
@@ -2362,8 +2374,9 @@ pub fn Replica(
             if (self.status == .normal and self.leader()) {
                 const prepare = self.pipeline.pop().?;
                 assert(self.commit_min == self.commit_max);
-                assert(self.commit_min == prepare.message.header.op);
-                assert(self.commit_max == prepare.message.header.op);
+                assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
+                assert(prepare.message.header.op == self.commit_min);
+                assert(prepare.message.header.op == self.commit_max);
                 assert(self.prepare_timeout.ticking);
 
                 self.message_bus.unref(prepare.message);
@@ -4764,18 +4777,6 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
-
-            if (self.committing) {
-                log.debug("{}: start_view_as_the_new_leader: still committing (view={} commit_min={} commit_max={})", .{
-                    self.replica,
-                    self.view,
-                    self.commit_min,
-                    self.commit_max,
-                });
-                return;
-            }
-
-            assert(!self.committing);
             assert(!self.repairing_pipeline);
 
             assert(self.commit_min == self.commit_max);
