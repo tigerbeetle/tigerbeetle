@@ -1258,7 +1258,7 @@ pub fn Replica(
                 //   receiver's state changed in the mean time.
 
                 log.debug(
-                    "{}: on_recovery_response: replica={} view={}..{} op={}..{} commit={}..{}",
+                    "{}: on_recovery_response: replacing response replica={} view={}..{} op={}..{} commit={}..{}",
                     .{
                         self.replica,
                         existing.header.replica,
@@ -1413,7 +1413,7 @@ pub fn Replica(
                 }
             }
 
-            log.debug("{}: on_recovery_response: responses={} view={} headers={}..{}" ++
+            log.info("{}: on_recovery_response: recovery done responses={} view={} headers={}..{}" ++
                 " commit={} dirty={} faulty={}", .{
                 self.replica,
                 count,
@@ -1486,28 +1486,18 @@ pub fn Replica(
                         checksum,
                     });
 
-                    if (self.journal.header_with_op_and_checksum(op, checksum)) |_| {
-                        // The header for the target prepare is already in-memory.
-                        // This is preferable to the `else` case since we have the prepare's
-                        // `header.size` in-memory, so the read can be (potentially) shorter.
-                        // TODO Do not reissue the read if we are already reading in order to send
-                        // to this particular destination replica.
-                        self.journal.read_prepare(
-                            on_request_prepare_read,
-                            op,
-                            prepare_checksum,
-                            message.header.replica,
-                        );
-                    } else {
-                        // TODO Do not reissue the read if we are already reading in order to send to
-                        // this particular destination replica.
-                        self.journal.read_prepare_with_op_and_checksum(
-                            on_request_prepare_read,
-                            op,
-                            prepare_checksum,
-                            message.header.replica,
-                        );
-                    }
+                    // Improve availability by calling `read_prepare_with_op_and_checksum` instead
+                    // of `read_prepare` — even if `journal.headers` contains the target message.
+                    // The latter skips the read when the target prepare is present but dirty (e.g.
+                    // it was recovered with decision=fix).
+                    // TODO Do not reissue the read if we are already reading in order to send to
+                    // this particular destination replica.
+                    self.journal.read_prepare_with_op_and_checksum(
+                        on_request_prepare_read,
+                        op,
+                        prepare_checksum,
+                        message.header.replica,
+                    );
 
                     // We have guaranteed the prepare (not safe to nack).
                     // Our copy may or may not be valid, but we will try to read & forward it.
