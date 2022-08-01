@@ -474,7 +474,7 @@ pub fn Replica(
                     if (self.committing) return;
                     assert(self.op == 0);
                     self.op = self.journal.op_maximum();
-                    self.commit_ops(self.op);
+                    self.commit_journal(self.op);
                     // The recovering→normal transition is deferred until all ops are committed.
                 } else {
                     // The journal just finished recovery.
@@ -808,7 +808,7 @@ pub fn Replica(
 
             if (self.follower()) {
                 // A prepare may already be committed if requested by repair() so take the max:
-                self.commit_ops(std.math.max(message.header.commit, self.commit_max));
+                self.commit_journal(std.math.max(message.header.commit, self.commit_max));
                 assert(self.commit_max >= message.header.commit);
             }
         }
@@ -893,7 +893,7 @@ pub fn Replica(
             }
 
             self.normal_status_timeout.reset();
-            self.commit_ops(message.header.commit);
+            self.commit_journal(message.header.commit);
         }
 
         fn on_repair(self: *Self, message: *Message) void {
@@ -1169,7 +1169,7 @@ pub fn Replica(
             assert(message.header.view == self.view);
             assert(self.follower());
 
-            self.commit_ops(self.commit_max);
+            self.commit_journal(self.commit_max);
 
             self.repair();
         }
@@ -1456,7 +1456,7 @@ pub fn Replica(
             // `state_machine.commit_timestamp` is updated as messages are committed.
 
             self.reset_quorum_recovery_response();
-            self.commit_ops(commit);
+            self.commit_journal(commit);
             self.repair();
         }
 
@@ -2178,9 +2178,9 @@ pub fn Replica(
         }
 
         /// Commit ops up to commit number `commit` (inclusive).
-        /// A function which calls `commit_ops()` to set `commit_max` must first call `view_jump()`.
-        /// Otherwise, we may fork the log.
-        fn commit_ops(self: *Self, commit: u64) void {
+        /// A function which calls `commit_journal()` to set `commit_max` must first call
+        /// `view_jump()`. Otherwise, we may fork the log.
+        fn commit_journal(self: *Self, commit: u64) void {
             // TODO Restrict `view_change` status only to the leader purely as defense-in-depth.
             // Be careful of concurrency when doing this, as successive view changes can happen quickly.
             assert(self.status == .normal or self.status == .view_change or
@@ -2196,7 +2196,7 @@ pub fn Replica(
             // We must update `commit_max` even if we are already committing, otherwise we will lose
             // information that we should know, and `set_latest_op_and_k()` will catch us out:
             if (commit > self.commit_max) {
-                log.debug("{}: commit_ops: advancing commit_max={}..{}", .{
+                log.debug("{}: commit_journal: advancing commit_max={}..{}", .{
                     self.replica,
                     self.commit_max,
                     commit,
@@ -2204,9 +2204,9 @@ pub fn Replica(
                 self.commit_max = commit;
             }
 
-            // Guard against multiple concurrent invocations of commit_ops()/commit_pipeline():
+            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.committing) {
-                log.debug("{}: commit_ops: already committing...", .{self.replica});
+                log.debug("{}: commit_journal: already committing...", .{self.replica});
                 return;
             }
 
@@ -2223,17 +2223,17 @@ pub fn Replica(
             assert(!self.committing);
             self.committing = true;
 
-            self.commit_ops_read();
+            self.commit_journal_next();
         }
 
-        fn commit_ops_read(self: *Self) void {
+        fn commit_journal_next(self: *Self) void {
             assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            if (!self.valid_hash_chain("commit_ops_read")) {
+            if (!self.valid_hash_chain("commit_journal_next")) {
                 assert(self.replica_count > 1);
                 self.commit_ops_done();
                 return;
@@ -2245,7 +2245,7 @@ pub fn Replica(
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
                 const checksum = self.journal.header_with_op(op).?.checksum;
-                self.journal.read_prepare(commit_ops_commit, op, checksum, null);
+                self.journal.read_prepare(commit_journal_next_callback, op, checksum, null);
             } else {
                 self.commit_ops_done();
                 // This is an optimization to expedite the view change before the `repair_timeout`:
@@ -2257,19 +2257,19 @@ pub fn Replica(
                     assert(self.commit_min == self.op);
                     self.transition_to_normal_from_recovering_status(0);
                 } else {
-                    // We expect that a cluster-of-one only calls commit_ops() in recovering status.
+                    // We expect that a cluster-of-one only calls commit_journal() in recovering status.
                     assert(self.replica_count > 1);
                 }
             }
         }
 
-        fn commit_ops_commit(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
+        fn commit_journal_next_callback(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
             assert(self.committing);
             assert(destination_replica == null);
 
             if (prepare == null) {
                 self.commit_ops_done();
-                log.debug("{}: commit_ops_commit: prepare == null", .{self.replica});
+                log.debug("{}: commit_journal_next_callback: prepare == null", .{self.replica});
                 if (self.replica_count == 1) @panic("cannot recover corrupt prepare");
                 return;
             }
@@ -2279,7 +2279,10 @@ pub fn Replica(
                 .view_change => {
                     if (self.leader_index(self.view) != self.replica) {
                         self.commit_ops_done();
-                        log.debug("{}: commit_ops_commit: no longer leader", .{self.replica});
+                        log.debug("{}: commit_journal_next_callback: no longer leader view={}", .{
+                            self.replica,
+                            self.view,
+                        });
                         assert(self.replica_count > 1);
                         return;
                     }
@@ -2297,30 +2300,30 @@ pub fn Replica(
 
             if (prepare.?.header.op != op) {
                 self.commit_ops_done();
-                log.debug("{}: commit_ops_commit: op changed", .{self.replica});
+                log.debug("{}: commit_journal_next_callback: op changed", .{self.replica});
                 assert(self.replica_count > 1);
                 return;
             }
 
             if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
                 self.commit_ops_done();
-                log.debug("{}: commit_ops_commit: checksum changed", .{self.replica});
+                log.debug("{}: commit_journal_next_callback: checksum changed", .{self.replica});
                 assert(self.replica_count > 1);
                 return;
             }
 
-            self.commit_op_hooks(prepare.?, commit_ops_commit_callback);
+            self.commit_op_prefetch(prepare.?, commit_journal_callback);
         }
 
-        fn commit_ops_commit_callback(self: *Self) void {
+        fn commit_journal_callback(self: *Self) void {
             assert(self.committing);
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            self.commit_ops_read();
+            self.commit_journal_next();
         }
 
-        fn commit_op_hooks(
+        fn commit_op_prefetch(
             self: *Self,
             prepare: *Message,
             callback: fn (*Self) void,
@@ -2410,9 +2413,10 @@ pub fn Replica(
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
 
-            // If we are a follower committing through `commit_ops()` then a view change may have
-            // happened since we last checked in `commit_ops_read()`. However, this would relate to
-            // subsequent ops, since by now we have already verified the hash chain for this commit.
+            // If we are a follower committing through `commit_journal()` then a view change may
+            // have happened since we last checked in `commit_journal_next()`. However, this would
+            // relate to subsequent ops, since by now we have already verified the hash chain for
+            // this commit.
 
             assert(self.journal.header_with_op(self.commit_min).?.checksum ==
                 prepare.header.parent);
@@ -2487,7 +2491,7 @@ pub fn Replica(
             assert(self.leader());
             assert(self.pipeline.count > 0);
 
-            // Guard against multiple concurrent invocations of commit_ops()/commit_pipeline():
+            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.committing) {
                 log.debug("{}: commit_pipeline: already committing...", .{self.replica});
                 return;
@@ -2519,7 +2523,7 @@ pub fn Replica(
                 assert(count >= self.quorum_replication);
                 assert(count <= self.replica_count);
 
-                self.commit_op_hooks(prepare.message, commit_pipeline_callback);
+                self.commit_op_prefetch(prepare.message, commit_pipeline_callback);
             } else {
                 self.commit_ops_done();
             }
@@ -3630,7 +3634,7 @@ pub fn Replica(
             // Commit ops, which may in turn discover faulty prepares and drive more repairs:
             if (self.commit_min < self.commit_max) {
                 assert(self.replica_count > 1);
-                self.commit_ops(self.commit_max);
+                self.commit_journal(self.commit_max);
                 return;
             }
 
