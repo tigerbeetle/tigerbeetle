@@ -24,31 +24,9 @@ const HashMapTransfers = std.AutoHashMap(u128, Transfer);
 const HashMapPosted = std.AutoHashMap(u128, bool);
 
 pub fn StateMachineType(comptime Storage: type) type {
+    _ = Storage;
     return struct {
         const StateMachine = @This();
-
-        const Grid = @import("lsm/grid.zig").GridType(Storage);
-        const GrooveType = @import("lsm/groove.zig").GrooveType;
-        const SuperBlock = @import("lsm/superblock.zig").SuperBlockType(Storage);
-
-        const Forest = ForestType(Storage, .{
-            .accounts = GrooveType(
-                Storage,
-                Account,
-                .{
-                    .ignored = &[_][]const u8{ "reserved", "flags" },
-                    .derived = .{},
-                },
-            ),
-            .transfers = GrooveType(
-                Storage,
-                Transfer,
-                .{
-                    .ignored = &[_][]const u8{ "reserved", "flags" },
-                    .derived = .{},
-                },
-            ),
-        });
 
         pub const Operation = enum(u8) {
             /// Operations reserved by VR protocol (for all state machines):
@@ -157,54 +135,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             // Use a single branch condition to detect non-zero reserved timestamps.
             // Summing then branching once is faster than branching every iteration of the loop.
             assert(sum_reserved_timestamps == 0);
-        }
-
-        pub fn prefetch(
-            self: *StateMachine,
-            callback: fn (*StateMachine) void,
-            operation: Operation,
-            input: []const u8,
-        ) void {
-            assert(self.prefetch_callback == null);
-            self.prefetch_callback = callback;
-
-            return switch (operation) {
-                .reserved, .root => unreachable,
-                .register => return,
-                .create_accounts => {
-                    for (mem.bytesAsSlice(Event(.create_accounts))) |*a| {
-                        self.forest.grooves.accounts.prefetch_enqueue(a.id);
-                    }
-                    self.forest.grooves.accounts.prefetch();
-                },
-                .create_transfers => {
-                    for (mem.bytesAsSlice(Event(.create_transfers))) |*event| {
-                        self.prefetch_create_transfers(event);
-                    }
-                },
-                .lookup_accounts => self.execute_lookup_accounts(input, output),
-                .lookup_transfers => self.execute_lookup_transfers(input, output),
-            };
-        }
-
-        fn prefetch_accounts_callback(completion: *PrefetchAccountsContext) void {
-            const self = @fieldParentPtr(StateMachine, "TODO", completion);
-            const callback = self.prefetch_callback.?;
-            self.prefetch_callback = null;
-            callback(self);
-        }
-
-        fn prefetch_create_transfers(self: *StateMachine, t: *const Transfer) void {
-            if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                self.forest.grooves.transfers.prefetch("id", t.pending_id);
-                const p = self.get_transfer(t.pending_id) orelse return .pending_transfer_not_found;
-                const dr = self.get_account(p.debit_account_id).?;
-                const cr = self.get_account(p.credit_account_id).?;
-                if (self.get_transfer(t.id)) |e| return post_or_void_pending_transfer_exists(t, e, p);
-            }
-            const dr = self.get_account(t.debit_account_id) orelse return .debit_account_not_found;
-            const cr = self.get_account(t.credit_account_id) orelse return .credit_account_not_found;
-            if (self.get_transfer(t.id)) |e| return create_transfer_exists(t, e);
         }
 
         pub fn commit(
