@@ -1994,6 +1994,7 @@ pub fn Replica(
                     if (self.replica_count == 2) assert(threshold == 1);
 
                     assert(self.status == .view_change);
+                    assert(self.replica != message.header.replica);
                 },
                 .nack_prepare => {
                     assert(self.replica_count > 1);
@@ -2001,6 +2002,8 @@ pub fn Replica(
 
                     assert(self.status == .view_change);
                     assert(self.leader_index(self.view) == self.replica);
+                    assert(self.replica != message.header.replica);
+                    assert(self.nack_prepare_op.? == message.header.op);
                 },
                 else => unreachable,
             }
@@ -2416,17 +2419,8 @@ pub fn Replica(
                     assert(m.header.context == context);
                     assert(m.header.replica == replica);
                     switch (command) {
-                        .start_view_change => {
-                            assert(m.header.replica != self.replica);
-                            assert(m.header.view == self.view);
-                        },
                         .do_view_change => assert(m.header.view == self.view),
                         .recovery_response => assert(m.header.replica != self.replica),
-                        .nack_prepare => {
-                            // TODO See if we can restrict this branch further.
-                            assert(m.header.replica != self.replica);
-                            assert(m.header.op == self.nack_prepare_op.?);
-                        },
                         else => unreachable,
                     }
                     count += 1;
@@ -3528,8 +3522,6 @@ pub fn Replica(
             }
 
             if (self.journal.header_for_entry(header)) |existing| {
-                assert(existing.op == header.op);
-
                 // Do not replace any existing op lightly as doing so may impair durability and even
                 // violate correctness by undoing a prepare already acknowledged to the leader:
                 if (existing.checksum == header.checksum) {
