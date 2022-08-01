@@ -227,7 +227,7 @@ pub const Cluster = struct {
             return false;
         }
 
-        // Ensure that the replica can eventually recover without this replica.
+        // Ensure that the cluster can eventually recover without this replica.
         // Verify that each op is recoverable by the current healthy cluster (minus the replica we
         // are trying to crash).
         // TODO Remove this workaround when VSR recovery protocol is disabled.
