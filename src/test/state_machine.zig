@@ -39,7 +39,7 @@ pub const StateMachine = struct {
         };
     }
 
-    pub fn deinit(_: *StateMachine) void {}
+    pub fn deinit(_: *StateMachine, _: std.mem.Allocator) void {}
 
     pub fn tick(state_machine: *StateMachine) void {
         if (state_machine.callback) |callback| {

@@ -300,7 +300,7 @@ pub fn Replica(
             errdefer journal.deinit(allocator);
 
             var state_machine = try StateMachine.init(allocator, state_machine_options);
-            errdefer state_machine.deinit();
+            errdefer state_machine.deinit(allocator);
 
             const recovery_nonce = blk: {
                 var nonce: [@sizeOf(Nonce)]u8 = undefined;
@@ -396,7 +396,7 @@ pub fn Replica(
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
-            self.state_machine.deinit();
+            self.state_machine.deinit(allocator);
 
             {
                 var it = self.client_table.iterator();
@@ -1092,7 +1092,7 @@ pub fn Replica(
             // 1. Start committing op=N.
             // 2. Send `do_view_change` to self.
             // 3. Finish committing op=N.
-            // 4. Remaining `do_view_change` arrives, quorum complete.
+            // 4. Remaining `do_view_change` messages arrive, completing the quorum.
             // In this scenario, the our own `do_view_change`'s commit is `N-1`, but `commit_min=N`.
             // Don't let the commit backtrack.
             if (k.? < self.commit_min) {
@@ -1986,8 +1986,11 @@ pub fn Replica(
                 assert(m.header.checksum_body == message.header.checksum_body);
 
                 if (message.header.command == .do_view_change) {
+                    // Replicas don't resend `do_view_change` messages to themselves.
+                    assert(message.header.replica != self.replica);
                     // A replica may resend a `do_view_change` with a different commit if it was
                     // committing originally. Keep the one with the highest commit.
+                    // This is *not* necessary for correctness.
                     if (m.header.commit < message.header.commit) {
                         log.debug("{}: on_{s}: replacing (newer message replica={} commit={}..{})", .{
                             self.replica,
@@ -1996,6 +1999,7 @@ pub fn Replica(
                             m.header.commit,
                             message.header.commit,
                         });
+                        // TODO(Buggify): skip updating the DVC, since it isn't required for correctness.
                         self.message_bus.unref(m);
                         messages[message.header.replica] = message.ref();
                     } else if (m.header.commit > message.header.commit) {
@@ -2915,7 +2919,7 @@ pub fn Replica(
 
         fn flush_loopback_queue(self: *Self) void {
             // There are four cases where a replica will send a message to itself:
-            // However, of these five cases, all but one call send_message_to_replica().
+            // However, of these four cases, all but one call send_message_to_replica().
             //
             // 1. In on_request(), the leader sends a synchronous prepare to itself, but this is
             //    done by calling on_prepare() directly, and subsequent prepare timeout retries will

@@ -76,7 +76,7 @@ pub const StateMachine = struct {
         };
     }
 
-    pub fn deinit(self: *StateMachine) void {
+    pub fn deinit(self: *StateMachine, _: std.mem.Allocator) void {
         self.accounts.deinit();
         self.transfers.deinit();
         self.posted.deinit();
