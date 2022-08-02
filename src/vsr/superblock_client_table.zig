@@ -67,19 +67,12 @@ pub const ClientTable = struct {
         allocator.free(client_table.sorted);
     }
 
-    /// Creates a sortable key for a given entry using the client id + request number.
-    /// The request should be unique under a client and clients should be unique between each other.
-    fn sort_entries_key(entry: *const Entry) u256 {
-        const header = entry.reply.header;
-        const key_parts = [_]u128{ header.client, header.request };
-        return @bitCast(u256, key_parts);
-    }
-
-    fn sort_entries_less_than(context: void, entry_a: *const Entry, entry_b: *const Entry) bool {
+    fn sort_entries_less_than(context: void, a: *const Entry, b: *const Entry) bool {
         _ = context;
+        assert(a.reply.header.client != b.reply.header.client);
         return std.math.order(
-            sort_entries_key(entry_a),
-            sort_entries_key(entry_b),
+            a.reply.header.client,
+            b.reply.header.client,
         ) == .lt;
     }
 
@@ -111,38 +104,49 @@ pub const ClientTable = struct {
         // The entries must be collected and sorted into a separate buffer first before iteration.
         // This avoids relying on iteration order of AutoHashMapUnmanaged which may change between 
         // zig versions.
-        var num_entries: u32 = 0;
+        var entries_count: u32 = 0;
         {
-            var it = client_table.iterator();
-            while (it.next()) |entry| : (num_entries += 1) {
-                assert(num_entries < client_table.sorted.len);
-                client_table.sorted[num_entries] = entry;
-                num_entries += 1;
+            var it = client_table.entries.valueIterator();
+            while (it.next()) |entry| : (entries_count += 1) {
+                assert(entries_count < client_table.sorted.len);
+                assert(entry.reply.header.command == .reply);
+                client_table.sorted[entries_count] = entry;
+                entries_count += 1;
             }
         }
 
-        assert(num_entries <= client_table.sorted.len);
-        const entries = client_table.sorted[0..num_entries];
+        assert(entries_count <= client_table.sorted.len);
+        const entries = client_table.sorted[0..entries_count];
         std.sort.sort(*const Entry, entries, {}, sort_entries_less_than);
 
         var size: u64 = 0;
         assert(target.len >= encode_size_max);
 
-        // Write all headers
-        size = std.mem.alignForward(size, @alignOf(vsr.Header));
+        // Write all headers:
+        var new_size = std.mem.alignForward(size, @alignOf(vsr.Header));
+        std.mem.set(u8, target[size..new_size], 0);
+        size = new_size;
+
         for (entries) |entry| {
             mem.copy(u8, target[size..], mem.asBytes(entry.reply.header));
             size += @sizeOf(vsr.Header);
         }
 
-        // Write all sessions
-        size = std.mem.alignForward(size, @alignOf(u64));
+        // Write all sessions:
+        new_size = std.mem.alignForward(size, @alignOf(u64));
+        std.mem.set(u8, target[size..new_size], 0);
+        size = new_size;
+
         for (entries) |entry| {
-            mem.copy(u8, target[size..], mem.asBytes(entry.session));
+            mem.copy(u8, target[size..], mem.asBytes(&entry.session));
             size += @sizeOf(u64);
         }
         
-        // Write all messages
+        // Write all messages:
+        new_size = std.mem.alignForward(size, @alignOf(u8));
+        std.mem.set(u8, target[size..new_size], 0);
+        size = new_size;
+
         for (entries) |entry| {
             const body = entry.reply.body();
             assert(body.len == (entry.reply.header.size - @sizeOf(vsr.Header)));
@@ -150,8 +154,12 @@ pub const ClientTable = struct {
             size += body.len;
         }
 
-        // Finally write the entry count
-        mem.copy(u8, target[size..], mem.asBytes(&num_entries));
+        // Finally write the entry count:
+        new_size = std.mem.alignForward(size, @alignOf(u32));
+        std.mem.set(u8, target[size..new_size], 0);
+        size = new_size;
+
+        mem.copy(u8, target[size..], mem.asBytes(&entries_count));
         size += @sizeOf(u32);
 
         assert(size <= encode_size_max);
@@ -160,34 +168,44 @@ pub const ClientTable = struct {
 
     pub fn decode(client_table: *ClientTable, source: []align(@alignOf(vsr.Header)) const u8) void {
         // Read the entry count at the end of the buffer to determine how many there are.
-        var num_entries: u32 = undefined;
-        mem.copy(u8, mem.asBytes(&num_entries), source[source.len - @sizeOf(u32)..]);
+        var entries_count: u32 = undefined;
+        mem.copy(u8, mem.asBytes(&entries_count), source[source.len - @sizeOf(u32)..]);
+        assert(entries_count <= client_table.sorted.len);
 
-        assert(num_entries <= client_table.sorted.len);
-        if (num_entries == 0) return;
+        assert(client_table.count() == 0);
+        defer assert(client_table.count() == entries_count);
+
+        // Skip decoding if there aren't any entries.
+        if (entries_count == 0) return;
 
         var size: u64 = 0;
         assert(source.len > 0);
         assert(source.len <= encode_size_max);
 
-        var headers = mem.bytesAsSlice(vsr.Header, source[size..num_entries * @sizeOf(vsr.Header)]);
+        size = std.mem.alignForward(size, @alignOf(vsr.Header));
+        const headers = mem.bytesAsSlice(vsr.Header, source[size..entries_count * @sizeOf(vsr.Header)],);
         size += mem.sliceAsBytes(headers).len;
-
-        var sessions = mem.bytesAsSlice(u64, source[size..num_entries * @sizeOf(u64)]);
+        
+        size = std.mem.alignForward(size, @alignOf(u64)); 
+        const sessions = mem.bytesAsSlice(u64, source[size..entries_count * @sizeOf(u64)]);
         size += mem.sliceAsBytes(sessions).len;
-
+        
+        size = std.mem.alignForward(size, @alignOf(u8)); 
         var bodies = source[size..];
         assert(bodies.len > 0);
 
         var i: u32 = 0;
-        while (i < num_entries) : (i += 1) {
+        while (i < entries_count) : (i += 1) {
             // Prepare the entry with a message.
             var entry: Entry = undefined;
             entry.reply = client_table.message_pool.get_message();
 
             // Read the header and session for the entry.
-            entry.reply.header.* = headers[i];
             entry.session = sessions[i];
+            entry.reply.header.* = headers[i];
+            assert(entry.reply.header.valid_checksum());
+            assert(entry.reply.header.command == .reply);
+            assert(entry.reply.header.commit >= entry.session);
 
             // Get the message body buffer for the entry.
             const body_size = entry.reply.header.size - @sizeOf(vsr.Header);
@@ -197,6 +215,7 @@ pub const ClientTable = struct {
             assert(bodies.len >= body_size);
             mem.copy(u8, body, bodies[0..body_size]);
             bodies = bodies[body_size..];
+            assert(entry.reply.header.valid_checksum_body(body));
             
             // Insert into the client table
             client_table.put(&entry);
