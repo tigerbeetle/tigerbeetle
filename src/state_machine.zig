@@ -171,9 +171,11 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn prefetch(
             self: *StateMachine,
             callback: fn (*StateMachine) void,
+            op: u64,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
+            _ = op;
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
             self.prefetch_input = input;
@@ -313,13 +315,13 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn commit(
             self: *StateMachine,
             client: u128,
-            op_number: u64,
+            op: u64,
             operation: Operation,
             input: []const u8,
             output: []u8,
         ) usize {
             _ = client;
-            _ = op_number;
+            _ = op;
 
             const result = switch (operation) {
                 .root => unreachable,
@@ -336,6 +338,18 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.forest.grooves.posted.prefetch_clear();
 
             return result;
+        }
+
+        pub fn compact(self: *StateMachine, op: u64, callback: fn (*StateMachine) void) void {
+            // TODO self.forest.compact(op, callback);
+            _ = op;
+            callback(self);
+        }
+
+        pub fn checkpoint(self: *StateMachine, op: u64, callback: fn (*StateMachine) void) void {
+            // TODO self.forest.checkpoint(op, checkpoint_callback);
+            _ = op;
+            callback(self);
         }
 
         fn execute(
@@ -1284,9 +1298,11 @@ test "linked accounts" {
     const StateMachine = StateMachineType(Storage);
     var state_machine = try StateMachine.init(
         testing.allocator,
-        accounts_max,
-        transfers_max,
-        transfers_pending_max,
+        .{
+            .accounts_max = accounts_max,
+            .transfers_max = transfers_max,
+            .transfers_pending_max = transfers_pending_max,
+        },
     );
     defer state_machine.deinit();
 

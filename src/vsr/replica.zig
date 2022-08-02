@@ -97,7 +97,7 @@ pub fn Replica(
         message_bus: *MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
-        state_machine: *StateMachine,
+        state_machine: StateMachine,
 
         /// The current view, initially 0:
         view: u32,
@@ -126,6 +126,7 @@ pub fn Replica(
         commit_max: u64,
 
         /// Whether we are reading a prepare from storage in order to commit.
+        /// Guards against concurrent commits.
         committing: bool = false,
 
         /// Whether we are reading a prepare from storage in order to push to the pipeline.
@@ -208,6 +209,9 @@ pub fn Replica(
 
         on_change_state: ?fn (replica: *Self) void = null,
 
+        commit_callback: ?fn (*Self) void = null,
+        commit_prepare: ?*Message = null,
+
         pub fn init(
             allocator: Allocator,
             cluster: u32,
@@ -216,7 +220,7 @@ pub fn Replica(
             time: *Time,
             storage: *Storage,
             message_bus: *MessageBus,
-            state_machine: *StateMachine,
+            state_machine_options: StateMachine.Options,
         ) !Self {
             assert(replica_count > 0);
             assert(replica < replica_count);
@@ -261,6 +265,9 @@ pub fn Replica(
 
             const journal = try Journal.init(allocator, storage, replica);
             errdefer journal.deinit(allocator);
+
+            var state_machine = try StateMachine.init(allocator, state_machine_options);
+            errdefer state_machine.deinit(allocator);
 
             const recovery_nonce = blk: {
                 var nonce: [@sizeOf(Nonce)]u8 = undefined;
@@ -355,6 +362,7 @@ pub fn Replica(
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
+            self.state_machine.deinit(allocator);
 
             while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
 
@@ -362,6 +370,15 @@ pub fn Replica(
                 assert(loopback_message.next == null);
                 self.message_bus.unref(loopback_message);
                 self.loopback_queue = null;
+            }
+
+            if (self.commit_prepare) |message| {
+                assert(self.committing);
+                assert(self.commit_callback != null);
+                self.message_bus.unref(message);
+                self.commit_prepare = null;
+            } else {
+                assert(self.commit_callback == null);
             }
 
             for (self.do_view_change_from_all_replicas) |message| {
@@ -388,6 +405,7 @@ pub fn Replica(
             assert(self.loopback_queue == null);
 
             self.clock.tick();
+            self.state_machine.tick();
 
             if (!self.journal.recovered) {
                 if (!self.journal.recovering) self.journal.recover();
@@ -413,7 +431,7 @@ pub fn Replica(
                     if (self.committing) return;
                     assert(self.op == 0);
                     self.op = self.journal.op_maximum();
-                    self.commit_ops(self.op);
+                    self.commit_journal(self.op);
                     // The recovering→normal transition is deferred until all ops are committed.
                 } else {
                     // The journal just finished recovery.
@@ -747,7 +765,7 @@ pub fn Replica(
 
             if (self.follower()) {
                 // A prepare may already be committed if requested by repair() so take the max:
-                self.commit_ops(std.math.max(message.header.commit, self.commit_max));
+                self.commit_journal(std.math.max(message.header.commit, self.commit_max));
                 assert(self.commit_max >= message.header.commit);
             }
         }
@@ -832,7 +850,7 @@ pub fn Replica(
             }
 
             self.normal_status_timeout.reset();
-            self.commit_ops(message.header.commit);
+            self.commit_journal(message.header.commit);
         }
 
         fn on_repair(self: *Self, message: *Message) void {
@@ -965,8 +983,9 @@ pub fn Replica(
             // We may receive a `do_view_change` quorum from other replicas, which already have a
             // `start_view_change_quorum`, before we receive a `start_view_change_quorum`:
             if (!self.start_view_change_quorum) {
-                log.debug("{}: on_do_view_change: waiting for start_view_change quorum", .{
+                log.debug("{}: on_do_view_change: waiting for start_view_change quorum (view={})", .{
                     self.replica,
+                    self.view,
                 });
                 return;
             }
@@ -1030,6 +1049,24 @@ pub fn Replica(
 
                     if (k == null or m.header.commit > k.?) k = m.header.commit;
                 }
+            }
+
+            // Consider the case:
+            // 1. Start committing op=N.
+            // 2. Send `do_view_change` to self.
+            // 3. Finish committing op=N.
+            // 4. Remaining `do_view_change` messages arrive, completing the quorum.
+            // In this scenario, the our own `do_view_change`'s commit is `N-1`, but `commit_min=N`.
+            // Don't let the commit backtrack.
+            if (k.? < self.commit_min) {
+                assert(k.? == self.do_view_change_from_all_replicas[self.replica].?.header.commit);
+                log.debug("{}: on_do_view_change: bump view view={} commit={}..{}", .{
+                    self.replica,
+                    self.view,
+                    k,
+                    self.commit_min,
+                });
+                k = self.commit_min;
             }
 
             self.set_latest_op_and_k(&latest, k.?, "on_do_view_change");
@@ -1107,7 +1144,7 @@ pub fn Replica(
             assert(message.header.view == self.view);
             assert(self.follower());
 
-            self.commit_ops(self.commit_max);
+            self.commit_journal(self.commit_max);
 
             self.repair();
         }
@@ -1394,7 +1431,7 @@ pub fn Replica(
             // `state_machine.commit_timestamp` is updated as messages are committed.
 
             self.reset_quorum_recovery_response();
-            self.commit_ops(commit);
+            self.commit_journal(commit);
             self.repair();
         }
 
@@ -1909,10 +1946,44 @@ pub fn Replica(
                 assert(m.header.replica == message.header.replica);
                 assert(m.header.view == message.header.view);
                 assert(m.header.op == message.header.op);
-                assert(m.header.commit == message.header.commit);
                 assert(m.header.checksum_body == message.header.checksum_body);
-                assert(m.header.checksum == message.header.checksum);
-                log.debug("{}: on_{s}: ignoring (duplicate message)", .{ self.replica, command });
+
+                if (message.header.command == .do_view_change) {
+                    // Replicas don't resend `do_view_change` messages to themselves.
+                    assert(message.header.replica != self.replica);
+                    // A replica may resend a `do_view_change` with a different commit if it was
+                    // committing originally. Keep the one with the highest commit.
+                    // This is *not* necessary for correctness.
+                    if (m.header.commit < message.header.commit) {
+                        log.debug("{}: on_{s}: replacing (newer message replica={} commit={}..{})", .{
+                            self.replica,
+                            command,
+                            message.header.replica,
+                            m.header.commit,
+                            message.header.commit,
+                        });
+                        // TODO(Buggify): skip updating the DVC, since it isn't required for correctness.
+                        self.message_bus.unref(m);
+                        messages[message.header.replica] = message.ref();
+                    } else if (m.header.commit > message.header.commit) {
+                        log.debug("{}: on_{s}: ignoring (older message replica={})", .{
+                            self.replica,
+                            command,
+                            message.header.replica,
+                        });
+                    } else {
+                        assert(m.header.checksum == message.header.checksum);
+                    }
+                } else {
+                    assert(m.header.commit == message.header.commit);
+                    assert(m.header.checksum == message.header.checksum);
+                }
+
+                log.debug("{}: on_{s}: ignoring (duplicate message replica={})", .{
+                    self.replica,
+                    command,
+                    message.header.replica,
+                });
                 return null;
             }
 
@@ -2030,9 +2101,15 @@ pub fn Replica(
                 // In a cluster-of-one, the prepares must always be written to the WAL sequentially
                 // (never concurrently). This ensures that there will be no gaps in the WAL during
                 // crash recovery.
-                log.debug("{}: append: serializing append op={}", .{ self.replica, message.header.op });
+                log.debug("{}: append: serializing append op={}", .{
+                    self.replica,
+                    message.header.op,
+                });
             } else {
-                log.debug("{}: append: appending to journal", .{self.replica});
+                log.debug("{}: append: appending to journal op={}", .{
+                    self.replica,
+                    message.header.op,
+                });
                 self.write_prepare(message, .append);
             }
         }
@@ -2080,9 +2157,9 @@ pub fn Replica(
         }
 
         /// Commit ops up to commit number `commit` (inclusive).
-        /// A function which calls `commit_ops()` to set `commit_max` must first call `view_jump()`.
-        /// Otherwise, we may fork the log.
-        fn commit_ops(self: *Self, commit: u64) void {
+        /// A function which calls `commit_journal()` to set `commit_max` must first call
+        /// `view_jump()`. Otherwise, we may fork the log.
+        fn commit_journal(self: *Self, commit: u64) void {
             // TODO Restrict `view_change` status only to the leader purely as defense-in-depth.
             // Be careful of concurrency when doing this, as successive view changes can happen quickly.
             assert(self.status == .normal or self.status == .view_change or
@@ -2098,7 +2175,7 @@ pub fn Replica(
             // We must update `commit_max` even if we are already committing, otherwise we will lose
             // information that we should know, and `set_latest_op_and_k()` will catch us out:
             if (commit > self.commit_max) {
-                log.debug("{}: commit_ops: advancing commit_max={}..{}", .{
+                log.debug("{}: commit_journal: advancing commit_max={}..{}", .{
                     self.replica,
                     self.commit_max,
                     commit,
@@ -2106,9 +2183,9 @@ pub fn Replica(
                 self.commit_max = commit;
             }
 
-            // Guard against multiple concurrent invocations of commit_ops():
+            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.committing) {
-                log.debug("{}: commit_ops: already committing...", .{self.replica});
+                log.debug("{}: commit_journal: already committing...", .{self.replica});
                 return;
             }
 
@@ -2125,19 +2202,19 @@ pub fn Replica(
             assert(!self.committing);
             self.committing = true;
 
-            self.commit_ops_read();
+            self.commit_journal_next();
         }
 
-        fn commit_ops_read(self: *Self) void {
+        fn commit_journal_next(self: *Self) void {
             assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            if (!self.valid_hash_chain("commit_ops_read")) {
-                self.committing = false;
+            if (!self.valid_hash_chain("commit_journal_next")) {
                 assert(self.replica_count > 1);
+                self.commit_ops_done();
                 return;
             }
             assert(self.op >= self.commit_max);
@@ -2147,9 +2224,9 @@ pub fn Replica(
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
                 const checksum = self.journal.header_with_op(op).?.checksum;
-                self.journal.read_prepare(commit_ops_commit, op, checksum, null);
+                self.journal.read_prepare(commit_journal_next_callback, op, checksum, null);
             } else {
-                self.committing = false;
+                self.commit_ops_done();
                 // This is an optimization to expedite the view change before the `repair_timeout`:
                 if (self.status == .view_change and self.repairs_allowed()) self.repair();
 
@@ -2159,20 +2236,19 @@ pub fn Replica(
                     assert(self.commit_min == self.op);
                     self.transition_to_normal_from_recovering_status(0);
                 } else {
-                    // We expect that a cluster-of-one only calls commit_ops() in recovering status.
+                    // We expect that a cluster-of-one only calls commit_journal() in recovering status.
                     assert(self.replica_count > 1);
                 }
             }
         }
 
-        fn commit_ops_commit(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
+        fn commit_journal_next_callback(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
+            assert(self.committing);
             assert(destination_replica == null);
 
-            assert(self.committing);
-            self.committing = false;
-
             if (prepare == null) {
-                log.debug("{}: commit_ops_commit: prepare == null", .{self.replica});
+                self.commit_ops_done();
+                log.debug("{}: commit_journal_next_callback: prepare == null", .{self.replica});
                 if (self.replica_count == 1) @panic("cannot recover corrupt prepare");
                 return;
             }
@@ -2181,7 +2257,11 @@ pub fn Replica(
                 .normal => {},
                 .view_change => {
                     if (self.leader_index(self.view) != self.replica) {
-                        log.debug("{}: commit_ops_commit: no longer leader", .{self.replica});
+                        self.commit_ops_done();
+                        log.debug("{}: commit_journal_next_callback: no longer leader view={}", .{
+                            self.replica,
+                            self.view,
+                        });
                         assert(self.replica_count > 1);
                         return;
                     }
@@ -2198,39 +2278,125 @@ pub fn Replica(
             const op = self.commit_min + 1;
 
             if (prepare.?.header.op != op) {
-                log.debug("{}: commit_ops_commit: op changed", .{self.replica});
+                self.commit_ops_done();
+                log.debug("{}: commit_journal_next_callback: op changed", .{self.replica});
                 assert(self.replica_count > 1);
                 return;
             }
 
             if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
-                log.debug("{}: commit_ops_commit: checksum changed", .{self.replica});
+                self.commit_ops_done();
+                log.debug("{}: commit_journal_next_callback: checksum changed", .{self.replica});
                 assert(self.replica_count > 1);
                 return;
             }
 
-            self.commit_op(prepare.?);
+            self.commit_op_prefetch(prepare.?, commit_journal_callback);
+        }
 
-            assert(self.commit_min == op);
+        fn commit_journal_callback(self: *Self) void {
+            assert(self.committing);
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            self.committing = true;
-            self.commit_ops_read();
+            self.commit_journal_next();
         }
 
-        fn commit_op(self: *Self, prepare: *const Message) void {
-            // TODO Can we add more checks around allowing commit_op() during a view change?
+        fn commit_op_prefetch(
+            self: *Self,
+            prepare: *Message,
+            callback: fn (*Self) void,
+        ) void {
+            assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
+            assert(self.commit_prepare == null);
+            assert(self.commit_callback == null);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
 
-            // If we are a follower committing through `commit_ops()` then a view change may have
-            // happened since we last checked in `commit_ops_read()`. However, this would relate to
-            // subsequent ops, since by now we have already verified the hash chain for this commit.
+            self.commit_prepare = prepare.ref();
+            self.commit_callback = callback;
+            self.state_machine.prefetch(
+                prepare.header.op,
+                prepare.header.operation.cast(StateMachine),
+                prepare.buffer[@sizeOf(Header)..prepare.header.size],
+                commit_op_prefetch_callback,
+            );
+        }
+
+        fn commit_op_prefetch_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(self.committing);
+            assert(self.commit_prepare != null);
+            assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+
+            self.commit_op(self.commit_prepare.?);
+            assert(self.commit_min == self.commit_prepare.?.header.op);
+            assert(self.commit_min <= self.commit_max);
+
+            if (self.status == .normal and self.leader()) {
+                const prepare = self.pipeline.pop().?;
+                assert(self.commit_min == self.commit_max);
+                assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
+                assert(prepare.message.header.op == self.commit_min);
+                assert(prepare.message.header.op == self.commit_max);
+                assert(self.prepare_timeout.ticking);
+
+                self.message_bus.unref(prepare.message);
+
+                if (self.pipeline.head_ptr()) |next| {
+                    assert(next.message.header.op == self.commit_min + 1);
+                    assert(next.message.header.op == self.commit_prepare.?.header.op + 1);
+
+                    if (self.replica_count == 1) {
+                        // Write the next message in the queue.
+                        // A cluster-of-one writes prepares sequentially to avoid gaps in the
+                        // WAL caused by reordered writes.
+                        log.debug("{}: append: appending to journal op={}", .{
+                            self.replica,
+                            next.message.header.op,
+                        });
+                        self.write_prepare(next.message, .append);
+                    }
+                } else {
+                    // When the pipeline is empty, stop the prepare timeout.
+                    // The timeout will be restarted when another entry arrives for the pipeline.
+                    self.prepare_timeout.stop();
+                }
+            }
+
+            self.state_machine.compact(self.commit_prepare.?.header.op, commit_op_compact_callback);
+        }
+
+        fn commit_op_compact_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            const callback = self.commit_callback.?;
+            assert(self.committing);
+
+            self.message_bus.unref(self.commit_prepare.?);
+            self.commit_prepare = null;
+            self.commit_callback = null;
+            callback(self);
+        }
+
+        fn commit_op(self: *Self, prepare: *const Message) void {
+            // TODO Can we add more checks around allowing commit_op() during a view change?
+            assert(self.committing);
+            assert(self.commit_prepare != null);
+            assert(self.commit_callback != null);
+            assert(prepare.header.command == .prepare);
+            assert(prepare.header.operation != .root);
+            assert(prepare.header.op == self.commit_min + 1);
+            assert(prepare.header.op <= self.op);
+
+            // If we are a follower committing through `commit_journal()` then a view change may
+            // have happened since we last checked in `commit_journal_next()`. However, this would
+            // relate to subsequent ops, since by now we have already verified the hash chain for
+            // this commit.
 
             assert(self.journal.header_with_op(self.commit_min).?.checksum ==
                 prepare.header.parent);
@@ -2298,22 +2464,38 @@ pub fn Replica(
         }
 
         /// Commits, frees and pops as many prepares at the head of the pipeline as have quorum.
+        /// Can be called only when the replica is the leader.
         /// Can be called only when the pipeline has at least one prepare.
-        /// Stops the prepare timeout and resets the timeouts counter if the pipeline becomes empty.
         fn commit_pipeline(self: *Self) void {
             assert(self.status == .normal);
             assert(self.leader());
             assert(self.pipeline.count > 0);
 
-            while (self.pipeline.head_ptr()) |prepare| {
-                assert(self.pipeline.count > 0);
+            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
+            if (self.committing) {
+                log.debug("{}: commit_pipeline: already committing...", .{self.replica});
+                return;
+            }
+
+            self.committing = true;
+            self.commit_pipeline_next();
+        }
+
+        fn commit_pipeline_next(self: *Self) void {
+            assert(self.committing);
+            assert(self.status == .normal);
+            assert(self.leader());
+
+            if (self.pipeline.head_ptr()) |prepare| {
                 assert(self.commit_min == self.commit_max);
-                assert(self.commit_max + self.pipeline.count == self.op);
-                assert(self.commit_max + 1 == prepare.message.header.op);
+                assert(self.commit_min + 1 == prepare.message.header.op);
+                assert(self.commit_min + self.pipeline.count == self.op);
+                assert(self.journal.has(prepare.message.header));
 
                 if (!prepare.ok_quorum_received) {
                     // Eventually handled by on_prepare_timeout().
                     log.debug("{}: commit_pipeline: waiting for quorum", .{self.replica});
+                    self.commit_ops_done();
                     return;
                 }
 
@@ -2321,26 +2503,30 @@ pub fn Replica(
                 assert(count >= self.quorum_replication);
                 assert(count <= self.replica_count);
 
-                self.commit_op(prepare.message);
-
-                assert(self.commit_min == self.commit_max);
-                assert(self.commit_max == prepare.message.header.op);
-
-                self.message_bus.unref(self.pipeline.pop().?.message);
-
-                if (self.replica_count == 1) {
-                    if (self.pipeline.head_ptr()) |head| {
-                        // Write the next message in the queue.
-                        // A cluster-of-one writes prepares sequentially to avoid gaps in the WAL.
-                        self.write_prepare(head.message, .append);
-                        // The loop will wrap around and exit when `!ok_quorum_received`.
-                    }
-                }
+                self.commit_op_prefetch(prepare.message, commit_pipeline_callback);
+            } else {
+                self.commit_ops_done();
             }
+        }
 
-            assert(self.prepare_timeout.ticking);
+        fn commit_pipeline_callback(self: *Self) void {
+            assert(self.committing);
+            assert(self.commit_min <= self.commit_max);
+            assert(self.commit_min <= self.op);
 
-            if (self.pipeline.count == 0) self.prepare_timeout.stop();
+            if (self.status == .normal and self.leader()) {
+                if (self.pipeline.head_ptr()) |pipeline_head| {
+                    assert(pipeline_head.message.header.op == self.commit_min + 1);
+                }
+                self.commit_pipeline_next();
+            } else {
+                self.commit_ops_done();
+            }
+        }
+
+        fn commit_ops_done(self: *Self) void {
+            assert(self.committing);
+            self.committing = false;
         }
 
         fn copy_latest_headers_and_set_size(
@@ -2694,8 +2880,8 @@ pub fn Replica(
         }
 
         fn flush_loopback_queue(self: *Self) void {
-            // There are three cases where a replica will send a message to itself:
-            // However, of these three cases, only two cases will call send_message_to_replica().
+            // There are four cases where a replica will send a message to itself:
+            // However, of these four cases, all but one call send_message_to_replica().
             //
             // 1. In on_request(), the leader sends a synchronous prepare to itself, but this is
             //    done by calling on_prepare() directly, and subsequent prepare timeout retries will
@@ -2704,6 +2890,8 @@ pub fn Replica(
             //    asynchronous prepare_ok to itself.
             // 3. In on_start_view_change(), after receiving a quorum of start_view_change
             //    messages, the new leader sends a synchronous do_view_change to itself.
+            // 4. In start_view_as_the_new_leader(), the new leader sends itself a prepare_ok
+            //    message for each uncommitted message.
             if (self.loopback_queue) |message| {
                 defer self.message_bus.unref(message);
 
@@ -3425,13 +3613,12 @@ pub fn Replica(
             // Commit ops, which may in turn discover faulty prepares and drive more repairs:
             if (self.commit_min < self.commit_max) {
                 assert(self.replica_count > 1);
-                self.commit_ops(self.commit_max);
+                self.commit_journal(self.commit_max);
                 return;
             }
 
             if (self.status == .view_change and self.leader_index(self.view) == self.replica) {
                 if (self.repair_pipeline_op() != null) return self.repair_pipeline();
-
                 // Start the view as the new leader:
                 self.start_view_as_the_new_leader();
             }
@@ -4556,8 +4743,6 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
-
-            assert(!self.committing);
             assert(!self.repairing_pipeline);
 
             assert(self.commit_min == self.commit_max);
@@ -4595,6 +4780,8 @@ pub fn Replica(
         fn transition_to_normal_from_recovering_status(self: *Self, new_view: u32) void {
             assert(self.status == .recovering);
             assert(self.view == 0);
+            assert(!self.committing);
+            assert(self.replica_count > 1 or new_view == 0);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
