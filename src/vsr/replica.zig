@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 
+const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientTable = @import("superblock_client_table.zig").ClientTable;
@@ -65,6 +66,8 @@ pub fn Replica(
     comptime Storage: type,
     comptime Time: type,
 ) type {
+    const SuperBlock = vsr.SuperBlockType(Storage);
+
     return struct {
         const Self = @This();
 
@@ -98,6 +101,10 @@ pub fn Replica(
 
         /// For executing service up-calls after an operation has been committed:
         state_machine: StateMachine,
+
+        // TODO Document.
+        superblock: SuperBlock,
+        superblock_context: SuperBlock.Context = undefined,
 
         /// The current view, initially 0:
         view: u32,
@@ -209,19 +216,26 @@ pub fn Replica(
 
         on_change_state: ?fn (replica: *Self) void = null,
 
+        /// Called when `commit_prepare` finishes committing.
         commit_callback: ?fn (*Self) void = null,
+
+        /// The prepare message being committed.
         commit_prepare: ?*Message = null,
 
-        pub fn init(
-            allocator: Allocator,
+        const Options = struct {
             cluster: u32,
             replica_count: u8,
-            replica: u8,
+            replica_index: u8,
             time: *Time,
+            superblock: SuperBlock,
             storage: *Storage,
             message_bus: *MessageBus,
             state_machine_options: StateMachine.Options,
-        ) !Self {
+        };
+
+        pub fn init(allocator: Allocator, options: Options) !Self {
+            const replica_count = options.replica_count;
+            const replica = options.replica_index;
             assert(replica_count > 0);
             assert(replica < replica_count);
 
@@ -253,20 +267,20 @@ pub fn Replica(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
-            const root_prepare = Header.root_prepare(cluster);
+            const root_prepare = Header.root_prepare(options.cluster);
 
             var clock = try Clock.init(
                 allocator,
                 replica_count,
                 replica,
-                time,
+                options.time,
             );
             errdefer clock.deinit(allocator);
 
-            const journal = try Journal.init(allocator, storage, replica);
+            const journal = try Journal.init(allocator, options.storage, replica);
             errdefer journal.deinit(allocator);
 
-            var state_machine = try StateMachine.init(allocator, state_machine_options);
+            var state_machine = try StateMachine.init(allocator, options.state_machine_options);
             errdefer state_machine.deinit(allocator);
 
             const recovery_nonce = blk: {
@@ -279,15 +293,16 @@ pub fn Replica(
             };
 
             var self = Self{
-                .cluster = cluster,
+                .cluster = options.cluster,
                 .replica_count = replica_count,
                 .replica = replica,
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
                 .clock = clock,
                 .journal = journal,
-                .message_bus = message_bus,
+                .message_bus = options.message_bus,
                 .state_machine = state_machine,
+                .superblock = options.superblock,
                 .view = root_prepare.view,
                 .view_normal = root_prepare.view,
                 .op = root_prepare.op,
@@ -363,6 +378,7 @@ pub fn Replica(
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
             self.state_machine.deinit(allocator);
+            self.superblock.deinit(allocator);
 
             while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
 
@@ -2369,7 +2385,7 @@ pub fn Replica(
                 }
             }
 
-            self.state_machine.compact(self.commit_prepare.?.header.op, commit_op_compact_callback);
+            self.state_machine.compact(commit_op_compact_callback, self.commit_prepare.?.header.op);
         }
 
         fn commit_op_compact_callback(state_machine: *StateMachine) void {
@@ -5162,6 +5178,114 @@ pub fn Replica(
                 .repair => self.repair(),
                 .pipeline => self.repair(),
             }
+        }
+    };
+}
+
+pub fn ReplicaFormatter(comptime Storage: type) type {
+    const SuperBlock = vsr.SuperBlockType(Storage);
+    return struct {
+        const Self = @This();
+
+        cluster: u32,
+        replica: u8,
+        storage: *Storage,
+        callback: ?fn (formatter: *Self) void = null,
+
+        journal_write: Storage.Write = undefined,
+        journal_write_offset: u64 = 0,
+        journal_write_buffer: []u8,
+
+        superblock: SuperBlock,
+        superblock_context: SuperBlock.Context = undefined,
+
+        pub fn init(
+            allocator: std.mem.Allocator,
+            cluster: u32,
+            replica: u8,
+            storage: *Storage,
+            message_pool: *MessagePool,
+        ) !Self {
+            const journal_write_size_max = 4 * 1024 * 1024;
+            assert(journal_write_size_max % config.sector_size == 0);
+
+            var journal_write_buffer = try allocator.alloc(u8, journal_write_size_max);
+            errdefer allocator.free(journal_write_buffer);
+
+            var superblock = try SuperBlock.init(allocator, storage, message_pool);
+            errdefer superblock.deinit(allocator);
+
+            return Self{
+                .cluster = cluster,
+                .replica = replica,
+                .storage = storage,
+                .journal_write_buffer = journal_write_buffer,
+                .superblock = superblock,
+            };
+        }
+
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            assert(self.callback == null);
+
+            allocator.free(self.journal_write_buffer);
+            self.superblock.deinit(allocator);
+        }
+
+        /// Initialize the TigerBeetle replica's data file.
+        pub fn format(self: *Self, callback: fn (formatter: *Self) void) !void {
+            assert(self.callback == null);
+            assert(self.journal_write_offset == 0);
+
+            self.callback = callback;
+            self.format_wal_sectors();
+        }
+
+        fn format_wal_sectors(self: *Self) void {
+            assert(self.callback != null);
+            assert(self.journal_write_offset <= config.journal_size_max);
+
+            const offset = self.journal_write_offset;
+            const buffer = self.journal_write_buffer;
+            const write_size = vsr.format_journal(self.cluster, offset, buffer);
+            if (write_size == 0) {
+                self.format_superblock();
+            } else {
+                self.journal_write_offset += write_size;
+                self.storage.write_sectors(
+                    format_wal_sectors_callback,
+                    &self.journal_write,
+                    buffer[0..write_size],
+                    offset,
+                );
+            }
+        }
+
+        fn format_wal_sectors_callback(write: *Storage.Write) void {
+            const self = @fieldParentPtr(Self, "journal_write", write);
+            assert(self.callback != null);
+            assert(self.journal_write_offset == config.journal_size_max);
+
+            self.format_wal_sectors();
+        }
+
+        fn format_superblock(self: *Self) void {
+            assert(self.callback != null);
+            assert(self.journal_write_offset == config.journal_size_max);
+
+            self.superblock.format(format_superblock_callback, &self.superblock_context, .{
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
+            });
+        }
+
+        fn format_superblock_callback(context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(Self, "superblock", context.superblock);
+            const callback = self.callback.?;
+            assert(self.journal_write_offset == config.journal_size_max);
+
+            self.callback = null;
+            callback(self);
         }
     };
 }
