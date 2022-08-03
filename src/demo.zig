@@ -37,7 +37,8 @@ pub fn request(
     var io = try IO.init(32, 0);
     defer io.deinit();
 
-    var message_bus = try MessageBus.init(allocator, cluster_id, &addresses, client_id, &io);
+    var message_pool = try MessagePool.init(allocator, .client);
+    var message_bus = try MessageBus.init(allocator, cluster_id, &addresses, client_id, &io, &message_pool);
     defer message_bus.deinit();
 
     var client = try Client.init(

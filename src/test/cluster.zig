@@ -142,13 +142,15 @@ pub const Cluster = struct {
 
             replica.* = try Replica.init(
                 allocator,
-                options.cluster,
-                options.replica_count,
-                @intCast(u8, replica_index),
-                &cluster.times[replica_index],
-                &cluster.storages[replica_index],
-                message_bus,
-                cluster.options.state_machine_options,
+                .{
+                    .cluster = options.cluster,
+                    .replica_count = options.replica_count,
+                    .replica_index = @intCast(u8, replica_index),
+                    .time = &cluster.times[replica_index],
+                    .storage = &cluster.storages[replica_index],
+                    .message_bus = message_bus,
+                    .state_machine_options = cluster.options.state_machine_options,
+                },
             );
             message_bus.set_on_message(*Replica, replica, Replica.on_message);
         }
@@ -310,13 +312,15 @@ pub const Cluster = struct {
 
         replica.* = try Replica.init(
             cluster.allocator,
-            cluster.options.cluster,
-            cluster.options.replica_count,
-            @intCast(u8, replica_index),
-            &cluster.times[replica_index],
-            &cluster.storages[replica_index],
-            message_bus,
-            cluster.options.state_machine_options,
+            .{
+                .cluster = cluster.options.cluster,
+                .replica_count = cluster.options.replica_count,
+                .replica_index = @intCast(u8, replica_index),
+                .time = &cluster.times[replica_index],
+                .storage = &cluster.storages[replica_index],
+                .message_bus = message_bus,
+                .state_machine_options = cluster.options.state_machine_options,
+            },
         );
         message_bus.set_on_message(*Replica, replica, Replica.on_message);
         replica.on_change_state = cluster.on_change_state;

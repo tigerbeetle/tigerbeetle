@@ -32,9 +32,9 @@ pub fn StateMachineType(comptime Storage: type) type {
         prepare_timestamp: u64 = 0,
         commit_timestamp: u64 = 0,
 
-        pub fn init(seed: u64, options: Options) StateMachine {
-            return .{
-                .state = hash(0, std.mem.asBytes(&seed)),
+        pub fn init(_: std.mem.Allocator, options: Options) !StateMachine {
+            return StateMachine{
+                .state = hash(0, std.mem.asBytes(&options.seed)),
                 .options = options,
                 .prng = std.rand.DefaultPrng.init(options.seed),
             };
@@ -119,8 +119,8 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub fn compact(
             state_machine: *StateMachine,
-            op: u64,
             callback: fn (*StateMachine) void,
+            op: u64,
         ) void {
             _ = op;
             assert(state_machine.callback == null);
@@ -131,8 +131,8 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub fn checkpoint(
             state_machine: *StateMachine,
-            op: u64,
             callback: fn (*StateMachine) void,
+            op: u64,
         ) void {
             _ = op;
             assert(state_machine.callback == null);

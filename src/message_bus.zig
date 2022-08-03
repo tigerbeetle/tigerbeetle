@@ -35,7 +35,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
     return struct {
         const Self = @This();
 
-        pool: MessagePool,
+        pool: *MessagePool,
         io: *IO,
 
         cluster: u32,
@@ -90,6 +90,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                 .client => u128,
             },
             io: *IO,
+            message_pool: *MessagePool,
         ) !Self {
             // There must be enough connections for all replicas and at least one client.
             assert(config.connections_max > configuration.len);
@@ -112,7 +113,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
             };
 
             var bus: Self = .{
-                .pool = try MessagePool.init(allocator, process_type),
+                .pool = message_pool,
                 .io = io,
                 .cluster = cluster,
                 .configuration = configuration,

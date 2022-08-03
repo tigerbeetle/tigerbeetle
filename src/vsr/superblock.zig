@@ -397,7 +397,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         queue_tail: ?*Context = null,
 
         pub fn init(
-            allocator: mem.Allocator, 
+            allocator: mem.Allocator,
             storage: *Storage,
             message_pool: *MessagePool,
         ) !SuperBlock {

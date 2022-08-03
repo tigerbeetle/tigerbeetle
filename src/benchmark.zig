@@ -76,7 +76,8 @@ pub fn main() !void {
     var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
     var io = try IO.init(32, 0);
-    var message_bus = try MessageBus.init(allocator, cluster_id, address[0..], client_id, &io);
+    var message_pool = try MessagePool.init(allocator, .client);
+    var message_bus = try MessageBus.init(allocator, cluster_id, address[0..], client_id, &io, &message_pool);
     defer message_bus.deinit();
 
     var client = try Client.init(
