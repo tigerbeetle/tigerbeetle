@@ -2205,6 +2205,14 @@ pub fn Replica(
                 return;
             }
 
+            const slot = self.journal.slot_with_op_and_checksum(
+                prepare.?.header.op,
+                prepare.?.header.checksum,
+            ).?;
+            assert(self.journal.prepare_inhabited[slot.index]);
+            assert(self.journal.prepare_checksums[slot.index] == prepare.?.header.checksum);
+            assert(self.journal.has(prepare.?.header));
+
             switch (self.status) {
                 .normal => {},
                 .view_change => {
@@ -2224,18 +2232,7 @@ pub fn Replica(
             }
 
             const op = self.commit_min + 1;
-
-            if (prepare.?.header.op != op) {
-                log.debug("{}: commit_ops_commit: op changed", .{self.replica});
-                assert(self.replica_count > 1);
-                return;
-            }
-
-            if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
-                log.debug("{}: commit_ops_commit: checksum changed", .{self.replica});
-                assert(self.replica_count > 1);
-                return;
-            }
+            assert(prepare.?.header.op == op);
 
             self.commit_op(prepare.?);
 
@@ -2260,6 +2257,7 @@ pub fn Replica(
             // happened since we last checked in `commit_ops_read()`. However, this would relate to
             // subsequent ops, since by now we have already verified the hash chain for this commit.
 
+            assert(self.journal.has(prepare.header));
             assert(self.journal.header_with_op(self.commit_min).?.checksum ==
                 prepare.header.parent);
 
