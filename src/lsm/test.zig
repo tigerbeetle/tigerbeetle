@@ -6,6 +6,7 @@ const os = std.os;
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
+const log = std.log.scoped(.lsm_forest_test);
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
@@ -58,7 +59,7 @@ fn GrooveRecordType(comptime Object: type, comptime commit_count_max: u32) type 
             record.recorded.deinit();
         }
 
-        pub fn insert(record: *GrooveRecord, object: *const Object) !void {
+        pub fn put(record: *GrooveRecord, object: *const Object) !void {
             try record.recorded.append(object.*);
         }
 
@@ -67,10 +68,7 @@ fn GrooveRecordType(comptime Object: type, comptime commit_count_max: u32) type 
             record.recorded.clearRetainingCapacity();
         }
 
-        pub fn assert_checkpointed(record: *const GrooveRecord, io: *IO, groove: anytype) !void {
-            // Checkpoint asserts should happen before we start updating the record. 
-            assert(record.recorded.items.len == 0);
-
+        pub fn assert_checkpointed(record: *const GrooveRecord, groove: anytype, io: *IO) !void {
             const Groove = @TypeOf(groove.*);
             const CheckpointAssertion = struct {
                 prefetch_context: Groove.PrefetchContext = undefined,
@@ -119,7 +117,7 @@ fn GrooveRecordType(comptime Object: type, comptime commit_count_max: u32) type 
 
                     const checkpointed = assertion.checkpointed[0..assertion.verify_count];
                     for (checkpointed) |*object| {
-                        const groove_object = assertion.groove.get(object.id) catch unreachable;
+                        const groove_object = assertion.groove.get(object.id).?;
                         assert(std.mem.eql(
                             u8, 
                             std.mem.asBytes(object), 
@@ -193,6 +191,24 @@ const Environment = struct {
     record_transfers: GrooveRecordTransfers,
 
     fn init(env: *Environment, must_create: bool) !void {
+        try env.start(must_create);
+        errdefer env.shutdown();
+
+        env.record_accounts = try GrooveRecordAccounts.init();
+        errdefer env.record_accounts.deinit();
+
+        env.record_transfers = try GrooveRecordTransfers.init();
+        errdefer env.record_transfers.deinit();
+    }
+
+    fn deinit(env: *Environment) void {
+        env.record_transfers.deinit();
+        env.record_accounts.deinit();
+        env.shutdown();
+    }
+
+    /// Setup the environment without affecting the state that needs to persist across shutdown()s.
+    fn start(env: *Environment, must_create: bool) !void {
         env.state = .uninit;
 
         const dir_path = ".";
@@ -220,20 +236,13 @@ const Environment = struct {
         env.forest = try Forest.init(allocator, &env.grid, node_count, forest_config);
         errdefer env.forest.deinit(allocator);
 
-        env.record_accounts = try GrooveRecordAccounts.init();
-        errdefer env.record_accounts.deinit();
-
-        env.record_transfers = try GrooveRecordTransfers.init();
-        errdefer env.record_transfers.deinit();
-
         env.state = .init;
     }
 
-    fn deinit(env: *Environment) void {
+    fn shutdown(env: *Environment) void {
         assert(env.state != .uninit);
-
-        env.record_transfers.deinit();
-        env.record_accounts.deinit();
+        defer env.state = .uninit;
+        
         env.forest.deinit(allocator);
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
@@ -242,9 +251,6 @@ const Environment = struct {
         env.io.deinit();
         std.os.close(env.fd);
         std.os.close(env.dir_fd);
-
-        env.* = undefined;
-        env.state = .uninit;
     }
 
     fn format() !void {
@@ -329,14 +335,24 @@ const Environment = struct {
         env.state = .forest_open;
     }
 
-    fn simulate_crash(env: *Environment) !void {
-        env.deinit();
+    fn compact(env: *Environment, op: u64) !void {
+        assert(env.state == .forest_open);
+        env.state = .forest_compacting;
+        env.forest.compact(forest_compact_callback, op);
 
-        const must_create = false;
-        try env.init(must_create);
-        errdefer env.deinit();
+        while (true) {
+            switch (env.state) {
+                .forest_compacting => try env.io.tick(),
+                .forest_open => break,
+                else => unreachable,
+            }
+        }
+    }
 
-        try env.open();
+    fn forest_compact_callback(forest: *Forest) void {
+        const env = @fieldParentPtr(@This(), "forest", forest);
+        assert(env.state == .forest_compacting);
+        env.state = .forest_open;
     }
 
     fn run() !void {
@@ -349,8 +365,81 @@ const Environment = struct {
         // If an error occurs during re-initialization, we don't want to trip this call to deinit().
         var crashing = false;
         defer if (!crashing) env.deinit();
-
+        
+        // Open the superblock then forest to start inserting accounts and transfers.
         try env.open();
+        var next_id: u128 = 0;
+        var prng = std.rand.DefaultPrng.init(0xdeadbeef);
+
+        const num_accounts = 10_000;
+        {
+            var next_op: u64 = 0;
+            var next_crash: u32 = 0;
+            var next_checkpoint: u32 = 0;
+            var next_compact: u32 = forest_config.accounts.commit_count_max;
+            
+            var i: usize = 0;
+            while (i < num_accounts) : (i += 1) {
+                defer next_id += 1;
+                const account = Account{
+                    .id = next_id,
+                    .user_data = 0,
+                    .reserved = [_]u8{0} ** 48,
+                    .ledger = 710, // Let's use the ISO-4217 Code Number for ZAR
+                    .code = 1000, // A chart of accounts code to describe this as a clearing account.
+                    .flags = .{ .debits_must_not_exceed_credits = true },
+                    .debits_pending = 0,
+                    .debits_posted = 0,
+                    .credits_pending = 0,
+                    .credits_posted = prng.random().uintLessThanBiased(u64, 1000),
+                };
+
+                // Insert created account.
+                log.debug("inserting account {d}/{d}", .{ i, num_accounts });
+                try env.record_accounts.put(&account);
+                env.forest.grooves.accounts.put(&account);
+
+                // Compact the forest
+                if (i + 1 == next_compact) {
+                    log.debug("compacting forest {d}/{d}", .{ i, num_accounts });
+                    next_compact += forest_config.accounts.commit_count_max;
+
+                    const op = next_op;
+                    next_op += 1;
+
+                    try env.compact(op);
+                }
+
+                // Checkpoint everything.
+                if (i == next_checkpoint) {
+                    log.debug("checkpointing everything {d}/{d}", .{ i, num_accounts });
+                    next_checkpoint += 1024;
+
+                    const op = next_op;
+                    try env.checkpoint(op);
+                    try env.record_accounts.checkpoint();
+                    try env.record_transfers.checkpoint();
+                }
+
+                // Simulate crashing and restoring.
+                if (i == next_crash) {
+                    log.debug("simulating crash {d}/{d}", .{ i, num_accounts });
+                    next_crash += 1024;
+
+                    crashing = true;
+                    {
+                        env.shutdown();
+                        try env.start(must_create);
+                        errdefer env.deinit();
+
+                        try env.open();
+                        try env.record_accounts.assert_checkpointed(&env.forest.grooves.accounts, &env.io);
+                        try env.record_transfers.assert_checkpointed(&env.forest.grooves.transfers, &env.io);
+                    }
+                    crashing = false;
+                }
+            }
+        }
     }
 };
 
