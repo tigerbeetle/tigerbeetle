@@ -2002,8 +2002,8 @@ pub fn Replica(
 
                     assert(self.status == .view_change);
                     assert(self.leader_index(self.view) == self.replica);
-                    assert(self.replica != message.header.replica);
-                    assert(self.nack_prepare_op.? == message.header.op);
+                    assert(message.header.replica != self.replica);
+                    assert(message.header.op == self.nack_prepare_op.?);
                 },
                 else => unreachable,
             }
