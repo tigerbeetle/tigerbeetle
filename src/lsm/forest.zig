@@ -173,7 +173,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             }
         }
 
-        pub fn compact(forest: *Forest, callback: Callback, op: u46) void {
+        pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
             // Start a compacting join.
             const Join = JoinType(.compacting);
             Join.start(forest, callback);
