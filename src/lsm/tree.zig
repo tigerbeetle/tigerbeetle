@@ -786,7 +786,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             // Avoid checkpointing if this is not the last beat in the compaction measure.
             assert(tree.compaction_beat == op % config.lsm_batch_multiple);
             const last_beat_in_measure = config.lsm_batch_multiple - 1;
-            if (tree.compaction_beat != last_beat_in_measure) return;
+            if (tree.compaction_beat != last_beat_in_measure) return callback(tree);
 
             // Assert no outstanding compactions.
             assert(tree.compaction_table_immutable.status == .idle);
