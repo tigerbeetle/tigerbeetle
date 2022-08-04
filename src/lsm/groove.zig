@@ -26,7 +26,7 @@ fn ObjectTreeHelpers(comptime Object: type) type {
         }
 
         inline fn key_from_value(value: *const Object) u64 {
-            return value.timestamp;
+            return value.timestamp & ~@as(u64, tombstone_bit);
         }
 
         const sentinel_key = std.math.maxInt(u64);
