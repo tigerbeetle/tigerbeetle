@@ -514,6 +514,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             const start = (tree.compaction_beat == 0) or
                 (tree.compaction_beat == half_measure_beat_count);
 
+            // Try to start compacting the immutable table.
             const even_levels = tree.compaction_beat < half_measure_beat_count;
             if (even_levels) {
                 assert(tree.compaction_table_immutable.status == .idle);
@@ -522,11 +523,17 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 tree.compact_io_tick(&tree.compaction_table_immutable);
             }
 
+            // Try to start compacting the other levels.
             var it = CompactionTableIterator{ .tree = tree };
             while (it.next()) |context| {
                 if (start) tree.compact_io_start_table(snapshot, context);
                 tree.compact_io_tick(context.compaction);
             }
+
+            // Always start one io_pending that is resolved in compact_cpu() 
+            // to handle the case of no level or immutable table being selected for compaction
+            tree.compaction_io_pending += 1;
+            assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
         }
 
         fn compact_io_start_table_immutable(tree: *Tree, snapshot: u64) void {
@@ -649,7 +656,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         }
 
         fn compact_io_tick_done(tree: *Tree) void {
-            assert(tree.compaction_io_pending <= 1 + tree.compaction_table.len);
+            assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
             assert(tree.compaction_callback != null);
 
             // compact_done() is called after all compact_io_tick()'s complete.
@@ -659,9 +666,10 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         }
 
         pub fn compact_cpu(tree: *Tree) void {
-            assert(tree.compaction_io_pending <= 1 + tree.compaction_table.len);
+            assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
             assert(tree.compaction_callback != null);
 
+            // Try to tick the cpu portion of the immutable table compaction:
             const even_levels = tree.compaction_beat < half_measure_beat_count;
             if (even_levels) {
                 assert(tree.compaction_table_immutable.status == .idle);
@@ -671,6 +679,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 }
             }
 
+            // Try to tick the cpu portion of the level compactions:
             var it = CompactionTableIterator{ .tree = tree };
             while (it.next()) |context| {
                 if (context.compaction.status == .compacting) {
@@ -678,6 +687,9 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                     context.compaction.tick_cpu();
                 }
             }
+
+            // Resolve the io_pending added by compact_io(). This may trigger compact_done().
+            tree.compact_io_tick_done();
         }
 
         fn compact_done(tree: *Tree) void {
