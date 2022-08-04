@@ -97,7 +97,7 @@ fn GrooveRecordType(comptime Object: type, comptime commit_count_max: u32) type 
                         for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
                             const result = assertion.groove.get(object.id);
                             assert(result != null);
-                            assert(std.mem.eql(u8, std.mem.asBytes(object), std.mem.asBytes(&result.?)));
+                            assert(std.mem.eql(u8, std.mem.asBytes(object), std.mem.asBytes(result.?)));
                         }
                     }
 
