@@ -270,6 +270,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 const groove = worker.context.groove;
 
                 const id = worker.context.id_iterator.next() orelse {
+                    groove.prefetch_ids.clearRetainingCapacity();
                     assert(groove.prefetch_ids.count() == 0);
                     return false;
                 };
