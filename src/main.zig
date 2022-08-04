@@ -21,7 +21,7 @@ const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
 const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
-const ReplicaFormatter = vsr.ReplicaFormatter(Storage);
+const ReplicaFormat = vsr.ReplicaFormatType(Storage);
 
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
@@ -74,7 +74,7 @@ const Command = struct {
 
     superblock: ?SuperBlock,
     superblock_context: SuperBlock.Context,
-    replica_formatter: ReplicaFormatter,
+    replica_format: ReplicaFormat,
 
     pub fn format(allocator: mem.Allocator, cluster: u32, replica: u8, path: [:0]const u8) !void {
         const fd = try open_file(path, true);
@@ -82,16 +82,16 @@ const Command = struct {
         try command.init(allocator, fd, null);
 
         var message_pool = try MessagePool.init(allocator, .replica);
-        command.replica_formatter = try ReplicaFormatter.init(
+        command.replica_format = try ReplicaFormat.init(
             allocator,
             cluster,
             replica,
             &command.storage,
             &message_pool,
         );
-        defer command.replica_formatter.deinit(allocator);
+        defer command.replica_format.deinit(allocator);
 
-        try command.replica_formatter.format(format_callback);
+        try command.replica_format.format(format_callback);
         try command.run();
     }
 
@@ -133,8 +133,8 @@ const Command = struct {
         while (command.pending > 0) try command.io.run_for_ns(std.time.ns_per_ms);
     }
 
-    fn format_callback(replica_formatter: *ReplicaFormatter) void {
-        const command = @fieldParentPtr(Command, "replica_formatter", replica_formatter);
+    fn format_callback(replica_format: *ReplicaFormat) void {
+        const command = @fieldParentPtr(Command, "replica_format", replica_format);
         command.pending -= 1;
     }
 
@@ -185,6 +185,7 @@ const Command = struct {
                 },
             },
         );
+        errdefer replica.deinit(command.allocator);
         message_bus.set_on_message(*Replica, &replica, Replica.on_message);
 
         log.info("cluster={} replica={}: listening on {}", .{
