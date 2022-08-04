@@ -21,6 +21,7 @@ const output = std.log.scoped(.state_checker);
 const log_state_transitions_only = builtin.mode != .Debug;
 
 const log_health = std.log.scoped(.health);
+const log_faults = std.log.scoped(.faults);
 
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
@@ -218,7 +219,6 @@ pub fn main() !void {
 
         for (cluster.storages) |*storage, replica| {
             if (cluster.replicas[replica].journal.recovered) {
-
                 // TODO Remove this workaround when VSR recovery protocol is disabled.
                 // When only the minimum number of replicas are healthy (no more crashes allowed),
                 // disable storage faults on all healthy replicas.
@@ -229,11 +229,17 @@ pub fn main() !void {
                 // because two replicas are not enough to nack, and the unhealthy replica cannot
                 // complete the VSR recovery protocol either.
                 if (cluster.health[replica] == .up and crashes == 0) {
-                    storage.faulty = false;
+                    if (storage.faulty) {
+                        log_faults.debug("{}: disable storage faults", .{replica});
+                        storage.faulty = false;
+                    }
                 } else {
                     // When a journal recovers for the first time, enable its storage faults.
                     // Future crashes will recover in the presence of faults.
-                    storage.faulty = true;
+                    if (!storage.faulty) {
+                        log_faults.debug("{}: enable storage faults", .{replica});
+                        storage.faulty = true;
+                    }
                 }
             }
             storage.tick();

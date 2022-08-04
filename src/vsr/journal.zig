@@ -668,6 +668,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return range;
         }
 
+        /// Read a prepare from disk. There must be a matching in-memory header.
         pub fn read_prepare(
             self: *Self,
             callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
@@ -685,40 +686,20 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            // Do not use this pointer beyond this function's scope, as the
-            // header memory may then change:
-            const exact = self.header_with_op_and_checksum(op, checksum) orelse {
+            const slot = self.slot_with_op_and_checksum(op, checksum) orelse {
                 self.read_prepare_log(op, checksum, "no entry exactly");
                 callback(replica, null, null);
                 return;
             };
 
-            const slot = self.slot_with_op_and_checksum(op, checksum).?;
-            if (self.faulty.bit(slot)) {
-                assert(self.dirty.bit(slot));
-
-                self.read_prepare_log(op, checksum, "faulty");
+            if (self.prepare_inhabited[slot.index] and
+                self.prepare_checksums[slot.index] == checksum)
+            {
+                self.read_prepare_with_op_and_checksum(callback, op, checksum, destination_replica);
+            } else {
+                self.read_prepare_log(op, checksum, "no matching prepare");
                 callback(replica, null, null);
-                return;
             }
-
-            if (self.dirty.bit(slot)) {
-                self.read_prepare_log(op, checksum, "dirty");
-                callback(replica, null, null);
-                return;
-            }
-
-            // Skip the disk read if the header is all we need:
-            if (exact.size == @sizeOf(Header)) {
-                const message = replica.message_bus.get_message();
-                defer replica.message_bus.unref(message);
-
-                message.header.* = exact.*;
-                callback(replica, message, destination_replica);
-                return;
-            }
-
-            self.read_prepare_with_op_and_checksum(callback, op, checksum, destination_replica);
         }
 
         /// Read a prepare from disk. There may or may not be an in-memory header.
@@ -737,6 +718,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
+
+            // If the header is in-memory, we can skip the read from the disk.
+            if (self.header_with_op_and_checksum(op, checksum)) |exact| {
+                if (exact.size == @sizeOf(Header)) {
+                    message.header.* = exact.*;
+                    callback(replica, message, destination_replica);
+                    return;
+                }
+            }
 
             const read = self.reads.acquire() orelse {
                 self.read_prepare_log(op, checksum, "waiting for IOP");
@@ -818,6 +808,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 read.callback(replica, null, null);
                 return;
             }
+            assert(read.message.header.invalid() == null);
 
             if (read.message.header.cluster != replica.cluster) {
                 // This could be caused by a misdirected read or write.
