@@ -530,7 +530,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 tree.compact_io_tick(context.compaction);
             }
 
-            // Always start one io_pending that is resolved in compact_cpu() 
+            // Always start one io_pending that is resolved in compact_cpu()
             // to handle the case of no level or immutable table being selected for compaction
             tree.compaction_io_pending += 1;
             assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
