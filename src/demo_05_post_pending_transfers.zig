@@ -13,8 +13,8 @@ pub fn main() !void {
             .reserved = 0,
             .pending_id = 1001,
             .timeout = 0,
-            .ledger = 0,// Honor original Transfer ledger.
-            .code = 0,// Honor original Transfer code.
+            .ledger = 0, // Honor original Transfer ledger.
+            .code = 0, // Honor original Transfer code.
             .flags = .{ .post_pending_transfer = true }, // Post the pending two-phase transfer.
             .amount = 0, // Inherit the amount from the pending transfer.
         },
