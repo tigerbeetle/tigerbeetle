@@ -44,7 +44,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         );
         const PostedGroove = @import("lsm/posted_groove.zig").PostedGrooveType(Storage);
 
-        const Forest = ForestType(Storage, .{
+        pub const Forest = ForestType(Storage, .{
             .accounts = AccountsGroove,
             .transfers = TransfersGroove,
             .posted = PostedGroove,

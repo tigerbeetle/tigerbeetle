@@ -736,7 +736,7 @@ pub fn Replica(
             }
 
             // Verify that the new request will fit in the WAL.
-            if (message.header.op >= self.op_checkpoint + config.journal_slot_count) {
+            if (message.header.op > self.op_ceiling()) {
                 log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
                     message.header.op,
@@ -754,7 +754,7 @@ pub fn Replica(
             assert(message.header.op > self.op_checkpoint);
             assert(message.header.op > self.op);
             assert(message.header.op > self.commit_min);
-            assert(message.header.op < self.op_checkpoint + config.journal_slot_count);
+            assert(message.header.op <= self.op_ceiling());
 
             if (self.follower()) self.normal_status_timeout.reset();
 
@@ -2324,6 +2324,13 @@ pub fn Replica(
             self.commit_journal_next();
         }
 
+        /// Begin the commit path that is common between `commit_pipeline` and `commit_journal`:
+        ///
+        /// 1. prefetch
+        /// 2. commit_op: Update the state machine and the replica's commit_min/commit_max.
+        /// 3. compact
+        /// 4. checkpoint: (Optional step: Only at certain op multiples.)
+        /// 5. done: Call the `callback` that was passed to `commit_op_prefetch`.
         fn commit_op_prefetch(
             self: *Self,
             prepare: *Message,
@@ -2396,8 +2403,49 @@ pub fn Replica(
 
         fn commit_op_compact_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(self.committing);
+            assert(self.commit_callback != null);
+
+            const commit = self.commit_prepare.?.header.op;
+            const commit_beat = commit % config.lsm_batch_multiple;
+            if (commit_beat == config.lsm_batch_multiple - 1) {
+                self.state_machine.forest.checkpoint(
+                    commit_op_checkpoint_forest_callback,
+                    commit,
+                );
+            } else {
+                self.commit_op_done();
+            }
+        }
+
+        fn commit_op_checkpoint_forest_callback(forest: *StateMachine.Forest) void {
+            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
+            const self = @fieldParentPtr(Replica, "state_machine", state_machine);
+            assert(self.committing);
+            assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.commit_min);
+
+            self.superblock.checkpoint(
+                commit_op_checkpoint_superblock_callback,
+                &self.superblock_context,
+            );
+        }
+
+        fn commit_op_checkpoint_superblock_callback(superblock_context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(Replica, "superblock_context", superblock_context);
+            assert(self.committing);
+            assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.commit_min);
+
+            self.op_checkpoint = self.commit_min;
+            self.commit_op_done();
+        }
+
+        fn commit_op_done(self: *Self) void {
             const callback = self.commit_callback.?;
             assert(self.committing);
+            assert(self.commit_prepare.?.header.op == self.commit_min);
+            assert(self.commit_prepare.?.header.op <= self.op);
 
             self.message_bus.unref(self.commit_prepare.?);
             self.commit_prepare = null;
@@ -2852,10 +2900,12 @@ pub fn Replica(
                     self.journal.remove_entries_from(op);
                     self.op = op - 1;
 
-                    const slot = self.journal.slot_for_op(op);
-                    assert(self.journal.header_for_op(op) == null);
-                    assert(!self.journal.dirty.bit(slot));
-                    assert(!self.journal.faulty.bit(slot));
+                    assert(self.journal.header_with_op(op) == null);
+                    if (self.journal.header_for_op(op) == null) {
+                        const slot = self.journal.slot_for_op(op);
+                        assert(!self.journal.dirty.bit(slot));
+                        assert(!self.journal.faulty.bit(slot));
+                    }
                 }
             }
         }
@@ -3066,10 +3116,10 @@ pub fn Replica(
 
             // Verify that the new request will fit in the WAL.
             // The message's op hasn't been assigned yet, but it will be `self.op + 1`.
-            if (self.op + 1 >= self.op_checkpoint + config.journal_slot_count) {
+            if (self.op == self.op_ceiling()) {
                 log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
-                    message.header.op,
+                    self.op + 1,
                     self.op_checkpoint,
                 });
                 return true;
@@ -3344,6 +3394,19 @@ pub fn Replica(
             return true;
         }
 
+        /// Returns the highest op that can be received, considering the current checkpoint.
+        fn op_ceiling(self: *const Self) u64 {
+            assert(self.op_checkpoint <= self.commit_min);
+            assert(self.op_checkpoint <= self.op);
+            assert((self.op_checkpoint + 1) % config.lsm_batch_multiple == 0);
+
+            if (self.op_checkpoint == 0) {
+                return config.journal_slot_count - 1;
+            } else {
+                return self.op_checkpoint + config.journal_slot_count;
+            }
+        }
+
         fn is_repair(self: *const Self, message: *const Message) bool {
             assert(message.header.command == .prepare);
 
@@ -3360,13 +3423,13 @@ pub fn Replica(
 
         /// Returns whether the replica is the leader for the current view.
         /// This may be used only when the replica status is normal.
-        fn leader(self: *Self) bool {
+        fn leader(self: *const Self) bool {
             assert(self.status == .normal);
             return self.leader_index(self.view) == self.replica;
         }
 
         /// Returns the index into the configuration of the leader for a given view.
-        fn leader_index(self: *Self, view: u32) u8 {
+        fn leader_index(self: *const Self, view: u32) u8 {
             return @intCast(u8, @mod(view, self.replica_count));
         }
 
@@ -3380,7 +3443,7 @@ pub fn Replica(
             // to a newer op that is less than `commit_max` but greater than `commit_min`:
             assert(header.op > self.commit_min);
             // Never overwrite an op that still needs to be checkpointed.
-            assert(header.op - self.op_checkpoint < config.journal_slot_count);
+            assert(header.op <= self.op_ceiling());
 
             log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
                 self.replica,
@@ -3555,10 +3618,7 @@ pub fn Replica(
 
             // The replica repairs backwards from `commit_max`. But if `commit_max` is too high
             // (>1 WAL ahead), then bound it such that uncommitted WAL entries are not overwritten.
-            const commit_max_limit = std.math.min(
-                self.commit_max,
-                self.op_checkpoint + config.journal_slot_count,
-            );
+            const commit_max_limit = std.math.min(self.commit_max, self.op_ceiling());
 
             // Request outstanding committed prepares to advance our op number:
             // This handles the case of an idle cluster, where a follower will not otherwise advance.
