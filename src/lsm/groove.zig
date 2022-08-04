@@ -639,8 +639,7 @@ pub fn GrooveType(
 
                 if (config.verify) {
                     // This is checked in prefetch_enqueue()
-                    const id_tree_value = groove.ids.get_cached(id.*).?;
-                    assert(groove.objects.get_cached(id_tree_value.timestamp) != null);
+                    assert(groove.ids.get_cached(id.*) == null);
                 }
 
                 // If not in the LSM tree's cache, the object must be read from disk and added
