@@ -100,7 +100,7 @@ fn GrooveRecordType(comptime Object: type, comptime commit_count_max: u32) type 
                             assert(std.mem.eql(u8, std.mem.asBytes(object), std.mem.asBytes(&result.?)));
                         }
                     }
-                    
+
                     assertion.checkpointed = assertion.checkpointed[assertion.verify_count..];
                     assertion.verify_count = 0;
                     assertion.verify();
@@ -151,7 +151,7 @@ const Environment = struct {
         forest_checkpointing,
         superblock_checkpointing,
     };
-    
+
     state: State,
     dir_fd: os.fd_t,
     fd: os.fd_t,
@@ -217,7 +217,7 @@ const Environment = struct {
     fn shutdown(env: *Environment) void {
         assert(env.state != .uninit);
         defer env.state = .uninit;
-        
+
         env.forest.deinit(allocator);
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
@@ -275,7 +275,7 @@ const Environment = struct {
         assert(env.state == .init);
         env.state = .superblock_open;
         env.forest.open(forest_open_callback);
-    } 
+    }
 
     fn forest_open_callback(forest: *Forest) void {
         const env = @fieldParentPtr(@This(), "forest", forest);
@@ -345,14 +345,14 @@ const Environment = struct {
         // If an error occurs during re-initialization, we don't want to trip this call to deinit().
         var crashing = false;
         defer if (!crashing) env.deinit();
-        
+
         // Open the superblock then forest to start inserting accounts and transfers.
         try env.open();
 
         var op: u64 = 0;
         var id: u64 = 0;
         while (id < std.mem.alignForward(10_000, config.lsm_batch_multiple)) {
-            
+
             // Insert a bunch of accounts
             var i: u32 = 0;
             while (i < forest_config.accounts.commit_count_max / 2) : (i += 1) {
@@ -380,7 +380,7 @@ const Environment = struct {
                     const AccountPrefetch = struct {
                         context: Groove.PrefetchContext = undefined,
                         prefetched: bool = false,
-                        
+
                         fn prefetch_callback(context: *Groove.PrefetchContext) void {
                             const account_prefetch = @fieldParentPtr(@This(), "context", context);
                             assert(!account_prefetch.prefetched);
@@ -402,7 +402,7 @@ const Environment = struct {
                     log.debug("fetching account {d} from groove for assertion", .{account.id});
                     const acc = groove.get(account.id);
                     assert(acc != null);
-                    assert(std.mem.eql(u8, std.mem.asBytes(&acc.?), std.mem.asBytes(&account)));
+                    assert(std.mem.eql(u8, std.mem.asBytes(acc.?), std.mem.asBytes(&account)));
                 }
 
                 // Record the successfull insertion.
@@ -443,4 +443,3 @@ pub fn main() !void {
     try Environment.format(); // NOTE: this can be commented out after first run to speed up testing.
     try Environment.run();
 }
-
