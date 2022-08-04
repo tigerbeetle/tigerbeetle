@@ -302,6 +302,7 @@ comptime {
     assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
     assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
 
+    assert(journal_slot_count % lsm_batch_multiple == 0);
     assert(journal_size_max == journal_size_headers + journal_size_prepares);
 }
 
