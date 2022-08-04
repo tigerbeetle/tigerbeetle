@@ -18,6 +18,7 @@ const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const SuperBlockType = vsr.SuperBlockType;
+const FIFO = @import("../fifo.zig").FIFO;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
@@ -118,6 +119,9 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         checkpoint_callback: ?fn (*Tree) void,
         open_callback: ?fn (*Tree) void,
 
+        lookup_recursion_guard: bool = false,
+        lookup_recursion_queue: FIFO(LookupContext) = .{},
+
         pub const Options = struct {
             /// The maximum number of keys that may be committed per batch.
             commit_count_max: u32,
@@ -201,6 +205,45 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             key: Key,
         ) void {
             assert(snapshot <= snapshot_latest);
+
+            context.* = .{
+                .tree = tree,
+                .completion = undefined,
+
+                .callback = callback,
+                .snapshot = snapshot,
+                .key = key,
+
+                .fingerprint = undefined,
+
+                .index_block_count = undefined,
+                .index_block_addresses = undefined,
+                .index_block_checksums = undefined,
+            };
+
+            if (tree.lookup_recursion_guard) {
+                tree.lookup_recursion_queue.push(context);
+                return;
+            }
+            tree.start_lookup(context);
+        }
+
+        pub fn lookup_recursion_queue_drain(tree: *Tree) void {
+            assert(!tree.lookup_recursion_guard);
+
+            while (tree.lookup_recursion_queue.pop()) |context| {
+                tree.start_lookup(context);
+            }
+        }
+
+        fn start_lookup(tree: *Tree, context: *LookupContext) void {
+            assert(!tree.lookup_recursion_guard);
+
+            const callback = context.callback;
+            const snapshot = context.snapshot;
+            const key = context.key;
+
+            assert(snapshot <= snapshot_latest);
             if (snapshot == snapshot_latest) {
                 // The mutable table is converted to an immutable table when a snapshot is created.
                 // This means that a snapshot will never be able to see the mutable table.
@@ -210,14 +253,14 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 if (tree.table_mutable.get(key) orelse
                     tree.value_cache.?.getKeyPtr(tombstone_from_key(key))) |value|
                 {
-                    callback(context, unwrap_tombstone(value));
+                    context.finish(unwrap_tombstone(value));
                     return;
                 }
             }
 
             if (!tree.table_immutable.free and tree.table_immutable.snapshot_min < snapshot) {
                 if (tree.table_immutable.get(key)) |value| {
-                    callback(context, unwrap_tombstone(value));
+                    context.finish(unwrap_tombstone(value));
                     return;
                 }
             }
@@ -238,7 +281,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             }
 
             if (index_block_count == 0) {
-                callback(context, null);
+                context.finish(null);
                 return;
             }
 
@@ -249,14 +292,15 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 .tree = tree,
                 .completion = undefined,
 
+                .callback = callback,
+                .snapshot = snapshot,
                 .key = key,
+
                 .fingerprint = fingerprint,
 
                 .index_block_count = index_block_count,
                 .index_block_addresses = index_block_addresses,
                 .index_block_checksums = index_block_checksums,
-
-                .callback = callback,
             };
 
             context.read_index_block();
@@ -269,7 +313,10 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             tree: *Tree,
             completion: Read,
 
+            callback: fn (*Tree.LookupContext, ?*const Value) void,
+            snapshot: u64,
             key: Key,
+
             fingerprint: bloom_filter.Fingerprint,
 
             /// This value is an index into the index_block_addresses/checksums arrays.
@@ -283,9 +330,15 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 checksum: u128,
             } = null,
 
-            callback: fn (*Tree.LookupContext, ?*const Value) void,
+            /// Link for lookup_recursion_queue
+            next: ?*LookupContext = null,
 
             fn finish(context: *LookupContext, value: ?*const Value) void {
+                assert(!context.tree.lookup_recursion_guard);
+                const tree = context.tree;
+                tree.lookup_recursion_guard = true;
+                defer tree.lookup_recursion_guard = false;
+
                 const callback = context.callback;
                 context.* = undefined;
                 callback(context, value);

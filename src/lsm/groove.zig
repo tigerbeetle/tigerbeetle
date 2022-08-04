@@ -843,6 +843,15 @@ pub fn GrooveType(
             };
         }
 
+        pub fn lookup_recursion_queue_drain(groove: *Groove) void {
+            groove.objects.lookup_recursion_queue_drain();
+            groove.ids.lookup_recursion_queue_drain();
+
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                @field(groove.indexes, field.name).lookup_recursion_queue_drain();
+            }
+        }
+
         pub fn open(groove: *Groove, callback: fn (*Groove) void) void {
             const Join = JoinType(.open);
             Join.start(groove, callback);

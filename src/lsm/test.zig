@@ -114,6 +114,7 @@ fn GrooveRecordType(comptime Object: type, comptime commit_count_max: u32) type 
 
             assertion.verify();
             while (assertion.verify_count > 0) {
+                groove.lookup_recursion_queue_drain();
                 try io.tick();
             }
         }
