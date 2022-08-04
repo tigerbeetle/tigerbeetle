@@ -16,10 +16,12 @@ const Time = @import("time.zig").Time;
 const Storage = @import("storage.zig").Storage;
 
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
+const MessagePool = @import("message_pool.zig").MessagePool;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
 const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
+const ReplicaFormat = vsr.ReplicaFormatType(Storage);
 
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
@@ -65,43 +67,31 @@ fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
 
 const Command = struct {
     allocator: mem.Allocator,
-    fd: os.fd_t,
     io: IO,
     pending: u64,
     storage: Storage,
-    superblock: SuperBlock,
-    superblock_context: SuperBlock.Context,
     addresses: ?[]std.net.Address,
+
+    superblock: ?SuperBlock,
+    superblock_context: SuperBlock.Context,
+    replica_format: ReplicaFormat,
 
     pub fn format(allocator: mem.Allocator, cluster: u32, replica: u8, path: [:0]const u8) !void {
         const fd = try open_file(path, true);
-
-        {
-            const write_size_max = 4 * 1024 * 1024;
-            var write: [write_size_max]u8 = undefined;
-            var offset: u64 = superblock_zone_size;
-            while (true) {
-                const write_size = vsr.format_journal(cluster, offset, &write);
-                if (write_size == 0) break;
-                {
-                    var written: usize = 0;
-                    while (written < write_size) {
-                        written += try os.write(fd, write[0..write_size][written..]);
-                    }
-                }
-                offset += write_size;
-            }
-        }
-
         var command: Command = undefined;
         try command.init(allocator, fd, null);
 
-        command.superblock.format(format_callback, &command.superblock_context, .{
-            .cluster = cluster,
-            .replica = replica,
-            .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
-        });
+        var message_pool = try MessagePool.init(allocator, .replica);
+        command.replica_format = try ReplicaFormat.init(
+            allocator,
+            cluster,
+            replica,
+            &command.storage,
+            &message_pool,
+        );
+        defer command.replica_format.deinit(allocator);
 
+        try command.replica_format.format(format_callback);
         try command.run();
     }
 
@@ -118,7 +108,7 @@ const Command = struct {
         var command: Command = undefined;
         try command.init(allocator, fd, addresses);
 
-        command.superblock.open(open_callback, &command.superblock_context);
+        command.superblock.?.open(open_callback, &command.superblock_context);
         try command.run();
 
         // After opening the superblock, we immediately start the main event loop and remain there.
@@ -143,8 +133,8 @@ const Command = struct {
         while (command.pending > 0) try command.io.run_for_ns(std.time.ns_per_ms);
     }
 
-    fn format_callback(superblock_context: *SuperBlock.Context) void {
-        const command = @fieldParentPtr(Command, "superblock_context", superblock_context);
+    fn format_callback(replica_format: *ReplicaFormat) void {
+        const command = @fieldParentPtr(Command, "replica_format", replica_format);
         command.pending -= 1;
     }
 
@@ -153,12 +143,12 @@ const Command = struct {
         command.pending -= 1;
 
         // TODO log an error and exit instead. This is reachable if we e.g. run out of memory.
-        command.event_loop() catch unreachable;
+        command.start_loop() catch unreachable;
     }
 
-    fn event_loop(command: *Command) !void {
-        const cluster = command.superblock.working.cluster;
-        const replica_index = command.superblock.working.replica;
+    fn start_loop(command: *Command) !void {
+        const cluster = command.superblock.?.working.cluster;
+        const replica_index = command.superblock.?.working.replica;
 
         if (replica_index >= command.addresses.?.len) {
             fatal("all --addresses must be provided (cluster={}, replica={})", .{
@@ -168,33 +158,40 @@ const Command = struct {
         }
 
         var time: Time = .{};
+        var message_pool = try MessagePool.init(command.allocator, .replica);
         var message_bus = try MessageBus.init(
             command.allocator,
             cluster,
             command.addresses.?,
             replica_index,
             &command.io,
+            &message_pool,
         );
+        errdefer message_bus.deinit();
+
         var replica = try Replica.init(
             command.allocator,
-            cluster,
-            @intCast(u8, command.addresses.?.len),
-            replica_index,
-            &time,
-            &command.storage,
-            &message_bus,
             .{
-                .accounts_max = config.accounts_max,
-                .transfers_max = config.transfers_max,
-                .transfers_pending_max = config.transfers_pending_max,
+                .cluster = cluster,
+                .replica_count = @intCast(u8, command.addresses.?.len),
+                .replica_index = replica_index,
+                .time = &time,
+                .storage = &command.storage,
+                .message_bus = &message_bus,
+                .state_machine_options = .{
+                    .accounts_max = config.accounts_max,
+                    .transfers_max = config.transfers_max,
+                    .transfers_pending_max = config.transfers_pending_max,
+                },
             },
         );
+        errdefer replica.deinit(command.allocator);
         message_bus.set_on_message(*Replica, &replica, Replica.on_message);
 
         log.info("cluster={} replica={}: listening on {}", .{
-            cluster,
-            replica_index,
-            command.addresses.?[replica_index],
+            replica.cluster,
+            replica.replica,
+            command.addresses.?[replica.replica],
         });
 
         while (true) {
@@ -211,18 +208,15 @@ const Command = struct {
         addresses: ?[]std.net.Address,
     ) !void {
         command.allocator = allocator;
-        command.fd = fd;
+        command.superblock = null;
 
         command.io = try IO.init(128, 0);
         errdefer command.io.deinit();
 
         command.pending = 0;
 
-        command.storage = try Storage.init(&command.io, command.fd);
+        command.storage = try Storage.init(&command.io, fd);
         errdefer command.storage.deinit();
-
-        command.superblock = try SuperBlock.init(allocator, &command.storage);
-        errdefer command.superblock.deinit(allocator);
 
         command.addresses = addresses;
     }
