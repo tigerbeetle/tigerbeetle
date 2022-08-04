@@ -351,14 +351,17 @@ const Environment = struct {
 
         var op: u64 = 0;
         var id: u64 = 0;
+        var timestamp: u64 = 42;
         while (id < std.mem.alignForward(10_000, config.lsm_batch_multiple)) {
 
             // Insert a bunch of accounts
             var i: u32 = 0;
             while (i < forest_config.accounts.commit_count_max / 2) : (i += 1) {
                 defer id += 1;
+                defer timestamp += 1;
                 const account = Account{
                     .id = id,
+                    .timestamp = timestamp,
                     .user_data = 0,
                     .reserved = [_]u8{0} ** 48,
                     .ledger = 710, // Let's use the ISO-4217 Code Number for ZAR
