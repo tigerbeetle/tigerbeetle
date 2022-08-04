@@ -5182,7 +5182,7 @@ pub fn Replica(
     };
 }
 
-pub fn ReplicaFormatter(comptime Storage: type) type {
+pub fn ReplicaFormatType(comptime Storage: type) type {
     const SuperBlock = vsr.SuperBlockType(Storage);
     return struct {
         const Self = @This();
@@ -5190,11 +5190,11 @@ pub fn ReplicaFormatter(comptime Storage: type) type {
         cluster: u32,
         replica: u8,
         storage: *Storage,
-        callback: ?fn (formatter: *Self) void = null,
+        callback: ?fn (format: *Self) void = null,
 
-        journal_write: Storage.Write = undefined,
-        journal_write_offset: u64 = 0,
-        journal_write_buffer: []u8,
+        wal_write: Storage.Write = undefined,
+        wal_offset: u64 = 0,
+        wal_buffer: []align(config.sector_size) u8,
 
         superblock: SuperBlock,
         superblock_context: SuperBlock.Context = undefined,
@@ -5206,11 +5206,16 @@ pub fn ReplicaFormatter(comptime Storage: type) type {
             storage: *Storage,
             message_pool: *MessagePool,
         ) !Self {
-            const journal_write_size_max = 4 * 1024 * 1024;
-            assert(journal_write_size_max % config.sector_size == 0);
+            const wal_write_size_max = 4 * 1024 * 1024;
+            assert(wal_write_size_max % config.sector_size == 0);
 
-            var journal_write_buffer = try allocator.alloc(u8, journal_write_size_max);
-            errdefer allocator.free(journal_write_buffer);
+            var wal_buffer = try allocator.allocAdvanced(
+                u8,
+                config.sector_size,
+                wal_write_size_max,
+                .exact,
+            );
+            errdefer allocator.free(wal_buffer);
 
             var superblock = try SuperBlock.init(allocator, storage, message_pool);
             errdefer superblock.deinit(allocator);
@@ -5219,7 +5224,7 @@ pub fn ReplicaFormatter(comptime Storage: type) type {
                 .cluster = cluster,
                 .replica = replica,
                 .storage = storage,
-                .journal_write_buffer = journal_write_buffer,
+                .wal_buffer = wal_buffer,
                 .superblock = superblock,
             };
         }
@@ -5227,14 +5232,14 @@ pub fn ReplicaFormatter(comptime Storage: type) type {
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             assert(self.callback == null);
 
-            allocator.free(self.journal_write_buffer);
+            allocator.free(self.wal_buffer);
             self.superblock.deinit(allocator);
         }
 
         /// Initialize the TigerBeetle replica's data file.
-        pub fn format(self: *Self, callback: fn (formatter: *Self) void) !void {
+        pub fn format(self: *Self, callback: fn (format: *Self) void) !void {
             assert(self.callback == null);
-            assert(self.journal_write_offset == 0);
+            assert(self.wal_offset == 0);
 
             self.callback = callback;
             self.format_wal_sectors();
@@ -5242,35 +5247,48 @@ pub fn ReplicaFormatter(comptime Storage: type) type {
 
         fn format_wal_sectors(self: *Self) void {
             assert(self.callback != null);
-            assert(self.journal_write_offset <= config.journal_size_max);
+            assert(self.wal_offset <= config.journal_size_max);
+            assert(self.wal_buffer.len % config.sector_size == 0);
 
-            const offset = self.journal_write_offset;
-            const buffer = self.journal_write_buffer;
-            const write_size = vsr.format_journal(self.cluster, offset, buffer);
-            if (write_size == 0) {
+            const size = vsr.format_journal(self.cluster, self.wal_offset, self.wal_buffer);
+            assert(size % config.sector_size == 0);
+
+            const zeros = [_]u8{0} ** @sizeOf(Header);
+            for (std.mem.bytesAsSlice(Header, self.wal_buffer[0..size])) |*header| {
+                if (header.checksum == 0 and header.checksum_body == 0) {
+                    // This is the (empty) body of a Prepare.
+                    assert(std.mem.eql(u8, std.mem.asBytes(header), &zeros));
+                } else {
+                    assert(header.valid_checksum());
+                    assert(header.command == .prepare or header.command == .reserved);
+                    assert(header.op != 0 or header.operation == .root);
+                }
+            }
+
+            if (size == 0) {
                 self.format_superblock();
             } else {
-                self.journal_write_offset += write_size;
+                self.wal_offset += size;
                 self.storage.write_sectors(
                     format_wal_sectors_callback,
-                    &self.journal_write,
-                    buffer[0..write_size],
-                    offset,
+                    &self.wal_write,
+                    self.wal_buffer[0..size],
+                    self.wal_offset,
                 );
             }
         }
 
         fn format_wal_sectors_callback(write: *Storage.Write) void {
-            const self = @fieldParentPtr(Self, "journal_write", write);
+            const self = @fieldParentPtr(Self, "wal_write", write);
             assert(self.callback != null);
-            assert(self.journal_write_offset == config.journal_size_max);
+            assert(self.wal_offset <= config.journal_size_max);
 
             self.format_wal_sectors();
         }
 
         fn format_superblock(self: *Self) void {
             assert(self.callback != null);
-            assert(self.journal_write_offset == config.journal_size_max);
+            assert(self.wal_offset == config.journal_size_max);
 
             self.superblock.format(format_superblock_callback, &self.superblock_context, .{
                 .cluster = self.cluster,
@@ -5282,7 +5300,7 @@ pub fn ReplicaFormatter(comptime Storage: type) type {
         fn format_superblock_callback(context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock", context.superblock);
             const callback = self.callback.?;
-            assert(self.journal_write_offset == config.journal_size_max);
+            assert(self.wal_offset == config.journal_size_max);
 
             self.callback = null;
             callback(self);
