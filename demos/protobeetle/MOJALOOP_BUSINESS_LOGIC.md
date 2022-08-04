@@ -10,7 +10,7 @@ Phase-1/2 of the 2-phase transfer.
 Prepare duplicate check:
 ```sql
 --1587309924652
-insert into `transferDuplicateCheck` (`hash`, `transferId`) values (?, ?)
+INSERT INTO `transferDuplicateCheck` (`hash`, `transferId`) VALUES (?, ?)
 ```
 
 Validations:
@@ -35,17 +35,17 @@ Write the transfer to the DB...AND attempt payer dfsp position adjustment at the
 ```sql
 
 --1587309924656
-insert into `transfer` (`amount`, `currencyId`, `expirationDate`, `ilpCondition`, `transferId`) values (?, ?, ?, ?, ?)
+INSERT INTO `transfer` (`amount`, `currencyId`, `expirationDate`, `ilpCondition`, `transferId`) VALUES (?, ?, ?, ?, ?)
 --1587309924656 
-insert into `transferParticipant` (`amount`, `ledgerEntryTypeId`, `participantCurrencyId`, `transferId`, `transferParticipantRoleTypeId`) values (?, ?, ?, ?, ?)
+INSERT INTO `transferParticipant` (`amount`, `ledgerEntryTypeId`, `participantCurrencyId`, `transferId`, `transferParticipantRoleTypeId`) VALUES (?, ?, ?, ?, ?)
 --1587309924656
-insert into `transferParticipant` (`amount`, `ledgerEntryTypeId`, `participantCurrencyId`, `transferId`, `transferParticipantRoleTypeId`) values (?, ?, ?, ?, ?)
+INSERT INTO `transferParticipant` (`amount`, `ledgerEntryTypeId`, `participantCurrencyId`, `transferId`, `transferParticipantRoleTypeId`) VALUES (?, ?, ?, ?, ?)
 --1587309924656 (Inserted as part of a batch)
-insert into `transferExtension` (`transferId`, `key`, `value`) values (?, ?, ?)
+INSERT INTO `transferExtension` (`transferId`, `key`, `value`) VALUES (?, ?, ?)
 --1587309924656
-insert into `ilpPacket` (`transferId`, `value`) values (?, ?)
+INSERT INTO `ilpPacket` (`transferId`, `value`) VALUES (?, ?)
 --1587309924658
-insert into `transferStateChange` (`createdDate`, `reason`, `transferId`, `transferStateId`) values (?, ?, ?, ?)
+INSERT INTO `transferStateChange` (`createdDate`, `reason`, `transferId`, `transferStateId`) VALUES (?, ?, ?, ?)
 --1587309924660 
 UPDATE participantPosition SET value = (value + 100), changedDate = '2020-04-19 15:25:24.655' WHERE participantPositionId = 3 AND (value + 100) < (SELECT value FROM participantLimit WHERE participantLimitId = 1)
 --1587309924661 
@@ -114,40 +114,40 @@ Phase-2/2 of the 2-phase transfer.
 Write the transfer fulfillment to the DB:
 ```sql
 --1587309924755 - TransferService.getById(transferId) 
-select `transfer`.*, `transfer`.`currencyId` as `currency`, `pc1`.`participantCurrencyId` as `payerParticipantCurrencyId`, `tp1`.`amount` as `payerAmount`, `da`.`participantId` as `payerParticipantId`, `da`.`name` as `payerFsp`, `pc2`.`participantCurrencyId` as `payeeParticipantCurrencyId`, `tp2`.`amount` as `payeeAmount`, `ca`.`participantId` as `payeeParticipantId`, `ca`.`name` as `payeeFsp`, `tsc`.`transferStateChangeId`, `tsc`.`transferStateId` as `transferState`, `tsc`.`reason` as `reason`, `tsc`.`createdDate` as `completedTimestamp`, `ts`.`enumeration` as `transferStateEnumeration`, `ts`.`description` as `transferStateDescription`, `ilpp`.`value` as `ilpPacket`, `transfer`.`ilpCondition` as `condition`, `tf`.`ilpFulfilment` as `fulfilment`, `te`.`errorCode`, `te`.`errorDescription` 
-from `transfer` 
-inner join `transferParticipant` as `tp1` on `tp1`.`transferId` = `transfer`.`transferId` 
-inner join `transferParticipantRoleType` as `tprt1` on `tprt1`.`transferParticipantRoleTypeId` = `tp1`.`transferParticipantRoleTypeId` 
-inner join `participantCurrency` as `pc1` on `pc1`.`participantCurrencyId` = `tp1`.`participantCurrencyId` 
-inner join `participant` as `da` on `da`.`participantId` = `pc1`.`participantId` 
-inner join `transferParticipant` as `tp2` on `tp2`.`transferId` = `transfer`.`transferId` 
-inner join `transferParticipantRoleType` as `tprt2` on `tprt2`.`transferParticipantRoleTypeId` = `tp2`.`transferParticipantRoleTypeId` 
-inner join `participantCurrency` as `pc2` on `pc2`.`participantCurrencyId` = `tp2`.`participantCurrencyId` 
-inner join `participant` as `ca` on `ca`.`participantId` = `pc2`.`participantId` 
-inner join `ilpPacket` as `ilpp` on `ilpp`.`transferId` = `transfer`.`transferId` 
-left join `transferStateChange` as `tsc` on `tsc`.`transferId` = `transfer`.`transferId` 
-left join `transferState` as `ts` on `ts`.`transferStateId` = `tsc`.`transferStateId` 
-left join `transferFulfilment` as `tf` on `tf`.`transferId` = `transfer`.`transferId` 
-left join `transferError` as `te` on `te`.`transferId` = `transfer`.`transferId` 
-where `transfer`.`transferId` = ? and `tprt1`.`name` = ? and `tprt2`.`name` = ? and pc1.currencyId = transfer.currencyId and pc2.currencyId = transfer.currencyId 
-order by `tsc`.`transferStateChangeId` desc limit ?
+SELECT `transfer`.*, `transfer`.`currencyId` AS `currency`, `pc1`.`participantCurrencyId` AS `payerParticipantCurrencyId`, `tp1`.`amount` AS `payerAmount`, `da`.`participantId` AS `payerParticipantId`, `da`.`name` AS `payerFsp`, `pc2`.`participantCurrencyId` AS `payeeParticipantCurrencyId`, `tp2`.`amount` AS `payeeAmount`, `ca`.`participantId` AS `payeeParticipantId`, `ca`.`name` AS `payeeFsp`, `tsc`.`transferStateChangeId`, `tsc`.`transferStateId` AS `transferState`, `tsc`.`reason` AS `reason`, `tsc`.`createdDate` AS `completedTimestamp`, `ts`.`enumeration` AS `transferStateEnumeration`, `ts`.`description` AS `transferStateDescription`, `ilpp`.`value` AS `ilpPacket`, `transfer`.`ilpCondition` AS `condition`, `tf`.`ilpFulfilment` AS `fulfilment`, `te`.`errorCode`, `te`.`errorDescription` 
+FROM `transfer`
+INNER JOIN `transferParticipant` AS `tp1` ON `tp1`.`transferId` = `transfer`.`transferId`
+INNER JOIN `transferParticipantRoleType` AS `tprt1` ON `tprt1`.`transferParticipantRoleTypeId` = `tp1`.`transferParticipantRoleTypeId` 
+INNER JOIN `participantCurrency` AS `pc1` ON `pc1`.`participantCurrencyId` = `tp1`.`participantCurrencyId` 
+INNER JOIN `participant` AS `da` ON `da`.`participantId` = `pc1`.`participantId` 
+INNER JOIN `transferParticipant` AS `tp2` ON `tp2`.`transferId` = `transfer`.`transferId` 
+INNER JOIN `transferParticipantRoleType` AS `tprt2` ON `tprt2`.`transferParticipantRoleTypeId` = `tp2`.`transferParticipantRoleTypeId` 
+INNER JOIN `participantCurrency` AS `pc2` ON `pc2`.`participantCurrencyId` = `tp2`.`participantCurrencyId` 
+INNER JOIN `participant` AS `ca` ON `ca`.`participantId` = `pc2`.`participantId`
+INNER JOIN `ilpPacket` AS `ilpp` ON `ilpp`.`transferId` = `transfer`.`transferId` 
+LEFT JOIN `transferStateChange` AS `tsc` ON `tsc`.`transferId` = `transfer`.`transferId` 
+LEFT JOIN `transferState` AS `ts` ON `ts`.`transferStateId` = `tsc`.`transferStateId` 
+LEFT JOIN `transferFulfilment` AS `tf` ON `tf`.`transferId` = `transfer`.`transferId` 
+LEFT JOIN `transferError` AS `te` ON `te`.`transferId` = `transfer`.`transferId` 
+WHERE `transfer`.`transferId` = ?  AND `tprt1`.`name` = ?  AND `tprt2`.`name` = ?  AND pc1.currencyId = transfer.currencyId  AND pc2.currencyId = transfer.currencyId 
+ORDER BY `tsc`.`transferStateChangeId` desc limit ?
 --1587309924757 
-select * from `transferExtension` where `transferId` = ? and `isFulfilment` = ? and `isError` = ?
+SELECT * FROM `transferExtension` WHERE `transferId` = ?  AND `isFulfilment` = ?  AND `isError` = ?
 --1587309924759 
-insert into `transferFulfilmentDuplicateCheck` (`hash`, `transferId`) values (?, ?)
+INSERT INTO `transferFulfilmentDuplicateCheck` (`hash`, `transferId`) VALUES (?, ?)
 --1587309924768 
-select `transferParticipant`.*, `tsc`.`transferStateId`, `tsc`.`reason` from `transferParticipant` inner join `transferStateChange` as `tsc` on `tsc`.`transferId` = `transferParticipant`.`transferId` where `transferParticipant`.`transferId` = ? and `transferParticipant`.`transferParticipantRoleTypeId` = ? and `transferParticipant`.`ledgerEntryTypeId` = ? order by `tsc`.`transferStateChangeId` desc limit ?
+SELECT `transferParticipant`.*, `tsc`.`transferStateId`, `tsc`.`reason` FROM `transferParticipant` INNSER JOIN `transferStateChange` AS `tsc` ON `tsc`.`transferId` = `transferParticipant`.`transferId` WHERE `transferParticipant`.`transferId` = ? and `transferParticipant`.`transferParticipantRoleTypeId` = ?  AND `transferParticipant`.`ledgerEntryTypeId` = ? ORDER BY `tsc`.`transferStateChangeId` desc limit ?
 --1587309924770 
-select `settlementWindow`.`settlementWindowId`, `swsc`.`settlementWindowStateId` as `state`, `swsc`.`reason` as `reason`, `settlementWindow`.`createdDate` as `createdDate`, `swsc`.`createdDate` as `changedDate` 
-from `settlementWindow` left join `settlementWindowStateChange` as `swsc` on `swsc`.`settlementWindowStateChangeId` = `settlementWindow`.`currentStateChangeId` where `swsc`.`settlementWindowStateId` = ? order by `changedDate` desc
+SELECT `settlementWindow`.`settlementWindowId`, `swsc`.`settlementWindowStateId` AS `state`, `swsc`.`reason` AS `reason`, `settlementWindow`.`createdDate` AS `createdDate`, `swsc`.`createdDate` AS `changedDate` 
+FROM `settlementWindow` LEFT JOIN `settlementWindowStateChange` AS `swsc` ON `swsc`.`settlementWindowStateChangeId` = `settlementWindow`.`currentStateChangeId` WHERE `swsc`.`settlementWindowStateId` = ? ORDER BY `changedDate` desc
 --1587309924771 
-insert into `transferFulfilment` (`completedDate`, `createdDate`, `ilpFulfilment`, `isValid`, `settlementWindowId`, `transferId`) values (?, ?, ?, ?, ?, ?)
+INSERT INTO `transferFulfilment` (`completedDate`, `createdDate`, `ilpFulfilment`, `isValid`, `settlementWindowId`, `transferId`) VALUES (?, ?, ?, ?, ?, ?)
 --1587309924774 
-insert into `transferStateChange` (`createdDate`, `transferId`, `transferStateId`) values (?, ?, ?)
+INSERT INTO `transferStateChange` (`createdDate`, `transferId`, `transferStateId`) VALUES (?, ?, ?)
 --1587309924775 
 UPDATE participantPosition SET value = (value + -100), changedDate = '2020-04-19 15:25:24.769' WHERE participantPositionId = 5
 --1587309924775 
-select * from `transferStateChange` where `transferId` = ? order by `transferStateChangeId` desc limit ? for update
+SELECT * FROM `transferStateChange` WHERE `transferId` = ? ORDER BY `transferStateChangeId` desc limit ? for update
 --1587309924776 
 INSERT INTO participantPositionChange (participantPositionId, transferStateChangeId, value, reservedValue, createdDate) SELECT 5, 1254, value, reservedValue, '2020-04-19 15:25:24.769' FROM participantPosition WHERE participantPositionId = 5
 ```
@@ -245,13 +245,13 @@ const settlement = await SettlementModel.getById({ settlementId })
 Obtain all models for settlements:
 ```sql
 --1587309924788  - Get settlement model by name:
-select * from `settlementModel` where `name` = ? and isActive = 1
+SELECT * FROM `settlementModel` WHERE `name` = ? AND isActive = 1
 --1587309924789  - Get all settlement windows by settlement models:
 SELECT * FROM `settlementWindow` 
-left join settlementWindowStateChange AS swsc ON swsc.settlementWindowStateChangeId = settlementWindow.currentStateChangeId 
-left join settlementWindowContent AS swc ON swc.settlementWindowId = settlementWindow.settlementWindowId 
-left join settlementWindowContentStateChange AS swcsc ON swcsc.settlementWindowContentStateChangeId = swc.currentStateChangeId 
-where settlementWindow.settlementWindowId IN ? 
+LEFT JOIN settlementWindowStateChange AS swsc ON swsc.settlementWindowStateChangeId = settlementWindow.currentStateChangeId 
+LEFT JOIN settlementWindowContent AS swc ON swc.settlementWindowId = settlementWindow.settlementWindowId 
+LEFT JOIN settlementWindowContentStateChange AS swcsc ON swcsc.settlementWindowContentStateChangeId = swc.currentStateChangeId 
+WHERE settlementWindow.settlementWindowId IN ? 
 and ledgerAccountTypeId = ? 
 and swc.currencyId = ?
 and swsc.settlementWindowStateId = winStateEnum.CLOSED, winStateEnum.ABORTED, winStateEnum.PENDING_SETTLEMENT
@@ -293,15 +293,15 @@ INSERT INTO `settlement` (reason, createdDate, settlementModelId) VALUES (?, ?, 
 INSERT INTO `settlementSettlementWindow` (settlementId, settlementWindowId, createdDate) VALUES (?, ?, ?)
 --1587309924792 - Retrieve affected settlementWindowContent
 SELECT * FROM `settlementWindow AS sw` 
-left join settlementWindowStateChange AS swsc ON swsc.settlementWindowStateChangeId = settlementWindow.currentStateChangeId 
-left join settlementWindowContent AS swc ON swc.settlementWindowId = settlementWindow.settlementWindowId 
-left join settlementWindowContentStateChange AS swcsc ON swcsc.settlementWindowContentStateChangeId = swc.currentStateChangeId 
-where settlementWindow.settlementWindowId IN ? 
-and ledgerAccountTypeId = ? 
-and swc.currencyId = ?
-and swsc.settlementWindowStateId = winStateEnum.CLOSED, winStateEnum.ABORTED, winStateEnum.PENDING_SETTLEMENT
-and swcsc.settlementWindowStateId = [winStateEnum.CLOSED, winStateEnum.ABORTED]
---1587309924793 - Bind requested settlementWindowContent and settlementContentAggregation records
+LEFT JOIN settlementWindowStateChange AS swsc ON swsc.settlementWindowStateChangeId = settlementWindow.currentStateChangeId 
+LEFT JOIN settlementWindowContent AS swc ON swc.settlementWindowId = settlementWindow.settlementWindowId 
+LEFT JOIN settlementWindowContentStateChange AS swcsc ON swcsc.settlementWindowContentStateChangeId = swc.currentStateChangeId 
+WHERE settlementWindow.settlementWindowId IN ? 
+AND ledgerAccountTypeId = ? 
+AND swc.currencyId = ?
+AND swsc.settlementWindowStateId = winStateEnum.CLOSED, winStateEnum.ABORTED, winStateEnum.PENDING_SETTLEMENT
+AND swcsc.settlementWindowStateId = [winStateEnum.CLOSED, winStateEnum.ABORTED]
+--1587309924793 - Bind requested settlementWindowContent AND settlementContentAggregation records
 UPDATE `settlementWindowContent` SET settlementId = ? WHERE settlementWindowContentId = ?
 --1587309924794
 UPDATE `settlementContentAggregation` SET currentStateId = `enums.settlementWindowStates.PENDING_SETTLEMENT` WHERE `settlementWindowContentId` IN ?
@@ -320,10 +320,10 @@ INSERT INTO `settlementParticipantCurrencyStateChange` (settlementParticipantCur
 VALUES (?, enums.settlementStates.PENDING_SETTLEMENT, ?, ?)
 --1587309924800 - Update the pc to point to the new state
 UPDATE `settlementParticipantCurrency` SET currentStateChangeId = ? WHERE settlementParticipantCurrencyId = ?
---1587309924801 - Set state of CLOSED and ABORTED windows to PENDING_SETTLEMENT, skip already in PENDING_SETTLEMENT state
+--1587309924801 - Set state of CLOSED AND ABORTED windows to PENDING_SETTLEMENT, skip already in PENDING_SETTLEMENT state
 SELECT sw.settlementWindowId FROM settlementWindow AS sw 
-left join settlementWindowStateChange AS swsc ON swsc.settlementWindowStateChangeId = sw.currentStateChangeId
-WHERE sw.settlementWindowId = ? and swsc.settlementWindowStateId IN (enums.settlementWindowStates.CLOSED, enums.settlementWindowStates.ABORTED)
+LEFT JOIN settlementWindowStateChange AS swsc ON swsc.settlementWindowStateChangeId = sw.currentStateChangeId
+WHERE sw.settlementWindowId = ? AND swsc.settlementWindowStateId IN (enums.settlementWindowStates.CLOSED, enums.settlementWindowStates.ABORTED)
 --1587309924802
 INSERT INTO `settlementWindowStateChange` (settlementWindowId, settlementWindowStateId, reason, createdDate) VALUES
 (?, enums.settlementStates.PENDING_SETTLEMENT, ?, ?)
@@ -578,7 +578,7 @@ let updatePromises = []
 // seq-settlement-6.2.5, step 19
 for (const spcsc of settlementParticipantCurrencyStateChange) {
 // Switched to insert from batchInsert because only LAST_INSERT_ID is returned
-// TODO:: PoC - batchInsert + select inserted ids vs multiple inserts without select
+// TODO:: PoC - batchInsert + SELECT inserted ids vs multiple inserts without select
 const spcscCopy = Object.assign({}, spcsc)
 delete spcscCopy.settlementTransferId
 insertPromises.push(
