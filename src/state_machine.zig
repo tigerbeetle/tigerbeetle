@@ -340,13 +340,13 @@ pub fn StateMachineType(comptime Storage: type) type {
             return result;
         }
 
-        pub fn compact(self: *StateMachine, op: u64, callback: fn (*StateMachine) void) void {
+        pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
             // TODO self.forest.compact(op, callback);
             _ = op;
             callback(self);
         }
 
-        pub fn checkpoint(self: *StateMachine, op: u64, callback: fn (*StateMachine) void) void {
+        pub fn checkpoint(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
             // TODO self.forest.checkpoint(op, checkpoint_callback);
             _ = op;
             callback(self);
