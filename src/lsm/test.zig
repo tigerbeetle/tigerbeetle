@@ -70,75 +70,50 @@ fn GrooveRecordType(comptime Object: type, comptime commit_count_max: u32) type 
 
         pub fn assert_checkpointed(record: *const GrooveRecord, groove: anytype, io: *IO) !void {
             const Groove = @TypeOf(groove.*);
-            const CheckpointAssertion = struct {
+            const Assertion = struct {
                 prefetch_context: Groove.PrefetchContext = undefined,
                 checkpointed: []const Object,
                 verify_count: u32 = 0,
-                completed: bool = false,
                 groove: *Groove,
 
-                const Assertion = @This();
-
-                fn verify(assertion: *Assertion) void {
-                    assert(!assertion.completed);
+                fn verify(assertion: *@This()) void {
                     assert(assertion.verify_count == 0);
+                    assertion.verify_count = std.math.min(assertion.checkpointed.len, commit_count_max);
+                    if (assertion.verify_count == 0) return;
 
-                    // Select how many objects to prefetch from the groove for verification.
-                    assertion.verify_count = std.math.min(
-                        assertion.checkpointed.len, 
-                        commit_count_max,
-                    );
-
-                    if (assertion.verify_count == 0) {
-                        assertion.completed = true;
-                        return;
-                    }
-
-                    const checkpointed = assertion.checkpointed[0..assertion.verify_count];
-                    for (checkpointed) |*object| {
+                    for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
                         assertion.groove.prefetch_enqueue(object.id);
                     }
 
-                    assertion.groove.prefetch(
-                        groove_prefetch_callback, 
-                        &assertion.prefetch_context,
-                    );
+                    assertion.groove.prefetch(groove_prefetch_callback, &assertion.prefetch_context);
                 }
 
                 fn groove_prefetch_callback(prefetch_context: *Groove.PrefetchContext) void {
-                    const assertion = @fieldParentPtr(
-                        Assertion,
-                        "prefetch_context",
-                        prefetch_context,
-                    );
-                    assert(!assertion.completed);
+                    const assertion = @fieldParentPtr(@This(), "prefetch_context", prefetch_context);
                     assert(assertion.verify_count > 0);
-                    assert(assertion.verify_count <= commit_count_max);
 
-                    const checkpointed = assertion.checkpointed[0..assertion.verify_count];
-                    for (checkpointed) |*object| {
-                        const groove_object = assertion.groove.get(object.id).?;
-                        assert(std.mem.eql(
-                            u8, 
-                            std.mem.asBytes(object), 
-                            std.mem.asBytes(groove_object),
-                        ));
+                    {
+                        defer assertion.groove.prefetch_clear();
+                        for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
+                            const result = assertion.groove.get(object.id);
+                            assert(result != null);
+                            assert(std.mem.eql(u8, std.mem.asBytes(object), std.mem.asBytes(&result.?)));
+                        }
                     }
-
-                    assertion.groove.prefetch_clear();
-                    assertion.checkpointed = assertion.checkpointed[checkpointed.len..];
+                    
+                    assertion.checkpointed = assertion.checkpointed[assertion.verify_count..];
                     assertion.verify_count = 0;
                     assertion.verify();
                 }
             };
 
-            var checkpoint_assertion = CheckpointAssertion{
-                .groove = groove,
+            var assertion = Assertion{
                 .checkpointed = record.checkpointed.items,
+                .groove = groove,
             };
-            checkpoint_assertion.verify();
 
-            while (!checkpoint_assertion.completed) {
+            assertion.verify();
+            while (assertion.verify_count > 0) {
                 try io.tick();
             }
         }
@@ -325,6 +300,9 @@ const Environment = struct {
     fn forest_checkpoint_callback(forest: *Forest) void {
         const env = @fieldParentPtr(@This(), "forest", forest);
         assert(env.state == .forest_checkpointing);
+
+        log.debug("forest checkpointing completed!", .{});
+
         env.state = .superblock_checkpointing;
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context);
     }
@@ -333,6 +311,8 @@ const Environment = struct {
         const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
         assert(env.state == .superblock_checkpointing);
         env.state = .forest_open;
+
+        log.debug("superblock checkpointing completed!", .{});
     }
 
     fn compact(env: *Environment, op: u64) !void {
@@ -368,21 +348,17 @@ const Environment = struct {
         
         // Open the superblock then forest to start inserting accounts and transfers.
         try env.open();
-        var next_id: u128 = 0;
-        var prng = std.rand.DefaultPrng.init(0xdeadbeef);
 
-        const num_accounts = 10_000;
-        {
-            var next_op: u64 = 0;
-            var next_crash: u32 = 0;
-            var next_checkpoint: u32 = 0;
-            var next_compact: u32 = forest_config.accounts.commit_count_max;
+        var op: u64 = 0;
+        var id: u64 = 0;
+        while (id < std.mem.alignForward(10_000, config.lsm_batch_multiple)) {
             
-            var i: usize = 0;
-            while (i < num_accounts) : (i += 1) {
-                defer next_id += 1;
+            // Insert a bunch of accounts
+            var i: u32 = 0;
+            while (i < forest_config.accounts.commit_count_max / 2) : (i += 1) {
+                defer id += 1;
                 const account = Account{
-                    .id = next_id,
+                    .id = id,
                     .user_data = 0,
                     .reserved = [_]u8{0} ** 48,
                     .ledger = 710, // Let's use the ISO-4217 Code Number for ZAR
@@ -391,60 +367,80 @@ const Environment = struct {
                     .debits_pending = 0,
                     .debits_posted = 0,
                     .credits_pending = 0,
-                    .credits_posted = prng.random().uintLessThanBiased(u64, 1000),
+                    .credits_posted = 42,
                 };
 
-                // Insert created account.
-                log.debug("inserting account {d}/{d}", .{ i, num_accounts });
+                // Insert an account and make sure it can be retrieved.
+                {
+                    log.debug("inserting account {d} into groove", .{account.id});
+                    const groove = &env.forest.grooves.accounts;
+                    groove.put(&account);
+
+                    const Groove = @TypeOf(groove.*);
+                    const AccountPrefetch = struct {
+                        context: Groove.PrefetchContext = undefined,
+                        prefetched: bool = false,
+                        
+                        fn prefetch_callback(context: *Groove.PrefetchContext) void {
+                            const account_prefetch = @fieldParentPtr(@This(), "context", context);
+                            assert(!account_prefetch.prefetched);
+                            account_prefetch.prefetched = true;
+                        }
+                    };
+
+                    // Prefetch the account id to ensure it can be retrieved from .get().
+                    var account_prefetch = AccountPrefetch{};
+                    groove.prefetch_enqueue(account.id);
+                    groove.prefetch(AccountPrefetch.prefetch_callback, &account_prefetch.context);
+
+                    log.debug("prefetching account {d} into groove", .{account.id});
+                    while (!account_prefetch.prefetched) {
+                        try env.io.tick();
+                    }
+
+                    // Get the account once prefetched and ensure it was the one inserted:
+                    log.debug("fetching account {d} from groove for assertion", .{account.id});
+                    const acc = groove.get(account.id);
+                    assert(acc != null);
+                    assert(std.mem.eql(u8, std.mem.asBytes(&acc.?), std.mem.asBytes(&account)));
+                }
+
+                // Record the successfull insertion.
                 try env.record_accounts.put(&account);
-                env.forest.grooves.accounts.put(&account);
+            }
 
-                // Compact the forest
-                if (i + 1 == next_compact) {
-                    log.debug("compacting forest {d}/{d}", .{ i, num_accounts });
-                    next_compact += forest_config.accounts.commit_count_max;
+            // compact and checkpoint the forest
+            defer op += 1;
+            try env.compact(op);
+            try env.checkpoint(op);
 
-                    const op = next_op;
-                    next_op += 1;
-
-                    try env.compact(op);
-                }
-
-                // Checkpoint everything.
-                if (i == next_checkpoint) {
-                    log.debug("checkpointing everything {d}/{d}", .{ i, num_accounts });
-                    next_checkpoint += 1024;
-
-                    const op = next_op;
-                    try env.checkpoint(op);
-                    try env.record_accounts.checkpoint();
-                    try env.record_transfers.checkpoint();
-                }
+            // checkpoint the records when the forest is likely checkpointed.
+            if (op % config.lsm_batch_multiple == 0) {
+                try env.record_accounts.checkpoint();
+                try env.record_transfers.checkpoint();
 
                 // Simulate crashing and restoring.
-                if (i == next_crash) {
-                    log.debug("simulating crash {d}/{d}", .{ i, num_accounts });
-                    next_crash += 1024;
+                log.debug("simulating crash", .{});
+                crashing = true;
+                {
+                    env.shutdown();
+                    try env.start(must_create);
+                    errdefer env.deinit();
 
-                    crashing = true;
-                    {
-                        env.shutdown();
-                        try env.start(must_create);
-                        errdefer env.deinit();
+                    try env.open();
 
-                        try env.open();
-                        try env.record_accounts.assert_checkpointed(&env.forest.grooves.accounts, &env.io);
-                        try env.record_transfers.assert_checkpointed(&env.forest.grooves.transfers, &env.io);
-                    }
-                    crashing = false;
+                    // Double check the forest contains the checkpointed values.
+                    try env.record_accounts.assert_checkpointed(&env.forest.grooves.accounts, &env.io);
+                    try env.record_transfers.assert_checkpointed(&env.forest.grooves.transfers, &env.io);
                 }
+                crashing = false;
             }
         }
     }
 };
 
 pub fn main() !void {
-    try Environment.format();
+    try Environment.format(); // NOTE: this can be commented out after first run to speed up testing.
     try Environment.run();
 }
 
