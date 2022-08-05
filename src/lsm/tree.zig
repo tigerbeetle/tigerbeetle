@@ -737,13 +737,14 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             }
 
             // At end of fourth/last measure:
-            // - assert: odd compactions from previous tick are finished.
+            // - assert: immutable table and odd level compactions from previous tick are finished.
             // - remove tables made invisible during compaction of odd levels.
             // - assert: all visible levels haven't overflowed their max.
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_beat == config.lsm_batch_multiple - 1) {
                 log.debug(tree_name ++ ": finished compacting immutable table and odd levels", .{});
 
+                assert(tree.compaction_table_immutable.status == .idle);
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
                     tree.manifest.remove_invisible_tables(
