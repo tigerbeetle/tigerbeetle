@@ -302,7 +302,25 @@ comptime {
     assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
     assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
 
+    // For the given WAL (lsm_batch_multiple=4):
+    //
+    //   A    B    C    D    E
+    //   |····|····|····|····|
+    //
+    // - ("|" delineates measures, where a measure is a multiple of prepare batches.)
+    // - ("·" is a prepare in the WAL.)
+    // - The Replica triggers a checkpoint at "E".
+    // - The entries between "A" and "D" are on-disk in level 0.
+    // - The entries between "D" and "E" are in-memory in the immutable table.
+    // - So the checkpoint only includes "A…D".
+    //
+    // The journal must have at least two measures (batches) to ensure at least one is checkpointed.
+    assert(journal_slot_count >= lsm_batch_multiple * 2);
+    assert(journal_slot_count % lsm_batch_multiple == 0);
     assert(journal_size_max == journal_size_headers + journal_size_prepares);
+
+    // The LSM tree uses half-measures to balance compaction.
+    assert(lsm_batch_multiple % 2 == 0);
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.
