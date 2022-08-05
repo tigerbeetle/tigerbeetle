@@ -39,87 +39,6 @@ const Forest = ForestType(Storage, .{
     ),
 });
 
-fn GrooveRecordType(comptime Object: type, comptime commit_count_max: u32) type {
-    return struct {
-        const GrooveRecord = @This();
-        const RecordList = std.ArrayList(Object);
-
-        checkpointed: RecordList,
-        recorded: RecordList,
-
-        pub fn init() !GrooveRecord {
-            return GrooveRecord{
-                .checkpointed = RecordList.init(allocator),
-                .recorded = RecordList.init(allocator),
-            };
-        }
-
-        pub fn deinit(record: *GrooveRecord) void {
-            record.checkpointed.deinit();
-            record.recorded.deinit();
-        }
-
-        pub fn put(record: *GrooveRecord, object: *const Object) !void {
-            try record.recorded.append(object.*);
-        }
-
-        pub fn checkpoint(record: *GrooveRecord) !void {
-            try record.checkpointed.appendSlice(record.recorded.items);
-            record.recorded.clearRetainingCapacity();
-        }
-
-        pub fn assert_checkpointed(record: *const GrooveRecord, groove: anytype, io: *IO) !void {
-            const Groove = @TypeOf(groove.*);
-            const Assertion = struct {
-                prefetch_context: Groove.PrefetchContext = undefined,
-                checkpointed: []const Object,
-                verify_count: u32 = 0,
-                groove: *Groove,
-
-                fn verify(assertion: *@This()) void {
-                    assert(assertion.verify_count == 0);
-                    assertion.verify_count = std.math.min(assertion.checkpointed.len, commit_count_max);
-                    if (assertion.verify_count == 0) return;
-
-                    for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
-                        assertion.groove.prefetch_enqueue(object.id);
-                    }
-
-                    assertion.groove.prefetch(groove_prefetch_callback, &assertion.prefetch_context);
-                }
-
-                fn groove_prefetch_callback(prefetch_context: *Groove.PrefetchContext) void {
-                    const assertion = @fieldParentPtr(@This(), "prefetch_context", prefetch_context);
-                    assert(assertion.verify_count > 0);
-
-                    {
-                        defer assertion.groove.prefetch_clear();
-                        for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
-                            const result = assertion.groove.get(object.id);
-                            assert(result != null);
-                            assert(std.mem.eql(u8, std.mem.asBytes(object), std.mem.asBytes(result.?)));
-                        }
-                    }
-
-                    assertion.checkpointed = assertion.checkpointed[assertion.verify_count..];
-                    assertion.verify_count = 0;
-                    assertion.verify();
-                }
-            };
-
-            var assertion = Assertion{
-                .checkpointed = record.checkpointed.items,
-                .groove = groove,
-            };
-
-            assertion.verify();
-            while (assertion.verify_count > 0) {
-                try io.tick();
-            }
-        }
-    };
-}
-
 const Environment = struct {
     const cluster = 32;
     const replica = 4;
@@ -137,9 +56,6 @@ const Environment = struct {
             .commit_count_max = 8191,
         },
     };
-
-    const GrooveRecordAccounts = GrooveRecordType(Account, forest_config.accounts.commit_count_max);
-    const GrooveRecordTransfers = GrooveRecordType(Transfer, forest_config.transfers.commit_count_max);
 
     const State = enum {
         uninit,
@@ -162,23 +78,13 @@ const Environment = struct {
     superblock_context: SuperBlock.Context,
     grid: Grid,
     forest: Forest,
-    record_accounts: GrooveRecordAccounts,
-    record_transfers: GrooveRecordTransfers,
 
     fn init(env: *Environment, must_create: bool) !void {
         try env.start(must_create);
         errdefer env.shutdown();
-
-        env.record_accounts = try GrooveRecordAccounts.init();
-        errdefer env.record_accounts.deinit();
-
-        env.record_transfers = try GrooveRecordTransfers.init();
-        errdefer env.record_transfers.deinit();
     }
 
     fn deinit(env: *Environment) void {
-        env.record_transfers.deinit();
-        env.record_accounts.deinit();
         env.shutdown();
     }
 
@@ -335,6 +241,57 @@ const Environment = struct {
         env.state = .forest_open;
     }
 
+    fn assert_checkpointed(
+        env: *Environment,
+        groove: anytype, 
+        checkpointed: anytype,
+        comptime commit_count_max: u32,
+    ) !void {
+        const Groove = @TypeOf(groove.*);
+        const Object = @TypeOf(checkpointed[0]);
+
+        const CheckpointAssertion = struct {
+            prefetch_context: Groove.PrefetchContext = undefined,
+            verify_count: usize = 0,
+            checkpointed: []const Object,
+            groove: *Groove,
+
+            fn verify(assertion: *@This()) void {
+                assert(assertion.verify_count == 0);
+                assertion.verify_count = std.math.min(commit_count_max, assertion.checkpointed.len);
+                if (assertion.verify_count == 0) return;
+
+                for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
+                    assertion.groove.prefetch_enqueue(object.id);
+                }
+
+                assertion.groove.prefetch(prefetch_callback, &assertion.prefetch_context);
+            }
+
+            fn prefetch_callback(prefetch_context: *Groove.PrefetchContext) void {
+                const assertion = @fieldParentPtr(@This(), "prefetch_context", prefetch_context);
+                assert(assertion.verify_count > 0);
+
+                {
+                    defer assertion.groove.prefetch_clear();
+                    for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
+                        const result = assertion.groove.get(object.id);
+                        assert(result != null);
+                        assert(std.mem.eql(u8, std.mem.asBytes(&result.?), std.mem.asBytes(object)));
+                    }
+                }
+                
+                assertion.checkpointed = assertion.checkpointed[assertion.verify_count..];
+                assertion.verify_count = 0;
+                assertion.verify();
+            }
+        };
+
+        var assertion = CheckpointAssertion{ .checkpointed = checkpointed, .groove = groove };
+        assertion.verify();
+        while (assertion.verify_count > 0) try env.io.tick();
+    }
+
     fn run() !void {
         var env: Environment = undefined;
 
@@ -348,6 +305,16 @@ const Environment = struct {
 
         // Open the superblock then forest to start inserting accounts and transfers.
         try env.open();
+
+        // Recording types for verification
+        var mutable = std.ArrayList(Account).init(allocator);
+        defer mutable.deinit();
+
+        var compacting = std.ArrayList(Account).init(allocator);
+        defer compacting.deinit();
+
+        var checkpointed = std.ArrayList(Account).init(allocator);
+        defer checkpointed.deinit();
 
         var op: u64 = 0;
         var id: u64 = 0;
@@ -410,18 +377,27 @@ const Environment = struct {
                 }
 
                 // Record the successfull insertion.
-                try env.record_accounts.put(&account);
+                try mutable.append(account);
             }
 
             // compact and checkpoint the forest
             defer op += 1;
             try env.compact(op);
 
+            if (op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
+                try compacting.appendSlice(mutable.items);
+                mutable.clearRetainingCapacity();
+            }
+
             // checkpoint the records when the forest is likely finished compaction.
-            if (op != 0 and op % config.lsm_batch_multiple == 0) {
+            const checkpoint_op = op -| config.lsm_batch_multiple;
+            if (checkpoint_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
+                // Checkpoint the forest then superblock
                 try env.checkpoint(op);
-                try env.record_accounts.checkpoint();
-                try env.record_transfers.checkpoint();
+
+                // Record the accounts that have been checkpointed.
+                try checkpointed.appendSlice(compacting.items);
+                compacting.clearRetainingCapacity();
 
                 // Simulate crashing and restoring.
                 log.debug("simulating crash", .{});
@@ -431,11 +407,15 @@ const Environment = struct {
                     try env.start(must_create);
                     errdefer env.deinit();
 
+                    // Re-open the superblock and forest.
                     try env.open();
 
                     // Double check the forest contains the checkpointed values.
-                    try env.record_accounts.assert_checkpointed(&env.forest.grooves.accounts, &env.io);
-                    try env.record_transfers.assert_checkpointed(&env.forest.grooves.transfers, &env.io);
+                    try env.assert_checkpointed(
+                        &env.forest.grooves.accounts, 
+                        checkpointed.items,
+                        forest_config.accounts.commit_count_max,
+                    );
                 }
                 crashing = false;
             }
