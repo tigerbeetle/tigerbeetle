@@ -173,15 +173,18 @@ const Command = struct {
             command.allocator,
             .{
                 .cluster = cluster,
+                .superblock = command.superblock.?,
                 .replica_count = @intCast(u8, command.addresses.?.len),
                 .replica_index = replica_index,
                 .time = &time,
                 .storage = &command.storage,
                 .message_bus = &message_bus,
                 .state_machine_options = .{
-                    .accounts_max = config.accounts_max,
-                    .transfers_max = config.transfers_max,
-                    .transfers_pending_max = config.transfers_pending_max,
+                    // TODO Tune lsm_forest_node_count better.
+                    .lsm_forest_node_count = 4096,
+                    .cache_size_accounts = config.accounts_max,
+                    .cache_size_transfers = config.transfers_max,
+                    .cache_size_posted = config.transfers_pending_max,
                 },
             },
         );
