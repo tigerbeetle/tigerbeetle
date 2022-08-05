@@ -145,6 +145,8 @@ pub fn GrooveType(
     ///     but can be derived from an Object instance using the field's corresponding function.
     comptime options: anytype,
 ) type {
+    @setEvalBranchQuota(64000);
+
     assert(@hasField(Object, "id"));
     assert(std.meta.fieldInfo(Object, .id).field_type == u128);
     assert(@hasField(Object, "timestamp"));

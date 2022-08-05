@@ -58,7 +58,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
     const tree_hash = blk: {
         // Blake3 hash does alot at comptime..
-        @setEvalBranchQuota(tree_name.len * 512);
+        @setEvalBranchQuota(tree_name.len * 1024);
 
         var hash: u256 = undefined;
         std.crypto.hash.Blake3.hash(tree_name, std.mem.asBytes(&hash), .{});

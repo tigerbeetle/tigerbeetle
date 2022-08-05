@@ -102,7 +102,7 @@ pub const ClientTable = struct {
 
     pub fn encode(client_table: *const ClientTable, target: []align(@alignOf(vsr.Header)) u8) u64 {
         // The entries must be collected and sorted into a separate buffer first before iteration.
-        // This avoids relying on iteration order of AutoHashMapUnmanaged which may change between 
+        // This avoids relying on iteration order of AutoHashMapUnmanaged which may change between
         // zig versions.
         var entries_count: u32 = 0;
         {
@@ -141,7 +141,7 @@ pub const ClientTable = struct {
             mem.copy(u8, target[size..], mem.asBytes(&entry.session));
             size += @sizeOf(u64);
         }
-        
+
         // Write all messages:
         new_size = std.mem.alignForward(size, @alignOf(u8));
         std.mem.set(u8, target[size..new_size], 0);
@@ -169,7 +169,7 @@ pub const ClientTable = struct {
     pub fn decode(client_table: *ClientTable, source: []align(@alignOf(vsr.Header)) const u8) void {
         // Read the entry count at the end of the buffer to determine how many there are.
         var entries_count: u32 = undefined;
-        mem.copy(u8, mem.asBytes(&entries_count), source[source.len - @sizeOf(u32)..]);
+        mem.copy(u8, mem.asBytes(&entries_count), source[source.len - @sizeOf(u32) ..]);
         assert(entries_count <= client_table.sorted.len);
 
         assert(client_table.count() == 0);
@@ -183,14 +183,17 @@ pub const ClientTable = struct {
         assert(source.len <= encode_size_max);
 
         size = std.mem.alignForward(size, @alignOf(vsr.Header));
-        const headers = mem.bytesAsSlice(vsr.Header, source[size..entries_count * @sizeOf(vsr.Header)],);
+        const headers = mem.bytesAsSlice(
+            vsr.Header,
+            source[size .. entries_count * @sizeOf(vsr.Header)],
+        );
         size += mem.sliceAsBytes(headers).len;
-        
-        size = std.mem.alignForward(size, @alignOf(u64)); 
-        const sessions = mem.bytesAsSlice(u64, source[size..entries_count * @sizeOf(u64)]);
+
+        size = std.mem.alignForward(size, @alignOf(u64));
+        const sessions = mem.bytesAsSlice(u64, source[size .. entries_count * @sizeOf(u64)]);
         size += mem.sliceAsBytes(sessions).len;
-        
-        size = std.mem.alignForward(size, @alignOf(u8)); 
+
+        size = std.mem.alignForward(size, @alignOf(u8));
         var bodies = source[size..];
         assert(bodies.len > 0);
 
@@ -216,7 +219,7 @@ pub const ClientTable = struct {
             mem.copy(u8, body, bodies[0..body_size]);
             bodies = bodies[body_size..];
             assert(entry.reply.header.valid_checksum_body(body));
-            
+
             // Insert into the client table
             client_table.put(&entry);
         }
@@ -224,7 +227,7 @@ pub const ClientTable = struct {
 
     pub fn count(client_table: *const ClientTable) usize {
         return client_table.entries.count();
-    } 
+    }
 
     pub fn capacity(client_table: *const ClientTable) usize {
         return client_table.entries.capacity();

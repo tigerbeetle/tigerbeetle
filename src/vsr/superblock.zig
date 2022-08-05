@@ -270,9 +270,7 @@ pub const superblock_trailer_size_max = blk: {
 
     // We order the smaller manifest section ahead of the block free set for better access locality.
     // For example, it's cheaper to skip over 1 MiB when reading from disk than to skip over 32 MiB.
-    break :blk superblock_trailer_manifest_size_max 
-        + superblock_trailer_free_set_size_max 
-        + superblock_trailer_client_table_size_max;
+    break :blk superblock_trailer_manifest_size_max + superblock_trailer_free_set_size_max + superblock_trailer_client_table_size_max;
 };
 
 // A manifest block reference of 40 bytes contains a tree hash, checksum, and address.
@@ -682,8 +680,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             assert(superblock.writing.manifest_checksum == superblock.staging.manifest_checksum);
             assert(superblock.writing.free_set_checksum == superblock.staging.free_set_checksum);
-            assert(superblock.writing.client_table_checksum 
-                == superblock.staging.client_table_checksum);
+            assert(superblock.writing.client_table_checksum == superblock.staging.client_table_checksum);
 
             assert(superblock.writing.manifest_size == superblock.staging.manifest_size);
             assert(superblock.writing.free_set_size == superblock.staging.free_set_size);
