@@ -2405,8 +2405,9 @@ pub fn Replica(
             self.state_machine.compact(commit_op_compact_callback, self.commit_prepare.?.header.op);
         }
 
-        fn commit_op_compact_callback(state_machine: *StateMachine) void {
-            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+        fn commit_op_compact_callback(forest: *StateMachine.Forest) void {
+            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
+            const self = @fieldParentPtr(Replica, "state_machine", state_machine);
             assert(self.committing);
             assert(self.commit_callback != null);
             assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
