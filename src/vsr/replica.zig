@@ -454,8 +454,9 @@ pub fn Replica(
                     if (self.committing) return;
                     // TODO Assert that this path isn't taken more than once.
                     self.op = self.journal.op_maximum();
-                    assert(self.op >= self.op_checkpoint);
                     assert(self.op >= self.commit_min);
+                    assert(self.op >= self.op_checkpoint);
+                    assert(self.op <= self.op_checkpoint_trigger());
                     assert(self.journal.header_with_op(self.op) != null);
                     self.commit_journal(self.op);
                     // The recovering→normal transition is deferred until all ops are committed.
@@ -740,7 +741,7 @@ pub fn Replica(
             }
 
             // Verify that the new request will fit in the WAL.
-            if (message.header.op > self.op_ceiling()) {
+            if (message.header.op > self.op_checkpoint_trigger()) {
                 log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
                     message.header.op,
@@ -758,7 +759,7 @@ pub fn Replica(
             assert(message.header.op > self.op_checkpoint);
             assert(message.header.op > self.op);
             assert(message.header.op > self.commit_min);
-            assert(message.header.op <= self.op_ceiling());
+            assert(message.header.op <= self.op_checkpoint_trigger());
 
             if (self.follower()) self.normal_status_timeout.reset();
 
@@ -2333,7 +2334,7 @@ pub fn Replica(
         /// 1. prefetch
         /// 2. commit_op: Update the state machine and the replica's commit_min/commit_max.
         /// 3. compact
-        /// 4. checkpoint: (Optional step: Only at certain op multiples.)
+        /// 4. checkpoint: (Only called when `commit_min == op_checkpoint_trigger`).
         /// 5. done: Call the `callback` that was passed to `commit_op_prefetch`.
         fn commit_op_prefetch(
             self: *Self,
@@ -2413,15 +2414,12 @@ pub fn Replica(
             assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
 
-            const commit = self.commit_prepare.?.header.op;
-            if ((commit + 1) % config.journal_slot_count == 0) {
-                assert((commit + 1) % config.lsm_batch_multiple == 0);
-                // Trigger the checkpoint immediately before the WAL will wrap.
-                self.state_machine.forest.checkpoint(
-                    commit_op_checkpoint_forest_callback,
-                    commit,
-                );
+            const op = self.commit_prepare.?.header.op;
+            if (op == self.op_checkpoint_trigger()) {
+                assert((op + 1) % config.lsm_batch_multiple == 0);
+                self.state_machine.forest.checkpoint(commit_op_checkpoint_forest_callback, op);
             } else {
+                assert(op < self.op_checkpoint_trigger());
                 self.commit_op_done();
             }
         }
@@ -2431,8 +2429,9 @@ pub fn Replica(
             const self = @fieldParentPtr(Replica, "state_machine", state_machine);
             assert(self.committing);
             assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
-            assert((self.commit_prepare.?.header.op + 1) % config.journal_slot_count == 0);
+            assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
 
             // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
             //
@@ -2440,9 +2439,12 @@ pub fn Replica(
             //   |01|23|45|67|
             //
             // The checkpoint is triggered at "E".
-            // The but only "A…D" is checkpointed, so the SuperBlock's `commit_min` is 7-2=5.
+            // At this point, ops 6 and 7 are in the in-memory immutable table.
+            // They will only be compacted to disk in the next measure.
+            // Therefore, only ops "A..D" are committed to disk.
+            // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_new = .{
-                .commit_min = self.commit_min - config.lsm_batch_multiple,
+                .commit_min = self.op_checkpoint_next(),
                 .commit_max = self.commit_max,
                 .view_normal = self.view_normal,
                 .view = self.view,
@@ -2460,9 +2462,11 @@ pub fn Replica(
             const self = @fieldParentPtr(Replica, "superblock_context", superblock_context);
             assert(self.committing);
             assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
 
-            self.op_checkpoint = self.commit_min - config.lsm_batch_multiple;
+            self.op_checkpoint = self.op_checkpoint_next();
+            assert(self.op_checkpoint == self.commit_min - config.lsm_batch_multiple);
             assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
 
@@ -2472,8 +2476,9 @@ pub fn Replica(
         fn commit_op_done(self: *Self) void {
             const callback = self.commit_callback.?;
             assert(self.committing);
+            assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
-            assert(self.commit_prepare.?.header.op <= self.op);
+            assert(self.commit_prepare.?.header.op < self.op_checkpoint_trigger());
 
             self.message_bus.unref(self.commit_prepare.?);
             self.commit_prepare = null;
@@ -3144,7 +3149,7 @@ pub fn Replica(
 
             // Verify that the new request will fit in the WAL.
             // The message's op hasn't been assigned yet, but it will be `self.op + 1`.
-            if (self.op == self.op_ceiling()) {
+            if (self.op == self.op_checkpoint_trigger()) {
                 log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
                     self.op + 1,
@@ -3422,17 +3427,45 @@ pub fn Replica(
             return true;
         }
 
-        /// Returns the highest op that can be received, considering the current checkpoint.
-        fn op_ceiling(self: *const Self) u64 {
+        /// Returns the op that will be `op_checkpoint` after the next checkpoint.
+        ///
+        /// For a replica with journal_slot_count=8 and lsm_batch_multiple=2:
+        ///
+        ///   |01|23|45|67| (initial log fill)
+        ///   |89|01|23|45| (first wrap of log)
+        ///   |67|89|01|23| (second wrap of log)
+        ///
+        ///   checkpoint() call      0   1   2
+        ///   op_checkpoint          0   5  11
+        ///   op_checkpoint_next     5  11  17
+        ///   op_checkpoint_trigger  7  13  19
+        ///
+        fn op_checkpoint_next(self: *const Self) u64 {
             assert(self.op_checkpoint <= self.commit_min);
             assert(self.op_checkpoint <= self.op);
-            assert((self.op_checkpoint + 1) % config.lsm_batch_multiple == 0);
+            assert(self.op_checkpoint == 0 or
+                (self.op_checkpoint + 1) % config.lsm_batch_multiple == 0);
 
-            if (self.op_checkpoint == 0) {
-                return config.journal_slot_count - 1;
-            } else {
-                return self.op_checkpoint + config.journal_slot_count;
-            }
+            const op = if (self.op_checkpoint == 0)
+                // First wrap: op_checkpoint_next = 8-2-1 = 5
+                config.journal_slot_count - config.lsm_batch_multiple - 1
+            else
+                // Second wrap: op_checkpoint_next = 5+8-2 = 11
+                self.op_checkpoint + config.journal_slot_count - config.lsm_batch_multiple;
+            assert((op + 1) % config.lsm_batch_multiple == 0);
+
+            return op;
+        }
+
+        /// Returns the next op that will trigger a checkpoint.
+        ///
+        /// Receiving and storing an op higher than `op_checkpoint_trigger()` is forbidden; doing so
+        /// would overwrite a message (or the slot of a message) that has not yet been committed and
+        /// checkpointed.
+        ///
+        /// See `op_checkpoint_next` for more detail.
+        fn op_checkpoint_trigger(self: *const Self) u64 {
+            return self.op_checkpoint_next() + config.lsm_batch_multiple;
         }
 
         fn is_repair(self: *const Self, message: *const Message) bool {
@@ -3471,7 +3504,7 @@ pub fn Replica(
             // to a newer op that is less than `commit_max` but greater than `commit_min`:
             assert(header.op > self.commit_min);
             // Never overwrite an op that still needs to be checkpointed.
-            assert(header.op <= self.op_ceiling());
+            assert(header.op <= self.op_checkpoint_trigger());
 
             log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
                 self.replica,
@@ -3646,7 +3679,7 @@ pub fn Replica(
 
             // The replica repairs backwards from `commit_max`. But if `commit_max` is too high
             // (>1 WAL ahead), then bound it such that uncommitted WAL entries are not overwritten.
-            const commit_max_limit = std.math.min(self.commit_max, self.op_ceiling());
+            const commit_max_limit = std.math.min(self.commit_max, self.op_checkpoint_trigger());
 
             // Request outstanding committed prepares to advance our op number:
             // This handles the case of an idle cluster, where a follower will not otherwise advance.
@@ -4651,7 +4684,7 @@ pub fn Replica(
                 .prepare_ok => {
                     assert(self.status == .normal);
                     assert(message.header.view == self.view);
-                    assert(message.header.op <= self.op_ceiling());
+                    assert(message.header.op <= self.op_checkpoint_trigger());
                     // We must only ever send a prepare_ok to the latest leader of the active view:
                     // We must never straddle views by sending to a leader in an older view.
                     // Otherwise, we would be enabling a partitioned leader to commit.

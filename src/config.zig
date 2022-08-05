@@ -307,7 +307,8 @@ comptime {
     //   A    B    C    D    E
     //   |····|····|····|····|
     //
-    // - ("|" delineates measures/batches; "·" is a prepare in the WAL.)
+    // - ("|" delineates measures, where a measure is a multiple of prepare batches.)
+    // - ("·" is a prepare in the WAL.)
     // - The Replica triggers a checkpoint at "E".
     // - The entries between "A" and "D" are on-disk in level 0.
     // - The entries between "D" and "E" are in-memory in the immutable table.
