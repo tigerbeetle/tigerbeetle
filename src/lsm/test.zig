@@ -353,7 +353,6 @@ const Environment = struct {
         var id: u64 = 0;
         var timestamp: u64 = 42;
         while (id < std.mem.alignForward(10_000, config.lsm_batch_multiple)) {
-
             const accounts_to_insert = 1; // forest_config.accounts.commit_count_max;
 
             // Insert a bunch of accounts
@@ -417,7 +416,7 @@ const Environment = struct {
             // compact and checkpoint the forest
             defer op += 1;
             try env.compact(op);
-            
+
             // checkpoint the records when the forest is likely finished compaction.
             if (op != 0 and op % config.lsm_batch_multiple == 0) {
                 try env.checkpoint(op);
