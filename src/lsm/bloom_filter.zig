@@ -31,7 +31,7 @@ pub const Fingerprint = struct {
         };
 
         // Multiply-shift hashing. This produces 8 values in the range 0 to 31 (2^5 - 1).
-        const bit_indexes = (odd_integers * @splat(8, hash_lower)) >> @splat(8, @as(u5, 32 - 5));
+        const bit_indexes = (odd_integers *% @splat(8, hash_lower)) >> @splat(8, @as(u5, 32 - 5));
 
         return .{
             .hash = hash_upper,
