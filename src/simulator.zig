@@ -21,288 +21,12 @@ const output = std.log.scoped(.state_checker);
 const log_state_transitions_only = builtin.mode != .Debug;
 
 const log_health = std.log.scoped(.health);
+const log_faults = std.log.scoped(.faults);
 
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
 
-var prng: std.rand.DefaultPrng = undefined;
-
-const ticks_max = 100_000_000;
-
-/// `on_change_replica` and `send_request` need access to the cluster
-var cluster_ptr: *Cluster = undefined;
-
-pub const Simulator = struct {
-    cluster: *Cluster,
-
-    random: std.rand.Random,
-
-    replica_count: u8 = 0,
-    client_count: u8 = 0,
-    node_count: u8 = 0,
-
-    request_probability: u8 = 0,
-    idle_on_probability: u8 = 0,
-    idle_off_probability: u8 = 0,
-
-    replica_normal_min: u8 = 0,
-    requests_sent: u64 = 0,
-    idle: bool = false,
-    running: bool = false,
-
-    pub fn init(allocator: std.mem.Allocator, seed: u64) !Simulator {
-        prng = std.rand.DefaultPrng.init(seed);
-        const random = prng.random();
-
-        var self = Simulator{
-            .cluster = undefined,
-            .random = random,
-        };
-
-        self.replica_count = 1 + self.random.uintLessThan(u8, config.replicas_max);
-        self.client_count = 1 + self.random.uintLessThan(u8, config.clients_max);
-        self.node_count = self.replica_count + self.client_count;
-
-        self.request_probability = 1 + self.random.uintLessThan(u8, 99);
-        self.idle_on_probability = self.random.uintLessThan(u8, 20);
-        self.idle_off_probability = 10 + self.random.uintLessThan(u8, 10);
-
-        self.cluster = try Cluster.create(allocator, self.random, .{
-            .cluster = 0,
-            .replica_count = self.replica_count,
-            .client_count = self.client_count,
-            .seed = self.random.int(u64),
-            .network_options = .{
-                .packet_simulator_options = .{
-                    .replica_count = self.replica_count,
-                    .client_count = self.client_count,
-                    .node_count = self.node_count,
-
-                    .seed = self.random.int(u64),
-                    .one_way_delay_mean = 3 + self.random.uintLessThan(u16, 10),
-                    .one_way_delay_min = self.random.uintLessThan(u16, 3),
-                    .packet_loss_probability = self.random.uintLessThan(u8, 30),
-                    .path_maximum_capacity = 2 + self.random.uintLessThan(u8, 19),
-                    .path_clog_duration_mean = self.random.uintLessThan(u16, 500),
-                    .path_clog_probability = self.random.uintLessThan(u8, 2),
-                    .packet_replay_probability = self.random.uintLessThan(u8, 50),
-
-                    .partition_mode = random_partition_mode(self.random),
-                    .partition_probability = self.random.uintLessThan(u8, 3),
-                    .unpartition_probability = 1 + self.random.uintLessThan(u8, 10),
-                    .partition_stability = 100 + self.random.uintLessThan(u32, 100),
-                    .unpartition_stability = self.random.uintLessThan(u32, 20),
-                },
-            },
-            .storage_options = .{
-                .seed = self.random.int(u64),
-                .read_latency_min = self.random.uintLessThan(u16, 3),
-                .read_latency_mean = 3 + self.random.uintLessThan(u16, 10),
-                .write_latency_min = self.random.uintLessThan(u16, 3),
-                .write_latency_mean = 3 + self.random.uintLessThan(u16, 100),
-                .read_fault_probability = self.random.uintLessThan(u8, 10),
-                .write_fault_probability = self.random.uintLessThan(u8, 10),
-            },
-            .health_options = .{
-                .crash_probability = 0.0001,
-                .crash_stability = self.random.uintLessThan(u32, 1_000),
-                .restart_probability = 0.01,
-                .restart_stability = self.random.uintLessThan(u32, 1_000),
-            },
-        });
-        cluster_ptr = self.cluster;
-        errdefer self.cluster.destroy();
-
-        self.cluster.state_checker = try StateChecker.init(allocator, self.cluster);
-        errdefer self.cluster.state_checker.deinit();
-
-        for (self.cluster.replicas) |*replica| {
-            replica.on_change_state = on_change_replica;
-        }
-        self.cluster.on_change_state = on_change_replica;
-
-        output.info(
-            \\
-            \\          SEED={}
-            \\
-            \\          replicas={}
-            \\          clients={}
-            \\          request_probability={}%
-            \\          idle_on_probability={}%
-            \\          idle_off_probability={}%
-            \\          one_way_delay_mean={} ticks
-            \\          one_way_delay_min={} ticks
-            \\          packet_loss_probability={}%
-            \\          path_maximum_capacity={} messages
-            \\          path_clog_duration_mean={} ticks
-            \\          path_clog_probability={}%
-            \\          packet_replay_probability={}%
-            \\          partition_mode={}
-            \\          partition_probability={}%
-            \\          unpartition_probability={}%
-            \\          partition_stability={} ticks
-            \\          unpartition_stability={} ticks
-            \\          read_latency_min={}
-            \\          read_latency_mean={}
-            \\          write_latency_min={}
-            \\          write_latency_mean={}
-            \\          read_fault_probability={}%
-            \\          write_fault_probability={}%
-            \\          crash_probability={d}%
-            \\          crash_stability={} ticks
-            \\          restart_probability={d}%
-            \\          restart_stability={} ticks
-            \\
-        , .{
-            seed,
-            self.replica_count,
-            self.client_count,
-            self.request_probability,
-            self.idle_on_probability,
-            self.idle_off_probability,
-            self.cluster.options.network_options.packet_simulator_options.one_way_delay_mean,
-            self.cluster.options.network_options.packet_simulator_options.one_way_delay_min,
-            self.cluster.options.network_options.packet_simulator_options.packet_loss_probability,
-            self.cluster.options.network_options.packet_simulator_options.path_maximum_capacity,
-            self.cluster.options.network_options.packet_simulator_options.path_clog_duration_mean,
-            self.cluster.options.network_options.packet_simulator_options.path_clog_probability,
-            self.cluster.options.network_options.packet_simulator_options.packet_replay_probability,
-            self.cluster.options.network_options.packet_simulator_options.partition_mode,
-            self.cluster.options.network_options.packet_simulator_options.partition_probability,
-            self.cluster.options.network_options.packet_simulator_options.unpartition_probability,
-            self.cluster.options.network_options.packet_simulator_options.partition_stability,
-            self.cluster.options.network_options.packet_simulator_options.unpartition_stability,
-            self.cluster.options.storage_options.read_latency_min,
-            self.cluster.options.storage_options.read_latency_mean,
-            self.cluster.options.storage_options.write_latency_min,
-            self.cluster.options.storage_options.write_latency_mean,
-            self.cluster.options.storage_options.read_fault_probability,
-            self.cluster.options.storage_options.write_fault_probability,
-            self.cluster.options.health_options.crash_probability * 100,
-            self.cluster.options.health_options.crash_stability,
-            self.cluster.options.health_options.restart_probability * 100,
-            self.cluster.options.health_options.restart_stability,
-        });
-
-        self.requests_sent = 0;
-        self.idle = false;
-        self.running = true;
-
-        // The minimum number of healthy replicas required for a crashed replica to be able to recover.
-        self.replica_normal_min = replicas: {
-            if (self.replica_count == 1) {
-                // A cluster of 1 can crash safely (as long as there is no disk corruption) since it
-                // does not run the recovery protocol.
-                break :replicas 0;
-            } else {
-                break :replicas self.cluster.replicas[0].quorum_view_change;
-            }
-        };
-
-        // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
-        for (self.cluster.storages) |*storage, i| {
-            storage.faulty = self.replica_normal_min <= i;
-        }
-
-        return self;
-    }
-
-    pub fn deinit(self: Simulator) void {
-        self.cluster.state_checker.deinit();
-        self.cluster.destroy();
-    }
-
-    pub fn tick(self: *Simulator) !void {
-        const health_options = &self.cluster.options.health_options;
-        // The maximum number of replicas that can crash, with the cluster still able to recover.
-        var crashes = self.cluster.replica_normal_count() -| self.replica_normal_min;
-
-        for (self.cluster.storages) |*storage, replica| {
-            if (self.cluster.replicas[replica].journal.recovered) {
-
-                // TODO Remove this workaround when VSR recovery protocol is disabled.
-                // When only the minimum number of replicas are healthy (no more crashes allowed),
-                // disable storage faults on all healthy replicas.
-                //
-                // This is a workaround to avoid the deadlock that occurs when (for example) in a
-                // cluster of 3 replicas, one is down, another has a corrupt prepare, and the last does
-                // not have the prepare. The two healthy replicas can never complete a view change,
-                // because two replicas are not enough to nack, and the unhealthy replica cannot
-                // complete the VSR recovery protocol either.
-                if (self.cluster.health[replica] == .up and crashes == 0) {
-                    storage.faulty = false;
-                } else {
-                    // When a journal recovers for the first time, enable its storage faults.
-                    // Future crashes will recover in the presence of faults.
-                    storage.faulty = true;
-                }
-            }
-            storage.tick();
-        }
-
-        for (self.cluster.replicas) |*replica| {
-            switch (self.cluster.health[replica.replica]) {
-                .up => |*ticks| {
-                    ticks.* -|= 1;
-                    replica.tick();
-                    self.cluster.state_checker.check_state(replica.replica);
-
-                    if (ticks.* != 0) continue;
-                    if (crashes == 0) continue;
-                    if (self.cluster.storages[replica.replica].writes.count() == 0) {
-                        if (!chance_f64(self.random, health_options.crash_probability)) continue;
-                    } else {
-                        if (!chance_f64(self.random, health_options.crash_probability * 10.0)) continue;
-                    }
-
-                    if (!try self.cluster.crash_replica(replica.replica)) continue;
-                    log_health.debug("crash replica={}", .{replica.replica});
-                    crashes -= 1;
-                },
-                .down => |*ticks| {
-                    ticks.* -|= 1;
-                    // Keep ticking the time so that it won't have diverged too far to synchronize
-                    // when the replica restarts.
-                    replica.clock.time.tick();
-                    assert(replica.status == .recovering);
-                    if (ticks.* == 0 and chance_f64(self.random, health_options.restart_probability)) {
-                        self.cluster.health[replica.replica] = .{ .up = health_options.restart_stability };
-                        log_health.debug("restart replica={}", .{replica.replica});
-                    }
-                },
-            }
-        }
-
-        self.cluster.network.packet_simulator.tick(self.cluster.health);
-
-        for (self.cluster.clients) |*client| client.tick();
-
-        // TODO When storage is supported, run more transitions than fit in the journal.
-        const transitions_max = config.journal_slot_count / 2;
-        if (self.cluster.state_checker.transitions == transitions_max) {
-            if (self.cluster.state_checker.convergence() and
-                self.cluster.replica_up_count() == self.replica_count)
-            {
-                self.running = false;
-                return;
-            }
-            return;
-        } else {
-            assert(self.cluster.state_checker.transitions < transitions_max);
-        }
-
-        if (self.requests_sent < transitions_max) {
-            if (self.idle) {
-                if (chance(self.random, self.idle_off_probability)) self.idle = false;
-            } else {
-                if (chance(self.random, self.request_probability)) {
-                    if (send_request(self.random)) self.requests_sent += 1;
-                }
-                if (chance(self.random, self.idle_on_probability)) self.idle = true;
-            }
-        }
-    }
-};
+var cluster: *Cluster = undefined;
 
 pub fn main() !void {
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
@@ -338,24 +62,257 @@ pub fn main() !void {
         }
     }
 
-    var simulator = try Simulator.init(allocator, seed);
-    defer simulator.deinit();
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
 
-    var ticks: u64 = 0;
-    while (ticks < ticks_max and simulator.running) : (ticks += 1) {
-        try simulator.tick();
+    const replica_count = 1 + random.uintLessThan(u8, config.replicas_max);
+    const client_count = 1 + random.uintLessThan(u8, config.clients_max);
+    const node_count = replica_count + client_count;
+
+    const ticks_max = 100_000_000;
+    const request_probability = 1 + random.uintLessThan(u8, 99);
+    const idle_on_probability = random.uintLessThan(u8, 20);
+    const idle_off_probability = 10 + random.uintLessThan(u8, 10);
+
+    cluster = try Cluster.create(allocator, random, .{
+        .cluster = 0,
+        .replica_count = replica_count,
+        .client_count = client_count,
+        .seed = random.int(u64),
+        .network_options = .{
+            .packet_simulator_options = .{
+                .replica_count = replica_count,
+                .client_count = client_count,
+                .node_count = node_count,
+
+                .seed = random.int(u64),
+                .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
+                .one_way_delay_min = random.uintLessThan(u16, 3),
+                .packet_loss_probability = random.uintLessThan(u8, 30),
+                .path_maximum_capacity = 2 + random.uintLessThan(u8, 19),
+                .path_clog_duration_mean = random.uintLessThan(u16, 500),
+                .path_clog_probability = random.uintLessThan(u8, 2),
+                .packet_replay_probability = random.uintLessThan(u8, 50),
+
+                .partition_mode = random_partition_mode(random),
+                .partition_probability = random.uintLessThan(u8, 3),
+                .unpartition_probability = 1 + random.uintLessThan(u8, 10),
+                .partition_stability = 100 + random.uintLessThan(u32, 100),
+                .unpartition_stability = random.uintLessThan(u32, 20),
+            },
+        },
+        .storage_options = .{
+            .seed = random.int(u64),
+            .read_latency_min = random.uintLessThan(u16, 3),
+            .read_latency_mean = 3 + random.uintLessThan(u16, 10),
+            .write_latency_min = random.uintLessThan(u16, 3),
+            .write_latency_mean = 3 + random.uintLessThan(u16, 100),
+            .read_fault_probability = random.uintLessThan(u8, 10),
+            .write_fault_probability = random.uintLessThan(u8, 10),
+        },
+        .health_options = .{
+            .crash_probability = 0.0001,
+            .crash_stability = random.uintLessThan(u32, 1_000),
+            .restart_probability = 0.01,
+            .restart_stability = random.uintLessThan(u32, 1_000),
+        },
+    });
+    defer cluster.destroy();
+
+    cluster.state_checker = try StateChecker.init(allocator, cluster);
+    defer cluster.state_checker.deinit();
+
+    for (cluster.replicas) |*replica| {
+        replica.on_change_state = on_change_replica;
+    }
+    cluster.on_change_state = on_change_replica;
+
+    output.info(
+        \\
+        \\          SEED={}
+        \\
+        \\          replicas={}
+        \\          clients={}
+        \\          request_probability={}%
+        \\          idle_on_probability={}%
+        \\          idle_off_probability={}%
+        \\          one_way_delay_mean={} ticks
+        \\          one_way_delay_min={} ticks
+        \\          packet_loss_probability={}%
+        \\          path_maximum_capacity={} messages
+        \\          path_clog_duration_mean={} ticks
+        \\          path_clog_probability={}%
+        \\          packet_replay_probability={}%
+        \\          partition_mode={}
+        \\          partition_probability={}%
+        \\          unpartition_probability={}%
+        \\          partition_stability={} ticks
+        \\          unpartition_stability={} ticks
+        \\          read_latency_min={}
+        \\          read_latency_mean={}
+        \\          write_latency_min={}
+        \\          write_latency_mean={}
+        \\          read_fault_probability={}%
+        \\          write_fault_probability={}%
+        \\          crash_probability={d}%
+        \\          crash_stability={} ticks
+        \\          restart_probability={d}%
+        \\          restart_stability={} ticks
+        \\
+    , .{
+        seed,
+        replica_count,
+        client_count,
+        request_probability,
+        idle_on_probability,
+        idle_off_probability,
+        cluster.options.network_options.packet_simulator_options.one_way_delay_mean,
+        cluster.options.network_options.packet_simulator_options.one_way_delay_min,
+        cluster.options.network_options.packet_simulator_options.packet_loss_probability,
+        cluster.options.network_options.packet_simulator_options.path_maximum_capacity,
+        cluster.options.network_options.packet_simulator_options.path_clog_duration_mean,
+        cluster.options.network_options.packet_simulator_options.path_clog_probability,
+        cluster.options.network_options.packet_simulator_options.packet_replay_probability,
+        cluster.options.network_options.packet_simulator_options.partition_mode,
+        cluster.options.network_options.packet_simulator_options.partition_probability,
+        cluster.options.network_options.packet_simulator_options.unpartition_probability,
+        cluster.options.network_options.packet_simulator_options.partition_stability,
+        cluster.options.network_options.packet_simulator_options.unpartition_stability,
+        cluster.options.storage_options.read_latency_min,
+        cluster.options.storage_options.read_latency_mean,
+        cluster.options.storage_options.write_latency_min,
+        cluster.options.storage_options.write_latency_mean,
+        cluster.options.storage_options.read_fault_probability,
+        cluster.options.storage_options.write_fault_probability,
+        cluster.options.health_options.crash_probability * 100,
+        cluster.options.health_options.crash_stability,
+        cluster.options.health_options.restart_probability * 100,
+        cluster.options.health_options.restart_stability,
+    });
+
+    var requests_sent: u64 = 0;
+    var idle = false;
+
+    // The minimum number of healthy replicas required for a crashed replica to be able to recover.
+    const replica_normal_min = replicas: {
+        if (replica_count == 1) {
+            // A cluster of 1 can crash safely (as long as there is no disk corruption) since it
+            // does not run the recovery protocol.
+            break :replicas 0;
+        } else {
+            break :replicas cluster.replicas[0].quorum_view_change;
+        }
+    };
+
+    // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
+    for (cluster.storages) |*storage, i| {
+        storage.faulty = replica_normal_min <= i;
     }
 
     // TODO When storage is supported, run more transitions than fit in the journal.
     const transitions_max = config.journal_slot_count / 2;
-    if (simulator.cluster.state_checker.transitions < transitions_max) {
+    var tick: u64 = 0;
+    while (tick < ticks_max) : (tick += 1) {
+        const health_options = &cluster.options.health_options;
+        // The maximum number of replicas that can crash, with the cluster still able to recover.
+        var crashes = cluster.replica_normal_count() -| replica_normal_min;
+
+        for (cluster.storages) |*storage, replica| {
+            if (cluster.replicas[replica].journal.recovered) {
+                // TODO Remove this workaround when VSR recovery protocol is disabled.
+                // When only the minimum number of replicas are healthy (no more crashes allowed),
+                // disable storage faults on all healthy replicas.
+                //
+                // This is a workaround to avoid the deadlock that occurs when (for example) in a
+                // cluster of 3 replicas, one is down, another has a corrupt prepare, and the last does
+                // not have the prepare. The two healthy replicas can never complete a view change,
+                // because two replicas are not enough to nack, and the unhealthy replica cannot
+                // complete the VSR recovery protocol either.
+                if (cluster.health[replica] == .up and crashes == 0) {
+                    if (storage.faulty) {
+                        log_faults.debug("{}: disable storage faults", .{replica});
+                        storage.faulty = false;
+                    }
+                } else {
+                    // When a journal recovers for the first time, enable its storage faults.
+                    // Future crashes will recover in the presence of faults.
+                    if (!storage.faulty) {
+                        log_faults.debug("{}: enable storage faults", .{replica});
+                        storage.faulty = true;
+                    }
+                }
+            }
+            storage.tick();
+        }
+
+        for (cluster.replicas) |*replica| {
+            switch (cluster.health[replica.replica]) {
+                .up => |*ticks| {
+                    ticks.* -|= 1;
+                    replica.tick();
+                    cluster.state_checker.check_state(replica.replica);
+
+                    if (ticks.* != 0) continue;
+                    if (crashes == 0) continue;
+                    if (cluster.storages[replica.replica].writes.count() == 0) {
+                        if (!chance_f64(random, health_options.crash_probability)) continue;
+                    } else {
+                        if (!chance_f64(random, health_options.crash_probability * 10.0)) continue;
+                    }
+
+                    if (!try cluster.crash_replica(replica.replica)) continue;
+                    log_health.debug("crash replica={}", .{replica.replica});
+                    crashes -= 1;
+                },
+                .down => |*ticks| {
+                    ticks.* -|= 1;
+                    // Keep ticking the time so that it won't have diverged too far to synchronize
+                    // when the replica restarts.
+                    replica.clock.time.tick();
+                    assert(replica.status == .recovering);
+                    if (ticks.* == 0 and chance_f64(random, health_options.restart_probability)) {
+                        cluster.health[replica.replica] = .{ .up = health_options.restart_stability };
+                        log_health.debug("restart replica={}", .{replica.replica});
+                    }
+                },
+            }
+        }
+
+        cluster.network.packet_simulator.tick(cluster.health);
+
+        for (cluster.clients) |*client| client.tick();
+
+        if (cluster.state_checker.transitions == transitions_max) {
+            if (cluster.state_checker.convergence() and
+                cluster.replica_up_count() == replica_count)
+            {
+                break;
+            }
+            continue;
+        } else {
+            assert(cluster.state_checker.transitions < transitions_max);
+        }
+
+        if (requests_sent < transitions_max) {
+            if (idle) {
+                if (chance(random, idle_off_probability)) idle = false;
+            } else {
+                if (chance(random, request_probability)) {
+                    if (send_request(random)) requests_sent += 1;
+                }
+                if (chance(random, idle_on_probability)) idle = true;
+            }
+        }
+    }
+
+    if (cluster.state_checker.transitions < transitions_max) {
         output.err("you can reproduce this failure with seed={}", .{seed});
         @panic("unable to complete transitions_max before ticks_max");
     }
 
-    assert(simulator.cluster.state_checker.convergence());
+    assert(cluster.state_checker.convergence());
 
-    output.info("\n          PASSED ({} ticks)", .{ticks});
+    output.info("\n          PASSED ({} ticks)", .{tick});
 }
 
 /// Returns true, `p` percent of the time, else false.
@@ -377,13 +334,11 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
 }
 
 fn on_change_replica(replica: *Replica) void {
-    const cluster = cluster_ptr;
     assert(cluster.state_machines[replica.replica].state == replica.state_machine.state);
     cluster.state_checker.check_state(replica.replica);
 }
 
 fn send_request(random: std.rand.Random) bool {
-    const cluster = cluster_ptr;
     const client_index = random.uintLessThan(u8, cluster.options.client_count);
 
     const client = &cluster.clients[client_index];
