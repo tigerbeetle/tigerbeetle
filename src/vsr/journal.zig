@@ -692,8 +692,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             };
 
-            if (self.prepare_inhabited[slot.index] and
-                self.prepare_checksums[slot.index] == checksum)
+            if (self.prepare_inhabited[@intCast(usize, slot.index)] and
+                self.prepare_checksums[@intCast(usize, slot.index)] == checksum)
             {
                 self.read_prepare_with_op_and_checksum(callback, op, checksum, destination_replica);
             } else {

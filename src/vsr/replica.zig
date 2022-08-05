@@ -2209,8 +2209,8 @@ pub fn Replica(
                 prepare.?.header.op,
                 prepare.?.header.checksum,
             ).?;
-            assert(self.journal.prepare_inhabited[slot.index]);
-            assert(self.journal.prepare_checksums[slot.index] == prepare.?.header.checksum);
+            assert(self.journal.prepare_inhabited[@intCast(usize, slot.index)]);
+            assert(self.journal.prepare_checksums[@intCast(usize, slot.index)] == prepare.?.header.checksum);
             assert(self.journal.has(prepare.?.header));
 
             switch (self.status) {
