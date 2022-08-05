@@ -354,9 +354,11 @@ const Environment = struct {
         var timestamp: u64 = 42;
         while (id < std.mem.alignForward(10_000, config.lsm_batch_multiple)) {
 
+            const accounts_to_insert = 1; // forest_config.accounts.commit_count_max;
+
             // Insert a bunch of accounts
             var i: u32 = 0;
-            while (i < forest_config.accounts.commit_count_max / 2) : (i += 1) {
+            while (i < accounts_to_insert) : (i += 1) {
                 defer id += 1;
                 defer timestamp += 1;
                 const account = Account{
@@ -375,7 +377,7 @@ const Environment = struct {
 
                 // Insert an account and make sure it can be retrieved.
                 {
-                    log.debug("inserting account {d} into groove", .{account.id});
+                    //log.debug("inserting account {d} into groove", .{account.id});
                     const groove = &env.forest.grooves.accounts;
                     groove.put(&account);
 
@@ -396,13 +398,13 @@ const Environment = struct {
                     groove.prefetch_enqueue(account.id);
                     groove.prefetch(AccountPrefetch.prefetch_callback, &account_prefetch.context);
 
-                    log.debug("prefetching account {d} into groove", .{account.id});
+                    //log.debug("prefetching account {d} into groove", .{account.id});
                     while (!account_prefetch.prefetched) {
                         try env.io.tick();
                     }
 
                     // Get the account once prefetched and ensure it was the one inserted:
-                    log.debug("fetching account {d} from groove for assertion", .{account.id});
+                    //log.debug("fetching account {d} from groove for assertion", .{account.id});
                     const acc = groove.get(account.id);
                     assert(acc != null);
                     assert(std.mem.eql(u8, std.mem.asBytes(acc.?), std.mem.asBytes(&account)));
@@ -415,10 +417,10 @@ const Environment = struct {
             // compact and checkpoint the forest
             defer op += 1;
             try env.compact(op);
-            try env.checkpoint(op);
-
-            // checkpoint the records when the forest is likely checkpointed.
-            if (op % config.lsm_batch_multiple == 0) {
+            
+            // checkpoint the records when the forest is likely finished compaction.
+            if (op != 0 and op % config.lsm_batch_multiple == 0) {
+                try env.checkpoint(op);
                 try env.record_accounts.checkpoint();
                 try env.record_transfers.checkpoint();
 
