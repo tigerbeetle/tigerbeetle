@@ -9,8 +9,10 @@ pub const log_level: std.log.Level = .err;
 const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
 
+const Storage = @import("storage.zig").Storage;
+const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
-const StateMachine = @import("state_machine.zig").StateMachine;
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 const vsr = @import("vsr.zig");

@@ -15,6 +15,7 @@ const IO = @import("io.zig").IO;
 const Time = @import("time.zig").Time;
 const Storage = @import("storage.zig").Storage;
 
+const Grid = @import("lsm/grid.zig").GridType(Storage);
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
@@ -43,56 +44,82 @@ pub fn main() !void {
 const filename_fmt = "cluster_{d:0>10}_replica_{d:0>3}.tigerbeetle";
 const filename_len = fmt.count(filename_fmt, .{ 0, 0 });
 
-/// Create a .tigerbeetle data file for the given args and exit
-fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
-    // Add 1 for the terminating null byte
-    var buffer: [filename_len + 1]u8 = undefined;
-    const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica }) catch unreachable;
-    assert(filename.len == filename_len);
-
-    // TODO Expose data file size on the CLI.
-    const fd = try io.open_file(
-        dir_fd,
-        filename,
-        config.journal_size_max,
-        true,
-    );
-    std.os.close(fd);
-
-    const file = try (std.fs.Dir{ .fd = dir_fd }).openFile(filename, .{ .write = true });
-    defer file.close();
-
-    log.info("initialized data file", .{});
-}
-
 const Command = struct {
-    allocator: mem.Allocator,
+    dir_fd: os.fd_t,
+    fd: os.fd_t,
     io: IO,
-    pending: u64,
     storage: Storage,
-    addresses: ?[]std.net.Address,
+    superblock: SuperBlock,
+    message_pool: MessagePool,
 
-    superblock: ?SuperBlock,
-    superblock_context: SuperBlock.Context,
+    io_completed: bool,
     replica_format: ReplicaFormat,
+    superblock_context: SuperBlock.Context,
+
+    fn init(
+        command: *Command, 
+        allocator: mem.Allocator, 
+        path: [:0]const u8, 
+        must_create: bool,
+    ) !void {
+        // TODO Resolve the parent directory properly in the presence of .. and symlinks.
+        // TODO Handle physical volumes where there is no directory to fsync.
+        const dirname = std.fs.path.dirname(path) orelse ".";
+        command.dir_fd = try IO.open_dir(dirname);
+        errdefer os.close(command.dir_fd);
+
+        const basename = std.fs.path.basename(path);
+        command.fd = try IO.open_file(command.dir_fd, basename, data_file_size_min, must_create);
+        errdefer os.close(command.fd);
+
+        command.io = try IO.init(128, 0);
+        errdefer command.io.deinit();
+
+        command.storage = try Storage.init(&command.io, command.fd);
+        errdefer command.storage.deinit();
+
+        command.message_pool = try MessagePool.init(allocator, .replica);
+        // message_pool does not have deinit()
+
+        command.superblock = try SuperBlock.init(
+            allocator, 
+            &command.storage, 
+            &command.message_pool,
+        );
+        errdefer command.superblock.deinit(allocator);
+    }
+
+    fn deinit(command: *Command, allocator: mem.Allocator) void {
+        command.superblock.deinit(allocator);
+        command.storage.deinit();
+        command.io.deinit();
+        os.close(command.fd);
+        os.close(command.dir_fd);
+    }
 
     pub fn format(allocator: mem.Allocator, cluster: u32, replica: u8, path: [:0]const u8) !void {
-        const fd = try open_file(path, true);
         var command: Command = undefined;
-        try command.init(allocator, fd, null);
+        try command.init(allocator, path, true);
+        defer command.deinit(allocator);
 
-        var message_pool = try MessagePool.init(allocator, .replica);
         command.replica_format = try ReplicaFormat.init(
             allocator,
             cluster,
             replica,
             &command.storage,
-            &message_pool,
+            &command.superblock,
         );
         defer command.replica_format.deinit(allocator);
 
+        command.io_completed = false;
         try command.replica_format.format(format_callback);
-        try command.run();
+        while (!command.io_completed) try command.io.tick();
+    }
+
+    fn format_callback(replica_format: *ReplicaFormat) void {
+        const command = @fieldParentPtr(Command, "replica_format", replica_format);
+        assert(!command.io_completed);
+        command.io_completed = true;
     }
 
     pub fn start(
@@ -101,56 +128,35 @@ const Command = struct {
         memory: u64,
         path: [:0]const u8,
     ) !void {
-        _ = memory; // TODO
-
-        const fd = try open_file(path, false);
-
         var command: Command = undefined;
-        try command.init(allocator, fd, addresses);
+        try command.init(allocator, path, false);
+        defer command.deinit(allocator);
 
-        command.superblock.?.open(open_callback, &command.superblock_context);
-        try command.run();
+        command.io_completed = false;
+        command.superblock.open(open_callback, &command.superblock_context);
+        while (!command.io_completed) try command.io.tick();
 
-        // After opening the superblock, we immediately start the main event loop and remain there.
-        // If we were to arrive here, then the memory for the command is about to go out of scope.
-        unreachable;
-    }
-
-    fn open_file(path: [:0]const u8, must_create: bool) !os.fd_t {
-        // TODO Resolve the parent directory properly in the presence of .. and symlinks.
-        // TODO Handle physical volumes where there is no directory to fsync.
-        const dirname = std.fs.path.dirname(path) orelse ".";
-        const dir_fd = try IO.open_dir(dirname);
-
-        const basename = std.fs.path.basename(path);
-        return IO.open_file(dir_fd, basename, data_file_size_min, must_create);
-    }
-
-    fn run(command: *Command) !void {
-        assert(command.pending == 0);
-        command.pending += 1;
-
-        while (command.pending > 0) try command.io.run_for_ns(std.time.ns_per_ms);
-    }
-
-    fn format_callback(replica_format: *ReplicaFormat) void {
-        const command = @fieldParentPtr(Command, "replica_format", replica_format);
-        command.pending -= 1;
+        try command.run_replica(allocator, addresses, memory);
     }
 
     fn open_callback(superblock_context: *SuperBlock.Context) void {
         const command = @fieldParentPtr(Command, "superblock_context", superblock_context);
-        command.pending -= 1;
-
-        // TODO log an error and exit instead. This is reachable if we e.g. run out of memory.
-        command.start_loop() catch unreachable;
+        assert(!command.io_completed);
+        command.io_completed = true;
     }
 
-    fn start_loop(command: *Command) !void {
-        const cluster = command.superblock.?.working.cluster;
-        const replica_index = command.superblock.?.working.replica;
+    fn run_replica(
+        command: *Command,
+        allocator: mem.Allocator,
+        addresses: []std.net.Address,
+        memory: u64,
+    ) !void {
+        _ = memory; //TODO
 
-        if (replica_index >= command.addresses.?.len) {
+        const cluster = command.superblock.working.cluster;
+        const replica_index = command.superblock.working.replica;
+
+        if (replica_index >= addresses.len) {
             fatal("all --addresses must be provided (cluster={}, replica={})", .{
                 cluster,
                 replica_index,
@@ -158,25 +164,28 @@ const Command = struct {
         }
 
         var time: Time = .{};
-        var message_pool = try MessagePool.init(command.allocator, .replica);
         var message_bus = try MessageBus.init(
-            command.allocator,
+            allocator,
             cluster,
-            command.addresses.?,
+            addresses,
             replica_index,
             &command.io,
-            &message_pool,
+            &command.message_pool,
         );
-        errdefer message_bus.deinit();
+        defer message_bus.deinit();
+
+        var grid = try Grid.init(allocator, &command.superblock);
+        defer grid.deinit(allocator);
 
         var replica = try Replica.init(
-            command.allocator,
+            allocator,
             .{
                 .cluster = cluster,
-                .superblock = command.superblock.?,
-                .replica_count = @intCast(u8, command.addresses.?.len),
+                .superblock = &command.superblock,
+                .replica_count = @intCast(u8, addresses.len),
                 .replica_index = replica_index,
                 .time = &time,
+                .grid = &grid,
                 .storage = &command.storage,
                 .message_bus = &message_bus,
                 .state_machine_options = .{
@@ -188,13 +197,13 @@ const Command = struct {
                 },
             },
         );
-        errdefer replica.deinit(command.allocator);
+        defer replica.deinit(allocator);
         message_bus.set_on_message(*Replica, &replica, Replica.on_message);
 
         log.info("cluster={} replica={}: listening on {}", .{
             replica.cluster,
             replica.replica,
-            command.addresses.?[replica.replica],
+            addresses[replica.replica],
         });
 
         while (true) {
@@ -202,25 +211,5 @@ const Command = struct {
             message_bus.tick();
             try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
-    }
-
-    fn init(
-        command: *Command,
-        allocator: mem.Allocator,
-        fd: os.fd_t,
-        addresses: ?[]std.net.Address,
-    ) !void {
-        command.allocator = allocator;
-        command.superblock = null;
-
-        command.io = try IO.init(128, 0);
-        errdefer command.io.deinit();
-
-        command.pending = 0;
-
-        command.storage = try Storage.init(&command.io, fd);
-        errdefer command.storage.deinit();
-
-        command.addresses = addresses;
     }
 };

@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 
+const GridType = @import("../lsm/grid.zig").GridType;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
@@ -66,6 +67,7 @@ pub fn Replica(
     comptime Storage: type,
     comptime Time: type,
 ) type {
+    const Grid = GridType(Storage);
     const SuperBlock = vsr.SuperBlockType(Storage);
 
     return struct {
@@ -103,7 +105,7 @@ pub fn Replica(
         state_machine: StateMachine,
 
         // TODO Document.
-        superblock: SuperBlock,
+        superblock: *SuperBlock,
         superblock_context: SuperBlock.Context = undefined,
 
         /// The current view, initially 0:
@@ -227,7 +229,8 @@ pub fn Replica(
             replica_count: u8,
             replica_index: u8,
             time: *Time,
-            superblock: SuperBlock,
+            grid: *Grid,
+            superblock: *SuperBlock,
             storage: *Storage,
             message_bus: *MessageBus,
             state_machine_options: StateMachine.Options,
@@ -277,10 +280,14 @@ pub fn Replica(
             );
             errdefer clock.deinit(allocator);
 
-            const journal = try Journal.init(allocator, options.storage, replica);
+            var journal = try Journal.init(allocator, options.storage, replica);
             errdefer journal.deinit(allocator);
 
-            var state_machine = try StateMachine.init(allocator, options.state_machine_options);
+            var state_machine = try StateMachine.init(
+                allocator, 
+                options.grid, 
+                options.state_machine_options,
+            );
             errdefer state_machine.deinit(allocator);
 
             const recovery_nonce = blk: {
@@ -378,7 +385,6 @@ pub fn Replica(
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
             self.state_machine.deinit(allocator);
-            self.superblock.deinit(allocator);
 
             while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
 
@@ -408,7 +414,7 @@ pub fn Replica(
 
         /// The client table records for each client the latest session and the latest committed reply.
         inline fn client_table(self: *Self) *ClientTable {
-            return &self.state_machine.grid.superblock.client_table;
+            return &self.superblock.client_table;
         }
 
         /// Time is measured in logical ticks that are incremented on every call to tick().
@@ -2336,10 +2342,10 @@ pub fn Replica(
             self.commit_prepare = prepare.ref();
             self.commit_callback = callback;
             self.state_machine.prefetch(
+                commit_op_prefetch_callback,
                 prepare.header.op,
                 prepare.header.operation.cast(StateMachine),
-                prepare.buffer[@sizeOf(Header)..prepare.header.size],
-                commit_op_prefetch_callback,
+                prepare.body(),
             );
         }
 
@@ -2671,7 +2677,7 @@ pub fn Replica(
                     config.clients_max,
                     evictee.?.header.client,
                 });
-                assert(self.client_table().remove(evictee.?.header.client));
+                self.client_table().remove(evictee.?.header.client);
                 self.message_bus.unref(evictee.?);
             }
 
@@ -5196,7 +5202,7 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
         wal_offset: u64 = 0,
         wal_buffer: []align(config.sector_size) u8,
 
-        superblock: SuperBlock,
+        superblock: *SuperBlock,
         superblock_context: SuperBlock.Context = undefined,
 
         pub fn init(
@@ -5204,7 +5210,7 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
             cluster: u32,
             replica: u8,
             storage: *Storage,
-            message_pool: *MessagePool,
+            superblock: *SuperBlock,
         ) !Self {
             const wal_write_size_max = 4 * 1024 * 1024;
             assert(wal_write_size_max % config.sector_size == 0);
@@ -5216,9 +5222,6 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
                 .exact,
             );
             errdefer allocator.free(wal_buffer);
-
-            var superblock = try SuperBlock.init(allocator, storage, message_pool);
-            errdefer superblock.deinit(allocator);
 
             return Self{
                 .cluster = cluster,
@@ -5233,7 +5236,6 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
             assert(self.callback == null);
 
             allocator.free(self.wal_buffer);
-            self.superblock.deinit(allocator);
         }
 
         /// Initialize the TigerBeetle replica's data file.
@@ -5297,8 +5299,8 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
             });
         }
 
-        fn format_superblock_callback(context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(Self, "superblock", context.superblock);
+        fn format_superblock_callback(superblock_context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
             const callback = self.callback.?;
             assert(self.wal_offset == config.journal_size_max);
 
