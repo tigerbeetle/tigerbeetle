@@ -704,6 +704,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             } else {
                 if (tree.compaction_table_immutable.status == .done) {
                     tree.compaction_table_immutable.reset();
+                    tree.table_immutable.clear();
                 }
             }
 
