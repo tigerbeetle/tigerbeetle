@@ -118,13 +118,13 @@ pub fn Replica(
         status: Status = .recovering,
 
         /// The op number assigned to the most recently prepared operation:
+        // TODO: When recovery protocol is removed, load the `op` from the WAL, and verify that it is ≥op_checkpoint.
+        // Also verify that a corresponding header exists in the WAL.
         op: u64,
 
         /// The op of the highest checkpointed message.
-        // TODO Update this to use LSM storage.
         // TODO Refuse to store/ack any op>op_checkpoint+journal_slot_count.
-        // TODO Enforce invariant op≥op_checkpoint.
-        op_checkpoint: u64 = 0,
+        op_checkpoint: u64,
 
         /// The op number of the latest committed and executed operation (according to the replica):
         /// The replica may have to wait for repairs to complete before commit_min reaches commit_max.
@@ -238,9 +238,10 @@ pub fn Replica(
 
         pub fn init(allocator: Allocator, options: Options) !Self {
             const replica_count = options.replica_count;
-            const replica = options.replica_index;
+            const replica_index = options.replica_index;
             assert(replica_count > 0);
-            assert(replica < replica_count);
+            assert(replica_index < replica_count);
+            assert(options.superblock.working.vsr_state.internally_consistent());
 
             const majority = (replica_count / 2) + 1;
             assert(majority <= replica_count);
@@ -270,17 +271,15 @@ pub fn Replica(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
-            const root_prepare = Header.root_prepare(options.cluster);
-
             var clock = try Clock.init(
                 allocator,
                 replica_count,
-                replica,
+                replica_index,
                 options.time,
             );
             errdefer clock.deinit(allocator);
 
-            var journal = try Journal.init(allocator, options.storage, replica);
+            var journal = try Journal.init(allocator, options.storage, replica_index);
             errdefer journal.deinit(allocator);
 
             var state_machine = try StateMachine.init(
@@ -294,7 +293,7 @@ pub fn Replica(
                 var nonce: [@sizeOf(Nonce)]u8 = undefined;
                 var hash = std.crypto.hash.Blake3.init(.{});
                 hash.update(std.mem.asBytes(&clock.monotonic()));
-                hash.update(&[_]u8{replica});
+                hash.update(&[_]u8{replica_index});
                 hash.final(&nonce);
                 break :blk @bitCast(Nonce, nonce);
             };
@@ -302,7 +301,7 @@ pub fn Replica(
             var self = Self{
                 .cluster = options.cluster,
                 .replica_count = replica_count,
-                .replica = replica,
+                .replica = replica_index,
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
                 .clock = clock,
@@ -310,53 +309,54 @@ pub fn Replica(
                 .message_bus = options.message_bus,
                 .state_machine = state_machine,
                 .superblock = options.superblock,
-                .view = root_prepare.view,
-                .view_normal = root_prepare.view,
-                .op = root_prepare.op,
-                .commit_min = root_prepare.commit,
-                .commit_max = root_prepare.commit,
+                .view = options.superblock.working.vsr_state.view,
+                .view_normal = options.superblock.working.vsr_state.view_normal,
+                .op = 0,
+                .op_checkpoint = options.superblock.working.vsr_state.commit_min,
+                .commit_min = options.superblock.working.vsr_state.commit_min,
+                .commit_max = options.superblock.working.vsr_state.commit_max,
                 .ping_timeout = Timeout{
                     .name = "ping_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 100,
                 },
                 .prepare_timeout = Timeout{
                     .name = "prepare_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 50,
                 },
                 .commit_timeout = Timeout{
                     .name = "commit_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 100,
                 },
                 .normal_status_timeout = Timeout{
                     .name = "normal_status_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 500,
                 },
                 .view_change_status_timeout = Timeout{
                     .name = "view_change_status_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 500,
                 },
                 .view_change_message_timeout = Timeout{
                     .name = "view_change_message_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 50,
                 },
                 .repair_timeout = Timeout{
                     .name = "repair_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 50,
                 },
                 .recovery_timeout = Timeout{
                     .name = "recovery_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 200,
                 },
                 .recovery_nonce = recovery_nonce,
-                .prng = std.rand.DefaultPrng.init(replica),
+                .prng = std.rand.DefaultPrng.init(replica_index),
             };
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={}", .{
@@ -445,14 +445,18 @@ pub fn Replica(
                     // The data file is brand new — no messages have ever been written.
                     // Transition to normal status; no need to run the VSR recovery protocol.
                     assert(self.journal.faulty.count == 0);
+                    self.op = 0;
                     self.transition_to_normal_from_recovering_status(0);
                     assert(self.status == .normal);
                 } else if (self.replica_count == 1) {
                     // A cluster-of-one does not run the VSR recovery protocol.
                     if (self.journal.faulty.count != 0) @panic("journal is corrupt");
                     if (self.committing) return;
-                    assert(self.op == 0);
+                    // TODO Assert that this path isn't taken more than once.
                     self.op = self.journal.op_maximum();
+                    assert(self.op >= self.op_checkpoint);
+                    assert(self.op >= self.commit_min);
+                    assert(self.journal.header_with_op(self.op) != null);
                     self.commit_journal(self.op);
                     // The recovering→normal transition is deferred until all ops are committed.
                 } else {
@@ -2405,10 +2409,13 @@ pub fn Replica(
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
             assert(self.committing);
             assert(self.commit_callback != null);
+            assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
+            assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
 
             const commit = self.commit_prepare.?.header.op;
-            const commit_beat = commit % config.lsm_batch_multiple;
-            if (commit_beat == config.lsm_batch_multiple - 1) {
+            if ((commit + 1) % config.journal_slot_count == 0) {
+                assert((commit + 1) % config.lsm_batch_multiple == 0);
+                // Trigger the checkpoint immediately before the WAL will wrap.
                 self.state_machine.forest.checkpoint(
                     commit_op_checkpoint_forest_callback,
                     commit,
@@ -2424,7 +2431,24 @@ pub fn Replica(
             assert(self.committing);
             assert(self.commit_callback != null);
             assert(self.commit_prepare.?.header.op == self.commit_min);
+            assert((self.commit_prepare.?.header.op + 1) % config.journal_slot_count == 0);
 
+            // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
+            //
+            //   A  B  C  D  E
+            //   |01|23|45|67|
+            //
+            // The checkpoint is triggered at "E".
+            // The but only "A…D" is checkpointed, so the SuperBlock's `commit_min` is 7-2=5.
+            const vsr_state_new = .{
+                .commit_min = self.commit_min - config.lsm_batch_multiple,
+                .commit_max = self.commit_max,
+                .view_normal = self.view_normal,
+                .view = self.view,
+            };
+            assert(SuperBlock.VSRState.monotonic(self.superblock.working.vsr_state, vsr_state_new));
+
+            self.superblock.staging.vsr_state = vsr_state_new;
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
@@ -2437,7 +2461,10 @@ pub fn Replica(
             assert(self.commit_callback != null);
             assert(self.commit_prepare.?.header.op == self.commit_min);
 
-            self.op_checkpoint = self.commit_min;
+            self.op_checkpoint = self.commit_min - config.lsm_batch_multiple;
+            assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
+            assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
+
             self.commit_op_done();
         }
 
@@ -4623,6 +4650,7 @@ pub fn Replica(
                 .prepare_ok => {
                     assert(self.status == .normal);
                     assert(message.header.view == self.view);
+                    assert(message.header.op <= self.op_ceiling());
                     // We must only ever send a prepare_ok to the latest leader of the active view:
                     // We must never straddle views by sending to a leader in an older view.
                     // Otherwise, we would be enabling a partitioned leader to commit.
