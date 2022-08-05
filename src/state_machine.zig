@@ -344,16 +344,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.forest.tick();
         }
 
-        pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
-            // TODO self.forest.compact(op, callback);
-            _ = op;
-            callback(self);
-        }
-
-        pub fn checkpoint(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
-            // TODO self.forest.checkpoint(op, checkpoint_callback);
-            _ = op;
-            callback(self);
+        pub fn compact(self: *StateMachine, callback: fn (*Forest) void, op: u64) void {
+            self.forest.compact(callback, op);
         }
 
         fn execute(
