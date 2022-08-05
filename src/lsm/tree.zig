@@ -540,7 +540,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(tree.compaction_beat == half_measure_beat_count);
 
             // Do not start compaction if the immutable table does not require compaction.
-            if (tree.table_immutable.free) tree.compact_mutable_table_into_immutable();
             if (tree.table_immutable.free) return;
 
             const values_count = tree.table_immutable.values.len;

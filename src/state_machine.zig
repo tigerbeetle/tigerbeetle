@@ -340,6 +340,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             return result;
         }
 
+        pub fn tick(self: *StateMachine) void {
+            self.forest.tick();
+        }
+
         pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
             // TODO self.forest.compact(op, callback);
             _ = op;

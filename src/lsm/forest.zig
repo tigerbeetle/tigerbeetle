@@ -123,6 +123,10 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             }
         }
 
+        pub fn tick(forest: *Forest) void {
+            forest.grid.superblock.storage.tick();
+        }
+
         fn JoinType(comptime join_op: JoinOp) type {
             return struct {
                 pub fn start(forest: *Forest, callback: Callback) void {
@@ -184,7 +188,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             }
 
             // Tick the storage backend to start processing the IO.
-            forest.grid.superblock.storage.tick();
+            forest.tick();
 
             // While IO is processing, run/pipeline the CPU work on the grooves.
             inline for (std.meta.fields(Grooves)) |field| {

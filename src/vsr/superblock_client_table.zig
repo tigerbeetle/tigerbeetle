@@ -233,7 +233,7 @@ pub const ClientTable = struct {
         return client_table.entries.capacity();
     }
 
-    pub fn get(client_table: *const ClientTable, client: u128) ?*const Entry {
+    pub fn get(client_table: *ClientTable, client: u128) ?*Entry {
         return client_table.entries.getPtr(client);
     }
 
@@ -245,7 +245,7 @@ pub const ClientTable = struct {
     }
 
     pub fn remove(client_table: *ClientTable, client: u128) void {
-        client_table.entries.remove(client);
+        assert(client_table.entries.remove(client));
 
         if (config.verify) assert(!client_table.entries.contains(client));
     }
