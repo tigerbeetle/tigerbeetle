@@ -2,10 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const is_wasm = builtin.target.isWasm();
-
 /// Whether development or production:
-pub const deployment_environment = if (is_wasm) .simulator_frontend else .development;
+pub const deployment_environment = if (builtin.target.isWasm()) .simulator_frontend else .development;
 
 /// The maximum log level in increasing order of verbosity (emergency=0, debug=3):
 pub const log_level = 2;
@@ -235,7 +233,7 @@ pub const journal_size_prepares = journal_slot_count * message_size_max;
 
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
-    if (!is_wasm) {
+    if (!builtin.target.isWasm()) {
         _ = std.net.Address.parseIp4(address, 0) catch unreachable;
     }
     _ = @as(u16, port);
