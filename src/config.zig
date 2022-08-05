@@ -139,7 +139,7 @@ pub const tcp_keepalive = true;
 
 /// The time (in seconds) the connection needs to be idle before sending TCP keepalive probes:
 /// Probes are not sent when the send buffer has data or the congestion window size is zero,
-/// for these cases we also need tcp_user_timeout below.
+/// for these cases we also need tcp_user_timeout_ms below.
 pub const tcp_keepidle = 5;
 
 /// The time (in seconds) between individual keepalive probes:
@@ -151,13 +151,13 @@ pub const tcp_keepcnt = 3;
 /// The time (in milliseconds) to timeout an idle connection or unacknowledged send:
 /// This timer rides on the granularity of the keepalive or retransmission timers.
 /// For example, if keepalive will only send a probe after 10s then this becomes the lower bound
-/// for tcp_user_timeout to fire, even if tcp_user_timeout is 2s. Nevertheless, this would timeout
+/// for tcp_user_timeout_ms to fire, even if tcp_user_timeout_ms is 2s. Nevertheless, this would timeout
 /// the connection at 10s rather than wait for tcp_keepcnt probes to be sent. At the same time, if
-/// tcp_user_timeout is larger than the max keepalive time then tcp_keepcnt will be ignored and
-/// more keepalive probes will be sent until tcp_user_timeout fires.
+/// tcp_user_timeout_ms is larger than the max keepalive time then tcp_keepcnt will be ignored and
+/// more keepalive probes will be sent until tcp_user_timeout_ms fires.
 /// For a thorough overview of how these settings interact:
 /// https://blog.cloudflare.com/when-tcp-sockets-refuse-to-die/
-pub const tcp_user_timeout = (tcp_keepidle + tcp_keepintvl * tcp_keepcnt) * 1000;
+pub const tcp_user_timeout_ms = (tcp_keepidle + tcp_keepintvl * tcp_keepcnt) * 1000;
 
 /// Whether to disable Nagle's algorithm to eliminate send buffering delays:
 pub const tcp_nodelay = true;
