@@ -3451,6 +3451,7 @@ pub fn Replica(
                 config.journal_slot_count - config.lsm_batch_multiple - 1
             else
                 // Second wrap: op_checkpoint_next = 5+8-2 = 11
+                // Third wrap: op_checkpoint_next = 11+8-2 = 17
                 self.op_checkpoint + config.journal_slot_count - config.lsm_batch_multiple;
             assert((op + 1) % config.lsm_batch_multiple == 0);
 
