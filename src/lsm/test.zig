@@ -504,7 +504,7 @@ fn do_simple() !void {
     
     const tombstone_bit = 1 << (64 - 1);
     const key = account.timestamp & ~@as(u64, tombstone_bit);
-    const result = try do_lookup(&env, &tree, snapshot, key);
+    const result = try do_lookup(&env, &tree, 8, key);
 
     assert(result != null);
     assert(std.mem.eql(u8, std.mem.asBytes(result.?), std.mem.asBytes(&account)));
