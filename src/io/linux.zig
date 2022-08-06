@@ -977,7 +977,7 @@ pub const IO = struct {
         try os.fsync(dir_fd);
 
         const stat = try os.fstat(fd);
-        if (stat.size != size) @panic("data file inode size was truncated or corrupted");
+        if (stat.size < size) @panic("data file inode size was truncated or corrupted");
 
         return fd;
     }
