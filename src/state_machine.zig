@@ -829,15 +829,18 @@ pub fn StateMachineType(comptime Storage: type) type {
             return .exists;
         }
 
+        // TODO *const StateMachine?
         fn get_account(self: *StateMachine, id: u128) ?*const Account {
             return self.forest.grooves.accounts.get(id);
         }
 
+        // TODO *const StateMachine?
         fn get_transfer(self: *StateMachine, id: u128) ?*const Transfer {
             return self.forest.grooves.transfers.get(id);
         }
 
         /// Returns whether a pending transfer, if it exists, has already been posted or voided.
+        // TODO *const StateMachine?
         fn get_posted(self: *StateMachine, pending_id: u128) ?bool {
             return self.forest.grooves.posted.get(pending_id);
         }
@@ -898,6 +901,8 @@ test "sum_overflows" {
     try expectEqual(true, sum_overflows(math.maxInt(u64), math.maxInt(u64)));
     try expectEqual(true, sum_overflows(math.maxInt(u64), math.maxInt(u64)));
 }
+
+// TODO Refactor a test helper for StateMachine/Grid/Storage setup.
 
 test "create/lookup/rollback accounts" {
     const Vector = struct { result: CreateAccountResult, object: Account };
@@ -1230,12 +1235,47 @@ test "create/lookup/rollback accounts" {
         },
     };
 
-    const Storage = @import("storage.zig").Storage;
+    const Storage = @import("test/storage.zig").Storage;
     const StateMachine = StateMachineType(Storage);
-    var state_machine = try StateMachine.init(testing.allocator, vectors.len, 0, 0);
-    defer state_machine.deinit();
 
-    for (vectors) |vector, i| {
+    var storage = try Storage.init(
+        testing.allocator,
+        4096,
+        .{
+            .seed = 0,
+            .read_latency_min = 0,
+            .read_latency_mean = 0,
+            .write_latency_min = 0,
+            .write_latency_mean = 0,
+            .read_fault_probability = 0,
+            .write_fault_probability = 0,
+        },
+        0,
+        .{
+            .first_offset = 0,
+            .period = 0,
+        },
+    );
+    defer storage.deinit(testing.allocator);
+
+    var message_pool = try @import("message_pool.zig").MessagePool.init(testing.allocator, .replica);
+
+    const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
+    var superblock = try SuperBlock.init(testing.allocator, undefined, &message_pool);
+    defer superblock.deinit(testing.allocator);
+
+    var grid = try StateMachine.Grid.init(testing.allocator, &superblock);
+    defer grid.deinit(testing.allocator);
+
+    var state_machine = try StateMachine.init(testing.allocator, &grid, .{
+        .lsm_forest_node_count = 0,
+        .cache_size_accounts = vectors.len,
+        .cache_size_transfers = 0,
+        .cache_size_posted = 0,
+    });
+    defer state_machine.deinit(testing.allocator);
+
+    for (vectors) |*vector, i| {
         const result = state_machine.create_account(&vector.object);
         expectEqual(vector.result, result) catch |err| {
             print_test_vector(i, vector.result, result, vector.object, err);
@@ -1294,13 +1334,15 @@ test "linked accounts" {
     const StateMachine = StateMachineType(Storage);
     var state_machine = try StateMachine.init(
         testing.allocator,
+        undefined,
         .{
-            .accounts_max = accounts_max,
-            .transfers_max = transfers_max,
-            .transfers_pending_max = transfers_pending_max,
+            .lsm_forest_node_count = 0,
+            .cache_size_accounts = accounts_max,
+            .cache_size_transfers = transfers_max,
+            .cache_size_posted = transfers_pending_max,
         },
     );
-    defer state_machine.deinit();
+    defer state_machine.deinit(testing.allocator);
 
     const input = mem.asBytes(&accounts);
 
@@ -1308,7 +1350,7 @@ test "linked accounts" {
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, input, output);
+    const size = state_machine.commit(0, 0, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try expectEqualSlices(
@@ -1331,7 +1373,6 @@ test "linked accounts" {
     try expectEqual(accounts[8], state_machine.get_account(accounts[8].id).?.*);
     try expectEqual(accounts[11], state_machine.get_account(accounts[11].id).?.*);
     try expectEqual(accounts[12], state_machine.get_account(accounts[12].id).?.*);
-    try expectEqual(@as(u32, 5), state_machine.accounts.count());
 
     // TODO How can we test that events were in fact rolled back in LIFO order?
     // All our rollback handlers appear to be commutative.
@@ -1382,8 +1423,13 @@ test "create/lookup/rollback transfers" {
 
     const Storage = @import("storage.zig").Storage;
     const StateMachine = StateMachineType(Storage);
-    var state_machine = try StateMachine.init(testing.allocator, accounts.len, 1, 0);
-    defer state_machine.deinit();
+    var state_machine = try StateMachine.init(testing.allocator, undefined, .{
+        .lsm_forest_node_count = 0,
+        .cache_size_accounts = accounts.len,
+        .cache_size_transfers = 1,
+        .cache_size_posted = 0,
+    });
+    defer state_machine.deinit(testing.allocator);
 
     const input = mem.asBytes(&accounts);
 
@@ -1391,7 +1437,7 @@ test "create/lookup/rollback transfers" {
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, .create_accounts, input, output);
+    const size = state_machine.commit(0, 0, .create_accounts, input, output);
 
     const errors = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
     try expect(errors.len == 0);
@@ -2013,8 +2059,13 @@ test "create/lookup/rollback 2-phase transfers" {
 
     const Storage = @import("storage.zig").Storage;
     const StateMachine = StateMachineType(Storage);
-    var state_machine = try StateMachine.init(testing.allocator, accounts.len, 100, 1);
-    defer state_machine.deinit();
+    var state_machine = try StateMachine.init(testing.allocator, undefined, .{
+        .lsm_forest_node_count = 0,
+        .cache_size_accounts = accounts.len,
+        .cache_size_transfers = 100,
+        .cache_size_posted = 1,
+    });
+    defer state_machine.deinit(testing.allocator);
 
     // Create accounts:
     const accounts_input = mem.asBytes(&accounts);
@@ -2024,7 +2075,7 @@ test "create/lookup/rollback 2-phase transfers" {
 
     const accounts_timestamp = state_machine.prepare(.create_accounts, accounts_input);
     {
-        const size = state_machine.commit(0, .create_accounts, accounts_input, accounts_output);
+        const size = state_machine.commit(0, 0, .create_accounts, accounts_input, accounts_output);
         const errors = mem.bytesAsSlice(CreateAccountsResult, accounts_output[0..size]);
         try expectEqual(@as(usize, 0), errors.len);
     }
@@ -2041,7 +2092,7 @@ test "create/lookup/rollback 2-phase transfers" {
     const transfers_timestamp = state_machine.prepare(.create_transfers, transfers_input);
     try testing.expect(transfers_timestamp > accounts_timestamp);
     {
-        const size = state_machine.commit(0, .create_transfers, transfers_input, transfers_output);
+        const size = state_machine.commit(0, 1, .create_transfers, transfers_input, transfers_output);
         const errors = mem.bytesAsSlice(CreateTransfersResult, transfers_output[0..size]);
         try expectEqual(@as(usize, 0), errors.len);
     }
@@ -2618,7 +2669,7 @@ fn print_test_vector(
 fn test_helpers(comptime StateMachine: type) type {
     return struct {
         fn test_account_balances(
-            state_machine: *const StateMachine,
+            state_machine: *StateMachine,
             account_id: u128,
             debits_pending: u64,
             debits_posted: u64,
