@@ -57,9 +57,9 @@ const Command = struct {
     superblock_context: SuperBlock.Context,
 
     fn init(
-        command: *Command, 
-        allocator: mem.Allocator, 
-        path: [:0]const u8, 
+        command: *Command,
+        allocator: mem.Allocator,
+        path: [:0]const u8,
         must_create: bool,
     ) !void {
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
@@ -82,8 +82,8 @@ const Command = struct {
         // message_pool does not have deinit()
 
         command.superblock = try SuperBlock.init(
-            allocator, 
-            &command.storage, 
+            allocator,
+            &command.storage,
             &command.message_pool,
         );
         errdefer command.superblock.deinit(allocator);

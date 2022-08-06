@@ -244,7 +244,7 @@ const Environment = struct {
 
     fn assert_checkpointed(
         env: *Environment,
-        groove: anytype, 
+        groove: anytype,
         checkpointed: anytype,
         comptime commit_count_max: u32,
     ) !void {
@@ -281,7 +281,7 @@ const Environment = struct {
                         assert(std.mem.eql(u8, std.mem.asBytes(&result.?), std.mem.asBytes(object)));
                     }
                 }
-                
+
                 assertion.checkpointed = assertion.checkpointed[assertion.verify_count..];
                 assertion.verify_count = 0;
                 assertion.verify();
@@ -413,7 +413,7 @@ const Environment = struct {
 
                     // Double check the forest contains the checkpointed values.
                     try env.assert_checkpointed(
-                        &env.forest.grooves.accounts, 
+                        &env.forest.grooves.accounts,
                         checkpointed.items,
                         forest_config.accounts.commit_count_max,
                     );
@@ -436,7 +436,7 @@ fn do_simple() !void {
 
     // Initialze a single tree for simplicity
     // NOTE: forest init was commented out of Environment.init
-    
+
     const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
     var node_pool = try NodePool.init(allocator, Environment.node_count);
     defer node_pool.deinit(allocator);
@@ -501,7 +501,7 @@ fn do_simple() !void {
     try do_open(&env, &tree);
 
     // Check if checkpoint saved inserted account
-    
+
     const tombstone_bit = 1 << (64 - 1);
     const key = account.timestamp & ~@as(u64, tombstone_bit);
     const result = try do_lookup(&env, &tree, 8, key);
@@ -514,8 +514,12 @@ fn do_open(env: *Environment, tree: anytype) !void {
     const Tree = @TypeOf(tree.*);
     const S = struct {
         var opened = false;
-        fn tree_callback(_: *Tree) void { opened = true; }
-        fn superblock_callback(_: *SuperBlock.Context) void { opened = true; }
+        fn tree_callback(_: *Tree) void {
+            opened = true;
+        }
+        fn superblock_callback(_: *SuperBlock.Context) void {
+            opened = true;
+        }
     };
 
     S.opened = false;
@@ -531,9 +535,11 @@ fn do_compact(env: *Environment, tree: anytype, op: u64) !void {
     const Tree = @TypeOf(tree.*);
     const S = struct {
         var compacted = false;
-        fn callback(_: *Tree) void { compacted = true; }
+        fn callback(_: *Tree) void {
+            compacted = true;
+        }
     };
-    
+
     S.compacted = false;
     tree.compact(op, S.callback);
     while (!S.compacted) try env.io.tick();
@@ -543,8 +549,12 @@ fn do_checkpoint(env: *Environment, tree: anytype, op: u64) !void {
     const Tree = @TypeOf(tree.*);
     const S = struct {
         var checkpointed = false;
-        fn tree_callback(_: *Tree) void { checkpointed = true; }
-        fn superblock_callback(_: *SuperBlock.Context) void { checkpointed = true; }
+        fn tree_callback(_: *Tree) void {
+            checkpointed = true;
+        }
+        fn superblock_callback(_: *SuperBlock.Context) void {
+            checkpointed = true;
+        }
     };
 
     S.checkpointed = false;
@@ -563,7 +573,7 @@ fn do_lookup(env: *Environment, tree: anytype, snapshot: u64, key: anytype) !?*c
         var value: ?*const Account = undefined;
         var context: Tree.LookupContext = undefined;
 
-        fn callback(_: *Tree.LookupContext, v: ?*const Account) void { 
+        fn callback(_: *Tree.LookupContext, v: ?*const Account) void {
             found = true;
             value = v;
         }
