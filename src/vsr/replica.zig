@@ -15,6 +15,7 @@ const Header = vsr.Header;
 const Timeout = vsr.Timeout;
 const Command = vsr.Command;
 const Version = vsr.Version;
+const VSRState = vsr.VSRState;
 
 const log = std.log.scoped(.replica);
 
@@ -2406,9 +2407,8 @@ pub fn Replica(
             self.state_machine.compact(commit_op_compact_callback, self.commit_prepare.?.header.op);
         }
 
-        fn commit_op_compact_callback(forest: *StateMachine.Forest) void {
-            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
-            const self = @fieldParentPtr(Replica, "state_machine", state_machine);
+        fn commit_op_compact_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
             assert(self.committing);
             assert(self.commit_callback != null);
             assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
@@ -2417,16 +2417,15 @@ pub fn Replica(
             const op = self.commit_prepare.?.header.op;
             if (op == self.op_checkpoint_trigger()) {
                 assert((op + 1) % config.lsm_batch_multiple == 0);
-                self.state_machine.forest.checkpoint(commit_op_checkpoint_forest_callback, op);
+                self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback, op);
             } else {
                 assert(op < self.op_checkpoint_trigger());
                 self.commit_op_done();
             }
         }
 
-        fn commit_op_checkpoint_forest_callback(forest: *StateMachine.Forest) void {
-            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
-            const self = @fieldParentPtr(Replica, "state_machine", state_machine);
+        fn commit_op_checkpoint_state_machine_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
             assert(self.committing);
             assert(self.commit_callback != null);
             assert(self.commit_prepare.?.header.op == self.op);
@@ -2449,7 +2448,7 @@ pub fn Replica(
                 .view_normal = self.view_normal,
                 .view = self.view,
             };
-            assert(SuperBlock.VSRState.monotonic(self.superblock.working.vsr_state, vsr_state_new));
+            assert(VSRState.monotonic(self.superblock.working.vsr_state, vsr_state_new));
 
             self.superblock.staging.vsr_state = vsr_state_new;
             self.superblock.checkpoint(
@@ -2459,7 +2458,7 @@ pub fn Replica(
         }
 
         fn commit_op_checkpoint_superblock_callback(superblock_context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(Replica, "superblock_context", superblock_context);
+            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
             assert(self.committing);
             assert(self.commit_callback != null);
             assert(self.commit_prepare.?.header.op == self.op);

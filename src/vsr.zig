@@ -18,6 +18,7 @@ pub const Clock = @import("vsr/clock.zig").Clock;
 pub const Journal = @import("vsr/journal.zig").Journal;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = @import("vsr/superblock.zig").SuperBlockType;
+pub const VSRState = @import("vsr/superblock.zig").SuperBlockSector.VSRState;
 
 pub const ProcessType = enum { replica, client };
 
