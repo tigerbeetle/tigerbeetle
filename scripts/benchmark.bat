@@ -27,14 +27,15 @@ move zig-out\bin\tigerbeetle.exe . >nul
 
 for /l %%i in (0, 1, 0) do (
     echo Initializing replica %%i
-    set ZIG_FILE=.\cluster_0000000000_replica_00%%i.tigerbeetle
+    set ZIG_FILE=.\0_%%i.tigerbeetle.benchmark
     if exist "!ZIG_FILE!" DEL /F "!ZIG_FILE!"
-    .\tigerbeetle.exe init --directory=. --cluster=0 --replica=%%i > benchmark.log 2>&1
+    .\tigerbeetle.exe format --cluster=0 --replica=%%i %ZIG_FILE% > benchmark.log 2>&1
 )
 
 for /l %%i in (0, 1, 0) do (
     echo Starting replica %%i
-    start /B "tigerbeetle_%%i" .\tigerbeetle.exe start --directory=. --cluster=0 --addresses=3001 --replica=%%i > benchmark.log 2>&1
+    set ZIG_FILE=.\0_%%i.tigerbeetle.benchmark
+    start /B "tigerbeetle_%%i" .\tigerbeetle.exe start --addresses=3001 %ZIG_FILE% > benchmark.log 2>&1
 )
 
 rem Wait for replicas to start, listen and connect:

@@ -66,15 +66,27 @@ const usage = fmt.comptimePrint(
 
 pub const Command = union(enum) {
     format: struct {
+        args_allocated: std.ArrayList([:0]const u8),
         cluster: u32,
         replica: u8,
         path: [:0]const u8,
     },
     start: struct {
+        args_allocated: std.ArrayList([:0]const u8),
         addresses: []net.Address,
         memory: u64,
         path: [:0]const u8,
     },
+
+    pub fn deinit(command: Command, allocator: std.mem.Allocator) void {
+        var args_allocated = switch (command) {
+            .format => |cmd| cmd.args_allocated,
+            .start => |cmd| cmd.args_allocated,
+        };
+
+        for (args_allocated.items) |arg| allocator.free(arg);
+        args_allocated.deinit();
+    }
 };
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
@@ -92,10 +104,6 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     // Keep track of the args from the ArgIterator above that were allocated
     // then free them all at the end of the scope.
     var args_allocated = std.ArrayList([:0]const u8).init(allocator);
-    defer {
-        for (args_allocated.items) |arg| allocator.free(arg);
-        args_allocated.deinit();
-    }
 
     // Skip argv[0] which is the name of this executable
     const did_skip = args.skip();
@@ -143,6 +151,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
             return Command{
                 .format = .{
+                    .args_allocated = args_allocated,
                     .cluster = parse_cluster(cluster orelse fatal("required: --cluster", .{})),
                     .replica = parse_replica(replica orelse fatal("required: --replica", .{})),
                     .path = path orelse fatal("required: <path>", .{}),
@@ -155,6 +164,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
             return Command{
                 .start = .{
+                    .args_allocated = args_allocated,
                     .addresses = parse_addresses(
                         allocator,
                         addresses orelse fatal("required: --addresses", .{}),
