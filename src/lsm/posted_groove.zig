@@ -299,14 +299,15 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 result: ?*const Value,
             ) void {
                 const worker = @fieldParentPtr(PrefetchWorker, "lookup_id", completion);
+                const groove = worker.context.groove;
 
                 if (result) |value| {
                     switch (value.data) {
                         .posted => {
-                            worker.context.groove.prefetch_objects.putAssumeCapacity(value.id, true);
+                            groove.prefetch_objects.putAssumeCapacityNoClobber(value.id, true);
                         },
                         .voided => {
-                            worker.context.groove.prefetch_objects.putAssumeCapacity(value.id, false);
+                            groove.prefetch_objects.putAssumeCapacityNoClobber(value.id, false);
                         },
                         .tombstone => {
                             // Leave the ID out of prefetch_objects.
