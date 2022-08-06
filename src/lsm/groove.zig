@@ -765,7 +765,8 @@ pub fn GrooveType(
         }
 
         pub fn remove(groove: *Groove, object: *const Object) void {
-            // Make sure the given object exists in the object tree.
+            // Make sure the given object exists as the latest version in the object tree.
+            // Otherwise, we would fail to remove all the object's indexes.
             const existing_object = groove.get(object.id).?;
             assert(mem.eql(u8, mem.asBytes(existing_object), mem.asBytes(object)));
 
