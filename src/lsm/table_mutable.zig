@@ -51,15 +51,23 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn put(table: *TableMutable, value: *const Value) void {
-            table.values.putAssumeCapacity(value.*, {});
+            // If the key is already present in the hash map, the old key will not be overwritten
+            // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
+            // level getOrPut() API and manually overwrite the old key.
+            const gop = table.values.getOrPutAssumeCapacity(value.*);
+            gop.key_ptr.* = value.*;
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
             table.dirty = true;
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
-            const key = key_from_value(value);
-            table.values.putAssumeCapacity(tombstone_from_key(key), {});
+            // If the key is already present in the hash map, the old key will not be overwritten
+            // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
+            // level getOrPut() API and manually overwrite the old key.
+            const tombstone = tombstone_from_key(key_from_value(value));
+            const gop = table.values.getOrPutAssumeCapacity(tombstone);
+            gop.key_ptr.* = tombstone;
             assert(table.values.count() <= table.value_count_max);
         }
 
