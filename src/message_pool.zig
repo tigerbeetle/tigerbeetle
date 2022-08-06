@@ -81,8 +81,10 @@ pub const MessagePool = struct {
         }
 
         pub fn body(message: *Message) []align(@alignOf(Header)) u8 {
-            const buffer = message.buffer[@sizeOf(Header)..message.header.size];
-            return @alignCast(@alignOf(Header), buffer.ptr)[0..buffer.len];
+            return @alignCast(
+                @alignOf(Header),
+                message.buffer[@sizeOf(Header)..message.header.size],
+            );
         }
     };
 

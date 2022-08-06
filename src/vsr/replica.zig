@@ -2656,7 +2656,13 @@ pub fn Replica(
             const count = self.journal.copy_latest_headers_between(
                 op_min,
                 op_max,
-                std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..][0..body_size_max]),
+                std.mem.bytesAsSlice(
+                    Header,
+                    @alignCast(
+                        @alignOf(Header),
+                        message.buffer[@sizeOf(Header)..][0..body_size_max],
+                    ),
+                ),
             );
 
             message.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
@@ -3523,7 +3529,7 @@ pub fn Replica(
             assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
             return std.mem.bytesAsSlice(
                 Header,
-                message.buffer[@sizeOf(Header)..message.header.size],
+                @alignCast(@alignOf(Header), message.buffer[@sizeOf(Header)..message.header.size]),
             );
         }
 

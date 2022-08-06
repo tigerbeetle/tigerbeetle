@@ -270,9 +270,10 @@ const Environment = struct {
                 {
                     defer assertion.groove.prefetch_clear();
                     for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
+                        log.debug("verifying checkpointed for id={}", .{object.id});
                         const result = assertion.groove.get(object.id);
                         assert(result != null);
-                        assert(std.mem.eql(u8, std.mem.asBytes(&result.?), std.mem.asBytes(object)));
+                        assert(std.mem.eql(u8, std.mem.asBytes(result.?), std.mem.asBytes(object)));
                     }
                 }
 
@@ -361,7 +362,7 @@ const Environment = struct {
 
                     //log.debug("prefetching account {d} into groove", .{account.id});
                     while (!account_prefetch.prefetched) {
-                        try env.io.tick();
+                        try env.tick();
                     }
 
                     // Get the account once prefetched and ensure it was the one inserted:
@@ -383,7 +384,7 @@ const Environment = struct {
             const checkpoint_op = op -| config.lsm_batch_multiple;
             if (checkpoint_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
                 // Checkpoint the forest then superblock
-                try env.checkpoint(op);
+                try env.checkpoint(checkpoint_op);
 
                 // Record the accounts that have been checkpointed.
                 try checkpointed.appendSlice(compacting.items);
@@ -400,11 +401,22 @@ const Environment = struct {
                     try env.open();
 
                     // Double check the forest contains the checkpointed values.
+                    log.debug("checking the following after checkpoint({})", .{checkpoint_op});
+                    for (checkpointed.items) |a| log.debug("id={}", .{a.id});
+                    
+                    // Positive space
                     try env.assert_checkpointed(
                         &env.forest.grooves.accounts,
                         checkpointed.items,
                         forest_config.accounts.commit_count_max,
                     );
+
+                    // TODO Negative space (check compacting.items)
+
+                    // Reset everything
+                    op = checkpointed_op;
+                    id = checkpointed.items[checkpointed.items.len - 1].id + 1;
+                    timestamp = checkpointed.items[checkpointed.items.len - 1].timestamp + 1;
                 }
                 crashing = false;
             }
@@ -422,164 +434,4 @@ pub fn main() !void {
     try Environment.run(); //try do_simple();
 }
 
-fn do_simple() !void {
-    var env: Environment = undefined;
-    try env.init(false);
-    defer env.deinit();
 
-    // Initialze a single tree for simplicity
-    // NOTE: forest init was commented out of Environment.init
-
-    const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
-    var node_pool = try NodePool.init(allocator, Environment.node_count);
-    defer node_pool.deinit(allocator);
-
-    const Tree = @TypeOf(env.forest.grooves.accounts.objects);
-    var tree = try Tree.init(allocator, &node_pool, &env.grid, null, .{
-        .commit_count_max = Environment.forest_config.accounts.commit_count_max,
-    });
-    defer tree.deinit(allocator);
-
-    // Open the superblock then tree.
-
-    try do_open(&env, &tree);
-
-    // Insert an account into the tree.
-
-    const account = Account{
-        .id = 1337,
-        .timestamp = 42,
-        .user_data = 0,
-        .reserved = [_]u8{0} ** 48,
-        .ledger = 710, // Let's use the ISO-4217 Code Number for ZAR
-        .code = 1000, // A chart of accounts code to describe this as a clearing account.
-        .flags = .{ .debits_must_not_exceed_credits = true },
-        .debits_pending = 0,
-        .debits_posted = 0,
-        .credits_pending = 0,
-        .credits_posted = 42,
-    };
-    tree.put(&account);
-
-    // Compact the tree until its written from:
-    // mutable table -> immutable table (end of op=3)
-    // immutable table -> level 0 (end of op=7)
-
-    try do_compact(&env, &tree, 0);
-    try do_compact(&env, &tree, 1);
-    try do_compact(&env, &tree, 2);
-    try do_compact(&env, &tree, 3);
-    try do_compact(&env, &tree, 4);
-    try do_compact(&env, &tree, 5);
-    try do_compact(&env, &tree, 6);
-    try do_compact(&env, &tree, 7);
-
-    // Checkpoint the account inserted into mutable table from op 0-3
-
-    const snapshot = 3;
-    try do_checkpoint(&env, &tree, snapshot);
-
-    // simulate crash
-
-    tree.deinit(allocator);
-    node_pool.deinit(allocator);
-    env.deinit();
-
-    env.init(false) catch |e| std.debug.panic("env.init: {}", .{e});
-    node_pool = NodePool.init(allocator, Environment.node_count) catch |e| std.debug.panic("NodePool.init: {}", .{e});
-    tree = Tree.init(allocator, &node_pool, &env.grid, null, .{
-        .commit_count_max = Environment.forest_config.accounts.commit_count_max,
-    }) catch |e| std.debug.panic("Tree.init: {}", .{e});
-
-    try do_open(&env, &tree);
-
-    // Check if checkpoint saved inserted account
-
-    const tombstone_bit = 1 << (64 - 1);
-    const key = account.timestamp & ~@as(u64, tombstone_bit);
-    const result = try do_lookup(&env, &tree, 8, key);
-
-    assert(result != null);
-    assert(std.mem.eql(u8, std.mem.asBytes(result.?), std.mem.asBytes(&account)));
-}
-
-fn do_open(env: *Environment, tree: anytype) !void {
-    const Tree = @TypeOf(tree.*);
-    const S = struct {
-        var opened = false;
-        fn tree_callback(_: *Tree) void {
-            opened = true;
-        }
-        fn superblock_callback(_: *SuperBlock.Context) void {
-            opened = true;
-        }
-    };
-
-    S.opened = false;
-    env.superblock.open(S.superblock_callback, &env.superblock_context);
-    while (!S.opened) try env.io.tick();
-
-    S.opened = false;
-    tree.open(S.tree_callback);
-    while (!S.opened) try env.io.tick();
-}
-
-fn do_compact(env: *Environment, tree: anytype, op: u64) !void {
-    const Tree = @TypeOf(tree.*);
-    const S = struct {
-        var compacted = false;
-        fn callback(_: *Tree) void {
-            compacted = true;
-        }
-    };
-
-    S.compacted = false;
-    tree.compact(op, S.callback);
-    while (!S.compacted) try env.io.tick();
-}
-
-fn do_checkpoint(env: *Environment, tree: anytype, op: u64) !void {
-    const Tree = @TypeOf(tree.*);
-    const S = struct {
-        var checkpointed = false;
-        fn tree_callback(_: *Tree) void {
-            checkpointed = true;
-        }
-        fn superblock_callback(_: *SuperBlock.Context) void {
-            checkpointed = true;
-        }
-    };
-
-    S.checkpointed = false;
-    tree.checkpoint(op, S.tree_callback);
-    while (!S.checkpointed) try env.io.tick();
-
-    S.checkpointed = false;
-    env.superblock.checkpoint(S.superblock_callback, &env.superblock_context);
-    while (!S.checkpointed) try env.io.tick();
-}
-
-fn do_lookup(env: *Environment, tree: anytype, snapshot: u64, key: anytype) !?*const Account {
-    const Tree = @TypeOf(tree.*);
-    const S = struct {
-        var found = false;
-        var value: ?*const Account = undefined;
-        var context: Tree.LookupContext = undefined;
-
-        fn callback(_: *Tree.LookupContext, v: ?*const Account) void {
-            found = true;
-            value = v;
-        }
-    };
-
-    S.found = false;
-
-    tree.lookup(S.callback, &S.context, snapshot, key);
-    while (!S.found) {
-        // TODO(King) All other event loops in this test also need to tick Grid.
-        env.grid.tick();
-        try env.io.tick();
-    }
-
-    return S.value;
-}
