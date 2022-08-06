@@ -7,8 +7,8 @@ const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const message_pool = @import("../message_pool.zig");
-const Message = message_pool.MessagePool.Message;
+const MessagePool = @import("../message_pool.zig").MessagePool;
+const Message = @import("../message_pool.zig").MessagePool.Message;
 
 const log = std.log.scoped(.client);
 
@@ -32,7 +32,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         };
 
         allocator: mem.Allocator,
-        message_bus: *MessageBus,
+        message_bus: MessageBus,
 
         /// A universally unique identifier for the client (must not be zero).
         /// Used for routing replies back to the client via any network path (multi-path routing).
@@ -86,10 +86,20 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             id: u128,
             cluster: u32,
             replica_count: u8,
-            message_bus: *MessageBus,
+            message_pool: *MessagePool,
+            message_bus_options: MessageBus.Options,
         ) !Self {
             assert(id > 0);
             assert(replica_count > 0);
+
+            var message_bus = try MessageBus.init(
+                allocator,
+                cluster,
+                .{ .client = id },
+                message_pool,
+                message_bus_options,
+            );
+            errdefer message_bus.deinit(allocator);
 
             var self = Self{
                 .allocator = allocator,
@@ -109,13 +119,16 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 },
                 .prng = std.rand.DefaultPrng.init(@truncate(u64, id)),
             };
+            self.message_bus.set_on_message(*Self, &self, Self.on_message);
 
             self.ping_timeout.start();
 
             return self;
         }
 
-        pub fn deinit(_: *Self) void {}
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            self.message_bus.deinit(allocator);
+        }
 
         pub fn on_message(self: *Self, message: *Message) void {
             log.debug("{}: on_message: {}", .{ self.id, message.header });

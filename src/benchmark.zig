@@ -79,19 +79,20 @@ pub fn main() !void {
 
     var io = try IO.init(32, 0);
     var message_pool = try MessagePool.init(allocator, .client);
-    var message_bus = try MessageBus.init(allocator, cluster_id, address[0..], client_id, &io, &message_pool);
-    defer message_bus.deinit();
 
     var client = try Client.init(
         allocator,
         client_id,
         cluster_id,
         @intCast(u8, address.len),
-        &message_bus,
+        &message_pool,
+        .{
+            .configuration = address[0..],
+            .process = client_id,
+            .io = &io,
+        },
     );
-    defer client.deinit();
-
-    message_bus.set_on_message(*Client, &client, Client.on_message);
+    defer client.deinit(allocator);
 
     // Pre-allocate a million transfers:
     const transfers = try arena.allocator().alloc(tb.Transfer, transfers_max);

@@ -32,6 +32,11 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
         .client => config.tcp_sndbuf_client,
     };
 
+    const Process = union(vsr.ProcessType) {
+        replica: u8,
+        client: u128,
+    };
+
     return struct {
         const Self = @This();
 
@@ -80,47 +85,49 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
         /// Seeded with the process' replica index or client ID.
         prng: std.rand.DefaultPrng,
 
+        pub const Options = struct {
+            configuration: []std.net.Address,
+            io: *IO,
+        };
+
         /// Initialize the MessageBus for the given cluster, configuration and replica/client process.
         pub fn init(
             allocator: mem.Allocator,
             cluster: u32,
-            configuration: []std.net.Address,
-            process: switch (process_type) {
-                .replica => u8,
-                .client => u128,
-            },
-            io: *IO,
+            process: Process,
             message_pool: *MessagePool,
+            options: Options,
         ) !Self {
             // There must be enough connections for all replicas and at least one client.
-            assert(config.connections_max > configuration.len);
+            assert(config.connections_max > options.configuration.len);
+            assert(@as(vsr.ProcessType, process) == process_type);
 
             const connections = try allocator.alloc(Connection, config.connections_max);
             errdefer allocator.free(connections);
             mem.set(Connection, connections, .{});
 
-            const replicas = try allocator.alloc(?*Connection, configuration.len);
+            const replicas = try allocator.alloc(?*Connection, options.configuration.len);
             errdefer allocator.free(replicas);
             mem.set(?*Connection, replicas, null);
 
-            const replicas_connect_attempts = try allocator.alloc(u64, configuration.len);
+            const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
             errdefer allocator.free(replicas_connect_attempts);
             mem.set(u64, replicas_connect_attempts, 0);
 
             const prng_seed = switch (process_type) {
-                .replica => process,
-                .client => @truncate(u64, process),
+                .replica => process.replica,
+                .client => @truncate(u64, process.client),
             };
 
             var bus: Self = .{
                 .pool = message_pool,
-                .io = io,
+                .io = options.io,
                 .cluster = cluster,
-                .configuration = configuration,
+                .configuration = options.configuration,
                 .process = switch (process_type) {
                     .replica => .{
-                        .replica = process,
-                        .accept_fd = try init_tcp(io, configuration[process]),
+                        .replica = process.replica,
+                        .accept_fd = try init_tcp(options.io, options.configuration[process.replica]),
                     },
                     .client => {},
                 },
@@ -156,7 +163,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
         }
 
         /// TODO This is required by the Client.
-        pub fn deinit(_: *Self) void {}
+        pub fn deinit(_: *Self, _: std.mem.Allocator) void {}
 
         fn init_tcp(io: *IO, address: std.net.Address) !os.socket_t {
             const fd = try io.open_socket(

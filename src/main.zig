@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const fmt = std.fmt;
 const mem = std.mem;
 const os = std.os;
-const log = std.log;
+const log = std.log.scoped(.main);
 
 const config = @import("config.zig");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
@@ -15,14 +15,14 @@ const IO = @import("io.zig").IO;
 const Time = @import("time.zig").Time;
 const Storage = @import("storage.zig").Storage;
 
-const Grid = @import("lsm/grid.zig").GridType(Storage);
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
-const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
+const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
 const ReplicaFormat = vsr.ReplicaFormatType(Storage);
+const ReplicaOpenError = vsr.ReplicaOpenError;
 
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
@@ -52,12 +52,12 @@ const Command = struct {
     fd: os.fd_t,
     io: IO,
     storage: Storage,
-    superblock: SuperBlock,
     message_pool: MessagePool,
 
     io_completed: bool,
     replica_format: ReplicaFormat,
-    superblock_context: SuperBlock.Context,
+    replica_open: Replica.Open,
+    replica: Replica = undefined,
 
     fn init(
         command: *Command,
@@ -82,18 +82,12 @@ const Command = struct {
         errdefer command.storage.deinit();
 
         command.message_pool = try MessagePool.init(allocator, .replica);
-        // message_pool does not have deinit()
-
-        command.superblock = try SuperBlock.init(
-            allocator,
-            &command.storage,
-            &command.message_pool,
-        );
-        errdefer command.superblock.deinit(allocator);
+        // TODO Implement & call deinit() for MessagePool
     }
 
-    fn deinit(command: *Command, allocator: mem.Allocator) void {
-        command.superblock.deinit(allocator);
+    fn deinit(command: *Command, _: mem.Allocator) void {
+        // TODO Should this deinit ReplicaFormat/Replica.Open/Replica/MessagePool?
+        // TODO Add message_pool.deinit() once implemented.
         command.storage.deinit();
         command.io.deinit();
         os.close(command.fd);
@@ -105,17 +99,24 @@ const Command = struct {
         try command.init(allocator, path, true);
         defer command.deinit(allocator);
 
+        var superblock = try SuperBlock.init(
+            allocator,
+            &command.storage,
+            &command.message_pool,
+        );
+        defer superblock.deinit(allocator);
+
         command.replica_format = try ReplicaFormat.init(
             allocator,
             cluster,
             replica,
             &command.storage,
-            &command.superblock,
+            &superblock,
         );
         defer command.replica_format.deinit(allocator);
 
         command.io_completed = false;
-        try command.replica_format.format(format_callback);
+        command.replica_format.format(format_callback);
         while (!command.io_completed) try command.io.tick();
     }
 
@@ -131,87 +132,69 @@ const Command = struct {
         memory: u64,
         path: [:0]const u8,
     ) !void {
+        _ = memory; // TODO
+
         var command: Command = undefined;
         try command.init(allocator, path, false);
         defer command.deinit(allocator);
 
         command.io_completed = false;
-        command.superblock.open(open_callback, &command.superblock_context);
+        command.replica_open = try Replica.Open.init(allocator, &command.replica, .{
+            .replica_count = @intCast(u8, addresses.len),
+            .storage = &command.storage,
+            .message_pool = &command.message_pool,
+            .time = .{},
+            .state_machine_options = .{
+                // TODO Tune lsm_forest_node_count better.
+                .lsm_forest_node_count = 4096,
+                .cache_size_accounts = config.accounts_max,
+                .cache_size_transfers = config.transfers_max,
+                .cache_size_posted = config.transfers_pending_max,
+            },
+            .message_bus_options = .{
+                .configuration = addresses,
+                .io = &command.io,
+            },
+        });
+        errdefer command.replica_open.deinit(allocator);
+
+        command.replica_open.open(open_callback);
         while (!command.io_completed) try command.io.tick();
 
-        try command.run_replica(allocator, addresses, memory);
+        try command.run_replica(allocator, addresses);
     }
 
-    fn open_callback(superblock_context: *SuperBlock.Context) void {
-        const command = @fieldParentPtr(Command, "superblock_context", superblock_context);
+    fn open_callback(replica_open: *Replica.Open, result: anyerror!void) void {
+        const command = @fieldParentPtr(Command, "replica_open", replica_open);
         assert(!command.io_completed);
         command.io_completed = true;
+
+        result catch |err| switch (err) {
+            error.NoAddress => {
+                // TODO Include the replica index here.
+                fatal("all --addresses must be provided", .{ });
+            },
+            else => fatal("error opening replica err={}", .{ err }),
+        };
     }
 
     fn run_replica(
         command: *Command,
         allocator: mem.Allocator,
         addresses: []std.net.Address,
-        memory: u64,
     ) !void {
-        _ = memory; //TODO
+        // TODO Find a better place for this, it is awkward here.
+        // Plus, if open_callback hit error.NoAddress, the Replica.Open isn't deinitialized.
+        command.replica_open.deinit(allocator);
 
-        const cluster = command.superblock.working.cluster;
-        const replica_index = command.superblock.working.replica;
-
-        if (replica_index >= addresses.len) {
-            fatal("all --addresses must be provided (cluster={}, replica={})", .{
-                cluster,
-                replica_index,
-            });
-        }
-
-        var time: Time = .{};
-        var message_bus = try MessageBus.init(
-            allocator,
-            cluster,
-            addresses,
-            replica_index,
-            &command.io,
-            &command.message_pool,
-        );
-        defer message_bus.deinit();
-
-        var grid = try Grid.init(allocator, &command.superblock);
-        defer grid.deinit(allocator);
-
-        var replica = try Replica.init(
-            allocator,
-            .{
-                .cluster = cluster,
-                .superblock = &command.superblock,
-                .replica_count = @intCast(u8, addresses.len),
-                .replica_index = replica_index,
-                .time = &time,
-                .grid = &grid,
-                .storage = &command.storage,
-                .message_bus = &message_bus,
-                .state_machine_options = .{
-                    // TODO Tune lsm_forest_node_count better.
-                    .lsm_forest_node_count = 4096,
-                    .cache_size_accounts = config.accounts_max,
-                    .cache_size_transfers = config.transfers_max,
-                    .cache_size_posted = config.transfers_pending_max,
-                },
-            },
-        );
-        defer replica.deinit(allocator);
-        message_bus.set_on_message(*Replica, &replica, Replica.on_message);
-
-        log.info("cluster={} replica={}: listening on {}", .{
-            replica.cluster,
-            replica.replica,
-            addresses[replica.replica],
+        log.info("open_callback: cluster={} replica={}: listening on {}", .{
+            command.replica.cluster,
+            command.replica.replica,
+            addresses[command.replica.replica],
         });
 
         while (true) {
-            replica.tick();
-            message_bus.tick();
+            command.replica.tick();
             try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
     }

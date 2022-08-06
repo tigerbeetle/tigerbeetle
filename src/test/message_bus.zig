@@ -19,7 +19,7 @@ pub const Process = union(ProcessType) {
 
 pub const MessageBus = struct {
     network: *Network,
-    pool: MessagePool,
+    pool: *MessagePool,
 
     cluster: u32,
     process: Process,
@@ -29,22 +29,30 @@ pub const MessageBus = struct {
     on_message_callback: ?fn (context: ?*anyopaque, message: *Message) void = null,
     on_message_context: ?*anyopaque = null,
 
-    pub fn init(
-        allocator: std.mem.Allocator,
-        cluster: u32,
-        process: Process,
+    pub const Options = struct {
         network: *Network,
+    };
+
+    pub fn init(
+        _: std.mem.Allocator,
+        cluster: u32,
+        // TODO Replica initializes the MessageBus, but doesn't know about the Process type.
+        // For now move Process into MessageBus.Options; resolve this when unifying the MessageBus
+        // implementations.
+        process: Process,
+        message_pool: *MessagePool,
+        options: Options,
     ) !MessageBus {
         return MessageBus{
-            .pool = try MessagePool.init(allocator, @as(ProcessType, process)),
-            .network = network,
+            .network = options.network,
+            .pool = message_pool,
             .cluster = cluster,
             .process = process,
         };
     }
 
     /// TODO
-    pub fn deinit(_: *MessageBus) void {}
+    pub fn deinit(_: *MessageBus, _: std.mem.Allocator) void {}
 
     pub fn set_on_message(
         bus: *MessageBus,
