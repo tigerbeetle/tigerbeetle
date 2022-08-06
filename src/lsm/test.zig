@@ -80,16 +80,6 @@ const Environment = struct {
     forest: Forest,
 
     fn init(env: *Environment, must_create: bool) !void {
-        try env.start(must_create);
-        errdefer env.shutdown();
-    }
-
-    fn deinit(env: *Environment) void {
-        env.shutdown();
-    }
-
-    /// Setup the environment without affecting the state that needs to persist across shutdown()s.
-    fn start(env: *Environment, must_create: bool) !void {
         env.state = .uninit;
 
         const dir_path = ".";
@@ -114,18 +104,17 @@ const Environment = struct {
         env.grid = try Grid.init(allocator, &env.superblock);
         errdefer env.grid.deinit(allocator);
 
-        // env.forest = try Forest.init(allocator, &env.grid, node_count, forest_config);
-        // errdefer env.forest.deinit(allocator);
+        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_config);
+        errdefer env.forest.deinit(allocator);
 
         env.state = .init;
     }
 
-    fn shutdown(env: *Environment) void {
+    fn deinit(env: *Environment) void {
         assert(env.state != .uninit);
         defer env.state = .uninit;
 
-        //env.forest.deinit(allocator);
-
+        env.forest.deinit(allocator);
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
         // message_pool doesn't need to be deinit()
@@ -135,7 +124,12 @@ const Environment = struct {
         std.os.close(env.dir_fd);
     }
 
-    fn format() !void {
+    fn tick(env: *Environment) !void {
+        env.grid.tick();
+        try env.io.tick();
+    }
+
+    pub fn format() !void {
         var env: Environment = undefined;
 
         const must_create = true;
@@ -151,7 +145,7 @@ const Environment = struct {
 
         while (true) {
             switch (env.state) {
-                .init => try env.io.tick(),
+                .init => try env.tick(),
                 .formatted => break,
                 else => unreachable,
             }
@@ -164,13 +158,13 @@ const Environment = struct {
         env.state = .formatted;
     }
 
-    fn open(env: *Environment) !void {
+    pub fn open(env: *Environment) !void {
         assert(env.state == .init);
         env.superblock.open(superblock_open_callback, &env.superblock_context);
 
         while (true) {
             switch (env.state) {
-                .init, .superblock_open => try env.io.tick(),
+                .init, .superblock_open => try env.tick(),
                 .forest_open => break,
                 else => unreachable,
             }
@@ -190,14 +184,14 @@ const Environment = struct {
         env.state = .forest_open;
     }
 
-    fn checkpoint(env: *Environment, op: u64) !void {
+    pub fn checkpoint(env: *Environment, op: u64) !void {
         assert(env.state == .forest_open);
         env.state = .forest_checkpointing;
         env.forest.checkpoint(forest_checkpoint_callback, op);
 
         while (true) {
             switch (env.state) {
-                .forest_checkpointing, .superblock_checkpointing => try env.io.tick(),
+                .forest_checkpointing, .superblock_checkpointing => try env.tick(),
                 .forest_open => break,
                 else => unreachable,
             }
@@ -222,14 +216,14 @@ const Environment = struct {
         log.debug("superblock checkpointing completed!", .{});
     }
 
-    fn compact(env: *Environment, op: u64) !void {
+    pub fn compact(env: *Environment, op: u64) !void {
         assert(env.state == .forest_open);
         env.state = .forest_compacting;
         env.forest.compact(forest_compact_callback, op);
 
         while (true) {
             switch (env.state) {
-                .forest_compacting => try env.io.tick(),
+                .forest_compacting => try env.tick(),
                 .forest_open => break,
                 else => unreachable,
             }
@@ -242,7 +236,7 @@ const Environment = struct {
         env.state = .forest_open;
     }
 
-    fn assert_checkpointed(
+    pub fn assert_checkpointed(
         env: *Environment,
         groove: anytype,
         checkpointed: anytype,
@@ -290,7 +284,7 @@ const Environment = struct {
 
         var assertion = CheckpointAssertion{ .checkpointed = checkpointed, .groove = groove };
         assertion.verify();
-        while (assertion.verify_count > 0) try env.io.tick();
+        while (assertion.verify_count > 0) try env.tick();
     }
 
     fn run() !void {
@@ -385,11 +379,6 @@ const Environment = struct {
             defer op += 1;
             try env.compact(op);
 
-            if (op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
-                try compacting.appendSlice(mutable.items);
-                mutable.clearRetainingCapacity();
-            }
-
             // checkpoint the records when the forest is likely finished compaction.
             const checkpoint_op = op -| config.lsm_batch_multiple;
             if (checkpoint_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
@@ -404,9 +393,8 @@ const Environment = struct {
                 log.debug("simulating crash", .{});
                 crashing = true;
                 {
-                    env.shutdown();
-                    try env.start(must_create);
-                    errdefer env.deinit();
+                    env.deinit();
+                    try env.init(must_create);
 
                     // Re-open the superblock and forest.
                     try env.open();
@@ -420,13 +408,18 @@ const Environment = struct {
                 }
                 crashing = false;
             }
+
+            if (op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
+                try compacting.appendSlice(mutable.items);
+                mutable.clearRetainingCapacity();
+            }
         }
     }
 };
 
 pub fn main() !void {
     try Environment.format(); // NOTE: this can be commented out after first run to speed up testing.
-    try do_simple();
+    try Environment.run(); //try do_simple();
 }
 
 fn do_simple() !void {
