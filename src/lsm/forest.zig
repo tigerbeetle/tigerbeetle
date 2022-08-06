@@ -182,17 +182,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             const Join = JoinType(.compacting);
             Join.start(forest, callback);
 
-            // Queue up the storage IO operations on the grooves.
             inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).compact_io(op, Join.groove_callback(field.name));
-            }
-
-            // Tick the storage backend to start processing the IO.
-            forest.tick();
-
-            // While IO is processing, run/pipeline the CPU work on the grooves.
-            inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).compact_cpu();
+                @field(forest.grooves, field.name).compact(op, Join.groove_callback(field.name));
             }
         }
 

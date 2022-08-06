@@ -494,7 +494,18 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         ///
         /// Compactions start on the down beat of a half measure, using 0-based beats.
         /// For example, if there are 4 beats in a measure, start on beat 0 or beat 2.
-        pub fn compact_io(tree: *Tree, op: u64, callback: fn (*Tree) void) void {
+        pub fn compact(tree: *Tree, op: u64, callback: fn (*Tree) void) void {
+            tree.compact_start(op, callback);
+            tree.compact_drive();
+        }
+
+        fn compact_drive(tree: *Tree) void {
+            tree.compact_io();
+            // tree.manifest.manifest_log.superblock.storage.tick();
+            tree.compact_cpu();
+        }
+
+        fn compact_start(tree: *Tree, op: u64, callback: fn (*Tree) void) void {
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
 
@@ -520,20 +531,13 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 assert(tree.compaction_table_immutable.status == .idle);
             } else {
                 if (start) tree.compact_io_start_table_immutable(snapshot);
-                tree.compact_io_tick(&tree.compaction_table_immutable);
             }
 
             // Try to start compacting the other levels.
             var it = CompactionTableIterator{ .tree = tree };
             while (it.next()) |context| {
                 if (start) tree.compact_io_start_table(snapshot, context);
-                tree.compact_io_tick(context.compaction);
             }
-
-            // Always start one io_pending that is resolved in compact_cpu()
-            // to handle the case of no level or immutable table being selected for compaction
-            tree.compaction_io_pending += 1;
-            assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
         }
 
         fn compact_io_start_table_immutable(tree: *Tree, snapshot: u64) void {
@@ -556,7 +560,9 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(compare_keys(range.key_min, tree.table_immutable.key_min()) != .gt);
             assert(compare_keys(range.key_max, tree.table_immutable.key_max()) != .lt);
 
-            log.debug(tree_name ++ ": compacting immutable table to level 0", .{});
+            log.debug(tree_name ++ ": compacting {d} tables from immutable table to level 0", .{
+                range.table_count,
+            });
 
             tree.compaction_table_immutable.start(
                 tree.grid,
@@ -583,7 +589,8 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(compare_keys(range.key_min, table.key_min) != .gt);
             assert(compare_keys(range.key_max, table.key_max) != .lt);
 
-            log.debug(tree_name ++ ": compacting level {d} to level {d}", .{
+            log.debug(tree_name ++ ": compacting {d} tables from level {d} to level {d}", .{
+                range.table_count,
                 context.level_a,
                 context.level_b,
             });
@@ -602,8 +609,36 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             );
         }
 
+        fn compact_io(tree: *Tree) void {
+            assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
+            assert(tree.compaction_callback != null);
+
+            // Try to tick the cpu portion of the immutable table compaction:
+            const even_levels = tree.compaction_beat < half_measure_beat_count;
+            if (even_levels) {
+                assert(tree.compaction_table_immutable.status == .idle);
+            } else {
+                if (tree.compaction_table_immutable.status == .compacting) {
+                    tree.compact_io_tick(&tree.compaction_table_immutable);
+                }
+            }
+
+            // Try to tick the cpu portion of the level compactions:
+            var it = CompactionTableIterator{ .tree = tree };
+            while (it.next()) |context| {
+                if (context.compaction.status == .compacting) {
+                    assert(context.compaction.level_b == context.level_b);
+                    tree.compact_io_tick(context.compaction);
+                }
+            }
+
+            // Always start one io_pending that is resolved in compact_cpu()
+            // to handle the case of no level or immutable table being selected for compaction
+            tree.compaction_io_pending += 1;
+            assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
+        }
+
         fn compact_io_tick(tree: *Tree, compaction: anytype) void {
-            if (compaction.status != .compacting) return;
             tree.compaction_io_pending += 1;
 
             const even_levels = tree.compaction_beat < half_measure_beat_count;
@@ -665,7 +700,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             if (tree.compaction_io_pending == 0) tree.compact_done();
         }
 
-        pub fn compact_cpu(tree: *Tree) void {
+        fn compact_cpu(tree: *Tree) void {
             assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
             assert(tree.compaction_callback != null);
 
@@ -696,6 +731,8 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback != null);
 
+            var still_compacting = false;
+
             // Mark immutable compaction that reported done in their callback as "completed".
             const even_levels = tree.compaction_beat < half_measure_beat_count;
             if (even_levels) {
@@ -704,6 +741,8 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 if (tree.compaction_table_immutable.status == .done) {
                     tree.compaction_table_immutable.reset();
                     tree.table_immutable.clear();
+                } else if (tree.compaction_table_immutable.status == .compacting) {
+                    still_compacting = true;
                 }
             }
 
@@ -713,6 +752,8 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 if (context.compaction.status == .done) {
                     assert(context.compaction.level_b == context.level_b);
                     context.compaction.reset();
+                } else if (context.compaction.status == .compacting) {
+                    still_compacting = true;
                 }
             }
 
@@ -725,6 +766,12 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             if (tree.compaction_beat == half_measure_beat_count - 1) {
                 log.debug(tree_name ++ ": finished compacting even levels", .{});
 
+                if (still_compacting) {
+                    log.debug(tree_name ++ ": compactions weren't finished - retrying", .{});
+                    return tree.compact_drive();
+                }
+
+                it = CompactionTableIterator{ .tree = tree };
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
                     tree.manifest.remove_invisible_tables(
@@ -744,7 +791,14 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             if (tree.compaction_beat == config.lsm_batch_multiple - 1) {
                 log.debug(tree_name ++ ": finished compacting immutable table and odd levels", .{});
 
+                if (still_compacting) {
+                    log.debug(tree_name ++ ": compactions weren't finished - retrying", .{});
+                    return tree.compact_drive();
+                } 
+
                 assert(tree.compaction_table_immutable.status == .idle);
+
+                it = CompactionTableIterator{ .tree = tree };
                 while (it.next()) |context| {
                     assert(context.compaction.status == .idle);
                     tree.manifest.remove_invisible_tables(
