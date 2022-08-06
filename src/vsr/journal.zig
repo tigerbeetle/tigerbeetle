@@ -989,11 +989,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             self.recover_headers(offset_next);
         }
 
-        fn recover_headers_buffer(message: *Message, offset: u64) []u8 {
+        fn recover_headers_buffer(message: *Message, offset: u64) []align(@alignOf(Header)) u8 {
             const max = std.math.min(message.buffer.len, headers_size - offset);
             assert(max % config.sector_size == 0);
             assert(max % @sizeOf(Header) == 0);
-            return message.buffer[0..max];
+            return @alignCast(@alignOf(Header), message.buffer[0..max]);
         }
 
         fn recover_prepares(self: *Self, slot: Slot) void {

@@ -94,8 +94,7 @@ pub const Operation = enum(u8) {
 /// Network message and journal entry header:
 /// We reuse the same header for both so that prepare messages from the leader can simply be
 /// journalled as is by the followers without requiring any further modification.
-/// TODO Move from packed struct to extern struct for C ABI:
-pub const Header = packed struct {
+pub const Header = extern struct {
     comptime {
         assert(@sizeOf(Header) == 128);
     }
