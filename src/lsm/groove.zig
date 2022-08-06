@@ -860,33 +860,19 @@ pub fn GrooveType(
             }
         }
 
-        pub fn compact_io(groove: *Groove, op: u64, callback: Callback) void {
+        pub fn compact(groove: *Groove, op: u64, callback: Callback) void {
             // Start a compacting join operation.
             const Join = JoinType(.compacting);
             Join.start(groove, callback);
 
             // Compact the ObjectTree and IdTree
-            groove.ids.compact_io(op, Join.tree_callback(.ids));
-            groove.objects.compact_io(op, Join.tree_callback(.objects));
+            groove.ids.compact(op, Join.tree_callback(.ids));
+            groove.objects.compact(op, Join.tree_callback(.objects));
 
             // Compact the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const compact_io_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).compact_io(op, compact_io_callback);
-            }
-        }
-
-        pub fn compact_cpu(groove: *Groove) void {
-            // Make sure a compacting join operation is running
-            assert(groove.join_op == JoinOp.compacting);
-            assert(groove.join_pending <= join_pending_max);
-            assert(groove.join_callback != null);
-
-            groove.ids.compact_cpu();
-            groove.objects.compact_cpu();
-
-            inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(groove.indexes, field.name).compact_cpu();
+                const compact_callback = Join.tree_callback(.{ .index = field.name });
+                @field(groove.indexes, field.name).compact(op, compact_callback);
             }
         }
 
