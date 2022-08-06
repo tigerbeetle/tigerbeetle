@@ -517,8 +517,9 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             const snapshot = op + half_measure_beat_count - 1; // -1 converts the count to an index.
             assert(snapshot != snapshot_latest);
 
-            log.debug(tree_name ++ ": compaction beat {d}/{d}", .{
-                tree.compaction_beat,
+            log.debug(tree_name ++ ": compact_start: op={d} beat={d}/{d}", .{
+                op,
+                tree.compaction_beat + 1,
                 config.lsm_batch_multiple,
             });
 
@@ -560,7 +561,12 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(compare_keys(range.key_min, tree.table_immutable.key_min()) != .gt);
             assert(compare_keys(range.key_max, tree.table_immutable.key_max()) != .lt);
 
-            log.debug(tree_name ++ ": compacting {d} tables from immutable table to level 0", .{
+            log.debug(tree_name ++
+                ": compacting immutable table to level 0 " ++
+                "(values.len={d} snapshot_min={d} compaction.snapshot={d} table_count={d})", .{
+                tree.table_immutable.values.len,
+                tree.table_immutable.snapshot_min,
+                snapshot,
                 range.table_count,
             });
 
@@ -764,12 +770,12 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             // - assert: even compactions from previous tick are finished.
             // - remove tables made invisible during compaction of even levels.
             if (tree.compaction_beat == half_measure_beat_count - 1) {
-                log.debug(tree_name ++ ": finished compacting even levels", .{});
-
                 if (still_compacting) {
-                    log.debug(tree_name ++ ": compactions weren't finished - retrying", .{});
+                    log.debug(tree_name ++ ": compact_done: driving outstanding compactions", .{});
                     return tree.compact_drive();
                 }
+
+                log.debug(tree_name ++ ": compact_done: compacted even levels", .{});
 
                 it = CompactionTableIterator{ .tree = tree };
                 while (it.next()) |context| {
@@ -789,12 +795,13 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             // - assert: all visible levels haven't overflowed their max.
             // - convert mutable table to immutable tables for next measure.
             if (tree.compaction_beat == config.lsm_batch_multiple - 1) {
-                log.debug(tree_name ++ ": finished compacting immutable table and odd levels", .{});
-
                 if (still_compacting) {
-                    log.debug(tree_name ++ ": compactions weren't finished - retrying", .{});
+                    log.debug(tree_name ++ ": compact_done: driving outstanding compactions", .{});
                     return tree.compact_drive();
                 }
+
+                // TODO Make log message more accurate according to what was compacted.
+                log.debug(tree_name ++ ": compact_done: compacted immutable table and odd levels", .{});
 
                 assert(tree.compaction_table_immutable.status == .idle);
 
