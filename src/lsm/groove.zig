@@ -611,7 +611,7 @@ pub fn GrooveType(
             fn worker_finished(context: *PrefetchContext) void {
                 assert(context.groove.prefetch_ids.count() == 0);
 
-                context.workers_busy -= 0;
+                context.workers_busy -= 1;
                 if (context.workers_busy == 0) context.finish();
             }
 
