@@ -362,7 +362,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             callback(self);
         }
 
-        pub fn checkpoint(self: *StateMachine, callback: fn(*StateMachine) void, op: u64) void {
+        pub fn checkpoint(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
 
@@ -802,7 +802,11 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.forest.grooves.accounts.put(&cr);
 
             self.forest.grooves.posted.remove(t.pending_id);
-            self.forest.grooves.transfers.remove(t);
+
+            // We need to remove exactly what was put(), otherwise we cannot update indexes.
+            // However, the posting/voiding transfer `t` may not have had all fields provided.
+            // Therefore, get() what was put() and remove() that.
+            self.forest.grooves.transfers.remove(self.get_transfer(t.id).?);
         }
 
         fn post_or_void_pending_transfer_exists(
