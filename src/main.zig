@@ -33,10 +33,13 @@ pub fn main() !void {
     defer arena.deinit();
 
     const allocator = arena.allocator();
+    
+    var parse_args = try cli.parse_args(allocator);
+    defer parse_args.deinit(allocator);
 
-    switch (try cli.parse_args(allocator)) {
-        .format => |args| try Command.format(allocator, args.cluster, args.replica, args.path),
-        .start => |args| try Command.start(allocator, args.addresses, args.memory, args.path),
+    switch (parse_args) {
+        .format => |*args| try Command.format(allocator, args.cluster, args.replica, args.path),
+        .start => |*args| try Command.start(allocator, args.addresses, args.memory, args.path),
     }
 }
 
