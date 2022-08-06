@@ -114,8 +114,8 @@ const Environment = struct {
         env.grid = try Grid.init(allocator, &env.superblock);
         errdefer env.grid.deinit(allocator);
 
-        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_config);
-        errdefer env.forest.deinit(allocator);
+        // env.forest = try Forest.init(allocator, &env.grid, node_count, forest_config);
+        // errdefer env.forest.deinit(allocator);
 
         env.state = .init;
     }
@@ -124,7 +124,8 @@ const Environment = struct {
         assert(env.state != .uninit);
         defer env.state = .uninit;
 
-        env.forest.deinit(allocator);
+        //env.forest.deinit(allocator);
+
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
         // message_pool doesn't need to be deinit()
@@ -425,5 +426,152 @@ const Environment = struct {
 
 pub fn main() !void {
     try Environment.format(); // NOTE: this can be commented out after first run to speed up testing.
-    try Environment.run();
+    try do_simple();
+}
+
+fn do_simple() !void {
+    var env: Environment = undefined;
+    try env.init(false);
+    defer env.deinit();
+
+    // Initialze a single tree for simplicity
+    // NOTE: forest init was commented out of Environment.init
+    
+    const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
+    var node_pool = try NodePool.init(allocator, Environment.node_count);
+    defer node_pool.deinit(allocator);
+
+    const Tree = @TypeOf(env.forest.grooves.accounts.objects);
+    var tree = try Tree.init(allocator, &node_pool, &env.grid, null, .{
+        .commit_count_max = Environment.forest_config.accounts.commit_count_max,
+    });
+    defer tree.deinit(allocator);
+
+    // Open the superblock then tree.
+
+    try do_open(&env, &tree);
+
+    // Insert an account into the tree.
+
+    const account = Account{
+        .id = 1337,
+        .timestamp = 42,
+        .user_data = 0,
+        .reserved = [_]u8{0} ** 48,
+        .ledger = 710, // Let's use the ISO-4217 Code Number for ZAR
+        .code = 1000, // A chart of accounts code to describe this as a clearing account.
+        .flags = .{ .debits_must_not_exceed_credits = true },
+        .debits_pending = 0,
+        .debits_posted = 0,
+        .credits_pending = 0,
+        .credits_posted = 42,
+    };
+    tree.put(&account);
+
+    // Compact the tree until its written from:
+    // mutable table -> immutable table (end of op=3)
+    // immutable table -> level 0 (end of op=7)
+
+    try do_compact(&env, &tree, 0);
+    try do_compact(&env, &tree, 1);
+    try do_compact(&env, &tree, 2);
+    try do_compact(&env, &tree, 3);
+    try do_compact(&env, &tree, 4);
+    try do_compact(&env, &tree, 5);
+    try do_compact(&env, &tree, 6);
+    try do_compact(&env, &tree, 7);
+
+    // Checkpoint the account inserted into mutable table from op 0-3
+
+    const snapshot = 3;
+    try do_checkpoint(&env, &tree, snapshot);
+
+    // simulate crash
+
+    tree.deinit(allocator);
+    node_pool.deinit(allocator);
+    env.deinit();
+
+    env.init(false) catch |e| std.debug.panic("env.init: {}", .{e});
+    node_pool = NodePool.init(allocator, Environment.node_count) catch |e| std.debug.panic("NodePool.init: {}", .{e});
+    tree = Tree.init(allocator, &node_pool, &env.grid, null, .{
+        .commit_count_max = Environment.forest_config.accounts.commit_count_max,
+    }) catch |e| std.debug.panic("Tree.init: {}", .{e});
+
+    try do_open(&env, &tree);
+
+    // Check if checkpoint saved inserted account
+    
+    const tombstone_bit = 1 << (64 - 1);
+    const key = account.timestamp & ~@as(u64, tombstone_bit);
+    const result = try do_lookup(&env, &tree, snapshot, key);
+
+    assert(result != null);
+    assert(std.mem.eql(u8, std.mem.asBytes(result.?), std.mem.asBytes(&account)));
+}
+
+fn do_open(env: *Environment, tree: anytype) !void {
+    const Tree = @TypeOf(tree.*);
+    const S = struct {
+        var opened = false;
+        fn tree_callback(_: *Tree) void { opened = true; }
+        fn superblock_callback(_: *SuperBlock.Context) void { opened = true; }
+    };
+
+    S.opened = false;
+    env.superblock.open(S.superblock_callback, &env.superblock_context);
+    while (!S.opened) try env.io.tick();
+
+    S.opened = false;
+    tree.open(S.tree_callback);
+    while (!S.opened) try env.io.tick();
+}
+
+fn do_compact(env: *Environment, tree: anytype, op: u64) !void {
+    const Tree = @TypeOf(tree.*);
+    const S = struct {
+        var compacted = false;
+        fn callback(_: *Tree) void { compacted = true; }
+    };
+    
+    S.compacted = false;
+    tree.compact(op, S.callback);
+    while (!S.compacted) try env.io.tick();
+}
+
+fn do_checkpoint(env: *Environment, tree: anytype, op: u64) !void {
+    const Tree = @TypeOf(tree.*);
+    const S = struct {
+        var checkpointed = false;
+        fn tree_callback(_: *Tree) void { checkpointed = true; }
+        fn superblock_callback(_: *SuperBlock.Context) void { checkpointed = true; }
+    };
+
+    S.checkpointed = false;
+    tree.checkpoint(op, S.tree_callback);
+    while (!S.checkpointed) try env.io.tick();
+
+    S.checkpointed = false;
+    env.superblock.checkpoint(S.superblock_callback, &env.superblock_context);
+    while (!S.checkpointed) try env.io.tick();
+}
+
+fn do_lookup(env: *Environment, tree: anytype, snapshot: u64, key: anytype) !?*const Account {
+    const Tree = @TypeOf(tree.*);
+    const S = struct {
+        var found = false;
+        var value: ?*const Account = undefined;
+        var context: Tree.LookupContext = undefined;
+
+        fn callback(_: *Tree.LookupContext, v: ?*const Account) void { 
+            found = true;
+            value = v;
+        }
+    };
+
+    S.found = false;
+    tree.lookup(S.callback, &S.context, snapshot, key);
+    while (!S.found) try env.io.tick();
+
+    return S.value;
 }
