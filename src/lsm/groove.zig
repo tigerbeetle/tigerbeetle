@@ -693,7 +693,7 @@ pub fn GrooveType(
                 const object = result.?;
                 assert(!ObjectTreeHelpers(Object).tombstone(object));
 
-                worker.context.groove.prefetch_objects.putAssumeCapacity(object.*, {});
+                worker.context.groove.prefetch_objects.putAssumeCapacityNoClobber(object.*, {});
                 worker.lookup_finish();
             }
 
