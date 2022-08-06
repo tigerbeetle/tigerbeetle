@@ -902,7 +902,60 @@ test "sum_overflows" {
     try expectEqual(true, sum_overflows(math.maxInt(u64), math.maxInt(u64)));
 }
 
-// TODO Refactor a test helper for StateMachine/Grid/Storage setup.
+const TestContext = struct {
+    const Storage = @import("test/storage.zig").Storage;
+    const MessagePool = @import("message_pool.zig").MessagePool;
+    const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
+    const Grid = @import("lsm/grid.zig").GridType(Storage);
+    const StateMachine = StateMachineType(Storage);
+
+    storage: Storage,
+    message_pool: MessagePool,
+    superblock: SuperBlock,
+    grid: Grid,
+    state_machine: StateMachine,
+
+    fn init(ctx: *TestContext, allocator: mem.Allocator, options: StateMachine.Options) !void {
+        ctx.storage = try Storage.init(
+            allocator,
+            4096,
+            .{
+                .seed = 0,
+                .read_latency_min = 0,
+                .read_latency_mean = 0,
+                .write_latency_min = 0,
+                .write_latency_mean = 0,
+                .read_fault_probability = 0,
+                .write_fault_probability = 0,
+            },
+            0,
+            .{
+                .first_offset = 0,
+                .period = 0,
+            },
+        );
+        errdefer ctx.storage.deinit(allocator);
+
+        ctx.message_pool = .{ .free_list = null };
+
+        ctx.superblock = try SuperBlock.init(allocator, &ctx.storage, &ctx.message_pool);
+        errdefer ctx.superblock.deinit(allocator);
+
+        ctx.grid = try Grid.init(allocator, &ctx.superblock);
+        errdefer ctx.grid.deinit(allocator);
+
+        ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, options);
+        errdefer ctx.state_machine.deinit(allocator);
+    }
+
+    fn deinit(ctx: *TestContext, allocator: mem.Allocator) void {
+        ctx.storage.deinit(allocator);
+        ctx.superblock.deinit(allocator);
+        ctx.grid.deinit(allocator);
+        ctx.state_machine.deinit(allocator);
+        ctx.* = undefined;
+    }
+};
 
 test "create/lookup/rollback accounts" {
     const Vector = struct { result: CreateAccountResult, object: Account };
@@ -1235,45 +1288,16 @@ test "create/lookup/rollback accounts" {
         },
     };
 
-    const Storage = @import("test/storage.zig").Storage;
-    const StateMachine = StateMachineType(Storage);
-
-    var storage = try Storage.init(
-        testing.allocator,
-        4096,
-        .{
-            .seed = 0,
-            .read_latency_min = 0,
-            .read_latency_mean = 0,
-            .write_latency_min = 0,
-            .write_latency_mean = 0,
-            .read_fault_probability = 0,
-            .write_fault_probability = 0,
-        },
-        0,
-        .{
-            .first_offset = 0,
-            .period = 0,
-        },
-    );
-    defer storage.deinit(testing.allocator);
-
-    var message_pool = try @import("message_pool.zig").MessagePool.init(testing.allocator, .replica);
-
-    const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
-    var superblock = try SuperBlock.init(testing.allocator, undefined, &message_pool);
-    defer superblock.deinit(testing.allocator);
-
-    var grid = try StateMachine.Grid.init(testing.allocator, &superblock);
-    defer grid.deinit(testing.allocator);
-
-    var state_machine = try StateMachine.init(testing.allocator, &grid, .{
-        .lsm_forest_node_count = 0,
+    var context: TestContext = undefined;
+    try context.init(testing.allocator, .{
+        .lsm_forest_node_count = 1,
         .cache_size_accounts = vectors.len,
         .cache_size_transfers = 0,
         .cache_size_posted = 0,
     });
-    defer state_machine.deinit(testing.allocator);
+    defer context.deinit(testing.allocator);
+
+    const state_machine = &context.state_machine;
 
     for (vectors) |*vector, i| {
         const result = state_machine.create_account(&vector.object);
@@ -1330,19 +1354,16 @@ test "linked accounts" {
         mem.zeroInit(Account, .{ .id = 4, .code = 1, .ledger = 1 }),
     };
 
-    const Storage = @import("storage.zig").Storage;
-    const StateMachine = StateMachineType(Storage);
-    var state_machine = try StateMachine.init(
-        testing.allocator,
-        undefined,
-        .{
-            .lsm_forest_node_count = 0,
-            .cache_size_accounts = accounts_max,
-            .cache_size_transfers = transfers_max,
-            .cache_size_posted = transfers_pending_max,
-        },
-    );
-    defer state_machine.deinit(testing.allocator);
+    var context: TestContext = undefined;
+    try context.init(testing.allocator, .{
+        .lsm_forest_node_count = 1,
+        .cache_size_accounts = accounts_max,
+        .cache_size_transfers = transfers_max,
+        .cache_size_posted = transfers_pending_max,
+    });
+    defer context.deinit(testing.allocator);
+
+    const state_machine = &context.state_machine;
 
     const input = mem.asBytes(&accounts);
 
@@ -1421,15 +1442,16 @@ test "create/lookup/rollback transfers" {
         }),
     };
 
-    const Storage = @import("storage.zig").Storage;
-    const StateMachine = StateMachineType(Storage);
-    var state_machine = try StateMachine.init(testing.allocator, undefined, .{
-        .lsm_forest_node_count = 0,
+    var context: TestContext = undefined;
+    try context.init(testing.allocator, .{
+        .lsm_forest_node_count = 1,
         .cache_size_accounts = accounts.len,
         .cache_size_transfers = 1,
         .cache_size_posted = 0,
     });
-    defer state_machine.deinit(testing.allocator);
+    defer context.deinit(testing.allocator);
+
+    const state_machine = &context.state_machine;
 
     const input = mem.asBytes(&accounts);
 
@@ -1967,30 +1989,28 @@ test "create/lookup/rollback transfers" {
         }
     }
 
-    const test_account_balances = test_helpers(StateMachine).test_account_balances;
-
     // Transfer 3:
-    try test_account_balances(&state_machine, 1, 100 + 123, 200 + 3, 0, 7);
-    try test_account_balances(&state_machine, 3, 0, 7, 110 + 123, 210 + 3);
+    try test_account_balances(state_machine, 1, 100 + 123, 200 + 3, 0, 7);
+    try test_account_balances(state_machine, 3, 0, 7, 110 + 123, 210 + 3);
     state_machine.create_transfer_rollback(state_machine.get_transfer(3).?);
-    try test_account_balances(&state_machine, 1, 100 + 123, 200, 0, 7);
-    try test_account_balances(&state_machine, 3, 0, 7, 110 + 123, 210);
+    try test_account_balances(state_machine, 1, 100 + 123, 200, 0, 7);
+    try test_account_balances(state_machine, 3, 0, 7, 110 + 123, 210);
     try expect(state_machine.get_transfer(3) == null);
 
     // Transfer 2:
-    try test_account_balances(&state_machine, 1, 100 + 123, 200, 0, 7);
-    try test_account_balances(&state_machine, 3, 0, 7, 110 + 123, 210);
+    try test_account_balances(state_machine, 1, 100 + 123, 200, 0, 7);
+    try test_account_balances(state_machine, 3, 0, 7, 110 + 123, 210);
     state_machine.create_transfer_rollback(state_machine.get_transfer(2).?);
-    try test_account_balances(&state_machine, 1, 100 + 123, 200, 0, 0);
-    try test_account_balances(&state_machine, 3, 0, 0, 110 + 123, 210);
+    try test_account_balances(state_machine, 1, 100 + 123, 200, 0, 0);
+    try test_account_balances(state_machine, 3, 0, 0, 110 + 123, 210);
     try expect(state_machine.get_transfer(2) == null);
 
     // Transfer 1:
-    try test_account_balances(&state_machine, 1, 100 + 123, 200, 0, 0);
-    try test_account_balances(&state_machine, 3, 0, 0, 110 + 123, 210);
+    try test_account_balances(state_machine, 1, 100 + 123, 200, 0, 0);
+    try test_account_balances(state_machine, 3, 0, 0, 110 + 123, 210);
     state_machine.create_transfer_rollback(state_machine.get_transfer(1).?);
-    try test_account_balances(&state_machine, 1, 100, 200, 0, 0);
-    try test_account_balances(&state_machine, 3, 0, 0, 110, 210);
+    try test_account_balances(state_machine, 1, 100, 200, 0, 0);
+    try test_account_balances(state_machine, 3, 0, 0, 110, 210);
     try expect(state_machine.get_transfer(1) == null);
 
     for (accounts) |account| {
@@ -2057,15 +2077,16 @@ test "create/lookup/rollback 2-phase transfers" {
         }),
     };
 
-    const Storage = @import("storage.zig").Storage;
-    const StateMachine = StateMachineType(Storage);
-    var state_machine = try StateMachine.init(testing.allocator, undefined, .{
-        .lsm_forest_node_count = 0,
+    var context: TestContext = undefined;
+    try context.init(testing.allocator, .{
+        .lsm_forest_node_count = 1,
         .cache_size_accounts = accounts.len,
         .cache_size_transfers = 100,
         .cache_size_posted = 1,
     });
-    defer state_machine.deinit(testing.allocator);
+    defer context.deinit(testing.allocator);
+
+    const state_machine = &context.state_machine;
 
     // Create accounts:
     const accounts_input = mem.asBytes(&accounts);
@@ -2100,13 +2121,9 @@ test "create/lookup/rollback 2-phase transfers" {
         try expectEqual(transfer, state_machine.get_transfer(transfer.id).?.*);
     }
 
-    const helpers = test_helpers(StateMachine);
-    const test_account_balances = helpers.test_account_balances;
-    const test_transfer_rollback = helpers.test_transfer_rollback;
-
     // Test balances before posting:
-    try test_account_balances(&state_machine, 1, 52, 15, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 52, 15);
+    try test_account_balances(state_machine, 1, 52, 15, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 52, 15);
 
     // Post pending transfers:
     const Vector = struct { result: CreateTransferResult, object: Transfer };
@@ -2606,48 +2623,48 @@ test "create/lookup/rollback 2-phase transfers" {
     }
 
     // Balances after posting:
-    try test_account_balances(&state_machine, 1, 15, 35, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 15, 35);
+    try test_account_balances(state_machine, 1, 15, 35, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 15, 35);
 
     // Rollback posting transfer (different amount):
     assert(vectors[0].result == .ok);
-    try test_transfer_rollback(&state_machine, &vectors[0].object);
-    try test_account_balances(&state_machine, 1, 30, 22, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 30, 22);
+    try test_transfer_rollback(state_machine, &vectors[0].object);
+    try test_account_balances(state_machine, 1, 30, 22, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 30, 22);
 
     // Rollback voiding transfer:
     assert(vectors[22].result == .ok);
-    try test_transfer_rollback(&state_machine, &vectors[22].object);
-    try test_account_balances(&state_machine, 1, 45, 22, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 45, 22);
+    try test_transfer_rollback(state_machine, &vectors[22].object);
+    try test_account_balances(state_machine, 1, 45, 22, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 45, 22);
 
     // Rollback posting transfer (zero amount):
     assert(vectors[25].result == .ok);
-    try test_transfer_rollback(&state_machine, &vectors[25].object);
-    try test_account_balances(&state_machine, 1, 52, 15, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 52, 15);
+    try test_transfer_rollback(state_machine, &vectors[25].object);
+    try test_account_balances(state_machine, 1, 52, 15, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 52, 15);
 
     // Rollback all pending transfers:
-    try test_transfer_rollback(&state_machine, &transfers[1]);
-    try test_account_balances(&state_machine, 1, 37, 15, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 37, 15);
+    try test_transfer_rollback(state_machine, &transfers[1]);
+    try test_account_balances(state_machine, 1, 37, 15, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 37, 15);
 
-    try test_transfer_rollback(&state_machine, &transfers[2]);
-    try test_account_balances(&state_machine, 1, 22, 15, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 22, 15);
+    try test_transfer_rollback(state_machine, &transfers[2]);
+    try test_account_balances(state_machine, 1, 22, 15, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 22, 15);
 
-    try test_transfer_rollback(&state_machine, &transfers[3]);
-    try test_account_balances(&state_machine, 1, 7, 15, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 7, 15);
+    try test_transfer_rollback(state_machine, &transfers[3]);
+    try test_account_balances(state_machine, 1, 7, 15, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 7, 15);
 
-    try test_transfer_rollback(&state_machine, &transfers[4]);
-    try test_account_balances(&state_machine, 1, 0, 15, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 0, 15);
+    try test_transfer_rollback(state_machine, &transfers[4]);
+    try test_account_balances(state_machine, 1, 0, 15, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 0, 15);
 
     // Rollback transfer:
-    try test_transfer_rollback(&state_machine, &transfers[0]);
-    try test_account_balances(&state_machine, 1, 0, 0, 0, 0);
-    try test_account_balances(&state_machine, 2, 0, 0, 0, 0);
+    try test_transfer_rollback(state_machine, &transfers[0]);
+    try test_account_balances(state_machine, 1, 0, 0, 0, 0);
+    try test_account_balances(state_machine, 2, 0, 0, 0, 0);
 }
 
 fn print_test_vector(
@@ -2666,34 +2683,30 @@ fn print_test_vector(
     });
 }
 
-fn test_helpers(comptime StateMachine: type) type {
-    return struct {
-        fn test_account_balances(
-            state_machine: *StateMachine,
-            account_id: u128,
-            debits_pending: u64,
-            debits_posted: u64,
-            credits_pending: u64,
-            credits_posted: u64,
-        ) !void {
-            const account = state_machine.get_account(account_id).?.*;
-            try expectEqual(debits_pending, account.debits_pending);
-            try expectEqual(debits_posted, account.debits_posted);
-            try expectEqual(credits_pending, account.credits_pending);
-            try expectEqual(credits_posted, account.credits_posted);
-        }
+fn test_account_balances(
+    state_machine: *TestContext.StateMachine,
+    account_id: u128,
+    debits_pending: u64,
+    debits_posted: u64,
+    credits_pending: u64,
+    credits_posted: u64,
+) !void {
+    const account = state_machine.get_account(account_id).?.*;
+    try expectEqual(debits_pending, account.debits_pending);
+    try expectEqual(debits_posted, account.debits_posted);
+    try expectEqual(credits_pending, account.credits_pending);
+    try expectEqual(credits_posted, account.credits_posted);
+}
 
-        fn test_transfer_rollback(state_machine: *StateMachine, transfer: *const Transfer) !void {
-            assert(state_machine.get_transfer(transfer.id) != null);
+fn test_transfer_rollback(state_machine: *TestContext.StateMachine, transfer: *const Transfer) !void {
+    assert(state_machine.get_transfer(transfer.id) != null);
 
-            state_machine.create_transfer_rollback(transfer);
+    state_machine.create_transfer_rollback(transfer);
 
-            try expect(state_machine.get_transfer(transfer.id) == null);
-            if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
-                try expect(state_machine.get_posted(transfer.pending_id) == null);
-            }
-        }
-    };
+    try expect(state_machine.get_transfer(transfer.id) == null);
+    if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
+        try expect(state_machine.get_posted(transfer.pending_id) == null);
+    }
 }
 
 test "zeroed_32_bytes" {

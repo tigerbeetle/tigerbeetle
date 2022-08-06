@@ -398,7 +398,8 @@ pub fn GrooveType(
             // The cache size is meant to be computed based on the left over available memory
             // that tigerbeetle was given to allocate from CLI arguments.
             // TODO Improve unit in this name to make more clear what should be passed.
-            // For example, is this a size in bytes or a count in objects?
+            // For example, is this a size in bytes or a count in objects? It's a count in objects,
+            // but the name poorly reflects this.
             cache_size: u32,
             // In general, the commit count max for a field, depends on the field's object,
             // how many objects might be changed by a batch:
