@@ -83,6 +83,9 @@ pub fn StateMachineType(comptime Storage: type) type {
         prefetch_transfers_context: TransfersGroove.PrefetchContext = undefined,
         prefetch_posted_context: PostedGroove.PrefetchContext = undefined,
 
+        compact_callback: ?fn (*StateMachine) void = null,
+        checkpoint_callback: ?fn (*StateMachine) void = null,
+
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !StateMachine {
             var forest = try Forest.init(
                 allocator,
@@ -344,8 +347,34 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.forest.tick();
         }
 
-        pub fn compact(self: *StateMachine, callback: fn (*Forest) void, op: u64) void {
-            self.forest.compact(callback, op);
+        pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
+            assert(self.compact_callback == null);
+            assert(self.checkpoint_callback == null);
+
+            self.compact_callback = callback;
+            self.forest.compact(compact_finish, op);
+        }
+
+        fn compact_finish(forest: *Forest) void {
+            const self = @fieldParentPtr(StateMachine, "forest", forest);
+            const callback = self.compact_callback.?;
+            self.compact_callback = null;
+            callback(self);
+        }
+
+        pub fn checkpoint(self: *StateMachine, callback: fn(*StateMachine) void, op: u64) void {
+            assert(self.compact_callback == null);
+            assert(self.checkpoint_callback == null);
+
+            self.checkpoint_callback = callback;
+            self.forest.checkpoint(checkpoint_finish, op);
+        }
+
+        fn checkpoint_finish(forest: *Forest) void {
+            const self = @fieldParentPtr(StateMachine, "forest", forest);
+            const callback = self.checkpoint_callback.?;
+            self.checkpoint_callback = null;
+            callback(self);
         }
 
         fn execute(
