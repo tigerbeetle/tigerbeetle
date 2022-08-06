@@ -353,14 +353,10 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             groove.tree.open(tree_callback);
         }
 
-        pub fn compact_io(groove: *PostedGroove, op: u64, callback: fn (*PostedGroove) void) void {
+        pub fn compact(groove: *PostedGroove, op: u64, callback: fn (*PostedGroove) void) void {
             assert(groove.callback == null);
             groove.callback = callback;
-            groove.tree.compact_io(op, tree_callback);
-        }
-
-        pub fn compact_cpu(groove: *PostedGroove) void {
-            groove.tree.compact_cpu();
+            groove.tree.compact(op, tree_callback);
         }
 
         pub fn checkpoint(groove: *PostedGroove, op: u64, callback: fn (*PostedGroove) void) void {
@@ -383,8 +379,7 @@ test "PostedGroove" {
     _ = PostedGroove.put_no_clobber;
     _ = PostedGroove.remove;
 
-    _ = PostedGroove.compact_io;
-    _ = PostedGroove.compact_cpu;
+    _ = PostedGroove.compact;
     _ = PostedGroove.checkpoint;
 
     _ = PostedGroove.prefetch_enqueue;
