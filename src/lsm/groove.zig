@@ -769,7 +769,6 @@ pub fn GrooveType(
             const existing_object = groove.get(object.id).?;
             assert(mem.eql(u8, mem.asBytes(existing_object), mem.asBytes(object)));
 
-            groove.objects.remove(object);
             groove.ids.remove(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
 
             inline for (std.meta.fields(IndexTrees)) |field| {
@@ -780,6 +779,13 @@ pub fn GrooveType(
                     @field(groove.indexes, field.name).remove(&index_value);
                 }
             }
+
+            // The object must be removed last, as the `*const Object` pointer passed to this
+            // function may point into the memory of the object tree's mutable table, in which
+            // case calling groove.objects.remove() will overwrite that object in the mutable
+            // table with a tombstone. Therefore we must not access the object pointer after
+            // calling groove.objects.remove() as the pointed-to value may have changed.
+            groove.objects.remove(object);
         }
 
         /// Maximum number of pending sync callbacks (ObjecTree + IdTree + IndexTrees).
