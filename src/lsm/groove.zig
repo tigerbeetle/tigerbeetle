@@ -914,8 +914,7 @@ test "Groove" {
     _ = Groove.put;
     _ = Groove.remove;
 
-    _ = Groove.compact_io;
-    _ = Groove.compact_cpu;
+    _ = Groove.compact;
     _ = Groove.checkpoint;
 
     _ = Groove.prefetch_enqueue;
