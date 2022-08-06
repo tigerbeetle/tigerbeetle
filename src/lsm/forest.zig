@@ -129,12 +129,12 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         }
 
         pub fn deinit(forest: *Forest, allocator: mem.Allocator) void {
-            forest.node_pool.deinit(allocator);
-            allocator.destroy(forest.node_pool);
-
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).deinit(allocator);
             }
+
+            forest.node_pool.deinit(allocator);
+            allocator.destroy(forest.node_pool);
         }
 
         pub fn tick(forest: *Forest) void {
