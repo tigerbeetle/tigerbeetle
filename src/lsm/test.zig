@@ -236,27 +236,33 @@ const Environment = struct {
         env.state = .forest_open;
     }
 
-    pub fn assert_checkpointed(
+    const Visibility = enum {
+        visible,
+        invisible,
+    };
+
+    pub fn assert_visibility(
         env: *Environment,
+        comptime visibility: Visibility,
         groove: anytype,
-        checkpointed: anytype,
+        objects: anytype,
         comptime commit_count_max: u32,
     ) !void {
         const Groove = @TypeOf(groove.*);
-        const Object = @TypeOf(checkpointed[0]);
+        const Object = @TypeOf(objects[0]);
 
-        const CheckpointAssertion = struct {
+        const VisibilityAssertion = struct {
             prefetch_context: Groove.PrefetchContext = undefined,
             verify_count: usize = 0,
-            checkpointed: []const Object,
+            objects: []const Object,
             groove: *Groove,
 
             fn verify(assertion: *@This()) void {
                 assert(assertion.verify_count == 0);
-                assertion.verify_count = std.math.min(commit_count_max, assertion.checkpointed.len);
+                assertion.verify_count = std.math.min(commit_count_max, assertion.objects.len);
                 if (assertion.verify_count == 0) return;
 
-                for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
+                for (assertion.objects[0..assertion.verify_count]) |*object| {
                     assertion.groove.prefetch_enqueue(object.id);
                 }
 
@@ -269,21 +275,27 @@ const Environment = struct {
 
                 {
                     defer assertion.groove.prefetch_clear();
-                    for (assertion.checkpointed[0..assertion.verify_count]) |*object| {
-                        log.debug("verifying checkpointed for id={}", .{object.id});
+                    for (assertion.objects[0..assertion.verify_count]) |*object| {
+                        log.debug("verifying {} for id={}", .{visibility, object.id});
                         const result = assertion.groove.get(object.id);
-                        assert(result != null);
-                        assert(std.mem.eql(u8, std.mem.asBytes(result.?), std.mem.asBytes(object)));
+
+                        switch (visibility) {
+                            .invisible => assert(result == null),
+                            .visible => {
+                                assert(result != null);
+                                assert(std.mem.eql(u8, std.mem.asBytes(result.?), std.mem.asBytes(object)));
+                            }
+                        }
                     }
                 }
 
-                assertion.checkpointed = assertion.checkpointed[assertion.verify_count..];
+                assertion.objects = assertion.objects[assertion.verify_count..];
                 assertion.verify_count = 0;
                 assertion.verify();
             }
         };
 
-        var assertion = CheckpointAssertion{ .checkpointed = checkpointed, .groove = groove };
+        var assertion = VisibilityAssertion{ .objects = objects, .groove = groove };
         assertion.verify();
         while (assertion.verify_count > 0) try env.tick();
     }
@@ -303,24 +315,23 @@ const Environment = struct {
         try env.open();
 
         // Recording types for verification
-        var mutable = std.ArrayList(Account).init(allocator);
-        defer mutable.deinit();
+        var inserted = std.ArrayList(Account).init(allocator);
+        defer inserted.deinit();
 
-        var compacting = std.ArrayList(Account).init(allocator);
-        defer compacting.deinit();
-
-        var checkpointed = std.ArrayList(Account).init(allocator);
-        defer checkpointed.deinit();
+        const accounts_to_insert_per_op = 1; // forest_config.accounts.commit_count_max;
+        const iterations = 4;
 
         var op: u64 = 0;
-        var id: u64 = 0;
+        var id: u128 = 0;
         var timestamp: u64 = 42;
-        while (id < std.mem.alignForward(10_000, config.lsm_batch_multiple)) {
-            const accounts_to_insert = 1; // forest_config.accounts.commit_count_max;
+        var crash_probability = std.rand.DefaultPrng.init(1337);
 
+        var iter: usize = 0;
+        while (iter < (accounts_to_insert_per_op * config.lsm_batch_multiple * iterations)) : (iter += 1) {
             // Insert a bunch of accounts
+            
             var i: u32 = 0;
-            while (i < accounts_to_insert) : (i += 1) {
+            while (i < accounts_to_insert_per_op) : (i += 1) {
                 defer id += 1;
                 defer timestamp += 1;
                 const account = Account{
@@ -337,48 +348,25 @@ const Environment = struct {
                     .credits_posted = 42,
                 };
 
-                // Insert an account and make sure it can be retrieved.
-                {
-                    //log.debug("inserting account {d} into groove", .{account.id});
-                    const groove = &env.forest.grooves.accounts;
-                    groove.put(&account);
+                 // Insert an account ...
+                const groove = &env.forest.grooves.accounts;
+                groove.put(&account);
 
-                    const Groove = @TypeOf(groove.*);
-                    const AccountPrefetch = struct {
-                        context: Groove.PrefetchContext = undefined,
-                        prefetched: bool = false,
-
-                        fn prefetch_callback(context: *Groove.PrefetchContext) void {
-                            const account_prefetch = @fieldParentPtr(@This(), "context", context);
-                            assert(!account_prefetch.prefetched);
-                            account_prefetch.prefetched = true;
-                        }
-                    };
-
-                    // Prefetch the account id to ensure it can be retrieved from .get().
-                    var account_prefetch = AccountPrefetch{};
-                    groove.prefetch_enqueue(account.id);
-                    groove.prefetch(AccountPrefetch.prefetch_callback, &account_prefetch.context);
-
-                    //log.debug("prefetching account {d} into groove", .{account.id});
-                    while (!account_prefetch.prefetched) {
-                        try env.tick();
-                    }
-
-                    // Get the account once prefetched and ensure it was the one inserted:
-                    //log.debug("fetching account {d} from groove for assertion", .{account.id});
-                    const acc = groove.get(account.id);
-                    assert(acc != null);
-                    assert(std.mem.eql(u8, std.mem.asBytes(acc.?), std.mem.asBytes(&account)));
-                }
+                // ..and make sure it can be retrieved
+                try env.assert_visibility(
+                    .visible,
+                    &env.forest.grooves.accounts,
+                    @as([]const Account, &.{ account }),
+                    forest_config.accounts.commit_count_max,
+                );
 
                 // Record the successfull insertion.
-                try mutable.append(account);
+                try inserted.append(account);
             }
 
-            // compact and checkpoint the forest
-            defer op += 1;
+            // compact the forest
             try env.compact(op);
+            defer op += 1;
 
             // checkpoint the records when the forest is likely finished compaction.
             const checkpoint_op = op -| config.lsm_batch_multiple;
@@ -386,44 +374,47 @@ const Environment = struct {
                 // Checkpoint the forest then superblock
                 try env.checkpoint(checkpoint_op);
 
-                // Record the accounts that have been checkpointed.
-                try checkpointed.appendSlice(compacting.items);
-                compacting.clearRetainingCapacity();
+                const checkpointed = inserted.items[0..((checkpoint_op + 1) * accounts_to_insert_per_op)];
+                const uncommitted = inserted.items[checkpointed.len..];
+                log.debug("checkpointed={d} uncommitted={d}", .{checkpointed.len, uncommitted.len});
+                assert(uncommitted.len == config.lsm_batch_multiple * accounts_to_insert_per_op);
 
-                // Simulate crashing and restoring.
-                log.debug("simulating crash", .{});
-                crashing = true;
-                {
-                    env.deinit();
-                    try env.init(must_create);
+                // Randomly initiate a crash
+                if (crash_probability.random().uintLessThanBiased(u32, 100) >= 50) {
+                    // Simulate crashing and restoring.
+                    log.debug("simulating crash", .{});
+                    crashing = true;
+                    {
+                        env.deinit();
+                        try env.init(must_create);
 
-                    // Re-open the superblock and forest.
-                    try env.open();
+                        // Re-open the superblock and forest.
+                        try env.open();
 
-                    // Double check the forest contains the checkpointed values.
-                    log.debug("checking the following after checkpoint({})", .{checkpoint_op});
-                    for (checkpointed.items) |a| log.debug("id={}", .{a.id});
-                    
-                    // Positive space
-                    try env.assert_checkpointed(
-                        &env.forest.grooves.accounts,
-                        checkpointed.items,
-                        forest_config.accounts.commit_count_max,
-                    );
+                        // Double check the forest DOES NOT contain the un-checkpointed values (negative space)
+                        try env.assert_visibility(
+                            .invisible,
+                            &env.forest.grooves.accounts,
+                            uncommitted,
+                            forest_config.accounts.commit_count_max,
+                        );
 
-                    // TODO Negative space (check compacting.items)
+                        // Reset everything to after checkpoint
+                        op = checkpoint_op;
+                        inserted.items.len = checkpointed.len;
+                        id = checkpointed[checkpointed.len - 1].id + 1;
+                        timestamp = checkpointed[checkpointed.len - 1].timestamp + 1;
+                    }
+                    crashing = false;
+                } 
 
-                    // Reset everything
-                    op = checkpointed_op;
-                    id = checkpointed.items[checkpointed.items.len - 1].id + 1;
-                    timestamp = checkpointed.items[checkpointed.items.len - 1].timestamp + 1;
-                }
-                crashing = false;
-            }
-
-            if (op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
-                try compacting.appendSlice(mutable.items);
-                mutable.clearRetainingCapacity();
+                // Double check the forest contains the checkpointed values (positive space)
+                try env.assert_visibility(
+                    .visible,
+                    &env.forest.grooves.accounts,
+                    checkpointed,
+                    forest_config.accounts.commit_count_max,
+                );
             }
         }
     }

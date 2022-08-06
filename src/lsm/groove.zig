@@ -596,15 +596,11 @@ pub fn GrooveType(
             fn start_workers(context: *PrefetchContext) void {
                 assert(context.workers_busy == 0);
 
-                while (context.workers_busy < context.workers.len) : (context.workers_busy += 1) {
+                while (context.workers_busy < context.workers.len) {
                     const worker = &context.workers[context.workers_busy];
                     worker.* = .{ .context = context };
+                    context.workers_busy += 1;
                     if (!worker.lookup_start()) break;
-                }
-
-                if (context.workers_busy == 0) {
-                    assert(context.groove.prefetch_ids.count() == 0);
-                    context.finish();
                 }
             }
 
@@ -639,7 +635,7 @@ pub fn GrooveType(
 
                 const id = worker.context.id_iterator.next() orelse {
                     groove.prefetch_ids.clearRetainingCapacity();
-                    assert(groove.prefetch_ids.count() == 0);
+                    worker.context.worker_finished();
                     return false;
                 };
 
@@ -699,7 +695,6 @@ pub fn GrooveType(
 
             fn lookup_finish(worker: *PrefetchWorker) void {
                 if (!worker.lookup_start()) {
-                    worker.context.worker_finished();
                     worker.* = undefined;
                 }
             }
