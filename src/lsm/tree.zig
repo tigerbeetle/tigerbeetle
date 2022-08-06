@@ -794,7 +794,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 if (still_compacting) {
                     log.debug(tree_name ++ ": compactions weren't finished - retrying", .{});
                     return tree.compact_drive();
-                } 
+                }
 
                 assert(tree.compaction_table_immutable.status == .idle);
 

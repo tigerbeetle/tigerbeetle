@@ -283,8 +283,8 @@ pub fn Replica(
             errdefer journal.deinit(allocator);
 
             var state_machine = try StateMachine.init(
-                allocator, 
-                options.grid, 
+                allocator,
+                options.grid,
                 options.state_machine_options,
             );
             errdefer state_machine.deinit(allocator);
