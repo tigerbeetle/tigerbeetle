@@ -7,6 +7,7 @@ pub fn StateMachineType(comptime Storage: type) type {
     _ = Storage;
     return struct {
         const StateMachine = @This();
+        const Grid = @import("../lsm/grid.zig").GridType(Storage);
 
         pub const Operation = enum(u8) {
             /// Operations reserved by VR protocol (for all state machines):
@@ -32,7 +33,10 @@ pub fn StateMachineType(comptime Storage: type) type {
         prepare_timestamp: u64 = 0,
         commit_timestamp: u64 = 0,
 
-        pub fn init(_: std.mem.Allocator, options: Options) !StateMachine {
+        callback: ?fn (state_machine: *StateMachine) void = null,
+        callback_ticks: usize = 0,
+
+        pub fn init(_: std.mem.Allocator, _: *Grid, options: Options) !StateMachine {
             return StateMachine{
                 .state = hash(0, std.mem.asBytes(&options.seed)),
                 .options = options,

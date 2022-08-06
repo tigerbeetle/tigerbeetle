@@ -62,7 +62,7 @@ const quorum_messages_null = [_]?*Message{null} ** config.replicas_max;
 const QuorumCounter = std.StaticBitSet(config.replicas_max);
 const quorum_counter_null = QuorumCounter.initEmpty();
 
-pub fn Replica(
+pub fn ReplicaType(
     comptime StateMachine: type,
     comptime MessageBus: type,
     comptime Storage: type,
@@ -73,6 +73,8 @@ pub fn Replica(
 
     return struct {
         const Self = @This();
+
+        pub const Open = ReplicaOpenType(StateMachine, MessageBus, Storage, Time);
 
         const Journal = vsr.Journal(Self, Storage);
         const Clock = vsr.Clock(Time);
@@ -92,6 +94,8 @@ pub fn Replica(
         /// The minimum number of replicas required to form a view change quorum:
         quorum_view_change: u8,
 
+        time: Time,
+
         /// A distributed fault-tolerant clock for lower and upper bounds on the leader's wall clock:
         clock: Clock,
 
@@ -100,14 +104,15 @@ pub fn Replica(
 
         /// An abstraction to send messages from the replica to another replica or client.
         /// The message bus will also deliver messages to this replica by calling `on_message()`.
-        message_bus: *MessageBus,
+        message_bus: MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
         state_machine: StateMachine,
 
         // TODO Document.
-        superblock: *SuperBlock,
+        superblock: SuperBlock,
         superblock_context: SuperBlock.Context = undefined,
+        grid: Grid,
 
         /// The current view, initially 0:
         view: u32,
@@ -229,15 +234,17 @@ pub fn Replica(
             cluster: u32,
             replica_count: u8,
             replica_index: u8,
-            time: *Time,
-            grid: *Grid,
-            superblock: *SuperBlock,
+            superblock: SuperBlock,
+            time: Time,
             storage: *Storage,
-            message_bus: *MessageBus,
+            message_pool: *MessagePool,
+            // TODO With https://github.com/coilhq/tigerbeetle/issues/71,
+            // the separate message_bus_options won't be necessary.
+            message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
         };
 
-        pub fn init(allocator: Allocator, options: Options) !Self {
+        pub fn init(self: *Self, allocator: Allocator, options: Options) !void {
             const replica_count = options.replica_count;
             const replica_index = options.replica_index;
             assert(replica_count > 0);
@@ -272,20 +279,33 @@ pub fn Replica(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
+            self.time = options.time;
             var clock = try Clock.init(
                 allocator,
                 replica_count,
                 replica_index,
-                options.time,
+                &self.time,
             );
             errdefer clock.deinit(allocator);
 
             var journal = try Journal.init(allocator, options.storage, replica_index);
             errdefer journal.deinit(allocator);
 
+            var message_bus = try MessageBus.init(
+                allocator,
+                options.cluster,
+                .{ .replica = options.replica_index },
+                options.message_pool,
+                options.message_bus_options,
+            );
+            errdefer message_bus.deinit(allocator);
+
+            var grid = try Grid.init(allocator, &self.superblock);
+            errdefer grid.deinit(allocator);
+
             var state_machine = try StateMachine.init(
                 allocator,
-                options.grid,
+                &self.grid,
                 options.state_machine_options,
             );
             errdefer state_machine.deinit(allocator);
@@ -299,17 +319,21 @@ pub fn Replica(
                 break :blk @bitCast(Nonce, nonce);
             };
 
-            var self = Self{
+            self.* = Self{
                 .cluster = options.cluster,
                 .replica_count = replica_count,
                 .replica = replica_index,
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
+                // Copy the (already-initialized) time back, to avoid regressing the monotonic
+                // clock guard.
+                .time = self.time,
                 .clock = clock,
                 .journal = journal,
-                .message_bus = options.message_bus,
+                .message_bus = message_bus,
                 .state_machine = state_machine,
                 .superblock = options.superblock,
+                .grid = grid,
                 .view = options.superblock.working.vsr_state.view,
                 .view_normal = options.superblock.working.vsr_state.view_normal,
                 .op = 0,
@@ -359,6 +383,7 @@ pub fn Replica(
                 .recovery_nonce = recovery_nonce,
                 .prng = std.rand.DefaultPrng.init(replica_index),
             };
+            message_bus.set_on_message(*Self, self, Self.on_message);
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={}", .{
                 self.replica,
@@ -376,8 +401,6 @@ pub fn Replica(
             });
 
             assert(self.status == .recovering);
-
-            return self;
         }
 
         /// Free all memory and unref all messages held by the replica
@@ -386,6 +409,8 @@ pub fn Replica(
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
             self.state_machine.deinit(allocator);
+            self.superblock.deinit(allocator);
+            defer self.message_bus.deinit(allocator);
 
             while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
 
@@ -429,6 +454,7 @@ pub fn Replica(
 
             self.clock.tick();
             self.state_machine.tick();
+            self.message_bus.tick();
 
             if (!self.journal.recovered) {
                 if (!self.journal.recovering) self.journal.recover();
@@ -3456,8 +3482,11 @@ pub fn Replica(
                 config.journal_slot_count - config.lsm_batch_multiple - 1
             else
                 // Second wrap: op_checkpoint_next = 5+8-2 = 11
+                // Third wrap: op_checkpoint_next = 11+8-2 = 17
                 self.op_checkpoint + config.journal_slot_count - config.lsm_batch_multiple;
             assert((op + 1) % config.lsm_batch_multiple == 0);
+            // The checkpoint always advances.
+            assert(op > self.op_checkpoint);
 
             return op;
         }
@@ -5315,6 +5344,102 @@ pub fn Replica(
     };
 }
 
+fn ReplicaOpenType(
+    comptime StateMachine: type,
+    comptime MessageBus: type,
+    comptime Storage: type,
+    comptime Time: type,
+) type {
+    const SuperBlock = vsr.SuperBlockType(Storage);
+    const Replica = ReplicaType(StateMachine, MessageBus, Storage, Time);
+
+    return struct {
+        const Self = @This();
+
+        allocator: std.mem.Allocator,
+        replica: *Replica,
+        replica_options: Replica.Options,
+        superblock: ?SuperBlock,
+        superblock_context: SuperBlock.Context = undefined,
+        callback: ?fn (opener: *Self, result: anyerror!void) void = null,
+
+        const Options = struct {
+            replica_count: u8,
+            storage: *Storage,
+            message_pool: *MessagePool,
+            time: Time,
+            state_machine_options: StateMachine.Options,
+            message_bus_options: MessageBus.Options,
+        };
+
+        pub fn init(
+            allocator: std.mem.Allocator,
+            replica: *Replica,
+            options: Options,
+        ) !Self {
+            const superblock = try SuperBlock.init(allocator, options.storage, options.message_pool);
+            errdefer superblock.deinit(allocator);
+
+            return Self{
+                .allocator = allocator,
+                .replica = replica,
+                .replica_options = .{
+                    // "cluster" and "replica_index" will be extracted from the opened SuperBlock.
+                    .cluster = undefined,
+                    .replica_index = undefined,
+                    .replica_count = options.replica_count,
+                    // "superblock" will be moved into the options once it has been opened.
+                    .superblock = undefined,
+                    .storage = options.storage,
+                    .time = options.time,
+                    .message_pool = options.message_pool,
+                    .state_machine_options = options.state_machine_options,
+                    .message_bus_options = options.message_bus_options,
+                },
+                .superblock = superblock,
+            };
+        }
+
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            if (self.superblock) |*superblock| {
+                superblock.deinit(allocator);
+                self.superblock = null;
+            }
+            self.callback = null;
+        }
+
+        pub fn open(
+            self: *Self,
+            callback: fn (opener: *Self, result: anyerror!void) void,
+        ) void {
+            assert(self.superblock != null);
+            assert(self.callback == null);
+
+            self.callback = callback;
+            self.superblock.?.open(open_callback, &self.superblock_context);
+        }
+
+        fn open_callback(superblock_context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            assert(self.superblock != null);
+            const callback = self.callback.?;
+            self.callback = null;
+
+            if (self.superblock.?.working.replica >= self.replica_options.replica_count) {
+                callback(self, error.NoAddress);
+                return;
+            }
+
+            self.replica_options.cluster = self.superblock.?.working.cluster;
+            self.replica_options.replica_index = self.superblock.?.working.replica;
+            self.replica_options.superblock = self.superblock.?;
+            self.superblock = null;
+
+            callback(self, self.replica.init(self.allocator, self.replica_options));
+        }
+    };
+}
+
 pub fn ReplicaFormatType(comptime Storage: type) type {
     const SuperBlock = vsr.SuperBlockType(Storage);
     return struct {
@@ -5366,7 +5491,7 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
         }
 
         /// Initialize the TigerBeetle replica's data file.
-        pub fn format(self: *Self, callback: fn (format: *Self) void) !void {
+        pub fn format(self: *Self, callback: fn (format: *Self) void) void {
             assert(self.callback == null);
             assert(self.wal_offset == 0);
 
@@ -5397,13 +5522,13 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
             if (size == 0) {
                 self.format_superblock();
             } else {
-                self.wal_offset += size;
                 self.storage.write_sectors(
                     format_wal_sectors_callback,
                     &self.wal_write,
                     self.wal_buffer[0..size],
                     self.wal_offset,
                 );
+                self.wal_offset += size;
             }
         }
 

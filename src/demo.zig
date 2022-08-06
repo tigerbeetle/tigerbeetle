@@ -38,19 +38,20 @@ pub fn request(
     defer io.deinit();
 
     var message_pool = try MessagePool.init(allocator, .client);
-    var message_bus = try MessageBus.init(allocator, cluster_id, &addresses, client_id, &io, &message_pool);
-    defer message_bus.deinit();
 
     var client = try Client.init(
         allocator,
         client_id,
         cluster_id,
         @intCast(u8, addresses.len),
-        &message_bus,
+        &message_pool,
+        .{
+            .configuration: &addresses,
+            .process = client_id,
+            .io = &io,
+        },
     );
-    defer client.deinit();
-
-    message_bus.set_on_message(*Client, &client, Client.on_message);
+    defer client.deinit(allocator);
 
     const message = client.get_message();
     defer client.unref(message);

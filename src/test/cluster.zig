@@ -19,8 +19,10 @@ const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;
 
 const vsr = @import("../vsr.zig");
-pub const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
+pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
+pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
 pub const Client = vsr.Client(StateMachine, MessageBus);
+const SuperBlock = vsr.SuperBlockType(Storage);
 
 pub const ClusterOptions = struct {
     cluster: u32,
@@ -61,9 +63,16 @@ pub const Cluster = struct {
     options: ClusterOptions,
 
     storages: []Storage,
-    times: []Time,
+    // TODO Move MessagePool into Replica/Client (tricky because it is required by SuperBlock)?
+    pools: []MessagePool,
+    // TODO Set a replica to `null` when its corresponding health is `down`, to be sure we don't use it.
     replicas: []Replica,
     health: []ReplicaHealth,
+
+    replica_format: ReplicaFormat = undefined,
+    replica_formatting: bool = false,
+    replica_open: Replica.Open = undefined,
+    replica_opening: bool = false,
 
     clients: []Client,
     network: Network,
@@ -73,6 +82,8 @@ pub const Cluster = struct {
     on_change_state: fn (replica: *Replica) void = undefined,
 
     pub fn create(allocator: mem.Allocator, prng: std.rand.Random, options: ClusterOptions) !*Cluster {
+        const process_count = options.replica_count + options.client_count;
+        assert(process_count <= std.math.maxInt(u8));
         assert(options.replica_count > 0);
         assert(options.health_options.crash_probability < 1.0);
         assert(options.health_options.crash_probability >= 0.0);
@@ -85,12 +96,20 @@ pub const Cluster = struct {
         const storages = try allocator.alloc(Storage, options.replica_count);
         errdefer allocator.free(storages);
 
-        const times = try allocator.alloc(Time, options.replica_count);
-        errdefer allocator.free(times);
+        var pools = try allocator.alloc(MessagePool, process_count);
+        errdefer allocator.free(pools);
+
+        {
+            var i: usize = 0;
+            while (i < process_count) : (i += 1) {
+                pools[i] = try MessagePool.init(allocator, if (i < options.replica_count) .replica else .client);
+            }
+        }
 
         const replicas = try allocator.alloc(Replica, options.replica_count);
         errdefer allocator.free(replicas);
 
+        // TODO Might be simpler to start all replicas as "down", and then move Replica.Open to the restart path.
         const health = try allocator.alloc(ReplicaHealth, options.replica_count);
         errdefer allocator.free(health);
         mem.set(ReplicaHealth, health, .{ .up = 0 });
@@ -110,7 +129,7 @@ pub const Cluster = struct {
             .allocator = allocator,
             .options = options,
             .storages = storages,
-            .times = times,
+            .pools = pools,
             .replicas = replicas,
             .health = health,
             .clients = clients,
@@ -118,78 +137,72 @@ pub const Cluster = struct {
         };
 
         var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
-        const faulty_areas = Storage.generate_faulty_areas(prng, config.journal_size_max, options.replica_count, &buffer);
+        const faulty_areas = Storage.generate_faulty_areas(
+            prng,
+            config.journal_size_max,
+            options.replica_count,
+            &buffer,
+        );
         assert(faulty_areas.len == options.replica_count);
 
-        for (cluster.replicas) |*replica, replica_index| {
-            cluster.times[replica_index] = .{
-                .resolution = config.tick_ms * std.time.ns_per_ms,
-                .offset_type = .linear,
-                .offset_coefficient_A = 0,
-                .offset_coefficient_B = 0,
-            };
-            cluster.storages[replica_index] = try Storage.init(
+        // Format each replica's storage (equivalent to "tigerbeetle format ...").
+        for (cluster.storages) |*storage, replica_index| {
+            storage.* = try Storage.init(
                 allocator,
                 config.journal_size_max,
                 options.storage_options,
                 @intCast(u8, replica_index),
                 faulty_areas[replica_index],
             );
-            const message_bus = try cluster.network.init_message_bus(
-                options.cluster,
-                .{ .replica = @intCast(u8, replica_index) },
-            );
 
-            replica.* = try Replica.init(
+            var superblock = try SuperBlock.init(allocator, storage, &cluster.pools[replica_index]);
+            defer superblock.deinit(allocator);
+
+            cluster.replica_format = try ReplicaFormat.init(
                 allocator,
-                .{
-                    .cluster = options.cluster,
-                    .replica_count = options.replica_count,
-                    .replica_index = @intCast(u8, replica_index),
-                    .time = &cluster.times[replica_index],
-                    .storage = &cluster.storages[replica_index],
-                    .message_bus = message_bus,
-                    .state_machine_options = cluster.options.state_machine_options,
-                },
-            );
-            message_bus.set_on_message(*Replica, replica, Replica.on_message);
-        }
-
-        {
-            // Format the WAL (equivalent to "tigerbeetle init ...").
-            for (cluster.storages) |storage| {
-                const write_size = vsr.format_journal(options.cluster, 0, storage.memory);
-                assert(write_size == storage.memory.len);
-                assert(write_size == config.journal_size_max);
-            }
-        }
-
-        for (cluster.clients) |*client| {
-            const client_id = prng.int(u128);
-            const client_message_bus = try cluster.network.init_message_bus(
                 options.cluster,
-                .{ .client = client_id },
+                @intCast(u8, replica_index),
+                storage,
+                &superblock,
             );
+            defer cluster.replica_format.deinit(allocator);
+            defer cluster.replica_format = undefined;
+
+            assert(!cluster.replica_formatting);
+            cluster.replica_formatting = true;
+            cluster.replica_format.format(format_callback);
+            while (cluster.replica_formatting) storage.tick();
+        }
+        errdefer for (cluster.storages) |*storage| storage.deinit(allocator);
+
+        for (cluster.replicas) |_, replica_index| try cluster.open(@intCast(u8, replica_index));
+        errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
+
+        for (cluster.clients) |*client, i| {
+            const client_id = prng.int(u128);
             client.* = try Client.init(
                 allocator,
                 client_id,
                 options.cluster,
                 options.replica_count,
-                client_message_bus,
+                &cluster.pools[options.replica_count + i],
+                .{ .network = &cluster.network },
             );
-            client_message_bus.set_on_message(*Client, client, Client.on_message);
+
+            cluster.network.link(client.message_bus.process, &client.message_bus);
         }
 
         return cluster;
     }
 
     pub fn destroy(cluster: *Cluster) void {
-        for (cluster.clients) |*client| client.deinit();
+        for (cluster.clients) |*client| client.deinit(cluster.allocator);
         cluster.allocator.free(cluster.clients);
 
         for (cluster.replicas) |*replica| replica.deinit(cluster.allocator);
         cluster.allocator.free(cluster.replicas);
         cluster.allocator.free(cluster.health);
+        cluster.allocator.free(cluster.pools);
 
         for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
         cluster.allocator.free(cluster.storages);
@@ -197,6 +210,12 @@ pub const Cluster = struct {
         cluster.network.deinit();
 
         cluster.allocator.destroy(cluster);
+    }
+
+    fn format_callback(replica_format: *ReplicaFormat) void {
+        const cluster = @fieldParentPtr(Cluster, "replica_format", replica_format);
+        assert(cluster.replica_formatting);
+        cluster.replica_formatting = false;
     }
 
     /// Reset a replica to its initial state, simulating a random crash/panic.
@@ -310,19 +329,10 @@ pub const Cluster = struct {
         const total_messages = message_pool.messages_max_replica;
         assert(messages_in_network + messages_in_pool == total_messages);
 
-        replica.* = try Replica.init(
-            cluster.allocator,
-            .{
-                .cluster = cluster.options.cluster,
-                .replica_count = cluster.options.replica_count,
-                .replica_index = @intCast(u8, replica_index),
-                .time = &cluster.times[replica_index],
-                .storage = &cluster.storages[replica_index],
-                .message_bus = message_bus,
-                .state_machine_options = cluster.options.state_machine_options,
-            },
-        );
-        message_bus.set_on_message(*Replica, replica, Replica.on_message);
+        // TODO Logically it would make more sense to run this during restart, not immediately following the crash.
+        // But having it here does allow the replica's MessageBus to be initialized & start queueing packets.
+        try cluster.open(replica_index);
+
         replica.on_change_state = cluster.on_change_state;
         return true;
     }
@@ -345,5 +355,48 @@ pub const Cluster = struct {
             }
         }
         return count;
+    }
+
+    fn open(cluster: *Cluster, replica_index: u8) !void {
+        assert(!cluster.replica_opening);
+
+        cluster.replica_open = try Replica.Open.init(
+            cluster.allocator,
+            &cluster.replicas[replica_index],
+            .{
+                .replica_count = @intCast(u8, cluster.replicas.len),
+                .storage = &cluster.storages[replica_index],
+                .message_pool = &cluster.pools[replica_index],
+                .time = .{
+                    .resolution = config.tick_ms * std.time.ns_per_ms,
+                    .offset_type = .linear,
+                    .offset_coefficient_A = 0,
+                    .offset_coefficient_B = 0,
+                },
+                .state_machine_options = cluster.options.state_machine_options,
+                .message_bus_options = .{ .network = &cluster.network },
+            },
+        );
+        defer cluster.replica_open.deinit(cluster.allocator);
+        defer cluster.replica_open = undefined;
+
+        assert(!cluster.replica_opening);
+        cluster.replica_opening = true;
+        cluster.replica_open.open(open_callback);
+        while (cluster.replica_opening) cluster.storages[replica_index].tick();
+
+        var replica = &cluster.replicas[replica_index];
+        assert(replica.cluster == cluster.options.cluster);
+        assert(replica.replica == replica_index);
+        // TODO Assert that opening worked as expected.
+
+        cluster.network.link(replica.message_bus.process, &replica.message_bus);
+    }
+
+    fn open_callback(replica_open: *Replica.Open, result: anyerror!void) void {
+        const cluster = @fieldParentPtr(Cluster, "replica_open", replica_open);
+        assert(cluster.replica_opening);
+        cluster.replica_opening = false;
+        result catch unreachable;
     }
 };

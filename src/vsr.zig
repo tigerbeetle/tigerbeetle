@@ -10,8 +10,9 @@ const config = @import("config.zig");
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
 pub const Version: u8 = 0;
 
-pub const Replica = @import("vsr/replica.zig").Replica;
+pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const ReplicaFormatType = @import("vsr/replica.zig").ReplicaFormatType;
+pub const ReplicaOpenError = @import("vsr/replica.zig").ReplicaOpenError;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
 pub const Clock = @import("vsr/clock.zig").Clock;
