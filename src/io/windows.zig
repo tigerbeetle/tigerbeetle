@@ -1033,7 +1033,7 @@ pub const IO = struct {
         _ = dir_handle;
 
         const file_size = try os.windows.GetFileSizeEx(handle);
-        if (file_size != size) @panic("data file inode size was truncated or corrupted");
+        if (file_size < size) @panic("data file inode size was truncated or corrupted");
 
         return handle;
     }

@@ -719,8 +719,9 @@ pub const IO = struct {
         // We always do this when opening because we don't know if this was done before crashing.
         try fs_sync(dir_fd);
 
+        // TODO Document that `size` is now `data_file_size_min` from `main.zig`.
         const stat = try os.fstat(fd);
-        if (stat.size != size) @panic("data file inode size was truncated or corrupted");
+        if (stat.size < size) @panic("data file inode size was truncated or corrupted");
 
         return fd;
     }
