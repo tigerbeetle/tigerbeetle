@@ -580,8 +580,13 @@ fn do_lookup(env: *Environment, tree: anytype, snapshot: u64, key: anytype) !?*c
     };
 
     S.found = false;
+
     tree.lookup(S.callback, &S.context, snapshot, key);
-    while (!S.found) try env.io.tick();
+    while (!S.found) {
+        // TODO(King) All other event loops in this test also need to tick Grid.
+        env.grid.tick();
+        try env.io.tick();
+    }
 
     return S.value;
 }
