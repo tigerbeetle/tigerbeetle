@@ -453,6 +453,7 @@ pub fn ReplicaType(
             // decrease throughput significantly.
             assert(self.loopback_queue == null);
 
+            // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
             self.state_machine.tick();
             self.message_bus.tick();

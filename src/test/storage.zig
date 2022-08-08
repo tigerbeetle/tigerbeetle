@@ -156,7 +156,10 @@ pub const Storage = struct {
     pub fn reset(storage: *Storage) void {
         while (storage.writes.peek()) |write| {
             _ = storage.writes.remove();
-            storage.fault_sectors(write.offset, write.buffer.len);
+            // TODO Allow some corruption in other zones.
+            if (write.zone == .wal) {
+                storage.fault_sectors(write.offset, write.buffer.len);
+            }
         }
 
         storage.reads.len = 0;
