@@ -23,6 +23,7 @@ pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
 pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
 pub const Client = vsr.Client(StateMachine, MessageBus);
 const SuperBlock = vsr.SuperBlockType(Storage);
+const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
 
 pub const ClusterOptions = struct {
     cluster: u32,
@@ -102,7 +103,10 @@ pub const Cluster = struct {
         {
             var i: usize = 0;
             while (i < process_count) : (i += 1) {
-                pools[i] = try MessagePool.init(allocator, if (i < options.replica_count) .replica else .client);
+                pools[i] = try MessagePool.init(
+                    allocator,
+                    if (i < options.replica_count) .replica else .client,
+                );
             }
         }
 
@@ -149,7 +153,7 @@ pub const Cluster = struct {
         for (cluster.storages) |*storage, replica_index| {
             storage.* = try Storage.init(
                 allocator,
-                config.journal_size_max,
+                superblock_zone_size + config.journal_size_max,
                 options.storage_options,
                 @intCast(u8, replica_index),
                 faulty_areas[replica_index],
@@ -166,21 +170,23 @@ pub const Cluster = struct {
                 &superblock,
             );
             defer cluster.replica_format.deinit(allocator);
-            defer cluster.replica_format = undefined;
 
             assert(!cluster.replica_formatting);
             cluster.replica_formatting = true;
             cluster.replica_format.format(format_callback);
             while (cluster.replica_formatting) storage.tick();
         }
+        cluster.replica_format = undefined;
         errdefer for (cluster.storages) |*storage| storage.deinit(allocator);
 
-        for (cluster.replicas) |_, replica_index| try cluster.open(@intCast(u8, replica_index));
+        for (cluster.replicas) |_, replica_index| {
+            try cluster.open_replica(@intCast(u8, replica_index));
+        }
         errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
 
         for (cluster.clients) |*client, i| {
             const client_id = prng.int(u128);
-            client.* = try Client.init(
+            try client.init(
                 allocator,
                 client_id,
                 options.cluster,
@@ -329,9 +335,10 @@ pub const Cluster = struct {
         const total_messages = message_pool.messages_max_replica;
         assert(messages_in_network + messages_in_pool == total_messages);
 
-        // TODO Logically it would make more sense to run this during restart, not immediately following the crash.
-        // But having it here does allow the replica's MessageBus to be initialized & start queueing packets.
-        try cluster.open(replica_index);
+        // Logically it would make more sense to run this during restart, not immediately following
+        // the crash. But having it here allows the replica's MessageBus to initialized and start
+        // queueing packets, or collecting packets that are dropped by the network.
+        try cluster.open_replica(replica_index);
 
         replica.on_change_state = cluster.on_change_state;
         return true;
@@ -357,7 +364,7 @@ pub const Cluster = struct {
         return count;
     }
 
-    fn open(cluster: *Cluster, replica_index: u8) !void {
+    fn open_replica(cluster: *Cluster, replica_index: u8) !void {
         assert(!cluster.replica_opening);
 
         cluster.replica_open = try Replica.Open.init(
@@ -378,11 +385,10 @@ pub const Cluster = struct {
             },
         );
         defer cluster.replica_open.deinit(cluster.allocator);
-        defer cluster.replica_open = undefined;
 
         assert(!cluster.replica_opening);
         cluster.replica_opening = true;
-        cluster.replica_open.open(open_callback);
+        cluster.replica_open.open(open_replica_callback);
         while (cluster.replica_opening) cluster.storages[replica_index].tick();
 
         var replica = &cluster.replicas[replica_index];
@@ -393,7 +399,7 @@ pub const Cluster = struct {
         cluster.network.link(replica.message_bus.process, &replica.message_bus);
     }
 
-    fn open_callback(replica_open: *Replica.Open, result: anyerror!void) void {
+    fn open_replica_callback(replica_open: *Replica.Open, result: anyerror!void) void {
         const cluster = @fieldParentPtr(Cluster, "replica_open", replica_open);
         assert(cluster.replica_opening);
         cluster.replica_opening = false;

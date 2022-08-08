@@ -39,7 +39,8 @@ pub fn request(
 
     var message_pool = try MessagePool.init(allocator, .client);
 
-    var client = try Client.init(
+    var client: Client = undefined;
+    try client.init(
         allocator,
         client_id,
         cluster_id,

@@ -81,14 +81,17 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         /// Seeded with the client's ID.
         prng: std.rand.DefaultPrng,
 
+        /// Instead of returning a `Client`, take a pointer and modify, so that
+        /// `message_bus.set_on_message` has a stable reference.
         pub fn init(
+            self: *Self,
             allocator: mem.Allocator,
             id: u128,
             cluster: u32,
             replica_count: u8,
             message_pool: *MessagePool,
             message_bus_options: MessageBus.Options,
-        ) !Self {
+        ) !void {
             assert(id > 0);
             assert(replica_count > 0);
 
@@ -101,7 +104,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             );
             errdefer message_bus.deinit(allocator);
 
-            var self = Self{
+            self.* = .{
                 .allocator = allocator,
                 .message_bus = message_bus,
                 .id = id,
@@ -119,11 +122,9 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 },
                 .prng = std.rand.DefaultPrng.init(@truncate(u64, id)),
             };
-            self.message_bus.set_on_message(*Self, &self, Self.on_message);
+            self.message_bus.set_on_message(*Self, self, Self.on_message);
 
             self.ping_timeout.start();
-
-            return self;
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {

@@ -12,9 +12,6 @@ const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeC
 
 const log = std.log.scoped(.grid);
 
-const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
-const write_ahead_log_zone_size = config.message_size_max * 1024; // TODO Use journal_slot_count.
-
 pub fn GridType(comptime Storage: type) type {
     const block_size = config.block_size;
     const SuperBlock = SuperBlockType(Storage);

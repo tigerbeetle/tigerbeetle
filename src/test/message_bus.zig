@@ -26,6 +26,8 @@ pub const MessageBus = struct {
 
     /// The callback to be called when a message is received. Use set_on_message() to set
     /// with type safety for the context pointer.
+    // TODO Now that MessageBus is embedded directly in Replica/Client, the `context` can be
+    // removed, and instead use @fieldParentPtr in the callback.
     on_message_callback: ?fn (context: ?*anyopaque, message: *Message) void = null,
     on_message_context: ?*anyopaque = null,
 

@@ -29,12 +29,17 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
 
+comptime {
+    assert(config.deployment_environment == .production or
+        config.deployment_environment == .development);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
-    
+
     var parse_args = try cli.parse_args(allocator);
     defer parse_args.deinit(allocator);
 
