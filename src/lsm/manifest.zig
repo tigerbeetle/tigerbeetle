@@ -228,10 +228,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const buffer = &manifest.open_buffers[level];
 
             // Make sure theres room in the open buffer to push the table to.
-            if (buffer.full()) {
-                const tables = buffer.drain();
-                manifest.levels[level].insert_tables(manifest.node_pool, tables);
-            }
+            if (buffer.full()) manifest.drain_open_buffer(buffer, level);
 
             buffer.push(table);
         }
@@ -242,14 +239,24 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             // Insert all left-over pushed open tables into the ManifestLevels.
             for (manifest.open_buffers) |*buffer, level| {
-                const tables = buffer.drain();
-                if (tables.len == 0) continue;
-                manifest.levels[level].insert_tables(manifest.node_pool, tables);
+                manifest.drain_open_buffer(buffer, @intCast(u7, level));
             }
 
             const callback = manifest.open_callback.?;
             manifest.open_callback = null;
             callback(manifest);
+        }
+
+        fn drain_open_buffer(manifest: *Manifest, buffer: *TableInfoBuffer, level: u7) void {
+            assert(level < config.lsm_levels);
+            assert(buffer == &manifest.open_buffers[level]);
+
+            const tables = buffer.drain();
+            if (tables.len == 0) return;
+
+            // open() reports table in reverse sorted order
+            std.mem.reverse(TableInfo, tables);
+            manifest.levels[level].insert_tables(manifest.node_pool, tables);
         }
 
         pub fn insert_tables(
