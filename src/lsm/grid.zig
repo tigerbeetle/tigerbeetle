@@ -281,6 +281,7 @@ pub fn GridType(comptime Storage: type) type {
                 write_block_callback,
                 &iop.completion,
                 write.block,
+                .grid,
                 block_offset(write.address),
             );
         }
@@ -399,6 +400,7 @@ pub fn GridType(comptime Storage: type) type {
                 read_block_callback,
                 &iop.completion,
                 iop.block,
+                .grid,
                 block_offset(read.address),
             );
         }
@@ -468,7 +470,7 @@ pub fn GridType(comptime Storage: type) type {
         fn block_offset(address: u64) u64 {
             assert(address > 0);
 
-            return vsr.Zone.grid.offset((address - 1) * block_size);
+            return (address - 1) * block_size;
         }
     };
 }

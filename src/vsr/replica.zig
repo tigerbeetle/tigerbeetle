@@ -5527,7 +5527,8 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
                     format_wal_sectors_callback,
                     &self.wal_write,
                     self.wal_buffer[0..size],
-                    vsr.Zone.wal.offset(self.wal_offset),
+                    .wal,
+                    self.wal_offset,
                 );
                 self.wal_offset += size;
             }

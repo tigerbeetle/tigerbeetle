@@ -32,16 +32,22 @@ pub const Zone = enum {
     const size_wal = config.journal_size_max;
 
     pub fn offset(zone: Zone, offset_logical: u64) u64 {
+        if (zone.size()) |zone_size| {
+            assert(offset_logical < zone_size);
+        }
+
         return offset_logical + switch (zone) {
-            .superblock => blk: {
-                assert(offset_logical < size_superblock);
-                break :blk 0;
-            },
-            .wal => blk: {
-                assert(offset_logical < size_wal);
-                break :blk size_superblock;
-            },
+            .superblock => 0,
+            .wal => size_superblock,
             .grid => size_superblock + size_wal,
+        };
+    }
+
+    pub fn size(zone: Zone) ?u64 {
+        return switch (zone) {
+            .superblock => size_superblock,
+            .wal => size_wal,
+            .grid => null,
         };
     }
 };
