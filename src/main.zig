@@ -21,6 +21,7 @@ const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
+const ReplicaOpen = Replica.Open;
 const ReplicaFormat = vsr.ReplicaFormatType(Storage);
 const ReplicaOpenError = vsr.ReplicaOpenError;
 
@@ -54,11 +55,6 @@ const Command = struct {
     storage: Storage,
     message_pool: MessagePool,
 
-    io_completed: bool,
-    replica_format: ReplicaFormat,
-    replica_open: Replica.Open,
-    replica: Replica = undefined,
-
     fn init(
         command: *Command,
         allocator: mem.Allocator,
@@ -86,7 +82,6 @@ const Command = struct {
     }
 
     fn deinit(command: *Command, _: mem.Allocator) void {
-        // TODO Should this deinit ReplicaFormat/Replica.Open/Replica/MessagePool?
         // TODO Add message_pool.deinit() once implemented.
         command.storage.deinit();
         command.io.deinit();
@@ -106,24 +101,30 @@ const Command = struct {
         );
         defer superblock.deinit(allocator);
 
-        command.replica_format = try ReplicaFormat.init(
+        const FormatContext = struct {
+            replica_format: ReplicaFormat,
+            formatted: bool,
+
+            fn callback(replica_format: *ReplicaFormat) void {
+                const context = @fieldParentPtr(@This(), "replica_format", replica_format);
+                assert(!context.formatted);
+                context.formatted = true;
+            }
+        };
+
+        var context: FormatContext = undefined;
+        context.replica_format = try ReplicaFormat.init(
             allocator,
             cluster,
             replica,
             &command.storage,
             &superblock,
         );
-        defer command.replica_format.deinit(allocator);
+        defer context.replica_format.deinit(allocator);
 
-        command.io_completed = false;
-        command.replica_format.format(format_callback);
-        while (!command.io_completed) try command.io.tick();
-    }
-
-    fn format_callback(replica_format: *ReplicaFormat) void {
-        const command = @fieldParentPtr(Command, "replica_format", replica_format);
-        assert(!command.io_completed);
-        command.io_completed = true;
+        context.formatted = false;
+        context.replica_format.format(FormatContext.callback);
+        while (!context.formatted) try command.io.tick();
     }
 
     pub fn start(
@@ -138,8 +139,20 @@ const Command = struct {
         try command.init(allocator, path, false);
         defer command.deinit(allocator);
 
-        command.io_completed = false;
-        command.replica_open = try Replica.Open.init(allocator, &command.replica, .{
+        const OpenContext = struct {
+            replica_open: ReplicaOpen,
+            result: ?(anyerror!void),
+            replica: Replica,
+
+            fn callback(replica_open: *ReplicaOpen, result: anyerror!void) void {
+                const context = @fieldParentPtr(@This(), "replica_open", replica_open);
+                assert(context.result == null);
+                context.result = result;
+            }
+        };
+
+        var context: OpenContext = undefined;
+        context.replica_open = try ReplicaOpen.init(allocator, &context.replica, .{
             .replica_count = @intCast(u8, addresses.len),
             .storage = &command.storage,
             .message_pool = &command.message_pool,
@@ -156,45 +169,28 @@ const Command = struct {
                 .io = &command.io,
             },
         });
-        errdefer command.replica_open.deinit(allocator);
+        defer context.replica_open.deinit(allocator);
 
-        command.replica_open.open(open_callback);
-        while (!command.io_completed) try command.io.tick();
+        context.result = null;
+        context.replica_open.open(OpenContext.callback);
+        while (context.result == null) try command.io.tick();
 
-        try command.run_replica(allocator, addresses);
-    }
-
-    fn open_callback(replica_open: *Replica.Open, result: anyerror!void) void {
-        const command = @fieldParentPtr(Command, "replica_open", replica_open);
-        assert(!command.io_completed);
-        command.io_completed = true;
-
-        result catch |err| switch (err) {
+        context.result.? catch |err| switch (err) {
             error.NoAddress => {
                 // TODO Include the replica index here.
                 fatal("all --addresses must be provided", .{ });
             },
             else => fatal("error opening replica err={}", .{ err }),
         };
-    }
 
-    fn run_replica(
-        command: *Command,
-        allocator: mem.Allocator,
-        addresses: []std.net.Address,
-    ) !void {
-        // TODO Find a better place for this, it is awkward here.
-        // Plus, if open_callback hit error.NoAddress, the Replica.Open isn't deinitialized.
-        command.replica_open.deinit(allocator);
-
-        log.info("open_callback: cluster={} replica={}: listening on {}", .{
-            command.replica.cluster,
-            command.replica.replica,
-            addresses[command.replica.replica],
+        log.info("cluster={} replica={}: listening on {}", .{
+            context.replica.cluster,
+            context.replica.replica,
+            addresses[context.replica.replica],
         });
 
         while (true) {
-            command.replica.tick();
+            context.replica.tick();
             try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
     }
