@@ -300,10 +300,8 @@ pub const superblock_trailer_client_table_size_max = blk: {
 };
 
 pub const data_file_size_min = blk: {
-    const wal_zone_size = 1024 * 1024 * 1024; // TODO Replace with WAL constants when they land.
     const client_table_zone_size = config.message_size_max * config.clients_max * 2;
-
-    break :blk superblock_zone_size + wal_zone_size + client_table_zone_size;
+    break :blk superblock_zone_size + config.journal_size_max + client_table_zone_size;
 };
 
 pub fn SuperBlockType(comptime Storage: type) type {

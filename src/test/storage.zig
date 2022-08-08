@@ -51,6 +51,8 @@ pub const Storage = struct {
     pub const Read = struct {
         callback: fn (read: *Storage.Read) void,
         buffer: []u8,
+        zone: vsr.Zone,
+        /// Absolute offset within the storage.
         offset: u64,
         /// Tick at which this read is considered "completed" and the callback should be called.
         done_at_tick: u64,
@@ -65,6 +67,8 @@ pub const Storage = struct {
     pub const Write = struct {
         callback: fn (write: *Storage.Write) void,
         buffer: []const u8,
+        zone: vsr.Zone,
+        /// Absolute offset within the storage.
         offset: u64,
         /// Tick at which this write is considered "completed" and the callback should be called.
         done_at_tick: u64,
@@ -200,6 +204,7 @@ pub const Storage = struct {
         read.* = .{
             .callback = callback,
             .buffer = buffer,
+            .zone = zone,
             .offset = offset_in_storage,
             .done_at_tick = storage.ticks + storage.read_latency(),
         };
@@ -211,19 +216,22 @@ pub const Storage = struct {
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
         mem.copy(u8, read.buffer, storage.memory[read.offset..][0..read.buffer.len]);
 
-        if (storage.x_in_100(storage.options.read_fault_probability)) {
-            storage.fault_sectors(read.offset, read.buffer.len);
-        }
+        // TODO Allow some corruption in other zones.
+        if (read.zone == .wal) {
+            if (storage.x_in_100(storage.options.read_fault_probability)) {
+                storage.fault_sectors(read.offset, read.buffer.len);
+            }
 
-        if (storage.faulty) {
-            // Corrupt faulty sectors.
-            const sector_min = @divExact(read.offset, config.sector_size);
-            var sector: usize = 0;
-            while (sector < @divExact(read.buffer.len, config.sector_size)) : (sector += 1) {
-                if (storage.faults.isSet(sector_min + sector)) {
-                    const faulty_sector_offset = sector * config.sector_size;
-                    const faulty_sector_bytes = read.buffer[faulty_sector_offset..][0..config.sector_size];
-                    storage.prng.random().bytes(faulty_sector_bytes);
+            if (storage.faulty) {
+                // Corrupt faulty sectors.
+                const sector_min = @divExact(read.offset, config.sector_size);
+                var sector: usize = 0;
+                while (sector < @divExact(read.buffer.len, config.sector_size)) : (sector += 1) {
+                    if (storage.faults.isSet(sector_min + sector)) {
+                        const faulty_sector_offset = sector * config.sector_size;
+                        const faulty_sector_bytes = read.buffer[faulty_sector_offset..][0..config.sector_size];
+                        storage.prng.random().bytes(faulty_sector_bytes);
+                    }
                 }
             }
         }
@@ -258,6 +266,7 @@ pub const Storage = struct {
         write.* = .{
             .callback = callback,
             .buffer = buffer,
+            .zone = zone,
             .offset = offset_in_storage,
             .done_at_tick = storage.ticks + storage.write_latency(),
         };
@@ -269,15 +278,16 @@ pub const Storage = struct {
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
         mem.copy(u8, storage.memory[write.offset..][0..write.buffer.len], write.buffer);
 
-        {
+        // TODO Allow some corruption in other zones.
+        if (write.zone == .wal) {
             const sector_min = @divExact(write.offset, config.sector_size);
             const sector_max = @divExact(write.offset + write.buffer.len, config.sector_size);
             var sector: usize = sector_min;
             while (sector < sector_max) : (sector += 1) storage.faults.unset(sector);
-        }
 
-        if (storage.x_in_100(storage.options.write_fault_probability)) {
-            storage.fault_sectors(write.offset, write.buffer.len);
+            if (storage.x_in_100(storage.options.write_fault_probability)) {
+                storage.fault_sectors(write.offset, write.buffer.len);
+            }
         }
 
         const callback = write.callback;
@@ -423,7 +433,6 @@ pub const Storage = struct {
     /// Given an offset and size of a read/write, returns the range of any faulty sectors touched
     /// by the read/write.
     fn faulty_sectors(storage: *const Storage, offset: u64, size: u64) ?SectorRange {
-        assert(size <= config.message_size_max);
         const message_size_max = config.message_size_max;
         const period = storage.faulty_areas.period;
 

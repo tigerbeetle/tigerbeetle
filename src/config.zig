@@ -1,8 +1,16 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const Environment = enum {
+    development,
+    production,
+    simulation,
+};
+
 /// Whether development or production:
-pub const deployment_environment = .development;
+pub const deployment_environment: Environment =
+    if (@hasDecl(@import("root"), "deployment_environment")) @import("root").deployment_environment
+    else .development;
 
 /// The maximum log level in increasing order of verbosity (emergency=0, debug=3):
 pub const log_level = 2;
@@ -89,7 +97,11 @@ pub const connections_max = replicas_max + clients_max;
 /// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
 /// For a 1 Gbps NIC = 125 MiB/s throughput: 2 MiB / 125 * 1000ms = 16ms for the next request.
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const message_size_max = 1 * 1024 * 1024;
+pub const message_size_max = switch (deployment_environment) {
+    // Use a small message size during the simulator for improved performance.
+    .simulation => sector_size,
+    else => 1 * 1024 * 1024
+};
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
@@ -180,7 +192,11 @@ pub const sector_size = 4096;
 /// WARNING: Disabling direct I/O is unsafe; the page cache cannot be trusted after an fsync error,
 /// even after an application panic, since the kernel will mark dirty pages as clean, even
 /// when they were never written to disk.
-pub const direct_io = true;
+pub const direct_io = switch (deployment_environment) {
+    .development => true,
+    .production => true,
+    .simulation => false,
+};
 
 /// The maximum number of concurrent read I/O operations to allow at once.
 pub const io_depth_read = 8;
@@ -318,6 +334,10 @@ comptime {
     assert(journal_slot_count >= lsm_batch_multiple * 2);
     assert(journal_slot_count % lsm_batch_multiple == 0);
     assert(journal_size_max == journal_size_headers + journal_size_prepares);
+
+    // The WAL format requires messages to be a multiple of the sector size.
+    assert(message_size_max % sector_size == 0);
+    assert(message_size_max >= sector_size);
 
     // The LSM tree uses half-measures to balance compaction.
     assert(lsm_batch_multiple % 2 == 0);

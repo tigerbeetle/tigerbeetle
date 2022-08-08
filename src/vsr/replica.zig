@@ -410,6 +410,7 @@ pub fn ReplicaType(
             self.clock.deinit(allocator);
             self.state_machine.deinit(allocator);
             self.superblock.deinit(allocator);
+            self.grid.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
             while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
@@ -2441,8 +2442,18 @@ pub fn ReplicaType(
             assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
 
             const op = self.commit_prepare.?.header.op;
+            assert(op == self.commit_min);
+
             if (op == self.op_checkpoint_trigger()) {
+                assert(op == self.op);
                 assert((op + 1) % config.lsm_batch_multiple == 0);
+                log.debug("{}: commit_op_compact_callback: checkpoint start " ++
+                    "(op={} current_checkpoint={} next_checkpoint={})", .{
+                    self.replica,
+                    self.op,
+                    self.op_checkpoint,
+                    self.op_checkpoint_next(),
+                });
                 self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback, op);
             } else {
                 assert(op < self.op_checkpoint_trigger());
@@ -2495,13 +2506,18 @@ pub fn ReplicaType(
             assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
 
+            log.debug("{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})", .{
+                self.replica,
+                self.op,
+                self.op_checkpoint,
+            });
+
             self.commit_op_done();
         }
 
         fn commit_op_done(self: *Self) void {
             const callback = self.commit_callback.?;
             assert(self.committing);
-            assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_trigger());
 
@@ -5359,6 +5375,7 @@ fn ReplicaOpenType(
         allocator: std.mem.Allocator,
         replica: *Replica,
         replica_options: Replica.Options,
+        // TODO Just use replica_options.superblock.
         superblock: ?SuperBlock,
         superblock_context: SuperBlock.Context = undefined,
         callback: ?fn (opener: *Self, result: anyerror!void) void = null,
@@ -5412,7 +5429,6 @@ fn ReplicaOpenType(
             self: *Self,
             callback: fn (opener: *Self, result: anyerror!void) void,
         ) void {
-            assert(self.superblock != null);
             assert(self.callback == null);
 
             self.callback = callback;
@@ -5421,17 +5437,18 @@ fn ReplicaOpenType(
 
         fn open_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
-            assert(self.superblock != null);
             const callback = self.callback.?;
             self.callback = null;
 
-            if (self.superblock.?.working.replica >= self.replica_options.replica_count) {
+            const superblock = &self.superblock.?;
+            if (superblock.working.replica >= self.replica_options.replica_count) {
                 callback(self, error.NoAddress);
                 return;
             }
 
-            self.replica_options.cluster = self.superblock.?.working.cluster;
-            self.replica_options.replica_index = self.superblock.?.working.replica;
+            self.replica_options.cluster = superblock.working.cluster;
+            self.replica_options.replica_index = superblock.working.replica;
+            // The Replica's SuperBlock was initialized in-place.
             self.replica_options.superblock = self.superblock.?;
             self.superblock = null;
 
