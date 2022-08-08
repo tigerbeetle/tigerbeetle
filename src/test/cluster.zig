@@ -180,7 +180,12 @@ pub const Cluster = struct {
         errdefer for (cluster.storages) |*storage| storage.deinit(allocator);
 
         for (cluster.replicas) |_, replica_index| {
-            try cluster.open_replica(@intCast(u8, replica_index));
+            try cluster.open_replica(@intCast(u8, replica_index), .{
+                .resolution = config.tick_ms * std.time.ns_per_ms,
+                .offset_type = .linear,
+                .offset_coefficient_A = 0,
+                .offset_coefficient_B = 0,
+            });
         }
         errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
 
@@ -301,6 +306,7 @@ pub const Cluster = struct {
 
         // Reset the storage before the replica so that pending writes can (partially) finish.
         cluster.storages[replica_index].reset();
+        const replica_time = replica.time;
         replica.deinit(cluster.allocator);
 
         // The message bus and network should be left alone, as messages
@@ -338,7 +344,10 @@ pub const Cluster = struct {
         // Logically it would make more sense to run this during restart, not immediately following
         // the crash. But having it here allows the replica's MessageBus to initialized and start
         // queueing packets, or collecting packets that are dropped by the network.
-        try cluster.open_replica(replica_index);
+        //
+        // Pass the old replica's Time through to the new replica. It will continue to be tick
+        // while the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
+        try cluster.open_replica(replica_index, replica_time);
 
         replica.on_change_state = cluster.on_change_state;
         return true;
@@ -364,7 +373,7 @@ pub const Cluster = struct {
         return count;
     }
 
-    fn open_replica(cluster: *Cluster, replica_index: u8) !void {
+    fn open_replica(cluster: *Cluster, replica_index: u8, time: Time) !void {
         assert(!cluster.replica_opening);
 
         cluster.replica_open = try Replica.Open.init(
@@ -374,12 +383,7 @@ pub const Cluster = struct {
                 .replica_count = @intCast(u8, cluster.replicas.len),
                 .storage = &cluster.storages[replica_index],
                 .message_pool = &cluster.pools[replica_index],
-                .time = .{
-                    .resolution = config.tick_ms * std.time.ns_per_ms,
-                    .offset_type = .linear,
-                    .offset_coefficient_A = 0,
-                    .offset_coefficient_B = 0,
-                },
+                .time = time,
                 .state_machine_options = cluster.options.state_machine_options,
                 .message_bus_options = .{ .network = &cluster.network },
             },

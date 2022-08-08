@@ -326,11 +326,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(!self.recovering);
             assert(self.recovered);
             assert(self.writes.executing() == 0);
-            assert(self.headers[0].valid_checksum());
 
-            const replica = @fieldParentPtr(Replica, "journal", self);
+            if (!self.headers[0].valid_checksum()) return false;
             if (self.headers[0].operation != .root) return false;
 
+            const replica = @fieldParentPtr(Replica, "journal", self);
             assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
             assert(self.headers[0].checksum == self.prepare_checksums[0]);
             assert(self.prepare_inhabited[0]);
@@ -760,8 +760,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const offset = offset_logical(.prepares, slot);
 
             log.debug(
-                "{}: read_sectors: offset={} len={}",
-                .{ replica.replica, offset, buffer.len },
+                "{}: read_sectors: op={} checksum={} offset={} len={}",
+                .{ replica.replica, op, checksum, offset, buffer.len },
             );
 
             // Memory must not be owned by `self.headers` as these may be modified concurrently:
