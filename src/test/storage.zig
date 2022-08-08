@@ -187,14 +187,20 @@ pub const Storage = struct {
         callback: fn (read: *Storage.Read) void,
         read: *Storage.Read,
         buffer: []u8,
-        offset: u64,
+        zone: vsr.Zone,
+        offset_in_zone: u64,
     ) void {
-        storage.assert_bounds_and_alignment(buffer, offset);
+        if (zone.size()) |zone_size| {
+            assert(offset_in_zone + buffer.len <= zone_size);
+        }
+
+        const offset_in_storage = zone.offset(offset_in_zone);
+        storage.assert_bounds_and_alignment(buffer, offset_in_storage);
 
         read.* = .{
             .callback = callback,
             .buffer = buffer,
-            .offset = offset,
+            .offset = offset_in_storage,
             .done_at_tick = storage.ticks + storage.read_latency(),
         };
 
@@ -232,21 +238,27 @@ pub const Storage = struct {
         callback: fn (write: *Storage.Write) void,
         write: *Storage.Write,
         buffer: []const u8,
-        offset: u64,
+        zone: vsr.Zone,
+        offset_in_zone: u64,
     ) void {
-        storage.assert_bounds_and_alignment(buffer, offset);
+        if (zone.size()) |zone_size| {
+            assert(offset_in_zone + buffer.len <= zone_size);
+        }
+
+        const offset_in_storage = zone.offset(offset_in_zone);
+        storage.assert_bounds_and_alignment(buffer, offset_in_storage);
 
         // Verify that there are no concurrent overlapping writes.
         var iterator = storage.writes.iterator();
         while (iterator.next()) |other| {
-            assert(offset + buffer.len <= other.offset or
-                other.offset + other.buffer.len <= offset);
+            assert(offset_in_storage + buffer.len <= other.offset or
+                other.offset + other.buffer.len <= offset_in_storage);
         }
 
         write.* = .{
             .callback = callback,
             .buffer = buffer,
-            .offset = offset,
+            .offset = offset_in_storage,
             .done_at_tick = storage.ticks + storage.write_latency(),
         };
 

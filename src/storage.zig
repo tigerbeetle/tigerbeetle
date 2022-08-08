@@ -95,15 +95,21 @@ pub const Storage = struct {
         callback: fn (read: *Storage.Read) void,
         read: *Storage.Read,
         buffer: []u8,
-        offset: u64,
+        zone: vsr.Zone,
+        offset_in_zone: u64,
     ) void {
-        assert_alignment(buffer, offset);
+        if (zone.size()) |zone_size| {
+            assert(offset_in_zone + buffer.len <= zone_size);
+        }
+
+        const offset_in_storage = zone.offset(offset_in_zone);
+        assert_alignment(buffer, offset_in_storage);
 
         read.* = .{
             .completion = undefined,
             .callback = callback,
             .buffer = buffer,
-            .offset = offset,
+            .offset = offset_in_storage,
             .target_max = buffer.len,
         };
 
@@ -235,15 +241,21 @@ pub const Storage = struct {
         callback: fn (write: *Storage.Write) void,
         write: *Storage.Write,
         buffer: []const u8,
-        offset: u64,
+        zone: vsr.Zone,
+        offset_in_zone: u64,
     ) void {
-        assert_alignment(buffer, offset);
+        if (zone.size()) |zone_size| {
+            assert(offset_in_zone + buffer.len <= zone_size);
+        }
+
+        const offset_in_storage = zone.offset(offset_in_zone);
+        assert_alignment(buffer, offset_in_storage);
 
         write.* = .{
             .completion = undefined,
             .callback = callback,
             .buffer = buffer,
-            .offset = offset,
+            .offset = offset_in_storage,
         };
 
         self.start_write(write);

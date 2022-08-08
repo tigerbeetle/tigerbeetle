@@ -13,7 +13,7 @@ const IOPS = @import("../iops.zig").IOPS;
 
 const log = std.log.scoped(.journal);
 
-/// There are two contiguous circular buffers on disk in the journal storage zone.
+/// There are two contiguous circular buffers on disk in the journal storage zone (`vsr.Zone.wal`).
 ///
 /// In both rings, the `op` for each reserved header is set to the slot index.
 /// This helps WAL recovery detect misdirected reads/writes.
@@ -757,7 +757,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
 
             const buffer: []u8 = message.buffer[0..config.message_size_max];
-            const offset = offset_physical(.prepares, slot);
+            const offset = offset_logical(.prepares, slot);
 
             log.debug(
                 "{}: read_sectors: offset={} len={}",
@@ -773,6 +773,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 read_prepare_with_op_and_checksum_callback,
                 &read.completion,
                 buffer,
+                .wal,
                 offset,
             );
         }
@@ -942,7 +943,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 recover_headers_callback,
                 &read.completion,
                 buffer,
-                offset_physical_for_logical(.headers, offset),
+                .wal,
+                offset,
             );
         }
 
@@ -1036,7 +1038,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 // We load the entire message to verify that it isn't torn or corrupt.
                 // We don't know the message's size, so use the entire buffer.
                 message.buffer[0..config.message_size_max],
-                offset_physical(.prepares, slot),
+                .wal,
+                offset_logical(.prepares, slot),
             );
         }
 
@@ -1515,7 +1518,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
             const buffer = message.buffer[0..vsr.sector_ceil(message.header.size)];
-            const offset = offset_physical(.prepares, slot);
+            const offset = offset_logical(.prepares, slot);
 
             if (builtin.mode == .Debug) {
                 // Assert that any sector padding has already been zeroed:
@@ -1589,7 +1592,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .index = @divFloor(slot_of_message.index, headers_per_sector) * headers_per_sector,
             };
 
-            const offset = offset_physical(.headers, slot_of_message);
+            const offset = offset_logical(.headers, slot_of_message);
             assert(offset % config.sector_size == 0);
 
             const buffer: []u8 = write.header_sector(self);
@@ -1740,48 +1743,28 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .prepares => {
                     const offset = config.message_size_max * slot.index;
                     assert(offset < prepares_size);
-                    return offset;
+                    return offset + config.journal_size_headers;
                 },
             }
-        }
-
-        fn offset_physical(ring: Ring, slot: Slot) u64 {
-            return vsr.Zone.wal.offset(switch (ring) {
-                .headers => offset_logical(.headers, slot),
-                .prepares => headers_size + offset_logical(.prepares, slot),
-            });
         }
 
         fn offset_logical_in_headers_for_message(self: *const Self, message: *Message) u64 {
             return offset_logical(.headers, self.slot_for_header(message.header));
         }
 
-        /// Where `offset` is a logical offset relative to the start of the respective ring.
-        fn offset_physical_for_logical(ring: Ring, offset: u64) u64 {
-            return vsr.Zone.wal.offset(switch (ring) {
-                .headers => blk: {
-                    assert(offset < headers_size);
-                    break :blk offset;
-                },
-                .prepares => blk: {
-                    assert(offset < prepares_size);
-                    break :blk headers_size + offset;
-                },
-            });
-        }
-
+        // TODO Add a `Ring` argument, and make the offset relative to that.
         fn write_sectors(
             self: *Self,
             callback: fn (write: *Self.Write) void,
             write: *Self.Write,
             buffer: []const u8,
-            offset: u64,
+            offset_in_wal: u64,
         ) void {
             write.range = .{
                 .callback = callback,
                 .completion = undefined,
                 .buffer = buffer,
-                .offset = offset,
+                .offset = offset_in_wal,
                 .locked = false,
             };
             self.lock_sectors(write);
@@ -1817,6 +1800,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 write_sectors_on_write,
                 &write.range.completion,
                 write.range.buffer,
+                .wal,
                 write.range.offset,
             );
             // We rely on the Storage.write_sectors() implementation being always synchronous,

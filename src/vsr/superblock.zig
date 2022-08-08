@@ -334,8 +334,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         storage: *Storage,
 
-        /// The first physical offset that may be written to the superblock storage zone.
-        storage_offset: u64 = vsr.Zone.superblock.offset(0),
+        /// The first logical offset that may be written to the superblock storage zone.
+        storage_offset: u64 = 0,
 
         /// The total size of the superblock storage zone after this physical offset.
         storage_size: u64 = superblock_zone_size,
@@ -788,6 +788,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 write_manifest_callback,
                 &context.write,
                 buffer,
+                .superblock,
                 offset,
             );
         }
@@ -830,6 +831,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 write_free_set_callback,
                 &context.write,
                 buffer,
+                .superblock,
                 offset,
             );
         }
@@ -872,6 +874,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 write_client_table_callback,
                 &context.write,
                 buffer,
+                .superblock,
                 offset,
             );
         }
@@ -921,7 +924,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.assert_bounds(offset, buffer.len + superblock_trailer_size_max);
 
-            superblock.storage.write_sectors(write_sector_callback, &context.write, buffer, offset);
+            superblock.storage.write_sectors(
+                write_sector_callback,
+                &context.write,
+                buffer,
+                .superblock,
+                offset,
+            );
         }
 
         fn write_sector_callback(write: *Storage.Write) void {
@@ -984,7 +993,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.assert_bounds(offset, buffer.len + superblock_trailer_size_max);
 
-            superblock.storage.read_sectors(read_sector_callback, &context.read, buffer, offset);
+            superblock.storage.read_sectors(
+                read_sector_callback,
+                &context.read,
+                buffer,
+                .superblock,
+                offset,
+            );
         }
 
         fn read_sector_callback(read: *Storage.Read) void {
@@ -1091,7 +1106,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 return;
             }
 
-            superblock.storage.read_sectors(read_manifest_callback, &context.read, buffer, offset);
+            superblock.storage.read_sectors(
+                read_manifest_callback,
+                &context.read,
+                buffer,
+                .superblock,
+                offset,
+            );
         }
 
         fn read_manifest_callback(read: *Storage.Read) void {
@@ -1154,6 +1175,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 read_free_set_callback,
                 &context.read,
                 buffer,
+                .superblock,
                 offset,
             );
         }
@@ -1224,6 +1246,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 read_client_table_callback,
                 &context.read,
                 buffer,
+                .superblock,
                 offset,
             );
         }
