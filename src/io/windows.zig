@@ -987,8 +987,12 @@ pub const IO = struct {
 
         if (handle == os.windows.INVALID_HANDLE_VALUE) {
             return switch (os.windows.kernel32.GetLastError()) {
-                .ACCESS_DENIED => error.AccessDenied,
-                else => |err| os.windows.unexpectedError(err),
+                .FILE_NOT_FOUND => error.FileNotFound,
+                .SHARING_VIOLATION, .ACCESS_DENIED => error.AccessDenied,
+                else => |err| {
+                    log.warn("CreateFileW(): {}", .{err});
+                    return os.windows.unexpectedError(err);
+                },
             };
         }
 
