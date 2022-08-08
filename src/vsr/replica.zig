@@ -383,7 +383,7 @@ pub fn ReplicaType(
                 .recovery_nonce = recovery_nonce,
                 .prng = std.rand.DefaultPrng.init(replica_index),
             };
-            message_bus.set_on_message(*Self, self, Self.on_message);
+            self.message_bus.set_on_message(*Self, self, Self.on_message);
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={}", .{
                 self.replica,
