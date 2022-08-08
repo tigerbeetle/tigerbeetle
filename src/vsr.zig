@@ -1022,7 +1022,7 @@ test "format_journal" {
         var write_data = try std.testing.allocator.alloc(u8, write_size_max);
         defer std.testing.allocator.free(write_data);
 
-        var headers_ring = std.mem.bytesAsSlice(Header, wal_data[0..config.journal_size_headers]);
+        var headers_ring = std.mem.bytesAsSlice(Header, @alignCast(@alignOf(Header), wal_data[0..config.journal_size_headers]));
         var prepare_ring = std.mem.bytesAsSlice([config.message_size_max]u8, wal_data[config.journal_size_headers..]);
         try std.testing.expectEqual(@as(usize, config.journal_slot_count), headers_ring.len);
         try std.testing.expectEqual(@as(usize, config.journal_slot_count), prepare_ring.len);
