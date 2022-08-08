@@ -11,8 +11,10 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
 const IO = @import("io.zig").IO;
+const Storage = @import("storage.zig").Storage;
+const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
-const StateMachine = @import("state_machine.zig").StateMachine;
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
@@ -47,8 +49,7 @@ pub fn request(
         @intCast(u8, addresses.len),
         &message_pool,
         .{
-            .configuration: &addresses,
-            .process = client_id,
+            .configuration = &addresses,
             .io = &io,
         },
     );
