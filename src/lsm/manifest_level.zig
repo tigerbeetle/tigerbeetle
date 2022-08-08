@@ -85,7 +85,7 @@ pub fn ManifestLevelType(
                 assert(compare_keys(a.key_min, a.key_max) != .gt);
                 for (tables[1..]) |b| {
                     assert(compare_keys(b.key_min, b.key_max) != .gt);
-                    assert(compare_keys(a.key_max, b.key_min) != .lt);
+                    assert(compare_keys(a.key_max, b.key_min) == .lt);
                     a = b;
                 }
             }
