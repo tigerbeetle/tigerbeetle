@@ -88,7 +88,6 @@ pub fn main() !void {
         &message_pool,
         .{
             .configuration = address[0..],
-            .process = client_id,
             .io = &io,
         },
     );
