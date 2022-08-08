@@ -5451,6 +5451,7 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
         callback: ?fn (format: *Self) void = null,
 
         wal_write: Storage.Write = undefined,
+        /// The *logical* offset within the WAL.
         wal_offset: u64 = 0,
         wal_buffer: []align(config.sector_size) u8,
 
@@ -5526,7 +5527,7 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
                     format_wal_sectors_callback,
                     &self.wal_write,
                     self.wal_buffer[0..size],
-                    self.wal_offset,
+                    vsr.Zone.wal.offset(self.wal_offset),
                 );
                 self.wal_offset += size;
             }

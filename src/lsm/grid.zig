@@ -14,7 +14,6 @@ const log = std.log.scoped(.grid);
 
 const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
 const write_ahead_log_zone_size = config.message_size_max * 1024; // TODO Use journal_slot_count.
-const client_table_zone_size = config.message_size_max * config.clients_max * 2;
 
 pub fn GridType(comptime Storage: type) type {
     const block_size = config.block_size;
@@ -51,10 +50,6 @@ pub fn GridType(comptime Storage: type) type {
             .value_alignment = config.sector_size,
         },
     );
-
-    const grid_offset: u64 = superblock_zone_size +
-        write_ahead_log_zone_size +
-        client_table_zone_size;
 
     return struct {
         const Grid = @This();
@@ -473,7 +468,7 @@ pub fn GridType(comptime Storage: type) type {
         fn block_offset(address: u64) u64 {
             assert(address > 0);
 
-            return grid_offset + (address - 1) * block_size;
+            return vsr.Zone.grid.offset((address - 1) * block_size);
         }
     };
 }

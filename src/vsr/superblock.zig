@@ -335,7 +335,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         storage: *Storage,
 
         /// The first physical offset that may be written to the superblock storage zone.
-        storage_offset: u64 = 0,
+        storage_offset: u64 = vsr.Zone.superblock.offset(0),
 
         /// The total size of the superblock storage zone after this physical offset.
         storage_size: u64 = superblock_zone_size,

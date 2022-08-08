@@ -23,6 +23,29 @@ pub const VSRState = @import("vsr/superblock.zig").SuperBlockSector.VSRState;
 
 pub const ProcessType = enum { replica, client };
 
+pub const Zone = enum {
+    superblock,
+    wal,
+    grid,
+
+    const size_superblock = @import("vsr/superblock.zig").superblock_zone_size;
+    const size_wal = config.journal_size_max;
+
+    pub fn offset(zone: Zone, offset_logical: u64) u64 {
+        return offset_logical + switch (zone) {
+            .superblock => blk: {
+                assert(offset_logical < size_superblock);
+                break :blk 0;
+            },
+            .wal => blk: {
+                assert(offset_logical < size_wal);
+                break :blk size_superblock;
+            },
+            .grid => size_superblock + size_wal,
+        };
+    }
+};
+
 /// Viewstamped Replication protocol commands:
 pub const Command = enum(u8) {
     reserved,
@@ -917,19 +940,19 @@ pub fn checksum(source: []const u8) u128 {
 }
 
 /// Returns the number of bytes written to `target`.
-pub fn format_journal(cluster: u32, offset: u64, target: []u8) usize {
-    assert(offset <= config.journal_size_max);
-    assert(offset % config.sector_size == 0);
+pub fn format_journal(cluster: u32, offset_logical: u64, target: []u8) usize {
+    assert(offset_logical <= config.journal_size_max);
+    assert(offset_logical % config.sector_size == 0);
     assert(target.len > 0);
     assert(target.len % config.sector_size == 0);
 
     const sector_max = @divExact(config.journal_size_max, config.sector_size);
     var sectors = std.mem.bytesAsSlice([config.sector_size]u8, target);
     for (sectors) |*sector_data, i| {
-        const sector = @divExact(offset, config.sector_size) + i;
+        const sector = @divExact(offset_logical, config.sector_size) + i;
         if (sector == sector_max) {
             if (i == 0) {
-                assert(offset == config.journal_size_max);
+                assert(offset_logical == config.journal_size_max);
             }
             return i * config.sector_size;
         } else {

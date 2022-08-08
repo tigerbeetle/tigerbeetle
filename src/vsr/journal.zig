@@ -1591,7 +1591,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             const offset = offset_physical(.headers, slot_of_message);
             assert(offset % config.sector_size == 0);
-            assert(offset == slot_first.index * @sizeOf(Header));
 
             const buffer: []u8 = write.header_sector(self);
             const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
@@ -1747,10 +1746,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn offset_physical(ring: Ring, slot: Slot) u64 {
-            return switch (ring) {
+            return vsr.Zone.wal.offset(switch (ring) {
                 .headers => offset_logical(.headers, slot),
                 .prepares => headers_size + offset_logical(.prepares, slot),
-            };
+            });
         }
 
         fn offset_logical_in_headers_for_message(self: *const Self, message: *Message) u64 {
@@ -1759,16 +1758,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         /// Where `offset` is a logical offset relative to the start of the respective ring.
         fn offset_physical_for_logical(ring: Ring, offset: u64) u64 {
-            switch (ring) {
-                .headers => {
+            return vsr.Zone.wal.offset(switch (ring) {
+                .headers => blk: {
                     assert(offset < headers_size);
-                    return offset;
+                    break :blk offset;
                 },
-                .prepares => {
+                .prepares => blk: {
                     assert(offset < prepares_size);
-                    return headers_size + offset;
+                    break :blk headers_size + offset;
                 },
-            }
+            });
         }
 
         fn write_sectors(
