@@ -65,13 +65,11 @@ pub const Cluster = struct {
 
     storages: []Storage,
     // TODO Move MessagePool into Replica/Client (tricky because it is required by SuperBlock)?
+    // The MessagePool must still be resued between replica restarts (and accessible while the
+    // replica is crashed); otherwise messages in the network during a crash will leak.
     pools: []MessagePool,
-    // TODO Set a replica to `null` when its corresponding health is `down`, to be sure we don't use it.
     replicas: []Replica,
     health: []ReplicaHealth,
-
-    replica_open: Replica.Open = undefined,
-    replica_opening: bool = false,
 
     clients: []Client,
     network: Network,
@@ -111,7 +109,6 @@ pub const Cluster = struct {
         const replicas = try allocator.alloc(Replica, options.replica_count);
         errdefer allocator.free(replicas);
 
-        // TODO Might be simpler to start all replicas as "down", and then move Replica.Open to the restart path.
         const health = try allocator.alloc(ReplicaHealth, options.replica_count);
         errdefer allocator.free(health);
         mem.set(ReplicaHealth, health, .{ .up = 0 });
@@ -337,7 +334,6 @@ pub const Cluster = struct {
         // while the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
         try cluster.open_replica(replica_index, replica_time);
 
-        replica.on_change_state = cluster.on_change_state;
         return true;
     }
 
@@ -362,11 +358,9 @@ pub const Cluster = struct {
     }
 
     fn open_replica(cluster: *Cluster, replica_index: u8, time: Time) !void {
-        assert(!cluster.replica_opening);
-
-        cluster.replica_open = try Replica.Open.init(
+        var replica = &cluster.replicas[replica_index];
+        try replica.open(
             cluster.allocator,
-            &cluster.replicas[replica_index],
             .{
                 .replica_count = @intCast(u8, cluster.replicas.len),
                 .storage = &cluster.storages[replica_index],
@@ -376,25 +370,12 @@ pub const Cluster = struct {
                 .message_bus_options = .{ .network = &cluster.network },
             },
         );
-        defer cluster.replica_open.deinit(cluster.allocator);
-
-        assert(!cluster.replica_opening);
-        cluster.replica_opening = true;
-        cluster.replica_open.open(open_replica_callback);
-        while (cluster.replica_opening) cluster.storages[replica_index].tick();
-
-        var replica = &cluster.replicas[replica_index];
         assert(replica.cluster == cluster.options.cluster);
         assert(replica.replica == replica_index);
-        // TODO Assert that opening worked as expected.
+        assert(replica.replica_count == cluster.replicas.len);
+        assert(replica.status == .recovering);
 
+        replica.on_change_state = cluster.on_change_state;
         cluster.network.link(replica.message_bus.process, &replica.message_bus);
-    }
-
-    fn open_replica_callback(replica_open: *Replica.Open, result: anyerror!void) void {
-        const cluster = @fieldParentPtr(Cluster, "replica_open", replica_open);
-        assert(cluster.replica_opening);
-        cluster.replica_opening = false;
-        result catch unreachable;
     }
 };

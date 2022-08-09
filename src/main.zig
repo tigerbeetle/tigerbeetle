@@ -21,9 +21,7 @@ const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
-const ReplicaOpen = Replica.Open;
 const ReplicaFormat = vsr.ReplicaFormatType(Storage);
-const ReplicaOpenError = vsr.ReplicaOpenError;
 
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
@@ -121,20 +119,8 @@ const Command = struct {
         try command.init(allocator, path, false);
         defer command.deinit(allocator);
 
-        const OpenContext = struct {
-            replica_open: ReplicaOpen,
-            result: ?(anyerror!void),
-            replica: Replica,
-
-            fn callback(replica_open: *ReplicaOpen, result: anyerror!void) void {
-                const context = @fieldParentPtr(@This(), "replica_open", replica_open);
-                assert(context.result == null);
-                context.result = result;
-            }
-        };
-
-        var context: OpenContext = undefined;
-        context.replica_open = try ReplicaOpen.init(allocator, &context.replica, .{
+        var replica: Replica = undefined;
+        try replica.open(allocator, .{
             .replica_count = @intCast(u8, addresses.len),
             .storage = &command.storage,
             .message_pool = &command.message_pool,
@@ -150,29 +136,19 @@ const Command = struct {
                 .configuration = addresses,
                 .io = &command.io,
             },
-        });
-        defer context.replica_open.deinit(allocator);
-
-        context.result = null;
-        context.replica_open.open(OpenContext.callback);
-        while (context.result == null) try command.io.tick();
-
-        context.result.? catch |err| switch (err) {
-            error.NoAddress => {
-                // TODO Include the replica index here.
-                fatal("all --addresses must be provided", .{ });
-            },
-            else => fatal("error opening replica err={}", .{ err }),
+        }) catch |err| switch (err) {
+            error.NoAddress => fatal("all --addresses must be provided", .{}),
+            else => err,
         };
 
-        log.info("cluster={} replica={}: listening on {}", .{
-            context.replica.cluster,
-            context.replica.replica,
-            addresses[context.replica.replica],
+        log.info("{}: cluster={}: listening on {}", .{
+            replica.replica,
+            replica.cluster,
+            addresses[replica.replica],
         });
 
         while (true) {
-            context.replica.tick();
+            replica.tick();
             try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
     }

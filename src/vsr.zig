@@ -12,7 +12,6 @@ pub const Version: u8 = 0;
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const format = @import("vsr/replica.zig").format;
-pub const ReplicaOpenError = @import("vsr/replica.zig").ReplicaOpenError;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
 pub const Clock = @import("vsr/clock.zig").Clock;
