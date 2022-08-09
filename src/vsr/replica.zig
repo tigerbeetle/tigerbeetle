@@ -103,7 +103,7 @@ pub fn ReplicaType(
         journal: Journal,
 
         /// An abstraction to send messages from the replica to another replica or client.
-        /// The message bus will also deliver messages to this replica by calling `on_message()`.
+        /// The message bus will also deliver messages to this replica by calling `on_message_from_bus()`.
         message_bus: MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
@@ -296,6 +296,7 @@ pub fn ReplicaType(
                 options.cluster,
                 .{ .replica = options.replica_index },
                 options.message_pool,
+                Self.on_message_from_bus,
                 options.message_bus_options,
             );
             errdefer message_bus.deinit(allocator);
@@ -383,7 +384,6 @@ pub fn ReplicaType(
                 .recovery_nonce = recovery_nonce,
                 .prng = std.rand.DefaultPrng.init(replica_index),
             };
-            self.message_bus.set_on_message(*Self, self, Self.on_message);
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={}", .{
                 self.replica,
@@ -519,6 +519,11 @@ pub fn ReplicaType(
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
+        fn on_message_from_bus(message_bus: *MessageBus, message: *Message) void {
+            const self = @fieldParentPtr(Self, "message_bus", message_bus);
+            self.on_message(message);
+        }
+
         pub fn on_message(self: *Self, message: *Message) void {
             assert(self.loopback_queue == null);
             assert(message.references > 0);

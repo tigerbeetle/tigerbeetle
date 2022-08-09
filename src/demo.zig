@@ -33,7 +33,7 @@ pub fn request(
 ) !void {
     const allocator = std.heap.page_allocator;
     const client_id = std.crypto.random.int(u128);
-    const cluster_id: u32 = 1;
+    const cluster_id: u32 = 0;
     var addresses = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
     var io = try IO.init(32, 0);
@@ -41,8 +41,7 @@ pub fn request(
 
     var message_pool = try MessagePool.init(allocator, .client);
 
-    var client: Client = undefined;
-    try client.init(
+    var client = try Client.init(
         allocator,
         client_id,
         cluster_id,

@@ -24,12 +24,8 @@ pub const MessageBus = struct {
     cluster: u32,
     process: Process,
 
-    /// The callback to be called when a message is received. Use set_on_message() to set
-    /// with type safety for the context pointer.
-    // TODO Now that MessageBus is embedded directly in Replica/Client, the `context` can be
-    // removed, and instead use @fieldParentPtr in the callback.
-    on_message_callback: ?fn (context: ?*anyopaque, message: *Message) void = null,
-    on_message_context: ?*anyopaque = null,
+    /// The callback to be called when a message is received.
+    on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
 
     pub const Options = struct {
         network: *Network,
@@ -43,6 +39,7 @@ pub const MessageBus = struct {
         // implementations.
         process: Process,
         message_pool: *MessagePool,
+        on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
         options: Options,
     ) !MessageBus {
         return MessageBus{
@@ -50,25 +47,12 @@ pub const MessageBus = struct {
             .pool = message_pool,
             .cluster = cluster,
             .process = process,
+            .on_message_callback = on_message_callback,
         };
     }
 
     /// TODO
     pub fn deinit(_: *MessageBus, _: std.mem.Allocator) void {}
-
-    pub fn set_on_message(
-        bus: *MessageBus,
-        comptime Context: type,
-        context: Context,
-        comptime on_message: fn (context: Context, message: *Message) void,
-    ) void {
-        bus.on_message_callback = struct {
-            fn wrapper(_context: ?*anyopaque, message: *Message) void {
-                on_message(@intToPtr(Context, @ptrToInt(_context)), message);
-            }
-        }.wrapper;
-        bus.on_message_context = context;
-    }
 
     pub fn tick(_: *MessageBus) void {}
 
