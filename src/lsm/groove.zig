@@ -57,7 +57,6 @@ const IdTreeValue = extern struct {
         return value.id;
     }
 
-    // TODO(ifreund): disallow this id in the state machine.
     const sentinel_key = std.math.maxInt(u128);
     const tombstone_bit = 1 << (64 - 1);
 

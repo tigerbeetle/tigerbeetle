@@ -521,6 +521,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (!zeroed_48_bytes(a.reserved)) return .reserved_field;
 
             if (a.id == 0) return .id_must_not_be_zero;
+            if (a.id == math.maxInt(u128)) return .id_must_not_be_max_int;
             if (a.ledger == 0) return .ledger_must_not_be_zero;
             if (a.code == 0) return .code_must_not_be_zero;
 
@@ -568,13 +569,16 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (t.reserved != 0) return .reserved_field;
 
             if (t.id == 0) return .id_must_not_be_zero;
+            if (t.id == math.maxInt(u128)) return .id_must_not_be_max_int;
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                 return self.post_or_void_pending_transfer(t);
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
+            if (t.debit_account_id == math.maxInt(u128)) return .debit_account_id_must_not_be_max_int;
             if (t.credit_account_id == 0) return .credit_account_id_must_not_be_zero;
+            if (t.credit_account_id == math.maxInt(u128)) return .credit_account_id_must_not_be_max_int;
             if (t.credit_account_id == t.debit_account_id) return .accounts_must_be_different;
 
             if (t.pending_id != 0) return .pending_id_must_be_zero;
@@ -699,6 +703,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
 
             if (t.pending_id == 0) return .pending_id_must_not_be_zero;
+            if (t.pending_id == math.maxInt(u128)) return .pending_id_must_not_be_max_int;
             if (t.pending_id == t.id) return .pending_id_must_be_different;
 
             const p = self.get_transfer(t.pending_id) orelse return .pending_transfer_not_found;
@@ -1057,6 +1062,25 @@ test "create/lookup/rollback accounts" {
             .result = .id_must_not_be_zero,
             .object = mem.zeroInit(Account, .{
                 .id = 0,
+                .user_data = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{
+                    .padding = 0,
+                    .debits_must_not_exceed_credits = true,
+                    .credits_must_not_exceed_debits = true,
+                },
+                .debits_pending = math.maxInt(u64),
+                .debits_posted = math.maxInt(u64),
+                .credits_pending = math.maxInt(u64),
+                .credits_posted = math.maxInt(u64),
+                .timestamp = 2,
+            }),
+        },
+        .{
+            .result = .id_must_not_be_max_int,
+            .object = mem.zeroInit(Account, .{
+                .id = math.maxInt(u128),
                 .user_data = 0,
                 .ledger = 0,
                 .code = 0,
@@ -1558,10 +1582,40 @@ test "create/lookup/rollback transfers" {
             }),
         },
         .{
+            .result = .id_must_not_be_max_int,
+            .object = mem.zeroInit(Transfer, .{
+                .id = math.maxInt(u128),
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .pending_id = 1,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{ .pending = true },
+                .amount = 0,
+                .timestamp = timestamp,
+            }),
+        },
+        .{
             .result = .debit_account_id_must_not_be_zero,
             .object = mem.zeroInit(Transfer, .{
                 .id = 1,
                 .debit_account_id = 0,
+                .credit_account_id = 0,
+                .pending_id = 1,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{ .pending = true },
+                .amount = 0,
+                .timestamp = timestamp,
+            }),
+        },
+        .{
+            .result = .debit_account_id_must_not_be_max_int,
+            .object = mem.zeroInit(Transfer, .{
+                .id = 1,
+                .debit_account_id = math.maxInt(u128),
                 .credit_account_id = 0,
                 .pending_id = 1,
                 .timeout = 0,
@@ -1578,6 +1632,21 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 100,
                 .credit_account_id = 0,
+                .pending_id = 1,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{ .pending = true },
+                .amount = 0,
+                .timestamp = timestamp,
+            }),
+        },
+        .{
+            .result = .credit_account_id_must_not_be_max_int,
+            .object = mem.zeroInit(Transfer, .{
+                .id = 1,
+                .debit_account_id = 100,
+                .credit_account_id = math.maxInt(u128),
                 .pending_id = 1,
                 .timeout = 0,
                 .ledger = 0,
@@ -2257,6 +2326,23 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         .{
+            .result = .pending_id_must_not_be_max_int,
+            .object = mem.zeroInit(Transfer, .{
+                .id = 101,
+                .debit_account_id = 10,
+                .credit_account_id = 20,
+                .user_data = 30,
+                .pending_id = math.maxInt(u128),
+                .ledger = 60,
+                .code = 70,
+                .flags = .{
+                    .void_pending_transfer = true,
+                },
+                .amount = 80,
+                .timestamp = timestamp + 1,
+            }),
+        },
+        .{
             .result = .pending_id_must_be_different,
             .object = mem.zeroInit(Transfer, .{
                 .id = 101,
@@ -2671,14 +2757,14 @@ test "create/lookup/rollback 2-phase transfers" {
     try test_account_balances(state_machine, 2, 0, 0, 30, 22);
 
     // Rollback voiding transfer:
-    assert(vectors[22].result == .ok);
-    try test_transfer_rollback(state_machine, &vectors[22].object);
+    assert(vectors[23].result == .ok);
+    try test_transfer_rollback(state_machine, &vectors[23].object);
     try test_account_balances(state_machine, 1, 45, 22, 0, 0);
     try test_account_balances(state_machine, 2, 0, 0, 45, 22);
 
     // Rollback posting transfer (zero amount):
-    assert(vectors[25].result == .ok);
-    try test_transfer_rollback(state_machine, &vectors[25].object);
+    assert(vectors[26].result == .ok);
+    try test_transfer_rollback(state_machine, &vectors[26].object);
     try test_account_balances(state_machine, 1, 52, 15, 0, 0);
     try test_account_balances(state_machine, 2, 0, 0, 52, 15);
 

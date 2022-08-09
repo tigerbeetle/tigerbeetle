@@ -99,6 +99,7 @@ pub const CreateAccountResult = enum(u32) {
     reserved_field,
 
     id_must_not_be_zero,
+    id_must_not_be_max_int,
     ledger_must_not_be_zero,
     code_must_not_be_zero,
 
@@ -129,8 +130,11 @@ pub const CreateTransferResult = enum(u32) {
     reserved_field,
 
     id_must_not_be_zero,
+    id_must_not_be_max_int,
     debit_account_id_must_not_be_zero,
+    debit_account_id_must_not_be_max_int,
     credit_account_id_must_not_be_zero,
+    credit_account_id_must_not_be_max_int,
     accounts_must_be_different,
 
     pending_id_must_be_zero,
@@ -171,6 +175,7 @@ pub const CreateTransferResult = enum(u32) {
     timeout_reserved_for_pending_transfer,
 
     pending_id_must_not_be_zero,
+    pending_id_must_not_be_max_int,
     pending_id_must_be_different,
 
     pending_transfer_not_found,
