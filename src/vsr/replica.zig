@@ -75,8 +75,6 @@ pub fn ReplicaType(
     return struct {
         const Self = @This();
 
-        pub const Open = ReplicaOpenType(StateMachine, MessageBus, Storage, Time);
-
         const Journal = vsr.Journal(Self, Storage);
         const Clock = vsr.Clock(Time);
 
@@ -232,9 +230,7 @@ pub fn ReplicaType(
         commit_prepare: ?*Message = null,
 
         const Options = struct {
-            cluster: u32,
             replica_count: u8,
-            replica_index: u8,
             superblock: SuperBlock,
             time: Time,
             storage: *Storage,
@@ -246,9 +242,11 @@ pub fn ReplicaType(
         };
 
         pub fn init(self: *Self, allocator: Allocator, options: Options) !void {
+            const cluster = options.superblock.working.cluster;
+            const replica_index = options.superblock.working.replica;
             const replica_count = options.replica_count;
-            const replica_index = options.replica_index;
             assert(replica_count > 0);
+            assert(replica_count <= config.replicas_max);
             assert(replica_index < replica_count);
             assert(options.superblock.working.vsr_state.internally_consistent());
 
@@ -294,8 +292,8 @@ pub fn ReplicaType(
 
             var message_bus = try MessageBus.init(
                 allocator,
-                options.cluster,
-                .{ .replica = options.replica_index },
+                cluster,
+                .{ .replica = replica_index },
                 options.message_pool,
                 Self.on_message_from_bus,
                 options.message_bus_options,
@@ -322,7 +320,7 @@ pub fn ReplicaType(
             };
 
             self.* = Self{
-                .cluster = options.cluster,
+                .cluster = cluster,
                 .replica_count = replica_count,
                 .replica = replica_index,
                 .quorum_replication = quorum_replication,
@@ -5364,106 +5362,61 @@ pub fn ReplicaType(
                 .pipeline => self.repair(),
             }
         }
-    };
-}
-
-fn ReplicaOpenType(
-    comptime StateMachine: type,
-    comptime MessageBus: type,
-    comptime Storage: type,
-    comptime Time: type,
-) type {
-    const SuperBlock = vsr.SuperBlockType(Storage);
-    const Replica = ReplicaType(StateMachine, MessageBus, Storage, Time);
-
-    return struct {
-        const Self = @This();
-
-        allocator: std.mem.Allocator,
-        replica: *Replica,
-        replica_options: Replica.Options,
-        // TODO Just use replica_options.superblock.
-        superblock: ?SuperBlock,
-        superblock_context: SuperBlock.Context = undefined,
-        callback: ?fn (opener: *Self, result: anyerror!void) void = null,
-
-        const Options = struct {
-            replica_count: u8,
-            storage: *Storage,
-            message_pool: *MessagePool,
-            time: Time,
-            state_machine_options: StateMachine.Options,
-            message_bus_options: MessageBus.Options,
-        };
-
-        pub fn init(
-            allocator: std.mem.Allocator,
-            replica: *Replica,
-            options: Options,
-        ) !Self {
-            const superblock = try SuperBlock.init(allocator, options.storage, options.message_pool);
-            errdefer superblock.deinit(allocator);
-
-            return Self{
-                .allocator = allocator,
-                .replica = replica,
-                .replica_options = .{
-                    // "cluster" and "replica_index" will be extracted from the opened SuperBlock.
-                    .cluster = undefined,
-                    .replica_index = undefined,
-                    .replica_count = options.replica_count,
-                    // "superblock" will be moved into the options once it has been opened.
-                    .superblock = undefined,
-                    .storage = options.storage,
-                    .time = options.time,
-                    .message_pool = options.message_pool,
-                    .state_machine_options = options.state_machine_options,
-                    .message_bus_options = options.message_bus_options,
-                },
-                .superblock = superblock,
-            };
-        }
-
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            if (self.superblock) |*superblock| {
-                superblock.deinit(allocator);
-                self.superblock = null;
-            }
-            self.callback = null;
-        }
 
         pub fn open(
             self: *Self,
-            callback: fn (opener: *Self, result: anyerror!void) void,
-        ) void {
-            assert(self.callback == null);
+            allocator: std.mem.Allocator,
+            options: struct {
+                replica_count: u8,
+                storage: *Storage,
+                message_pool: *MessagePool,
+                time: Time,
+                state_machine_options: StateMachine.Options,
+                message_bus_options: MessageBus.Options,
+            },
+        ) !void {
+            const ReplicaOpen = ReplicaOpenType(Storage);
+            var superblock = try SuperBlock.init(allocator, options.storage, options.message_pool);
+            errdefer superblock.deinit(allocator);
 
-            self.callback = callback;
-            self.superblock.?.open(open_callback, &self.superblock_context);
-        }
+            var replica_open = ReplicaOpen{};
+            superblock.open(ReplicaOpen.open_callback, &replica_open.superblock_context);
+            replica_open.opening = true;
+            while (replica_open.opening) options.storage.tick();
 
-        fn open_callback(superblock_context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
-            const callback = self.callback.?;
-            self.callback = null;
-
-            const superblock = &self.superblock.?;
-            if (superblock.working.replica >= self.replica_options.replica_count) {
-                callback(self, error.NoAddress);
-                return;
+            if (superblock.working.replica >= options.replica_count) {
+                return error.NoAddress;
             }
 
-            self.replica_options.cluster = superblock.working.cluster;
-            self.replica_options.replica_index = superblock.working.replica;
-            // The Replica's SuperBlock was initialized in-place.
-            self.replica_options.superblock = self.superblock.?;
-            self.superblock = null;
-
-            callback(self, self.replica.init(self.allocator, self.replica_options));
+            try self.init(allocator, .{
+                .replica_count = options.replica_count,
+                .superblock = superblock,
+                .storage = options.storage,
+                .time = options.time,
+                .message_pool = options.message_pool,
+                .state_machine_options = options.state_machine_options,
+                .message_bus_options = options.message_bus_options,
+            });
         }
     };
 }
 
+fn ReplicaOpenType(comptime Storage: type) type {
+    const SuperBlock = vsr.SuperBlockType(Storage);
+
+    return struct {
+        opening: bool = false,
+        superblock_context: SuperBlock.Context = undefined,
+
+        fn open_callback(superblock_context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+            assert(self.opening);
+            self.opening = false;
+        }
+    };
+}
+
+/// Initialize the TigerBeetle replica's data file.
 pub fn format(
     comptime Storage: type,
     allocator: std.mem.Allocator,
@@ -5473,7 +5426,23 @@ pub fn format(
     superblock: *vsr.SuperBlockType(Storage),
 ) !void {
     const ReplicaFormat = ReplicaFormatType(Storage);
-    try ReplicaFormat.format(allocator, cluster, replica, storage, superblock);
+    var replica_format = ReplicaFormat{};
+
+    try replica_format.format_wal(allocator, cluster, storage);
+    assert(!replica_format.formatting);
+
+    superblock.format(
+        ReplicaFormat.format_superblock_callback,
+        &replica_format.superblock_context,
+        .{
+            .cluster = cluster,
+            .replica = replica,
+            .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
+        },
+    );
+
+    replica_format.formatting = true;
+    while (replica_format.formatting) storage.tick();
 }
 
 fn ReplicaFormatType(comptime Storage: type) type {
@@ -5484,28 +5453,6 @@ fn ReplicaFormatType(comptime Storage: type) type {
         formatting: bool = false,
         superblock_context: SuperBlock.Context = undefined,
         wal_write: Storage.Write = undefined,
-
-        /// Initialize the TigerBeetle replica's data file.
-        fn format(
-            allocator: std.mem.Allocator,
-            cluster: u32,
-            replica: u8,
-            storage: *Storage,
-            superblock: *SuperBlock,
-        ) !void {
-            var self = Self{};
-            try self.format_wal(allocator, cluster, storage);
-            assert(!self.formatting);
-
-            superblock.format(format_superblock_callback, &self.superblock_context, .{
-                .cluster = cluster,
-                .replica = replica,
-                .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
-            });
-
-            self.formatting = true;
-            while (self.formatting) storage.tick();
-        }
 
         fn format_wal(
             self: *Self,
