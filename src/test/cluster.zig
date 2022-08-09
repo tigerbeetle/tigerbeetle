@@ -70,8 +70,6 @@ pub const Cluster = struct {
     replicas: []Replica,
     health: []ReplicaHealth,
 
-    replica_format: ReplicaFormat = undefined,
-    replica_formatting: bool = false,
     replica_open: Replica.Open = undefined,
     replica_opening: bool = false,
 
@@ -149,7 +147,6 @@ pub const Cluster = struct {
         );
         assert(faulty_areas.len == options.replica_count);
 
-        // Format each replica's storage (equivalent to "tigerbeetle format ...").
         for (cluster.storages) |*storage, replica_index| {
             storage.* = try Storage.init(
                 allocator,
@@ -158,26 +155,23 @@ pub const Cluster = struct {
                 @intCast(u8, replica_index),
                 faulty_areas[replica_index],
             );
+        }
+        errdefer for (cluster.storages) |*storage| storage.deinit(allocator);
 
+        // Format each replica's storage (equivalent to "tigerbeetle format ...").
+        for (cluster.storages) |*storage, replica_index| {
             var superblock = try SuperBlock.init(allocator, storage, &cluster.pools[replica_index]);
             defer superblock.deinit(allocator);
 
-            cluster.replica_format = try ReplicaFormat.init(
+            try vsr.format(
+                Storage,
                 allocator,
                 options.cluster,
                 @intCast(u8, replica_index),
                 storage,
                 &superblock,
             );
-            defer cluster.replica_format.deinit(allocator);
-
-            assert(!cluster.replica_formatting);
-            cluster.replica_formatting = true;
-            cluster.replica_format.format(format_callback);
-            while (cluster.replica_formatting) storage.tick();
         }
-        cluster.replica_format = undefined;
-        errdefer for (cluster.storages) |*storage| storage.deinit(allocator);
 
         for (cluster.replicas) |_, replica_index| {
             try cluster.open_replica(@intCast(u8, replica_index), .{
@@ -221,12 +215,6 @@ pub const Cluster = struct {
         cluster.network.deinit();
 
         cluster.allocator.destroy(cluster);
-    }
-
-    fn format_callback(replica_format: *ReplicaFormat) void {
-        const cluster = @fieldParentPtr(Cluster, "replica_format", replica_format);
-        assert(cluster.replica_formatting);
-        cluster.replica_formatting = false;
     }
 
     /// Reset a replica to its initial state, simulating a random crash/panic.

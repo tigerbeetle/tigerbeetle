@@ -9,6 +9,7 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientTable = @import("superblock_client_table.zig").ClientTable;
+const format_journal = @import("./journal.zig").format_journal;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -5463,34 +5464,60 @@ fn ReplicaOpenType(
     };
 }
 
-pub fn ReplicaFormatType(comptime Storage: type) type {
+pub fn format(
+    comptime Storage: type,
+    allocator: std.mem.Allocator,
+    cluster: u32,
+    replica: u8,
+    storage: *Storage,
+    superblock: *vsr.SuperBlockType(Storage),
+) !void {
+    const ReplicaFormat = ReplicaFormatType(Storage);
+    try ReplicaFormat.format(allocator, cluster, replica, storage, superblock);
+}
+
+fn ReplicaFormatType(comptime Storage: type) type {
     const SuperBlock = vsr.SuperBlockType(Storage);
     return struct {
         const Self = @This();
 
-        cluster: u32,
-        replica: u8,
-        storage: *Storage,
-        callback: ?fn (format: *Self) void = null,
-
-        wal_write: Storage.Write = undefined,
-        /// The *logical* offset within the WAL.
-        wal_offset: u64 = 0,
-        wal_buffer: []align(config.sector_size) u8,
-
-        superblock: *SuperBlock,
+        formatting: bool = false,
         superblock_context: SuperBlock.Context = undefined,
+        wal_write: Storage.Write = undefined,
 
-        pub fn init(
+        /// Initialize the TigerBeetle replica's data file.
+        fn format(
             allocator: std.mem.Allocator,
             cluster: u32,
             replica: u8,
             storage: *Storage,
             superblock: *SuperBlock,
-        ) !Self {
+        ) !void {
+            var self = Self{};
+            try self.format_wal(allocator, cluster, storage);
+            assert(!self.formatting);
+
+            superblock.format(format_superblock_callback, &self.superblock_context, .{
+                .cluster = cluster,
+                .replica = replica,
+                .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
+            });
+
+            self.formatting = true;
+            while (self.formatting) storage.tick();
+        }
+
+        fn format_wal(
+            self: *Self,
+            allocator: std.mem.Allocator,
+            cluster: u32,
+            storage: *Storage,
+        ) !void {
+            const header_zeroes = [_]u8{0} ** @sizeOf(Header);
             const wal_write_size_max = 4 * 1024 * 1024;
             assert(wal_write_size_max % config.sector_size == 0);
 
+            // Direct I/O requires the buffer to be sector-aligned.
             var wal_buffer = try allocator.allocAdvanced(
                 u8,
                 config.sector_size,
@@ -5499,90 +5526,55 @@ pub fn ReplicaFormatType(comptime Storage: type) type {
             );
             errdefer allocator.free(wal_buffer);
 
-            return Self{
-                .cluster = cluster,
-                .replica = replica,
-                .storage = storage,
-                .wal_buffer = wal_buffer,
-                .superblock = superblock,
-            };
-        }
+            // The logical offset *within the WAL*.
+            var wal_offset: u64 = 0;
+            while (wal_offset < config.journal_size_max) {
+                const size = format_journal(cluster, wal_offset, wal_buffer);
+                assert(size % config.sector_size == 0);
+                assert(size > 0);
 
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            assert(self.callback == null);
-
-            allocator.free(self.wal_buffer);
-        }
-
-        /// Initialize the TigerBeetle replica's data file.
-        pub fn format(self: *Self, callback: fn (format: *Self) void) void {
-            assert(self.callback == null);
-            assert(self.wal_offset == 0);
-
-            self.callback = callback;
-            self.format_wal_sectors();
-        }
-
-        fn format_wal_sectors(self: *Self) void {
-            assert(self.callback != null);
-            assert(self.wal_offset <= config.journal_size_max);
-            assert(self.wal_buffer.len % config.sector_size == 0);
-
-            const size = vsr.format_journal(self.cluster, self.wal_offset, self.wal_buffer);
-            assert(size % config.sector_size == 0);
-
-            const zeros = [_]u8{0} ** @sizeOf(Header);
-            for (std.mem.bytesAsSlice(Header, self.wal_buffer[0..size])) |*header| {
-                if (header.checksum == 0 and header.checksum_body == 0) {
-                    // This is the (empty) body of a Prepare.
-                    assert(std.mem.eql(u8, std.mem.asBytes(header), &zeros));
-                } else {
-                    assert(header.valid_checksum());
-                    assert(header.command == .prepare or header.command == .reserved);
-                    assert(header.op != 0 or header.operation == .root);
+                for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
+                    if (std.mem.eql(u8, std.mem.asBytes(header), &header_zeroes)) {
+                        // This is the (empty) body of a reserved or root Prepare.
+                    } else {
+                        // This is either a Prepare's header or a redundant header.
+                        assert(header.valid_checksum());
+                        if (header.op == 0) {
+                            assert(header.command == .prepare);
+                            assert(header.operation == .root);
+                        } else {
+                            assert(header.command == .reserved);
+                            assert(header.operation == .reserved);
+                        }
+                    }
                 }
-            }
 
-            if (size == 0) {
-                self.format_superblock();
-            } else {
-                self.storage.write_sectors(
+                storage.write_sectors(
                     format_wal_sectors_callback,
                     &self.wal_write,
-                    self.wal_buffer[0..size],
+                    wal_buffer[0..size],
                     .wal,
-                    self.wal_offset,
+                    wal_offset,
                 );
-                self.wal_offset += size;
+                self.formatting = true;
+                while (self.formatting) storage.tick();
+                wal_offset += size;
             }
+
+            // There is nothing left to write.
+            assert(format_journal(cluster, wal_offset, wal_buffer) == 0);
         }
 
         fn format_wal_sectors_callback(write: *Storage.Write) void {
             const self = @fieldParentPtr(Self, "wal_write", write);
-            assert(self.callback != null);
-            assert(self.wal_offset <= config.journal_size_max);
-
-            self.format_wal_sectors();
-        }
-
-        fn format_superblock(self: *Self) void {
-            assert(self.callback != null);
-            assert(self.wal_offset == config.journal_size_max);
-
-            self.superblock.format(format_superblock_callback, &self.superblock_context, .{
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
-            });
+            assert(self.formatting);
+            self.formatting = false;
         }
 
         fn format_superblock_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
-            const callback = self.callback.?;
-            assert(self.wal_offset == config.journal_size_max);
-
-            self.callback = null;
-            callback(self);
+            assert(self.formatting);
+            self.formatting = false;
         }
     };
 }

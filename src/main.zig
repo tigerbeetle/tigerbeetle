@@ -106,30 +106,7 @@ const Command = struct {
         );
         defer superblock.deinit(allocator);
 
-        const FormatContext = struct {
-            replica_format: ReplicaFormat,
-            formatted: bool,
-
-            fn callback(replica_format: *ReplicaFormat) void {
-                const context = @fieldParentPtr(@This(), "replica_format", replica_format);
-                assert(!context.formatted);
-                context.formatted = true;
-            }
-        };
-
-        var context: FormatContext = undefined;
-        context.replica_format = try ReplicaFormat.init(
-            allocator,
-            cluster,
-            replica,
-            &command.storage,
-            &superblock,
-        );
-        defer context.replica_format.deinit(allocator);
-
-        context.formatted = false;
-        context.replica_format.format(FormatContext.callback);
-        while (!context.formatted) try command.io.tick();
+        try vsr.format(Storage, allocator, cluster, replica, &command.storage, &superblock);
     }
 
     pub fn start(
