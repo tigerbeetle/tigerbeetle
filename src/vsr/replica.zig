@@ -112,6 +112,7 @@ pub fn ReplicaType(
         superblock: SuperBlock,
         superblock_context: SuperBlock.Context = undefined,
         grid: Grid,
+        opened: bool,
 
         /// The current view, initially 0:
         view: u32,
@@ -229,9 +230,76 @@ pub fn ReplicaType(
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
 
-        const Options = struct {
+        const OpenOptions = struct {
             replica_count: u8,
-            superblock: SuperBlock,
+            storage: *Storage,
+            message_pool: *MessagePool,
+            time: Time,
+            state_machine_options: StateMachine.Options,
+            message_bus_options: MessageBus.Options,
+        };
+    
+        /// Initializes and opens the provided replica using the options.
+        pub fn open(self: *Self, allocator: std.mem.Allocator, options: OpenOptions) !void {
+            self.superblock = try SuperBlock.init(
+                allocator,
+                options.storage,
+                options.message_pool,
+            );
+
+            // Once initialzed, the replica is in charge of calling superblock.deinit()
+            var initialized = false;
+            errdefer if (!initialized) self.superblock.deinit(allocator);
+
+            // Open the superblock:
+            self.opened = false;
+            self.superblock.open(superblock_open_callback, &self.superblock_context);
+            while (!self.opened) self.superblock.storage.tick();
+
+            if (self.superblock.working.replica >= options.replica_count) {
+                return error.NoAddress;
+            }
+
+            // Intiaize the replica:
+            try self.init(allocator, .{
+                .cluster = self.superblock.working.cluster,
+                .replica_index = self.superblock.working.replica,
+                .replica_count = options.replica_count,
+                .storage = options.storage,
+                .time = options.time,
+                .message_pool = options.message_pool,
+                .state_machine_options = options.state_machine_options,
+                .message_bus_options = options.message_bus_options,
+            });
+
+            initialized = true;
+            errdefer self.deinit(allocator);
+
+            // Open the (Forest inside) StateMachine:
+            self.opened = false;
+            self.state_machine.open(state_machine_open_callback);
+            while (!self.opened) {
+                self.grid.tick();
+                self.superblock.storage.tick();
+            }
+        }
+
+        fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            assert(!self.opened);
+            self.opened = true;
+        }
+
+        fn state_machine_open_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(!self.opened);
+            self.opened = true;
+        }
+
+        const Options = struct {
+            cluster: u32,
+            replica_count: u8,
+            replica_index: u8,
             time: Time,
             storage: *Storage,
             message_pool: *MessagePool,
@@ -241,14 +309,16 @@ pub fn ReplicaType(
             state_machine_options: StateMachine.Options,
         };
 
-        pub fn init(self: *Self, allocator: Allocator, options: Options) !void {
-            const cluster = options.superblock.working.cluster;
-            const replica_index = options.superblock.working.replica;
+        /// NOTE: self.superblock must be initialized and opened by this call
+        fn init(self: *Self, allocator: Allocator, options: Options) !void {
             const replica_count = options.replica_count;
+            const replica_index = options.replica_index;
             assert(replica_count > 0);
-            assert(replica_count <= config.replicas_max);
             assert(replica_index < replica_count);
-            assert(options.superblock.working.vsr_state.internally_consistent());
+
+            assert(self.opened);
+            assert(self.superblock.opened);
+            assert(self.superblock.working.vsr_state.internally_consistent());
 
             const majority = (replica_count / 2) + 1;
             assert(majority <= replica_count);
@@ -279,48 +349,48 @@ pub fn ReplicaType(
             assert(quorum_replication + quorum_view_change > replica_count);
 
             self.time = options.time;
-            var clock = try Clock.init(
+            self.clock = try Clock.init(
                 allocator,
                 replica_count,
                 replica_index,
                 &self.time,
             );
-            errdefer clock.deinit(allocator);
+            errdefer self.clock.deinit(allocator);
 
-            var journal = try Journal.init(allocator, options.storage, replica_index);
-            errdefer journal.deinit(allocator);
+            self.journal = try Journal.init(allocator, options.storage, replica_index);
+            errdefer self.journal.deinit(allocator);
 
-            var message_bus = try MessageBus.init(
+            self.message_bus = try MessageBus.init(
                 allocator,
-                cluster,
-                .{ .replica = replica_index },
+                options.cluster,
+                .{ .replica = options.replica_index },
                 options.message_pool,
                 Self.on_message_from_bus,
                 options.message_bus_options,
             );
-            errdefer message_bus.deinit(allocator);
+            errdefer self.message_bus.deinit(allocator);
 
-            var grid = try Grid.init(allocator, &self.superblock);
-            errdefer grid.deinit(allocator);
+            self.grid = try Grid.init(allocator, &self.superblock);
+            errdefer self.grid.deinit(allocator);
 
-            var state_machine = try StateMachine.init(
+            self.state_machine = try StateMachine.init(
                 allocator,
                 &self.grid,
                 options.state_machine_options,
             );
-            errdefer state_machine.deinit(allocator);
+            errdefer self.state_machine.deinit(allocator);
 
             const recovery_nonce = blk: {
                 var nonce: [@sizeOf(Nonce)]u8 = undefined;
                 var hash = std.crypto.hash.Blake3.init(.{});
-                hash.update(std.mem.asBytes(&clock.monotonic()));
+                hash.update(std.mem.asBytes(&self.clock.monotonic()));
                 hash.update(&[_]u8{replica_index});
                 hash.final(&nonce);
                 break :blk @bitCast(Nonce, nonce);
             };
 
             self.* = Self{
-                .cluster = cluster,
+                .cluster = options.cluster,
                 .replica_count = replica_count,
                 .replica = replica_index,
                 .quorum_replication = quorum_replication,
@@ -328,18 +398,19 @@ pub fn ReplicaType(
                 // Copy the (already-initialized) time back, to avoid regressing the monotonic
                 // clock guard.
                 .time = self.time,
-                .clock = clock,
-                .journal = journal,
-                .message_bus = message_bus,
-                .state_machine = state_machine,
-                .superblock = options.superblock,
-                .grid = grid,
-                .view = options.superblock.working.vsr_state.view,
-                .view_normal = options.superblock.working.vsr_state.view_normal,
+                .clock = self.clock,
+                .journal = self.journal,
+                .message_bus = self.message_bus,
+                .state_machine = self.state_machine,
+                .superblock = self.superblock,
+                .grid = self.grid,
+                .opened = self.opened,
+                .view = self.superblock.working.vsr_state.view,
+                .view_normal = self.superblock.working.vsr_state.view_normal,
                 .op = 0,
-                .op_checkpoint = options.superblock.working.vsr_state.commit_min,
-                .commit_min = options.superblock.working.vsr_state.commit_min,
-                .commit_max = options.superblock.working.vsr_state.commit_max,
+                .op_checkpoint = self.superblock.working.vsr_state.commit_min,
+                .commit_min = self.superblock.working.vsr_state.commit_min,
+                .commit_max = self.superblock.working.vsr_state.commit_max,
                 .ping_timeout = Timeout{
                     .name = "ping_timeout",
                     .id = replica_index,
@@ -5361,57 +5432,6 @@ pub fn ReplicaType(
                 .repair => self.repair(),
                 .pipeline => self.repair(),
             }
-        }
-
-        pub fn open(
-            self: *Self,
-            allocator: std.mem.Allocator,
-            options: struct {
-                replica_count: u8,
-                storage: *Storage,
-                message_pool: *MessagePool,
-                time: Time,
-                state_machine_options: StateMachine.Options,
-                message_bus_options: MessageBus.Options,
-            },
-        ) !void {
-            const ReplicaOpen = ReplicaOpenType(Storage);
-            var superblock = try SuperBlock.init(allocator, options.storage, options.message_pool);
-            errdefer superblock.deinit(allocator);
-
-            var replica_open = ReplicaOpen{};
-            superblock.open(ReplicaOpen.open_callback, &replica_open.superblock_context);
-            replica_open.opening = true;
-            while (replica_open.opening) options.storage.tick();
-
-            if (superblock.working.replica >= options.replica_count) {
-                return error.NoAddress;
-            }
-
-            try self.init(allocator, .{
-                .replica_count = options.replica_count,
-                .superblock = superblock,
-                .storage = options.storage,
-                .time = options.time,
-                .message_pool = options.message_pool,
-                .state_machine_options = options.state_machine_options,
-                .message_bus_options = options.message_bus_options,
-            });
-        }
-    };
-}
-
-fn ReplicaOpenType(comptime Storage: type) type {
-    const SuperBlock = vsr.SuperBlockType(Storage);
-
-    return struct {
-        opening: bool = false,
-        superblock_context: SuperBlock.Context = undefined,
-
-        fn open_callback(superblock_context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-            assert(self.opening);
-            self.opening = false;
         }
     };
 }
