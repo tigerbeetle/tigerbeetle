@@ -181,12 +181,17 @@ pub fn StateMachineType(comptime Storage: type) type {
             _ = op;
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
+
+            if (operation == .register) {
+                callback(self);
+                return;
+            }
+
             self.prefetch_input = input;
             self.prefetch_callback = callback;
 
             return switch (operation) {
-                .reserved, .root => unreachable,
-                .register => return,
+                .reserved, .root, .register => unreachable,
                 .create_accounts => {
                     self.prefetch_create_accounts(mem.bytesAsSlice(Account, input));
                 },
