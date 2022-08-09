@@ -83,6 +83,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         prefetch_transfers_context: TransfersGroove.PrefetchContext = undefined,
         prefetch_posted_context: PostedGroove.PrefetchContext = undefined,
 
+        open_callback: ?fn (*StateMachine) void = null,
         compact_callback: ?fn (*StateMachine) void = null,
         checkpoint_callback: ?fn (*StateMachine) void = null,
 
@@ -137,6 +138,22 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .lookup_transfers => Transfer,
                 else => unreachable,
             };
+        }
+
+        pub fn open(self: *StateMachine, callback: fn (*StateMachine) void) void {
+            assert(self.open_callback == null);
+            self.open_callback = callback;
+            
+            self.forest.open(forest_open_callback);
+        }
+
+        fn forest_open_callback(forest: *Forest) void {
+            const self = @fieldParentPtr(StateMachine, "forest", forest);
+            assert(self.open_callback != null);
+
+            const callback = self.open_callback.?;
+            self.open_callback = null;
+            callback(self);
         }
 
         /// Returns the header's timestamp.
