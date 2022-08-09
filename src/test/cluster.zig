@@ -191,7 +191,7 @@ pub const Cluster = struct {
 
         for (cluster.clients) |*client, i| {
             const client_id = prng.int(u128);
-            try client.init(
+            client.* = try Client.init(
                 allocator,
                 client_id,
                 options.cluster,

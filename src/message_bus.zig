@@ -17,10 +17,10 @@ const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 
-pub const MessageBusReplica = MessageBusImpl(.replica);
-pub const MessageBusClient = MessageBusImpl(.client);
+pub const MessageBusReplica = MessageBusType(.replica);
+pub const MessageBusClient = MessageBusType(.client);
 
-fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
+fn MessageBusType(comptime process_type: vsr.ProcessType) type {
     const SendQueue = RingBuffer(*Message, switch (process_type) {
         .replica => config.connection_send_queue_max_replica,
         // A client has at most 1 in-flight request, plus pings.
@@ -64,10 +64,8 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
             .client => void,
         },
 
-        /// The callback to be called when a message is received. Use set_on_message() to set
-        /// with type safety for the context pointer.
-        on_message_callback: ?fn (context: ?*anyopaque, message: *Message) void = null,
-        on_message_context: ?*anyopaque = null,
+        /// The callback to be called when a message is received.
+        on_message_callback: fn (message_bus: *Self, message: *Message) void,
 
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
@@ -96,6 +94,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
             cluster: u32,
             process: Process,
             message_pool: *MessagePool,
+            on_message_callback: fn (message_bus: *Self, message: *Message) void,
             options: Options,
         ) !Self {
             // There must be enough connections for all replicas and at least one client.
@@ -131,6 +130,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                     },
                     .client => {},
                 },
+                .on_message_callback = on_message_callback,
                 .connections = connections,
                 .replicas = replicas,
                 .replicas_connect_attempts = replicas_connect_attempts,
@@ -143,23 +143,6 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
             }
 
             return bus;
-        }
-
-        pub fn set_on_message(
-            bus: *Self,
-            comptime Context: type,
-            context: Context,
-            comptime on_message: fn (context: Context, message: *Message) void,
-        ) void {
-            assert(bus.on_message_callback == null);
-            assert(bus.on_message_context == null);
-
-            bus.on_message_callback = struct {
-                fn wrapper(_context: ?*anyopaque, message: *Message) void {
-                    on_message(@intToPtr(Context, @ptrToInt(_context)), message);
-                }
-            }.wrapper;
-            bus.on_message_context = context;
         }
 
         /// TODO This is required by the Client.
@@ -781,7 +764,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                     }
                 }
 
-                bus.on_message_callback.?(bus.on_message_context, message);
+                bus.on_message_callback(bus, message);
             }
 
             fn maybe_set_peer(connection: *Connection, bus: *Self, header: *const Header) void {

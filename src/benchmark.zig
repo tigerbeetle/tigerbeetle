@@ -80,8 +80,7 @@ pub fn main() !void {
     var io = try IO.init(32, 0);
     var message_pool = try MessagePool.init(allocator, .client);
 
-    var client: Client = undefined;
-    try client.init(
+    var client = try Client.init(
         allocator,
         client_id,
         cluster_id,
