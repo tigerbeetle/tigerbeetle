@@ -748,6 +748,15 @@ pub fn GrooveType(
             if (!std.mem.eql(u8, std.mem.asBytes(old), std.mem.asBytes(new))) {
                 groove.objects.remove(old);
                 groove.objects.put(new);
+
+                // Don't forget to update the prefetch_objects tree when prefetching 
+                // as this is the object returned by future calls to Groove.get().
+                if (groove.prefetch_objects.count() > 0) {
+                    if (groove.prefetch_objects.getKeyPtrAdapted(old.id, PrefetchObjectsAdapter{})) |prefetch_obj| {
+                        assert(old == prefetch_obj);
+                        prefetch_obj.* = new.*;
+                    }
+                }
             }
 
             inline for (std.meta.fields(IndexTrees)) |field| {
