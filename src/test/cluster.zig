@@ -98,6 +98,7 @@ pub const Cluster = struct {
 
         {
             var i: usize = 0;
+            errdefer for (pools[0..i]) |*pool| pool.deinit(allocator);
             while (i < process_count) : (i += 1) {
                 pools[i] = try MessagePool.init(
                     allocator,
@@ -105,6 +106,7 @@ pub const Cluster = struct {
                 );
             }
         }
+        errdefer for (pools) |*pool| pool.deinit(allocator);
 
         const replicas = try allocator.alloc(Replica, options.replica_count);
         errdefer allocator.free(replicas);

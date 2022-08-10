@@ -81,11 +81,11 @@ const Command = struct {
         errdefer command.storage.deinit();
 
         command.message_pool = try MessagePool.init(allocator, .replica);
-        // TODO Implement & call deinit() for MessagePool
+        errdefer command.message_pool.deinit(allocator);
     }
 
-    fn deinit(command: *Command, _: mem.Allocator) void {
-        // TODO Add message_pool.deinit() once implemented.
+    fn deinit(command: *Command, allocator: mem.Allocator) void {
+        command.message_pool.deinit(allocator);
         command.storage.deinit();
         command.io.deinit();
         os.close(command.fd);
