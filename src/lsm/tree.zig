@@ -878,7 +878,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             // Start an asynchronous checkpoint on the manifest.
             assert(tree.checkpoint_callback == null);
             tree.checkpoint_callback = callback;
-            tree.manifest.checkpoint(op, manifest_checkpoint_callback);
+            tree.manifest.checkpoint(manifest_checkpoint_callback);
         }
 
         fn manifest_checkpoint_callback(manifest: *Manifest) void {

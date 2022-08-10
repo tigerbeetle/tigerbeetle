@@ -666,9 +666,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             callback(manifest);
         }
 
-        pub fn checkpoint(manifest: *Manifest, op: u64, callback: Callback) void {
-            _ = op;
-
+        pub fn checkpoint(manifest: *Manifest, callback: Callback) void {
             assert(manifest.checkpoint_callback == null);
             manifest.checkpoint_callback = callback;
 
