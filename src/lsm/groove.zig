@@ -595,12 +595,25 @@ pub fn GrooveType(
             fn start_workers(context: *PrefetchContext) void {
                 assert(context.workers_busy == 0);
 
-                while (context.workers_busy < context.workers.len) {
-                    const worker = &context.workers[context.workers_busy];
+                // Track an extra "worker" that will finish after the loop.
+                //
+                // This prevents `context.finish()` from being called within the loop body when every
+                // worker finishes synchronously. `context.finish()` sets the `context` to undefined,
+                // but `context` is required for the last loop condition check.
+                context.workers_busy += 1;
+
+                // -1 to ignore the extra worker.
+                while (context.workers_busy - 1 < context.workers.len) {
+                    const worker = &context.workers[context.workers_busy - 1];
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
-                    if (!worker.lookup_start()) break;
+                    if (!worker.lookup_start()) {
+                        break;
+                    }
                 }
+
+                assert(context.workers_busy >= 1);
+                context.worker_finished();
             }
 
             fn worker_finished(context: *PrefetchContext) void {
@@ -611,7 +624,9 @@ pub fn GrooveType(
             }
 
             fn finish(context: *PrefetchContext) void {
+                assert(context.workers_busy == 0);
                 assert(context.groove.prefetch_ids.count() == 0);
+                assert(context.id_iterator.next() == null);
 
                 const callback = context.callback;
                 context.* = undefined;
