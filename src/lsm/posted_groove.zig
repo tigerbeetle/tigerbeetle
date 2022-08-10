@@ -244,9 +244,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                     const worker = &context.workers[context.workers_busy - 1];
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
-                    if (!worker.lookup_start()) {
-                        break;
-                    }
+                    if (!worker.lookup_start()) break;
                 }
 
                 assert(context.workers_busy >= 1);
@@ -283,6 +281,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 const id = worker.context.id_iterator.next() orelse {
                     groove.prefetch_ids.clearRetainingCapacity();
                     assert(groove.prefetch_ids.count() == 0);
+                    worker.context.worker_finished();
                     return false;
                 };
 

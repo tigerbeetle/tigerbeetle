@@ -607,9 +607,7 @@ pub fn GrooveType(
                     const worker = &context.workers[context.workers_busy - 1];
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
-                    if (!worker.lookup_start()) {
-                        break;
-                    }
+                    if (!worker.lookup_start()) break;
                 }
 
                 assert(context.workers_busy >= 1);
@@ -659,7 +657,7 @@ pub fn GrooveType(
                 }
 
                 // If not in the LSM tree's cache, the object must be read from disk and added
-                // to the auxillary prefetch_objects hash map.
+                // to the auxiliary prefetch_objects hash map.
                 // TODO: this LSM tree function needlessly checks the LSM tree's cache a
                 // second time. Adding API to the LSM tree to avoid this may be worthwhile.
                 groove.ids.lookup(
