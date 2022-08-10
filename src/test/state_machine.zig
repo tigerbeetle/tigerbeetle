@@ -57,6 +57,12 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
         }
 
+        /// Don't add latency to `StateMachine.open`: the simulator calls it synchronously during
+        /// replica setup.
+        pub fn open(self: *StateMachine, callback: fn (*StateMachine) void) void {
+            callback(self);
+        }
+
         pub fn prepare(
             state_machine: *StateMachine,
             operation: Operation,

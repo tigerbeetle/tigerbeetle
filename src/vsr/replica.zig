@@ -238,7 +238,7 @@ pub fn ReplicaType(
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
         };
-    
+
         /// Initializes and opens the provided replica using the options.
         pub fn open(self: *Self, allocator: std.mem.Allocator, options: OpenOptions) !void {
             self.superblock = try SuperBlock.init(
@@ -525,6 +525,7 @@ pub fn ReplicaType(
 
             // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
+            self.grid.tick();
             self.state_machine.tick();
             self.message_bus.tick();
 
