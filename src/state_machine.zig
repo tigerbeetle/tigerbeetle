@@ -538,7 +538,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (!zeroed_48_bytes(a.reserved)) return .reserved_field;
 
             if (a.id == 0) return .id_must_not_be_zero;
-            if (a.id == math.maxInt(u128)) return .id_must_not_be_max_int;
+            if (a.id == math.maxInt(u128)) return .id_must_not_be_int_max;
             if (a.ledger == 0) return .ledger_must_not_be_zero;
             if (a.code == 0) return .code_must_not_be_zero;
 
@@ -586,16 +586,16 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (t.reserved != 0) return .reserved_field;
 
             if (t.id == 0) return .id_must_not_be_zero;
-            if (t.id == math.maxInt(u128)) return .id_must_not_be_max_int;
+            if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                 return self.post_or_void_pending_transfer(t);
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
-            if (t.debit_account_id == math.maxInt(u128)) return .debit_account_id_must_not_be_max_int;
+            if (t.debit_account_id == math.maxInt(u128)) return .debit_account_id_must_not_be_int_max;
             if (t.credit_account_id == 0) return .credit_account_id_must_not_be_zero;
-            if (t.credit_account_id == math.maxInt(u128)) return .credit_account_id_must_not_be_max_int;
+            if (t.credit_account_id == math.maxInt(u128)) return .credit_account_id_must_not_be_int_max;
             if (t.credit_account_id == t.debit_account_id) return .accounts_must_be_different;
 
             if (t.pending_id != 0) return .pending_id_must_be_zero;
@@ -720,7 +720,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
 
             if (t.pending_id == 0) return .pending_id_must_not_be_zero;
-            if (t.pending_id == math.maxInt(u128)) return .pending_id_must_not_be_max_int;
+            if (t.pending_id == math.maxInt(u128)) return .pending_id_must_not_be_int_max;
             if (t.pending_id == t.id) return .pending_id_must_be_different;
 
             const p = self.get_transfer(t.pending_id) orelse return .pending_transfer_not_found;
@@ -1095,7 +1095,7 @@ test "create/lookup/rollback accounts" {
             }),
         },
         .{
-            .result = .id_must_not_be_max_int,
+            .result = .id_must_not_be_int_max,
             .object = mem.zeroInit(Account, .{
                 .id = math.maxInt(u128),
                 .user_data = 0,
@@ -1599,7 +1599,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         .{
-            .result = .id_must_not_be_max_int,
+            .result = .id_must_not_be_int_max,
             .object = mem.zeroInit(Transfer, .{
                 .id = math.maxInt(u128),
                 .debit_account_id = 0,
@@ -1629,7 +1629,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         .{
-            .result = .debit_account_id_must_not_be_max_int,
+            .result = .debit_account_id_must_not_be_int_max,
             .object = mem.zeroInit(Transfer, .{
                 .id = 1,
                 .debit_account_id = math.maxInt(u128),
@@ -1659,7 +1659,7 @@ test "create/lookup/rollback transfers" {
             }),
         },
         .{
-            .result = .credit_account_id_must_not_be_max_int,
+            .result = .credit_account_id_must_not_be_int_max,
             .object = mem.zeroInit(Transfer, .{
                 .id = 1,
                 .debit_account_id = 100,
@@ -2343,7 +2343,7 @@ test "create/lookup/rollback 2-phase transfers" {
             }),
         },
         .{
-            .result = .pending_id_must_not_be_max_int,
+            .result = .pending_id_must_not_be_int_max,
             .object = mem.zeroInit(Transfer, .{
                 .id = 101,
                 .debit_account_id = 10,
