@@ -12,7 +12,8 @@ const TransferFlags = tb.TransferFlags;
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
-const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachine;
+const Storage = @import("tigerbeetle/src/storage.zig").Storage;
+const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachineType(Storage);
 const Operation = StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
 const IO = @import("tigerbeetle/src/io.zig").IO;
