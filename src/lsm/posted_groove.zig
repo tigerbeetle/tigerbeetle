@@ -232,16 +232,25 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             fn start_workers(context: *PrefetchContext) void {
                 assert(context.workers_busy == 0);
 
-                while (context.workers_busy < context.workers.len) : (context.workers_busy += 1) {
-                    const worker = &context.workers[context.workers_busy];
+                // Track an extra "worker" that will finish after the loop.
+                //
+                // This prevents `context.finish()` from being called within the loop body when every
+                // worker finishes synchronously. `context.finish()` sets the `context` to undefined,
+                // but `context` is required for the last loop condition check.
+                context.workers_busy += 1;
+
+                // -1 to ignore the extra worker.
+                while (context.workers_busy - 1 < context.workers.len) {
+                    const worker = &context.workers[context.workers_busy - 1];
                     worker.* = .{ .context = context };
-                    if (!worker.lookup_start()) break;
+                    context.workers_busy += 1;
+                    if (!worker.lookup_start()) {
+                        break;
+                    }
                 }
 
-                if (context.workers_busy == 0) {
-                    assert(context.groove.prefetch_ids.count() == 0);
-                    context.finish();
-                }
+                assert(context.workers_busy >= 1);
+                context.worker_finished();
             }
 
             fn worker_finished(context: *PrefetchContext) void {
@@ -252,7 +261,9 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             }
 
             fn finish(context: *PrefetchContext) void {
+                assert(context.workers_busy == 0);
                 assert(context.groove.prefetch_ids.count() == 0);
+                assert(context.id_iterator.next() == null);
 
                 const callback = context.callback;
                 context.* = undefined;
