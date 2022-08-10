@@ -121,6 +121,15 @@ pub const MessagePool = struct {
 
         return ret;
     }
+    
+    /// Frees all messages that were unused or returned to the pool via unref().
+    pub fn deinit(pool: *MessagePool, allocator: mem.Allocator) void {
+        while (pool.free_list) |message| {
+            pool.free_list = message.next;
+            allocator.free(message.buffer);
+            allocator.destroy(message);
+        }
+    }
 
     /// Get an unused message with a buffer of config.message_size_max.
     /// The returned message has exactly one reference.

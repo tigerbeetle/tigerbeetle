@@ -78,7 +78,10 @@ pub fn main() !void {
     var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
     var io = try IO.init(32, 0);
+    defer io.deinit();
+
     var message_pool = try MessagePool.init(allocator, .client);
+    defer message_pool.deinit(allocator);
 
     var client = try Client.init(
         allocator,
@@ -94,7 +97,9 @@ pub fn main() !void {
     defer client.deinit(allocator);
 
     // Pre-allocate a million transfers:
-    const transfers = try arena.allocator().alloc(tb.Transfer, transfers_max);
+    const transfers = try allocator.alloc(tb.Transfer, transfers_max);
+    defer allocator.free(transfers);
+    
     for (transfers) |*transfer, index| {
         transfer.* = .{
             .id = index,
