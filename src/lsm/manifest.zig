@@ -683,19 +683,5 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.checkpoint_callback = null;
             callback(manifest);
         }
-
-        /// Returns a unique snapshot, incrementing the greatest snapshot value seen so far,
-        /// whether this was for a TableInfo.snapshot_min/snapshot_max or registered snapshot.
-        pub fn take_snapshot(manifest: *Manifest) u64 {
-            // A snapshot cannot be 0 as this is a reserved value in the superblock.
-            assert(manifest.snapshot_max > 0);
-            // The constant snapshot_latest must compare greater than any issued snapshot.
-            // This also ensures that we are not about to overflow the u64 counter.
-            assert(manifest.snapshot_max < snapshot_latest - 1);
-
-            manifest.snapshot_max += 1;
-
-            return manifest.snapshot_max;
-        }
     };
 }
