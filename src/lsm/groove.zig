@@ -615,8 +615,6 @@ pub fn GrooveType(
             }
 
             fn worker_finished(context: *PrefetchContext) void {
-                assert(context.groove.prefetch_ids.count() == 0);
-
                 context.workers_busy -= 1;
                 if (context.workers_busy == 0) context.finish();
             }
@@ -647,6 +645,7 @@ pub fn GrooveType(
 
                 const id = worker.context.id_iterator.next() orelse {
                     groove.prefetch_ids.clearRetainingCapacity();
+                    assert(groove.prefetch_ids.count() == 0);
                     worker.context.worker_finished();
                     return false;
                 };
