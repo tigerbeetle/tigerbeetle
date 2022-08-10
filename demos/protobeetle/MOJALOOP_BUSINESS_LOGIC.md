@@ -1216,7 +1216,6 @@ WHERE participantCurrencyId = ?--hubAccountId - The Hub account per currency and
 --At this point, the notification message is sent to the DFSP.
 ```
 
-
 ### Settlement Continued
 The following logic will take place post each of the following Settlement Events described above (Record Transfers, Reservation and Commit):
 
