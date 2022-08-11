@@ -361,16 +361,16 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             groove.tree.open(tree_callback);
         }
 
-        pub fn compact(groove: *PostedGroove, op: u64, callback: fn (*PostedGroove) void) void {
+        pub fn compact(groove: *PostedGroove, callback: fn (*PostedGroove) void, op: u64) void {
             assert(groove.callback == null);
             groove.callback = callback;
-            groove.tree.compact(op, tree_callback);
+            groove.tree.compact(tree_callback, op);
         }
 
-        pub fn checkpoint(groove: *PostedGroove, op: u64, callback: fn (*PostedGroove) void) void {
+        pub fn checkpoint(groove: *PostedGroove, callback: fn (*PostedGroove) void) void {
             assert(groove.callback == null);
             groove.callback = callback;
-            groove.tree.checkpoint(op, tree_callback);
+            groove.tree.checkpoint(tree_callback);
         }
     };
 }

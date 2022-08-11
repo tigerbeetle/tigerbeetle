@@ -2524,7 +2524,7 @@ pub fn ReplicaType(
                     self.op_checkpoint,
                     self.op_checkpoint_next(),
                 });
-                self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback, op);
+                self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
             } else {
                 assert(op < self.op_checkpoint_trigger());
                 self.commit_op_done();
