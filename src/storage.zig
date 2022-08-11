@@ -203,6 +203,7 @@ pub const Storage = struct {
             error.IsDir,
             error.SystemResources,
             error.Unseekable,
+            error.ConnectionTimedOut,
             error.Unexpected,
             => {
                 log.err(

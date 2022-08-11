@@ -82,10 +82,6 @@ pub const journal_slot_count = switch (deployment_environment) {
 // TODO remove this; just allocate a part of the total storage for the journal
 pub const journal_size_max = journal_slot_count * (128 + message_size_max);
 
-// TODO Move these to a separate "internal computed constants" file.
-pub const journal_size_headers = journal_slot_count * 128; // 128 == @sizeOf(Header)
-pub const journal_size_prepares = journal_slot_count * message_size_max;
-
 /// The maximum number of connections that can be held open by the server at any time:
 pub const connections_max = replicas_max + clients_max;
 
@@ -150,7 +146,7 @@ pub const tcp_keepalive = true;
 
 /// The time (in seconds) the connection needs to be idle before sending TCP keepalive probes:
 /// Probes are not sent when the send buffer has data or the congestion window size is zero,
-/// for these cases we also need tcp_user_timeout below.
+/// for these cases we also need tcp_user_timeout_ms below.
 pub const tcp_keepidle = 5;
 
 /// The time (in seconds) between individual keepalive probes:
@@ -162,13 +158,13 @@ pub const tcp_keepcnt = 3;
 /// The time (in milliseconds) to timeout an idle connection or unacknowledged send:
 /// This timer rides on the granularity of the keepalive or retransmission timers.
 /// For example, if keepalive will only send a probe after 10s then this becomes the lower bound
-/// for tcp_user_timeout to fire, even if tcp_user_timeout is 2s. Nevertheless, this would timeout
+/// for tcp_user_timeout_ms to fire, even if tcp_user_timeout_ms is 2s. Nevertheless, this would timeout
 /// the connection at 10s rather than wait for tcp_keepcnt probes to be sent. At the same time, if
-/// tcp_user_timeout is larger than the max keepalive time then tcp_keepcnt will be ignored and
-/// more keepalive probes will be sent until tcp_user_timeout fires.
+/// tcp_user_timeout_ms is larger than the max keepalive time then tcp_keepcnt will be ignored and
+/// more keepalive probes will be sent until tcp_user_timeout_ms fires.
 /// For a thorough overview of how these settings interact:
 /// https://blog.cloudflare.com/when-tcp-sockets-refuse-to-die/
-pub const tcp_user_timeout = (tcp_keepidle + tcp_keepintvl * tcp_keepcnt) * 1000;
+pub const tcp_user_timeout_ms = (tcp_keepidle + tcp_keepintvl * tcp_keepcnt) * 1000;
 
 /// Whether to disable Nagle's algorithm to eliminate send buffering delays:
 pub const tcp_nodelay = true;
@@ -308,7 +304,11 @@ pub const clock_synchronization_window_max_ms = 20000;
 /// Whether to perform intensive online verification.
 pub const verify = true;
 
-// TODO Move these into a separate `config_valid.zig` which we import here:
+// TODO Move these to a separate "internal computed constants" file.
+pub const journal_size_headers = journal_slot_count * 128; // 128 == @sizeOf(Header)
+pub const journal_size_prepares = journal_slot_count * message_size_max;
+
+ // TODO Move these into a separate `config_valid.zig` which we import here:
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
@@ -317,6 +317,8 @@ comptime {
     // Avoid latency issues from setting sndbuf too high:
     assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
     assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
+
+    assert(journal_size_max == journal_size_headers + journal_size_prepares);
 
     // For the given WAL (lsm_batch_multiple=4):
     //
