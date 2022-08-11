@@ -255,8 +255,13 @@ pub fn ReplicaType(
             self.opened = false;
             self.superblock.open(superblock_open_callback, &self.superblock_context);
             while (!self.opened) self.superblock.storage.tick();
+            assert(self.superblock.working.vsr_state.internally_consistent());
 
             if (self.superblock.working.replica >= options.replica_count) {
+                log.err("{}: open: no address for replica (replica_count={})", .{
+                    self.superblock.working.replica,
+                    options.replica_count,
+                });
                 return error.NoAddress;
             }
 
