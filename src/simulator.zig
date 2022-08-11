@@ -85,6 +85,7 @@ pub fn main() !void {
         .replica_count = replica_count,
         .client_count = client_count,
         .seed = random.int(u64),
+        .on_change_state = on_change_replica,
         .network_options = .{
             .packet_simulator_options = .{
                 .replica_count = replica_count,
@@ -204,11 +205,6 @@ pub fn main() !void {
 
     cluster.state_checker = try StateChecker.init(allocator, cluster);
     defer cluster.state_checker.deinit();
-
-    for (cluster.replicas) |*replica| {
-        replica.on_change_state = on_change_replica;
-    }
-    cluster.on_change_state = on_change_replica;
 
     var requests_sent: u64 = 0;
     var idle = false;

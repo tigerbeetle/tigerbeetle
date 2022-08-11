@@ -530,7 +530,7 @@ pub fn GrooveType(
             groove.* = undefined;
         }
 
-        pub fn get(groove: *Groove, id: u128) ?*const Object {
+        pub fn get(groove: *const Groove, id: u128) ?*const Object {
             if (groove.ids.get_cached(id)) |id_tree_value| {
                 if (id_tree_value.tombstone()) {
                     return null;
@@ -739,7 +739,7 @@ pub fn GrooveType(
             }
         }
 
-        /// Update the object and index tress by diff'ing the old and new values.
+        /// Update the object and index trees by diff'ing the old and new values.
         fn update(groove: *Groove, old: *const Object, new: *const Object) void {
             assert(old.id == new.id);
             assert(old.timestamp == new.timestamp);

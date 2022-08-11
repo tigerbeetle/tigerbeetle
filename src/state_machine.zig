@@ -143,7 +143,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn open(self: *StateMachine, callback: fn (*StateMachine) void) void {
             assert(self.open_callback == null);
             self.open_callback = callback;
-            
+
             self.forest.open(forest_open_callback);
         }
 
@@ -889,19 +889,16 @@ pub fn StateMachineType(comptime Storage: type) type {
             return .exists;
         }
 
-        // TODO *const StateMachine?
-        fn get_account(self: *StateMachine, id: u128) ?*const Account {
+        fn get_account(self: *const StateMachine, id: u128) ?*const Account {
             return self.forest.grooves.accounts.get(id);
         }
 
-        // TODO *const StateMachine?
-        fn get_transfer(self: *StateMachine, id: u128) ?*const Transfer {
+        fn get_transfer(self: *const StateMachine, id: u128) ?*const Transfer {
             return self.forest.grooves.transfers.get(id);
         }
 
         /// Returns whether a pending transfer, if it exists, has already been posted or voided.
-        // TODO *const StateMachine?
-        fn get_posted(self: *StateMachine, pending_id: u128) ?bool {
+        fn get_posted(self: *const StateMachine, pending_id: u128) ?bool {
             return self.forest.grooves.posted.get(pending_id);
         }
     };

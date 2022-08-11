@@ -32,6 +32,7 @@ pub const ClusterOptions = struct {
     client_count: u8,
 
     seed: u64,
+    on_change_state: fn (replica: *Replica) void,
 
     network_options: NetworkOptions,
     storage_options: Storage.Options,
@@ -76,7 +77,6 @@ pub const Cluster = struct {
 
     // TODO: Initializing these fields in main() is a bit ugly
     state_checker: StateChecker = undefined,
-    on_change_state: fn (replica: *Replica) void = undefined,
 
     pub fn create(allocator: mem.Allocator, prng: std.rand.Random, options: ClusterOptions) !*Cluster {
         const process_count = options.replica_count + options.client_count;
@@ -206,6 +206,7 @@ pub const Cluster = struct {
         for (cluster.replicas) |*replica| replica.deinit(cluster.allocator);
         cluster.allocator.free(cluster.replicas);
         cluster.allocator.free(cluster.health);
+        for (cluster.pools) |*pool| pool.deinit(cluster.allocator);
         cluster.allocator.free(cluster.pools);
 
         for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
@@ -377,7 +378,7 @@ pub const Cluster = struct {
         assert(replica.replica_count == cluster.replicas.len);
         assert(replica.status == .recovering);
 
-        replica.on_change_state = cluster.on_change_state;
+        replica.on_change_state = cluster.options.on_change_state;
         cluster.network.link(replica.message_bus.process, &replica.message_bus);
     }
 };

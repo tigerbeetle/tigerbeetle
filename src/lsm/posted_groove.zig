@@ -171,7 +171,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             groove.* = undefined;
         }
 
-        pub fn get(groove: *PostedGroove, id: u128) ?bool {
+        pub fn get(groove: *const PostedGroove, id: u128) ?bool {
             if (groove.tree.get_cached(id)) |value| {
                 switch (value.data) {
                     .posted => return true,
