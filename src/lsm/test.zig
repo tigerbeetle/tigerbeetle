@@ -96,6 +96,7 @@ const Environment = struct {
         errdefer env.storage.deinit();
 
         env.message_pool = try MessagePool.init(allocator, .replica);
+        errdefer env.message_pool.deinit(allocator);
 
         env.superblock = try SuperBlock.init(allocator, &env.storage, &env.message_pool);
         env.superblock_context = undefined;
@@ -117,7 +118,7 @@ const Environment = struct {
         env.forest.deinit(allocator);
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
-        // message_pool doesn't need to be deinit()
+        env.message_pool.deinit(allocator);
         env.storage.deinit();
         env.io.deinit();
         std.os.close(env.fd);
@@ -276,7 +277,7 @@ const Environment = struct {
                 {
                     defer assertion.groove.prefetch_clear();
                     for (assertion.objects[0..assertion.verify_count]) |*object| {
-                        log.debug("verifying {} for id={}", .{visibility, object.id});
+                        // log.debug("verifying {} for id={}", .{visibility, object.id});
                         const result = assertion.groove.get(object.id);
 
                         switch (visibility) {

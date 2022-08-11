@@ -232,27 +232,34 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             fn start_workers(context: *PrefetchContext) void {
                 assert(context.workers_busy == 0);
 
-                while (context.workers_busy < context.workers.len) : (context.workers_busy += 1) {
-                    const worker = &context.workers[context.workers_busy];
+                // Track an extra "worker" that will finish after the loop.
+                //
+                // This prevents `context.finish()` from being called within the loop body when every
+                // worker finishes synchronously. `context.finish()` sets the `context` to undefined,
+                // but `context` is required for the last loop condition check.
+                context.workers_busy += 1;
+
+                // -1 to ignore the extra worker.
+                while (context.workers_busy - 1 < context.workers.len) {
+                    const worker = &context.workers[context.workers_busy - 1];
                     worker.* = .{ .context = context };
+                    context.workers_busy += 1;
                     if (!worker.lookup_start()) break;
                 }
 
-                if (context.workers_busy == 0) {
-                    assert(context.groove.prefetch_ids.count() == 0);
-                    context.finish();
-                }
+                assert(context.workers_busy >= 1);
+                context.worker_finished();
             }
 
             fn worker_finished(context: *PrefetchContext) void {
-                assert(context.groove.prefetch_ids.count() == 0);
-
                 context.workers_busy -= 1;
                 if (context.workers_busy == 0) context.finish();
             }
 
             fn finish(context: *PrefetchContext) void {
+                assert(context.workers_busy == 0);
                 assert(context.groove.prefetch_ids.count() == 0);
+                assert(context.id_iterator.next() == null);
 
                 const callback = context.callback;
                 context.* = undefined;
@@ -272,6 +279,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 const id = worker.context.id_iterator.next() orelse {
                     groove.prefetch_ids.clearRetainingCapacity();
                     assert(groove.prefetch_ids.count() == 0);
+                    worker.context.worker_finished();
                     return false;
                 };
 
@@ -319,7 +327,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
             fn lookup_finish(worker: *PrefetchWorker) void {
                 if (!worker.lookup_start()) {
-                    worker.context.worker_finished();
                     worker.* = undefined;
                 }
             }

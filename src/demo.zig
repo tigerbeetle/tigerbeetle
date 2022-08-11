@@ -40,6 +40,7 @@ pub fn request(
     defer io.deinit();
 
     var message_pool = try MessagePool.init(allocator, .client);
+    defer message_pool.deinit(allocator);
 
     var client = try Client.init(
         allocator,

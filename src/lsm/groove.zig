@@ -595,23 +595,34 @@ pub fn GrooveType(
             fn start_workers(context: *PrefetchContext) void {
                 assert(context.workers_busy == 0);
 
-                while (context.workers_busy < context.workers.len) {
-                    const worker = &context.workers[context.workers_busy];
+                // Track an extra "worker" that will finish after the loop.
+                //
+                // This prevents `context.finish()` from being called within the loop body when every
+                // worker finishes synchronously. `context.finish()` sets the `context` to undefined,
+                // but `context` is required for the last loop condition check.
+                context.workers_busy += 1;
+
+                // -1 to ignore the extra worker.
+                while (context.workers_busy - 1 < context.workers.len) {
+                    const worker = &context.workers[context.workers_busy - 1];
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
                     if (!worker.lookup_start()) break;
                 }
+
+                assert(context.workers_busy >= 1);
+                context.worker_finished();
             }
 
             fn worker_finished(context: *PrefetchContext) void {
-                assert(context.groove.prefetch_ids.count() == 0);
-
                 context.workers_busy -= 1;
                 if (context.workers_busy == 0) context.finish();
             }
 
             fn finish(context: *PrefetchContext) void {
+                assert(context.workers_busy == 0);
                 assert(context.groove.prefetch_ids.count() == 0);
+                assert(context.id_iterator.next() == null);
 
                 const callback = context.callback;
                 context.* = undefined;
@@ -634,6 +645,7 @@ pub fn GrooveType(
 
                 const id = worker.context.id_iterator.next() orelse {
                     groove.prefetch_ids.clearRetainingCapacity();
+                    assert(groove.prefetch_ids.count() == 0);
                     worker.context.worker_finished();
                     return false;
                 };
@@ -644,7 +656,7 @@ pub fn GrooveType(
                 }
 
                 // If not in the LSM tree's cache, the object must be read from disk and added
-                // to the auxillary prefetch_objects hash map.
+                // to the auxiliary prefetch_objects hash map.
                 // TODO: this LSM tree function needlessly checks the LSM tree's cache a
                 // second time. Adding API to the LSM tree to avoid this may be worthwhile.
                 groove.ids.lookup(
@@ -736,6 +748,16 @@ pub fn GrooveType(
             if (!std.mem.eql(u8, std.mem.asBytes(old), std.mem.asBytes(new))) {
                 groove.objects.remove(old);
                 groove.objects.put(new);
+
+                // Don't forget to update the prefetch_objects tree when prefetching 
+                // as this is the object returned by future calls to Groove.get().
+                if (groove.prefetch_objects.count() > 0) {
+                    if (groove.prefetch_objects.getKeyPtrAdapted(old.id, PrefetchObjectsAdapter{})) |prefetch_obj| {
+                        // Only update the prefetch object if `old` originates from that hash map.
+                        // `old` could originate from groove.objects if groove.ids was populated.
+                        if (old == prefetch_obj) prefetch_obj.* = new.*;
+                    }
+                }
             }
 
             inline for (std.meta.fields(IndexTrees)) |field| {
