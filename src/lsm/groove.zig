@@ -748,7 +748,8 @@ pub fn GrooveType(
 
             // Update the object tree entry if any of the fields (even ignored) are different.
             if (!std.mem.eql(u8, std.mem.asBytes(old), std.mem.asBytes(new))) {
-                groove.objects.remove(old);
+                // Unlike the index trees, the new and old values in the object tree share the
+                // same key. Therefore put() is sufficient to overwrite the old value.
                 groove.objects.put(new);
             }
 
