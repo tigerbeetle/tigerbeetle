@@ -34,9 +34,6 @@ pub const MessageBus = struct {
     pub fn init(
         _: std.mem.Allocator,
         cluster: u32,
-        // TODO Replica initializes the MessageBus, but doesn't know about the Process type.
-        // For now move Process into MessageBus.Options; resolve this when unifying the MessageBus
-        // implementations.
         process: Process,
         message_pool: *MessagePool,
         on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,

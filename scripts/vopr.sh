@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -eEuo pipefail
 
 # Install Zig if it does not already exist:
 if [ ! -d "zig" ]; then
@@ -11,10 +11,10 @@ if [ ! -d "zig" ]; then
 fi
 
 # If a seed is provided as an argument then replay the seed, otherwise test a 1,000 seeds:
-if [ "$1" ]; then
+if [ "${1:-}" ]; then
 
     # Build in fast ReleaseSafe mode if required, useful where you don't need debug logging:
-    if [ "$2" == "-OReleaseSafe" ]; then
+    if [ "${2:-}" == "-OReleaseSafe" ]; then
         echo "Replaying seed $1 in ReleaseSafe mode..."
         BUILD_MODE="-OReleaseSafe"
     else
@@ -23,10 +23,10 @@ if [ "$1" ]; then
     fi
     echo ""
 
-    zig/zig run src/simulator.zig $BUILD_MODE -- $1
+    zig/zig run src/simulator.zig $BUILD_MODE -- "$1"
 else
     zig/zig build-exe src/simulator.zig -OReleaseSafe
-    for I in {1..1000}
+    for _ in {1..1000}
     do
         ./simulator
     done

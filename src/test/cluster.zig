@@ -229,7 +229,20 @@ pub const Cluster = struct {
             return false;
         }
 
-        // Ensure that the replica can eventually recover without this replica.
+        // TODO Remove this workaround when VSR recovery protocol is disabled.
+        for (replica.journal.prepare_inhabited) |inhabited, i| {
+            if (i == 0) {
+                // Ignore the root header.
+            } else {
+                if (inhabited) break;
+            }
+        } else {
+            // Only crash when at least one header has been written to the WAL.
+            // An empty WAL would skip recovery after a crash.
+            return false;
+        }
+
+        // Ensure that the cluster can eventually recover without this replica.
         // Verify that each op is recoverable by the current healthy cluster (minus the replica we
         // are trying to crash).
         // TODO Remove this workaround when VSR recovery protocol is disabled.
