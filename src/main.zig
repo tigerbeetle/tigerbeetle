@@ -21,7 +21,6 @@ const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
-const ReplicaFormat = vsr.ReplicaFormatType(Storage);
 
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
