@@ -18,6 +18,12 @@ git clone https://github.com/coilhq/tigerbeetle.git
 cd tigerbeetle/
 ```
 
+## Upgrade Ubuntu to the 5.7.15 kernel
+
+```bash
+scripts/upgrade_ubuntu_kernel.sh
+```
+
 ## Install Zig and build TigerBeetle
 
 ```bash
@@ -26,7 +32,7 @@ scripts/install.sh
 
 ## Simulate non-pristine lab conditions
 
-You are ready to rock! To simulate non-pristine lab conditions (tiger beetles thrive in harsh environments with noisy neighbors) turn up your favorite album, or if you're looking for something new we suggest Noel Gallagher's High Flying Birds.
+You are ready to rock! To simulate non-pristine lab conditions (tiger beetles thrive in harsh environments with noisy neighbors), turn up your favorite album, or if you're looking for something new, we suggest Noel Gallagher's High Flying Birds.
 
 Be aware that super non-pristine lab conditions such as an active video call might cause cache pollution and drop throughput. But rock 'n roll is generally fine.
 
@@ -42,11 +48,13 @@ scripts/benchmark.sh
 
 Take a look at the source code of these demos before you run them. Check out our screencast of these demos for much more detail (note that there have been a few changes to our types since the screencast).
 
-Let's turn up the log level some more (and your favorite album) so you can see everything the server does as you run these demos:
+Let's turn up the log level some more (and your favorite album), so you can see everything the server does as you run these demos:
 
-* Open `src/config.zig` in your editor and change `log_level` to `3` (debug).
+- Open `src/config.zig` in your editor and change `log_level` to `3` (debug).
 
-* Start a single replica cluster:
+- Rebuild TigerBeetle using the new debug log level by running `zig/zig build -Dcpu=baseline -Drelease-safe && mv zig-out/bin/tigerbeetle .`
+
+- Start a single replica cluster:
 Format the data file:
 `./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle`
 Start the replica from the data file:
@@ -80,9 +88,9 @@ zig/zig run src/demo_07_lookup_transfers.zig
 
 ### Demo 4, 5, 6: Two-phase transfer journal entries
 
-Let's try full two-phase transfers (create, and then post):
+Let's try full two-phase transfers (create and then post):
 
-*These two-phase transfers are designed for two-phase systems such as Interledger or Mojaloop, where the fulfil packet only includes the transfer id and you want to avoid a lookup query roundtrip to the database before writing the compensating journal entry.*
+*These two-phase transfers are designed for two-phase systems such as Interledger or Mojaloop, where the fulfill packet only includes the transfer id, and you want to avoid a lookup query roundtrip to the database before writing the compensating journal entry.*
 
 You will see the second transfer is rejected with an error for tripping the debit reserved limit.
 
@@ -91,7 +99,7 @@ zig/zig run src/demo_04_create_pending_transfers.zig
 zig/zig run src/demo_02_lookup_accounts.zig
 ```
 
-You will see these two-phase transfers only update the inflight reserved limits.
+You will see these two-phase transfers only update the reserved inflight limits.
 
 Let's post (and accept):
 
