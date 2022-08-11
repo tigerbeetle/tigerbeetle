@@ -121,6 +121,7 @@ const Context = struct {
     io: *IO,
     addresses: []std.net.Address,
     client: Client,
+    message_pool: MessagePool,
 
     fn create(
         env: c.napi_env,
@@ -133,19 +134,20 @@ const Context = struct {
         errdefer allocator.destroy(context);
 
         context.io = io;
+        context.message_pool = try MessagePool.init(allocator, .client);
+        errdefer context.message_pool.deinit(allocator);
 
         context.addresses = try vsr.parse_addresses(allocator, addresses_raw);
         errdefer allocator.free(context.addresses);
         assert(context.addresses.len > 0);
 
         const client_id = std.crypto.random.int(u128);
-        var message_pool = try MessagePool.init(allocator, .client);
         context.client = try Client.init(
             allocator,
             client_id,
             cluster,
             @intCast(u8, context.addresses.len),
-            &message_pool,
+            &context.message_pool,
             .{
                 .configuration = context.addresses,
                 .io = context.io,
@@ -766,6 +768,8 @@ fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
 
     const allocator = std.heap.c_allocator;
     context.client.deinit(allocator);
+    context.message_pool.deinit(allocator);
+    allocator.free(context.addresses);
 
     return null;
 }
