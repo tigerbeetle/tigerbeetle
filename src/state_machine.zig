@@ -207,6 +207,12 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.prefetch_input = input;
             self.prefetch_callback = callback;
 
+            // We do this here instead of at the end of commit() to avoid the need to call
+            // prefetch() in the StateMachine unit tests below.
+            self.forest.grooves.accounts.prefetch_clear();
+            self.forest.grooves.transfers.prefetch_clear();
+            self.forest.grooves.posted.prefetch_clear();
+
             return switch (operation) {
                 .reserved, .root, .register => unreachable,
                 .create_accounts => {
@@ -357,10 +363,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
                 else => unreachable,
             };
-
-            self.forest.grooves.accounts.prefetch_clear();
-            self.forest.grooves.transfers.prefetch_clear();
-            self.forest.grooves.posted.prefetch_clear();
 
             return result;
         }
@@ -562,7 +564,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn create_account_rollback(self: *StateMachine, a: *const Account) void {
-            self.forest.grooves.accounts.remove(a);
+            self.forest.grooves.accounts.remove(a.id);
         }
 
         fn create_account_exists(a: *const Account, e: *const Account) CreateAccountResult {
@@ -683,7 +685,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.forest.grooves.accounts.put(&dr);
             self.forest.grooves.accounts.put(&cr);
 
-            self.forest.grooves.transfers.remove(t);
+            self.forest.grooves.transfers.remove(t.id);
         }
 
         fn create_transfer_exists(t: *const Transfer, e: *const Transfer) CreateTransferResult {
@@ -829,11 +831,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.forest.grooves.accounts.put(&cr);
 
             self.forest.grooves.posted.remove(t.pending_id);
-
-            // We need to remove exactly what was put(), otherwise we cannot update indexes.
-            // However, the posting/voiding transfer `t` may not have had all fields provided.
-            // Therefore, get() what was put() and remove() that.
-            self.forest.grooves.transfers.remove(self.get_transfer(t.id).?);
+            self.forest.grooves.transfers.remove(t.id);
         }
 
         fn post_or_void_pending_transfer_exists(

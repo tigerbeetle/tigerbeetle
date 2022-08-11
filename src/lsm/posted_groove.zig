@@ -84,9 +84,10 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         /// and enables simple state machine function signatures that commit writes atomically.
         prefetch_ids: PrefetchIDs,
 
-        /// An auxillary hash map for prefetched objects which are not present in the mutable table
-        /// or value cache of the object tree and ID index tree.
-        /// This is required for correctness, to not evict other prefetch hits from the value cache.
+        /// The prefetched Objects. This hash map holds the subset of objects in the LSM tree
+        /// that are required for the current commit. All get()/put()/remove() operations during
+        /// the commit are both passed to the LSM trees and mirrored in this hash map. It is always
+        /// sufficient to query this hashmap alone to know the state of the LSM trees.
         prefetch_objects: PrefetchObjects,
 
         /// This field is necessary to expose the same open()/compact_cpu()/compact_io() function
@@ -172,15 +173,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         }
 
         pub fn get(groove: *const PostedGroove, id: u128) ?bool {
-            if (groove.tree.get_cached(id)) |value| {
-                switch (value.data) {
-                    .posted => return true,
-                    .voided => return false,
-                    .tombstone => return null,
-                }
-            } else {
-                return groove.prefetch_objects.get(id);
-            }
+            return groove.prefetch_objects.get(id);
         }
 
         /// Must be called directly after the state machine commit is finished and prefetch results
@@ -192,12 +185,18 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         }
 
         /// This must be called by the state machine for every key to be prefetched.
+        /// We tolerate duplicate IDs enqueued by the state machine.
+        /// For example, if all unique operations require the same two dependencies.
         pub fn prefetch_enqueue(groove: *PostedGroove, id: u128) void {
-            if (groove.tree.get_cached(id) != null) return;
-
-            // We tolerate duplicate IDs enqueued by the state machine.
-            // For example, if all unique operations require the same two dependencies.
-            groove.prefetch_ids.putAssumeCapacity(id, {});
+            if (groove.tree.get_cached(id)) |value| {
+                switch (value.data) {
+                    .posted => groove.prefetch_objects.putAssumeCapacity(value.id, true),
+                    .voided => groove.prefetch_objects.putAssumeCapacity(value.id, false),
+                    .tombstone => {}, // Leave the ID out of prefetch_objects.
+                }
+            } else {
+                groove.prefetch_ids.putAssumeCapacity(id, {});
+            }
         }
 
         /// Ensure the objects corresponding to all ids enqueued with prefetch_enqueue() are
@@ -333,18 +332,19 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         };
 
         pub fn put_no_clobber(groove: *PostedGroove, id: u128, posted: bool) void {
-            assert(groove.get(id) == null);
+            const gop = groove.prefetch_objects.getOrPutAssumeCapacity(id);
+            assert(!gop.found_existing);
 
             const value: Value = .{
                 .id = id,
                 .data = if (posted) .posted else .voided,
             };
             groove.tree.put(&value);
+            gop.value_ptr.* = posted;
         }
 
         pub fn remove(groove: *PostedGroove, id: u128) void {
-            assert(groove.get(id) != null);
-
+            assert(groove.prefetch_objects.remove(id));
             groove.tree.remove(&Value{ .id = id, .data = .tombstone });
         }
 
