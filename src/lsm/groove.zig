@@ -753,8 +753,9 @@ pub fn GrooveType(
                 // as this is the object returned by future calls to Groove.get().
                 if (groove.prefetch_objects.count() > 0) {
                     if (groove.prefetch_objects.getKeyPtrAdapted(old.id, PrefetchObjectsAdapter{})) |prefetch_obj| {
-                        assert(old == prefetch_obj);
-                        prefetch_obj.* = new.*;
+                        // Only update the prefetch object if `old` originates from that hash map.
+                        // `old` could originate from groove.objects if groove.ids was populated.
+                        if (old == prefetch_obj) prefetch_obj.* = new.*;
                     }
                 }
             }

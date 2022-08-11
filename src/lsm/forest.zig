@@ -211,3 +211,420 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         }
     };
 }
+
+pub fn main() !void {
+    try ForestTestType(struct {
+        pub const Storage = @import("../storage.zig").Storage;
+
+        const IO = @import("../io.zig").IO;
+        const SuperBlock = vsr.SuperBlockType(Storage);
+        const MessagePool = @import("../message_pool.zig").MessagePool;
+
+        const StorageContext = struct {
+            dir_fd: std.os.fd_t,
+            fd: std.os.fd_t,
+            io: IO,
+            storage: Storage,
+            initialized: bool,
+
+            fn init(
+                context: *StorageContext,
+                comptime size_max: u32,
+                comptime must_create: bool,
+            ) !void {
+                assert(!context.initialized);
+
+                const dir_path = ".";
+                context.dir_fd = try IO.open_dir(dir_path);
+                errdefer std.os.close(context.dir_fd);
+
+                context.fd = try IO.open_file(context.dir_fd, "test_forest", size_max, must_create);
+                errdefer std.os.close(context.fd);
+
+                context.io = try IO.init(128, 0);
+                errdefer context.io.deinit();
+
+                context.storage = try Storage.init(&context.io, context.fd);
+                errdefer context.storage.deinit();
+
+                context.initialized = true;
+            }
+
+            fn deinit(context: *StorageContext) void {
+                if (!context.initialized) return;
+                defer context.initialized = false;
+
+                context.storage.deinit();
+                context.io.deinit();
+                std.os.close(context.fd);
+                std.os.close(context.dir_fd);
+            }
+        };
+
+        pub fn with_storage(
+            allocator: mem.Allocator,
+            comptime size_max: u32,
+            comptime callback: fn (*Storage) anyerror!void,
+        ) !void {
+            var context: StorageContext = undefined;
+            context.initialized = false;
+
+            // Format the storage
+            {   
+                const must_create = true;
+                try context.init(size_max, must_create);
+                defer context.deinit();
+
+                var message_pool = try MessagePool.init(allocator, .replica);
+                defer message_pool.deinit(allocator);
+
+                var superblock = try SuperBlock.init(allocator, &context.storage, &message_pool);
+                defer superblock.deinit(allocator);
+
+                const cluster = 0;
+                const replica = 0;
+                try vsr.format(
+                    Storage,
+                    allocator,
+                    cluster,
+                    replica,
+                    &context.storage,
+                    &superblock,
+                );
+            }
+
+            // Open and run the storage
+            {
+                const must_create = false;
+                try context.init(size_max, must_create);
+                defer context.deinit();
+
+                try callback(&context.storagE);
+            }
+        }
+
+        pub fn crash_and_restore(
+            storage: *Storage,
+            allocator: mem.Allocator,
+            comptime size_max: u32,
+        ) !void {
+            _ = allocator;
+
+            const context = @fieldParentPtr(StorageContext, "storage", storage);
+            context.deinit();
+
+            const must_create = false;
+            try context.init(size_max, must_create);
+        }
+    }).run();
+}
+
+test "Forest" {
+    // TODO panics
+    // try test_forest_in_memory();
+
+    _ = ForestTestType(struct {
+        pub const Storage = @import("../storage.zig").Storage;
+    });
+}
+
+fn test_forest_in_memory() !void {
+    try ForestTestType(struct {
+        pub const Storage = @import("../test/storage.zig").Storage;
+
+        const SuperBlock = vsr.SuperBlockType(Storage);
+        const MessagePool = @import("../message_pool.zig").MessagePool;
+
+        pub fn with_storage(
+            allocator: mem.Allocator,
+            comptime size_max: u32,
+            comptime callback: fn (*Storage) anyerror!void,
+        ) !void {
+            const replica_index = 0;
+            var storage = try Storage.init(
+                allocator,
+                size_max,
+                Storage.Options{
+                    .seed = 0xdeadbeef,
+                    .read_latency_min = 0,
+                    .read_latency_mean = 0,
+                    .write_latency_min = 0,
+                    .write_latency_mean = 0,
+                    .read_fault_probability = 0,
+                    .write_fault_probability = 0,
+                },
+                replica_index,
+                Storage.FaultyAreas{
+                    .first_offset = 0,
+                    .period = 0,
+                },
+            );
+            defer storage.deinit(allocator);
+
+            // Format the superblock
+            {
+                var message_pool = try MessagePool.init(allocator, .replica);
+                defer message_pool.deinit(allocator);
+
+                var superblock = try SuperBlock.init(allocator, &storage, &message_pool);
+                defer superblock.deinit(allocator);
+
+                const cluster = 0;
+                const replica = 0;
+                try vsr.format(
+                    Storage,
+                    allocator,
+                    cluster,
+                    replica,
+                    &storage,
+                    &superblock,
+                );
+            }
+            
+            // Run the callback on the formatted storage
+            try callback(&storage);
+        }
+
+        pub fn crash_and_restore(
+            storage: *Storage,
+            allocator: mem.Allocator,
+            comptime size_max: u32,
+        ) !void {
+            // contents are in memory so we don't want to deinit() then init() again.
+            _ = storage;
+            _ = allocator;
+            _ = size_max;
+        }
+    }).run();
+}
+
+fn ForestTestType(comptime StorageProvider: type) type {
+    const tb = @import("../tigerbeetle.zig");
+    const Account = tb.Account;
+    const Transfer = tb.Transfer;
+
+    const GrooveType = @import("groove.zig").GrooveType;
+    const MessagePool = @import("../message_pool.zig").MessagePool;
+
+    const Storage = StorageProvider.Storage;
+    const Grid = GridType(Storage);
+    const SuperBlock = vsr.SuperBlockType(Storage);
+    const Forest = ForestType(Storage, .{
+        .accounts = GrooveType(
+            Storage,
+            Account,
+            .{
+                .ignored = &[_][]const u8{ "reserved", "flags" },
+                .derived = .{},
+            },
+        ),
+        .transfers = GrooveType(
+            Storage,
+            Transfer,
+            .{
+                .ignored = &[_][]const u8{ "reserved", "flags" },
+                .derived = .{},
+            },
+        ),
+    });
+
+    const allocator = std.testing.allocator;
+    const size_max = (512 + 64) * 1024 * 1024;
+
+    const node_count = 1024;
+    const cache_size = 2 * 1024 * 1024;
+    const forest_config = .{
+        .transfers = .{
+            .cache_size = cache_size,
+            .commit_count_max = 8191 * 2,
+        },
+        .accounts = .{
+            .cache_size = cache_size,
+            .commit_count_max = 8191,
+        },
+    };
+
+    const max_run_ops = 10; // TODO bump this up
+
+    return struct {
+        const Self = @This();
+
+        op: u64 = 0,
+        timestamp: u64 = 0,
+        checkpoint_op: ?u64 = null,
+        accounts: Recorder(Account) = .{},
+        transfers: Recorder(Transfer) = .{},
+        prng: std.rand.DefaultPrng = std.rand.DefaultPrng.init(0xdeadbeef),
+
+        fn Recorder(comptime T: type) type {
+            return struct {
+                inserted: std.ArrayList(T) = std.ArrayList(T).init(allocator),
+                checkpointed: u32 = 0,
+                next_checkpoint: u32 = 0,
+            };
+        }
+
+        pub fn run() !void {
+            try StorageProvider.with_storage(allocator, size_max, run_with_storage);
+        }
+
+        fn run_with_storage(storage: *Storage) !void {
+            var self = Self{};
+            defer self.accounts.inserted.deinit();
+            defer self.transfers.inserted.deinit();
+
+            while (true) {
+                try self.run_until_crash(storage);
+                if (self.op >= max_run_ops) break;
+                try StorageProvider.crash_and_restore(storage, allocator, size_max);
+            }
+        }
+
+        fn run_until_crash(self: *Self, storage: *Storage) !void {
+            var message_pool = try MessagePool.init(allocator, .replica);
+            defer message_pool.deinit(allocator);
+
+            var superblock = try SuperBlock.init(allocator, storage, &message_pool);
+            defer superblock.deinit(allocator);
+
+            // Open the superblock
+            {
+                const S = struct {
+                    var opened = false;
+                    fn superblock_open_callback(_: *SuperBlock.Context) void {
+                        opened = true;
+                    }
+                };
+
+                S.opened = false;
+                var context: SuperBlock.Context = undefined;
+                superblock.open(S.superblock_open_callback, &context);
+                while (!S.opened) storage.tick();
+            }
+
+            var grid = try Grid.init(allocator, &superblock);
+            defer grid.deinit(allocator);
+
+            var forest = try Forest.init(allocator, &grid, node_count, forest_config);
+            defer forest.deinit(allocator);
+
+            // Open the forest
+            {
+                const S = struct {
+                    var opened = false;
+                    fn forest_open_callback(_: *Forest) void {
+                        opened = true;
+                    }
+                };
+
+                S.opened = false;
+                forest.open(S.forest_open_callback);
+                while (!S.opened) {
+                    grid.tick();
+                    storage.tick();
+                }
+            }
+
+            // TODO Use self.accounts/transfers to check positive and negative space here
+            // TODO create transfers as well
+            // TODO crash in random intervals
+
+            while (self.op < max_run_ops) : (self.op += 1) {
+                // StateMachine.create_accounts
+                {
+                    const ledger = self.prng.random().int(u32);
+                    const code = self.prng.random().int(u16);
+                    
+                    const id = self.prng.random().int(u128);
+                    const timestamp = self.timestamp;
+                    self.timestamp += 1;
+
+                    const account = Account{
+                        .id = id,
+                        .timestamp = timestamp,
+                        .user_data = self.prng.random().int(u128),
+                        .reserved = [_]u8{0} ** 48,
+                        .ledger = ledger,
+                        .code = code,
+                        .flags = .{ .debits_must_not_exceed_credits = true },
+                        .debits_pending = 0,
+                        .debits_posted = 0,
+                        .credits_pending = 0,
+                        .credits_posted = 42,
+                    };
+
+                    forest.grooves.accounts.put(&account);
+                    try self.accounts.inserted.append(account);
+                }
+                
+                // Compact the forest
+                {
+                    const S = struct {
+                        var compacted = false;
+                        fn forest_compact_callback(_: *Forest) void {
+                            compacted = true;
+                        }
+                    };
+
+                    S.compacted = false;
+                    forest.compact(S.forest_compact_callback, self.op);
+                    while (!S.compacted) {
+                        grid.tick();
+                        storage.tick();
+                    }
+                }
+
+                // At the end of a compaction measure, record how many will be checkpointed next.
+                if (self.op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
+                    self.accounts.next_checkpoint = @intCast(u32, self.accounts.inserted.items.len);
+                    self.transfers.next_checkpoint = @intCast(u32, self.transfers.inserted.items.len);
+                }
+
+                // Try to checkpoint the previous batch's compaction
+                if (std.math.sub(u64, self.op, config.lsm_batch_multiple) catch null) |checkpoint_op| {
+                    if (checkpoint_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
+                        // Checkpoint the forest
+                        {
+                            const S = struct {
+                                var checkpointed = false;
+                                fn forest_checkpoint_callback(_: *Forest) void {
+                                    checkpointed = true;
+                                }
+                            };
+
+                            S.checkpointed = false;
+                            forest.checkpoint(S.forest_checkpoint_callback, self.op);
+                            while (!S.checkpointed) {
+                                grid.tick();
+                                storage.tick();
+                            }
+                        }
+
+                        // Checkpoint the superblock
+                        {
+                            const S = struct {
+                                var checkpointed = false;
+                                fn superblock_checkpoint_callback(_: *SuperBlock.Context) void {
+                                    checkpointed = true;
+                                }
+                            };
+
+                            S.checkpointed = false;
+                            var context: SuperBlock.Context = undefined;
+                            superblock.checkpoint(S.superblock_checkpoint_callback, &context);
+                            while (!S.checkpointed) {
+                                grid.tick();
+                                storage.tick();
+                            }
+                        }
+
+                        // Mark all state as checkpointed for crash recovery
+                        self.checkpoint_op = checkpoint_op;
+                        self.accounts.checkpointed = self.accounts.next_checkpoint;
+                        self.transfers.checkpointed = self.transfers.next_checkpoint;
+                    }
+                }
+            }
+        }
+    };
+}
