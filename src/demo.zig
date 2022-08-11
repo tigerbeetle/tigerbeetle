@@ -33,7 +33,7 @@ pub fn request(
 ) !void {
     const allocator = std.heap.page_allocator;
     const client_id = std.crypto.random.int(u128);
-    const cluster_id: u32 = 1;
+    const cluster_id: u32 = 0;
     var addresses = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
     var io = try IO.init(32, 0);

@@ -1008,6 +1008,7 @@ const TestContext = struct {
         ctx.superblock.deinit(allocator);
         ctx.grid.deinit(allocator);
         ctx.state_machine.deinit(allocator);
+        ctx.message_pool.deinit(allocator);
         ctx.* = undefined;
     }
 };

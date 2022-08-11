@@ -314,7 +314,7 @@ pub fn ReplicaType(
             state_machine_options: StateMachine.Options,
         };
 
-        /// NOTE: self.superblock must be initialized and opened by this call
+        /// NOTE: self.superblock must be initialized and opened prior to this call.
         fn init(self: *Self, allocator: Allocator, options: Options) !void {
             const replica_count = options.replica_count;
             const replica_index = options.replica_index;
@@ -550,13 +550,14 @@ pub fn ReplicaType(
                     // The data file is brand new — no messages have ever been written.
                     // Transition to normal status; no need to run the VSR recovery protocol.
                     assert(self.journal.faulty.count == 0);
-                    self.op = 0;
+                    assert(self.op == 0);
                     self.transition_to_normal_from_recovering_status(0);
                     assert(self.status == .normal);
                 } else if (self.replica_count == 1) {
                     // A cluster-of-one does not run the VSR recovery protocol.
                     if (self.journal.faulty.count != 0) @panic("journal is corrupt");
                     if (self.committing) return;
+                    assert(self.op == 0);
                     // TODO Assert that this path isn't taken more than once.
                     self.op = self.journal.op_maximum();
                     assert(self.op >= self.commit_min);
