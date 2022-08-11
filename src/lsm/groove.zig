@@ -873,35 +873,35 @@ pub fn GrooveType(
             }
         }
 
-        pub fn compact(groove: *Groove, op: u64, callback: Callback) void {
+        pub fn compact(groove: *Groove, callback: Callback, op: u64) void {
             // Start a compacting join operation.
             const Join = JoinType(.compacting);
             Join.start(groove, callback);
 
             // Compact the ObjectTree and IdTree
-            groove.ids.compact(op, Join.tree_callback(.ids));
-            groove.objects.compact(op, Join.tree_callback(.objects));
+            groove.ids.compact(Join.tree_callback(.ids), op);
+            groove.objects.compact(Join.tree_callback(.objects), op);
 
             // Compact the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const compact_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).compact(op, compact_callback);
+                @field(groove.indexes, field.name).compact(compact_callback, op);
             }
         }
 
-        pub fn checkpoint(groove: *Groove, op: u64, callback: fn (*Groove) void) void {
+        pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
             // Start a checkpoint join operation.
             const Join = JoinType(.checkpoint);
             Join.start(groove, callback);
 
             // Checkpoint the IdTree and ObjectTree.
-            groove.ids.checkpoint(op, Join.tree_callback(.ids));
-            groove.objects.checkpoint(op, Join.tree_callback(.objects));
+            groove.ids.checkpoint(Join.tree_callback(.ids));
+            groove.objects.checkpoint(Join.tree_callback(.objects));
 
             // Checkpoint the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const checkpoint_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).checkpoint(op, checkpoint_callback);
+                @field(groove.indexes, field.name).checkpoint(checkpoint_callback);
             }
         }
     };
