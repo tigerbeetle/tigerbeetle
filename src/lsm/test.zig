@@ -185,10 +185,10 @@ const Environment = struct {
         env.state = .forest_open;
     }
 
-    pub fn checkpoint(env: *Environment, op: u64) !void {
+    pub fn checkpoint(env: *Environment) !void {
         assert(env.state == .forest_open);
         env.state = .forest_checkpointing;
-        env.forest.checkpoint(forest_checkpoint_callback, op);
+        env.forest.checkpoint(forest_checkpoint_callback);
 
         while (true) {
             switch (env.state) {
@@ -373,7 +373,7 @@ const Environment = struct {
             const checkpoint_op = op -| config.lsm_batch_multiple;
             if (checkpoint_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
                 // Checkpoint the forest then superblock
-                try env.checkpoint(checkpoint_op);
+                try env.checkpoint();
 
                 const checkpointed = inserted.items[0..((checkpoint_op + 1) * accounts_to_insert_per_op)];
                 const uncommitted = inserted.items[checkpointed.len..];
