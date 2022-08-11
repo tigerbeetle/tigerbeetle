@@ -178,7 +178,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
         /// Get a cached value/tombstone for the given key.
         /// Returns null if no value/tombstone for the given key is cached.
-        pub fn get_cached(tree: *Tree, key: Key) ?*const Value {
+        pub fn get_cached(tree: *const Tree, key: Key) ?*const Value {
             const value = tree.table_mutable.get(key) orelse
                 tree.value_cache.?.getKeyPtr(tombstone_from_key(key));
 
