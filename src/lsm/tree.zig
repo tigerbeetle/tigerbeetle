@@ -512,17 +512,24 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             tree.compaction_callback = callback;
             tree.compaction_beat = op % config.lsm_batch_multiple;
 
-            // The result of the compaction must be seen to complete at the end of the half measure.
-            // Otherwise a read snapshot, acquired during the compaction, may see differently later.
-            const snapshot = op + half_measure_beat_count - 1; // -1 converts the count to an index.
+            // The target snapshot of a compaction is actually the previous batch minus one.
+            //
+            // At the start of the current batch, mutable table inserts from the previous batch
+            // would be in the immutable table. This means the current batch compaction will
+            // actually be flushing to disk (levels) mutable table updates from the previous batch.
+            //
+            // -1 as the ops are zero based so the "last" op from previous batch is reflected.
+            const snapshot = std.mem.alignBackward(op, config.lsm_batch_multiple) -| 1;
             assert(snapshot != snapshot_latest);
 
-            log.debug(tree_name ++ ": compact_start: op={d} beat={d}/{d}", .{
+            log.debug(tree_name ++ ": compact_start: op={d} snapshot={d} beat={d}/{d}", .{
                 op,
+                snapshot,
                 tree.compaction_beat + 1,
                 config.lsm_batch_multiple,
             });
 
+            // True if the current op is starting either even or odd compactions.
             const start = (tree.compaction_beat == 0) or
                 (tree.compaction_beat == half_measure_beat_count);
 

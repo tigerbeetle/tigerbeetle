@@ -277,7 +277,7 @@ const Environment = struct {
                 {
                     defer assertion.groove.prefetch_clear();
                     for (assertion.objects[0..assertion.verify_count]) |*object| {
-                        // log.debug("verifying {} for id={}", .{visibility, object.id});
+                        log.debug("verifying {} for id={}", .{visibility, object.id});
                         const result = assertion.groove.get(object.id);
 
                         switch (visibility) {
