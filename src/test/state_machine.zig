@@ -142,9 +142,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn checkpoint(
             state_machine: *StateMachine,
             callback: fn (*StateMachine) void,
-            op: u64,
         ) void {
-            _ = op;
             assert(state_machine.callback == null);
             assert(state_machine.callback_ticks == 0);
             state_machine.callback = callback;
