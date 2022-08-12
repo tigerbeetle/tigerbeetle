@@ -414,15 +414,27 @@ pub fn ManifestLevelType(
                             level.iterator_start_table_node_for_key_node(start.node, direction),
                             direction,
                         );
+                    } else {
+                        break :blk Tables.Iterator{
+                            .array = &level.tables,
+                            .direction = direction,
+                            .cursor = .{ .node = 0, .relative_index = 0 },
+                            .done = true,
+                        };
+                    }
+                } else {
+                    switch (direction) {
+                        .ascending => break :blk level.tables.iterator(0, 0, direction),
+                        .descending => {
+                            const last = level.tables.last();
+                            break :blk level.tables.iterator(
+                                level.tables.absolute_index_for_cursor(last),
+                                last.node,
+                                .descending,
+                            );
+                        },
                     }
                 }
-
-                break :blk Tables.Iterator{
-                    .array = &level.tables,
-                    .direction = direction,
-                    .cursor = .{ .node = 0, .relative_index = 0 },
-                    .done = true,
-                };
             };
 
             return .{
@@ -932,14 +944,6 @@ pub fn TestContext(
             assert(context.reference.items.len <= table_count_max);
             const index = context.random.uintAtMostBiased(u32, reference_len - count);
 
-            if (log) {
-                std.debug.print("Removing tables: ", .{});
-                for (context.reference.items[index..][0..count]) |t| {
-                    std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
-                }
-                std.debug.print("\n", .{});
-            }
-
             const snapshot = context.take_snapshot();
 
             context.level.set_snapshot_max(snapshot, context.reference.items[index..][0..count]);
@@ -965,6 +969,23 @@ pub fn TestContext(
                     if (table.invisible(context.snapshots.slice())) {
                         try to_remove.append(table);
                     }
+                }
+
+                if (log) {
+                    std.debug.print("Removing tables: ", .{});
+                    for (to_remove.items) |t| {
+                        std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
+                    }
+                    std.debug.print("\n", .{});
+                    std.debug.print("\nactual: ", .{});
+                    var it = context.level.iterator(
+                        .invisible,
+                        context.snapshots.slice(),
+                        .ascending,
+                        KeyRange{ .key_min = 0, .key_max = math.maxInt(Key) },
+                    );
+                    while (it.next()) |t| std.debug.print("[{},{}], ", .{ t.key_min, t.key_max });
+                    std.debug.print("\n", .{});
                 }
 
                 if (to_remove.items.len > 0) {
@@ -1139,7 +1160,6 @@ test "ManifestLevel" {
         var context = try Context.init(random);
         defer context.deinit();
 
-        // TODO Disabled until error in remove_tables() is addressed.
-        // try context.run();
+        try context.run();
     }
 }
