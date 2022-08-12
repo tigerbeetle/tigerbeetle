@@ -244,7 +244,7 @@ npm run benchmark
 
 ```shell
 ./tigerbeetle format --cluster=0 --replica=0 ./cluster_0_replica_0_test.tigerbeetle
-./tigerbeetle start --addresses=3001 ./cluster_0_replica_0_test.tigerbeetle  > tigerbeetle_test.log 2>&1
+./tigerbeetle start --addresses=3001 ./cluster_0_replica_0_test.tigerbeetle > tigerbeetle_test.log 2>&1
 npm run test
 ```
 For more information, type; `./tigerbeetle -h` 
