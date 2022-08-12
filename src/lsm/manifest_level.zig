@@ -918,11 +918,15 @@ pub fn TestContext(
             tables.clearRetainingCapacity();
 
             const snapshots = context.snapshots.slice();
-            {
+
+            // Ensure that iteration with a null key range in both directions is tested.
+            if (context.random.boolean()) {
                 var it = context.level.iterator(.invisible, snapshots, .ascending, null);
-                while (it.next()) |table| {
-                    try tables.append(table.*);
-                }
+                while (it.next()) |table| try tables.append(table.*);
+            } else {
+                var it = context.level.iterator(.invisible, snapshots, .descending, null);
+                while (it.next()) |table| try tables.append(table.*);
+                mem.reverse(TableInfo, tables.items);
             }
 
             if (tables.items.len > 0) {
