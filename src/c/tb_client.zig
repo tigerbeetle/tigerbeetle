@@ -35,8 +35,9 @@ fn client_to_context(tb_client: tb_client_t) *ContextImplementation {
 }
 
 const DefaultContext = blk: {
+    const Storage = @import("../storage.zig").Storage;
     const MessageBus = @import("../message_bus.zig").MessageBusClient;
-    const StateMachine = @import("../state_machine.zig").StateMachine;
+    const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
     break :blk ContextType(StateMachine, MessageBus);
 };
 
