@@ -605,7 +605,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     }
                 } else {
                     // Thereafter, all iterated tables must extend the range in ascending order.
-                    assert(compare_keys(table.key_min, range.key_max) == .gt);
+                    assert(compare_keys(table.key_max, range.key_max) == .gt);
                     range.key_max = table.key_max;
                 }
             }
