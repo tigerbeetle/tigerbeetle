@@ -319,7 +319,7 @@ const Environment = struct {
         var inserted = std.ArrayList(Account).init(allocator);
         defer inserted.deinit();
 
-        const accounts_to_insert_per_op = 1; // forest_config.accounts.commit_count_max;
+        const accounts_to_insert_per_op = forest_config.accounts.commit_count_max;
         const iterations = 4;
 
         var op: u64 = 0;
