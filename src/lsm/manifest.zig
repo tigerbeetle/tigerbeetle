@@ -594,18 +594,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 assert(compare_keys(table.key_max, range.key_min) != .lt);
                 assert(compare_keys(table.key_min, range.key_max) != .gt);
 
-                assert(range.table_count > 0);
-                if (range.table_count == 1) {
-                    // The first iterated table.key_min/max may overlap range.key_min/max entirely.
-                    if (compare_keys(table.key_min, range.key_min) == .lt) {
-                        range.key_min = table.key_min;
-                    }
-                    if (compare_keys(table.key_max, range.key_max) == .gt) {
-                        range.key_max = table.key_max;
-                    }
-                } else {
-                    // Thereafter, all iterated tables must extend the range in ascending order.
-                    assert(compare_keys(table.key_max, range.key_max) == .gt);
+                // The first iterated table.key_min/max may overlap range.key_min/max entirely.
+                if (compare_keys(table.key_min, range.key_min) == .lt) {
+                    range.key_min = table.key_min;
+                }
+
+                // Thereafter, iterated tables may/may not extend the range in ascending order.
+                if (compare_keys(table.key_max, range.key_max) == .gt) {
                     range.key_max = table.key_max;
                 }
             }
