@@ -8,4 +8,5 @@ zig-cache/
 # TigerBeetle
 *.tigerbeetle
 benchmark.log
+tigerbeetle_test.log
 /benchmark
