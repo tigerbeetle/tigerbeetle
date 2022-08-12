@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
@@ -42,5 +43,43 @@ pub fn build(b: *std.build.Builder) void {
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
+    }
+
+    {
+        const benchmark = b.addExecutable("eytzinger_benchmark", "src/eytzinger_benchmark.zig");
+        benchmark.setTarget(target);
+        benchmark.setBuildMode(.ReleaseSafe);
+        const run_cmd = benchmark.run();
+
+        const step = b.step("eytzinger_benchmark", "Benchmark array search");
+        step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const benchmark = b.addExecutable("benchmark_ewah", "src/ewah_benchmark.zig");
+        benchmark.setTarget(target);
+        benchmark.setBuildMode(.ReleaseSafe);
+        const run_cmd = benchmark.run();
+
+        const step = b.step("benchmark_ewah", "Benchmark EWAH codec");
+        step.dependOn(&run_cmd.step);
+    }
+
+    { 
+        const tb_client = b.addStaticLibrary("tb_client", "src/c/tb_client.zig");
+        tb_client.setMainPkgPath("src");
+        tb_client.setTarget(target);
+        tb_client.setBuildMode(mode);
+        tb_client.setOutputDir("zig-out");
+        tb_client.pie = true;
+        tb_client.bundle_compiler_rt = true;
+
+        const os_tag = target.os_tag orelse builtin.target.os.tag;
+        if (os_tag != .windows) {
+            tb_client.linkLibC();
+        }
+
+        const build_step = b.step("tb_client", "Build C client shared library");
+        build_step.dependOn(&tb_client.step);
     }
 }

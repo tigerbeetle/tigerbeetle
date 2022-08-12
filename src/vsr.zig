@@ -10,14 +10,46 @@ const config = @import("config.zig");
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
 pub const Version: u8 = 0;
 
-pub const Replica = @import("vsr/replica.zig").Replica;
+pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
+pub const format = @import("vsr/replica.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
 pub const Clock = @import("vsr/clock.zig").Clock;
 pub const Journal = @import("vsr/journal.zig").Journal;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
+pub const SuperBlockType = @import("vsr/superblock.zig").SuperBlockType;
+pub const VSRState = @import("vsr/superblock.zig").SuperBlockSector.VSRState;
 
 pub const ProcessType = enum { replica, client };
+
+pub const Zone = enum {
+    superblock,
+    wal,
+    grid,
+
+    const size_superblock = @import("vsr/superblock.zig").superblock_zone_size;
+    const size_wal = config.journal_size_max;
+
+    pub fn offset(zone: Zone, offset_logical: u64) u64 {
+        if (zone.size()) |zone_size| {
+            assert(offset_logical < zone_size);
+        }
+
+        return offset_logical + switch (zone) {
+            .superblock => 0,
+            .wal => size_superblock,
+            .grid => size_superblock + size_wal,
+        };
+    }
+
+    pub fn size(zone: Zone) ?u64 {
+        return switch (zone) {
+            .superblock => size_superblock,
+            .wal => size_wal,
+            .grid => null,
+        };
+    }
+};
 
 /// Viewstamped Replication protocol commands:
 pub const Command = enum(u8) {
@@ -46,6 +78,9 @@ pub const Command = enum(u8) {
     nack_prepare,
 
     eviction,
+
+    request_block,
+    block,
 };
 
 /// This type exists to avoid making the Header type dependant on the state
@@ -88,8 +123,7 @@ pub const Operation = enum(u8) {
 /// Network message and journal entry header:
 /// We reuse the same header for both so that prepare messages from the leader can simply be
 /// journalled as is by the followers without requiring any further modification.
-/// TODO Move from packed struct to extern struct for C ABI:
-pub const Header = packed struct {
+pub const Header = extern struct {
     comptime {
         assert(@sizeOf(Header) == 128);
     }
@@ -248,9 +282,11 @@ pub const Header = packed struct {
             .request_start_view => self.invalid_request_start_view(),
             .request_headers => self.invalid_request_headers(),
             .request_prepare => self.invalid_request_prepare(),
+            .request_block => null, // TODO
             .headers => self.invalid_headers(),
             .nack_prepare => self.invalid_nack_prepare(),
             .eviction => self.invalid_eviction(),
+            .block => null, // TODO
         };
     }
 
@@ -902,116 +938,8 @@ pub fn sector_ceil(offset: u64) u64 {
     return sectors * config.sector_size;
 }
 
-/// Returns the number of bytes written to `target`.
-pub fn format_journal(cluster: u32, offset: u64, target: []u8) usize {
-    assert(offset <= config.journal_size_max);
-    assert(offset % config.sector_size == 0);
-    assert(target.len > 0);
-    assert(target.len % config.sector_size == 0);
-
-    const sector_max = @divExact(config.journal_size_max, config.sector_size);
-    var sectors = std.mem.bytesAsSlice([config.sector_size]u8, target);
-    for (sectors) |*sector_data, i| {
-        const sector = @divExact(offset, config.sector_size) + i;
-        if (sector == sector_max) {
-            if (i == 0) {
-                assert(offset == config.journal_size_max);
-            }
-            return i * config.sector_size;
-        } else {
-            format_journal_sector(cluster, sector, sector_data);
-        }
-    }
-    return target.len;
-}
-
-fn format_journal_sector(cluster: u32, sector: usize, sector_data: *[config.sector_size]u8) void {
-    assert(sector < @divExact(config.journal_size_max, config.sector_size));
-
-    const headers_per_sector = @divExact(config.sector_size, @sizeOf(Header));
-    const slot_count = config.journal_slot_count;
-    var sector_headers = std.mem.bytesAsSlice(Header, sector_data);
-
-    if (sector * headers_per_sector < slot_count) {
-        for (sector_headers) |*header, i| {
-            const slot = sector * headers_per_sector + i;
-            if (sector == 0 and i == 0) {
-                header.* = Header.root_prepare(cluster);
-            } else {
-                header.* = Header.reserved(cluster, slot);
-            }
-        }
-        return;
-    }
-
-    const sectors_per_message = config.message_size_max / config.sector_size;
-    const sector_in_prepares = sector - slot_count / headers_per_sector;
-    const message_slot = sector_in_prepares / sectors_per_message;
-    if (message_slot < slot_count) {
-        std.mem.set(u8, sector_data, 0);
-        if (sector_in_prepares % sectors_per_message == 0) {
-            // First sector of the message.
-            if (message_slot == 0) {
-                sector_headers[0] = Header.root_prepare(cluster);
-            } else {
-                sector_headers[0] = Header.reserved(cluster, message_slot);
-            }
-        }
-        return;
-    }
-
-    unreachable;
-}
-
-test "format_journal" {
-    const cluster = 123;
-    const write_sizes = [_]usize{
-        config.sector_size,
-        config.sector_size * 2,
-        config.sector_size * 3,
-        config.journal_size_max,
-    };
-
-    for (write_sizes) |write_size_max| {
-        var wal_data = try std.testing.allocator.alloc(u8, config.journal_size_max);
-        defer std.testing.allocator.free(wal_data);
-
-        var write_data = try std.testing.allocator.alloc(u8, write_size_max);
-        defer std.testing.allocator.free(write_data);
-
-        var headers_ring = std.mem.bytesAsSlice(Header, wal_data[0..config.journal_size_headers]);
-        var prepare_ring = std.mem.bytesAsSlice([config.message_size_max]u8, wal_data[config.journal_size_headers..]);
-        try std.testing.expectEqual(@as(usize, config.journal_slot_count), headers_ring.len);
-        try std.testing.expectEqual(@as(usize, config.journal_slot_count), prepare_ring.len);
-
-        var offset: u64 = 0;
-        while (true) {
-            const write_size = format_journal(cluster, offset, write_data);
-            if (write_size == 0) break;
-            std.mem.copy(u8, wal_data[offset..][0..write_size], write_data[0..write_size]);
-            offset += write_size;
-        }
-
-        for (headers_ring) |*header, slot| {
-            try std.testing.expect(header.valid_checksum());
-            try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
-            try std.testing.expectEqual(header.invalid(), null);
-            try std.testing.expectEqual(header.cluster, cluster);
-            try std.testing.expectEqual(header.op, slot);
-            try std.testing.expectEqual(header.size, @sizeOf(Header));
-            if (slot == 0) {
-                try std.testing.expectEqual(header.command, .prepare);
-                try std.testing.expectEqual(header.operation, .root);
-            } else {
-                try std.testing.expectEqual(header.command, .reserved);
-            }
-
-            const prepare_bytes = prepare_ring[slot];
-            const prepare_header = std.mem.bytesAsValue(Header, prepare_bytes[0..@sizeOf(Header)]);
-            const prepare_body = prepare_bytes[@sizeOf(Header)..];
-
-            try std.testing.expectEqual(header.*, prepare_header.*);
-            for (prepare_body) |byte| try std.testing.expectEqual(byte, 0);
-        }
-    }
+pub fn checksum(source: []const u8) u128 {
+    var target: [32]u8 = undefined;
+    std.crypto.hash.Blake3.hash(source, target[0..], .{});
+    return @bitCast(u128, target[0..@sizeOf(u128)].*);
 }

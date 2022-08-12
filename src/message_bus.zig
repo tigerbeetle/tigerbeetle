@@ -17,25 +17,30 @@ const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 
-pub const MessageBusReplica = MessageBusImpl(.replica);
-pub const MessageBusClient = MessageBusImpl(.client);
+pub const MessageBusReplica = MessageBusType(.replica);
+pub const MessageBusClient = MessageBusType(.client);
 
-fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
+fn MessageBusType(comptime process_type: vsr.ProcessType) type {
     const SendQueue = RingBuffer(*Message, switch (process_type) {
         .replica => config.connection_send_queue_max_replica,
         // A client has at most 1 in-flight request, plus pings.
         .client => config.connection_send_queue_max_client,
-    });
+    }, .array);
 
     const tcp_sndbuf = switch (process_type) {
         .replica => config.tcp_sndbuf_replica,
         .client => config.tcp_sndbuf_client,
     };
 
+    const Process = union(vsr.ProcessType) {
+        replica: u8,
+        client: u128,
+    };
+
     return struct {
         const Self = @This();
 
-        pool: MessagePool,
+        pool: *MessagePool,
         io: *IO,
 
         cluster: u32,
@@ -59,10 +64,8 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
             .client => void,
         },
 
-        /// The callback to be called when a message is received. Use set_on_message() to set
-        /// with type safety for the context pointer.
-        on_message_callback: ?fn (context: ?*anyopaque, message: *Message) void = null,
-        on_message_context: ?*anyopaque = null,
+        /// The callback to be called when a message is received.
+        on_message_callback: fn (message_bus: *Self, message: *Message) void,
 
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
@@ -80,49 +83,54 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
         /// Seeded with the process' replica index or client ID.
         prng: std.rand.DefaultPrng,
 
+        pub const Options = struct {
+            configuration: []std.net.Address,
+            io: *IO,
+        };
+
         /// Initialize the MessageBus for the given cluster, configuration and replica/client process.
         pub fn init(
             allocator: mem.Allocator,
             cluster: u32,
-            configuration: []std.net.Address,
-            process: switch (process_type) {
-                .replica => u8,
-                .client => u128,
-            },
-            io: *IO,
+            process: Process,
+            message_pool: *MessagePool,
+            on_message_callback: fn (message_bus: *Self, message: *Message) void,
+            options: Options,
         ) !Self {
             // There must be enough connections for all replicas and at least one client.
-            assert(config.connections_max > configuration.len);
+            assert(config.connections_max > options.configuration.len);
+            assert(@as(vsr.ProcessType, process) == process_type);
 
             const connections = try allocator.alloc(Connection, config.connections_max);
             errdefer allocator.free(connections);
             mem.set(Connection, connections, .{});
 
-            const replicas = try allocator.alloc(?*Connection, configuration.len);
+            const replicas = try allocator.alloc(?*Connection, options.configuration.len);
             errdefer allocator.free(replicas);
             mem.set(?*Connection, replicas, null);
 
-            const replicas_connect_attempts = try allocator.alloc(u64, configuration.len);
+            const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
             errdefer allocator.free(replicas_connect_attempts);
             mem.set(u64, replicas_connect_attempts, 0);
 
             const prng_seed = switch (process_type) {
-                .replica => process,
-                .client => @truncate(u64, process),
+                .replica => process.replica,
+                .client => @truncate(u64, process.client),
             };
 
             var bus: Self = .{
-                .pool = try MessagePool.init(allocator, process_type),
-                .io = io,
+                .pool = message_pool,
+                .io = options.io,
                 .cluster = cluster,
-                .configuration = configuration,
+                .configuration = options.configuration,
                 .process = switch (process_type) {
                     .replica => .{
-                        .replica = process,
-                        .accept_fd = try init_tcp(io, configuration[process]),
+                        .replica = process.replica,
+                        .accept_fd = try init_tcp(options.io, options.configuration[process.replica]),
                     },
                     .client => {},
                 },
+                .on_message_callback = on_message_callback,
                 .connections = connections,
                 .replicas = replicas,
                 .replicas_connect_attempts = replicas_connect_attempts,
@@ -137,25 +145,8 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
             return bus;
         }
 
-        pub fn set_on_message(
-            bus: *Self,
-            comptime Context: type,
-            context: Context,
-            comptime on_message: fn (context: Context, message: *Message) void,
-        ) void {
-            assert(bus.on_message_callback == null);
-            assert(bus.on_message_context == null);
-
-            bus.on_message_callback = struct {
-                fn wrapper(_context: ?*anyopaque, message: *Message) void {
-                    on_message(@intToPtr(Context, @ptrToInt(_context)), message);
-                }
-            }.wrapper;
-            bus.on_message_context = context;
-        }
-
         /// TODO This is required by the Client.
-        pub fn deinit(_: *Self) void {}
+        pub fn deinit(_: *Self, _: std.mem.Allocator) void {}
 
         fn init_tcp(io: *IO, address: std.net.Address) !os.socket_t {
             const fd = try io.open_socket(
@@ -641,7 +632,13 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                                 //assert(!connection.send_submitted);
                             },
                             // Ignore all the remaining errors for now
-                            error.ConnectionAborted, error.ConnectionResetByPeer, error.BlockingOperationInProgress, error.NetworkSubsystemFailed, error.SystemResources, error.Unexpected => {},
+                            error.ConnectionAborted,
+                            error.ConnectionResetByPeer,
+                            error.BlockingOperationInProgress,
+                            error.NetworkSubsystemFailed,
+                            error.SystemResources,
+                            error.Unexpected,
+                            => {},
                         };
                     },
                     .close => {},
@@ -670,7 +667,11 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                     return null;
                 }
 
-                const header = mem.bytesAsValue(Header, data[0..@sizeOf(Header)]);
+                const header = mem.bytesAsValue(
+                    Header, 
+                    @alignCast(@alignOf(Header), data[0..@sizeOf(Header)]),
+                );
+                
                 if (!connection.recv_checked_header) {
                     if (!header.valid_checksum()) {
                         log.err("invalid header checksum received from {}", .{connection.peer});
@@ -763,7 +764,7 @@ fn MessageBusImpl(comptime process_type: vsr.ProcessType) type {
                     }
                 }
 
-                bus.on_message_callback.?(bus.on_message_context, message);
+                bus.on_message_callback(bus, message);
             }
 
             fn maybe_set_peer(connection: *Connection, bus: *Self, header: *const Header) void {

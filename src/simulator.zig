@@ -7,6 +7,7 @@ const config = @import("config.zig");
 
 const Client = @import("test/cluster.zig").Client;
 const Cluster = @import("test/cluster.zig").Cluster;
+const ClusterOptions = @import("test/cluster.zig").ClusterOptions;
 const Header = @import("vsr.zig").Header;
 const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
@@ -25,6 +26,12 @@ const log_faults = std.log.scoped(.faults);
 
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
+
+/// Modifies compile-time constants on "config.zig".
+pub const deployment_environment = .simulation;
+comptime {
+    assert(config.deployment_environment == .simulation);
+}
 
 var cluster: *Cluster = undefined;
 
@@ -74,11 +81,12 @@ pub fn main() !void {
     const idle_on_probability = random.uintLessThan(u8, 20);
     const idle_off_probability = 10 + random.uintLessThan(u8, 10);
 
-    cluster = try Cluster.create(allocator, random, .{
+    const cluster_options: ClusterOptions = .{
         .cluster = 0,
         .replica_count = replica_count,
         .client_count = client_count,
         .seed = random.int(u64),
+        .on_change_state = on_change_replica,
         .network_options = .{
             .packet_simulator_options = .{
                 .replica_count = replica_count,
@@ -116,16 +124,13 @@ pub fn main() !void {
             .restart_probability = 0.01,
             .restart_stability = random.uintLessThan(u32, 1_000),
         },
-    });
-    defer cluster.destroy();
-
-    cluster.state_checker = try StateChecker.init(allocator, cluster);
-    defer cluster.state_checker.deinit();
-
-    for (cluster.replicas) |*replica| {
-        replica.on_change_state = on_change_replica;
-    }
-    cluster.on_change_state = on_change_replica;
+        .state_machine_options = .{
+            .seed = random.int(u64),
+            .prefetch_mean = 5 + random.uintLessThan(u64, 10),
+            .compact_mean = 5 + random.uintLessThan(u64, 10),
+            .checkpoint_mean = 5 + random.uintLessThan(u64, 10),
+        },
+    };
 
     output.info(
         \\
@@ -158,6 +163,9 @@ pub fn main() !void {
         \\          crash_stability={} ticks
         \\          restart_probability={d}%
         \\          restart_stability={} ticks
+        \\          prefetch_mean={} ticks
+        \\          compact_mean={} ticks
+        \\          checkpoint_mean={} ticks
         \\
     , .{
         seed,
@@ -166,29 +174,38 @@ pub fn main() !void {
         request_probability,
         idle_on_probability,
         idle_off_probability,
-        cluster.options.network_options.packet_simulator_options.one_way_delay_mean,
-        cluster.options.network_options.packet_simulator_options.one_way_delay_min,
-        cluster.options.network_options.packet_simulator_options.packet_loss_probability,
-        cluster.options.network_options.packet_simulator_options.path_maximum_capacity,
-        cluster.options.network_options.packet_simulator_options.path_clog_duration_mean,
-        cluster.options.network_options.packet_simulator_options.path_clog_probability,
-        cluster.options.network_options.packet_simulator_options.packet_replay_probability,
-        cluster.options.network_options.packet_simulator_options.partition_mode,
-        cluster.options.network_options.packet_simulator_options.partition_probability,
-        cluster.options.network_options.packet_simulator_options.unpartition_probability,
-        cluster.options.network_options.packet_simulator_options.partition_stability,
-        cluster.options.network_options.packet_simulator_options.unpartition_stability,
-        cluster.options.storage_options.read_latency_min,
-        cluster.options.storage_options.read_latency_mean,
-        cluster.options.storage_options.write_latency_min,
-        cluster.options.storage_options.write_latency_mean,
-        cluster.options.storage_options.read_fault_probability,
-        cluster.options.storage_options.write_fault_probability,
-        cluster.options.health_options.crash_probability * 100,
-        cluster.options.health_options.crash_stability,
-        cluster.options.health_options.restart_probability * 100,
-        cluster.options.health_options.restart_stability,
+        cluster_options.network_options.packet_simulator_options.one_way_delay_mean,
+        cluster_options.network_options.packet_simulator_options.one_way_delay_min,
+        cluster_options.network_options.packet_simulator_options.packet_loss_probability,
+        cluster_options.network_options.packet_simulator_options.path_maximum_capacity,
+        cluster_options.network_options.packet_simulator_options.path_clog_duration_mean,
+        cluster_options.network_options.packet_simulator_options.path_clog_probability,
+        cluster_options.network_options.packet_simulator_options.packet_replay_probability,
+        cluster_options.network_options.packet_simulator_options.partition_mode,
+        cluster_options.network_options.packet_simulator_options.partition_probability,
+        cluster_options.network_options.packet_simulator_options.unpartition_probability,
+        cluster_options.network_options.packet_simulator_options.partition_stability,
+        cluster_options.network_options.packet_simulator_options.unpartition_stability,
+        cluster_options.storage_options.read_latency_min,
+        cluster_options.storage_options.read_latency_mean,
+        cluster_options.storage_options.write_latency_min,
+        cluster_options.storage_options.write_latency_mean,
+        cluster_options.storage_options.read_fault_probability,
+        cluster_options.storage_options.write_fault_probability,
+        cluster_options.health_options.crash_probability * 100,
+        cluster_options.health_options.crash_stability,
+        cluster_options.health_options.restart_probability * 100,
+        cluster_options.health_options.restart_stability,
+        cluster_options.state_machine_options.prefetch_mean,
+        cluster_options.state_machine_options.compact_mean,
+        cluster_options.state_machine_options.checkpoint_mean,
     });
+
+    cluster = try Cluster.create(allocator, random, cluster_options);
+    defer cluster.destroy();
+
+    cluster.state_checker = try StateChecker.init(allocator, cluster);
+    defer cluster.state_checker.deinit();
 
     var requests_sent: u64 = 0;
     var idle = false;
@@ -261,7 +278,7 @@ pub fn main() !void {
                     }
 
                     if (!try cluster.crash_replica(replica.replica)) continue;
-                    log_health.debug("crash replica={}", .{replica.replica});
+                    log_health.debug("{}: crash replica", .{replica.replica});
                     crashes -= 1;
                 },
                 .down => |*ticks| {
@@ -272,7 +289,7 @@ pub fn main() !void {
                     assert(replica.status == .recovering);
                     if (ticks.* == 0 and chance_f64(random, health_options.restart_probability)) {
                         cluster.health[replica.replica] = .{ .up = health_options.restart_stability };
-                        log_health.debug("restart replica={}", .{replica.replica});
+                        log_health.debug("{}: restart replica", .{replica.replica});
                     }
                 },
             }
@@ -334,7 +351,6 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
 }
 
 fn on_change_replica(replica: *Replica) void {
-    assert(cluster.state_machines[replica.replica].state == replica.state_machine.state);
     cluster.state_checker.check_state(replica.replica);
 }
 

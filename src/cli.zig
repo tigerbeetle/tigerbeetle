@@ -10,89 +10,93 @@ const config = @import("config.zig");
 const vsr = @import("vsr.zig");
 const IO = @import("io.zig").IO;
 
+// TODO Document --memory
 const usage = fmt.comptimePrint(
     \\Usage:
     \\
     \\  tigerbeetle [-h | --help]
     \\
-    \\  tigerbeetle init  [--directory=<path>] --cluster=<integer> --replica=<index>
+    \\  tigerbeetle format --cluster=<integer> --replica=<index> <path>
     \\
-    \\  tigerbeetle start [--directory=<path>] --cluster=<integer> --replica=<index> --addresses=<addresses>
+    \\  tigerbeetle start --addresses=<addresses> <path>
     \\
     \\Commands:
     \\
-    \\  init   Create a new .tigerbeetle data file. Requires the --cluster and
-    \\         --replica options. The file will be created in the path set by
-    \\         the --directory option if provided. Otherwise, it will be created in
-    \\         the default {[default_directory]s}.
+    \\  format  Create a TigerBeetle replica data file at <path>.
+    \\          The --cluster and --replica arguments are required.
+    \\          Each TigerBeetle replica must have its own data file.
     \\
-    \\  start  Run a TigerBeetle replica as part of the cluster specified by the
-    \\         --cluster, --replica, and --addresses options. This requires an
-    \\         existing .tigerbeetle data file, either in the default
-    \\         {[default_directory]s} or the path set with --directory.
+    \\  start   Run a TigerBeetle replica from the data file at <path>.
     \\
     \\Options:
     \\
     \\  -h, --help
     \\        Print this help message and exit.
     \\
-    \\  --directory=<path>
-    \\        Set the directory used to store .tigerbeetle data files. If this option is
-    \\        omitted, the default {[default_directory]s} will be used.
-    \\
     \\  --cluster=<integer>
     \\        Set the cluster ID to the provided 32-bit unsigned integer.
     \\
     \\  --replica=<index>
-    \\        Set the zero-based index that will be used for this replica process.
-    \\        The value of this option will be interpreted as an index into the --addresses array.
+    \\        Set the zero-based index that will be used for the replica process.
+    \\        The value of this argument will be interpreted as an index into the --addresses array.
     \\
     \\  --addresses=<addresses>
-    \\        Set the addresses of all replicas in the cluster. Accepts a
-    \\        comma-separated list of IPv4 addresses with port numbers.
-    \\        Either the IPv4 address or port number, but not both, may be
-    \\        ommited in which case a default of {[default_address]s} or {[default_port]d}
+    \\        Set the addresses of all replicas in the cluster.
+    \\        Accepts a comma-separated list of IPv4 addresses with port numbers.
+    \\        Either the IPv4 address or port number (but not both) may be omitted,
+    \\        in which case a default of {[default_address]s} or {[default_port]d}
     \\        will be used.
     \\
     \\Examples:
     \\
-    \\  tigerbeetle init --cluster=0 --replica=0 --directory=/var/lib/tigerbeetle
-    \\  tigerbeetle init --cluster=0 --replica=1 --directory=/var/lib/tigerbeetle
-    \\  tigerbeetle init --cluster=0 --replica=2 --directory=/var/lib/tigerbeetle
+    \\  tigerbeetle format --cluster=7 --replica=0 7_0.tigerbeetle
+    \\  tigerbeetle format --cluster=7 --replica=1 7_1.tigerbeetle
+    \\  tigerbeetle format --cluster=7 --replica=2 7_2.tigerbeetle
     \\
-    \\  tigerbeetle start --cluster=0 --replica=0 --addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002
-    \\  tigerbeetle start --cluster=0 --replica=1 --addresses=3003,3001,3002
-    \\  tigerbeetle start --cluster=0 --replica=2 --addresses=3003,3001,3002
+    \\  tigerbeetle start --addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 7_0.tigerbeetle
+    \\  tigerbeetle start --addresses=3003,3001,3002 7_1.tigerbeetle
+    \\  tigerbeetle start --addresses=3003,3001,3002 7_2.tigerbeetle
     \\
-    \\  tigerbeetle start --cluster=1 --replica=0 --addresses=192.168.0.1,192.168.0.2,192.168.0.3
+    \\  tigerbeetle start --addresses=192.168.0.1,192.168.0.2,192.168.0.3 7_0.tigerbeetle
     \\
 , .{
-    .default_directory = config.directory,
     .default_address = config.address,
     .default_port = config.port,
 });
 
 pub const Command = union(enum) {
-    init: struct {
+    format: struct {
+        args_allocated: std.ArrayList([:0]const u8),
         cluster: u32,
         replica: u8,
-        dir_fd: os.fd_t,
+        path: [:0]const u8,
     },
     start: struct {
-        cluster: u32,
-        replica: u8,
+        args_allocated: std.ArrayList([:0]const u8),
         addresses: []net.Address,
-        dir_fd: os.fd_t,
+        memory: u64,
+        path: [:0]const u8,
     },
+
+    pub fn deinit(command: Command, allocator: std.mem.Allocator) void {
+        var args_allocated = switch (command) {
+            .format => |cmd| cmd.args_allocated,
+            .start => |cmd| cmd.args_allocated,
+        };
+
+        for (args_allocated.items) |arg| allocator.free(arg);
+        args_allocated.deinit();
+    }
 };
 
-/// Parse the command line arguments passed to the tigerbeetle binary.
+/// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
 pub fn parse_args(allocator: std.mem.Allocator) !Command {
-    var maybe_cluster: ?[]const u8 = null;
-    var maybe_replica: ?[]const u8 = null;
-    var maybe_addresses: ?[]const u8 = null;
-    var maybe_directory: ?[:0]const u8 = null;
+    var path: ?[:0]const u8 = null;
+    var cluster: ?[]const u8 = null;
+    var replica: ?[]const u8 = null;
+    var addresses: ?[]const u8 = null;
+    var memory: ?[]const u8 = null;
 
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
@@ -100,17 +104,13 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     // Keep track of the args from the ArgIterator above that were allocated
     // then free them all at the end of the scope.
     var args_allocated = std.ArrayList([:0]const u8).init(allocator);
-    defer {
-        for (args_allocated.items) |arg| allocator.free(arg);
-        args_allocated.deinit();
-    }
 
     // Skip argv[0] which is the name of this executable
     const did_skip = args.skip();
     assert(did_skip);
 
     const raw_command = try (args.next(allocator) orelse
-        fatal("no command provided, expected 'start' or 'init'", .{}));
+        fatal("no command provided, expected 'start' or 'format'", .{}));
     defer allocator.free(raw_command);
 
     if (mem.eql(u8, raw_command, "-h") or mem.eql(u8, raw_command, "--help")) {
@@ -118,69 +118,59 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
         os.exit(0);
     }
     const command = meta.stringToEnum(meta.Tag(Command), raw_command) orelse
-        fatal("unknown command '{s}', expected 'start' or 'init'", .{raw_command});
+        fatal("unknown command '{s}', expected 'start' or 'format'", .{raw_command});
 
     while (args.next(allocator)) |parsed_arg| {
         const arg = try parsed_arg;
         try args_allocated.append(arg);
 
         if (mem.startsWith(u8, arg, "--cluster")) {
-            maybe_cluster = parse_flag("--cluster", arg);
+            cluster = parse_flag("--cluster", arg);
         } else if (mem.startsWith(u8, arg, "--replica")) {
-            maybe_replica = parse_flag("--replica", arg);
+            replica = parse_flag("--replica", arg);
         } else if (mem.startsWith(u8, arg, "--addresses")) {
-            maybe_addresses = parse_flag("--addresses", arg);
-        } else if (mem.startsWith(u8, arg, "--directory")) {
-            maybe_directory = parse_flag("--directory", arg);
+            addresses = parse_flag("--addresses", arg);
+        } else if (mem.startsWith(u8, arg, "--memory")) {
+            memory = parse_flag("--memory", arg);
         } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
             os.exit(0);
-        } else if (mem.startsWith(u8, arg, "--")) {
+        } else if (mem.startsWith(u8, arg, "-")) {
             fatal("unexpected argument: '{s}'", .{arg});
+        } else if (path == null) {
+            path = arg;
         } else {
             fatal("unexpected argument: '{s}' (must start with '--')", .{arg});
         }
     }
 
-    const raw_cluster = maybe_cluster orelse fatal("required argument: --cluster", .{});
-    const raw_replica = maybe_replica orelse fatal("required argument: --replica", .{});
-
-    const cluster = parse_cluster(raw_cluster);
-    const replica = parse_replica(raw_replica);
-
-    const dir_path = maybe_directory orelse config.directory;
-    const dir_fd = IO.open_dir(dir_path) catch |err|
-        fatal("failed to open directory '{s}': {}", .{ dir_path, err });
-
     switch (command) {
-        .init => {
-            if (maybe_addresses != null) {
-                fatal("--addresses: supported only by 'start' command", .{});
-            }
+        .format => {
+            if (addresses != null) fatal("--addresses: supported only by 'start' command", .{});
+            if (memory != null) fatal("--memory: supported only by 'start' command", .{});
 
             return Command{
-                .init = .{
-                    .cluster = cluster,
-                    .replica = replica,
-                    .dir_fd = dir_fd,
+                .format = .{
+                    .args_allocated = args_allocated,
+                    .cluster = parse_cluster(cluster orelse fatal("required: --cluster", .{})),
+                    .replica = parse_replica(replica orelse fatal("required: --replica", .{})),
+                    .path = path orelse fatal("required: <path>", .{}),
                 },
             };
         },
         .start => {
-            const raw_addresses = maybe_addresses orelse
-                fatal("required argument: --addresses", .{});
-            const addresses = parse_addresses(allocator, raw_addresses);
-
-            if (replica >= addresses.len) {
-                fatal("--replica: value greater than length of --addresses array", .{});
-            }
+            if (cluster != null) fatal("--cluster: supported only by 'format' command", .{});
+            if (replica != null) fatal("--replica: supported only by 'format' command", .{});
 
             return Command{
                 .start = .{
-                    .cluster = cluster,
-                    .replica = replica,
-                    .addresses = addresses,
-                    .dir_fd = dir_fd,
+                    .args_allocated = args_allocated,
+                    .addresses = parse_addresses(
+                        allocator,
+                        addresses orelse fatal("required: --addresses", .{}),
+                    ),
+                    .memory = if (memory) |m| parse_size(m) else config.memory_size_max_default,
+                    .path = path orelse fatal("required: <path>", .{}),
                 },
             };
         },
@@ -189,20 +179,20 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
 /// Format and print an error message followed by the usage string to stderr,
 /// then exit with an exit code of 1.
-fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
+pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
     os.exit(1);
 }
 
-/// Parse e.g. `--cluster=1a2b3c` into `1a2b3c` with error handling.
+/// Parse e.g. `--cluster=123` into `123` with error handling.
 fn parse_flag(comptime flag: []const u8, arg: [:0]const u8) [:0]const u8 {
     const value = arg[flag.len..];
     if (value.len < 2) {
         fatal("{s} argument requires a value", .{flag});
     }
     if (value[0] != '=') {
-        fatal("expected '=' after {s} but found '{c}'", .{ flag, value[0] });
+        fatal("expected '=' after '{s}' but found '{c}'", .{ flag, value[0] });
     }
     return value[1..];
 }
@@ -230,8 +220,77 @@ fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []ne
         error.PortOverflow => fatal("--addresses: port exceeds 65535", .{}),
         error.PortInvalid => fatal("--addresses: invalid port", .{}),
         error.AddressInvalid => fatal("--addresses: invalid IPv4 address", .{}),
-        error.OutOfMemory => fatal("--addresses: out of memory", .{}),
+        error.OutOfMemory => fatal("out of memory", .{}),
     };
+}
+
+fn parse_size(string: []const u8) u64 {
+    var value = mem.trim(u8, string, " ");
+
+    const unit: u64 = blk: {
+        if (parse_size_unit(&value, &[_][]const u8{ "TiB", "tib", "TB", "tb" })) {
+            break :blk 1024 * 1024 * 1024 * 1024;
+        } else if (parse_size_unit(&value, &[_][]const u8{ "GiB", "gib", "GB", "gb" })) {
+            break :blk 1024 * 1024 * 1024;
+        } else if (parse_size_unit(&value, &[_][]const u8{ "MiB", "mib", "MB", "mb" })) {
+            break :blk 1024 * 1024;
+        } else if (parse_size_unit(&value, &[_][]const u8{ "KiB", "kib", "KB", "kb" })) {
+            break :blk 1024;
+        } else {
+            break :blk 1;
+        }
+    };
+
+    const size = fmt.parseUnsigned(u64, value, 10) catch |err| switch (err) {
+        error.Overflow => fatal("size value exceeds a 64-bit unsigned integer", .{}),
+        error.InvalidCharacter => fatal("size value contains an invalid character", .{}),
+    };
+
+    return size * unit;
+}
+
+fn parse_size_unit(value: *[]const u8, suffixes: []const []const u8) bool {
+    for (suffixes) |suffix| {
+        if (mem.endsWith(u8, value.*, suffix)) {
+            value.* = mem.trim(u8, value.*[0 .. value.*.len - suffix.len], " ");
+            return true;
+        }
+    }
+    return false;
+}
+
+test "parse_size" {
+    const expectEqual = std.testing.expectEqual;
+
+    const tib = 1024 * 1024 * 1024 * 1024;
+    const gib = 1024 * 1024 * 1024;
+    const mib = 1024 * 1024;
+    const kib = 1024;
+
+    try expectEqual(@as(u64, 0), parse_size("0"));
+    try expectEqual(@as(u64, 1), parse_size("  1  "));
+    try expectEqual(@as(u64, 140737488355328), parse_size(" 140737488355328 "));
+    try expectEqual(@as(u64, 140737488355328), parse_size(" 128TiB "));
+
+    try expectEqual(@as(u64, 1 * tib), parse_size("  1TiB "));
+    try expectEqual(@as(u64, 10 * tib), parse_size("  10  tib "));
+    try expectEqual(@as(u64, 100 * tib), parse_size("  100  TB "));
+    try expectEqual(@as(u64, 1000 * tib), parse_size("  1000  tb "));
+
+    try expectEqual(@as(u64, 1 * gib), parse_size("  1GiB "));
+    try expectEqual(@as(u64, 10 * gib), parse_size("  10  gib "));
+    try expectEqual(@as(u64, 100 * gib), parse_size("  100  GB "));
+    try expectEqual(@as(u64, 1000 * gib), parse_size("  1000  gb "));
+
+    try expectEqual(@as(u64, 1 * mib), parse_size("  1MiB "));
+    try expectEqual(@as(u64, 10 * mib), parse_size("  10  mib "));
+    try expectEqual(@as(u64, 100 * mib), parse_size("  100  MB "));
+    try expectEqual(@as(u64, 1000 * mib), parse_size("  1000  mb "));
+
+    try expectEqual(@as(u64, 1 * kib), parse_size("  1KiB "));
+    try expectEqual(@as(u64, 10 * kib), parse_size("  10  kib "));
+    try expectEqual(@as(u64, 100 * kib), parse_size("  100  KB "));
+    try expectEqual(@as(u64, 1000 * kib), parse_size("  1000  kb "));
 }
 
 fn parse_replica(raw_replica: []const u8) u8 {

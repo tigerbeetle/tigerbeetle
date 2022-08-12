@@ -1,8 +1,16 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const Environment = enum {
+    development,
+    production,
+    simulation,
+};
+
 /// Whether development or production:
-pub const deployment_environment = .development;
+pub const deployment_environment: Environment =
+    if (@hasDecl(@import("root"), "deployment_environment")) @import("root").deployment_environment
+    else .development;
 
 /// The maximum log level in increasing order of verbosity (emergency=0, debug=3):
 pub const log_level = 2;
@@ -35,8 +43,8 @@ pub const port = 3001;
 /// Bind to the "127.0.0.1" loopback address to accept local connections as a safe default only.
 pub const address = "127.0.0.1";
 
-/// Where data files should be persisted by default:
-pub const directory = "/var/lib/tigerbeetle";
+/// The default maximum amount of memory to use.
+pub const memory_size_max_default = 1024 * 1024 * 1024;
 
 /// The maximum number of accounts to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
@@ -85,7 +93,11 @@ pub const connections_max = replicas_max + clients_max;
 /// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
 /// For a 1 Gbps NIC = 125 MiB/s throughput: 2 MiB / 125 * 1000ms = 16ms for the next request.
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const message_size_max = 1 * 1024 * 1024;
+pub const message_size_max = switch (deployment_environment) {
+    // Use a small message size during the simulator for improved performance.
+    .simulation => sector_size,
+    else => 1 * 1024 * 1024
+};
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
@@ -157,6 +169,9 @@ pub const tcp_user_timeout_ms = (tcp_keepidle + tcp_keepintvl * tcp_keepcnt) * 1
 /// Whether to disable Nagle's algorithm to eliminate send buffering delays:
 pub const tcp_nodelay = true;
 
+/// Size of a CPU cache line in bytes
+pub const cache_line_size = 64;
+
 /// The minimum size of an aligned kernel page and an Advanced Format disk sector:
 /// This is necessary for direct I/O without the kernel having to fix unaligned pages with a copy.
 /// The new Advanced Format sector size is backwards compatible with the old 512 byte sector size.
@@ -173,12 +188,76 @@ pub const sector_size = 4096;
 /// WARNING: Disabling direct I/O is unsafe; the page cache cannot be trusted after an fsync error,
 /// even after an application panic, since the kernel will mark dirty pages as clean, even
 /// when they were never written to disk.
-pub const direct_io = true;
+pub const direct_io = switch (deployment_environment) {
+    .development => true,
+    .production => true,
+    .simulation => false,
+};
 
 /// The maximum number of concurrent read I/O operations to allow at once.
 pub const io_depth_read = 8;
 /// The maximum number of concurrent write I/O operations to allow at once.
 pub const io_depth_write = 8;
+
+/// The number of redundant copies of the superblock in the superblock storage zone.
+/// This must be either { 4, 6, 8 }, i.e. an even number, for more efficient flexible quorums.
+/// This is further multiplied by two to support copy-on-write across copy sets.
+///
+/// The superblock contains local state for the replica and therefore cannot be replicated remotely.
+/// Loss of the superblock would represent loss of the replica and so it must be protected.
+/// Since each superblock copy also copies the superblock trailer (around 33 MiB), setting this
+/// beyond 4 copies (or decreasing block_size < 64 KiB) can result in a superblock zone > 264 MiB.
+///
+/// This can mean checkpointing latencies in the rare extreme worst-case of at most 264ms, although
+/// this would require EWAH compression of our block free set to have zero effective compression.
+/// In practice, checkpointing latency should be an order of magnitude better due to compression,
+/// because our block free set will fill holes when allocating.
+///
+/// The superblock only needs to be checkpointed every now and then, before the WAL wraps around,
+/// or when a view change needs to take place to elect a new primary.
+pub const superblock_copies = 4;
+
+/// The maximum size of a local data file.
+/// This should not be much larger than several TiB to limit:
+/// * blast radius and recovery time when a whole replica is lost,
+/// * replicated storage overhead, since all data files are mirrored,
+/// * the size of the superblock storage zone, and
+/// * the static memory allocation required for tracking LSM forest metadata in memory.
+// TODO Remove, now that we have block_count_max.
+pub const size_max = 16 * 1024 * 1024 * 1024 * 1024;
+
+/// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
+pub const block_size = 64 * 1024;
+
+pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size);
+
+// TODO Document and tune these LSM options:
+pub const lsm_trees = 30;
+
+/// The number of levels in an LSM tree.
+pub const lsm_levels = 7;
+
+pub const lsm_growth_factor = 8;
+
+/// The maximum key size for an LSM tree in bytes.
+pub const lsm_key_size_max = 32;
+
+pub const lsm_table_size_max = 64 * 1024 * 1024;
+
+/// Size of nodes used by the LSM tree manifest implementation.
+/// TODO Double-check this with our "LSM Manifest" spreadsheet.
+pub const lsm_manifest_node_size = 16 * 1024;
+
+/// A multiple of batch inserts that a mutable table can definitely accommodate before flushing.
+/// For example, if a message_size_max batch can contain at most 8181 transfers then a multiple of 4
+/// means that the transfer tree's mutable table will be sized to 8191 * 4 = 32764 transfers.
+/// TODO Assert this relative to lsm_table_size_max.
+/// We want to ensure that a mutable table can be converted to an immutable table without overflow.
+pub const lsm_batch_multiple = 4;
+
+pub const lsm_snapshots_max = 32;
+
+pub const lsm_value_to_key_layout_ratio_min = 16;
 
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
@@ -222,10 +301,14 @@ pub const clock_synchronization_window_min_ms = 2000;
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = 20000;
 
+/// Whether to perform intensive online verification.
+pub const verify = true;
+
 // TODO Move these to a separate "internal computed constants" file.
 pub const journal_size_headers = journal_slot_count * 128; // 128 == @sizeOf(Header)
 pub const journal_size_prepares = journal_slot_count * message_size_max;
 
+ // TODO Move these into a separate `config_valid.zig` which we import here:
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
@@ -236,4 +319,30 @@ comptime {
     assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
 
     assert(journal_size_max == journal_size_headers + journal_size_prepares);
+
+    // For the given WAL (lsm_batch_multiple=4):
+    //
+    //   A    B    C    D    E
+    //   |····|····|····|····|
+    //
+    // - ("|" delineates measures, where a measure is a multiple of prepare batches.)
+    // - ("·" is a prepare in the WAL.)
+    // - The Replica triggers a checkpoint at "E".
+    // - The entries between "A" and "D" are on-disk in level 0.
+    // - The entries between "D" and "E" are in-memory in the immutable table.
+    // - So the checkpoint only includes "A…D".
+    //
+    // The journal must have at least two measures (batches) to ensure at least one is checkpointed.
+    assert(journal_slot_count >= lsm_batch_multiple * 2);
+    assert(journal_slot_count % lsm_batch_multiple == 0);
+    assert(journal_size_max == journal_size_headers + journal_size_prepares);
+
+    // The WAL format requires messages to be a multiple of the sector size.
+    assert(message_size_max % sector_size == 0);
+    assert(message_size_max >= sector_size);
+
+    // The LSM tree uses half-measures to balance compaction.
+    assert(lsm_batch_multiple % 2 == 0);
 }
+
+pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.
