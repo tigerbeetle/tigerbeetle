@@ -17,6 +17,7 @@ import (
 const (
 	TIGERBEETLE_PORT              = "3000"
 	TIGERBEETLE_CLUSTER_ID uint32 = 0
+	TIGERBEETLE_REPLICA_ID uint32 = 0
 )
 
 func toU128(value string) *types.Uint128 {
@@ -42,15 +43,14 @@ func WithClient(s testing.TB, withClient func(Client)) {
 		panic("tigerbeetle was not built for your platform")
 	}
 
-	replicaArg := "--replica=0"
-	directoryArg := "--directory=."
 	addressArg := "--addresses=" + TIGERBEETLE_PORT
+	replicaArg := fmt.Sprintf("--replica=%d", TIGERBEETLE_REPLICA_ID)
 	clusterArg := fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID)
 
-	fileName := "./cluster_0000000000_replica_000.tigerbeetle"
+	fileName := fmt.Sprintf("./%d_%d.tigerbeetle", TIGERBEETLE_CLUSTER_ID, TIGERBEETLE_REPLICA_ID)
 	_ = os.Remove(fileName)
 
-	tbInit := exec.Command(tigerbeetlePath, "init", clusterArg, replicaArg, directoryArg)
+	tbInit := exec.Command(tigerbeetlePath, "format", clusterArg, replicaArg, fileName)
 	var tbErr bytes.Buffer
 	tbInit.Stdout = &tbErr
 	tbInit.Stderr = &tbErr
@@ -63,7 +63,7 @@ func WithClient(s testing.TB, withClient func(Client)) {
 		_ = os.Remove(fileName)
 	})
 
-	tbStart := exec.Command(tigerbeetlePath, "start", clusterArg, replicaArg, addressArg, directoryArg)
+	tbStart := exec.Command(tigerbeetlePath, "start", addressArg, fileName)
 	if err := tbStart.Start(); err != nil {
 		s.Fatal(err)
 	}
