@@ -52,6 +52,7 @@ pub fn ThreadType(
 
         addresses: []std.net.Address,
         io: IO,
+        message_pool: MessagePool,
         message_bus: MessageBus,
         client: Client,
 
@@ -114,18 +115,29 @@ pub fn ThreadType(
             };
             errdefer self.io.deinit();
 
+            log.debug("init: initializing MessagePool", .{});
+            self.message_pool = MessagePool.init(allocator, .client) catch |err| {
+                log.err("failed to initialize MessagePool: {}", .{err});
+                return err;
+            };
+            errdefer self.message_pool.deinit(self.allocator);
+
             log.debug("init: initializing MessageBus.", .{});
             self.message_bus = MessageBus.init(
                 self.allocator,
                 cluster_id,
-                self.addresses,
-                self.client_id,
-                &self.io,
+                .{ .client = self.client_id },
+                &self.message_pool,
+                Client.on_message,
+                .{
+                    .configuration = self.addresses,
+                    .io = &self.io,
+                },
             ) catch |err| {
                 log.err("failed to initialize message bus: {}.", .{err});
                 return err;
             };
-            errdefer self.message_bus.deinit();
+            errdefer self.message_bus.deinit(self.allocator);
 
             log.debug("init: Initializing client(cluster_id={d}, client_id={d}, addresses={o})", .{
                 cluster_id,
@@ -137,14 +149,16 @@ pub fn ThreadType(
                 self.client_id,
                 cluster_id,
                 @intCast(u8, self.addresses.len),
-                &self.message_bus,
+                &self.message_pool,
+                .{
+                    .configuration = self.addresses,
+                    .io = &self.io,
+                },
             ) catch |err| {
                 log.err("failed to initalize client: {}", .{err});
                 return err;
             };
-            errdefer self.client.deinit();
-
-            self.message_bus.set_on_message(*Client, &self.client, Client.on_message);
+            errdefer self.client.deinit(self.allocator);
 
             self.retry = .{};
             self.submitted = .{};
@@ -174,8 +188,9 @@ pub fn ThreadType(
             self.thread.join();
             self.signal.deinit();
 
-            self.client.deinit();
-            self.message_bus.deinit();
+            self.client.deinit(self.allocator);
+            self.message_bus.deinit(self.allocator);
+            self.message_pool.deinit(self.allocator);
             self.io.deinit();
 
             self.allocator.free(self.addresses);
