@@ -4,14 +4,19 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 
+const GridType = @import("../lsm/grid.zig").GridType;
+const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const ClientTable = @import("superblock_client_table.zig").ClientTable;
+const format_journal = @import("./journal.zig").format_journal;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const Timeout = vsr.Timeout;
 const Command = vsr.Command;
 const Version = vsr.Version;
+const VSRState = vsr.VSRState;
 
 const log = std.log.scoped(.replica);
 
@@ -39,32 +44,6 @@ pub const Status = enum {
     recovering,
 };
 
-const ClientTable = std.AutoHashMapUnmanaged(u128, ClientTableEntry);
-
-/// We found two bugs in the VRR paper relating to the client table:
-///
-/// 1. a correctness bug, where successive client crashes may cause request numbers to collide for
-/// different request payloads, resulting in requests receiving the wrong reply, and
-///
-/// 2. a liveness bug, where if the client table is updated for request and prepare messages with
-/// the client's latest request number, then the client may be locked out from the cluster if the
-/// request is ever reordered through a view change.
-///
-/// We therefore take a different approach with the implementation of our client table, to:
-///
-/// 1. register client sessions explicitly through the state machine to ensure that client session
-/// numbers always increase, and
-///
-/// 2. make a more careful distinction between uncommitted and committed request numbers,
-/// considering that uncommitted requests may not survive a view change.
-const ClientTableEntry = struct {
-    /// The client's session number as committed to the cluster by a register request.
-    session: u64,
-
-    /// The reply sent to the client's latest committed request.
-    reply: *Message,
-};
-
 const Nonce = u128;
 
 const Prepare = struct {
@@ -84,12 +63,15 @@ const quorum_messages_null = [_]?*Message{null} ** config.replicas_max;
 const QuorumCounter = std.StaticBitSet(config.replicas_max);
 const quorum_counter_null = QuorumCounter.initEmpty();
 
-pub fn Replica(
+pub fn ReplicaType(
     comptime StateMachine: type,
     comptime MessageBus: type,
     comptime Storage: type,
     comptime Time: type,
 ) type {
+    const Grid = GridType(Storage);
+    const SuperBlock = vsr.SuperBlockType(Storage);
+
     return struct {
         const Self = @This();
 
@@ -111,6 +93,8 @@ pub fn Replica(
         /// The minimum number of replicas required to form a view change quorum:
         quorum_view_change: u8,
 
+        time: Time,
+
         /// A distributed fault-tolerant clock for lower and upper bounds on the leader's wall clock:
         clock: Clock,
 
@@ -118,14 +102,17 @@ pub fn Replica(
         journal: Journal,
 
         /// An abstraction to send messages from the replica to another replica or client.
-        /// The message bus will also deliver messages to this replica by calling `on_message()`.
-        message_bus: *MessageBus,
+        /// The message bus will also deliver messages to this replica by calling `on_message_from_bus()`.
+        message_bus: MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
-        state_machine: *StateMachine,
+        state_machine: StateMachine,
 
-        /// The client table records for each client the latest session and the latest committed reply.
-        client_table: ClientTable,
+        // TODO Document.
+        superblock: SuperBlock,
+        superblock_context: SuperBlock.Context = undefined,
+        grid: Grid,
+        opened: bool,
 
         /// The current view, initially 0:
         view: u32,
@@ -137,13 +124,13 @@ pub fn Replica(
         status: Status = .recovering,
 
         /// The op number assigned to the most recently prepared operation:
+        // TODO: When recovery protocol is removed, load the `op` from the WAL, and verify that it is ≥op_checkpoint.
+        // Also verify that a corresponding header exists in the WAL.
         op: u64,
 
         /// The op of the highest checkpointed message.
-        // TODO Update this to use LSM storage.
         // TODO Refuse to store/ack any op>op_checkpoint+journal_slot_count.
-        // TODO Enforce invariant op≥op_checkpoint.
-        op_checkpoint: u64 = 0,
+        op_checkpoint: u64,
 
         /// The op number of the latest committed and executed operation (according to the replica):
         /// The replica may have to wait for repairs to complete before commit_min reaches commit_max.
@@ -154,6 +141,7 @@ pub fn Replica(
         commit_max: u64,
 
         /// Whether we are reading a prepare from storage in order to commit.
+        /// Guards against concurrent commits.
         committing: bool = false,
 
         /// Whether we are reading a prepare from storage in order to push to the pipeline.
@@ -164,7 +152,7 @@ pub fn Replica(
         ///
         /// After a view change, the old leader's pipeline is left untouched so that it is able to
         /// help the new leader repair, even in the face of local storage faults.
-        pipeline: RingBuffer(Prepare, config.pipeline_max) = .{},
+        pipeline: RingBuffer(Prepare, config.pipeline_max, .array) = .{},
 
         /// In some cases, a replica may send a message to itself. We do not submit these messages
         /// to the message bus but rather queue them here for guaranteed immediate delivery, which
@@ -236,18 +224,106 @@ pub fn Replica(
 
         on_change_state: ?fn (replica: *Self) void = null,
 
-        pub fn init(
-            allocator: Allocator,
+        /// Called when `commit_prepare` finishes committing.
+        commit_callback: ?fn (*Self) void = null,
+
+        /// The prepare message being committed.
+        commit_prepare: ?*Message = null,
+
+        const OpenOptions = struct {
+            replica_count: u8,
+            storage: *Storage,
+            message_pool: *MessagePool,
+            time: Time,
+            state_machine_options: StateMachine.Options,
+            message_bus_options: MessageBus.Options,
+        };
+
+        /// Initializes and opens the provided replica using the options.
+        pub fn open(self: *Self, allocator: std.mem.Allocator, options: OpenOptions) !void {
+            self.superblock = try SuperBlock.init(
+                allocator,
+                options.storage,
+                options.message_pool,
+            );
+
+            // Once initialzed, the replica is in charge of calling superblock.deinit()
+            var initialized = false;
+            errdefer if (!initialized) self.superblock.deinit(allocator);
+
+            // Open the superblock:
+            self.opened = false;
+            self.superblock.open(superblock_open_callback, &self.superblock_context);
+            while (!self.opened) self.superblock.storage.tick();
+            assert(self.superblock.working.vsr_state.internally_consistent());
+
+            if (self.superblock.working.replica >= options.replica_count) {
+                log.err("{}: open: no address for replica (replica_count={})", .{
+                    self.superblock.working.replica,
+                    options.replica_count,
+                });
+                return error.NoAddress;
+            }
+
+            // Intiaize the replica:
+            try self.init(allocator, .{
+                .cluster = self.superblock.working.cluster,
+                .replica_index = self.superblock.working.replica,
+                .replica_count = options.replica_count,
+                .storage = options.storage,
+                .time = options.time,
+                .message_pool = options.message_pool,
+                .state_machine_options = options.state_machine_options,
+                .message_bus_options = options.message_bus_options,
+            });
+
+            initialized = true;
+            errdefer self.deinit(allocator);
+
+            // Open the (Forest inside) StateMachine:
+            self.opened = false;
+            self.state_machine.open(state_machine_open_callback);
+            while (!self.opened) {
+                self.grid.tick();
+                self.superblock.storage.tick();
+            }
+        }
+
+        fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            assert(!self.opened);
+            self.opened = true;
+        }
+
+        fn state_machine_open_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(!self.opened);
+            self.opened = true;
+        }
+
+        const Options = struct {
             cluster: u32,
             replica_count: u8,
-            replica: u8,
-            time: *Time,
+            replica_index: u8,
+            time: Time,
             storage: *Storage,
-            message_bus: *MessageBus,
-            state_machine: *StateMachine,
-        ) !Self {
+            message_pool: *MessagePool,
+            // TODO With https://github.com/coilhq/tigerbeetle/issues/71,
+            // the separate message_bus_options won't be necessary.
+            message_bus_options: MessageBus.Options,
+            state_machine_options: StateMachine.Options,
+        };
+
+        /// NOTE: self.superblock must be initialized and opened prior to this call.
+        fn init(self: *Self, allocator: Allocator, options: Options) !void {
+            const replica_count = options.replica_count;
+            const replica_index = options.replica_index;
             assert(replica_count > 0);
-            assert(replica < replica_count);
+            assert(replica_index < replica_count);
+
+            assert(self.opened);
+            assert(self.superblock.opened);
+            assert(self.superblock.working.vsr_state.internally_consistent());
 
             const majority = (replica_count / 2) + 1;
             assert(majority <= replica_count);
@@ -277,91 +353,111 @@ pub fn Replica(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
-            var client_table: ClientTable = .{};
-            errdefer client_table.deinit(allocator);
-            try client_table.ensureTotalCapacity(allocator, @intCast(u32, config.clients_max));
-            assert(client_table.capacity() >= config.clients_max);
-
-            const root_prepare = Header.root_prepare(cluster);
-
-            var clock = try Clock.init(
+            self.time = options.time;
+            self.clock = try Clock.init(
                 allocator,
                 replica_count,
-                replica,
-                time,
+                replica_index,
+                &self.time,
             );
-            errdefer clock.deinit(allocator);
+            errdefer self.clock.deinit(allocator);
 
-            const journal = try Journal.init(allocator, storage, replica);
-            errdefer journal.deinit(allocator);
+            self.journal = try Journal.init(allocator, options.storage, replica_index);
+            errdefer self.journal.deinit(allocator);
+
+            self.message_bus = try MessageBus.init(
+                allocator,
+                options.cluster,
+                .{ .replica = options.replica_index },
+                options.message_pool,
+                Self.on_message_from_bus,
+                options.message_bus_options,
+            );
+            errdefer self.message_bus.deinit(allocator);
+
+            self.grid = try Grid.init(allocator, &self.superblock);
+            errdefer self.grid.deinit(allocator);
+
+            self.state_machine = try StateMachine.init(
+                allocator,
+                &self.grid,
+                options.state_machine_options,
+            );
+            errdefer self.state_machine.deinit(allocator);
 
             const recovery_nonce = blk: {
                 var nonce: [@sizeOf(Nonce)]u8 = undefined;
                 var hash = std.crypto.hash.Blake3.init(.{});
-                hash.update(std.mem.asBytes(&clock.monotonic()));
-                hash.update(&[_]u8{replica});
+                hash.update(std.mem.asBytes(&self.clock.monotonic()));
+                hash.update(&[_]u8{replica_index});
                 hash.final(&nonce);
                 break :blk @bitCast(Nonce, nonce);
             };
 
-            var self = Self{
-                .cluster = cluster,
+            self.* = Self{
+                .cluster = options.cluster,
                 .replica_count = replica_count,
-                .replica = replica,
+                .replica = replica_index,
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
-                .clock = clock,
-                .journal = journal,
-                .message_bus = message_bus,
-                .state_machine = state_machine,
-                .client_table = client_table,
-                .view = root_prepare.view,
-                .view_normal = root_prepare.view,
-                .op = root_prepare.op,
-                .commit_min = root_prepare.commit,
-                .commit_max = root_prepare.commit,
+                // Copy the (already-initialized) time back, to avoid regressing the monotonic
+                // clock guard.
+                .time = self.time,
+                .clock = self.clock,
+                .journal = self.journal,
+                .message_bus = self.message_bus,
+                .state_machine = self.state_machine,
+                .superblock = self.superblock,
+                .grid = self.grid,
+                .opened = self.opened,
+                .view = self.superblock.working.vsr_state.view,
+                .view_normal = self.superblock.working.vsr_state.view_normal,
+                .op = 0,
+                .op_checkpoint = self.superblock.working.vsr_state.commit_min,
+                .commit_min = self.superblock.working.vsr_state.commit_min,
+                .commit_max = self.superblock.working.vsr_state.commit_max,
                 .ping_timeout = Timeout{
                     .name = "ping_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 100,
                 },
                 .prepare_timeout = Timeout{
                     .name = "prepare_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 50,
                 },
                 .commit_timeout = Timeout{
                     .name = "commit_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 100,
                 },
                 .normal_status_timeout = Timeout{
                     .name = "normal_status_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 500,
                 },
                 .view_change_status_timeout = Timeout{
                     .name = "view_change_status_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 500,
                 },
                 .view_change_message_timeout = Timeout{
                     .name = "view_change_message_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 50,
                 },
                 .repair_timeout = Timeout{
                     .name = "repair_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 50,
                 },
                 .recovery_timeout = Timeout{
                     .name = "recovery_timeout",
-                    .id = replica,
+                    .id = replica_index,
                     .after = 200,
                 },
                 .recovery_nonce = recovery_nonce,
-                .prng = std.rand.DefaultPrng.init(replica),
+                .prng = std.rand.DefaultPrng.init(replica_index),
             };
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={}", .{
@@ -375,13 +471,11 @@ pub fn Replica(
             // always overallocate capacity by a factor of two.
             log.debug("{}: init: client_table.capacity()={} for config.clients_max={} entries", .{
                 self.replica,
-                self.client_table.capacity(),
+                self.client_table().capacity(),
                 config.clients_max,
             });
 
             assert(self.status == .recovering);
-
-            return self;
         }
 
         /// Free all memory and unref all messages held by the replica
@@ -389,14 +483,10 @@ pub fn Replica(
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
-
-            {
-                var it = self.client_table.iterator();
-                while (it.next()) |entry| {
-                    self.message_bus.unref(entry.value_ptr.reply);
-                }
-                self.client_table.deinit(allocator);
-            }
+            self.state_machine.deinit(allocator);
+            self.superblock.deinit(allocator);
+            self.grid.deinit(allocator);
+            defer self.message_bus.deinit(allocator);
 
             while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
 
@@ -404,6 +494,15 @@ pub fn Replica(
                 assert(loopback_message.next == null);
                 self.message_bus.unref(loopback_message);
                 self.loopback_queue = null;
+            }
+
+            if (self.commit_prepare) |message| {
+                assert(self.committing);
+                assert(self.commit_callback != null);
+                self.message_bus.unref(message);
+                self.commit_prepare = null;
+            } else {
+                assert(self.commit_callback == null);
             }
 
             for (self.do_view_change_from_all_replicas) |message| {
@@ -415,6 +514,11 @@ pub fn Replica(
             }
         }
 
+        /// The client table records for each client the latest session and the latest committed reply.
+        inline fn client_table(self: *Self) *ClientTable {
+            return &self.superblock.client_table;
+        }
+
         /// Time is measured in logical ticks that are incremented on every call to tick().
         /// This eliminates a dependency on the system time and enables deterministic testing.
         pub fn tick(self: *Self) void {
@@ -424,7 +528,11 @@ pub fn Replica(
             // decrease throughput significantly.
             assert(self.loopback_queue == null);
 
+            // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
+            self.grid.tick();
+            self.state_machine.tick();
+            self.message_bus.tick();
 
             if (!self.journal.recovered) {
                 if (!self.journal.recovering) self.journal.recover();
@@ -442,6 +550,7 @@ pub fn Replica(
                     // The data file is brand new — no messages have ever been written.
                     // Transition to normal status; no need to run the VSR recovery protocol.
                     assert(self.journal.faulty.count == 0);
+                    assert(self.op == 0);
                     self.transition_to_normal_from_recovering_status(0);
                     assert(self.status == .normal);
                 } else if (self.replica_count == 1) {
@@ -449,8 +558,13 @@ pub fn Replica(
                     if (self.journal.faulty.count != 0) @panic("journal is corrupt");
                     if (self.committing) return;
                     assert(self.op == 0);
+                    // TODO Assert that this path isn't taken more than once.
                     self.op = self.journal.op_maximum();
-                    self.commit_ops(self.op);
+                    assert(self.op >= self.commit_min);
+                    assert(self.op >= self.op_checkpoint);
+                    assert(self.op <= self.op_checkpoint_trigger());
+                    assert(self.journal.header_with_op(self.op) != null);
+                    self.commit_journal(self.op);
                     // The recovering→normal transition is deferred until all ops are committed.
                 } else {
                     // The journal just finished recovery.
@@ -482,6 +596,11 @@ pub fn Replica(
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
+        fn on_message_from_bus(message_bus: *MessageBus, message: *Message) void {
+            const self = @fieldParentPtr(Self, "message_bus", message_bus);
+            self.on_message(message);
+        }
+
         pub fn on_message(self: *Self, message: *Message) void {
             assert(self.loopback_queue == null);
             assert(message.references > 0);
@@ -533,6 +652,7 @@ pub fn Replica(
                 .request_start_view => self.on_request_start_view(message),
                 .request_prepare => self.on_request_prepare(message),
                 .request_headers => self.on_request_headers(message),
+                .request_block => unreachable, // TODO
                 .headers => self.on_headers(message),
                 .nack_prepare => self.on_nack_prepare(message),
                 // A replica should never handle misdirected messages intended for a client:
@@ -543,6 +663,7 @@ pub fn Replica(
                     });
                     return;
                 },
+                .block => unreachable, // TODO
                 .reserved => unreachable,
             }
 
@@ -731,7 +852,7 @@ pub fn Replica(
             }
 
             // Verify that the new request will fit in the WAL.
-            if (message.header.op >= self.op_checkpoint + config.journal_slot_count) {
+            if (message.header.op > self.op_checkpoint_trigger()) {
                 log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
                     message.header.op,
@@ -749,7 +870,7 @@ pub fn Replica(
             assert(message.header.op > self.op_checkpoint);
             assert(message.header.op > self.op);
             assert(message.header.op > self.commit_min);
-            assert(message.header.op < self.op_checkpoint + config.journal_slot_count);
+            assert(message.header.op <= self.op_checkpoint_trigger());
 
             if (self.follower()) self.normal_status_timeout.reset();
 
@@ -782,7 +903,7 @@ pub fn Replica(
 
             if (self.follower()) {
                 // A prepare may already be committed if requested by repair() so take the max:
-                self.commit_ops(std.math.max(message.header.commit, self.commit_max));
+                self.commit_journal(std.math.max(message.header.commit, self.commit_max));
                 assert(self.commit_max >= message.header.commit);
             }
         }
@@ -867,7 +988,7 @@ pub fn Replica(
             }
 
             self.normal_status_timeout.reset();
-            self.commit_ops(message.header.commit);
+            self.commit_journal(message.header.commit);
         }
 
         fn on_repair(self: *Self, message: *Message) void {
@@ -1000,8 +1121,9 @@ pub fn Replica(
             // We may receive a `do_view_change` quorum from other replicas, which already have a
             // `start_view_change_quorum`, before we receive a `start_view_change_quorum`:
             if (!self.start_view_change_quorum) {
-                log.debug("{}: on_do_view_change: waiting for start_view_change quorum", .{
+                log.debug("{}: on_do_view_change: waiting for start_view_change quorum (view={})", .{
                     self.replica,
+                    self.view,
                 });
                 return;
             }
@@ -1065,6 +1187,24 @@ pub fn Replica(
 
                     if (k == null or m.header.commit > k.?) k = m.header.commit;
                 }
+            }
+
+            // Consider the case:
+            // 1. Start committing op=N.
+            // 2. Send `do_view_change` to self.
+            // 3. Finish committing op=N.
+            // 4. Remaining `do_view_change` messages arrive, completing the quorum.
+            // In this scenario, the our own `do_view_change`'s commit is `N-1`, but `commit_min=N`.
+            // Don't let the commit backtrack.
+            if (k.? < self.commit_min) {
+                assert(k.? == self.do_view_change_from_all_replicas[self.replica].?.header.commit);
+                log.debug("{}: on_do_view_change: bump view view={} commit={}..{}", .{
+                    self.replica,
+                    self.view,
+                    k,
+                    self.commit_min,
+                });
+                k = self.commit_min;
             }
 
             self.set_latest_op_and_k(&latest, k.?, "on_do_view_change");
@@ -1142,7 +1282,7 @@ pub fn Replica(
             assert(message.header.view == self.view);
             assert(self.follower());
 
-            self.commit_ops(self.commit_max);
+            self.commit_journal(self.commit_max);
 
             self.repair();
         }
@@ -1429,7 +1569,7 @@ pub fn Replica(
             // `state_machine.commit_timestamp` is updated as messages are committed.
 
             self.reset_quorum_recovery_response();
-            self.commit_ops(commit);
+            self.commit_journal(commit);
             self.repair();
         }
 
@@ -1934,10 +2074,44 @@ pub fn Replica(
                 assert(m.header.replica == message.header.replica);
                 assert(m.header.view == message.header.view);
                 assert(m.header.op == message.header.op);
-                assert(m.header.commit == message.header.commit);
                 assert(m.header.checksum_body == message.header.checksum_body);
-                assert(m.header.checksum == message.header.checksum);
-                log.debug("{}: on_{s}: ignoring (duplicate message)", .{ self.replica, command });
+
+                if (message.header.command == .do_view_change) {
+                    // Replicas don't resend `do_view_change` messages to themselves.
+                    assert(message.header.replica != self.replica);
+                    // A replica may resend a `do_view_change` with a different commit if it was
+                    // committing originally. Keep the one with the highest commit.
+                    // This is *not* necessary for correctness.
+                    if (m.header.commit < message.header.commit) {
+                        log.debug("{}: on_{s}: replacing (newer message replica={} commit={}..{})", .{
+                            self.replica,
+                            command,
+                            message.header.replica,
+                            m.header.commit,
+                            message.header.commit,
+                        });
+                        // TODO(Buggify): skip updating the DVC, since it isn't required for correctness.
+                        self.message_bus.unref(m);
+                        messages[message.header.replica] = message.ref();
+                    } else if (m.header.commit > message.header.commit) {
+                        log.debug("{}: on_{s}: ignoring (older message replica={})", .{
+                            self.replica,
+                            command,
+                            message.header.replica,
+                        });
+                    } else {
+                        assert(m.header.checksum == message.header.checksum);
+                    }
+                } else {
+                    assert(m.header.commit == message.header.commit);
+                    assert(m.header.checksum == message.header.checksum);
+                }
+
+                log.debug("{}: on_{s}: ignoring (duplicate message replica={})", .{
+                    self.replica,
+                    command,
+                    message.header.replica,
+                });
                 return null;
             }
 
@@ -2058,9 +2232,15 @@ pub fn Replica(
                 // In a cluster-of-one, the prepares must always be written to the WAL sequentially
                 // (never concurrently). This ensures that there will be no gaps in the WAL during
                 // crash recovery.
-                log.debug("{}: append: serializing append op={}", .{ self.replica, message.header.op });
+                log.debug("{}: append: serializing append op={}", .{
+                    self.replica,
+                    message.header.op,
+                });
             } else {
-                log.debug("{}: append: appending to journal", .{self.replica});
+                log.debug("{}: append: appending to journal op={}", .{
+                    self.replica,
+                    message.header.op,
+                });
                 self.write_prepare(message, .append);
             }
         }
@@ -2108,9 +2288,9 @@ pub fn Replica(
         }
 
         /// Commit ops up to commit number `commit` (inclusive).
-        /// A function which calls `commit_ops()` to set `commit_max` must first call `view_jump()`.
-        /// Otherwise, we may fork the log.
-        fn commit_ops(self: *Self, commit: u64) void {
+        /// A function which calls `commit_journal()` to set `commit_max` must first call
+        /// `view_jump()`. Otherwise, we may fork the log.
+        fn commit_journal(self: *Self, commit: u64) void {
             // TODO Restrict `view_change` status only to the leader purely as defense-in-depth.
             // Be careful of concurrency when doing this, as successive view changes can happen quickly.
             assert(self.status == .normal or self.status == .view_change or
@@ -2126,7 +2306,7 @@ pub fn Replica(
             // We must update `commit_max` even if we are already committing, otherwise we will lose
             // information that we should know, and `set_latest_op_and_k()` will catch us out:
             if (commit > self.commit_max) {
-                log.debug("{}: commit_ops: advancing commit_max={}..{}", .{
+                log.debug("{}: commit_journal: advancing commit_max={}..{}", .{
                     self.replica,
                     self.commit_max,
                     commit,
@@ -2134,9 +2314,9 @@ pub fn Replica(
                 self.commit_max = commit;
             }
 
-            // Guard against multiple concurrent invocations of commit_ops():
+            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.committing) {
-                log.debug("{}: commit_ops: already committing...", .{self.replica});
+                log.debug("{}: commit_journal: already committing...", .{self.replica});
                 return;
             }
 
@@ -2153,19 +2333,19 @@ pub fn Replica(
             assert(!self.committing);
             self.committing = true;
 
-            self.commit_ops_read();
+            self.commit_journal_next();
         }
 
-        fn commit_ops_read(self: *Self) void {
+        fn commit_journal_next(self: *Self) void {
             assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            if (!self.valid_hash_chain("commit_ops_read")) {
-                self.committing = false;
+            if (!self.valid_hash_chain("commit_journal_next")) {
                 assert(self.replica_count > 1);
+                self.commit_ops_done();
                 return;
             }
             assert(self.op >= self.commit_max);
@@ -2175,9 +2355,9 @@ pub fn Replica(
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
                 const checksum = self.journal.header_with_op(op).?.checksum;
-                self.journal.read_prepare(commit_ops_commit, op, checksum, null);
+                self.journal.read_prepare(commit_journal_next_callback, op, checksum, null);
             } else {
-                self.committing = false;
+                self.commit_ops_done();
                 // This is an optimization to expedite the view change before the `repair_timeout`:
                 if (self.status == .view_change and self.repairs_allowed()) self.repair();
 
@@ -2187,20 +2367,19 @@ pub fn Replica(
                     assert(self.commit_min == self.op);
                     self.transition_to_normal_from_recovering_status(0);
                 } else {
-                    // We expect that a cluster-of-one only calls commit_ops() in recovering status.
+                    // We expect that a cluster-of-one only calls commit_journal() in recovering status.
                     assert(self.replica_count > 1);
                 }
             }
         }
 
-        fn commit_ops_commit(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
+        fn commit_journal_next_callback(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
+            assert(self.committing);
             assert(destination_replica == null);
 
-            assert(self.committing);
-            self.committing = false;
-
             if (prepare == null) {
-                log.debug("{}: commit_ops_commit: prepare == null", .{self.replica});
+                self.commit_ops_done();
+                log.debug("{}: commit_journal_next_callback: prepare == null", .{self.replica});
                 if (self.replica_count == 1) @panic("cannot recover corrupt prepare");
                 return;
             }
@@ -2217,11 +2396,14 @@ pub fn Replica(
                 .normal => {},
                 .view_change => {
                     if (self.leader_index(self.view) != self.replica) {
-                        log.debug("{}: commit_ops_commit: no longer leader", .{self.replica});
+                        self.commit_ops_done();
+                        log.debug("{}: commit_journal_next_callback: no longer leader view={}", .{
+                            self.replica,
+                            self.view,
+                        });
                         assert(self.replica_count > 1);
                         return;
                     }
-
                     // Only the leader may commit during a view change before starting the new view.
                     // Fall through if this is indeed the case.
                 },
@@ -2234,18 +2416,192 @@ pub fn Replica(
             const op = self.commit_min + 1;
             assert(prepare.?.header.op == op);
 
-            self.commit_op(prepare.?);
+            self.commit_op_prefetch(prepare.?, commit_journal_callback);
+        }
 
-            assert(self.commit_min == op);
+        fn commit_journal_callback(self: *Self) void {
+            assert(self.committing);
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            self.committing = true;
-            self.commit_ops_read();
+            self.commit_journal_next();
+        }
+
+        /// Begin the commit path that is common between `commit_pipeline` and `commit_journal`:
+        ///
+        /// 1. prefetch
+        /// 2. commit_op: Update the state machine and the replica's commit_min/commit_max.
+        /// 3. compact
+        /// 4. checkpoint: (Only called when `commit_min == op_checkpoint_trigger`).
+        /// 5. done: Call the `callback` that was passed to `commit_op_prefetch`.
+        fn commit_op_prefetch(
+            self: *Self,
+            prepare: *Message,
+            callback: fn (*Self) void,
+        ) void {
+            assert(self.committing);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.replica_count == 1));
+            assert(self.commit_prepare == null);
+            assert(self.commit_callback == null);
+            assert(prepare.header.command == .prepare);
+            assert(prepare.header.operation != .root);
+            assert(prepare.header.op == self.commit_min + 1);
+            assert(prepare.header.op <= self.op);
+
+            self.commit_prepare = prepare.ref();
+            self.commit_callback = callback;
+            self.state_machine.prefetch(
+                commit_op_prefetch_callback,
+                prepare.header.op,
+                prepare.header.operation.cast(StateMachine),
+                prepare.body(),
+            );
+        }
+
+        fn commit_op_prefetch_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(self.committing);
+            assert(self.commit_prepare != null);
+            assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+
+            self.commit_op(self.commit_prepare.?);
+            assert(self.commit_min == self.commit_prepare.?.header.op);
+            assert(self.commit_min <= self.commit_max);
+
+            if (self.status == .normal and self.leader()) {
+                const prepare = self.pipeline.pop().?;
+                assert(self.commit_min == self.commit_max);
+                assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
+                assert(prepare.message.header.op == self.commit_min);
+                assert(prepare.message.header.op == self.commit_max);
+                assert(self.prepare_timeout.ticking);
+
+                self.message_bus.unref(prepare.message);
+
+                if (self.pipeline.head_ptr()) |next| {
+                    assert(next.message.header.op == self.commit_min + 1);
+                    assert(next.message.header.op == self.commit_prepare.?.header.op + 1);
+
+                    if (self.replica_count == 1) {
+                        // Write the next message in the queue.
+                        // A cluster-of-one writes prepares sequentially to avoid gaps in the
+                        // WAL caused by reordered writes.
+                        log.debug("{}: append: appending to journal op={}", .{
+                            self.replica,
+                            next.message.header.op,
+                        });
+                        self.write_prepare(next.message, .append);
+                    }
+                } else {
+                    // When the pipeline is empty, stop the prepare timeout.
+                    // The timeout will be restarted when another entry arrives for the pipeline.
+                    self.prepare_timeout.stop();
+                }
+            }
+
+            self.state_machine.compact(commit_op_compact_callback, self.commit_prepare.?.header.op);
+        }
+
+        fn commit_op_compact_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(self.committing);
+            assert(self.commit_callback != null);
+            assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
+            assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
+
+            const op = self.commit_prepare.?.header.op;
+            assert(op == self.commit_min);
+
+            if (op == self.op_checkpoint_trigger()) {
+                assert(op == self.op);
+                assert((op + 1) % config.lsm_batch_multiple == 0);
+                log.debug("{}: commit_op_compact_callback: checkpoint start " ++
+                    "(op={} current_checkpoint={} next_checkpoint={})", .{
+                    self.replica,
+                    self.op,
+                    self.op_checkpoint,
+                    self.op_checkpoint_next(),
+                });
+                self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
+            } else {
+                assert(op < self.op_checkpoint_trigger());
+                self.commit_op_done();
+            }
+        }
+
+        fn commit_op_checkpoint_state_machine_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(self.committing);
+            assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.op);
+            assert(self.commit_prepare.?.header.op == self.commit_min);
+            assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
+
+            // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
+            //
+            //   A  B  C  D  E
+            //   |01|23|45|67|
+            //
+            // The checkpoint is triggered at "E".
+            // At this point, ops 6 and 7 are in the in-memory immutable table.
+            // They will only be compacted to disk in the next measure.
+            // Therefore, only ops "A..D" are committed to disk.
+            // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
+            const vsr_state_new = .{
+                .commit_min = self.op_checkpoint_next(),
+                .commit_max = self.commit_max,
+                .view_normal = self.view_normal,
+                .view = self.view,
+            };
+            assert(VSRState.monotonic(self.superblock.working.vsr_state, vsr_state_new));
+
+            self.superblock.staging.vsr_state = vsr_state_new;
+            self.superblock.checkpoint(
+                commit_op_checkpoint_superblock_callback,
+                &self.superblock_context,
+            );
+        }
+
+        fn commit_op_checkpoint_superblock_callback(superblock_context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            assert(self.committing);
+            assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.op);
+            assert(self.commit_prepare.?.header.op == self.commit_min);
+
+            self.op_checkpoint = self.op_checkpoint_next();
+            assert(self.op_checkpoint == self.commit_min - config.lsm_batch_multiple);
+            assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
+            assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
+
+            log.debug("{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})", .{
+                self.replica,
+                self.op,
+                self.op_checkpoint,
+            });
+
+            self.commit_op_done();
+        }
+
+        fn commit_op_done(self: *Self) void {
+            const callback = self.commit_callback.?;
+            assert(self.committing);
+            assert(self.commit_prepare.?.header.op == self.commit_min);
+            assert(self.commit_prepare.?.header.op < self.op_checkpoint_trigger());
+
+            self.message_bus.unref(self.commit_prepare.?);
+            self.commit_prepare = null;
+            self.commit_callback = null;
+            callback(self);
         }
 
         fn commit_op(self: *Self, prepare: *const Message) void {
             // TODO Can we add more checks around allowing commit_op() during a view change?
+            assert(self.committing);
+            assert(self.commit_prepare != null);
+            assert(self.commit_callback != null);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
             assert(prepare.header.command == .prepare);
@@ -2253,9 +2609,10 @@ pub fn Replica(
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
 
-            // If we are a follower committing through `commit_ops()` then a view change may have
-            // happened since we last checked in `commit_ops_read()`. However, this would relate to
-            // subsequent ops, since by now we have already verified the hash chain for this commit.
+            // If we are a follower committing through `commit_journal()` then a view change may
+            // have happened since we last checked in `commit_journal_next()`. However, this would
+            // relate to subsequent ops, since by now we have already verified the hash chain for
+            // this commit.
 
             assert(self.journal.has(prepare.header));
             assert(self.journal.header_with_op(self.commit_min).?.checksum ==
@@ -2277,6 +2634,7 @@ pub fn Replica(
 
             const reply_body_size = @intCast(u32, self.state_machine.commit(
                 prepare.header.client,
+                prepare.header.op,
                 prepare.header.operation.cast(StateMachine),
                 prepare.buffer[@sizeOf(Header)..prepare.header.size],
                 reply.buffer[@sizeOf(Header)..],
@@ -2323,22 +2681,38 @@ pub fn Replica(
         }
 
         /// Commits, frees and pops as many prepares at the head of the pipeline as have quorum.
+        /// Can be called only when the replica is the leader.
         /// Can be called only when the pipeline has at least one prepare.
-        /// Stops the prepare timeout and resets the timeouts counter if the pipeline becomes empty.
         fn commit_pipeline(self: *Self) void {
             assert(self.status == .normal);
             assert(self.leader());
             assert(self.pipeline.count > 0);
 
-            while (self.pipeline.head_ptr()) |prepare| {
-                assert(self.pipeline.count > 0);
+            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
+            if (self.committing) {
+                log.debug("{}: commit_pipeline: already committing...", .{self.replica});
+                return;
+            }
+
+            self.committing = true;
+            self.commit_pipeline_next();
+        }
+
+        fn commit_pipeline_next(self: *Self) void {
+            assert(self.committing);
+            assert(self.status == .normal);
+            assert(self.leader());
+
+            if (self.pipeline.head_ptr()) |prepare| {
                 assert(self.commit_min == self.commit_max);
-                assert(self.commit_max + self.pipeline.count == self.op);
-                assert(self.commit_max + 1 == prepare.message.header.op);
+                assert(self.commit_min + 1 == prepare.message.header.op);
+                assert(self.commit_min + self.pipeline.count == self.op);
+                assert(self.journal.has(prepare.message.header));
 
                 if (!prepare.ok_quorum_received) {
                     // Eventually handled by on_prepare_timeout().
                     log.debug("{}: commit_pipeline: waiting for quorum", .{self.replica});
+                    self.commit_ops_done();
                     return;
                 }
 
@@ -2346,26 +2720,30 @@ pub fn Replica(
                 assert(count >= self.quorum_replication);
                 assert(count <= self.replica_count);
 
-                self.commit_op(prepare.message);
-
-                assert(self.commit_min == self.commit_max);
-                assert(self.commit_max == prepare.message.header.op);
-
-                self.message_bus.unref(self.pipeline.pop().?.message);
-
-                if (self.replica_count == 1) {
-                    if (self.pipeline.head_ptr()) |head| {
-                        // Write the next message in the queue.
-                        // A cluster-of-one writes prepares sequentially to avoid gaps in the WAL.
-                        self.write_prepare(head.message, .append);
-                        // The loop will wrap around and exit when `!ok_quorum_received`.
-                    }
-                }
+                self.commit_op_prefetch(prepare.message, commit_pipeline_callback);
+            } else {
+                self.commit_ops_done();
             }
+        }
 
-            assert(self.prepare_timeout.ticking);
+        fn commit_pipeline_callback(self: *Self) void {
+            assert(self.committing);
+            assert(self.commit_min <= self.commit_max);
+            assert(self.commit_min <= self.op);
 
-            if (self.pipeline.count == 0) self.prepare_timeout.stop();
+            if (self.status == .normal and self.leader()) {
+                if (self.pipeline.head_ptr()) |pipeline_head| {
+                    assert(pipeline_head.message.header.op == self.commit_min + 1);
+                }
+                self.commit_pipeline_next();
+            } else {
+                self.commit_ops_done();
+            }
+        }
+
+        fn commit_ops_done(self: *Self) void {
+            assert(self.committing);
+            self.committing = false;
         }
 
         fn copy_latest_headers_and_set_size(
@@ -2393,7 +2771,13 @@ pub fn Replica(
             const count = self.journal.copy_latest_headers_between(
                 op_min,
                 op_max,
-                std.mem.bytesAsSlice(Header, message.buffer[@sizeOf(Header)..][0..body_size_max]),
+                std.mem.bytesAsSlice(
+                    Header,
+                    @alignCast(
+                        @alignOf(Header),
+                        message.buffer[@sizeOf(Header)..][0..body_size_max],
+                    ),
+                ),
             );
 
             message.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
@@ -2455,12 +2839,12 @@ pub fn Replica(
             // we do require that all entries have different commit numbers and are iterated.
             // This ensures that we will always pick the entry with the oldest commit number.
             // We also check that a client has only one entry in the hash map (or it's buggy).
-            const clients = self.client_table.count();
+            const clients = self.client_table().count();
             assert(clients <= config.clients_max);
             if (clients == config.clients_max) {
                 var evictee: ?*Message = null;
                 var iterated: usize = 0;
-                var iterator = self.client_table.valueIterator();
+                var iterator = self.client_table().iterator();
                 while (iterator.next()) |entry| : (iterated += 1) {
                     assert(entry.reply.header.command == .reply);
                     assert(entry.reply.header.context == 0);
@@ -2485,8 +2869,7 @@ pub fn Replica(
                     config.clients_max,
                     evictee.?.header.client,
                 });
-                assert(self.client_table.remove(evictee.?.header.client));
-                assert(!self.client_table.contains(evictee.?.header.client));
+                self.client_table().remove(evictee.?.header.client);
                 self.message_bus.unref(evictee.?);
             }
 
@@ -2499,11 +2882,11 @@ pub fn Replica(
 
             // Any duplicate .register requests should have received the same session number if the
             // client table entry already existed, or been dropped if a session was being committed:
-            self.client_table.putAssumeCapacityNoClobber(reply.header.client, .{
+            self.client_table().put(&.{
                 .session = session,
                 .reply = reply.ref(),
             });
-            assert(self.client_table.count() <= config.clients_max);
+            assert(self.client_table().count() <= config.clients_max);
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -2661,10 +3044,12 @@ pub fn Replica(
                     self.journal.remove_entries_from(op);
                     self.op = op - 1;
 
-                    const slot = self.journal.slot_for_op(op);
-                    assert(self.journal.header_for_op(op) == null);
-                    assert(!self.journal.dirty.bit(slot));
-                    assert(!self.journal.faulty.bit(slot));
+                    assert(self.journal.header_with_op(op) == null);
+                    if (self.journal.header_for_op(op) == null) {
+                        const slot = self.journal.slot_for_op(op);
+                        assert(!self.journal.dirty.bit(slot));
+                        assert(!self.journal.faulty.bit(slot));
+                    }
                 }
             }
         }
@@ -2711,8 +3096,8 @@ pub fn Replica(
         }
 
         fn flush_loopback_queue(self: *Self) void {
-            // There are three cases where a replica will send a message to itself:
-            // However, of these three cases, only two cases will call send_message_to_replica().
+            // There are four cases where a replica will send a message to itself:
+            // However, of these four cases, all but one call send_message_to_replica().
             //
             // 1. In on_request(), the leader sends a synchronous prepare to itself, but this is
             //    done by calling on_prepare() directly, and subsequent prepare timeout retries will
@@ -2721,6 +3106,8 @@ pub fn Replica(
             //    asynchronous prepare_ok to itself.
             // 3. In on_start_view_change(), after receiving a quorum of start_view_change
             //    messages, the new leader sends a synchronous do_view_change to itself.
+            // 4. In start_view_as_the_new_leader(), the new leader sends itself a prepare_ok
+            //    message for each uncommitted message.
             if (self.loopback_queue) |message| {
                 defer self.message_bus.unref(message);
 
@@ -2873,10 +3260,10 @@ pub fn Replica(
 
             // Verify that the new request will fit in the WAL.
             // The message's op hasn't been assigned yet, but it will be `self.op + 1`.
-            if (self.op + 1 >= self.op_checkpoint + config.journal_slot_count) {
+            if (self.op == self.op_checkpoint_trigger()) {
                 log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
-                    message.header.op,
+                    self.op + 1,
                     self.op_checkpoint,
                 });
                 return true;
@@ -2897,7 +3284,7 @@ pub fn Replica(
             assert(message.header.context == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
 
-            if (self.client_table.getPtr(message.header.client)) |entry| {
+            if (self.client_table().get(message.header.client)) |entry| {
                 assert(entry.reply.header.command == .reply);
                 assert(entry.reply.header.client == message.header.client);
 
@@ -3151,6 +3538,50 @@ pub fn Replica(
             return true;
         }
 
+        /// Returns the op that will be `op_checkpoint` after the next checkpoint.
+        ///
+        /// For a replica with journal_slot_count=8 and lsm_batch_multiple=2:
+        ///
+        ///   |01|23|45|67| (initial log fill)
+        ///   |89|01|23|45| (first wrap of log)
+        ///   |67|89|01|23| (second wrap of log)
+        ///
+        ///   checkpoint() call      0   1   2
+        ///   op_checkpoint          0   5  11
+        ///   op_checkpoint_next     5  11  17
+        ///   op_checkpoint_trigger  7  13  19
+        ///
+        fn op_checkpoint_next(self: *const Self) u64 {
+            assert(self.op_checkpoint <= self.commit_min);
+            assert(self.op_checkpoint <= self.op);
+            assert(self.op_checkpoint == 0 or
+                (self.op_checkpoint + 1) % config.lsm_batch_multiple == 0);
+
+            const op = if (self.op_checkpoint == 0)
+                // First wrap: op_checkpoint_next = 8-2-1 = 5
+                config.journal_slot_count - config.lsm_batch_multiple - 1
+            else
+                // Second wrap: op_checkpoint_next = 5+8-2 = 11
+                // Third wrap: op_checkpoint_next = 11+8-2 = 17
+                self.op_checkpoint + config.journal_slot_count - config.lsm_batch_multiple;
+            assert((op + 1) % config.lsm_batch_multiple == 0);
+            // The checkpoint always advances.
+            assert(op > self.op_checkpoint);
+
+            return op;
+        }
+
+        /// Returns the next op that will trigger a checkpoint.
+        ///
+        /// Receiving and storing an op higher than `op_checkpoint_trigger()` is forbidden; doing so
+        /// would overwrite a message (or the slot of a message) that has not yet been committed and
+        /// checkpointed.
+        ///
+        /// See `op_checkpoint_next` for more detail.
+        fn op_checkpoint_trigger(self: *const Self) u64 {
+            return self.op_checkpoint_next() + config.lsm_batch_multiple;
+        }
+
         fn is_repair(self: *const Self, message: *const Message) bool {
             assert(message.header.command == .prepare);
 
@@ -3167,13 +3598,13 @@ pub fn Replica(
 
         /// Returns whether the replica is the leader for the current view.
         /// This may be used only when the replica status is normal.
-        fn leader(self: *Self) bool {
+        fn leader(self: *const Self) bool {
             assert(self.status == .normal);
             return self.leader_index(self.view) == self.replica;
         }
 
         /// Returns the index into the configuration of the leader for a given view.
-        fn leader_index(self: *Self, view: u32) u8 {
+        fn leader_index(self: *const Self, view: u32) u8 {
             return @intCast(u8, @mod(view, self.replica_count));
         }
 
@@ -3187,7 +3618,7 @@ pub fn Replica(
             // to a newer op that is less than `commit_max` but greater than `commit_min`:
             assert(header.op > self.commit_min);
             // Never overwrite an op that still needs to be checkpointed.
-            assert(header.op - self.op_checkpoint < config.journal_slot_count);
+            assert(header.op <= self.op_checkpoint_trigger());
 
             log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
                 self.replica,
@@ -3207,7 +3638,7 @@ pub fn Replica(
             assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
             return std.mem.bytesAsSlice(
                 Header,
-                message.buffer[@sizeOf(Header)..message.header.size],
+                @alignCast(@alignOf(Header), message.buffer[@sizeOf(Header)..message.header.size]),
             );
         }
 
@@ -3261,7 +3692,7 @@ pub fn Replica(
 
             var op = self.commit_max + 1;
             var parent = self.journal.header_with_op(self.commit_max).?.checksum;
-            var iterator = self.pipeline.iterator();
+            var iterator = self.pipeline.iterator_mutable();
             while (iterator.next_ptr()) |prepare| {
                 assert(prepare.message.header.command == .prepare);
                 assert(prepare.message.header.op == op);
@@ -3362,10 +3793,7 @@ pub fn Replica(
 
             // The replica repairs backwards from `commit_max`. But if `commit_max` is too high
             // (>1 WAL ahead), then bound it such that uncommitted WAL entries are not overwritten.
-            const commit_max_limit = std.math.min(
-                self.commit_max,
-                self.op_checkpoint + config.journal_slot_count,
-            );
+            const commit_max_limit = std.math.min(self.commit_max, self.op_checkpoint_trigger());
 
             // Request outstanding committed prepares to advance our op number:
             // This handles the case of an idle cluster, where a follower will not otherwise advance.
@@ -3442,13 +3870,12 @@ pub fn Replica(
             // Commit ops, which may in turn discover faulty prepares and drive more repairs:
             if (self.commit_min < self.commit_max) {
                 assert(self.replica_count > 1);
-                self.commit_ops(self.commit_max);
+                self.commit_journal(self.commit_max);
                 return;
             }
 
             if (self.status == .view_change and self.leader_index(self.view) == self.replica) {
                 if (self.repair_pipeline_op() != null) return self.repair_pipeline();
-
                 // Start the view as the new leader:
                 self.start_view_as_the_new_leader();
             }
@@ -4369,6 +4796,7 @@ pub fn Replica(
                 .prepare_ok => {
                     assert(self.status == .normal);
                     assert(message.header.view == self.view);
+                    assert(message.header.op <= self.op_checkpoint_trigger());
                     // We must only ever send a prepare_ok to the latest leader of the active view:
                     // We must never straddle views by sending to a leader in an older view.
                     // Otherwise, we would be enabling a partitioned leader to commit.
@@ -4571,8 +4999,6 @@ pub fn Replica(
             assert(self.status == .view_change);
             assert(self.leader_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
-
-            assert(!self.committing);
             assert(!self.repairing_pipeline);
 
             assert(self.commit_min == self.commit_max);
@@ -4610,6 +5036,8 @@ pub fn Replica(
         fn transition_to_normal_from_recovering_status(self: *Self, new_view: u32) void {
             assert(self.status == .recovering);
             assert(self.view == 0);
+            assert(!self.committing);
+            assert(self.replica_count > 1 or new_view == 0);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
@@ -4760,7 +5188,7 @@ pub fn Replica(
             assert(reply.header.commit > 0);
             assert(reply.header.request > 0);
 
-            if (self.client_table.getPtr(reply.header.client)) |entry| {
+            if (self.client_table().get(reply.header.client)) |entry| {
                 assert(entry.reply.header.command == .reply);
                 assert(entry.reply.header.context == 0);
                 assert(entry.reply.header.op == entry.reply.header.commit);
@@ -4990,6 +5418,116 @@ pub fn Replica(
                 .repair => self.repair(),
                 .pipeline => self.repair(),
             }
+        }
+    };
+}
+
+/// Initialize the TigerBeetle replica's data file.
+pub fn format(
+    comptime Storage: type,
+    allocator: std.mem.Allocator,
+    cluster: u32,
+    replica: u8,
+    storage: *Storage,
+    superblock: *vsr.SuperBlockType(Storage),
+) !void {
+    const ReplicaFormat = ReplicaFormatType(Storage);
+    var replica_format = ReplicaFormat{};
+
+    try replica_format.format_wal(allocator, cluster, storage);
+    assert(!replica_format.formatting);
+
+    superblock.format(
+        ReplicaFormat.format_superblock_callback,
+        &replica_format.superblock_context,
+        .{
+            .cluster = cluster,
+            .replica = replica,
+            .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
+        },
+    );
+
+    replica_format.formatting = true;
+    while (replica_format.formatting) storage.tick();
+}
+
+fn ReplicaFormatType(comptime Storage: type) type {
+    const SuperBlock = vsr.SuperBlockType(Storage);
+    return struct {
+        const Self = @This();
+
+        formatting: bool = false,
+        superblock_context: SuperBlock.Context = undefined,
+        wal_write: Storage.Write = undefined,
+
+        fn format_wal(
+            self: *Self,
+            allocator: std.mem.Allocator,
+            cluster: u32,
+            storage: *Storage,
+        ) !void {
+            const header_zeroes = [_]u8{0} ** @sizeOf(Header);
+            const wal_write_size_max = 4 * 1024 * 1024;
+            assert(wal_write_size_max % config.sector_size == 0);
+
+            // Direct I/O requires the buffer to be sector-aligned.
+            var wal_buffer = try allocator.allocAdvanced(
+                u8,
+                config.sector_size,
+                wal_write_size_max,
+                .exact,
+            );
+            errdefer allocator.free(wal_buffer);
+
+            // The logical offset *within the WAL*.
+            var wal_offset: u64 = 0;
+            while (wal_offset < config.journal_size_max) {
+                const size = format_journal(cluster, wal_offset, wal_buffer);
+                assert(size % config.sector_size == 0);
+                assert(size > 0);
+
+                for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
+                    if (std.mem.eql(u8, std.mem.asBytes(header), &header_zeroes)) {
+                        // This is the (empty) body of a reserved or root Prepare.
+                    } else {
+                        // This is either a Prepare's header or a redundant header.
+                        assert(header.valid_checksum());
+                        if (header.op == 0) {
+                            assert(header.command == .prepare);
+                            assert(header.operation == .root);
+                        } else {
+                            assert(header.command == .reserved);
+                            assert(header.operation == .reserved);
+                        }
+                    }
+                }
+
+                storage.write_sectors(
+                    format_wal_sectors_callback,
+                    &self.wal_write,
+                    wal_buffer[0..size],
+                    .wal,
+                    wal_offset,
+                );
+                self.formatting = true;
+                while (self.formatting) storage.tick();
+                wal_offset += size;
+            }
+
+            // There is nothing left to write.
+            assert(format_journal(cluster, wal_offset, wal_buffer) == 0);
+        }
+
+        fn format_wal_sectors_callback(write: *Storage.Write) void {
+            const self = @fieldParentPtr(Self, "wal_write", write);
+            assert(self.formatting);
+            self.formatting = false;
+        }
+
+        fn format_superblock_callback(superblock_context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            assert(self.formatting);
+            self.formatting = false;
         }
     };
 }

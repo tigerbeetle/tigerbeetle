@@ -2,6 +2,8 @@ test {
     _ = @import("vsr.zig");
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
+    _ = @import("vsr/superblock_manifest.zig");
+    _ = @import("vsr/superblock_free_set.zig");
     // TODO: clean up logging of clock test and enable it here.
     //_ = @import("vsr/clock.zig");
 
@@ -11,4 +13,10 @@ test {
     _ = @import("ring_buffer.zig");
 
     _ = @import("io.zig");
+
+    _ = @import("ewah.zig");
+    _ = @import("util.zig");
+
+    // TODO Add remaining unit tests from lsm namespace.
+    _ = @import("lsm/forest.zig");
 }

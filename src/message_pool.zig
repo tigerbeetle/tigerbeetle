@@ -26,6 +26,7 @@ pub const messages_max_replica = messages_max: {
     sum += config.clients_max; // Replica.client_table
     sum += 1; // Replica.loopback_queue
     sum += config.pipeline_max; // Replica.pipeline
+    sum += 1; // Replica.commit_prepare
     // Replica.do_view_change_from_all_replicas quorum:
     // Replica.recovery_response_quorum is only used for recovery and does not increase the limit.
     // All other quorums are bitsets.
@@ -79,8 +80,11 @@ pub const MessagePool = struct {
             return message;
         }
 
-        pub fn body(message: *Message) []u8 {
-            return message.buffer[@sizeOf(Header)..message.header.size];
+        pub fn body(message: *Message) []align(@alignOf(Header)) u8 {
+            return @alignCast(
+                @alignOf(Header),
+                message.buffer[@sizeOf(Header)..message.header.size],
+            );
         }
     };
 
@@ -116,6 +120,15 @@ pub const MessagePool = struct {
         }
 
         return ret;
+    }
+    
+    /// Frees all messages that were unused or returned to the pool via unref().
+    pub fn deinit(pool: *MessagePool, allocator: mem.Allocator) void {
+        while (pool.free_list) |message| {
+            pool.free_list = message.next;
+            allocator.free(message.buffer);
+            allocator.destroy(message);
+        }
     }
 
     /// Get an unused message with a buffer of config.message_size_max.

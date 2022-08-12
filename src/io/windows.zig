@@ -919,10 +919,12 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
-        const dir = try std.fs.cwd().openDirZ(dir_path, .{});
+    pub fn open_dir(dir_path: []const u8) !os.fd_t {
+        const dir = try std.fs.cwd().openDir(dir_path, .{});
         return dir.fd;
     }
+
+    pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
     /// Opens or creates a journal file:
     /// - For reading and writing.
@@ -933,14 +935,11 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        self: *IO,
         dir_handle: os.fd_t,
-        relative_path: [:0]const u8,
+        relative_path: []const u8,
         size: u64,
         must_create: bool,
     ) !os.fd_t {
-        _ = self;
-
         assert(relative_path.len > 0);
         assert(size >= config.sector_size);
         assert(size % config.sector_size == 0);
@@ -989,8 +988,12 @@ pub const IO = struct {
 
         if (handle == os.windows.INVALID_HANDLE_VALUE) {
             return switch (os.windows.kernel32.GetLastError()) {
-                .ACCESS_DENIED => error.AccessDenied,
-                else => |err| os.windows.unexpectedError(err),
+                .FILE_NOT_FOUND => error.FileNotFound,
+                .SHARING_VIOLATION, .ACCESS_DENIED => error.AccessDenied,
+                else => |err| {
+                    log.warn("CreateFileW(): {}", .{err});
+                    return os.windows.unexpectedError(err);
+                },
             };
         }
 
@@ -1035,7 +1038,7 @@ pub const IO = struct {
         _ = dir_handle;
 
         const file_size = try os.windows.GetFileSizeEx(handle);
-        if (file_size != size) @panic("data file inode size was truncated or corrupted");
+        if (file_size < size) @panic("data file inode size was truncated or corrupted");
 
         return handle;
     }

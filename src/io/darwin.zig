@@ -83,7 +83,7 @@ pub const IO = struct {
         const change_events = self.flush_io(&events, &io_pending);
 
         // Only call kevent() if we need to submit io events or if we need to wait for completions.
-        if (change_events > 0 or self.completed.peek() == null) {
+        if (change_events > 0 or self.completed.empty()) {
             // Zero timeouts for kevent() implies a non-blocking poll
             var ts = std.mem.zeroes(os.timespec);
 
@@ -91,7 +91,7 @@ pub const IO = struct {
             // We should never wait indefinitely (timeout_ptr = null for kevent) given:
             // - tick() is non-blocking (wait_for_completions = false)
             // - run_for_ns() always submits a timeout
-            if (change_events == 0 and self.completed.peek() == null) {
+            if (change_events == 0 and self.completed.empty()) {
                 if (wait_for_completions) {
                     const timeout_ns = next_timeout orelse @panic("kevent() blocking forever");
                     ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
@@ -637,9 +637,11 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
-        return os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
+    pub fn open_dir(dir_path: []const u8) !os.fd_t {
+        return os.open(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
     }
+
+    pub const INVALID_FILE: os.fd_t = -1;
 
     /// Opens or creates a journal file:
     /// - For reading and writing.
@@ -650,14 +652,11 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        self: *IO,
         dir_fd: os.fd_t,
-        relative_path: [:0]const u8,
+        relative_path: []const u8,
         size: u64,
         must_create: bool,
     ) !os.fd_t {
-        _ = self;
-
         assert(relative_path.len > 0);
         assert(size >= config.sector_size);
         assert(size % config.sector_size == 0);
@@ -687,7 +686,7 @@ pub const IO = struct {
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
-        const fd = try os.openatZ(dir_fd, relative_path, flags, mode);
+        const fd = try os.openat(dir_fd, relative_path, flags, mode);
         // TODO Return a proper error message when the path exists or does not exist (init/start).
         errdefer os.close(fd);
 
@@ -722,8 +721,9 @@ pub const IO = struct {
         // We always do this when opening because we don't know if this was done before crashing.
         try fs_sync(dir_fd);
 
+        // TODO Document that `size` is now `data_file_size_min` from `main.zig`.
         const stat = try os.fstat(fd);
-        if (stat.size != size) @panic("data file inode size was truncated or corrupted");
+        if (stat.size < size) @panic("data file inode size was truncated or corrupted");
 
         return fd;
     }
