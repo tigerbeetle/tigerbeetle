@@ -385,9 +385,10 @@ pub fn GrooveType(
         /// and enables simple state machine function signatures that commit writes atomically.
         prefetch_ids: PrefetchIDs,
 
-        /// An auxillary hash map for prefetched objects which are not present in the mutable table
-        /// or value cache of the object tree and ID index tree.
-        /// This is required for correctness, to not evict other prefetch hits from the value cache.
+        /// The prefetched Objects. This hash map holds the subset of objects in the LSM trees
+        /// that are required for the current commit. All get()/put()/remove() operations during
+        /// the commit are both passed to the LSM trees and mirrored in this hash map. It is always
+        /// sufficient to query this hashmap alone to know the state of the LSM trees.
         prefetch_objects: PrefetchObjects,
 
         pub fn init(
@@ -530,20 +531,8 @@ pub fn GrooveType(
             groove.* = undefined;
         }
 
-        pub fn get(groove: *Groove, id: u128) ?*const Object {
-            if (groove.ids.get_cached(id)) |id_tree_value| {
-                if (id_tree_value.tombstone()) {
-                    return null;
-                } else {
-                    const object = groove.objects.get_cached(id_tree_value.timestamp).?;
-                    assert(!ObjectTreeHelpers(Object).tombstone(object));
-                    return object;
-                }
-            } else if (groove.prefetch_objects.getKeyPtrAdapted(id, PrefetchObjectsAdapter{})) |object| {
-                return object;
-            } else {
-                return null;
-            }
+        pub fn get(groove: *const Groove, id: u128) ?*const Object {
+            return groove.prefetch_objects.getKeyPtrAdapted(id, PrefetchObjectsAdapter{});
         }
 
         /// Must be called directly after the state machine commit is finished and prefetch results
@@ -555,12 +544,21 @@ pub fn GrooveType(
         }
 
         /// This must be called by the state machine for every key to be prefetched.
+        /// We tolerate duplicate IDs enqueued by the state machine.
+        /// For example, if all unique operations require the same two dependencies.
         pub fn prefetch_enqueue(groove: *Groove, id: u128) void {
-            if (groove.ids.get_cached(id) != null) return;
-
-            // We tolerate duplicate IDs enqueued by the state machine.
-            // For example, if all unique operations require the same two dependencies.
-            groove.prefetch_ids.putAssumeCapacity(id, {});
+            if (groove.ids.get_cached(id)) |id_tree_value| {
+                if (!id_tree_value.tombstone()) {
+                    const object = groove.objects.get_cached(id_tree_value.timestamp).?;
+                    assert(!ObjectTreeHelpers(Object).tombstone(object));
+                    groove.prefetch_objects.putAssumeCapacity(object.*, {});
+                } else {
+                    // Do nothing, a prefetched ID not present in prefetch_objects indicates
+                    // that the object has either been deleted or never existed.
+                }
+            } else {
+                groove.prefetch_ids.putAssumeCapacity(id, {});
+            }
         }
 
         /// Ensure the objects corresponding to all ids enqueued with prefetch_enqueue() are
@@ -712,16 +710,20 @@ pub fn GrooveType(
         };
 
         pub fn put_no_clobber(groove: *Groove, object: *const Object) void {
-            assert(groove.get(object.id) == null);
+            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(object.id, PrefetchObjectsAdapter{});
+            assert(!gop.found_existing);
             groove.insert(object);
+            gop.key_ptr.* = object.*;
         }
 
         pub fn put(groove: *Groove, object: *const Object) void {
-            if (groove.get(object.id)) |existing_object| {
-                groove.update(existing_object, object);
+            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(object.id, PrefetchObjectsAdapter{});
+            if (gop.found_existing) {
+                groove.update(gop.key_ptr, object);
             } else {
                 groove.insert(object);
             }
+            gop.key_ptr.* = object.*;
         }
 
         /// Insert the value into the objects tree and its fields into the index trees.
@@ -739,25 +741,16 @@ pub fn GrooveType(
             }
         }
 
-        /// Update the object and index tress by diff'ing the old and new values.
+        /// Update the object and index trees by diff'ing the old and new values.
         fn update(groove: *Groove, old: *const Object, new: *const Object) void {
             assert(old.id == new.id);
             assert(old.timestamp == new.timestamp);
 
             // Update the object tree entry if any of the fields (even ignored) are different.
             if (!std.mem.eql(u8, std.mem.asBytes(old), std.mem.asBytes(new))) {
-                groove.objects.remove(old);
+                // Unlike the index trees, the new and old values in the object tree share the
+                // same key. Therefore put() is sufficient to overwrite the old value.
                 groove.objects.put(new);
-
-                // Don't forget to update the prefetch_objects tree when prefetching 
-                // as this is the object returned by future calls to Groove.get().
-                if (groove.prefetch_objects.count() > 0) {
-                    if (groove.prefetch_objects.getKeyPtrAdapted(old.id, PrefetchObjectsAdapter{})) |prefetch_obj| {
-                        // Only update the prefetch object if `old` originates from that hash map.
-                        // `old` could originate from groove.objects if groove.ids was populated.
-                        if (old == prefetch_obj) prefetch_obj.* = new.*;
-                    }
-                }
             }
 
             inline for (std.meta.fields(IndexTrees)) |field| {
@@ -780,12 +773,11 @@ pub fn GrooveType(
             }
         }
 
-        pub fn remove(groove: *Groove, object: *const Object) void {
-            // Make sure the given object exists as the latest version in the object tree.
-            // Otherwise, we would fail to remove all the object's indexes.
-            const existing_object = groove.get(object.id).?;
-            assert(mem.eql(u8, mem.asBytes(existing_object), mem.asBytes(object)));
+        /// Asserts that the object with the given ID exists.
+        pub fn remove(groove: *Groove, id: u128) void {
+            const object = groove.prefetch_objects.getKeyPtrAdapted(id, PrefetchObjectsAdapter{}).?;
 
+            groove.objects.remove(object);
             groove.ids.remove(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
 
             inline for (std.meta.fields(IndexTrees)) |field| {
@@ -797,12 +789,9 @@ pub fn GrooveType(
                 }
             }
 
-            // The object must be removed last, as the `*const Object` pointer passed to this
-            // function may point into the memory of the object tree's mutable table, in which
-            // case calling groove.objects.remove() will overwrite that object in the mutable
-            // table with a tombstone. Therefore we must not access the object pointer after
-            // calling groove.objects.remove() as the pointed-to value may have changed.
-            groove.objects.remove(object);
+            // TODO(zig) Replace this with a call to removeByPtr() after upgrading to 0.10.
+            // removeByPtr() replaces an unnecessary lookup here with some pointer arithmetic.
+            assert(groove.prefetch_objects.removeAdapted(object.id, PrefetchObjectsAdapter{}));
         }
 
         /// Maximum number of pending sync callbacks (ObjecTree + IdTree + IndexTrees).
@@ -884,35 +873,35 @@ pub fn GrooveType(
             }
         }
 
-        pub fn compact(groove: *Groove, op: u64, callback: Callback) void {
+        pub fn compact(groove: *Groove, callback: Callback, op: u64) void {
             // Start a compacting join operation.
             const Join = JoinType(.compacting);
             Join.start(groove, callback);
 
             // Compact the ObjectTree and IdTree
-            groove.ids.compact(op, Join.tree_callback(.ids));
-            groove.objects.compact(op, Join.tree_callback(.objects));
+            groove.ids.compact(Join.tree_callback(.ids), op);
+            groove.objects.compact(Join.tree_callback(.objects), op);
 
             // Compact the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const compact_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).compact(op, compact_callback);
+                @field(groove.indexes, field.name).compact(compact_callback, op);
             }
         }
 
-        pub fn checkpoint(groove: *Groove, op: u64, callback: fn (*Groove) void) void {
+        pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
             // Start a checkpoint join operation.
             const Join = JoinType(.checkpoint);
             Join.start(groove, callback);
 
             // Checkpoint the IdTree and ObjectTree.
-            groove.ids.checkpoint(op, Join.tree_callback(.ids));
-            groove.objects.checkpoint(op, Join.tree_callback(.objects));
+            groove.ids.checkpoint(Join.tree_callback(.ids));
+            groove.objects.checkpoint(Join.tree_callback(.objects));
 
             // Checkpoint the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const checkpoint_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).checkpoint(op, checkpoint_callback);
+                @field(groove.indexes, field.name).checkpoint(checkpoint_callback);
             }
         }
     };

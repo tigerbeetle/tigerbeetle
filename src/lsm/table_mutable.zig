@@ -46,7 +46,7 @@ pub fn TableMutableType(comptime Table: type) type {
             table.values.deinit(allocator);
         }
 
-        pub fn get(table: *TableMutable, key: Key) ?*const Value {
+        pub fn get(table: *const TableMutable, key: Key) ?*const Value {
             return table.values.getKeyPtr(tombstone_from_key(key));
         }
 
@@ -56,6 +56,7 @@ pub fn TableMutableType(comptime Table: type) type {
             // level getOrPut() API and manually overwrite the old key.
             const gop = table.values.getOrPutAssumeCapacity(value.*);
             gop.key_ptr.* = value.*;
+
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
             table.dirty = true;

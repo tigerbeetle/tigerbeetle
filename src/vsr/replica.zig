@@ -255,8 +255,13 @@ pub fn ReplicaType(
             self.opened = false;
             self.superblock.open(superblock_open_callback, &self.superblock_context);
             while (!self.opened) self.superblock.storage.tick();
+            assert(self.superblock.working.vsr_state.internally_consistent());
 
             if (self.superblock.working.replica >= options.replica_count) {
+                log.err("{}: open: no address for replica (replica_count={})", .{
+                    self.superblock.working.replica,
+                    options.replica_count,
+                });
                 return error.NoAddress;
             }
 
@@ -309,7 +314,7 @@ pub fn ReplicaType(
             state_machine_options: StateMachine.Options,
         };
 
-        /// NOTE: self.superblock must be initialized and opened by this call
+        /// NOTE: self.superblock must be initialized and opened prior to this call.
         fn init(self: *Self, allocator: Allocator, options: Options) !void {
             const replica_count = options.replica_count;
             const replica_index = options.replica_index;
@@ -545,13 +550,14 @@ pub fn ReplicaType(
                     // The data file is brand new — no messages have ever been written.
                     // Transition to normal status; no need to run the VSR recovery protocol.
                     assert(self.journal.faulty.count == 0);
-                    self.op = 0;
+                    assert(self.op == 0);
                     self.transition_to_normal_from_recovering_status(0);
                     assert(self.status == .normal);
                 } else if (self.replica_count == 1) {
                     // A cluster-of-one does not run the VSR recovery protocol.
                     if (self.journal.faulty.count != 0) @panic("journal is corrupt");
                     if (self.committing) return;
+                    assert(self.op == 0);
                     // TODO Assert that this path isn't taken more than once.
                     self.op = self.journal.op_maximum();
                     assert(self.op >= self.commit_min);
@@ -1392,7 +1398,7 @@ pub fn ReplicaType(
                 //   receiver's state changed in the mean time.
 
                 log.debug(
-                    "{}: on_recovery_response: replica={} view={}..{} op={}..{} commit={}..{}",
+                    "{}: on_recovery_response: replacing response replica={} view={}..{} op={}..{} commit={}..{}",
                     .{
                         self.replica,
                         existing.header.replica,
@@ -1547,7 +1553,7 @@ pub fn ReplicaType(
                 }
             }
 
-            log.debug("{}: on_recovery_response: responses={} view={} headers={}..{}" ++
+            log.info("{}: on_recovery_response: recovery done responses={} view={} headers={}..{}" ++
                 " commit={} dirty={} faulty={}", .{
                 self.replica,
                 count,
@@ -1620,28 +1626,18 @@ pub fn ReplicaType(
                         checksum,
                     });
 
-                    if (self.journal.header_with_op_and_checksum(op, checksum)) |_| {
-                        // The header for the target prepare is already in-memory.
-                        // This is preferable to the `else` case since we have the prepare's
-                        // `header.size` in-memory, so the read can be (potentially) shorter.
-                        // TODO Do not reissue the read if we are already reading in order to send
-                        // to this particular destination replica.
-                        self.journal.read_prepare(
-                            on_request_prepare_read,
-                            op,
-                            prepare_checksum,
-                            message.header.replica,
-                        );
-                    } else {
-                        // TODO Do not reissue the read if we are already reading in order to send to
-                        // this particular destination replica.
-                        self.journal.read_prepare_with_op_and_checksum(
-                            on_request_prepare_read,
-                            op,
-                            prepare_checksum,
-                            message.header.replica,
-                        );
-                    }
+                    // Improve availability by calling `read_prepare_with_op_and_checksum` instead
+                    // of `read_prepare` — even if `journal.headers` contains the target message.
+                    // The latter skips the read when the target prepare is present but dirty (e.g.
+                    // it was recovered with decision=fix).
+                    // TODO Do not reissue the read if we are already reading in order to send to
+                    // this particular destination replica.
+                    self.journal.read_prepare_with_op_and_checksum(
+                        on_request_prepare_read,
+                        op,
+                        prepare_checksum,
+                        message.header.replica,
+                    );
 
                     // We have guaranteed the prepare (not safe to nack).
                     // Our copy may or may not be valid, but we will try to read & forward it.
@@ -2172,6 +2168,7 @@ pub fn ReplicaType(
                     if (self.replica_count == 2) assert(threshold == 1);
 
                     assert(self.status == .view_change);
+                    assert(self.replica != message.header.replica);
                 },
                 .nack_prepare => {
                     assert(self.replica_count > 1);
@@ -2179,6 +2176,8 @@ pub fn ReplicaType(
 
                     assert(self.status == .view_change);
                     assert(self.leader_index(self.view) == self.replica);
+                    assert(message.header.replica != self.replica);
+                    assert(message.header.op == self.nack_prepare_op.?);
                 },
                 else => unreachable,
             }
@@ -2385,6 +2384,14 @@ pub fn ReplicaType(
                 return;
             }
 
+            const slot = self.journal.slot_with_op_and_checksum(
+                prepare.?.header.op,
+                prepare.?.header.checksum,
+            ).?;
+            assert(self.journal.prepare_inhabited[slot.index]);
+            assert(self.journal.prepare_checksums[slot.index] == prepare.?.header.checksum);
+            assert(self.journal.has(prepare.?.header));
+
             switch (self.status) {
                 .normal => {},
                 .view_change => {
@@ -2397,7 +2404,6 @@ pub fn ReplicaType(
                         assert(self.replica_count > 1);
                         return;
                     }
-
                     // Only the leader may commit during a view change before starting the new view.
                     // Fall through if this is indeed the case.
                 },
@@ -2408,20 +2414,7 @@ pub fn ReplicaType(
             }
 
             const op = self.commit_min + 1;
-
-            if (prepare.?.header.op != op) {
-                self.commit_ops_done();
-                log.debug("{}: commit_journal_next_callback: op changed", .{self.replica});
-                assert(self.replica_count > 1);
-                return;
-            }
-
-            if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
-                self.commit_ops_done();
-                log.debug("{}: commit_journal_next_callback: checksum changed", .{self.replica});
-                assert(self.replica_count > 1);
-                return;
-            }
+            assert(prepare.?.header.op == op);
 
             self.commit_op_prefetch(prepare.?, commit_journal_callback);
         }
@@ -2531,7 +2524,7 @@ pub fn ReplicaType(
                     self.op_checkpoint,
                     self.op_checkpoint_next(),
                 });
-                self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback, op);
+                self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
             } else {
                 assert(op < self.op_checkpoint_trigger());
                 self.commit_op_done();
@@ -2609,6 +2602,8 @@ pub fn ReplicaType(
             assert(self.committing);
             assert(self.commit_prepare != null);
             assert(self.commit_callback != null);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.replica_count == 1));
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
@@ -2619,6 +2614,7 @@ pub fn ReplicaType(
             // relate to subsequent ops, since by now we have already verified the hash chain for
             // this commit.
 
+            assert(self.journal.has(prepare.header));
             assert(self.journal.header_with_op(self.commit_min).?.checksum ==
                 prepare.header.parent);
 
@@ -2805,17 +2801,8 @@ pub fn ReplicaType(
                     assert(m.header.context == context);
                     assert(m.header.replica == replica);
                     switch (command) {
-                        .start_view_change => {
-                            assert(m.header.replica != self.replica);
-                            assert(m.header.view == self.view);
-                        },
                         .do_view_change => assert(m.header.view == self.view),
                         .recovery_response => assert(m.header.replica != self.replica),
-                        .nack_prepare => {
-                            // TODO See if we can restrict this branch further.
-                            assert(m.header.replica != self.replica);
-                            assert(m.header.op == self.nack_prepare_op.?);
-                        },
                         else => unreachable,
                     }
                     count += 1;
@@ -3960,8 +3947,6 @@ pub fn ReplicaType(
             }
 
             if (self.journal.header_for_entry(header)) |existing| {
-                assert(existing.op == header.op);
-
                 // Do not replace any existing op lightly as doing so may impair durability and even
                 // violate correctness by undoing a prepare already acknowledged to the leader:
                 if (existing.checksum == header.checksum) {

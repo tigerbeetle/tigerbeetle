@@ -197,16 +197,16 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             Join.start(forest, callback);
 
             inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).compact(op, Join.groove_callback(field.name));
+                @field(forest.grooves, field.name).compact(Join.groove_callback(field.name), op);
             }
         }
 
-        pub fn checkpoint(forest: *Forest, callback: Callback, op: u64) void {
+        pub fn checkpoint(forest: *Forest, callback: Callback) void {
             const Join = JoinType(.checkpoint);
             Join.start(forest, callback);
 
             inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).checkpoint(op, Join.groove_callback(field.name));
+                @field(forest.grooves, field.name).checkpoint(Join.groove_callback(field.name));
             }
         }
     };

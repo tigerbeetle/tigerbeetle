@@ -22,6 +22,14 @@ pub const IO = struct {
     completed: FIFO(Completion) = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
+        // Detect the linux version to ensure that we support all io_uring ops used.
+        const uts = std.os.uname();
+        const release = std.mem.sliceTo(&uts.release, 0);
+        const version = try std.builtin.Version.parse(release);
+        if (version.major < 5 or version.minor < 5) {
+            @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
+        }
+
         return IO{ .ring = try IO_Uring.init(entries, flags) };
     }
 
@@ -334,6 +342,7 @@ pub const IO = struct {
                                 .NXIO => error.Unseekable,
                                 .OVERFLOW => error.Unseekable,
                                 .SPIPE => error.Unseekable,
+                                .TIMEDOUT => error.ConnectionTimedOut,
                                 else => |errno| os.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -360,6 +369,8 @@ pub const IO = struct {
                                 .NOTCONN => error.SocketNotConnected,
                                 .NOTSOCK => error.FileDescriptorNotASocket,
                                 .CONNRESET => error.ConnectionResetByPeer,
+                                .TIMEDOUT => error.ConnectionTimedOut,
+                                .OPNOTSUPP => error.OperationNotSupported,
                                 else => |errno| os.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -394,6 +405,7 @@ pub const IO = struct {
                                 .NOTSOCK => error.FileDescriptorNotASocket,
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PIPE => error.BrokenPipe,
+                                .TIMEDOUT => error.ConnectionTimedOut,
                                 else => |errno| os.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -591,6 +603,7 @@ pub const IO = struct {
         PermissionDenied,
         ProtocolNotSupported,
         ConnectionTimedOut,
+        SystemResources,
     } || os.UnexpectedError;
 
     pub fn connect(
@@ -637,6 +650,7 @@ pub const IO = struct {
         IsDir,
         SystemResources,
         Unseekable,
+        ConnectionTimedOut,
     } || os.UnexpectedError;
 
     pub fn read(
@@ -683,6 +697,8 @@ pub const IO = struct {
         SystemResources,
         SocketNotConnected,
         FileDescriptorNotASocket,
+        ConnectionTimedOut,
+        OperationNotSupported,
     } || os.UnexpectedError;
 
     pub fn recv(
@@ -733,6 +749,7 @@ pub const IO = struct {
         FileDescriptorNotASocket,
         OperationNotSupported,
         BrokenPipe,
+        ConnectionTimedOut,
     } || os.UnexpectedError;
 
     pub fn send(
@@ -994,7 +1011,7 @@ pub const IO = struct {
         defer dir.deleteFile(path) catch {};
 
         while (true) {
-            const res = os.system.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
+            const res = os.linux.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
             switch (os.linux.getErrno(res)) {
                 .SUCCESS => {
                     os.close(@intCast(os.fd_t, res));

@@ -1,11 +1,20 @@
 #!/bin/bash
-set -e
+set -eEuo pipefail
 
 # Assert that we are only upgrading the kernel for Ubuntu, and not another distribution:
-DISTRIBUTION=`lsb_release -i | awk '{print $3}'`
-if [ $DISTRIBUTION != "Ubuntu" ]; then
+DISTRIBUTION=$(lsb_release -i | awk '{print $3}')
+if [ "$DISTRIBUTION" != "Ubuntu" ]; then
     echo "This script must be run on Ubuntu."
     exit 1
+fi
+
+# No need to downgrade the kernel if we are on a newer version.
+CURRENT_KERNEL_VERSION=$(uname -r | grep -o "[0-9\.]*" | head -1)
+if [ "$(printf '%s\n' "5.7.15" "$CURRENT_KERNEL_VERSION" | sort -V | head -n1)" = "5.7.15" ]; then
+    echo "Current kernel ${CURRENT_KERNEL_VERSION} supports io_uring. No need to upgrade."
+    exit 0
+else
+    echo "Upgrading kernel from ${CURRENT_KERNEL_VERSION} to 5.7.15."
 fi
 
 # Use a temporary download directory that we can cleanup afterwards:

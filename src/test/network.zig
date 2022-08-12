@@ -43,7 +43,7 @@ pub const Network = struct {
     options: NetworkOptions,
     packet_simulator: PacketSimulator(Packet),
 
-    // TODO If this storage a ?*MessageBus, then a process's bus could be set to `null` while
+    // TODO If this stored a ?*MessageBus, then a process's bus could be set to `null` while
     // the replica is crashed, and replaced when it is destroy. Zig complains:
     //
     //   ./src/test/message_bus.zig:20:24: error: struct 'test.message_bus.MessageBus' depends on itself
