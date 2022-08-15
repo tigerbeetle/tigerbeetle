@@ -4,11 +4,12 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const config = @import("config.zig");
+const vsr = @import("vsr.zig");
+const Header = vsr.Header;
 
 const Client = @import("test/cluster.zig").Client;
 const Cluster = @import("test/cluster.zig").Cluster;
 const ClusterOptions = @import("test/cluster.zig").ClusterOptions;
-const Header = @import("vsr.zig").Header;
 const Replica = @import("test/cluster.zig").Replica;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StateMachine = @import("test/cluster.zig").StateMachine;
@@ -205,9 +206,6 @@ pub fn main() !void {
     cluster = try Cluster.create(allocator, random, cluster_options);
     defer cluster.destroy();
 
-    cluster.state_checker = try StateChecker.init(allocator, cluster);
-    defer cluster.state_checker.deinit();
-
     var requests_sent: u64 = 0;
     var idle = false;
 
@@ -227,8 +225,10 @@ pub fn main() !void {
         storage.faulty = replica_normal_min <= i;
     }
 
+    // The maximum number of transitions from calling `client.request()`, not including
+    // `register` messages.
     // TODO When storage is supported, run more transitions than fit in the journal.
-    const transitions_max = config.journal_slot_count / 2;
+    const committed_requests_max = config.journal_slot_count / 2;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         const health_options = &cluster.options.health_options;
@@ -303,7 +303,7 @@ pub fn main() !void {
 
         for (cluster.clients) |*client| client.tick();
 
-        if (cluster.state_checker.transitions == transitions_max) {
+        if (cluster.state_checker.committed_requests == committed_requests_max) {
             if (cluster.state_checker.convergence() and
                 cluster.replica_up_count() == replica_count)
             {
@@ -311,10 +311,10 @@ pub fn main() !void {
             }
             continue;
         } else {
-            assert(cluster.state_checker.transitions < transitions_max);
+            assert(cluster.state_checker.committed_requests < committed_requests_max);
         }
 
-        if (requests_sent < transitions_max) {
+        if (requests_sent < committed_requests_max) {
             if (idle) {
                 if (chance(random, idle_off_probability)) idle = false;
             } else {
@@ -326,9 +326,9 @@ pub fn main() !void {
         }
     }
 
-    if (cluster.state_checker.transitions < transitions_max) {
+    if (cluster.state_checker.committed_requests < committed_requests_max) {
         output.err("you can reproduce this failure with seed={}", .{seed});
-        fatal(.liveness, "unable to complete transitions_max before ticks_max", .{});
+        fatal(.liveness, "unable to complete committed_requests_max before ticks_max", .{});
     }
 
     assert(cluster.state_checker.convergence());
@@ -377,12 +377,7 @@ fn send_request(random: std.rand.Random) bool {
     const client_index = random.uintLessThan(u8, cluster.options.client_count);
 
     const client = &cluster.clients[client_index];
-    const checker_request_queue = &cluster.state_checker.client_requests[client_index];
-
-    // Ensure that we don't shortchange testing of the full client request queue length:
-    assert(client.request_queue.buffer.len <= checker_request_queue.buffer.len);
     if (client.request_queue.full()) return false;
-    if (checker_request_queue.full()) return false;
 
     const message = client.get_message();
     defer client.unref(message);
@@ -402,16 +397,11 @@ fn send_request(random: std.rand.Random) bool {
         random.bytes(body);
     }
 
-    // While hashing the client ID with the request body prevents input collisions across clients,
-    // it's still possible for the same client to generate the same body, and therefore input hash.
-    const client_input = StateMachine.hash(client.id, body);
-    checker_request_queue.push_assume_capacity(client_input);
-    std.log.scoped(.test_client).debug("client {} sending input={x}", .{
+    std.log.scoped(.test_client).debug("{}: send_request: sending bytes={x}", .{
         client_index,
-        client_input,
+        body_size,
     });
-
-    client.request(0, client_callback, .hash, message, body_size);
+    client.request(0, client_callback, .random, message, body_size);
 
     return true;
 }

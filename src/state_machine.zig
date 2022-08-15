@@ -340,7 +340,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             output: []align(16) u8,
         ) usize {
             _ = client;
-            _ = op;
+            assert(op != 0);
 
             const result = switch (operation) {
                 .root => unreachable,
@@ -1523,7 +1523,7 @@ test "linked accounts" {
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const size = state_machine.commit(0, 1, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try expectEqualSlices(
@@ -1606,7 +1606,7 @@ test "create/lookup/rollback transfers" {
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const size = state_machine.commit(0, 1, .create_accounts, input, output);
 
     const errors = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
     try expect(errors.len == 0);
@@ -2283,7 +2283,7 @@ test "create/lookup/rollback 2-phase transfers" {
 
     const accounts_timestamp = state_machine.prepare(.create_accounts, accounts_input);
     {
-        const size = state_machine.commit(0, 0, .create_accounts, accounts_input, accounts_output);
+        const size = state_machine.commit(0, 1, .create_accounts, accounts_input, accounts_output);
         const errors = mem.bytesAsSlice(CreateAccountsResult, accounts_output[0..size]);
         try expectEqual(@as(usize, 0), errors.len);
     }
@@ -2300,7 +2300,7 @@ test "create/lookup/rollback 2-phase transfers" {
     const transfers_timestamp = state_machine.prepare(.create_transfers, transfers_input);
     try testing.expect(transfers_timestamp > accounts_timestamp);
     {
-        const size = state_machine.commit(0, 1, .create_transfers, transfers_input, transfers_output);
+        const size = state_machine.commit(0, 2, .create_transfers, transfers_input, transfers_output);
         const errors = mem.bytesAsSlice(CreateTransfersResult, transfers_output[0..size]);
         try expectEqual(@as(usize, 0), errors.len);
     }
