@@ -243,7 +243,8 @@ npm run benchmark
 #### Test
 
 ```shell
-./tigerbeetle init --cluster=1 --replica=0 --directory=.
-./tigerbeetle start --cluster=1 --replica=0 --directory=. --addresses=3001
+./tigerbeetle format --cluster=0 --replica=0 ./cluster_0_replica_0_test.tigerbeetle
+./tigerbeetle start --addresses=3001 ./cluster_0_replica_0_test.tigerbeetle > tigerbeetle_test.log 2>&1
 npm run test
 ```
+For more information, type; `./tigerbeetle -h` 
