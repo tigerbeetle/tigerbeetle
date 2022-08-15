@@ -89,7 +89,25 @@ The [QuickStart](#quickstart) step above will install Zig for you to the root of
 To run TigerBeetle's long-running simulation, called *The VOPR*:
 
 ```bash
-scripts/vopr.sh
+zig/zig build vopr
+```
+
+Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR Hub](src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create GitHub issues as needed.
+
+```bash
+zig/zig build vopr -- --send
+```
+
+Run the VOPR using a specific seed. This will run in `Debug` mode by default but you can also include `--build-mode` to run in ReleaseSafe mode.
+
+```bash
+zig/zig build vopr -- --seed=123 --build-mode=ReleaseSafe
+```
+
+To view all the available command line arguments simply use the `--help` flag.
+
+```bash
+zig/zig build vopr -- --help
 ```
 
 *The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames, by our love of fuzzing over the years, by [Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
