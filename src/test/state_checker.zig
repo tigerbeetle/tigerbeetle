@@ -7,7 +7,8 @@ const config = @import("../config.zig");
 const Cluster = @import("cluster.zig").Cluster;
 const Network = @import("network.zig").Network;
 const Storage = @import("storage.zig").Storage;
-const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
+const Client = @import("cluster.zig").Client;
+const Replica = @import("cluster.zig").Replica;
 
 const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
@@ -15,47 +16,52 @@ const Message = MessagePool.Message;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
-const RequestQueue = RingBuffer(u128, config.client_request_queue_max, .array);
 const StateTransitions = std.AutoHashMap(u128, u64);
 
 const log = std.log.scoped(.state_checker);
 
 pub const StateChecker = struct {
-    /// Indexed by client index as used by Cluster.
-    client_requests: [config.clients_max]RequestQueue =
-        [_]RequestQueue{.{}} ** config.clients_max,
-
     /// Indexed by replica index.
-    state_machine_states: [config.replicas_max]u128,
+    replica_states: [config.replicas_max]u128 = [_]u128{0} ** config.replicas_max,
 
+    /// Keyed by committed `message.header.checksum`.
+    ///
+    /// The `0` key represents the state before the root prepare has committed (e.g. during WAL
+    /// recovery).
     history: StateTransitions,
 
-    /// The highest cannonical state reached by the cluster.
-    state: u128,
+    // TODO When StateChecker is owned by the Simulation, use @fieldParentPtr to get these.
+    replicas: []const Replica,
+    clients: []const Client,
 
-    /// The number of times the cannonical state has been advanced.
-    transitions: u64 = 0,
+    /// The highest canonical state reached by the cluster.
+    state: u128 = 0,
 
-    pub fn init(allocator: mem.Allocator, cluster: *Cluster) !StateChecker {
-        const state = cluster.replicas[0].state_machine.state;
+    /// The number of times the canonical state has been advanced *including*:
+    /// * `register` operations, and
+    /// * the root message.
+    committed_messages: u64 = 0,
 
-        var state_machine_states: [config.replicas_max]u128 = undefined;
-        for (cluster.replicas) |*replica, i| {
-            const state_machine = &replica.state_machine;
-            assert(state_machine.state == state);
-            state_machine_states[i] = state_machine.state;
-        }
+    /// The number of times the canonical state has been advanced *excluding*:
+    /// * `register` operations, and
+    /// * the root message.
+    /// (That is, correspond 1:1 with `client.request()` calls).
+    committed_requests: u64 = 0,
 
+    pub fn init(
+        allocator: mem.Allocator,
+        replicas: []const Replica,
+        clients: []const Client,
+    ) !StateChecker {
         var history = StateTransitions.init(allocator);
         errdefer history.deinit();
 
         var state_checker = StateChecker{
-            .state_machine_states = state_machine_states,
             .history = history,
-            .state = state,
+            .replicas = replicas,
+            .clients = clients,
         };
-
-        try state_checker.history.putNoClobber(state, state_checker.transitions);
+        try state_checker.history.putNoClobber(0, state_checker.committed_messages);
 
         return state_checker;
     }
@@ -64,14 +70,19 @@ pub const StateChecker = struct {
         state_checker.history.deinit();
     }
 
-    pub fn check_state(state_checker: *StateChecker, replica: u8) !void {
-        const cluster = @fieldParentPtr(Cluster, "state_checker", state_checker);
+    pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
+        const replica = state_checker.replicas[replica_index];
 
-        const a = state_checker.state_machine_states[replica];
-        const b = cluster.replicas[replica].state_machine.state;
+        // Until the journal has recovered, `commit_min` may not be in the headers.
+        // TODO Verify that `replica.commit_min` always exists after recovering via state transfer.
+        const commit_header =
+            if (replica.journal.recovered) replica.journal.header_with_op(replica.commit_min).? else null;
+
+        const a = state_checker.replica_states[replica_index];
+        const b = if (commit_header) |h| h.checksum else 0;
 
         if (b == a) return;
-        state_checker.state_machine_states[replica] = b;
+        state_checker.replica_states[replica_index] = b;
 
         // If some other replica has already reached this state, then it will be in the history:
         if (state_checker.history.get(b)) |transition| {
@@ -81,65 +92,79 @@ pub const StateChecker = struct {
             // transitioned may not regress.
             log.info(
                 "{d:0>4}/{d:0>4} {x:0>32} > {x:0>32} {}",
-                .{ transition, state_checker.transitions, a, b, replica },
+                .{ transition, state_checker.committed_messages, a, b, replica_index },
             );
             return;
         }
 
+        if (commit_header == null) return;
+        assert(commit_header.?.command == .prepare);
+        assert(commit_header.?.parent == a);
+        assert(commit_header.?.operation != .reserved);
+
         // The replica has transitioned to state `b` that is not yet in the history.
-        // Check if this is a valid new state based on all currently inflight client requests.
-        for (state_checker.client_requests) |*queue| {
-            if (queue.head_ptr()) |input| {
-                if (b == StateMachine.hash(state_checker.state, std.mem.asBytes(input))) {
-                    const transitions_executed = state_checker.history.get(a).?;
-                    if (transitions_executed < state_checker.transitions) {
-                        return error.ReplicaSkippedInterimTransitions;
-                    } else {
-                        assert(transitions_executed == state_checker.transitions);
-                    }
+        // Check if this is a valid new state based on the originating client's inflight request.
+        if (commit_header.?.op == 0) {
+            assert(commit_header.?.operation == .root);
+        } else {
+            const client = for (state_checker.clients) |*client| {
+                if (client.id == commit_header.?.client) break client;
+            } else unreachable;
 
-                    state_checker.state = b;
-                    state_checker.transitions += 1;
-
-                    log.info("     {d:0>4} {x:0>32} > {x:0>32} {}", .{
-                        state_checker.transitions,
-                        a,
-                        b,
-                        replica,
-                    });
-
-                    state_checker.history.putNoClobber(b, state_checker.transitions) catch {
-                        @panic("state checker unable to allocate memory for history.put()");
-                    };
-
-                    // As soon as we reach a valid state we must pop the inflight request.
-                    // We cannot wait until the client receives the reply because that would allow
-                    // the inflight request to be used to reach other states in the interim.
-                    // We must therefore use our own queue rather than the clients' queues.
-                    _ = queue.pop();
-                    return;
-                }
+            if (client.request_queue.empty()) {
+                return error.ReplicaTransitionedToInvalidState;
             }
+
+            const request = client.request_queue.head_ptr_const().?;
+            assert(request.message.header.client == commit_header.?.client);
+            assert(request.message.header.request == commit_header.?.request);
+            assert(request.message.header.command == .request);
+            assert(request.message.header.operation == commit_header.?.operation);
+            assert(request.message.header.size == commit_header.?.size);
+            // `checksum_body` will not match; the leader's StateMachine updated the timestamps in the
+            // prepare body's accounts/transfers.
         }
 
-        return error.ReplicaTransitionedToInvalidState;
+        const transitions_executed = state_checker.history.get(a).?;
+        if (transitions_executed < state_checker.committed_messages) {
+            return error.ReplicaSkippedInterimTransitions;
+        } else {
+            assert(transitions_executed == state_checker.committed_messages);
+        }
+
+        state_checker.state = b;
+        state_checker.committed_messages += 1;
+        state_checker.committed_requests += @boolToInt(
+            commit_header.?.operation != .register and
+            commit_header.?.operation != .root,
+        );
+        assert(state_checker.committed_messages == commit_header.?.op + 1);
+
+        log.info("     {d:0>4} {x:0>32} > {x:0>32} {}", .{
+            state_checker.committed_messages,
+            a,
+            b,
+            replica_index,
+        });
+
+        state_checker.history.putNoClobber(b, state_checker.committed_messages) catch {
+            @panic("state checker unable to allocate memory for history.put()");
+        };
     }
 
     pub fn convergence(state_checker: *StateChecker) bool {
-        const cluster = @fieldParentPtr(Cluster, "state_checker", state_checker);
-
-        const a = state_checker.state_machine_states[0];
-        for (state_checker.state_machine_states[1..cluster.options.replica_count]) |b| {
+        const a = state_checker.replica_states[0];
+        for (state_checker.replica_states[1..state_checker.replicas[0].replica_count]) |b| {
             if (b != a) return false;
         }
 
         const transitions_executed = state_checker.history.get(a).?;
-        if (transitions_executed < state_checker.transitions) {
+        if (transitions_executed < state_checker.committed_messages) {
             // Cluster reached convergence but on a regressed state.
             // A replica reached the transition limit, crashed, then repaired.
             return false;
         } else {
-            assert(transitions_executed == state_checker.transitions);
+            assert(transitions_executed == state_checker.committed_messages);
         }
 
         return true;
