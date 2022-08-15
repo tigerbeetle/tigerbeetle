@@ -808,54 +808,54 @@ test "exponential_backoff_with_jitter" {
 /// * A replica's IP address may be changed without reconfiguration.
 /// This does require that the user specify the same order to all replicas.
 /// The caller owns the memory of the returned slice of addresses.
-pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8) ![]std.net.Address {
-    return parse_addresses_limit(allocator, raw, config.replicas_max);
-}
-
-fn parse_addresses_limit(allocator: std.mem.Allocator, raw: []const u8, max: usize) ![]std.net.Address {
-    var addresses = try allocator.alloc(std.net.Address, max);
+pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8, address_limit: usize) ![]std.net.Address {
+    // TODO After parsing addresses resize the memory allocation.
+    var addresses = try allocator.alloc(std.net.Address, address_limit);
     errdefer allocator.free(addresses);
 
     var index: usize = 0;
     var comma_iterator = std.mem.split(u8, raw, ",");
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        if (index == max) return error.AddressLimitExceeded;
-
-        var colon_iterator = std.mem.split(u8, raw_address, ":");
-        // The split iterator will always return non-null once, even if the delimiter is not found:
-        const raw_ipv4 = colon_iterator.next().?;
-
-        if (colon_iterator.next()) |raw_port| {
-            if (colon_iterator.next() != null) return error.AddressHasMoreThanOneColon;
-
-            const port = std.fmt.parseUnsigned(u16, raw_port, 10) catch |err| switch (err) {
-                error.Overflow => return error.PortOverflow,
-                error.InvalidCharacter => return error.PortInvalid,
-            };
-            addresses[index] = std.net.Address.parseIp4(raw_ipv4, port) catch {
-                return error.AddressInvalid;
-            };
-        } else {
-            // There was no colon in the address so there are now two cases:
-            // 1. an IPv4 address with the default port, or
-            // 2. a port with the default IPv4 address.
-
-            // Let's try parsing as a port first:
-            if (std.fmt.parseUnsigned(u16, raw_address, 10)) |port| {
-                addresses[index] = std.net.Address.parseIp4(config.address, port) catch unreachable;
-            } else |err| switch (err) {
-                error.Overflow => return error.PortOverflow,
-                error.InvalidCharacter => {
-                    // Something was not a digit, let's try parsing as an IPv4 instead:
-                    addresses[index] = std.net.Address.parseIp4(raw_address, config.port) catch {
-                        return error.AddressInvalid;
-                    };
-                },
-            }
-        }
+        if (index == address_limit) return error.AddressLimitExceeded;
+        addresses[index] = try parse_address(raw_address);
     }
     return addresses[0..index];
+}
+
+pub fn parse_address(raw: []const u8) !std.net.Address {
+    var colon_iterator = std.mem.split(u8, raw, ":");
+    // The split iterator will always return non-null once, even if the delimiter is not found:
+    const raw_ipv4 = colon_iterator.next().?;
+
+    if (colon_iterator.next()) |raw_port| {
+        if (colon_iterator.next() != null) return error.AddressHasMoreThanOneColon;
+
+        const port = std.fmt.parseUnsigned(u16, raw_port, 10) catch |err| switch (err) {
+            error.Overflow => return error.PortOverflow,
+            error.InvalidCharacter => return error.PortInvalid,
+        };
+        return std.net.Address.parseIp4(raw_ipv4, port) catch {
+            return error.AddressInvalid;
+        };
+    } else {
+        // There was no colon in the address so there are now two cases:
+        // 1. an IPv4 address with the default port, or
+        // 2. a port with the default IPv4 address.
+
+        // Let's try parsing as a port first:
+        if (std.fmt.parseUnsigned(u16, raw, 10)) |port| {
+            return std.net.Address.parseIp4(config.address, port) catch unreachable;
+        } else |err| switch (err) {
+            error.Overflow => return error.PortOverflow,
+            error.InvalidCharacter => {
+                // Something was not a digit, let's try parsing as an IPv4 instead:
+                return std.net.Address.parseIp4(raw, config.port) catch {
+                    return error.AddressInvalid;
+                };
+            },
+        }
+    }
 }
 
 test "parse_addresses" {
@@ -910,7 +910,7 @@ test "parse_addresses" {
     };
 
     for (vectors_positive) |vector| {
-        const addresses_actual = try parse_addresses_limit(std.testing.allocator, vector.raw, 3);
+        const addresses_actual = try parse_addresses(std.testing.allocator, vector.raw, 3);
         defer std.testing.allocator.free(addresses_actual);
 
         try std.testing.expectEqual(addresses_actual.len, 3);
@@ -924,7 +924,7 @@ test "parse_addresses" {
     }
 
     for (vectors_negative) |vector| {
-        try std.testing.expectEqual(vector.err, parse_addresses_limit(std.testing.allocator, vector.raw, 2));
+        try std.testing.expectEqual(vector.err, parse_addresses(std.testing.allocator, vector.raw, 2));
     }
 }
 
