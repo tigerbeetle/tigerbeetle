@@ -2596,7 +2596,7 @@ pub fn ReplicaType(
         fn commit_op(self: *Self, prepare: *const Message) void {
             // TODO Can we add more checks around allowing commit_op() during a view change?
             assert(self.committing);
-            assert(self.commit_prepare != null);
+            assert(self.commit_prepare.? == prepare);
             assert(self.commit_callback != null);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));

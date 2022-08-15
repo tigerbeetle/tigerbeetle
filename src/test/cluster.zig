@@ -74,8 +74,6 @@ pub const Cluster = struct {
 
     clients: []Client,
     network: Network,
-
-    // TODO: Initializing these fields in main() is a bit ugly
     state_checker: StateChecker = undefined,
 
     pub fn create(allocator: mem.Allocator, prng: std.rand.Random, options: ClusterOptions) !*Cluster {
@@ -118,6 +116,9 @@ pub const Cluster = struct {
         const clients = try allocator.alloc(Client, options.client_count);
         errdefer allocator.free(clients);
 
+        var state_checker = try StateChecker.init(allocator, options.cluster, clients);
+        errdefer state_checker.deinit();
+
         var network = try Network.init(
             allocator,
             options.replica_count,
@@ -135,6 +136,7 @@ pub const Cluster = struct {
             .health = health,
             .clients = clients,
             .network = network,
+            .state_checker = state_checker,
         };
 
         var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
@@ -200,6 +202,9 @@ pub const Cluster = struct {
     }
 
     pub fn destroy(cluster: *Cluster) void {
+        cluster.state_checker.deinit();
+        cluster.network.deinit();
+
         for (cluster.clients) |*client| client.deinit(cluster.allocator);
         cluster.allocator.free(cluster.clients);
 
@@ -211,8 +216,6 @@ pub const Cluster = struct {
 
         for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
         cluster.allocator.free(cluster.storages);
-
-        cluster.network.deinit();
 
         cluster.allocator.destroy(cluster);
     }
