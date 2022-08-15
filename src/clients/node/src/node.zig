@@ -12,9 +12,11 @@ const TransferFlags = tb.TransferFlags;
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
-const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachine;
+const Storage = @import("tigerbeetle/src/storage.zig").Storage;
+const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachineType(Storage);
 const Operation = StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
+const MessagePool = @import("tigerbeetle/src/message_pool.zig").MessagePool;
 const IO = @import("tigerbeetle/src/io.zig").IO;
 const config = @import("tigerbeetle/src/config.zig");
 
@@ -118,8 +120,8 @@ fn globalsCast(globals_raw: *anyopaque) *Globals {
 const Context = struct {
     io: *IO,
     addresses: []std.net.Address,
-    message_bus: MessageBus,
     client: Client,
+    message_pool: MessagePool,
 
     fn create(
         env: c.napi_env,
@@ -132,32 +134,26 @@ const Context = struct {
         errdefer allocator.destroy(context);
 
         context.io = io;
+        context.message_pool = try MessagePool.init(allocator, .client);
+        errdefer context.message_pool.deinit(allocator);
 
         context.addresses = try vsr.parse_addresses(allocator, addresses_raw);
         errdefer allocator.free(context.addresses);
         assert(context.addresses.len > 0);
 
         const client_id = std.crypto.random.int(u128);
-
-        context.message_bus = try MessageBus.init(
-            allocator,
-            cluster,
-            context.addresses,
-            client_id,
-            context.io,
-        );
-        errdefer context.message_bus.deinit();
-
         context.client = try Client.init(
             allocator,
             client_id,
             cluster,
             @intCast(u8, context.addresses.len),
-            &context.message_bus,
+            &context.message_pool,
+            .{
+                .configuration = context.addresses,
+                .io = context.io,
+            },
         );
-        errdefer context.client.deinit();
-
-        context.message_bus.set_on_message(*Client, &context.client, Client.on_message);
+        defer context.client.deinit(allocator);
 
         return try translate.create_external(env, context);
     }
@@ -769,8 +765,11 @@ fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
         "Failed to get Client Context pointer.",
     ) catch return null;
     const context = contextCast(context_raw.?) catch return null;
-    context.client.deinit();
-    context.message_bus.deinit();
+
+    const allocator = std.heap.c_allocator;
+    context.client.deinit(allocator);
+    context.message_pool.deinit(allocator);
+    allocator.free(context.addresses);
 
     return null;
 }
