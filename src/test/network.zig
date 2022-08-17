@@ -28,7 +28,7 @@ pub const Network = struct {
         message: *Message,
 
         pub fn deinit(packet: *const Packet, path: PacketSimulatorPath) void {
-            const source_bus = &packet.network.buses.items[path.source];
+            const source_bus = packet.network.buses.items[path.source];
             source_bus.unref(packet.message);
         }
     };
@@ -43,7 +43,16 @@ pub const Network = struct {
     options: NetworkOptions,
     packet_simulator: PacketSimulator(Packet),
 
-    buses: std.ArrayListUnmanaged(MessageBus),
+    // TODO If this stored a ?*MessageBus, then a process's bus could be set to `null` while
+    // the replica is crashed, and replaced when it is destroy. Zig complains:
+    //
+    //   ./src/test/message_bus.zig:20:24: error: struct 'test.message_bus.MessageBus' depends on itself
+    //   pub const MessageBus = struct {
+    //                          ^
+    //   ./src/test/message_bus.zig:21:5: note: while checking this field
+    //       network: *Network,
+    //       ^
+    buses: std.ArrayListUnmanaged(*MessageBus),
     processes: std.ArrayListUnmanaged(u128),
 
     pub fn init(
@@ -55,7 +64,7 @@ pub const Network = struct {
         const process_count = client_count + replica_count;
         assert(process_count <= std.math.maxInt(u8));
 
-        var buses = try std.ArrayListUnmanaged(MessageBus).initCapacity(allocator, process_count);
+        var buses = try std.ArrayListUnmanaged(*MessageBus).initCapacity(allocator, process_count);
         errdefer buses.deinit(allocator);
 
         var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
@@ -77,13 +86,11 @@ pub const Network = struct {
     }
 
     pub fn deinit(network: *Network) void {
-        // TODO: deinit the buses themselves when they gain a deinit()
         network.buses.deinit(network.allocator);
         network.processes.deinit(network.allocator);
     }
 
-    /// Returns the address (index into Network.buses)
-    pub fn init_message_bus(network: *Network, cluster: u32, process: Process) !*MessageBus {
+    pub fn link(network: *Network, process: Process, message_bus: *MessageBus) void {
         const raw_process = switch (process) {
             .replica => |replica| replica,
             .client => |client| blk: {
@@ -92,14 +99,16 @@ pub const Network = struct {
             },
         };
 
-        for (network.processes.items) |p| assert(p != raw_process);
-
-        const bus = try MessageBus.init(network.allocator, cluster, process, network);
-
-        network.processes.appendAssumeCapacity(raw_process);
-        network.buses.appendAssumeCapacity(bus);
-
-        return &network.buses.items[network.buses.items.len - 1];
+        for (network.processes.items) |existing_process, i| {
+            if (existing_process == raw_process) {
+                network.buses.items[i] = message_bus;
+                break;
+            }
+        } else {
+            network.processes.appendAssumeCapacity(raw_process);
+            network.buses.appendAssumeCapacity(message_bus);
+        }
+        assert(network.processes.items.len == network.buses.items.len);
     }
 
     pub fn send_message(network: *Network, message: *Message, path: Path) void {
@@ -131,13 +140,13 @@ pub const Network = struct {
     }
 
     pub fn get_message_bus(network: *Network, process: Process) *MessageBus {
-        return &network.buses.items[network.process_to_address(process)];
+        return network.buses.items[network.process_to_address(process)];
     }
 
     fn deliver_message(packet: Packet, path: PacketSimulatorPath) void {
         const network = packet.network;
 
-        const target_bus = &network.buses.items[path.target];
+        const target_bus = network.buses.items[path.target];
 
         const message = target_bus.get_message();
         defer target_bus.unref(message);
@@ -164,7 +173,7 @@ pub const Network = struct {
             }
         }
 
-        target_bus.on_message_callback.?(target_bus.on_message_context, message);
+        target_bus.on_message_callback(target_bus, message);
     }
 
     fn raw_process_to_process(raw: u128) Process {

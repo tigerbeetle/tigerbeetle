@@ -22,6 +22,14 @@ pub const IO = struct {
     completed: FIFO(Completion) = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
+        // Detect the linux version to ensure that we support all io_uring ops used.
+        const uts = std.os.uname();
+        const release = std.mem.sliceTo(&uts.release, 0);
+        const version = try std.builtin.Version.parse(release);
+        if (version.major < 5 or version.minor < 5) {
+            @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
+        }
+
         return IO{ .ring = try IO_Uring.init(entries, flags) };
     }
 
@@ -334,6 +342,7 @@ pub const IO = struct {
                                 .NXIO => error.Unseekable,
                                 .OVERFLOW => error.Unseekable,
                                 .SPIPE => error.Unseekable,
+                                .TIMEDOUT => error.ConnectionTimedOut,
                                 else => |errno| os.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -360,6 +369,8 @@ pub const IO = struct {
                                 .NOTCONN => error.SocketNotConnected,
                                 .NOTSOCK => error.FileDescriptorNotASocket,
                                 .CONNRESET => error.ConnectionResetByPeer,
+                                .TIMEDOUT => error.ConnectionTimedOut,
+                                .OPNOTSUPP => error.OperationNotSupported,
                                 else => |errno| os.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -394,6 +405,7 @@ pub const IO = struct {
                                 .NOTSOCK => error.FileDescriptorNotASocket,
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PIPE => error.BrokenPipe,
+                                .TIMEDOUT => error.ConnectionTimedOut,
                                 else => |errno| os.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -591,6 +603,7 @@ pub const IO = struct {
         PermissionDenied,
         ProtocolNotSupported,
         ConnectionTimedOut,
+        SystemResources,
     } || os.UnexpectedError;
 
     pub fn connect(
@@ -637,6 +650,7 @@ pub const IO = struct {
         IsDir,
         SystemResources,
         Unseekable,
+        ConnectionTimedOut,
     } || os.UnexpectedError;
 
     pub fn read(
@@ -683,6 +697,8 @@ pub const IO = struct {
         SystemResources,
         SocketNotConnected,
         FileDescriptorNotASocket,
+        ConnectionTimedOut,
+        OperationNotSupported,
     } || os.UnexpectedError;
 
     pub fn recv(
@@ -733,6 +749,7 @@ pub const IO = struct {
         FileDescriptorNotASocket,
         OperationNotSupported,
         BrokenPipe,
+        ConnectionTimedOut,
     } || os.UnexpectedError;
 
     pub fn send(
@@ -867,9 +884,11 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: [:0]const u8) !os.fd_t {
-        return os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
+    pub fn open_dir(dir_path: []const u8) !os.fd_t {
+        return os.open(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
     }
+
+    pub const INVALID_FILE: os.fd_t = -1;
 
     /// Opens or creates a journal file:
     /// - For reading and writing.
@@ -880,14 +899,11 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        self: *IO,
         dir_fd: os.fd_t,
-        relative_path: [:0]const u8,
+        relative_path: []const u8,
         size: u64,
         must_create: bool,
     ) !os.fd_t {
-        _ = self;
-
         assert(relative_path.len > 0);
         assert(size >= config.sector_size);
         assert(size % config.sector_size == 0);
@@ -929,7 +945,7 @@ pub const IO = struct {
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
-        const fd = try os.openatZ(dir_fd, relative_path, flags, mode);
+        const fd = try os.openat(dir_fd, relative_path, flags, mode);
         // TODO Return a proper error message when the path exists or does not exist (init/start).
         errdefer os.close(fd);
 
@@ -978,7 +994,7 @@ pub const IO = struct {
         try os.fsync(dir_fd);
 
         const stat = try os.fstat(fd);
-        if (stat.size != size) @panic("data file inode size was truncated or corrupted");
+        if (stat.size < size) @panic("data file inode size was truncated or corrupted");
 
         return fd;
     }
@@ -995,7 +1011,7 @@ pub const IO = struct {
         defer dir.deleteFile(path) catch {};
 
         while (true) {
-            const res = os.system.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
+            const res = os.linux.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
             switch (os.linux.getErrno(res)) {
                 .SUCCESS => {
                     os.close(@intCast(os.fd_t, res));

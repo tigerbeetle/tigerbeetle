@@ -3,41 +3,46 @@ const assert = std.debug.assert;
 const fmt = std.fmt;
 const mem = std.mem;
 const os = std.os;
-const log = std.log;
+const log = std.log.scoped(.main);
 
 const config = @import("config.zig");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 
 const cli = @import("cli.zig");
+const fatal = cli.fatal;
 
 const IO = @import("io.zig").IO;
 const Time = @import("time.zig").Time;
 const Storage = @import("storage.zig").Storage;
+
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
-const StateMachine = @import("state_machine.zig").StateMachine;
+const MessagePool = @import("message_pool.zig").MessagePool;
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
-const Replica = vsr.Replica(StateMachine, MessageBus, Storage, Time);
+const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
+
+const SuperBlock = vsr.SuperBlockType(Storage);
+const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
+const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
+
+comptime {
+    assert(config.deployment_environment == .production or
+        config.deployment_environment == .development);
+}
 
 pub fn main() !void {
-    var io = try IO.init(128, 0);
-    defer io.deinit();
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
 
-    switch (try cli.parse_args(allocator)) {
-        .init => |args| try init(&io, args.cluster, args.replica, args.dir_fd),
-        .start => |args| try start(
-            &io,
-            allocator,
-            args.cluster,
-            args.replica,
-            args.addresses,
-            args.dir_fd,
-        ),
+    var parse_args = try cli.parse_args(allocator);
+    defer parse_args.deinit(allocator);
+
+    switch (parse_args) {
+        .format => |*args| try Command.format(allocator, args.cluster, args.replica, args.path),
+        .start => |*args| try Command.start(allocator, args.addresses, args.memory, args.path),
     }
 }
 
@@ -45,100 +50,105 @@ pub fn main() !void {
 const filename_fmt = "cluster_{d:0>10}_replica_{d:0>3}.tigerbeetle";
 const filename_len = fmt.count(filename_fmt, .{ 0, 0 });
 
-/// Create a .tigerbeetle data file for the given args and exit
-fn init(io: *IO, cluster: u32, replica: u8, dir_fd: os.fd_t) !void {
-    // Add 1 for the terminating null byte
-    var buffer: [filename_len + 1]u8 = undefined;
-    const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica }) catch unreachable;
-    assert(filename.len == filename_len);
+const Command = struct {
+    dir_fd: os.fd_t,
+    fd: os.fd_t,
+    io: IO,
+    storage: Storage,
+    message_pool: MessagePool,
 
-    // TODO Expose data file size on the CLI.
-    const fd = try io.open_file(
-        dir_fd,
-        filename,
-        config.journal_size_max,
-        true,
-    );
-    std.os.close(fd);
+    fn init(
+        command: *Command,
+        allocator: mem.Allocator,
+        path: [:0]const u8,
+        must_create: bool,
+    ) !void {
+        // TODO Resolve the parent directory properly in the presence of .. and symlinks.
+        // TODO Handle physical volumes where there is no directory to fsync.
+        const dirname = std.fs.path.dirname(path) orelse ".";
+        command.dir_fd = try IO.open_dir(dirname);
+        errdefer os.close(command.dir_fd);
 
-    const file = try (std.fs.Dir{ .fd = dir_fd }).openFile(filename, .{ .write = true });
-    defer file.close();
+        const basename = std.fs.path.basename(path);
+        command.fd = try IO.open_file(command.dir_fd, basename, data_file_size_min, must_create);
+        errdefer os.close(command.fd);
 
-    {
-        const write_size_max = 4 * 1024 * 1024;
-        var write: [write_size_max]u8 = undefined;
-        var offset: u64 = 0;
+        command.io = try IO.init(128, 0);
+        errdefer command.io.deinit();
+
+        command.storage = try Storage.init(&command.io, command.fd);
+        errdefer command.storage.deinit();
+
+        command.message_pool = try MessagePool.init(allocator, .replica);
+        errdefer command.message_pool.deinit(allocator);
+    }
+
+    fn deinit(command: *Command, allocator: mem.Allocator) void {
+        command.message_pool.deinit(allocator);
+        command.storage.deinit();
+        command.io.deinit();
+        os.close(command.fd);
+        os.close(command.dir_fd);
+    }
+
+    pub fn format(allocator: mem.Allocator, cluster: u32, replica: u8, path: [:0]const u8) !void {
+        var command: Command = undefined;
+        try command.init(allocator, path, true);
+        defer command.deinit(allocator);
+
+        var superblock = try SuperBlock.init(
+            allocator,
+            &command.storage,
+            &command.message_pool,
+        );
+        defer superblock.deinit(allocator);
+
+        try vsr.format(Storage, allocator, cluster, replica, &command.storage, &superblock);
+    }
+
+    pub fn start(
+        allocator: mem.Allocator,
+        addresses: []std.net.Address,
+        memory: u64,
+        path: [:0]const u8,
+    ) !void {
+        _ = memory; // TODO
+
+        var command: Command = undefined;
+        try command.init(allocator, path, false);
+        defer command.deinit(allocator);
+
+        var replica: Replica = undefined;
+        try replica.open(allocator, .{
+            .replica_count = @intCast(u8, addresses.len),
+            .storage = &command.storage,
+            .message_pool = &command.message_pool,
+            .time = .{},
+            .state_machine_options = .{
+                // TODO Tune lsm_forest_node_count better.
+                .lsm_forest_node_count = 4096,
+                .cache_size_accounts = config.accounts_max,
+                .cache_size_transfers = config.transfers_max,
+                .cache_size_posted = config.transfers_pending_max,
+            },
+            .message_bus_options = .{
+                .configuration = addresses,
+                .io = &command.io,
+            },
+        }) catch |err| switch (err) {
+            error.NoAddress => fatal("all --addresses must be provided", .{}),
+            else => err,
+        };
+
+        log.info("{}: cluster={}: listening on {}", .{
+            replica.replica,
+            replica.cluster,
+            addresses[replica.replica],
+        });
+
         while (true) {
-            const write_size = vsr.format_journal(cluster, offset, &write);
-            if (write_size == 0) break;
-            try file.writeAll(write[0..write_size]);
-            offset += write_size;
+            replica.tick();
+            try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
     }
-
-    log.info("initialized data file", .{});
-}
-
-/// Run as a replica server defined by the given args
-fn start(
-    io: *IO,
-    allocator: mem.Allocator,
-    cluster: u32,
-    replica_index: u8,
-    addresses: []std.net.Address,
-    dir_fd: os.fd_t,
-) !void {
-    // Add 1 for the terminating null byte
-    var buffer: [filename_len + 1]u8 = undefined;
-    const filename = fmt.bufPrintZ(&buffer, filename_fmt, .{ cluster, replica_index }) catch {
-        unreachable;
-    };
-    assert(filename.len == filename_len);
-
-    // TODO Expose data file size on the CLI.
-    const storage_fd = try io.open_file(
-        dir_fd,
-        filename,
-        config.journal_size_max, // TODO Double-check that we have space for redundant headers.
-        false,
-    );
-
-    var state_machine = try StateMachine.init(
-        allocator,
-        config.accounts_max,
-        config.transfers_max,
-        config.transfers_pending_max,
-    );
-    var storage = try Storage.init(config.journal_size_max, storage_fd, io);
-    var message_bus = try MessageBus.init(
-        allocator,
-        cluster,
-        addresses,
-        replica_index,
-        io,
-    );
-    var time: Time = .{};
-    var replica = try Replica.init(
-        allocator,
-        cluster,
-        @intCast(u8, addresses.len),
-        replica_index,
-        &time,
-        &storage,
-        &message_bus,
-        &state_machine,
-    );
-    message_bus.set_on_message(*Replica, &replica, Replica.on_message);
-
-    log.info("cluster={x} replica={}: listening on {}", .{
-        cluster,
-        replica_index,
-        addresses[replica_index],
-    });
-
-    while (true) {
-        replica.tick();
-        message_bus.tick();
-        try io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
-    }
-}
+};
