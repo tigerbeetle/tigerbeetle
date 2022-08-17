@@ -1,12 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const os = std.os;
-const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.storage);
 
 const IO = @import("io.zig").IO;
 const config = @import("config.zig");
+const fatal = @import("cli.zig").fatal;
 const vsr = @import("vsr.zig");
 
 pub const Storage = struct {
@@ -68,38 +68,53 @@ pub const Storage = struct {
         offset: u64,
     };
 
-    size: u64,
-    fd: os.fd_t,
     io: *IO,
+    fd: os.fd_t,
 
-    pub fn init(size: u64, fd: os.fd_t, io: *IO) !Storage {
+    pub fn init(io: *IO, fd: os.fd_t) !Storage {
         return Storage{
-            .size = size,
-            .fd = fd,
             .io = io,
+            .fd = fd,
         };
     }
 
-    pub fn deinit() void {}
+    pub fn deinit(storage: *Storage) void {
+        assert(storage.fd != IO.INVALID_FILE);
+        storage.fd = IO.INVALID_FILE;
+    }
+
+    pub fn tick(storage: *Storage) void {
+        storage.io.tick() catch |err| {
+            log.warn("tick: {}", .{err});
+            std.debug.panic("storage tick: {}", .{err});
+        };
+    }
 
     pub fn read_sectors(
         self: *Storage,
         callback: fn (read: *Storage.Read) void,
         read: *Storage.Read,
         buffer: []u8,
-        offset: u64,
+        zone: vsr.Zone,
+        offset_in_zone: u64,
     ) void {
-        assert_alignment(buffer, offset);
+        if (zone.size()) |zone_size| {
+            assert(offset_in_zone + buffer.len <= zone_size);
+        }
+
+        const offset_in_storage = zone.offset(offset_in_zone);
+        assert_alignment(buffer, offset_in_storage);
 
         read.* = .{
             .completion = undefined,
             .callback = callback,
             .buffer = buffer,
-            .offset = offset,
+            .offset = offset_in_storage,
             .target_max = buffer.len,
         };
 
         self.start_read(read, 0);
+        assert(read.target().len > 0);
     }
 
     fn start_read(self: *Storage, read: *Storage.Read, bytes_read: usize) void {
@@ -110,7 +125,9 @@ pub const Storage = struct {
 
         const target = read.target();
         if (target.len == 0) {
-            read.callback(read);
+            const callback = read.callback;
+            read.* = undefined;
+            callback(read);
             return;
         }
 
@@ -186,6 +203,7 @@ pub const Storage = struct {
             error.IsDir,
             error.SystemResources,
             error.Unseekable,
+            error.ConnectionTimedOut,
             error.Unexpected,
             => {
                 log.err(
@@ -224,18 +242,26 @@ pub const Storage = struct {
         callback: fn (write: *Storage.Write) void,
         write: *Storage.Write,
         buffer: []const u8,
-        offset: u64,
+        zone: vsr.Zone,
+        offset_in_zone: u64,
     ) void {
-        assert_alignment(buffer, offset);
+        if (zone.size()) |zone_size| {
+            assert(offset_in_zone + buffer.len <= zone_size);
+        }
+
+        const offset_in_storage = zone.offset(offset_in_zone);
+        assert_alignment(buffer, offset_in_storage);
 
         write.* = .{
             .completion = undefined,
             .callback = callback,
             .buffer = buffer,
-            .offset = offset,
+            .offset = offset_in_storage,
         };
 
         self.start_write(write);
+        // Assert that the callback is called asynchronously.
+        assert(write.buffer.len > 0);
     }
 
     fn start_write(self: *Storage, write: *Storage.Write) void {
@@ -283,7 +309,9 @@ pub const Storage = struct {
         write.buffer = write.buffer[bytes_written..];
 
         if (write.buffer.len == 0) {
-            write.callback(write);
+            const callback = write.callback;
+            write.* = undefined;
+            callback(write);
             return;
         }
 
@@ -302,7 +330,9 @@ pub const Storage = struct {
 
     /// Ensures that the read or write is within bounds and intends to read or write some bytes.
     fn assert_bounds(self: *Storage, buffer: []const u8, offset: u64) void {
+        _ = self;
+        _ = offset;
+
         assert(buffer.len > 0);
-        assert(offset + buffer.len <= self.size);
     }
 };

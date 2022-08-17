@@ -9,8 +9,10 @@ pub const log_level: std.log.Level = .err;
 const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
 
+const Storage = @import("storage.zig").Storage;
+const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
-const StateMachine = @import("state_machine.zig").StateMachine;
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 const vsr = @import("vsr.zig");
@@ -76,22 +78,28 @@ pub fn main() !void {
     var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
     var io = try IO.init(32, 0);
-    var message_bus = try MessageBus.init(allocator, cluster_id, address[0..], client_id, &io);
-    defer message_bus.deinit();
+    defer io.deinit();
+
+    var message_pool = try MessagePool.init(allocator, .client);
+    defer message_pool.deinit(allocator);
 
     var client = try Client.init(
         allocator,
         client_id,
         cluster_id,
         @intCast(u8, address.len),
-        &message_bus,
+        &message_pool,
+        .{
+            .configuration = address[0..],
+            .io = &io,
+        },
     );
-    defer client.deinit();
-
-    message_bus.set_on_message(*Client, &client, Client.on_message);
+    defer client.deinit(allocator);
 
     // Pre-allocate a million transfers:
-    const transfers = try arena.allocator().alloc(tb.Transfer, transfers_max);
+    const transfers = try allocator.alloc(tb.Transfer, transfers_max);
+    defer allocator.free(transfers);
+    
     for (transfers) |*transfer, index| {
         transfer.* = .{
             .id = index,
@@ -158,7 +166,7 @@ const TimedQueue = struct {
     transfers_latency_max: i64,
     client: *Client,
     io: *IO,
-    batches: RingBuffer(Batch, batches_count),
+    batches: RingBuffer(Batch, batches_count, .array),
 
     pub fn init(client: *Client, io: *IO) TimedQueue {
         var self = TimedQueue{

@@ -50,7 +50,7 @@ BetaBeetle, the beta distributed version of TigerBeetle, was developed from Janu
 
 ## TigerBeetle (under active development)
 
-The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/coilhq/tigerbeetle/projects) provides a glimpse of where we want to go.
+The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/coilhq/tigerbeetle/projects?type=classic) provides a glimpse of where we want to go.
 
 ## QuickStart
 
@@ -89,7 +89,25 @@ The [QuickStart](#quickstart) step above will install Zig for you to the root of
 To run TigerBeetle's long-running simulation, called *The VOPR*:
 
 ```bash
-scripts/vopr.sh
+zig/zig build vopr
+```
+
+Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR Hub](src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create GitHub issues as needed.
+
+```bash
+zig/zig build vopr -- --send
+```
+
+Run the VOPR using a specific seed. This will run in `Debug` mode by default but you can also include `--build-mode` to run in ReleaseSafe mode.
+
+```bash
+zig/zig build vopr -- --seed=123 --build-mode=ReleaseSafe
+```
+
+To view all the available command line arguments simply use the `--help` flag.
+
+```bash
+zig/zig build vopr -- --help
 ```
 
 *The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames, by our love of fuzzing over the years, by [Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
@@ -105,13 +123,13 @@ Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com
 Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
 
 ```
-./tigerbeetle init --cluster=0 --replica=0 --directory=.
-./tigerbeetle init --cluster=0 --replica=1 --directory=.
-./tigerbeetle init --cluster=0 --replica=2 --directory=.
+./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=1 0_1.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=2 0_2.tigerbeetle
 
-./tigerbeetle start --cluster=0 --replica=0 --directory=. --addresses=3001,3002,3003
-./tigerbeetle start --cluster=0 --replica=1 --directory=. --addresses=3001,3002,3003
-./tigerbeetle start --cluster=0 --replica=2 --directory=. --addresses=3001,3002,3003
+./tigerbeetle start --addresses=3001,3002,3003 0_0.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 0_1.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 0_2.tigerbeetle
 ```
 
 Run the TigerBeetle binary to see all command line arguments:

@@ -11,8 +11,10 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
 const IO = @import("io.zig").IO;
+const Storage = @import("storage.zig").Storage;
+const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
-const StateMachine = @import("state_machine.zig").StateMachine;
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
@@ -31,25 +33,27 @@ pub fn request(
 ) !void {
     const allocator = std.heap.page_allocator;
     const client_id = std.crypto.random.int(u128);
-    const cluster_id: u32 = 1;
+    const cluster_id: u32 = 0;
     var addresses = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
 
     var io = try IO.init(32, 0);
     defer io.deinit();
 
-    var message_bus = try MessageBus.init(allocator, cluster_id, &addresses, client_id, &io);
-    defer message_bus.deinit();
+    var message_pool = try MessagePool.init(allocator, .client);
+    defer message_pool.deinit(allocator);
 
     var client = try Client.init(
         allocator,
         client_id,
         cluster_id,
         @intCast(u8, addresses.len),
-        &message_bus,
+        &message_pool,
+        .{
+            .configuration = &addresses,
+            .io = &io,
+        },
     );
-    defer client.deinit();
-
-    message_bus.set_on_message(*Client, &client, Client.on_message);
+    defer client.deinit(allocator);
 
     const message = client.get_message();
     defer client.unref(message);

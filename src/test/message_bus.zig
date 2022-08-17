@@ -19,46 +19,37 @@ pub const Process = union(ProcessType) {
 
 pub const MessageBus = struct {
     network: *Network,
-    pool: MessagePool,
+    pool: *MessagePool,
 
     cluster: u32,
     process: Process,
 
-    /// The callback to be called when a message is received. Use set_on_message() to set
-    /// with type safety for the context pointer.
-    on_message_callback: ?fn (context: ?*anyopaque, message: *Message) void = null,
-    on_message_context: ?*anyopaque = null,
+    /// The callback to be called when a message is received.
+    on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
+
+    pub const Options = struct {
+        network: *Network,
+    };
 
     pub fn init(
-        allocator: std.mem.Allocator,
+        _: std.mem.Allocator,
         cluster: u32,
         process: Process,
-        network: *Network,
+        message_pool: *MessagePool,
+        on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
+        options: Options,
     ) !MessageBus {
         return MessageBus{
-            .pool = try MessagePool.init(allocator, @as(ProcessType, process)),
-            .network = network,
+            .network = options.network,
+            .pool = message_pool,
             .cluster = cluster,
             .process = process,
+            .on_message_callback = on_message_callback,
         };
     }
 
     /// TODO
-    pub fn deinit(_: *MessageBus) void {}
-
-    pub fn set_on_message(
-        bus: *MessageBus,
-        comptime Context: type,
-        context: Context,
-        comptime on_message: fn (context: Context, message: *Message) void,
-    ) void {
-        bus.on_message_callback = struct {
-            fn wrapper(_context: ?*anyopaque, message: *Message) void {
-                on_message(@intToPtr(Context, @ptrToInt(_context)), message);
-            }
-        }.wrapper;
-        bus.on_message_context = context;
-    }
+    pub fn deinit(_: *MessageBus, _: std.mem.Allocator) void {}
 
     pub fn tick(_: *MessageBus) void {}
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -e
+set -eEuo pipefail
+
+# Number of replicas to benchmark
+REPLICAS=${REPLICAS:-0}
 
 # Install Zig if it does not already exist:
 if [ ! -d "zig" ]; then
@@ -22,7 +25,7 @@ function onerror {
         cat benchmark.log
     fi
 
-    for I in 0
+    for I in $REPLICAS
     do
         echo "Stopping replica $I..."
     done
@@ -30,20 +33,24 @@ function onerror {
 }
 trap onerror EXIT
 
-for I in 0
+for I in $REPLICAS
 do
-    echo "Initializing replica $I..."
-    FILE="./cluster_0000000000_replica_00${I}.tigerbeetle"
-    if [ -f $FILE ]; then
-        rm $FILE
+    echo "Formatting replica $I..."
+
+    # Be careful to use a benchmark-specific filename so that we don't erase a real data file:
+    FILE="./0_${I}.tigerbeetle.benchmark"
+    if [ -f "$FILE" ]; then
+        rm "$FILE"
     fi
-    ./tigerbeetle init --directory=. --cluster=0 --replica=$I > benchmark.log 2>&1
+
+    ./tigerbeetle format --cluster=0 --replica="$I" "$FILE" > benchmark.log 2>&1
 done
 
-for I in 0
+for I in $REPLICAS
 do
     echo "Starting replica $I..."
-    ./tigerbeetle start --directory=. --cluster=0 --addresses=3001 --replica=$I > benchmark.log 2>&1 &
+    FILE="./0_${I}.tigerbeetle.benchmark"
+    ./tigerbeetle start --addresses=3001 "$FILE" > benchmark.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:
@@ -53,3 +60,11 @@ echo ""
 echo "Benchmarking..."
 zig/zig run -OReleaseSafe src/benchmark.zig
 echo ""
+
+for I in 0
+do
+    FILE="./0_${I}.tigerbeetle.benchmark"
+    if [ -f $FILE ]; then
+        rm $FILE
+    fi
+done

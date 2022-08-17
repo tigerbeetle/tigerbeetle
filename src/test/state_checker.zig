@@ -6,7 +6,8 @@ const config = @import("../config.zig");
 
 const Cluster = @import("cluster.zig").Cluster;
 const Network = @import("network.zig").Network;
-const StateMachine = @import("state_machine.zig").StateMachine;
+const Storage = @import("storage.zig").Storage;
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
 
 const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
@@ -14,7 +15,7 @@ const Message = MessagePool.Message;
 
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
-const RequestQueue = RingBuffer(u128, config.client_request_queue_max);
+const RequestQueue = RingBuffer(u128, config.client_request_queue_max, .array);
 const StateTransitions = std.AutoHashMap(u128, u64);
 
 const log = std.log.scoped(.state_checker);
@@ -36,10 +37,11 @@ pub const StateChecker = struct {
     transitions: u64 = 0,
 
     pub fn init(allocator: mem.Allocator, cluster: *Cluster) !StateChecker {
-        const state = cluster.state_machines[0].state;
+        const state = cluster.replicas[0].state_machine.state;
 
         var state_machine_states: [config.replicas_max]u128 = undefined;
-        for (cluster.state_machines) |state_machine, i| {
+        for (cluster.replicas) |*replica, i| {
+            const state_machine = &replica.state_machine;
             assert(state_machine.state == state);
             state_machine_states[i] = state_machine.state;
         }
@@ -62,11 +64,11 @@ pub const StateChecker = struct {
         state_checker.history.deinit();
     }
 
-    pub fn check_state(state_checker: *StateChecker, replica: u8) void {
+    pub fn check_state(state_checker: *StateChecker, replica: u8) !void {
         const cluster = @fieldParentPtr(Cluster, "state_checker", state_checker);
 
         const a = state_checker.state_machine_states[replica];
-        const b = cluster.state_machines[replica].state;
+        const b = cluster.replicas[replica].state_machine.state;
 
         if (b == a) return;
         state_checker.state_machine_states[replica] = b;
@@ -91,7 +93,7 @@ pub const StateChecker = struct {
                 if (b == StateMachine.hash(state_checker.state, std.mem.asBytes(input))) {
                     const transitions_executed = state_checker.history.get(a).?;
                     if (transitions_executed < state_checker.transitions) {
-                        @panic("replica skipped interim transitions");
+                        return error.ReplicaSkippedInterimTransitions;
                     } else {
                         assert(transitions_executed == state_checker.transitions);
                     }
@@ -120,7 +122,7 @@ pub const StateChecker = struct {
             }
         }
 
-        @panic("replica transitioned to an invalid state");
+        return error.ReplicaTransitionedToInvalidState;
     }
 
     pub fn convergence(state_checker: *StateChecker) bool {

@@ -9,10 +9,11 @@ const config = @import("../config.zig");
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
+const IOPS = @import("../iops.zig").IOPS;
 
 const log = std.log.scoped(.journal);
 
-/// There are two contiguous circular buffers on disk in the journal storage zone.
+/// There are two contiguous circular buffers on disk in the journal storage zone (`vsr.Zone.wal`).
 ///
 /// In both rings, the `op` for each reserved header is set to the slot index.
 /// This helps WAL recovery detect misdirected reads/writes.
@@ -215,7 +216,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         recovering: bool = false,
 
         pub fn init(allocator: Allocator, storage: *Storage, replica: u8) !Self {
-            assert(write_ahead_log_zone_size <= storage.size);
+            // TODO Fix this assertion:
+            // assert(write_ahead_log_zone_size <= storage.size);
 
             var headers = try allocator.allocAdvanced(
                 Header,
@@ -324,11 +326,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(!self.recovering);
             assert(self.recovered);
             assert(self.writes.executing() == 0);
-            assert(self.headers[0].valid_checksum());
 
-            const replica = @fieldParentPtr(Replica, "journal", self);
+            if (!self.headers[0].valid_checksum()) return false;
             if (self.headers[0].operation != .root) return false;
 
+            const replica = @fieldParentPtr(Replica, "journal", self);
             assert(self.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
             assert(self.headers[0].checksum == self.prepare_checksums[0]);
             assert(self.prepare_inhabited[0]);
@@ -668,6 +670,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return range;
         }
 
+        /// Read a prepare from disk. There must be a matching in-memory header.
         pub fn read_prepare(
             self: *Self,
             callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
@@ -685,40 +688,20 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            // Do not use this pointer beyond this function's scope, as the
-            // header memory may then change:
-            const exact = self.header_with_op_and_checksum(op, checksum) orelse {
+            const slot = self.slot_with_op_and_checksum(op, checksum) orelse {
                 self.read_prepare_log(op, checksum, "no entry exactly");
                 callback(replica, null, null);
                 return;
             };
 
-            const slot = self.slot_with_op_and_checksum(op, checksum).?;
-            if (self.faulty.bit(slot)) {
-                assert(self.dirty.bit(slot));
-
-                self.read_prepare_log(op, checksum, "faulty");
+            if (self.prepare_inhabited[slot.index] and
+                self.prepare_checksums[slot.index] == checksum)
+            {
+                self.read_prepare_with_op_and_checksum(callback, op, checksum, destination_replica);
+            } else {
+                self.read_prepare_log(op, checksum, "no matching prepare");
                 callback(replica, null, null);
-                return;
             }
-
-            if (self.dirty.bit(slot)) {
-                self.read_prepare_log(op, checksum, "dirty");
-                callback(replica, null, null);
-                return;
-            }
-
-            // Skip the disk read if the header is all we need:
-            if (exact.size == @sizeOf(Header)) {
-                const message = replica.message_bus.get_message();
-                defer replica.message_bus.unref(message);
-
-                message.header.* = exact.*;
-                callback(replica, message, destination_replica);
-                return;
-            }
-
-            self.read_prepare_with_op_and_checksum(callback, op, checksum, destination_replica);
         }
 
         /// Read a prepare from disk. There may or may not be an in-memory header.
@@ -738,6 +721,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
+            // If the header is in-memory, we can skip the read from the disk.
+            if (self.header_with_op_and_checksum(op, checksum)) |exact| {
+                if (exact.size == @sizeOf(Header)) {
+                    message.header.* = exact.*;
+                    callback(replica, message, destination_replica);
+                    return;
+                }
+            }
+
             const read = self.reads.acquire() orelse {
                 self.read_prepare_log(op, checksum, "waiting for IOP");
                 callback(replica, null, null);
@@ -755,12 +747,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
 
             const buffer: []u8 = message.buffer[0..config.message_size_max];
-            const offset = offset_physical(.prepares, slot);
-
-            log.debug(
-                "{}: read_sectors: offset={} len={}",
-                .{ replica.replica, offset, buffer.len },
-            );
+            const offset = offset_logical(.prepares, slot);
 
             // Memory must not be owned by `self.headers` as these may be modified concurrently:
             assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
@@ -771,6 +758,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 read_prepare_with_op_and_checksum_callback,
                 &read.completion,
                 buffer,
+                .wal,
                 offset,
             );
         }
@@ -818,6 +806,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 read.callback(replica, null, null);
                 return;
             }
+            assert(read.message.header.invalid() == null);
 
             if (read.message.header.cluster != replica.cluster) {
                 // This could be caused by a misdirected read or write.
@@ -940,7 +929,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 recover_headers_callback,
                 &read.completion,
                 buffer,
-                offset_physical_for_logical(.headers, offset),
+                .wal,
+                offset,
             );
         }
 
@@ -987,11 +977,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             self.recover_headers(offset_next);
         }
 
-        fn recover_headers_buffer(message: *Message, offset: u64) []u8 {
+        fn recover_headers_buffer(message: *Message, offset: u64) []align(@alignOf(Header)) u8 {
             const max = std.math.min(message.buffer.len, headers_size - offset);
             assert(max % config.sector_size == 0);
             assert(max % @sizeOf(Header) == 0);
-            return message.buffer[0..max];
+            return @alignCast(@alignOf(Header), message.buffer[0..max]);
         }
 
         fn recover_prepares(self: *Self, slot: Slot) void {
@@ -1034,7 +1024,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 // We load the entire message to verify that it isn't torn or corrupt.
                 // We don't know the message's size, so use the entire buffer.
                 message.buffer[0..config.message_size_max],
-                offset_physical(.prepares, slot),
+                .wal,
+                offset_logical(.prepares, slot),
             );
         }
 
@@ -1513,7 +1504,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
             const buffer = message.buffer[0..vsr.sector_ceil(message.header.size)];
-            const offset = offset_physical(.prepares, slot);
+            const offset = offset_logical(.prepares, slot);
 
             if (builtin.mode == .Debug) {
                 // Assert that any sector padding has already been zeroed:
@@ -1587,9 +1578,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .index = @divFloor(slot_of_message.index, headers_per_sector) * headers_per_sector,
             };
 
-            const offset = offset_physical(.headers, slot_of_message);
+            const offset = offset_logical(.headers, slot_of_message);
             assert(offset % config.sector_size == 0);
-            assert(offset == slot_first.index * @sizeOf(Header));
 
             const buffer: []u8 = write.header_sector(self);
             const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
@@ -1739,48 +1729,28 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .prepares => {
                     const offset = config.message_size_max * slot.index;
                     assert(offset < prepares_size);
-                    return offset;
+                    return offset + config.journal_size_headers;
                 },
             }
-        }
-
-        fn offset_physical(ring: Ring, slot: Slot) u64 {
-            return switch (ring) {
-                .headers => offset_logical(.headers, slot),
-                .prepares => headers_size + offset_logical(.prepares, slot),
-            };
         }
 
         fn offset_logical_in_headers_for_message(self: *const Self, message: *Message) u64 {
             return offset_logical(.headers, self.slot_for_header(message.header));
         }
 
-        /// Where `offset` is a logical offset relative to the start of the respective ring.
-        fn offset_physical_for_logical(ring: Ring, offset: u64) u64 {
-            switch (ring) {
-                .headers => {
-                    assert(offset < headers_size);
-                    return offset;
-                },
-                .prepares => {
-                    assert(offset < prepares_size);
-                    return headers_size + offset;
-                },
-            }
-        }
-
+        // TODO Add a `Ring` argument, and make the offset relative to that.
         fn write_sectors(
             self: *Self,
             callback: fn (write: *Self.Write) void,
             write: *Self.Write,
             buffer: []const u8,
-            offset: u64,
+            offset_in_wal: u64,
         ) void {
             write.range = .{
                 .callback = callback,
                 .completion = undefined,
                 .buffer = buffer,
-                .offset = offset,
+                .offset = offset_in_wal,
                 .locked = false,
             };
             self.lock_sectors(write);
@@ -1816,6 +1786,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 write_sectors_on_write,
                 &write.range.completion,
                 write.range.buffer,
+                .wal,
                 write.range.offset,
             );
             // We rely on the Storage.write_sectors() implementation being always synchronous,
@@ -1920,105 +1891,6 @@ pub const BitSet = struct {
         }
     }
 };
-
-/// Take a u6 to limit to 64 items max (2^6 = 64)
-pub fn IOPS(comptime T: type, comptime size: u6) type {
-    const Map = std.StaticBitSet(size);
-    return struct {
-        const Self = @This();
-
-        items: [size]T = undefined,
-        /// 1 bits are free items.
-        free: Map = Map.initFull(),
-
-        pub fn acquire(self: *Self) ?*T {
-            const i = self.free.findFirstSet() orelse return null;
-            self.free.unset(i);
-            return &self.items[i];
-        }
-
-        pub fn release(self: *Self, item: *T) void {
-            item.* = undefined;
-            const i = (@ptrToInt(item) - @ptrToInt(&self.items)) / @sizeOf(T);
-            assert(!self.free.isSet(i));
-            self.free.set(i);
-        }
-
-        /// Returns the count of IOPs available.
-        pub fn available(self: *const Self) usize {
-            return self.free.count();
-        }
-
-        /// Returns the count of IOPs in use.
-        pub fn executing(self: *const Self) usize {
-            return size - self.available();
-        }
-
-        pub const Iterator = struct {
-            iops: *Self,
-            bitset_iterator: Map.Iterator(.{ .kind = .unset }),
-
-            pub fn next(iterator: *@This()) ?*T {
-                const i = iterator.bitset_iterator.next() orelse return null;
-                return &iterator.iops.items[i];
-            }
-        };
-
-        pub fn iterate(self: *Self) Iterator {
-            return .{
-                .iops = self,
-                .bitset_iterator = self.free.iterator(.{ .kind = .unset }),
-            };
-        }
-    };
-}
-
-test "IOPS" {
-    const testing = std.testing;
-    var iops = IOPS(u32, 4){};
-
-    try testing.expectEqual(@as(usize, 4), iops.available());
-    try testing.expectEqual(@as(usize, 0), iops.executing());
-
-    var one = iops.acquire().?;
-
-    try testing.expectEqual(@as(usize, 3), iops.available());
-    try testing.expectEqual(@as(usize, 1), iops.executing());
-
-    var two = iops.acquire().?;
-    var three = iops.acquire().?;
-
-    try testing.expectEqual(@as(usize, 1), iops.available());
-    try testing.expectEqual(@as(usize, 3), iops.executing());
-
-    var four = iops.acquire().?;
-    try testing.expectEqual(@as(?*u32, null), iops.acquire());
-
-    try testing.expectEqual(@as(usize, 0), iops.available());
-    try testing.expectEqual(@as(usize, 4), iops.executing());
-
-    iops.release(two);
-
-    try testing.expectEqual(@as(usize, 1), iops.available());
-    try testing.expectEqual(@as(usize, 3), iops.executing());
-
-    // there is only one slot free, so we will get the same pointer back.
-    try testing.expectEqual(@as(?*u32, two), iops.acquire());
-
-    iops.release(four);
-    iops.release(two);
-    iops.release(one);
-    iops.release(three);
-
-    try testing.expectEqual(@as(usize, 4), iops.available());
-    try testing.expectEqual(@as(usize, 0), iops.executing());
-
-    one = iops.acquire().?;
-    two = iops.acquire().?;
-    three = iops.acquire().?;
-    four = iops.acquire().?;
-    try testing.expectEqual(@as(?*u32, null), iops.acquire());
-}
 
 /// @B and @C:
 /// This prepare header is corrupt.
@@ -2289,5 +2161,120 @@ test "recovery_cases" {
             }
         }
         if (case_match == null) @panic("no matching case");
+    }
+}
+
+/// Format part of a new WAL, writing to `target`.
+///
+/// `offset_logical` is relative to the beginning of the WAL.
+/// Returns the number of bytes written to `target`.
+pub fn format_journal(cluster: u32, offset_logical: u64, target: []u8) usize {
+    assert(offset_logical <= config.journal_size_max);
+    assert(offset_logical % config.sector_size == 0);
+    assert(target.len > 0);
+    assert(target.len % config.sector_size == 0);
+
+    const sector_max = @divExact(config.journal_size_max, config.sector_size);
+    var sectors = std.mem.bytesAsSlice([config.sector_size]u8, target);
+    for (sectors) |*sector_data, i| {
+        const sector = @divExact(offset_logical, config.sector_size) + i;
+        if (sector == sector_max) {
+            if (i == 0) {
+                assert(offset_logical == config.journal_size_max);
+            }
+            return i * config.sector_size;
+        } else {
+            format_journal_sector(cluster, sector, sector_data);
+        }
+    }
+    return target.len;
+}
+
+fn format_journal_sector(cluster: u32, sector: usize, sector_data: *[config.sector_size]u8) void {
+    assert(sector < @divExact(config.journal_size_max, config.sector_size));
+
+    var sector_headers = std.mem.bytesAsSlice(Header, sector_data);
+
+    if (sector * headers_per_sector < slot_count) {
+        for (sector_headers) |*header, i| {
+            const slot = sector * headers_per_sector + i;
+            if (sector == 0 and i == 0) {
+                header.* = Header.root_prepare(cluster);
+                assert(header.op == 0);
+                assert(header.command == .prepare);
+                assert(header.operation == .root);
+            } else {
+                header.* = Header.reserved(cluster, slot);
+            }
+        }
+        return;
+    }
+
+    const sectors_per_message = @divExact(config.message_size_max, config.sector_size);
+    const sector_in_prepares = sector - @divExact(slot_count, headers_per_sector);
+    const message_slot = @divFloor(sector_in_prepares, sectors_per_message);
+    assert(message_slot < slot_count);
+
+    std.mem.set(u8, sector_data, 0);
+    if (sector_in_prepares % sectors_per_message == 0) {
+        // The header goes in the first sector of the message.
+        if (message_slot == 0) {
+            sector_headers[0] = Header.root_prepare(cluster);
+        } else {
+            sector_headers[0] = Header.reserved(cluster, message_slot);
+        }
+    }
+}
+
+test "format_journal" {
+    const cluster = 123;
+    const write_sizes = [_]usize{
+        config.sector_size,
+        config.sector_size * 2,
+        config.sector_size * 3,
+        config.journal_size_max,
+    };
+
+    for (write_sizes) |write_size_max| {
+        var wal_data = try std.testing.allocator.alloc(u8, config.journal_size_max);
+        defer std.testing.allocator.free(wal_data);
+
+        var write_data = try std.testing.allocator.alloc(u8, write_size_max);
+        defer std.testing.allocator.free(write_data);
+
+        var headers_ring = std.mem.bytesAsSlice(Header, @alignCast(@alignOf(Header), wal_data[0..config.journal_size_headers]));
+        var prepare_ring = std.mem.bytesAsSlice([config.message_size_max]u8, wal_data[config.journal_size_headers..]);
+        try std.testing.expectEqual(@as(usize, config.journal_slot_count), headers_ring.len);
+        try std.testing.expectEqual(@as(usize, config.journal_slot_count), prepare_ring.len);
+
+        var offset: u64 = 0;
+        while (true) {
+            const write_size = format_journal(cluster, offset, write_data);
+            if (write_size == 0) break;
+            std.mem.copy(u8, wal_data[offset..][0..write_size], write_data[0..write_size]);
+            offset += write_size;
+        }
+
+        for (headers_ring) |*header, slot| {
+            try std.testing.expect(header.valid_checksum());
+            try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
+            try std.testing.expectEqual(header.invalid(), null);
+            try std.testing.expectEqual(header.cluster, cluster);
+            try std.testing.expectEqual(header.op, slot);
+            try std.testing.expectEqual(header.size, @sizeOf(Header));
+            if (slot == 0) {
+                try std.testing.expectEqual(header.command, .prepare);
+                try std.testing.expectEqual(header.operation, .root);
+            } else {
+                try std.testing.expectEqual(header.command, .reserved);
+            }
+
+            const prepare_bytes = prepare_ring[slot];
+            const prepare_header = std.mem.bytesAsValue(Header, prepare_bytes[0..@sizeOf(Header)]);
+            const prepare_body = prepare_bytes[@sizeOf(Header)..];
+
+            try std.testing.expectEqual(header.*, prepare_header.*);
+            for (prepare_body) |byte| try std.testing.expectEqual(byte, 0);
+        }
     }
 }
