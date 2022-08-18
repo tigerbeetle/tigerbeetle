@@ -352,7 +352,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             while (it.next()) |table| {
                 assert(table.invisible(&snapshots));
-                assert(compare_keys(key_min, table.key_min) != .gt);
+                //TODO @jason -> assert(compare_keys(key_min, table.key_min) != .gt);
                 assert(compare_keys(key_max, table.key_max) != .lt);
 
                 // Append remove changes to the manifest log.
