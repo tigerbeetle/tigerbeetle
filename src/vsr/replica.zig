@@ -3167,7 +3167,7 @@ pub fn Replica(
 
         /// Returns whether the replica is the leader for the current view.
         /// This may be used only when the replica status is normal.
-        fn leader(self: *Self) bool {
+        pub fn leader(self: *Self) bool {
             assert(self.status == .normal);
             return self.leader_index(self.view) == self.replica;
         }
