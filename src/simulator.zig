@@ -29,13 +29,15 @@ pub const log_level: std.log.Level = if (log_state_transitions_only) .info else 
 
 /// Modifies compile-time constants on "config.zig".
 pub const deployment_environment = .simulation;
-comptime {
-    assert(config.deployment_environment == .simulation);
-}
 
 var cluster: *Cluster = undefined;
 
 pub fn main() !void {
+
+    comptime {
+        assert(config.deployment_environment == .simulation);
+    }
+
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
     log_buffer.unbuffered_writer = std.io.getStdErr().writer();
 
@@ -366,7 +368,6 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
 }
 
 fn on_change_replica(replica: *Replica) void {
-    assert(cluster.state_machines[replica.replica].state == replica.state_machine.state);
     cluster.state_checker.check_state(replica.replica) catch |err| {
         fatal(.correctness, "state checker error: {}", .{err});
     };
