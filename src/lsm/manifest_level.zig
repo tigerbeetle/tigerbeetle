@@ -305,7 +305,7 @@ pub fn ManifestLevelType(
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 while (it.next()) |table| : (absolute_index += 1) {
                     if (table.invisible(snapshots)) {
-                        //TODO @jason -> assert(table.equal(&tables[0]));
+                        // TODO @jason -> assert(table.equal(&tables[0]));
                         break;
                     }
                 } else {
