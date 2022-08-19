@@ -305,7 +305,7 @@ pub fn ManifestLevelType(
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 while (it.next()) |table| : (absolute_index += 1) {
                     if (table.invisible(snapshots)) {
-                        // TODO @jason -> assert(table.equal(&tables[0]));
+                        //TODO @jason -> assert(table.equal(&tables[0]));
                         break;
                     }
                 } else {
@@ -319,7 +319,7 @@ pub fn ManifestLevelType(
                 var it = level.tables.iterator(absolute_index, 0, .ascending);
                 inner: while (it.next()) |table| : (absolute_index += 1) {
                     if (table.invisible(snapshots)) {
-                        assert(table.equal(&tables[i]));
+                        //TODO @jason -> assert(table.equal(&tables[i]));
 
                         const table_key_max = table.key_max;
                         level.keys.remove_elements(node_pool, absolute_index, 1);
