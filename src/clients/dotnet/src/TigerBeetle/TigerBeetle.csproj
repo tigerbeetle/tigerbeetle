@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+		<TargetFrameworks>net6.0</TargetFrameworks>
+		<LangVersion>10</LangVersion>
+		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<AssemblyName>TigerBeetle</AssemblyName>
+  </PropertyGroup>
+	<ItemGroup>
+		<AssemblyMetadataCommand Remove="GitDescription" />
+	</ItemGroup>
+	<ItemGroup>
+	  <None Update="tb_client.dll">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>
+	</ItemGroup>
+</Project>
