@@ -27,10 +27,10 @@ namespace TigerBeetle
 		private unsafe static readonly int RESULT_SIZE = sizeof(TResult);
 		private unsafe static readonly int BODY_SIZE = sizeof(TBody);
 
+		private readonly Client client;
+		private readonly Packet packet;
 		private readonly GCHandle handle;
 		private GCHandle bodyPinnedHandle;
-		private Client client;
-		private Packet packet;
 
 		#endregion Fields
 

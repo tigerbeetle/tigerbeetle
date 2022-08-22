@@ -14,10 +14,10 @@ namespace TigerBeetle
 		public static readonly UInt128 Zero = new UInt128();
 
 		[FieldOffset(0)]
-		private ulong _0;
+		private readonly ulong _0;
 
 		[FieldOffset(8)]
-		private ulong _1;
+		private readonly ulong _1;
 
 		#endregion Fields
 

@@ -52,7 +52,7 @@ namespace TigerBeetle
 
 		#region Methods
 
-#if NETSTANDARD
+		#if NETSTANDARD
 
 		[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 		public unsafe delegate void OnCompletionFn(IntPtr ctx, IntPtr client, Packet* packet, byte* result, uint result_len);
@@ -71,7 +71,7 @@ namespace TigerBeetle
 			OnCompletionFn on_completion_fn
 		);
 
-#else
+		#else
 
 		[DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
 		public static unsafe extern TBStatus tb_client_init(
@@ -85,7 +85,7 @@ namespace TigerBeetle
 			delegate* unmanaged[Cdecl]<IntPtr,IntPtr,TBPacket*,byte*,uint,void> on_completion_fn
 		);
 
-#endif
+		#endif
 
 		[DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
 		public static unsafe extern void tb_client_submit(
@@ -98,6 +98,6 @@ namespace TigerBeetle
 			IntPtr client
 		);
 
-#endregion Methods
+		#endregion Methods
 	}
 }

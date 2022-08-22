@@ -16,7 +16,7 @@ namespace TigerBeetle
 	{
 		#region Fields
 
-		private unsafe IntPtr handle;
+		private IntPtr handle;
 		private readonly uint clusterID;
 
 		private readonly PacketList packets;
@@ -195,13 +195,11 @@ namespace TigerBeetle
 		private void Dispose(bool disposing)
 		{
 			_ = disposing;
-			unsafe
+
+			if (handle != IntPtr.Zero)
 			{
-				if (handle != IntPtr.Zero)
-				{
-					tb_client_deinit(handle);
-					handle = IntPtr.Zero;
-				}
+				tb_client_deinit(handle);
+				handle = IntPtr.Zero;
 			}
 		}
 
@@ -224,19 +222,13 @@ namespace TigerBeetle
 		#endif
 		private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len)
 		{
-			try
+			var request = IRequest.FromUserData(packet->user_data);
+			if (request != null)
 			{
-				var request = IRequest.FromUserData(packet->user_data);
-				if (request != null)
-				{
-					var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
-					request.Complete(packet->operation, packet->status, span);
-				}
+				var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
+				request.Complete(packet->operation, packet->status, span);
 			}
-			catch (Exception exception)
-			{
-				Console.WriteLine(exception);
-			}
+
 		}
 
 		#endregion Static callback
