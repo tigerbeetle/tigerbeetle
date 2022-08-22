@@ -13,5 +13,8 @@
 	  <None Update="tb_client.dll">
 	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
 	  </None>
+	  <None Update="libtb_client.so">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>	  
 	</ItemGroup>
 </Project>

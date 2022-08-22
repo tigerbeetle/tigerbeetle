@@ -548,10 +548,14 @@ namespace TigerBeetle.Tests
 
         public TBServer()
         {
+            CleanUp();
+
             var format = Process.Start(TB_SERVER, FORMAT);
             format.WaitForExit();
+            if (format.ExitCode != 0) throw new InvalidOperationException("format failed");
 
             process = Process.Start(TB_SERVER, START);
+            if (process.WaitForExit(100)) throw new InvalidOperationException("Tigerbeetle server failed to start");
         }
 
         #endregion Constructor
@@ -560,10 +564,22 @@ namespace TigerBeetle.Tests
 
         public void Dispose()
         {
-            process.Kill();
-            process.Dispose();
+            CleanUp();
+        }
 
-            File.Delete($"{TB_PATH}{TB_FILE}");
+        private void CleanUp()
+        {
+            try
+            {
+                if (process != null && !process.HasExited)
+                {
+                    process.Kill();
+                    process.Dispose();
+                }
+
+                File.Delete($"./{TB_FILE}");
+
+            } catch {}
         }
 
         #endregion Methods
