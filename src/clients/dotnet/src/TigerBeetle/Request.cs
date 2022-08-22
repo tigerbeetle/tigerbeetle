@@ -7,199 +7,199 @@ using static TigerBeetle.TBClient;
 
 namespace TigerBeetle
 {
-	internal interface IRequest
-	{
-		public static IRequest? FromUserData(IntPtr userData)
-		{
-			var handle = GCHandle.FromIntPtr(userData);
-			return handle.IsAllocated ? handle.Target as IRequest : null;
-		}
+    internal interface IRequest
+    {
+        public static IRequest? FromUserData(IntPtr userData)
+        {
+            var handle = GCHandle.FromIntPtr(userData);
+            return handle.IsAllocated ? handle.Target as IRequest : null;
+        }
 
-		void Complete(Operation operation, TBPacketStatus status, ReadOnlySpan<byte> result);
-	}
+        void Complete(Operation operation, TBPacketStatus status, ReadOnlySpan<byte> result);
+    }
 
-	internal abstract class Request<TResult, TBody> : IRequest
-		where TResult : unmanaged
-		where TBody : unmanaged
-	{
-		#region Fields
+    internal abstract class Request<TResult, TBody> : IRequest
+        where TResult : unmanaged
+        where TBody : unmanaged
+    {
+        #region Fields
 
-		private unsafe static readonly int RESULT_SIZE = sizeof(TResult);
-		private unsafe static readonly int BODY_SIZE = sizeof(TBody);
+        private unsafe static readonly int RESULT_SIZE = sizeof(TResult);
+        private unsafe static readonly int BODY_SIZE = sizeof(TBody);
 
-		private readonly Client client;
-		private readonly Packet packet;
-		private readonly GCHandle handle;
-		private GCHandle bodyPinnedHandle;
+        private readonly Client client;
+        private readonly Packet packet;
+        private readonly GCHandle handle;
+        private GCHandle bodyPinnedHandle;
 
-		#endregion Fields
+        #endregion Fields
 
-		#region Constructor
+        #region Constructor
 
-		public Request(Client client, Packet packet)
-		{
-			handle = GCHandle.Alloc(this, GCHandleType.Normal);
+        public Request(Client client, Packet packet)
+        {
+            handle = GCHandle.Alloc(this, GCHandleType.Normal);
 
-			this.client = client;
-			this.packet = packet;
-		}
+            this.client = client;
+            this.packet = packet;
+        }
 
-		#endregion Constructor
+        #endregion Constructor
 
-		#region Methods
+        #region Methods
 
-		public IntPtr Pin(TBody[] body, out uint size)
-		{
-			if (bodyPinnedHandle.IsAllocated) throw new InvalidOperationException();
+        public IntPtr Pin(TBody[] body, out uint size)
+        {
+            if (bodyPinnedHandle.IsAllocated) throw new InvalidOperationException();
 
-			bodyPinnedHandle = GCHandle.Alloc(body, GCHandleType.Pinned);
-			size = (uint)(body.Length * BODY_SIZE);
+            bodyPinnedHandle = GCHandle.Alloc(body, GCHandleType.Pinned);
+            size = (uint)(body.Length * BODY_SIZE);
 
-			return bodyPinnedHandle.AddrOfPinnedObject();
-		}
+            return bodyPinnedHandle.AddrOfPinnedObject();
+        }
 
-		public void Submit(Operation operation, TBody[] batch)
-		{
-			unsafe
-			{
-				var data = packet.Data;
-				data->next = null;
-				data->user_data = (IntPtr)handle;
-				data->operation = operation;
-				data->data = Pin(batch, out uint size);
-				data->data_size = size;
-				data->status = TBPacketStatus.Ok;
+        public void Submit(Operation operation, TBody[] batch)
+        {
+            unsafe
+            {
+                var data = packet.Data;
+                data->next = null;
+                data->user_data = (IntPtr)handle;
+                data->operation = operation;
+                data->data = Pin(batch, out uint size);
+                data->data_size = size;
+                data->status = TBPacketStatus.Ok;
 
-				this.client.Packets.Submit(packet);
-			}
-		}
+                this.client.Packets.Submit(packet);
+            }
+        }
 
-		public void Complete(Operation operation, TBPacketStatus status, ReadOnlySpan<byte> result)
-		{
-			handle.Free();
-			if (bodyPinnedHandle.IsAllocated) bodyPinnedHandle.Free();
+        public void Complete(Operation operation, TBPacketStatus status, ReadOnlySpan<byte> result)
+        {
+            handle.Free();
+            if (bodyPinnedHandle.IsAllocated) bodyPinnedHandle.Free();
 
-			TResult[] array;
+            TResult[] array;
 
-			if (status == TBPacketStatus.Ok && result.Length > 0)
-			{
-				array = new TResult[result.Length / RESULT_SIZE]; 
-			
-				var span = MemoryMarshal.Cast<byte, TResult>(result);
-				span.CopyTo(array);
-			}
-			else
-			{
-				array = Array.Empty<TResult>();
-			}
+            if (status == TBPacketStatus.Ok && result.Length > 0)
+            {
+                array = new TResult[result.Length / RESULT_SIZE];
 
-			client.Packets.Return(packet);
+                var span = MemoryMarshal.Cast<byte, TResult>(result);
+                span.CopyTo(array);
+            }
+            else
+            {
+                array = Array.Empty<TResult>();
+            }
 
-			if (status == TBPacketStatus.Ok)
-			{
-				SetResult(array);
-			}
-			else
-			{
-				var exception = new Exception($"Result={status}");
-				SetException(exception);
-			}
-		}
+            client.Packets.Return(packet);
 
-		protected abstract void SetResult(TResult[] result);
+            if (status == TBPacketStatus.Ok)
+            {
+                SetResult(array);
+            }
+            else
+            {
+                var exception = new Exception($"Result={status}");
+                SetException(exception);
+            }
+        }
 
-		protected abstract void SetException(Exception exception);
+        protected abstract void SetResult(TResult[] result);
 
-		#endregion Methods
-	}
+        protected abstract void SetException(Exception exception);
 
-	internal sealed class AsyncRequest<TResult, TBody> : Request<TResult, TBody>, IRequest
-		where TResult : unmanaged
-		where TBody : unmanaged
-	{
-		#region Fields
+        #endregion Methods
+    }
 
-		private readonly TaskCompletionSource<TResult[]> completionSource;
+    internal sealed class AsyncRequest<TResult, TBody> : Request<TResult, TBody>, IRequest
+        where TResult : unmanaged
+        where TBody : unmanaged
+    {
+        #region Fields
 
-		#endregion Fields
+        private readonly TaskCompletionSource<TResult[]> completionSource;
 
-		#region Constructor
+        #endregion Fields
 
-		public AsyncRequest(Client client, Packet packet) : base(client, packet)
-		{
-			#region Comments
+        #region Constructor
 
-			// Hints the TPL to execute the continuation on its own thread pool thread, instead of the unamaged's callback thread
+        public AsyncRequest(Client client, Packet packet) : base(client, packet)
+        {
+            #region Comments
 
-			#endregion Comments
+            // Hints the TPL to execute the continuation on its own thread pool thread, instead of the unamaged's callback thread
 
-			this.completionSource = new TaskCompletionSource<TResult[]>(TaskCreationOptions.RunContinuationsAsynchronously | TaskCreationOptions.AttachedToParent);
-		}
+            #endregion Comments
 
-		#endregion Constructor
+            this.completionSource = new TaskCompletionSource<TResult[]>(TaskCreationOptions.RunContinuationsAsynchronously | TaskCreationOptions.AttachedToParent);
+        }
 
-		#region Methods
+        #endregion Constructor
 
-		public Task<TResult[]> Wait() => completionSource.Task;
-		
-		protected override void SetResult(TResult[] result) => completionSource.SetResult(result);
+        #region Methods
 
-		protected override void SetException(Exception exception) => completionSource.SetException(exception);
+        public Task<TResult[]> Wait() => completionSource.Task;
 
-		#endregion Methods
-	}
+        protected override void SetResult(TResult[] result) => completionSource.SetResult(result);
 
-	internal sealed class BlockingRequest<TResult, TBody> : Request<TResult, TBody>, IRequest
-		where TResult : unmanaged
-		where TBody : unmanaged
-	{
-		#region Fields
+        protected override void SetException(Exception exception) => completionSource.SetException(exception);
 
-		private TResult[]? result = null;
-		private Exception? exception;
+        #endregion Methods
+    }
 
-		#endregion Fields
+    internal sealed class BlockingRequest<TResult, TBody> : Request<TResult, TBody>, IRequest
+        where TResult : unmanaged
+        where TBody : unmanaged
+    {
+        #region Fields
 
-		#region Constructor
+        private TResult[]? result = null;
+        private Exception? exception;
 
-		public BlockingRequest(Client client, Packet packet) : base(client, packet)
-		{
-		}
+        #endregion Fields
 
-		#endregion Constructor
+        #region Constructor
 
-		#region Methods
+        public BlockingRequest(Client client, Packet packet) : base(client, packet)
+        {
+        }
 
-		protected override void SetResult(TResult[] result)
-		{
-			lock (this)
-			{
-				this.result = result;
-				this.exception = null;
-				Monitor.Pulse(this);
-			}
-		}
+        #endregion Constructor
 
-		public TResult[] Wait()
-		{
-			lock (this)
-			{
-				Monitor.Wait(this);
-				return result ?? throw exception!;
-			}
+        #region Methods
 
-		}
+        protected override void SetResult(TResult[] result)
+        {
+            lock (this)
+            {
+                this.result = result;
+                this.exception = null;
+                Monitor.Pulse(this);
+            }
+        }
 
-		protected override void SetException(Exception exception)
-		{
-			lock (this)
-			{
-				this.exception = exception;
-				this.result = null;
-				Monitor.Pulse(this);
-			}
-		}
+        public TResult[] Wait()
+        {
+            lock (this)
+            {
+                Monitor.Wait(this);
+                return result ?? throw exception!;
+            }
 
-		#endregion Methods
-	}
+        }
+
+        protected override void SetException(Exception exception)
+        {
+            lock (this)
+            {
+                this.exception = exception;
+                this.result = null;
+                Monitor.Pulse(this);
+            }
+        }
+
+        #endregion Methods
+    }
 }

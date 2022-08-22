@@ -1,76 +1,76 @@
 ﻿namespace TigerBeetle
 {
-	public enum CreateTransferResult : uint
-	{
-		Ok = 0,
-		LinkedEventFailed,
+    public enum CreateTransferResult : uint
+    {
+        Ok = 0,
+        LinkedEventFailed,
 
-		ReservedFlag,
-		ReservedField,
+        ReservedFlag,
+        ReservedField,
 
-		IdMustNotBeZero,
-		IdMustNotBeIntMax,
-		DebitAccountIdMustNotBeZero,
-		DebitAccountIdMustNotBeIntMax,
-		CreditAccountIdMustNotBeZero,
-		CreditAccountIdMustNotBeIntMax,
-		AccountsMustBeDifferent,
+        IdMustNotBeZero,
+        IdMustNotBeIntMax,
+        DebitAccountIdMustNotBeZero,
+        DebitAccountIdMustNotBeIntMax,
+        CreditAccountIdMustNotBeZero,
+        CreditAccountIdMustNotBeIntMax,
+        AccountsMustBeDifferent,
 
-		PendingIdMustBeZero,
-		PendingTransferMustTimeout,
+        PendingIdMustBeZero,
+        PendingTransferMustTimeout,
 
-		LedgerMustNotBeZero,
-		CodeMustNotBeZero,
-		AmountMustNotBeZero,
+        LedgerMustNotBeZero,
+        CodeMustNotBeZero,
+        AmountMustNotBeZero,
 
-		DebitAccountNotFound,
-		CreditAccountNotFound,
+        DebitAccountNotFound,
+        CreditAccountNotFound,
 
-		AccountsMustHaveTheSameLedger,
-		TransferMustHaveTheSameLedgerAsAccounts,
+        AccountsMustHaveTheSameLedger,
+        TransferMustHaveTheSameLedgerAsAccounts,
 
-		ExistsWithDifferentFlags,
-		ExistsWithDifferentDebitAccountId,
-		ExistsWithDifferentCreditAccountId,
-		ExistsWithDifferentUserData,
-		ExistsWithDifferentPendingId,
-		ExistsWithDifferentTimeout,
-		ExistsWithDifferentCode,
-		ExistsWithDifferentAmount,
-		Exists,
+        ExistsWithDifferentFlags,
+        ExistsWithDifferentDebitAccountId,
+        ExistsWithDifferentCreditAccountId,
+        ExistsWithDifferentUserData,
+        ExistsWithDifferentPendingId,
+        ExistsWithDifferentTimeout,
+        ExistsWithDifferentCode,
+        ExistsWithDifferentAmount,
+        Exists,
 
-		OverflowsDebitsPending,
-		OverflowsCreditsPending,
-		OverflowsDebitsPosted,
-		OverflowsCreditsPosted,
-		OverflowsDebits,
-		OverflowsCredits,
+        OverflowsDebitsPending,
+        OverflowsCreditsPending,
+        OverflowsDebitsPosted,
+        OverflowsCreditsPosted,
+        OverflowsDebits,
+        OverflowsCredits,
 
-		ExceedsCredits,
-		ExceedsDebits,
+        ExceedsCredits,
+        ExceedsDebits,
 
-		CannotPostAndVoidPendingTransfer,
-		PendingTransferCannotPostOrVoidAnother,
-		TimeoutReservedForPendingTransfer,
+        CannotPostAndVoidPendingTransfer,
+        PendingTransferCannotPostOrVoidAnother,
+        TimeoutReservedForPendingTransfer,
 
-		PendingIdMustNotBeZero,
-		PendingIdMustNotBeIntMax,
-		PendingIdMustBeDifferent,
+        PendingIdMustNotBeZero,
+        PendingIdMustNotBeIntMax,
+        PendingIdMustBeDifferent,
 
-		PendingTransferNotFound,
-		PendingTransferNotPending,
+        PendingTransferNotFound,
+        PendingTransferNotPending,
 
-		PendingTransferHasDifferentDebitAccountId,
-		PendingTransferHasDifferentCreditAccountId,
-		PendingTransferHasDifferentLedger,
-		PendingTransferHasDifferentCode,
+        PendingTransferHasDifferentDebitAccountId,
+        PendingTransferHasDifferentCreditAccountId,
+        PendingTransferHasDifferentLedger,
+        PendingTransferHasDifferentCode,
 
-		ExceedsPendingTransferAmount,
-		PendingTransferHasDifferentAmount,
+        ExceedsPendingTransferAmount,
+        PendingTransferHasDifferentAmount,
 
-		PendingTransferAlreadyPosted,
-		PendingTransferAlreadyVoided,
+        PendingTransferAlreadyPosted,
+        PendingTransferAlreadyVoided,
 
-		PendingTransferExpired,
-	}
+        PendingTransferExpired,
+    }
 }

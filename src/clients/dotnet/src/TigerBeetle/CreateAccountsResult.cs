@@ -2,33 +2,33 @@
 
 namespace TigerBeetle
 {
-	[StructLayout(LayoutKind.Sequential, Size = 8)]
-	public struct CreateAccountsResult
-	{
-		#region Fields
+    [StructLayout(LayoutKind.Sequential, Size = 8)]
+    public struct CreateAccountsResult
+    {
+        #region Fields
 
-		private readonly int index;
+        private readonly int index;
 
-		private readonly CreateAccountResult result;
+        private readonly CreateAccountResult result;
 
-		#endregion Fields
+        #endregion Fields
 
-		#region Constructor
+        #region Constructor
 
-		internal CreateAccountsResult(int index, CreateAccountResult result = CreateAccountResult.Ok)
-		{
-			this.index = index;
-			this.result = result;
-		}
+        internal CreateAccountsResult(int index, CreateAccountResult result = CreateAccountResult.Ok)
+        {
+            this.index = index;
+            this.result = result;
+        }
 
-		#endregion Constructor
+        #endregion Constructor
 
-		#region Properties
+        #region Properties
 
-		public int Index => index;
+        public int Index => index;
 
-		public CreateAccountResult Result => result;
+        public CreateAccountResult Result => result;
 
-		#endregion Properties
-	}
+        #endregion Properties
+    }
 }

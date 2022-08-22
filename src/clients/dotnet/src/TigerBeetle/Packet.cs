@@ -2,21 +2,21 @@
 
 namespace TigerBeetle
 {
-	internal struct Packet
-	{
-		#region Fields
+    internal struct Packet
+    {
+        #region Fields
 
-		public readonly unsafe TBPacket* Data;
+        public readonly unsafe TBPacket* Data;
 
-		#endregion Fields
+        #endregion Fields
 
-		#region Constructor
+        #region Constructor
 
-		public unsafe Packet(TBPacket* data)
-		{
-			Data = data;
-		}
+        public unsafe Packet(TBPacket* data)
+        {
+            Data = data;
+        }
 
-		#endregion Constructor
-	}
+        #endregion Constructor
+    }
 }

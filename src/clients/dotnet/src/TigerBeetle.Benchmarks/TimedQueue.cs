@@ -5,70 +5,70 @@ using System.Threading.Tasks;
 
 namespace TigerBeetle.Benchmarks
 {
-	internal class TimedQueue
-	{
-		#region Fields
+    internal class TimedQueue
+    {
+        #region Fields
 
-		private Stopwatch timer = new Stopwatch();
+        private Stopwatch timer = new Stopwatch();
 
-		#endregion Fields
+        #endregion Fields
 
-		#region Properties
+        #region Properties
 
-		public Queue<Delegate> Batches { get; } = new();
+        public Queue<Delegate> Batches { get; } = new();
 
-		public long MaxTransfersLatency { get; private set; }
+        public long MaxTransfersLatency { get; private set; }
 
-		public long TotalTime { get; private set; }
+        public long TotalTime { get; private set; }
 
-		#endregion Properties
+        #endregion Properties
 
-		#region Methods
+        #region Methods
 
-		public async Task ExecuteAsync()
-		{
-			while (Batches.TryPeek(out Delegate func))
-			{
-				Func<Task> action = func as Func<Task>;
-				timer.Restart();
-				await action();
-				timer.Stop();
+        public async Task ExecuteAsync()
+        {
+            while (Batches.TryPeek(out Delegate func))
+            {
+                Func<Task> action = func as Func<Task>;
+                timer.Restart();
+                await action();
+                timer.Stop();
 
-				TotalTime += timer.ElapsedMilliseconds;
+                TotalTime += timer.ElapsedMilliseconds;
 
-				_ = Batches.Dequeue();
-				
-				MaxTransfersLatency = Math.Max(timer.ElapsedMilliseconds, MaxTransfersLatency);
-			}
-		}
+                _ = Batches.Dequeue();
 
-		public void Execute()
-		{
-			while (Batches.TryPeek(out Delegate func))
-			{
-				Action action = func as Action;
+                MaxTransfersLatency = Math.Max(timer.ElapsedMilliseconds, MaxTransfersLatency);
+            }
+        }
 
-				timer.Restart();
-				action();
-				timer.Stop();
+        public void Execute()
+        {
+            while (Batches.TryPeek(out Delegate func))
+            {
+                Action action = func as Action;
 
-				TotalTime += timer.ElapsedMilliseconds;
+                timer.Restart();
+                action();
+                timer.Stop();
 
-				_ = Batches.Dequeue();
+                TotalTime += timer.ElapsedMilliseconds;
 
-				MaxTransfersLatency = Math.Max(timer.ElapsedMilliseconds, MaxTransfersLatency);
-			}
-		}
+                _ = Batches.Dequeue();
 
-		public void Reset()
-		{
-			TotalTime = 0;
-			MaxTransfersLatency = 0;
-			timer.Reset();
-			Batches.Clear();
-		}
+                MaxTransfersLatency = Math.Max(timer.ElapsedMilliseconds, MaxTransfersLatency);
+            }
+        }
 
-		#endregion Methods
-	}
+        public void Reset()
+        {
+            TotalTime = 0;
+            MaxTransfersLatency = 0;
+            timer.Reset();
+            Batches.Clear();
+        }
+
+        #endregion Methods
+    }
 
 }

@@ -1,34 +1,34 @@
 ﻿namespace TigerBeetle
 {
-	public enum CreateAccountResult : uint
-	{
-		Ok = 0,
-		LinkedEventFailed,
+    public enum CreateAccountResult : uint
+    {
+        Ok = 0,
+        LinkedEventFailed,
 
-		ReservedFlag,
-		ReservedField,
+        ReservedFlag,
+        ReservedField,
 
-		IdMustNotBeZero,
-		IdMustNotBeIntMax,
-		LedgerMustNotBeZero,
-		CodeMustNotBeZero,
+        IdMustNotBeZero,
+        IdMustNotBeIntMax,
+        LedgerMustNotBeZero,
+        CodeMustNotBeZero,
 
-		MutuallyExclusiveFlags,
+        MutuallyExclusiveFlags,
 
-		OverflowsDebits,
-		OverflowsCredits,
+        OverflowsDebits,
+        OverflowsCredits,
 
-		ExceedsCredits,
-		ExceedsDebits,
+        ExceedsCredits,
+        ExceedsDebits,
 
-		ExistsWithDifferentFlags,
-		ExistsWithDifferentUser_data,
-		ExistsWithDifferentLedger,
-		ExistsWithDifferentCode,
-		ExistsWithDifferentDebitsPending,
-		ExistsWithDifferentDebitsPosted,
-		ExistsWithDifferentCreditsPending,
-		ExistsWithDifferentCreditsPosted,
-		Exists,
-	}
+        ExistsWithDifferentFlags,
+        ExistsWithDifferentUser_data,
+        ExistsWithDifferentLedger,
+        ExistsWithDifferentCode,
+        ExistsWithDifferentDebitsPending,
+        ExistsWithDifferentDebitsPosted,
+        ExistsWithDifferentCreditsPending,
+        ExistsWithDifferentCreditsPosted,
+        Exists,
+    }
 }

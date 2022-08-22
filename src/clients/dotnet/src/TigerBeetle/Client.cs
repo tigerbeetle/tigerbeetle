@@ -12,225 +12,225 @@ using static TigerBeetle.TBClient;
 
 namespace TigerBeetle
 {
-	public sealed class Client : IDisposable
-	{
-		#region Fields
+    public sealed class Client : IDisposable
+    {
+        #region Fields
 
-		private IntPtr handle;
-		private readonly uint clusterID;
+        private IntPtr handle;
+        private readonly uint clusterID;
 
-		private readonly PacketList packets;
+        private readonly PacketList packets;
 
-		#endregion Fields
+        #endregion Fields
 
-		#region Constructor
+        #region Constructor
 
-		public Client(uint clusterID, IPEndPoint[] configuration, int maxConcurrency)
-		{
-			if (configuration == null || configuration.Length == 0) throw new ArgumentException(nameof(configuration));
+        public Client(uint clusterID, IPEndPoint[] configuration, int maxConcurrency)
+        {
+            if (configuration == null || configuration.Length == 0) throw new ArgumentException(nameof(configuration));
 
-			// Cap the maximum amount of packets
-			if (maxConcurrency <= 0) throw new ArgumentException(nameof(maxConcurrency));
-			if (maxConcurrency > 4096) maxConcurrency = 4096;
+            // Cap the maximum amount of packets
+            if (maxConcurrency <= 0) throw new ArgumentException(nameof(maxConcurrency));
+            if (maxConcurrency > 4096) maxConcurrency = 4096;
 
-			this.clusterID = clusterID;
+            this.clusterID = clusterID;
 
-			var addresses_byte = Encoding.UTF8.GetBytes(string.Join(',', configuration.Select(x => x.ToString())) + '\0');
-			unsafe
-			{
-				fixed (byte* addressPtr = addresses_byte)
-				{
-					IntPtr handle;
-					TBPacketList packetList;
+            var addresses_byte = Encoding.UTF8.GetBytes(string.Join(',', configuration.Select(x => x.ToString())) + '\0');
+            unsafe
+            {
+                fixed (byte* addressPtr = addresses_byte)
+                {
+                    IntPtr handle;
+                    TBPacketList packetList;
 
-					#if NETSTANDARD
+#if NETSTANDARD
 					var status = PInvoke.tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, OnCompletionHandler);
-					#else
-					var status = tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, &OnCompletionCallback);
-					#endif
-					
-					if (status != TBStatus.Success) throw new Exception($"Result {status}");
+#else
+                    var status = tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, &OnCompletionCallback);
+#endif
 
-					this.handle = handle;
-					this.packets = new PacketList(this, packetList, maxConcurrency);
-				}
-			}
-		}
+                    if (status != TBStatus.Success) throw new Exception($"Result {status}");
 
-		~Client()
-		{
-			Dispose(disposing: false);
-		}
+                    this.handle = handle;
+                    this.packets = new PacketList(this, packetList, maxConcurrency);
+                }
+            }
+        }
 
-		#endregion Constructor
+        ~Client()
+        {
+            Dispose(disposing: false);
+        }
 
-		#region Properties
+        #endregion Constructor
 
-		public IntPtr Handle => handle;
+        #region Properties
 
-		public uint ClusterID => clusterID;
+        public IntPtr Handle => handle;
 
-		internal PacketList Packets => packets;
+        public uint ClusterID => clusterID;
 
-		#endregion Properties
+        internal PacketList Packets => packets;
 
-		#region Methods
+        #endregion Properties
 
-		public CreateAccountResult CreateAccount(Account account)
-		{
-			var ret = CallRequest<CreateAccountsResult, Account>(Operation.CreateAccounts, new[] { account });
-			return ret.Length == 0 ? CreateAccountResult.Ok : ret[0].Result;
-		}
+        #region Methods
 
-		public CreateAccountsResult[] CreateAccounts(Account[] batch)
-		{
-			return CallRequest<CreateAccountsResult, Account>(Operation.CreateAccounts, batch);
-		}
+        public CreateAccountResult CreateAccount(Account account)
+        {
+            var ret = CallRequest<CreateAccountsResult, Account>(Operation.CreateAccounts, new[] { account });
+            return ret.Length == 0 ? CreateAccountResult.Ok : ret[0].Result;
+        }
 
-		public async Task<CreateAccountResult> CreateAccountAsync(Account account)
-		{
-			var result = await CallRequestAsync<CreateAccountsResult, Account>(Operation.CreateAccounts, new[] { account });
-			return result.Length == 0 ? CreateAccountResult.Ok : result[0].Result;
-		}
+        public CreateAccountsResult[] CreateAccounts(Account[] batch)
+        {
+            return CallRequest<CreateAccountsResult, Account>(Operation.CreateAccounts, batch);
+        }
 
-		public Task<CreateAccountsResult[]> CreateAccountsAsync(Account[] batch)
-		{
-			return CallRequestAsync<CreateAccountsResult, Account>(Operation.CreateAccounts, batch);
-		}
+        public async Task<CreateAccountResult> CreateAccountAsync(Account account)
+        {
+            var result = await CallRequestAsync<CreateAccountsResult, Account>(Operation.CreateAccounts, new[] { account });
+            return result.Length == 0 ? CreateAccountResult.Ok : result[0].Result;
+        }
 
-		public CreateTransferResult CreateTransfer(Transfer transfer)
-		{
-			var ret = CallRequest<CreateTransfersResult, Transfer>(Operation.CreateTransfers, new[] { transfer });
-			return ret.Length == 0 ? CreateTransferResult.Ok : ret[0].Result;
-		}
+        public Task<CreateAccountsResult[]> CreateAccountsAsync(Account[] batch)
+        {
+            return CallRequestAsync<CreateAccountsResult, Account>(Operation.CreateAccounts, batch);
+        }
 
-		public CreateTransfersResult[] CreateTransfers(Transfer[] batch)
-		{
-			return CallRequest<CreateTransfersResult, Transfer>(Operation.CreateTransfers, batch);
-		}
+        public CreateTransferResult CreateTransfer(Transfer transfer)
+        {
+            var ret = CallRequest<CreateTransfersResult, Transfer>(Operation.CreateTransfers, new[] { transfer });
+            return ret.Length == 0 ? CreateTransferResult.Ok : ret[0].Result;
+        }
 
-		public async Task<CreateTransferResult> CreateTransferAsync(Transfer transfer)
-		{
-			var result = await CallRequestAsync<CreateTransfersResult, Transfer>(Operation.CreateTransfers, new[] { transfer });
-			return result.Length == 0 ? CreateTransferResult.Ok : result[0].Result;
-		}
+        public CreateTransfersResult[] CreateTransfers(Transfer[] batch)
+        {
+            return CallRequest<CreateTransfersResult, Transfer>(Operation.CreateTransfers, batch);
+        }
 
-		public Task<CreateTransfersResult[]> CreateTransfersAsync(Transfer[] batch)
-		{
-			return CallRequestAsync<CreateTransfersResult, Transfer>(Operation.CreateTransfers, batch);
-		}
+        public async Task<CreateTransferResult> CreateTransferAsync(Transfer transfer)
+        {
+            var result = await CallRequestAsync<CreateTransfersResult, Transfer>(Operation.CreateTransfers, new[] { transfer });
+            return result.Length == 0 ? CreateTransferResult.Ok : result[0].Result;
+        }
 
-		public Account? LookupAccount(UInt128 id)
-		{
-			var ret = CallRequest<Account, UInt128>(Operation.LookupAccounts, new[] { id });
-			return ret.Length == 0 ? null : ret[0];
-		}
+        public Task<CreateTransfersResult[]> CreateTransfersAsync(Transfer[] batch)
+        {
+            return CallRequestAsync<CreateTransfersResult, Transfer>(Operation.CreateTransfers, batch);
+        }
 
-		public Account[] LookupAccounts(UInt128[] ids)
-		{
-			return CallRequest<Account, UInt128>(Operation.LookupAccounts, ids);
-		}
+        public Account? LookupAccount(UInt128 id)
+        {
+            var ret = CallRequest<Account, UInt128>(Operation.LookupAccounts, new[] { id });
+            return ret.Length == 0 ? null : ret[0];
+        }
 
-		public async Task<Account?> LookupAccountAsync(UInt128 id)
-		{
-			var result = await CallRequestAsync<Account, UInt128>(Operation.LookupAccounts, new[] { id });
-			return result.Length == 0 ? null : result[0];
-		}
+        public Account[] LookupAccounts(UInt128[] ids)
+        {
+            return CallRequest<Account, UInt128>(Operation.LookupAccounts, ids);
+        }
 
-		public Task<Account[]> LookupAccountsAsync(UInt128[] ids)
-		{
-			return CallRequestAsync<Account, UInt128>(Operation.LookupAccounts, ids);
-		}
+        public async Task<Account?> LookupAccountAsync(UInt128 id)
+        {
+            var result = await CallRequestAsync<Account, UInt128>(Operation.LookupAccounts, new[] { id });
+            return result.Length == 0 ? null : result[0];
+        }
 
-		public Transfer? LookupTransfer(UInt128 id)
-		{
-			var ret = CallRequest<Transfer, UInt128>(Operation.LookupTransfers, new[] { id });
-			return ret.Length == 0 ? null : ret[0];
-		}
+        public Task<Account[]> LookupAccountsAsync(UInt128[] ids)
+        {
+            return CallRequestAsync<Account, UInt128>(Operation.LookupAccounts, ids);
+        }
 
-		public Transfer[] LookupTransfers(UInt128[] ids)
-		{
-			return CallRequest<Transfer, UInt128>(Operation.LookupTransfers, ids);
-		}
+        public Transfer? LookupTransfer(UInt128 id)
+        {
+            var ret = CallRequest<Transfer, UInt128>(Operation.LookupTransfers, new[] { id });
+            return ret.Length == 0 ? null : ret[0];
+        }
 
-		public async Task<Transfer?> LookupTransferAsync(UInt128 id)
-		{
-			var result = await CallRequestAsync<Transfer, UInt128>(Operation.LookupTransfers, new[] { id });
-			return result.Length == 0 ? null : result[0];
-		}
+        public Transfer[] LookupTransfers(UInt128[] ids)
+        {
+            return CallRequest<Transfer, UInt128>(Operation.LookupTransfers, ids);
+        }
 
-		public Task<Transfer[]> LookupTransfersAsync(UInt128[] ids)
-		{
-			return CallRequestAsync<Transfer, UInt128>(Operation.LookupTransfers, ids);
-		}
+        public async Task<Transfer?> LookupTransferAsync(UInt128 id)
+        {
+            var result = await CallRequestAsync<Transfer, UInt128>(Operation.LookupTransfers, new[] { id });
+            return result.Length == 0 ? null : result[0];
+        }
 
-		private TResult[] CallRequest<TResult, TBody>(Operation operation, TBody[] batch)
-			where TResult : unmanaged
-			where TBody : unmanaged
-		{
-			var packet = packets.Rent();
-			var blockingRequest = new BlockingRequest<TResult, TBody>(this, packet);
+        public Task<Transfer[]> LookupTransfersAsync(UInt128[] ids)
+        {
+            return CallRequestAsync<Transfer, UInt128>(Operation.LookupTransfers, ids);
+        }
 
-			blockingRequest.Submit(operation, batch);
-			return blockingRequest.Wait();
-		}
+        private TResult[] CallRequest<TResult, TBody>(Operation operation, TBody[] batch)
+            where TResult : unmanaged
+            where TBody : unmanaged
+        {
+            var packet = packets.Rent();
+            var blockingRequest = new BlockingRequest<TResult, TBody>(this, packet);
 
-		private async Task<TResult[]> CallRequestAsync<TResult, TBody>(Operation operation, TBody[] batch)
-			where TResult : unmanaged
-			where TBody : unmanaged
-		{
-			var packet = await packets.RentAsync();
-			var asyncRequest = new AsyncRequest<TResult, TBody>(this, packet);
+            blockingRequest.Submit(operation, batch);
+            return blockingRequest.Wait();
+        }
 
-			asyncRequest.Submit(operation, batch);
-			return await asyncRequest.Wait();
-		}
+        private async Task<TResult[]> CallRequestAsync<TResult, TBody>(Operation operation, TBody[] batch)
+            where TResult : unmanaged
+            where TBody : unmanaged
+        {
+            var packet = await packets.RentAsync();
+            var asyncRequest = new AsyncRequest<TResult, TBody>(this, packet);
 
-		public void Dispose()
-		{
-			GC.SuppressFinalize(this);
-			Dispose(disposing: true);
-		}
+            asyncRequest.Submit(operation, batch);
+            return await asyncRequest.Wait();
+        }
 
-		private void Dispose(bool disposing)
-		{
-			_ = disposing;
+        public void Dispose()
+        {
+            GC.SuppressFinalize(this);
+            Dispose(disposing: true);
+        }
 
-			if (handle != IntPtr.Zero)
-			{
-				tb_client_deinit(handle);
-				handle = IntPtr.Zero;
-			}
-		}
+        private void Dispose(bool disposing)
+        {
+            _ = disposing;
 
-		#endregion Methods
+            if (handle != IntPtr.Zero)
+            {
+                tb_client_deinit(handle);
+                handle = IntPtr.Zero;
+            }
+        }
 
-		#region TBClient callback
+        #endregion Methods
 
-		#region Comments
+        #region TBClient callback
 
-		// Uses either the new function pointer by value, or the old managed delegate in .Net standard
-		// Using managed delegate, the instance must be referenced to prevents GC
+        #region Comments
 
-		#endregion Comments
+        // Uses either the new function pointer by value, or the old managed delegate in .Net standard
+        // Using managed delegate, the instance must be referenced to prevents GC
 
-		#if NETSTANDARD
+        #endregion Comments
+
+#if NETSTANDARD
 		private static readonly OnCompletionFn OnCompletionHandler = new OnCompletionFn(OnCompletionCallback);
 		[AllowReversePInvokeCalls]
-		#else
-		[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-		#endif
-		private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len)
-		{
-			var request = IRequest.FromUserData(packet->user_data);
-			if (request != null)
-			{
-				var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
-				request.Complete(packet->operation, packet->status, span);
-			}
+#else
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+#endif
+        private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len)
+        {
+            var request = IRequest.FromUserData(packet->user_data);
+            if (request != null)
+            {
+                var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
+                request.Complete(packet->operation, packet->status, span);
+            }
 
-		}
+        }
 
-		#endregion Static callback
-	}
+        #endregion Static callback
+    }
 }
