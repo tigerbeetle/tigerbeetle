@@ -32,18 +32,20 @@ git submodule update
 
 ### 3. Install TigerBeetle
 
-Run the install script provided by TigerBeetle repo:
+Run the install script provided by TigerBeetle repo, and build the server executable.
 
 **Linux/MacOS**
 ```bash
 cd tigerbeetle
-scripts/install_zig.sh
+scripts/install.sh
 ```
 
 **Windows**
 ```cmd
 cd tigerbeetle
 scripts\install_zig.bat
+.\zig\zig.exe build install -Drelease-safe
+mv .\zig-out\bin\tigerbeetle.exe .
 ```
 
 ### 4. Test
