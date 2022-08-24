@@ -35,7 +35,7 @@ namespace TigerBeetle
 
 
         public Client(uint clusterID, string[] replicaAddresses, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
-        : this(clusterID, replicaAddresses.Select(x => x) , maxConcurrency)
+        : this(clusterID, replicaAddresses.Select(x => x), maxConcurrency)
         {
         }
 

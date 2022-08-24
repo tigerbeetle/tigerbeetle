@@ -579,7 +579,8 @@ namespace TigerBeetle.Tests
 
                 File.Delete($"./{TB_FILE}");
 
-            } catch {}
+            }
+            catch { }
         }
 
         #endregion Methods
