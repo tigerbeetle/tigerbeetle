@@ -1,19 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-		<TargetFrameworks>net6.0</TargetFrameworks>
-		<LangVersion>10</LangVersion>
-		<Nullable>enable</Nullable>
-		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<AssemblyName>TigerBeetle</AssemblyName>
-  </PropertyGroup>
-  <Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="$([MSBuild]::IsOSPlatform('Linux'))">
-    <Exec Command="tigerbeetle/zig/zig build tb_client_dyn -Drelease-safe'" WorkingDirectory="$(ProjectDir)/../../"/>
-  </Target>
-	<Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
-		<Exec Command="tigerbeetle/zig/zig build tb_client_dyn -Drelease-safe'" WorkingDirectory="$(ProjectDir)/../../"/>
-	</Target>
-	<Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
-		<Exec Command="cmd 'tigerbeetle/zig/zig.exe build tb_client_dyn -Drelease-safe'" WorkingDirectory="$(ProjectDir)/../../"/>
+	<PropertyGroup>
+			<TargetFrameworks>net6.0</TargetFrameworks>
+			<LangVersion>10</LangVersion>
+			<Nullable>enable</Nullable>
+			<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+			<AssemblyName>TigerBeetle</AssemblyName>
+	</PropertyGroup>
+	<Target Name="BuildZig" BeforeTargets="CoreCompile">
+		<Exec Command="'tigerbeetle/zig/zig' build tb_client_dyn -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../"/>
 	</Target>
 	<ItemGroup>
       <None Include="native/win-x64/tb_client.dll" 
