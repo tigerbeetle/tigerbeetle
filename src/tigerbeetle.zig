@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 
 pub const config = @import("config.zig");
 
-pub const Account = packed struct {
+pub const Account = extern struct {
     id: u128,
     /// Opaque third-party identifier to link this account (many-to-one) to an external entity.
     user_data: u128,
@@ -22,6 +22,7 @@ pub const Account = packed struct {
 
     comptime {
         assert(@sizeOf(Account) == 128);
+        assert(@bitSizeOf(Account) == @sizeOf(Account) * 8);
     }
 
     pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
@@ -56,7 +57,7 @@ pub const AccountFlags = packed struct {
     }
 };
 
-pub const Transfer = packed struct {
+pub const Transfer = extern struct {
     id: u128,
     debit_account_id: u128,
     credit_account_id: u128,
@@ -76,6 +77,7 @@ pub const Transfer = packed struct {
 
     comptime {
         assert(@sizeOf(Transfer) == 128);
+        assert(@bitSizeOf(Transfer) == @sizeOf(Transfer) * 8);
     }
 };
 
@@ -195,21 +197,23 @@ pub const CreateTransferResult = enum(u32) {
     pending_transfer_expired,
 };
 
-pub const CreateAccountsResult = packed struct {
+pub const CreateAccountsResult = extern struct {
     index: u32,
     result: CreateAccountResult,
 
     comptime {
         assert(@sizeOf(CreateAccountsResult) == 8);
+        assert(@bitSizeOf(CreateAccountsResult) == @sizeOf(CreateAccountsResult) * 8);
     }
 };
 
-pub const CreateTransfersResult = packed struct {
+pub const CreateTransfersResult = extern struct {
     index: u32,
     result: CreateTransferResult,
 
     comptime {
         assert(@sizeOf(CreateTransfersResult) == 8);
+        assert(@bitSizeOf(CreateTransfersResult) == @sizeOf(CreateTransfersResult) * 8);
     }
 };
 
