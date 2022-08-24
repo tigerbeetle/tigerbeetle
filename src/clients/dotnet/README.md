@@ -2,13 +2,80 @@
 
 A C# client for [TigerBeetle](https://github.com/coilhq/tigerbeetle)
 
-**[Compatible with .Net Standard 2.1](https://docs.microsoft.com/en-us/dotnet/standard/net-standard)**
+****
 
 *TigerBeetle is a financial accounting database designed for mission-critical safety and performance to power the future of financial services.*
 
 ## Development Setup
 
-TODO !
+### 1. Install [dotnet 6](https://dotnet.microsoft.com/en-us/download)
+
+It is needed to build and run the tests, this library can be used from any [.Net Standard 2.1 compatible runtime](https://docs.microsoft.com/en-us/dotnet/standard/net-standard) (.Net Framework 4.8, .Net Core, Xamarin, etc)
+
+
+For Windows users, there is a `.sln` solution file that can be opened with `Microsoft Visual Studio 2022`.
+
+### 2. Clone this repo
+
+Clone loading the submodules
+
+```bash
+git clone --recurse-submodules https://github.com/batiati/tigerbeetle-dotnet.git
+```
+
+Or initialize the submodules after cloning
+
+```bash
+git submodule init
+git submodule update 
+```
+
+
+
+### 3. Install TigerBeetle
+
+Run the install script provided by TigerBeetle repo:
+
+**Linux/MacOS**
+```bash
+cd tigerbeetle
+scripts/install_zig.sh
+```
+
+**Windows**
+```cmd
+cd tigerbeetle
+scripts\install_zig.bat
+```
+
+### 4. Build TigerBeetle client
+
+Build Tigerbeetle's `tb_client` library.
+
+On the tigerbeetle's folder:
+
+**Windows/Linux/MacOS**
+```bash
+zig/zig build tb_client_dyn -Drelease-safe
+```
+
+### 5. Test
+
+On the `tigerbeetle-dotnet/src` folder, run the integrated tests:
+
+```bash
+cd src
+dotnet test
+```
+
+## Usage
+
+TODO
+
+## Other clients and documentation
+
+- [Tigerbeetle Node](https://github.com/coilhq/tigerbeetle-node)
+- [Tigerbeetle Go](https://github.com/coilhq/tigerbeetle-go)
 
 ## License
 
