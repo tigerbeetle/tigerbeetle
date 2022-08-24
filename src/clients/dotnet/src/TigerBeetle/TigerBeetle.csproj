@@ -6,6 +6,9 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<AssemblyName>TigerBeetle</AssemblyName>
   </PropertyGroup>
+  <Target Name="BuildZig" BeforeTargets="CoreCompile">
+    <Exec Command="tigerbeetle/zig/zig build tb_client_dyn -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../"/>
+  </Target>  
   <ItemGroup>
       <None Include="native/win-x64/tb_client.dll" 
 	  		CopyToOutputDirectory="Always"
@@ -21,6 +24,5 @@
 	  		CopyToOutputDirectory="Always"
 	  		Link="libtb_client.dylib" 
 			Condition="$([MSBuild]::IsOSPlatform('OSX'))"/>
-        
   </ItemGroup>
 </Project>
