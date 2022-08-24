@@ -30,8 +30,6 @@ git submodule init
 git submodule update 
 ```
 
-
-
 ### 3. Install TigerBeetle
 
 Run the install script provided by TigerBeetle repo:
@@ -48,23 +46,13 @@ cd tigerbeetle
 scripts\install_zig.bat
 ```
 
-### 4. Build TigerBeetle client
+### 4. Test
 
-Build Tigerbeetle's `tb_client` library.
+On `tigerbeetle-dotnet/src` folder, run the integrated tests.
 
-On the tigerbeetle's folder:
-
-**Windows/Linux/MacOS**
-```bash
-zig/zig build tb_client_dyn -Drelease-safe
-```
-
-### 5. Test
-
-On the `tigerbeetle-dotnet/src` folder, run the integrated tests:
+During the build, the `tb_client` library will be built and embedded into the dotnet project.
 
 ```bash
-cd src
 dotnet test
 ```
 
