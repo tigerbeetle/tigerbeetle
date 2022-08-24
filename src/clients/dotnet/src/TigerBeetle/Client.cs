@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Net;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -16,6 +17,8 @@ namespace TigerBeetle
     {
         #region Fields
 
+        private const int DEFAULT_MAX_CONCURRENCY = 45;
+
         private IntPtr handle;
         private readonly uint clusterID;
 
@@ -25,9 +28,25 @@ namespace TigerBeetle
 
         #region Constructor
 
-        public Client(uint clusterID, IPEndPoint[] configuration, int maxConcurrency)
+        public Client(uint clusterID, int[] replicaPorts, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
+        : this(clusterID, replicaPorts.Select(x => x.ToString()), maxConcurrency)
         {
-            if (configuration == null || configuration.Length == 0) throw new ArgumentException(nameof(configuration));
+        }
+
+
+        public Client(uint clusterID, string[] replicaAddresses, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
+        : this(clusterID, replicaAddresses.Select(x => x) , maxConcurrency)
+        {
+        }
+
+        public Client(uint clusterID, IPEndPoint[] replicaEndpoints, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
+        : this(clusterID, replicaEndpoints.Select(x => x.ToString()), maxConcurrency)
+        {
+        }
+
+        private Client(uint clusterID, IEnumerable<string> configuration, int maxConcurrency)
+        {
+            if (configuration == null || configuration.Count() == 0) throw new ArgumentException(nameof(configuration));
 
             // Cap the maximum amount of packets
             if (maxConcurrency <= 0) throw new ArgumentException(nameof(maxConcurrency));
@@ -35,7 +54,7 @@ namespace TigerBeetle
 
             this.clusterID = clusterID;
 
-            var addresses_byte = Encoding.UTF8.GetBytes(string.Join(',', configuration.Select(x => x.ToString())) + '\0');
+            var addresses_byte = Encoding.UTF8.GetBytes(string.Join(',', configuration) + "\0");
             unsafe
             {
                 fixed (byte* addressPtr = addresses_byte)
@@ -44,7 +63,7 @@ namespace TigerBeetle
                     TBPacketList packetList;
 
 #if NETSTANDARD
-					var status = PInvoke.tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, OnCompletionHandler);
+					var status = tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, OnCompletionHandler);
 #else
                     var status = tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, &OnCompletionCallback);
 #endif
