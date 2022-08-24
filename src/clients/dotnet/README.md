@@ -58,7 +58,53 @@ dotnet test
 
 ## Usage
 
-TODO
+A client needs to be configured with a `clusterID` and `replicaAddresses`.
+The `Client` class is thread-safe and for better performance, a single instance should be shared between multiple concurrent tasks.
+Multiple clients can be instantiated in case of connecting to more than one TigerBeetle cluster.
+
+```C#
+var client = new Client(clusterID: 0, replicaAddresses: new[] { "3001", "3002", "3003" });
+```
+
+### Account Creation
+
+All TigerBeetle's ID are 128-bit integer, and `tigerbeetle-dotnet` client accepts a wide range of dotnet values: `int`, `uint`, `long`, `ulong`, `Guid` and the custom type `UInt128`.
+
+```C#
+var accounts = new[] {
+    new Account
+    {
+        Id = 1,
+        UserData = Guid.NewGuid(),
+        Code = 2,
+        Ledger = ISO4217.USD.Code,
+    },  
+};
+
+var errors = await client.CreateAccounts(accounts);
+```
+
+Successfully executed events return an empty array whilst unsuccessful ones return an array with errors for only the ones that failed. An error will point to the index in the submitted array of the failed event.
+
+### Creating a Transfer
+
+Amounts are 64-bit unsigned integers and can be easily converted to/from `decimal` values.
+
+```C#
+transfers = new[] {
+    new Transfer
+    {
+        Id = Guid.NewGuid(),
+        DebitAccountId = accountA.Id,
+        CreditAccountId = accountB.Id,
+        Code = 1,
+        Ledger = ISO4217.USD.Code,
+        Amount = ISO4217.USD.ToUInt64(0.99M),
+    },
+}
+
+var errors = await client.CreateTransfers(accounts);
+```
 
 ## Other clients and documentation
 
