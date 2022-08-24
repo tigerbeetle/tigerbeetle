@@ -348,8 +348,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             client: u128,
             op: u64,
             operation: Operation,
-            input: []const u8,
-            output: []u8,
+            input: []align(16) const u8,
+            output: []align(16) u8,
         ) usize {
             _ = client;
             _ = op;
@@ -404,8 +404,8 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn execute(
             self: *StateMachine,
             comptime operation: Operation,
-            input: []const u8,
-            output: []u8,
+            input: []align(16) const u8,
+            output: []align(16) u8,
         ) usize {
             comptime assert(operation != .lookup_accounts and operation != .lookup_transfers);
 
@@ -1442,7 +1442,7 @@ test "linked accounts" {
 
     const input = mem.asBytes(&accounts);
 
-    const output = try testing.allocator.alloc(u8, 4096);
+    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
@@ -1530,7 +1530,7 @@ test "create/lookup/rollback transfers" {
 
     const input = mem.asBytes(&accounts);
 
-    const output = try testing.allocator.alloc(u8, 4096);
+    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
@@ -2211,7 +2211,7 @@ test "create/lookup/rollback 2-phase transfers" {
     // Create accounts:
     const accounts_input = mem.asBytes(&accounts);
 
-    const accounts_output = try testing.allocator.alloc(u8, 4096);
+    const accounts_output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(accounts_output);
 
     const accounts_timestamp = state_machine.prepare(.create_accounts, accounts_input);
@@ -2227,7 +2227,7 @@ test "create/lookup/rollback 2-phase transfers" {
     // Create pending transfers:
     const transfers_input = mem.asBytes(&transfers);
 
-    const transfers_output = try testing.allocator.alloc(u8, 4096);
+    const transfers_output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(transfers_output);
 
     const transfers_timestamp = state_machine.prepare(.create_transfers, transfers_input);

@@ -68,9 +68,7 @@ pub const MessagePool = struct {
     pub const Message = struct {
         // TODO: replace this with a header() function to save memory
         header: *Header,
-        /// This buffer is aligned to config.sector_size and casting to that alignment in order
-        /// to perform Direct I/O is safe.
-        buffer: []u8,
+        buffer: []align(config.sector_size) u8,
         references: u32 = 0,
         next: ?*Message,
 
@@ -80,11 +78,8 @@ pub const MessagePool = struct {
             return message;
         }
 
-        pub fn body(message: *Message) []align(@alignOf(Header)) u8 {
-            return @alignCast(
-                @alignOf(Header),
-                message.buffer[@sizeOf(Header)..message.header.size],
-            );
+        pub fn body(message: *const Message) []align(@sizeOf(Header)) u8 {
+            return message.buffer[@sizeOf(Header)..message.header.size];
         }
     };
 
@@ -121,7 +116,7 @@ pub const MessagePool = struct {
 
         return ret;
     }
-    
+
     /// Frees all messages that were unused or returned to the pool via unref().
     pub fn deinit(pool: *MessagePool, allocator: mem.Allocator) void {
         while (pool.free_list) |message| {
