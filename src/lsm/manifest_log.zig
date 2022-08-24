@@ -893,6 +893,7 @@ pub fn main() !void {
     };
     assert(@sizeOf(TableInfo) == 48 + 16 * 2);
     assert(@alignOf(TableInfo) == 16);
+    assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
 
     const ManifestLogTest = ManifestLogTestType(Storage, TableInfo);
 

@@ -671,6 +671,7 @@ pub fn TestContext(
             comptime {
                 assert(@sizeOf(TableInfo) == 48 + @sizeOf(Key) * 2);
                 assert(@alignOf(TableInfo) == 16);
+                assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
             }
 
             pub fn visible(table: *const @This(), snapshot: u64) bool {
