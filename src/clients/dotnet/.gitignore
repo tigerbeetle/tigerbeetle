@@ -1,5 +1,10 @@
 .vs/
 bin/
 obj/
-src/TigerBeetle/tb_client.dll
-src/TigerBeetle/tb_client.so
+zig-cache/
+zig-out/
+src/TigerBeetle/native/**/*.o
+src/TigerBeetle/native/**/*.lib
+src/TigerBeetle/native/**/*.obj
+src/TigerBeetle/native/**/*.pdb
+

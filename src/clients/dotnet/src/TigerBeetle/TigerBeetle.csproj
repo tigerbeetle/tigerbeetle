@@ -6,15 +6,21 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<AssemblyName>TigerBeetle</AssemblyName>
   </PropertyGroup>
-	<ItemGroup>
-		<AssemblyMetadataCommand Remove="GitDescription" />
-	</ItemGroup>
-	<ItemGroup>
-	  <None Update="tb_client.dll">
-	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	  </None>
-	  <None Update="libtb_client.so">
-	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	  </None>	  
-	</ItemGroup>
+  <ItemGroup>
+      <None Include="native/win-x64/tb_client.dll" 
+	  		CopyToOutputDirectory="Always"
+			Link="tb_client.dll"
+			Condition="$([MSBuild]::IsOSPlatform('Windows'))"/>				
+
+      <None Include="native/linux-x64/libtb_client.so"
+	  		CopyToOutputDirectory="Always"
+	  		Link="libtb_client.so"
+			Condition="$([MSBuild]::IsOSPlatform('Linux'))"/>
+
+      <None Include="native/osx-x64/libtb_client.dylib"
+	  		CopyToOutputDirectory="Always"
+	  		Link="libtb_client.dylib" 
+			Condition="$([MSBuild]::IsOSPlatform('OSX'))"/>
+        
+  </ItemGroup>
 </Project>

@@ -533,7 +533,7 @@ namespace TigerBeetle.Tests
     {
         #region Fields
 
-        public const string TB_PATH = "../../../../../../tigerbeetle/";
+        public const string TB_PATH = "../../../../../tigerbeetle/";
         public static readonly string TB_SERVER = $"{TB_PATH}/tigerbeetle";
         public const int TB_PORT = 3001;
         public const string TB_FILE = "dotnet-tests.tigerbeetle";
