@@ -149,12 +149,12 @@ typedef enum TB_CREATE_TRANSFER_RESULT {
 
 typedef struct tb_create_accounts_result_t {
     uint32_t index;
-    TB_CREATE_ACCOUNT_RESULT result;
+    uint32_t result;
 } tb_create_accounts_result_t;
 
 typedef struct tb_create_transfers_result_t {
     uint32_t index;
-    TB_CREATE_TRANSFER_RESULT result;
+    uint32_t result;
 } tb_create_transfers_result_t;
 
 typedef enum TB_OPERATION {
