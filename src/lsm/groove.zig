@@ -84,7 +84,7 @@ fn IndexCompositeKeyType(comptime Field: type) type {
         .Enum => |e| {
             return switch (@bitSizeOf(e.tag_type)) {
                 0...@bitSizeOf(u64) => u64,
-                @bitSizeOf(u64)...@bitSizeOf(u128) => u128,
+                @bitSizeOf(u65)...@bitSizeOf(u128) => u128,
                 else => @compileError("Unsupported enum tag for index: " ++ @typeName(e.tag_type)),
             };
         },
@@ -94,7 +94,7 @@ fn IndexCompositeKeyType(comptime Field: type) type {
             }
             return switch (@bitSizeOf(Field)) {
                 0...@bitSizeOf(u64) => u64,
-                @bitSizeOf(u64)...@bitSizeOf(u128) => u128,
+                @bitSizeOf(u65)...@bitSizeOf(u128) => u128,
                 else => @compileError("Unsupported int type for index: " ++ @typeName(Field)),
             };
         },
