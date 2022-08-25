@@ -28,7 +28,7 @@ pub const Magic = enum(u8) {
 
 pub const SuperBlockVersion: u8 = 0;
 
-// Fields are aligned to work as an extern or packed struct.
+// Fields are ordered carefully to avoid padding.
 pub const SuperBlockSector = extern struct {
     checksum: u128 = undefined,
 
