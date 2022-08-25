@@ -39,7 +39,11 @@ pub fn CompositeKey(comptime Field: type) type {
 
         comptime {
             assert(@sizeOf(Self) == @sizeOf(Field) * 2);
-            assert(@alignOf(Self) == @alignOf(Field));
+            if (Field == u128) {
+                assert(@alignOf(Self) == 16);
+            } else {
+                assert(@alignOf(Self) == 8);
+            }
             // Assert that there is no padding
             assert(@bitSizeOf(Self) == @sizeOf(Self) * 8);
         }

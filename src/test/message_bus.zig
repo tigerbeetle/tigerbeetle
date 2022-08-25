@@ -25,7 +25,7 @@ pub const MessageBus = struct {
     process: Process,
 
     /// The callback to be called when a message is received.
-    on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
+    on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
 
     pub const Options = struct {
         network: *Network,
@@ -36,7 +36,7 @@ pub const MessageBus = struct {
         cluster: u32,
         process: Process,
         message_pool: *MessagePool,
-        on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
+        on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
         options: Options,
     ) !MessageBus {
         return MessageBus{

@@ -43,9 +43,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         const BlockPtr = *align(config.sector_size) [config.block_size]u8;
         const BlockPtrConst = *align(config.sector_size) const [config.block_size]u8;
 
-        pub const Callback = fn (manifest_log: *ManifestLog) void;
+        pub const Callback = *const fn (manifest_log: *ManifestLog) void;
 
-        pub const OpenEvent = fn (
+        pub const OpenEvent = *const fn (
             manifest_log: *ManifestLog,
             level: u7,
             table: *const TableInfo,

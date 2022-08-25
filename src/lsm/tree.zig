@@ -113,10 +113,10 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
         compaction_op: u64,
         compaction_io_pending: usize,
-        compaction_callback: ?fn (*Tree) void,
+        compaction_callback: ?*const fn (*Tree) void,
 
-        checkpoint_callback: ?fn (*Tree) void,
-        open_callback: ?fn (*Tree) void,
+        checkpoint_callback: ?*const fn (*Tree) void,
+        open_callback: ?*const fn (*Tree) void,
 
         pub const Options = struct {
             /// The maximum number of keys that may be committed per batch.
@@ -195,7 +195,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
         pub fn lookup(
             tree: *Tree,
-            callback: fn (*LookupContext, ?*const Value) void,
+            callback: *const fn (*LookupContext, ?*const Value) void,
             context: *LookupContext,
             snapshot: u64,
             key: Key,
@@ -283,7 +283,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 checksum: u128,
             } = null,
 
-            callback: fn (*Tree.LookupContext, ?*const Value) void,
+            callback: *const fn (*Tree.LookupContext, ?*const Value) void,
 
             fn finish(context: *LookupContext, value: ?*const Value) void {
                 const callback = context.callback;
@@ -388,7 +388,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             return if (value == null or tombstone(value.?)) null else value.?;
         }
 
-        pub fn open(tree: *Tree, callback: fn (*Tree) void) void {
+        pub fn open(tree: *Tree, callback: *const fn (*Tree) void) void {
             assert(tree.open_callback == null);
             tree.open_callback = callback;
 
@@ -494,7 +494,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         ///
         /// Compactions start on the down beat of a half measure, using 0-based beats.
         /// For example, if there are 4 beats in a measure, start on beat 0 or beat 2.
-        pub fn compact(tree: *Tree, callback: fn (*Tree) void, op: u64) void {
+        pub fn compact(tree: *Tree, callback: *const fn (*Tree) void, op: u64) void {
             tree.compact_start(callback, op);
             tree.compact_drive();
         }
@@ -505,10 +505,10 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             tree.compact_cpu();
         }
 
-        fn compact_start(tree: *Tree, callback: fn (*Tree) void, op: u64) void {
+        fn compact_start(tree: *Tree, callback: *const fn (*Tree) void, op: u64) void {
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
-            
+
             if (op > 0) assert(op > tree.compaction_op);
             tree.compaction_op = op;
             tree.compaction_callback = callback;
@@ -866,7 +866,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(!tree.table_immutable.free);
         }
 
-        pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
+        pub fn checkpoint(tree: *Tree, callback: *const fn (*Tree) void) void {
             // Assert no outstanding compact_io() work..
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
@@ -924,7 +924,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             snapshot: u64,
             query: RangeQuery,
 
-            pub fn next(callback: fn (result: ?Value) void) void {
+            pub fn next(callback: *const fn (result: ?Value) void) void {
                 _ = callback;
             }
         };

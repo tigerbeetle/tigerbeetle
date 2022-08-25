@@ -255,7 +255,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             //
             // zig direct translation:
             //   export fn ffs(num: i32) i32 {
-            //       return if (num == 0) 0 else @ctz(i32, num) + 1;
+            //       return if (num == 0) 0 else @ctz(num) + 1;
             //   }
             //
             // zig ffs output:
@@ -288,7 +288,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // value of @ctz() fits in a u5, but since we add 1 the return type of
             // our function must be a u6.
             comptime assert(31 + 1 <= math.maxInt(u6));
-            return @ctz(u32, x) + 1;
+            return @ctz(x) + 1;
         }
     };
 }

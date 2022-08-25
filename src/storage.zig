@@ -18,7 +18,7 @@ pub const Storage = struct {
 
     pub const Read = struct {
         completion: IO.Completion,
-        callback: fn (read: *Storage.Read) void,
+        callback: *const fn (read: *Storage.Read) void,
 
         /// The buffer to read into, re-sliced and re-assigned as we go, e.g. after partial reads.
         buffer: []u8,
@@ -63,7 +63,7 @@ pub const Storage = struct {
 
     pub const Write = struct {
         completion: IO.Completion,
-        callback: fn (write: *Storage.Write) void,
+        callback: *const fn (write: *Storage.Write) void,
         buffer: []const u8,
         offset: u64,
     };
@@ -92,7 +92,7 @@ pub const Storage = struct {
 
     pub fn read_sectors(
         self: *Storage,
-        callback: fn (read: *Storage.Read) void,
+        callback: *const fn (read: *Storage.Read) void,
         read: *Storage.Read,
         buffer: []u8,
         zone: vsr.Zone,
@@ -239,7 +239,7 @@ pub const Storage = struct {
 
     pub fn write_sectors(
         self: *Storage,
-        callback: fn (write: *Storage.Write) void,
+        callback: *const fn (write: *Storage.Write) void,
         write: *Storage.Write,
         buffer: []const u8,
         zone: vsr.Zone,

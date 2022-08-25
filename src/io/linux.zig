@@ -185,7 +185,7 @@ pub const IO = struct {
         next: ?*Completion = null,
         operation: Operation,
         context: ?*anyopaque,
-        callback: fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
+        callback: *const fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {

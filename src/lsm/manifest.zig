@@ -147,7 +147,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         const TableInfoBuffer = TableInfoBufferType(Table, null);
 
         const Grid = GridType(Storage);
-        const Callback = fn (*Manifest) void;
+        const Callback = *const fn (*Manifest) void;
 
         /// Levels beyond level 0 have tables with disjoint key ranges.
         /// Here, we use a structure with indexes over the segmented array for performance.
@@ -313,10 +313,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(level_b < config.lsm_levels);
             assert(level_a + 1 == level_b);
 
-            const table_info: TableInfo = blk: {
+            const table_info: TableInfo = {
                 _ = address;
                 _ = checksum;
-                break :blk @panic("TODO(Joran): lookup using address/checksum");
+                @panic("TODO(Joran): lookup using address/checksum");
             };
 
             const tables = [_]TableInfo{table_info};

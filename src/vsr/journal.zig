@@ -88,7 +88,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         pub const Read = struct {
             self: *Self,
             completion: Storage.Read,
-            callback: fn (self: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: *const fn (self: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
 
             message: *Message,
             op: u64,
@@ -100,7 +100,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             pub const Trigger = enum { append, repair, pipeline };
 
             self: *Self,
-            callback: fn (self: *Replica, wrote: ?*Message, trigger: Trigger) void,
+            callback: *const fn (self: *Replica, wrote: ?*Message, trigger: Trigger) void,
 
             message: *Message,
             trigger: Trigger,
@@ -133,7 +133,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// concurrent write to complete. This is a range on the physical disk.
         const Range = struct {
             completion: Storage.Write,
-            callback: fn (write: *Self.Write) void,
+            callback: *const fn (write: *Self.Write) void,
             buffer: []const u8,
             offset: u64,
 
@@ -673,7 +673,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There must be a matching in-memory header.
         pub fn read_prepare(
             self: *Self,
-            callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: *const fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
             op: u64,
             checksum: u128,
             destination_replica: ?u8,
@@ -707,7 +707,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There may or may not be an in-memory header.
         pub fn read_prepare_with_op_and_checksum(
             self: *Self,
-            callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: *const fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
             op: u64,
             checksum: u128,
             destination_replica: ?u8,
@@ -1456,7 +1456,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// `write_prepare` uses `write_sectors` to prevent concurrent disk writes.
         pub fn write_prepare(
             self: *Self,
-            callback: fn (self: *Replica, wrote: ?*Message, trigger: Write.Trigger) void,
+            callback: *const fn (self: *Replica, wrote: ?*Message, trigger: Write.Trigger) void,
             message: *Message,
             trigger: Self.Write.Trigger,
         ) void {
@@ -1741,7 +1741,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         // TODO Add a `Ring` argument, and make the offset relative to that.
         fn write_sectors(
             self: *Self,
-            callback: fn (write: *Self.Write) void,
+            callback: *const fn (write: *Self.Write) void,
             write: *Self.Write,
             buffer: []const u8,
             offset_in_wal: u64,

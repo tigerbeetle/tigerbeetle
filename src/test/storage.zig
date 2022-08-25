@@ -49,7 +49,7 @@ pub const Storage = struct {
     } = .always_asynchronous;
 
     pub const Read = struct {
-        callback: fn (read: *Storage.Read) void,
+        callback: *const fn (read: *Storage.Read) void,
         buffer: []u8,
         zone: vsr.Zone,
         /// Absolute offset within the storage.
@@ -65,7 +65,7 @@ pub const Storage = struct {
     };
 
     pub const Write = struct {
-        callback: fn (write: *Storage.Write) void,
+        callback: *const fn (write: *Storage.Write) void,
         buffer: []const u8,
         zone: vsr.Zone,
         /// Absolute offset within the storage.
@@ -191,7 +191,7 @@ pub const Storage = struct {
 
     pub fn read_sectors(
         storage: *Storage,
-        callback: fn (read: *Storage.Read) void,
+        callback: *const fn (read: *Storage.Read) void,
         read: *Storage.Read,
         buffer: []u8,
         zone: vsr.Zone,
@@ -246,7 +246,7 @@ pub const Storage = struct {
 
     pub fn write_sectors(
         storage: *Storage,
-        callback: fn (write: *Storage.Write) void,
+        callback: *const fn (write: *Storage.Write) void,
         write: *Storage.Write,
         buffer: []const u8,
         zone: vsr.Zone,
