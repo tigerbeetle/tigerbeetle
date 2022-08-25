@@ -85,7 +85,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
 
         const Data = struct {
             expiry: u64,
-            callback: fn (packet: Packet, path: Path) void,
+            callback: *const fn (packet: Packet, path: Path) void,
             packet: Packet,
         };
 
@@ -362,7 +362,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
         pub fn submit_packet(
             self: *Self,
             packet: Packet,
-            callback: fn (packet: Packet, path: Path) void,
+            callback: *const fn (packet: Packet, path: Path) void,
             path: Path,
         ) void {
             const queue = self.path_queue(path);

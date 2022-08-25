@@ -28,7 +28,7 @@ pub const Magic = enum(u8) {
 
 pub const SuperBlockVersion: u8 = 0;
 
-// Fields are aligned to work as an extern or packed struct.
+// Fields are ordered carefully to avoid padding.
 pub const SuperBlockSector = extern struct {
     checksum: u128 = undefined,
 
@@ -326,7 +326,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             };
 
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             caller: Caller,
 
             write: Storage.Write = undefined,
@@ -502,7 +502,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn format(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             options: FormatOptions,
         ) void {
@@ -568,7 +568,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn open(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
         ) void {
             assert(!superblock.opened);
@@ -584,7 +584,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn checkpoint(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
         ) void {
             assert(superblock.opened);
@@ -601,7 +601,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn view_change(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             vsr_state: SuperBlockSector.VSRState,
         ) void {

@@ -65,7 +65,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         },
 
         /// The callback to be called when a message is received.
-        on_message_callback: fn (message_bus: *Self, message: *Message) void,
+        on_message_callback: *const fn (message_bus: *Self, message: *Message) void,
 
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
@@ -94,7 +94,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             cluster: u32,
             process: Process,
             message_pool: *MessagePool,
-            on_message_callback: fn (message_bus: *Self, message: *Message) void,
+            on_message_callback: *const fn (message_bus: *Self, message: *Message) void,
             options: Options,
         ) !Self {
             // There must be enough connections for all replicas and at least one client.
@@ -668,10 +668,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 }
 
                 const header = mem.bytesAsValue(
-                    Header, 
+                    Header,
                     @alignCast(@alignOf(Header), data[0..@sizeOf(Header)]),
                 );
-                
+
                 if (!connection.recv_checked_header) {
                     if (!header.valid_checksum()) {
                         log.err("invalid header checksum received from {}", .{connection.peer});

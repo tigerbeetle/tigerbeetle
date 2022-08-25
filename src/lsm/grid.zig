@@ -66,7 +66,7 @@ pub fn GridType(comptime Storage: type) type {
         pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
 
         pub const Write = struct {
-            callback: fn (*Grid.Write) void,
+            callback: *const fn (*Grid.Write) void,
             address: u64,
             block: BlockPtrConst,
 
@@ -88,7 +88,7 @@ pub fn GridType(comptime Storage: type) type {
         };
 
         pub const Read = struct {
-            callback: fn (*Grid.Read, BlockPtrConst) void,
+            callback: *const fn (*Grid.Read, BlockPtrConst) void,
             address: u64,
             checksum: u128,
 
@@ -230,7 +230,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn write_block(
             grid: *Grid,
-            callback: fn (*Grid.Write) void,
+            callback: *const fn (*Grid.Write) void,
             write: *Grid.Write,
             block: BlockPtrConst,
             address: u64,
@@ -323,7 +323,7 @@ pub fn GridType(comptime Storage: type) type {
         /// block has been recovered.
         pub fn read_block(
             grid: *Grid,
-            callback: fn (*Grid.Read, BlockPtrConst) void,
+            callback: *const fn (*Grid.Read, BlockPtrConst) void,
             read: *Grid.Read,
             address: u64,
             checksum: u128,

@@ -32,7 +32,7 @@ pub fn CompactionType(
         const IteratorA = IteratorAType(Table, Storage);
         const IteratorB = LevelIteratorType(Table, Storage);
 
-        pub const Callback = fn (it: *Compaction) void;
+        pub const Callback = *const fn (it: *Compaction) void;
 
         const k = 2;
         const MergeIterator = KWayMergeIterator(
@@ -522,7 +522,7 @@ pub fn CompactionType(
         fn write_block_if_ready(
             compaction: *Compaction,
             block_write: *BlockWrite,
-            callback: fn (*Grid.Write) void,
+            callback: *const fn (*Grid.Write) void,
         ) void {
             if (block_write.ready) {
                 block_write.ready = false;
@@ -537,7 +537,7 @@ pub fn CompactionType(
             }
         }
 
-        fn write_block_callback(comptime field: []const u8) fn (*Grid.Write) void {
+        fn write_block_callback(comptime field: []const u8) *const fn (*Grid.Write) void {
             return struct {
                 fn callback(write: *Grid.Write) void {
                     const block_write = @fieldParentPtr(BlockWrite, "write", write);

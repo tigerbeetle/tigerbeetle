@@ -164,7 +164,7 @@ pub fn TableImmutableIteratorType(comptime Table: type, comptime Storage: type) 
         pub fn start(
             it: *TableImmutableIterator,
             context: Context,
-            read_done: fn (*TableImmutableIterator) void,
+            read_done: *const fn (*TableImmutableIterator) void,
         ) void {
             _ = read_done; // No asynchronous operations are performed.
             it.* = .{

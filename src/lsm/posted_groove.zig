@@ -92,7 +92,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
         /// This field is necessary to expose the same open()/compact_cpu()/compact_io() function
         /// signatures as the real Groove type.
-        callback: ?fn (*PostedGroove) void = null,
+        callback: ?*const fn (*PostedGroove) void = null,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -204,7 +204,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         /// backup hash map.
         pub fn prefetch(
             groove: *PostedGroove,
-            callback: fn (*PrefetchContext) void,
+            callback: *const fn (*PrefetchContext) void,
             context: *PrefetchContext,
         ) void {
             context.* = .{
@@ -217,7 +217,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
         pub const PrefetchContext = struct {
             groove: *PostedGroove,
-            callback: fn (*PrefetchContext) void,
+            callback: *const fn (*PrefetchContext) void,
 
             id_iterator: PrefetchIDs.KeyIterator,
 
@@ -355,19 +355,19 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             callback(groove);
         }
 
-        pub fn open(groove: *PostedGroove, callback: fn (*PostedGroove) void) void {
+        pub fn open(groove: *PostedGroove, callback: *const fn (*PostedGroove) void) void {
             assert(groove.callback == null);
             groove.callback = callback;
             groove.tree.open(tree_callback);
         }
 
-        pub fn compact(groove: *PostedGroove, callback: fn (*PostedGroove) void, op: u64) void {
+        pub fn compact(groove: *PostedGroove, callback: *const fn (*PostedGroove) void, op: u64) void {
             assert(groove.callback == null);
             groove.callback = callback;
             groove.tree.compact(tree_callback, op);
         }
 
-        pub fn checkpoint(groove: *PostedGroove, callback: fn (*PostedGroove) void) void {
+        pub fn checkpoint(groove: *PostedGroove, callback: *const fn (*PostedGroove) void) void {
             assert(groove.callback == null);
             groove.callback = callback;
             groove.tree.checkpoint(tree_callback);

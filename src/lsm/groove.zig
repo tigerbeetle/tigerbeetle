@@ -145,7 +145,7 @@ pub fn GrooveType(
     /// - ignored: [][]const u8:
     ///     An array of fields on the Object type that should not be given index trees
     ///
-    /// - derived: { .field = fn (*const Object) ?DerivedType }:
+    /// - derived: { .field = *const fn (*const Object) ?DerivedType }:
     ///     An anonymous struct which contain fields that don't exist on the Object
     ///     but can be derived from an Object instance using the field's corresponding function.
     comptime options: anytype,
@@ -344,7 +344,7 @@ pub fn GrooveType(
 
         const Grid = GridType(Storage);
 
-        const Callback = fn (*Groove) void;
+        const Callback = *const fn (*Groove) void;
         const JoinOp = enum {
             compacting,
             checkpoint,
@@ -572,7 +572,7 @@ pub fn GrooveType(
         /// backup hash map.
         pub fn prefetch(
             groove: *Groove,
-            callback: fn (*PrefetchContext) void,
+            callback: *const fn (*PrefetchContext) void,
             context: *PrefetchContext,
         ) void {
             context.* = .{
@@ -585,7 +585,7 @@ pub fn GrooveType(
 
         pub const PrefetchContext = struct {
             groove: *Groove,
-            callback: fn (*PrefetchContext) void,
+            callback: *const fn (*PrefetchContext) void,
 
             id_iterator: PrefetchIDs.KeyIterator,
 
@@ -834,7 +834,7 @@ pub fn GrooveType(
 
                 pub fn tree_callback(
                     comptime join_field: JoinField,
-                ) fn (*TreeFor(join_field)) void {
+                ) *const fn (*TreeFor(join_field)) void {
                     return struct {
                         fn tree_cb(tree: *TreeFor(join_field)) void {
                             // Derive the groove pointer from the tree using the join_field.
@@ -866,7 +866,7 @@ pub fn GrooveType(
             };
         }
 
-        pub fn open(groove: *Groove, callback: fn (*Groove) void) void {
+        pub fn open(groove: *Groove, callback: *const fn (*Groove) void) void {
             const Join = JoinType(.open);
             Join.start(groove, callback);
 
@@ -895,7 +895,7 @@ pub fn GrooveType(
             }
         }
 
-        pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
+        pub fn checkpoint(groove: *Groove, callback: *const fn (*Groove) void) void {
             // Start a checkpoint join operation.
             const Join = JoinType(.checkpoint);
             Join.start(groove, callback);

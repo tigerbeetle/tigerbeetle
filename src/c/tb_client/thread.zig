@@ -64,7 +64,7 @@ pub fn ThreadType(
         signal: Signal,
         thread: std.Thread,
 
-        pub const CompletionFn = fn (
+        pub const CompletionFn = *const fn (
             client_thread: *Self,
             packet: *Packet,
             result: ?[]const u8,
