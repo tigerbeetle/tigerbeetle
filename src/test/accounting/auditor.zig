@@ -164,6 +164,11 @@ pub const AccountingAuditor = struct {
             const cr = &self.accounts[expiration.credit_account_index];
             dr.debits_pending -= pending_amount;
             cr.credits_pending -= pending_amount;
+
+            assert(!dr.debits_exceed_credits(0));
+            assert(!dr.credits_exceed_debits(0));
+            assert(!cr.debits_exceed_credits(0));
+            assert(!cr.credits_exceed_debits(0));
         }
 
         self.timestamp = timestamp;
@@ -291,6 +296,11 @@ pub const AccountingAuditor = struct {
                 dr.debits_posted += transfer.amount;
                 cr.credits_posted += transfer.amount;
             }
+
+            assert(!dr.debits_exceed_credits(0));
+            assert(!dr.credits_exceed_debits(0));
+            assert(!cr.debits_exceed_credits(0));
+            assert(!cr.credits_exceed_debits(0));
         }
 
         if (transfers.len == 0) {
@@ -321,6 +331,8 @@ pub const AccountingAuditor = struct {
                 // If this assertion fails, `lookup_accounts` didn't return an account when it
                 // should have.
                 assert(account_lookup != null);
+                assert(!account_lookup.?.debits_exceed_credits(0));
+                assert(!account_lookup.?.credits_exceed_debits(0));
 
                 const account_expect = &self.accounts[account_index];
                 if (!std.mem.eql(
@@ -375,10 +387,11 @@ pub const AccountingAuditor = struct {
         match: struct {
             /// Whether the account is known to be created
             /// (we have received an `ok` for the respective `create_accounts`).
-            created: ?bool = null,
+            created: ?bool,
+            debits_must_not_exceed_credits: ?bool,
+            credits_must_not_exceed_debits: ?bool,
             /// Don't match this account.
             exclude: ?u128 = null,
-            // TODO balance limits
         },
     ) ?*const tb.Account {
         const offset = self.random.uintLessThanBiased(usize, self.accounts.len);
@@ -394,10 +407,19 @@ pub const AccountingAuditor = struct {
                 }
             }
 
-            if (match.exclude) |exclude_id| {
-                if (self.accounts[account_index].id == exclude_id) continue;
+            const account = &self.accounts[account_index];
+            if (match.debits_must_not_exceed_credits) |b| {
+                if (account.flags.debits_must_not_exceed_credits != b) continue;
             }
-            return &self.accounts[account_index];
+
+            if (match.credits_must_not_exceed_debits) |b| {
+                if (account.flags.credits_must_not_exceed_debits != b) continue;
+            }
+
+            if (match.exclude) |exclude_id| {
+                if (account.id == exclude_id) continue;
+            }
+            return account;
         }
         return null;
     }
