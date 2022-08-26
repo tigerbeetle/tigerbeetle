@@ -944,7 +944,11 @@ pub fn ReplicaType(
             assert(prepare.message.header.op <= self.op);
 
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
-            const threshold = self.quorum_replication;
+            // const threshold = self.quorum_replication;
+            // TODO: When Block recover & state transfer are implemented, this can be removed.
+            const threshold =
+                if (prepare.message.header.op == self.op_checkpoint_trigger()) self.replica_count
+                else self.quorum_replication;
 
             const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
@@ -2660,10 +2664,10 @@ pub fn ReplicaType(
                 .replica = prepare.header.replica,
                 .view = prepare.header.view,
                 .op = prepare.header.op,
+                .timestamp = prepare.header.timestamp,
                 .commit = prepare.header.op,
                 .size = @sizeOf(Header) + reply_body_size,
             };
-            assert(reply.header.timestamp == 0);
             assert(reply.header.epoch == 0);
 
             reply.header.set_checksum_body(reply.body());
