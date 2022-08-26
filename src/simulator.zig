@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 
+const tb = @import("tigerbeetle.zig");
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
@@ -11,9 +12,14 @@ const Client = @import("test/cluster.zig").Client;
 const Cluster = @import("test/cluster.zig").Cluster;
 const ClusterOptions = @import("test/cluster.zig").ClusterOptions;
 const Replica = @import("test/cluster.zig").Replica;
-const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StateMachine = @import("test/cluster.zig").StateMachine;
+const StateChecker = @import("test/state_checker.zig").StateChecker;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
+const MessageBus = @import("test/message_bus.zig").MessageBus;
+const auditor = @import("test/accounting/auditor.zig");
+const Workload = @import("test/accounting/workload.zig").AccountingWorkloadType(StateMachine);
+const Conductor = @import("test/conductor.zig").ConductorType(Client, MessageBus, StateMachine, Workload);
+const IdPermutation = @import("test/id.zig").IdPermutation;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
 const output = std.log.scoped(.state_checker);
@@ -31,7 +37,13 @@ pub const log_level: std.log.Level = if (log_state_transitions_only) .info else 
 /// Modifies compile-time constants on "config.zig".
 pub const deployment_environment = .simulation;
 
+const accounts_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Account));
+const transfers_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Transfer));
+
+const cluster_id = 0;
+
 var cluster: *Cluster = undefined;
+var state_checker: *StateChecker = undefined;
 
 pub fn main() !void {
     comptime {
@@ -83,10 +95,16 @@ pub fn main() !void {
     const idle_on_probability = random.uintLessThan(u8, 20);
     const idle_off_probability = 10 + random.uintLessThan(u8, 10);
 
+    // TODO: When block recovery and state transfer are implemented, remove this flag to allow
+    // crashes to coexist with WAL wraps.
+    const committed_requests_max: usize = config.journal_slot_count * 3;
+
     const cluster_options: ClusterOptions = .{
-        .cluster = 0,
+        .cluster = cluster_id,
         .replica_count = replica_count,
         .client_count = client_count,
+        // TODO Compute an upper-bound for this based on committed_requests_max.
+        .grid_size_max = 1024 * 1024 * 256,
         .seed = random.int(u64),
         .on_change_state = on_change_replica,
         .network_options = .{
@@ -127,11 +145,54 @@ pub fn main() !void {
             .restart_stability = random.uintLessThan(u32, 1_000),
         },
         .state_machine_options = .{
-            .seed = random.int(u64),
-            .prefetch_mean = 5 + random.uintLessThan(u64, 10),
-            .compact_mean = 5 + random.uintLessThan(u64, 10),
-            .checkpoint_mean = 5 + random.uintLessThan(u64, 10),
+            // TODO What should these fields be set to? Can they be randomized (and with what constraints)?
+            .lsm_forest_node_count = 4096,
+            .cache_entries_accounts = 2048,
+            .cache_entries_transfers = 2048,
+            .cache_entries_posted = 2048,
+            .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
         },
+    };
+
+    const workload_options: Workload.Options = .{
+        .auditor_options = .{
+            .accounts_max = 2 + random.uintLessThan(usize, 128),
+            .account_id_permutation = random_id_permutation(random),
+            .client_count = client_count,
+            .transfers_pending_max = 256,
+            .in_flight_max = Conductor.stalled_queue_capacity,
+        },
+        .transfer_id_permutation = random_id_permutation(random),
+        .operations = .{
+            .create_accounts = 1 + random.uintLessThan(usize, 10),
+            .create_transfers = 1 + random.uintLessThan(usize, 100),
+            .lookup_accounts = 1 + random.uintLessThan(usize, 20),
+            .lookup_transfers = 1 + random.uintLessThan(usize, 20),
+        },
+        .create_account_invalid_probability = 1,
+        .create_transfer_invalid_probability = 1,
+        .create_transfer_limit_probability = random.uintLessThan(u8, 101),
+        .create_transfer_pending_probability = 1 + random.uintLessThan(u8, 100),
+        .create_transfer_post_probability = 1 + random.uintLessThan(u8, 50),
+        .create_transfer_void_probability = 1 + random.uintLessThan(u8, 50),
+        .lookup_account_invalid_probability = 1,
+        .lookup_transfer = .{
+            .delivered = 1 + random.uintLessThan(usize, 10),
+            .sending = 1 + random.uintLessThan(usize, 10),
+        },
+        .lookup_transfer_span_mean = 10 + random.uintLessThan(usize, 1000),
+        .account_limit_probability = random.uintLessThan(u8, 80),
+        .linked_valid_probability = random.uintLessThan(u8, 101),
+        // 100% chance because this only applies to consecutive invalid transfers, which are rare.
+        .linked_invalid_probability = 100,
+        // TODO(Timeouts): When timeouts are implemented in the StateMachine, change this to the
+        // (commented out) value so that timeouts can actually trigger.
+        .pending_timeout_mean = std.math.maxInt(u64) / 2,
+        // .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
+        .accounts_batch_size_min = 0,
+        .accounts_batch_size_span = 1 + random.uintLessThan(usize, accounts_batch_size_max),
+        .transfers_batch_size_min = 0,
+        .transfers_batch_size_span = 1 + random.uintLessThan(usize, transfers_batch_size_max),
     };
 
     output.info(
@@ -165,10 +226,6 @@ pub fn main() !void {
         \\          crash_stability={} ticks
         \\          restart_probability={d}%
         \\          restart_stability={} ticks
-        \\          prefetch_mean={} ticks
-        \\          compact_mean={} ticks
-        \\          checkpoint_mean={} ticks
-        \\
     , .{
         seed,
         replica_count,
@@ -198,16 +255,40 @@ pub fn main() !void {
         cluster_options.health_options.crash_stability,
         cluster_options.health_options.restart_probability * 100,
         cluster_options.health_options.restart_stability,
-        cluster_options.state_machine_options.prefetch_mean,
-        cluster_options.state_machine_options.compact_mean,
-        cluster_options.state_machine_options.checkpoint_mean,
     });
 
     cluster = try Cluster.create(allocator, random, cluster_options);
     defer cluster.destroy();
 
-    var requests_sent: u64 = 0;
-    var idle = false;
+    var workload = try Workload.init(allocator, random, workload_options);
+    defer workload.deinit(allocator);
+
+    var conductor = try Conductor.init(allocator, random, &workload, .{
+        .cluster = cluster_id,
+        .replica_count = replica_count,
+        .client_count = client_count,
+        .message_bus_options = .{ .network = &cluster.network },
+        .requests_max = committed_requests_max,
+        .request_probability = request_probability,
+        .idle_on_probability = idle_on_probability,
+        .idle_off_probability = idle_off_probability,
+    });
+    defer conductor.deinit(allocator);
+
+    for (conductor.clients) |*client| {
+        cluster.network.link(client.message_bus.process, &client.message_bus);
+    }
+
+    state_checker = try allocator.create(StateChecker);
+    defer allocator.destroy(state_checker);
+
+    state_checker.* = try StateChecker.init(
+        allocator,
+        cluster_id,
+        cluster.replicas,
+        conductor.clients,
+    );
+    defer state_checker.deinit();
 
     // The minimum number of healthy replicas required for a crashed replica to be able to recover.
     const replica_normal_min = replicas: {
@@ -228,7 +309,6 @@ pub fn main() !void {
     // The maximum number of transitions from calling `client.request()`, not including
     // `register` messages.
     // TODO When storage is supported, run more transitions than fit in the journal.
-    const committed_requests_max = config.journal_slot_count / 2;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         const health_options = &cluster.options.health_options;
@@ -269,7 +349,7 @@ pub fn main() !void {
                     replica.tick();
                     cluster.storages[index].tick();
 
-                    cluster.state_checker.check_state(replica.replica) catch |err| {
+                    state_checker.check_state(replica.replica) catch |err| {
                         fatal(.correctness, "state checker error: {}", .{err});
                     };
 
@@ -300,38 +380,27 @@ pub fn main() !void {
         }
 
         cluster.network.packet_simulator.tick(cluster.health);
+        conductor.tick();
 
-        for (cluster.clients) |*client| client.tick();
-
-        if (cluster.state_checker.committed_requests == committed_requests_max) {
-            if (cluster.state_checker.convergence() and
+        if (state_checker.committed_requests == committed_requests_max) {
+            if (state_checker.convergence() and conductor.done() and
                 cluster.replica_up_count() == replica_count)
             {
                 break;
             }
             continue;
         } else {
-            assert(cluster.state_checker.committed_requests < committed_requests_max);
-        }
-
-        if (requests_sent < committed_requests_max) {
-            if (idle) {
-                if (chance(random, idle_off_probability)) idle = false;
-            } else {
-                if (chance(random, request_probability)) {
-                    if (send_request(random)) requests_sent += 1;
-                }
-                if (chance(random, idle_on_probability)) idle = true;
-            }
+            assert(state_checker.committed_requests < committed_requests_max);
         }
     }
 
-    if (cluster.state_checker.committed_requests < committed_requests_max) {
+    if (state_checker.committed_requests < committed_requests_max) {
         output.err("you can reproduce this failure with seed={}", .{seed});
         fatal(.liveness, "unable to complete committed_requests_max before ticks_max", .{});
     }
 
-    assert(cluster.state_checker.convergence());
+    assert(state_checker.convergence());
+    assert(conductor.done());
 
     output.info("\n          PASSED ({} ticks)", .{tick});
 }
@@ -350,12 +419,6 @@ fn fatal(exit_code: ExitCode, comptime fmt_string: []const u8, args: anytype) no
 }
 
 /// Returns true, `p` percent of the time, else false.
-fn chance(random: std.rand.Random, p: u8) bool {
-    assert(p <= 100);
-    return random.uintLessThan(u8, 100) < p;
-}
-
-/// Returns true, `p` percent of the time, else false.
 fn chance_f64(random: std.rand.Random, p: f64) bool {
     assert(p <= 100.0);
     return random.float(f64) < p;
@@ -368,53 +431,9 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
 }
 
 fn on_change_replica(replica: *Replica) void {
-    cluster.state_checker.check_state(replica.replica) catch |err| {
+    state_checker.check_state(replica.replica) catch |err| {
         fatal(.correctness, "state checker error: {}", .{err});
     };
-}
-
-fn send_request(random: std.rand.Random) bool {
-    const client_index = random.uintLessThan(u8, cluster.options.client_count);
-
-    const client = &cluster.clients[client_index];
-    if (client.request_queue.full()) return false;
-
-    const message = client.get_message();
-    defer client.unref(message);
-
-    const body_size_max = config.message_size_max - @sizeOf(Header);
-    const body_size: u32 = switch (random.uintLessThan(u8, 100)) {
-        0...10 => 0,
-        11...89 => random.uintLessThan(u32, body_size_max),
-        90...99 => body_size_max,
-        else => unreachable,
-    };
-
-    const body = message.buffer[@sizeOf(Header)..][0..body_size];
-    if (chance(random, 10)) {
-        std.mem.set(u8, body, 0);
-    } else {
-        random.bytes(body);
-    }
-
-    std.log.scoped(.test_client).debug("{}: send_request: sending bytes={x}", .{
-        client_index,
-        body_size,
-    });
-    client.request(0, client_callback, .random, message, body_size);
-
-    return true;
-}
-
-fn client_callback(
-    user_data: u128,
-    operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
-) void {
-    _ = operation;
-    _ = results catch unreachable;
-
-    assert(user_data == 0);
 }
 
 /// Returns a random partitioning mode, excluding .custom
@@ -423,6 +442,16 @@ fn random_partition_mode(random: std.rand.Random) PartitionMode {
     var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 2);
     if (enumAsInt >= @enumToInt(PartitionMode.custom)) enumAsInt += 1;
     return @intToEnum(PartitionMode, enumAsInt);
+}
+
+fn random_id_permutation(random: std.rand.Random) IdPermutation {
+    return switch (random.uintLessThan(usize, 4)) {
+        0 => .{ .identity = {} },
+        1 => .{ .reflect = {} },
+        2 => .{ .zigzag = {} },
+        3 => .{ .random = random.int(u64) },
+        else => unreachable,
+    };
 }
 
 pub fn parse_seed(bytes: []const u8) u64 {

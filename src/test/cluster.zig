@@ -4,8 +4,6 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 
-const StateChecker = @import("state_checker.zig").StateChecker;
-
 const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
@@ -13,7 +11,7 @@ const Message = MessagePool.Message;
 const Network = @import("network.zig").Network;
 const NetworkOptions = @import("network.zig").NetworkOptions;
 
-pub const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
+pub const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;
@@ -27,9 +25,9 @@ const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_si
 
 pub const ClusterOptions = struct {
     cluster: u32,
-
     replica_count: u8,
     client_count: u8,
+    grid_size_max: usize,
 
     seed: u64,
     on_change_state: fn (replica: *Replica) void,
@@ -65,21 +63,17 @@ pub const Cluster = struct {
     options: ClusterOptions,
 
     storages: []Storage,
-    // TODO Move MessagePool into Replica/Client (tricky because it is required by SuperBlock)?
-    // The MessagePool must still be resued between replica restarts (and accessible while the
-    // replica is crashed); otherwise messages in the network during a crash will leak.
     pools: []MessagePool,
     replicas: []Replica,
     health: []ReplicaHealth,
 
-    clients: []Client,
     network: Network,
-    state_checker: StateChecker = undefined,
 
     pub fn create(allocator: mem.Allocator, prng: std.rand.Random, options: ClusterOptions) !*Cluster {
-        const process_count = options.replica_count + options.client_count;
-        assert(process_count <= std.math.maxInt(u8));
         assert(options.replica_count > 0);
+        assert(options.client_count > 0);
+        assert(options.grid_size_max > 0);
+        assert(options.grid_size_max % config.sector_size == 0);
         assert(options.health_options.crash_probability < 1.0);
         assert(options.health_options.crash_probability >= 0.0);
         assert(options.health_options.restart_probability < 1.0);
@@ -91,18 +85,12 @@ pub const Cluster = struct {
         const storages = try allocator.alloc(Storage, options.replica_count);
         errdefer allocator.free(storages);
 
-        var pools = try allocator.alloc(MessagePool, process_count);
+        var pools = try allocator.alloc(MessagePool, options.replica_count);
         errdefer allocator.free(pools);
 
-        {
-            var i: usize = 0;
-            errdefer for (pools[0..i]) |*pool| pool.deinit(allocator);
-            while (i < process_count) : (i += 1) {
-                pools[i] = try MessagePool.init(
-                    allocator,
-                    if (i < options.replica_count) .replica else .client,
-                );
-            }
+        for (pools) |*pool, i| {
+            errdefer for (pools[0..i]) |*p| p.deinit(allocator);
+            pool.* = try MessagePool.init(allocator, .replica);
         }
         errdefer for (pools) |*pool| pool.deinit(allocator);
 
@@ -112,12 +100,6 @@ pub const Cluster = struct {
         const health = try allocator.alloc(ReplicaHealth, options.replica_count);
         errdefer allocator.free(health);
         mem.set(ReplicaHealth, health, .{ .up = 0 });
-
-        const clients = try allocator.alloc(Client, options.client_count);
-        errdefer allocator.free(clients);
-
-        var state_checker = try StateChecker.init(allocator, options.cluster, clients);
-        errdefer state_checker.deinit();
 
         var network = try Network.init(
             allocator,
@@ -134,9 +116,7 @@ pub const Cluster = struct {
             .pools = pools,
             .replicas = replicas,
             .health = health,
-            .clients = clients,
             .network = network,
-            .state_checker = state_checker,
         };
 
         var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
@@ -151,7 +131,7 @@ pub const Cluster = struct {
         for (cluster.storages) |*storage, replica_index| {
             storage.* = try Storage.init(
                 allocator,
-                superblock_zone_size + config.journal_size_max,
+                superblock_zone_size + config.journal_size_max + options.grid_size_max,
                 options.storage_options,
                 @intCast(u8, replica_index),
                 faulty_areas[replica_index],
@@ -184,29 +164,11 @@ pub const Cluster = struct {
         }
         errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
 
-        for (cluster.clients) |*client, i| {
-            const client_id = prng.int(u128);
-            client.* = try Client.init(
-                allocator,
-                client_id,
-                options.cluster,
-                options.replica_count,
-                &cluster.pools[options.replica_count + i],
-                .{ .network = &cluster.network },
-            );
-
-            cluster.network.link(client.message_bus.process, &client.message_bus);
-        }
-
         return cluster;
     }
 
     pub fn destroy(cluster: *Cluster) void {
-        cluster.state_checker.deinit();
         cluster.network.deinit();
-
-        for (cluster.clients) |*client| client.deinit(cluster.allocator);
-        cluster.allocator.free(cluster.clients);
 
         for (cluster.replicas) |*replica| replica.deinit(cluster.allocator);
         cluster.allocator.free(cluster.replicas);
@@ -269,8 +231,11 @@ pub const Cluster = struct {
                 break :op_max op_max.?;
             };
 
-            // TODO This workaround doesn't handle log wrapping correctly.
-            assert(cluster_op_max < config.journal_slot_count);
+            // This whole workaround doesn't handle log wrapping correctly.
+            // If the log has wrapped, don't crash the replica.
+            if (cluster_op_max >= config.journal_slot_count) {
+                return false;
+            }
 
             var op: u64 = cluster_op_max + 1;
             while (op > 0) {

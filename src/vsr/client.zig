@@ -81,6 +81,15 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         /// Seeded with the client's ID.
         prng: std.rand.DefaultPrng,
 
+        on_reply_context: ?*anyopaque = null,
+        /// Used for testing. Called for replies to all operations (including `register`).
+        on_reply_callback: ?fn (
+            context: ?*anyopaque,
+            client: *Self,
+            request: *Message,
+            reply: *Message,
+        ) void = null,
+
         pub fn init(
             allocator: mem.Allocator,
             id: u128,
@@ -350,6 +359,10 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             // Otherwise, requests may run through send_request_for_the_first_time() more than once.
             if (self.request_queue.head_ptr()) |next_request| {
                 self.send_request_for_the_first_time(next_request.message);
+            }
+
+            if (self.on_reply_callback) |on_reply_callback| {
+                on_reply_callback(self.on_reply_context, self, inflight.message, reply);
             }
 
             if (inflight.message.header.operation != .register) {
