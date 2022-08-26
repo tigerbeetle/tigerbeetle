@@ -23,7 +23,7 @@ pub const messages_max_replica = messages_max: {
     var sum: usize = 0;
 
     sum += config.io_depth_read + config.io_depth_write; // Journal I/O
-    sum += config.clients_max; // Replica.client_table
+    sum += config.clients_max; // SuperBlock.client_table
     sum += 1; // Replica.loopback_queue
     sum += config.pipeline_max; // Replica.pipeline
     sum += 1; // Replica.commit_prepare
@@ -87,11 +87,13 @@ pub const MessagePool = struct {
     free_list: ?*Message,
 
     pub fn init(allocator: mem.Allocator, process_type: vsr.ProcessType) error{OutOfMemory}!MessagePool {
-        const messages_max: usize = switch (process_type) {
+        return MessagePool.init_capacity(allocator, switch (process_type) {
             .replica => messages_max_replica,
             .client => messages_max_client,
-        };
+        });
+    }
 
+    pub fn init_capacity(allocator: mem.Allocator, messages_max: usize) error{OutOfMemory}!MessagePool {
         var ret: MessagePool = .{
             .free_list = null,
         };

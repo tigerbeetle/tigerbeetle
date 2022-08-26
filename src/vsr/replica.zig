@@ -2659,10 +2659,10 @@ pub fn ReplicaType(
                 .replica = prepare.header.replica,
                 .view = prepare.header.view,
                 .op = prepare.header.op,
+                .timestamp = prepare.header.timestamp,
                 .commit = prepare.header.op,
                 .size = @sizeOf(Header) + reply_body_size,
             };
-            assert(reply.header.timestamp == 0);
             assert(reply.header.epoch == 0);
 
             reply.header.set_checksum_body(reply.body());

@@ -505,6 +505,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(index == chain_start_index);
         }
 
+        // Accounts that do not fit in the response are omitted.
         fn execute_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
             const batch = mem.bytesAsSlice(u128, input);
             const output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
@@ -519,6 +520,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             return results_count * @sizeOf(Account);
         }
 
+        // Transfers that do not fit in the response are omitted.
         fn execute_lookup_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
             const batch = mem.bytesAsSlice(u128, input);
             const output_len = @divFloor(output.len, @sizeOf(Transfer)) * @sizeOf(Transfer);

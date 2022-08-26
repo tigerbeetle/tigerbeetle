@@ -19,4 +19,7 @@ test {
 
     // TODO Add remaining unit tests from lsm namespace.
     _ = @import("lsm/forest.zig");
+
+    _ = @import("test/accounting/auditor.zig");
+    _ = @import("test/accounting/workload.zig");
 }
