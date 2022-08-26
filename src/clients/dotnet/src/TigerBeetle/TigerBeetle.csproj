@@ -5,24 +5,30 @@
 			<Nullable>enable</Nullable>
 			<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 			<AssemblyName>TigerBeetle</AssemblyName>
+			<Configuration Condition="$([MSBuild]::IsOSPlatform('Windows'))">Windows</Configuration>
+			<Configuration Condition="$([MSBuild]::IsOSPlatform('Linux'))">Linux</Configuration>			
+			<Configuration Condition="$([MSBuild]::IsOSPlatform('OSX'))">OSX</Configuration>			
 	</PropertyGroup>
-	<Target Name="BuildZig" BeforeTargets="CoreCompile">
-		<Exec Command="'tigerbeetle/zig/zig' build tb_client_dyn -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../"/>
+	<Target Name="BuildZig" BeforeTargets="CoreCompile"  Condition="'$(Configuration)'=='Windows'">
+		<Exec Command=".\tigerbeetle\zig\zig.exe build tb_client_dyn -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../"/>
 	</Target>
+	<Target Name="BuildZig" BeforeTargets="CoreCompile"  Condition="'$(Configuration)'!='Windows'">
+		<Exec Command="tigerbeetle/zig/zig build tb_client_dyn -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../"/>
+	</Target>	
 	<ItemGroup>
       <None Include="native/win-x64/tb_client.dll" 
 	  		CopyToOutputDirectory="Always"
 			Link="tb_client.dll"
-			Condition="$([MSBuild]::IsOSPlatform('Windows'))"/>				
+			Condition="'$(Configuration)'=='Windows'"/>				
 
       <None Include="native/linux-x64/libtb_client.so"
 	  		CopyToOutputDirectory="Always"
 	  		Link="libtb_client.so"
-			Condition="$([MSBuild]::IsOSPlatform('Linux'))"/>
+			Condition="'$(Configuration)'=='Linux'"/>
 
       <None Include="native/osx-x64/libtb_client.dylib"
 	  		CopyToOutputDirectory="Always"
 	  		Link="libtb_client.dylib" 
-			Condition="$([MSBuild]::IsOSPlatform('OSX'))"/>
+			Condition="'$(Configuration)'=='OSX'"/>
   </ItemGroup>
 </Project>
