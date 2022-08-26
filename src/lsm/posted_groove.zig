@@ -241,7 +241,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 for (context.workers) |*worker| {
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
-                    if (!worker.lookup_start()) break;
+                    if (!worker.lookup_start_next()) break;
                 }
 
                 assert(context.workers_busy >= 1);
@@ -270,13 +270,19 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
             /// Returns true if asynchronous I/O has been started.
             /// Returns false if there are no more IDs to prefetch.
-            fn lookup_start(worker: *PrefetchWorker) bool {
+            fn lookup_start_next(worker: *PrefetchWorker) bool {
                 const groove = worker.context.groove;
 
                 const id = worker.context.id_iterator.next() orelse {
                     groove.prefetch_ids.clearRetainingCapacity();
                     assert(groove.prefetch_ids.count() == 0);
-                    worker.context.worker_finished();
+
+                    // Since worker_finished() may cause the entire prefetch to finish and call
+                    // the provided callback, we must not set worker to undefined after calling
+                    // worker_finished() as the memory may already be used for something else.
+                    const context = worker.context;
+                    worker.* = undefined;
+                    context.worker_finished();
                     return false;
                 };
 
@@ -319,13 +325,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                         },
                     }
                 }
-                worker.lookup_finish();
-            }
-
-            fn lookup_finish(worker: *PrefetchWorker) void {
-                if (!worker.lookup_start()) {
-                    worker.* = undefined;
-                }
+                _ = worker.lookup_start_next();
             }
         };
 
