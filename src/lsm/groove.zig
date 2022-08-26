@@ -606,9 +606,7 @@ pub fn GrooveType(
                 // but `context` is required for the last loop condition check.
                 context.workers_busy += 1;
 
-                // -1 to ignore the extra worker.
-                while (context.workers_busy - 1 < context.workers.len) {
-                    const worker = &context.workers[context.workers_busy - 1];
+                for (context.workers) |*worker| {
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
                     if (!worker.lookup_start()) break;
