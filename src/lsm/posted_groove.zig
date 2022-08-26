@@ -241,7 +241,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 for (context.workers) |*worker| {
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
-                    if (!worker.lookup_start_next()) break;
+                    worker.lookup_start_next();
                 }
 
                 assert(context.workers_busy >= 1);
@@ -255,8 +255,10 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
             fn finish(context: *PrefetchContext) void {
                 assert(context.workers_busy == 0);
-                assert(context.groove.prefetch_ids.count() == 0);
+
                 assert(context.id_iterator.next() == null);
+                context.groove.prefetch_ids.clearRetainingCapacity();
+                assert(context.groove.prefetch_ids.count() == 0);
 
                 const callback = context.callback;
                 context.* = undefined;
@@ -270,39 +272,32 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
             /// Returns true if asynchronous I/O has been started.
             /// Returns false if there are no more IDs to prefetch.
-            fn lookup_start_next(worker: *PrefetchWorker) bool {
-                const groove = worker.context.groove;
-
+            fn lookup_start_next(worker: *PrefetchWorker) void {
                 const id = worker.context.id_iterator.next() orelse {
-                    groove.prefetch_ids.clearRetainingCapacity();
-                    assert(groove.prefetch_ids.count() == 0);
-
                     // Since worker_finished() may cause the entire prefetch to finish and call
                     // the provided callback, we must not set worker to undefined after calling
                     // worker_finished() as the memory may already be used for something else.
                     const context = worker.context;
                     worker.* = undefined;
                     context.worker_finished();
-                    return false;
+                    return;
                 };
 
                 if (config.verify) {
                     // This is checked in prefetch_enqueue()
-                    assert(groove.tree.get_cached(id.*) == null);
+                    assert(worker.context.groove.tree.get_cached(id.*) == null);
                 }
 
                 // If not in the LSM tree's cache, the object must be read from disk and added
                 // to the auxillary prefetch_objects hash map.
                 // TODO: this LSM tree function needlessly checks the LSM tree's cache a
                 // second time. Adding API to the LSM tree to avoid this may be worthwhile.
-                groove.tree.lookup(
+                worker.context.groove.tree.lookup(
                     lookup_id_callback,
                     &worker.lookup_id,
                     snapshot_latest,
                     id.*,
                 );
-
-                return true;
             }
 
             fn lookup_id_callback(
@@ -325,7 +320,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                         },
                     }
                 }
-                _ = worker.lookup_start_next();
+                worker.lookup_start_next();
             }
         };
 
