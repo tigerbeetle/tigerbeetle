@@ -11,9 +11,9 @@
 //!
 //! Transfer Encoding:
 //!
-//! * Transfer ids are a deterministic, reversible permutation of an ascending index.
-//! * Using the transfer index as a seed, the Workload knows the eventual outcome of the transfer.
-//! * `Transfer.user_data` is set to the checksum of the remainder of the transfer's data
+//! * `Transfer.id` is a deterministic, reversible permutation of an ascending index.
+//! * With the transfer's index as a seed, the Workload knows the eventual outcome of the transfer.
+//! * `Transfer.user_data` is a checksum of the remainder of the transfer's data
 //!   (excluding `timestamp` and `user_data` itself). This helps `on_lookup_transfers` to
 //!   validate its results.
 //!
@@ -80,30 +80,16 @@ const TransferPlan = struct {
 };
 
 const TransferTemplate = struct {
-    plan: TransferPlan,
-    debit_account: DebitAccount,
-    credit_account: CreditAccount,
     ledger: u32,
     result: accounting_auditor.CreateTransferResultSet,
-
-    const DebitAccount = struct {
-        created: ?bool = true,
-    };
-
-    const CreditAccount = struct {
-        created: ?bool = true,
-        distinct: ?bool = true,
-    };
 };
 
-// TODO Test that this is exhaustive at comptime.
+/// Indexes: [valid:bool][limit:bool][method]
 const transfer_templates = table: {
-    const _0 = false;
-    const _1 = true;
-    const SNGL = TransferPlan.Method.single_phase;
-    const PEND = TransferPlan.Method.pending;
-    const POST = TransferPlan.Method.post_pending;
-    const VOID = TransferPlan.Method.void_pending;
+    const SNGL = @enumToInt(TransferPlan.Method.single_phase);
+    const PEND = @enumToInt(TransferPlan.Method.pending);
+    const POST = @enumToInt(TransferPlan.Method.post_pending);
+    const VOID = @enumToInt(TransferPlan.Method.void_pending);
     const Result = accounting_auditor.CreateTransferResultSet;
     const result = Result.init;
 
@@ -126,22 +112,40 @@ const transfer_templates = table: {
         }
     }.either;
 
-    break :table [_]TransferTemplate{
-        // valid, limit, method, debit_account, credit_account, ledger, result
-        template(_1, _0, SNGL, .{}, .{}, 1, result(.{ .ok = true })),
-        template(_1, _0, PEND, .{}, .{}, 1, result(.{ .ok = true })),
-        template(_1, _0, POST, .{}, .{}, 1, result(two_phase_ok)),
-        template(_1, _0, VOID, .{}, .{}, 1, result(two_phase_ok)),
-        template(_0, _0, SNGL, .{}, .{}, 0, result(.{ .ledger_must_not_be_zero = true })),
-        template(_0, _0, PEND, .{}, .{}, 0, result(.{ .ledger_must_not_be_zero = true })),
-        template(_0, _0, POST, .{}, .{}, 9, result(.{ .pending_transfer_has_different_ledger = true })),
-        template(_0, _0, VOID, .{}, .{}, 9, result(.{ .pending_transfer_has_different_ledger = true })),
+    const template = struct {
+        fn template(ledger: u32, result: Result) TransferTemplate {
+            return .{
+                .ledger = ledger,
+                .result = result,
+            };
+        }
+    }.template;
 
-        template(_1, _1, SNGL, .{}, .{}, 1, either(limits, result(.{ .ok = true }))),
-        template(_1, _1, PEND, .{}, .{}, 1, either(limits, result(.{ .ok = true }))),
-        template(_1, _1, POST, .{}, .{}, 1, either(limits, result(two_phase_ok))),
-        template(_1, _1, VOID, .{}, .{}, 1, either(limits, result(two_phase_ok))),
-    };
+    // [valid:bool][limit:bool][method]
+    var templates: [2][2][std.meta.fields(TransferPlan.Method).len]TransferTemplate = undefined;
+
+    // template(ledger, result)
+    templates[0][0][SNGL] = template(0, result(.{ .ledger_must_not_be_zero = true }));
+    templates[0][0][PEND] = template(0, result(.{ .ledger_must_not_be_zero = true }));
+    templates[0][0][POST] = template(9, result(.{ .pending_transfer_has_different_ledger = true }));
+    templates[0][0][VOID] = template(9, result(.{ .pending_transfer_has_different_ledger = true }));
+
+    templates[0][1][SNGL] = template(0, result(.{ .ledger_must_not_be_zero = true }));
+    templates[0][1][PEND] = template(0, result(.{ .ledger_must_not_be_zero = true }));
+    templates[0][1][POST] = template(9, result(.{ .pending_transfer_has_different_ledger = true }));
+    templates[0][1][VOID] = template(9, result(.{ .pending_transfer_has_different_ledger = true }));
+
+    templates[1][0][SNGL] = template(1, result(.{ .ok = true }));
+    templates[1][0][PEND] = template(1, result(.{ .ok = true }));
+    templates[1][0][POST] = template(1, result(two_phase_ok));
+    templates[1][0][VOID] = template(1, result(two_phase_ok));
+
+    templates[1][1][SNGL] = template(1, either(limits, result(.{ .ok = true })));
+    templates[1][1][PEND] = template(1, either(limits, result(.{ .ok = true })));
+    templates[1][1][POST] = template(1, either(limits, result(two_phase_ok)));
+    templates[1][1][VOID] = template(1, either(limits, result(two_phase_ok)));
+
+    break :table templates;
 };
 
 ///// OnePhaseValid creates "imminent" transfers: the workload knows they will succeed
@@ -514,24 +518,25 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                 break :method default;
             };
 
-            const transfer_template = for (transfer_templates[0..]) |*t| {
-                if (transfer_plan.valid == t.plan.valid and method == t.plan.method) break t;
-            } else unreachable;
+            const transfer_template = &transfer_templates
+                [@boolToInt(transfer_plan.valid)]
+                [@boolToInt(transfer_plan.limit)]
+                [@enumToInt(method)];
 
-            const limit_debits = transfer_template.plan.limit and self.random.boolean();
-            const limit_credits = transfer_template.plan.limit and (self.random.boolean() or !limit_debits);
+            const limit_debits = transfer_plan.limit and self.random.boolean();
+            const limit_credits = transfer_plan.limit and (self.random.boolean() or !limit_debits);
 
             const debit_account = self.auditor.pick_account(.{
-                .created = transfer_template.debit_account.created,
+                .created = true,
                 .debits_must_not_exceed_credits = limit_debits,
                 .credits_must_not_exceed_debits = null,
             }) orelse return null;
 
             const credit_account = self.auditor.pick_account(.{
-                .created = transfer_template.credit_account.created,
+                .created = true,
                 .debits_must_not_exceed_credits = null,
                 .credits_must_not_exceed_debits = limit_credits,
-                .exclude = if (transfer_template.credit_account.distinct == true) debit_account.id else null,
+                .exclude = debit_account.id,
             }) orelse return null;
 
             transfer.* = .{
@@ -726,7 +731,7 @@ fn sample_exponential(random: std.rand.Random, min: anytype, mean: @TypeOf(min))
 
 /// Sample from a discrete distribution.
 /// Use integers instead of floating-point numbers to avoid nondeterminism on different hardware.
-pub fn sample_distribution(
+fn sample_distribution(
     random: std.rand.Random,
     distribution: anytype,
 ) std.meta.FieldEnum(@TypeOf(distribution)) {
@@ -759,26 +764,4 @@ pub fn sample_distribution(
 fn chance(random: std.rand.Random, p: u8) bool {
     assert(p <= 100);
     return random.uintLessThanBiased(u8, 100) < p;
-}
-
-fn template(
-    valid: bool,
-    limit: bool,
-    method: TransferPlan.Method,
-    debit_account: TransferTemplate.DebitAccount,
-    credit_account: TransferTemplate.CreditAccount,
-    ledger: u32,
-    result: accounting_auditor.CreateTransferResultSet,
-) TransferTemplate {
-    return .{
-        .plan = .{
-            .valid = valid,
-            .limit = limit,
-            .method = method,
-        },
-        .debit_account = debit_account,
-        .credit_account = credit_account,
-        .ledger = ledger,
-        .result = result,
-    };
 }
