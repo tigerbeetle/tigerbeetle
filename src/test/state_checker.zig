@@ -136,7 +136,7 @@ pub const StateChecker = struct {
         state_checker.committed_messages += 1;
         state_checker.committed_requests += @boolToInt(
             commit_header.?.operation != .register and
-            commit_header.?.operation != .root,
+                commit_header.?.operation != .root,
         );
         assert(state_checker.committed_messages == commit_header.?.op + 1);
 

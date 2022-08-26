@@ -205,6 +205,8 @@ pub const Header = extern struct {
     ///
     /// * A `prepare` sets this to the leader's state machine `prepare_timestamp`.
     ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
+    /// * A `reply` sets this to the corresponding `prepare`'s timestamp.
+    ///   This allows the test workload to verify transfer timeouts.
     /// * A `do_view_change` sets this to the latest normal view number.
     /// * A `pong` sets this to the sender's wall clock value.
     /// * A `request_prepare` sets this to `1` when `context` is set to a checksum, and `0`
@@ -423,7 +425,7 @@ pub const Header = extern struct {
         if (self.client == 0) return "client == 0";
         if (self.context != 0) return "context != 0";
         if (self.op != self.commit) return "op != commit";
-        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.timestamp == 0) return "timestamp == 0";
         if (self.operation == .register) {
             // In this context, the commit number is the newly registered session number.
             // The `0` commit number is reserved for cluster initialization.
