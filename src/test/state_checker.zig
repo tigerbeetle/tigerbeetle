@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const config = @import("../config.zig");
+const vsr = @import("../vsr.zig");
 
 const Cluster = @import("cluster.zig").Cluster;
 const Network = @import("network.zig").Network;
@@ -26,9 +27,11 @@ pub const StateChecker = struct {
 
     /// Keyed by committed `message.header.checksum`.
     ///
-    /// The `0` key represents the state before the root prepare has committed (e.g. during WAL
-    /// recovery).
+    /// The first state is always `root_prepare.checksum`, since the root prepare doesn't
+    /// commit normally.
     history: StateTransitions,
+
+    root: u128,
 
     // TODO When StateChecker is owned by the Simulation, use @fieldParentPtr to get these.
     replicas: []const Replica,
@@ -37,12 +40,11 @@ pub const StateChecker = struct {
     /// The highest canonical state reached by the cluster.
     state: u128 = 0,
 
-    /// The number of times the canonical state has been advanced *including*:
-    /// * `register` operations, and
-    /// * the root message.
+    /// The number of times the canonical state has been advanced
+    /// including `register` operations, but excluding the root message.
     committed_messages: u64 = 0,
 
-    /// The number of times the canonical state has been advanced *excluding*:
+    /// The number of times the canonical state has been advanced excluding:
     /// * `register` operations, and
     /// * the root message.
     /// (That is, correspond 1:1 with `client.request()` calls).
@@ -50,18 +52,22 @@ pub const StateChecker = struct {
 
     pub fn init(
         allocator: mem.Allocator,
+        cluster: u32,
         replicas: []const Replica,
         clients: []const Client,
     ) !StateChecker {
         var history = StateTransitions.init(allocator);
         errdefer history.deinit();
 
+        const root_checksum = vsr.Header.root_prepare(cluster).checksum;
+
         var state_checker = StateChecker{
             .history = history,
+            .root = root_checksum,
             .replicas = replicas,
             .clients = clients,
         };
-        try state_checker.history.putNoClobber(0, state_checker.committed_messages);
+        try state_checker.history.putNoClobber(root_checksum, state_checker.committed_messages);
 
         return state_checker;
     }
@@ -73,13 +79,20 @@ pub const StateChecker = struct {
     pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
         const replica = state_checker.replicas[replica_index];
 
-        // Until the journal has recovered, `commit_min` may not be in the headers.
         // TODO Verify that `replica.commit_min` always exists after recovering via state transfer.
-        const commit_header =
-            if (replica.journal.recovered) replica.journal.header_with_op(replica.commit_min).? else null;
+        // Until the journal has recovered, `commit_min` may not be in the headers.
+        // Skip commit_min=0 because op=0 may not be in the headers even after recovery.
+        const commit_header = header: {
+            if (replica.journal.recovered and replica.commit_min > 0) {
+                break :header replica.journal.header_with_op(replica.commit_min).?;
+            } else {
+                // Still recovering or waiting for the first commit.
+                break :header null;
+            }
+        };
 
         const a = state_checker.replica_states[replica_index];
-        const b = if (commit_header) |h| h.checksum else 0;
+        const b = if (commit_header) |h| h.checksum else state_checker.root;
 
         if (b == a) return;
         state_checker.replica_states[replica_index] = b;
@@ -98,32 +111,29 @@ pub const StateChecker = struct {
         }
 
         if (commit_header == null) return;
-        assert(commit_header.?.command == .prepare);
         assert(commit_header.?.parent == a);
+        assert(commit_header.?.op > 0);
+        assert(commit_header.?.command == .prepare);
         assert(commit_header.?.operation != .reserved);
 
         // The replica has transitioned to state `b` that is not yet in the history.
         // Check if this is a valid new state based on the originating client's inflight request.
-        if (commit_header.?.op == 0) {
-            assert(commit_header.?.operation == .root);
-        } else {
-            const client = for (state_checker.clients) |*client| {
-                if (client.id == commit_header.?.client) break client;
-            } else unreachable;
+        const client = for (state_checker.clients) |*client| {
+            if (client.id == commit_header.?.client) break client;
+        } else unreachable;
 
-            if (client.request_queue.empty()) {
-                return error.ReplicaTransitionedToInvalidState;
-            }
-
-            const request = client.request_queue.head_ptr_const().?;
-            assert(request.message.header.client == commit_header.?.client);
-            assert(request.message.header.request == commit_header.?.request);
-            assert(request.message.header.command == .request);
-            assert(request.message.header.operation == commit_header.?.operation);
-            assert(request.message.header.size == commit_header.?.size);
-            // `checksum_body` will not match; the leader's StateMachine updated the timestamps in the
-            // prepare body's accounts/transfers.
+        if (client.request_queue.empty()) {
+            return error.ReplicaTransitionedToInvalidState;
         }
+
+        const request = client.request_queue.head_ptr_const().?;
+        assert(request.message.header.client == commit_header.?.client);
+        assert(request.message.header.request == commit_header.?.request);
+        assert(request.message.header.command == .request);
+        assert(request.message.header.operation == commit_header.?.operation);
+        assert(request.message.header.size == commit_header.?.size);
+        // `checksum_body` will not match; the leader's StateMachine updated the timestamps in the
+        // prepare body's accounts/transfers.
 
         const transitions_executed = state_checker.history.get(a).?;
         if (transitions_executed < state_checker.committed_messages) {
@@ -136,9 +146,9 @@ pub const StateChecker = struct {
         state_checker.committed_messages += 1;
         state_checker.committed_requests += @boolToInt(
             commit_header.?.operation != .register and
-            commit_header.?.operation != .root,
+                commit_header.?.operation != .root,
         );
-        assert(state_checker.committed_messages == commit_header.?.op + 1);
+        assert(state_checker.committed_messages == commit_header.?.op);
 
         log.info("     {d:0>4} {x:0>32} > {x:0>32} {}", .{
             state_checker.committed_messages,

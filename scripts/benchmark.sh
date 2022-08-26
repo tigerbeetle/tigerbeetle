@@ -50,7 +50,7 @@ for I in $REPLICAS
 do
     echo "Starting replica $I..."
     FILE="./0_${I}.tigerbeetle.benchmark"
-    ./tigerbeetle start --addresses=3001 "$FILE" > benchmark.log 2>&1 &
+    ./tigerbeetle start --addresses=3001 "$FILE" >> benchmark.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:
