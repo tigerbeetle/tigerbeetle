@@ -166,6 +166,7 @@ pub fn main() !void {
         },
         .create_account_invalid_probability = 1,
         .create_transfer_invalid_probability = 1,
+        .create_transfer_limit_probability = random.uintLessThan(u8, 101),
         .create_transfer_pending_probability = 1 + random.uintLessThan(u8, 100),
         .create_transfer_post_probability = 1 + random.uintLessThan(u8, 50),
         .create_transfer_void_probability = 1 + random.uintLessThan(u8, 50),
@@ -176,6 +177,7 @@ pub fn main() !void {
         },
         .lookup_transfer_span_min = 10,
         .lookup_transfer_span_mean = 10 + random.uintLessThan(usize, 1000),
+        .account_limit_probability = random.uintLessThan(u8, 80),
         .linked_valid_probability = random.uintLessThan(u8, 101),
         // 100% chance because this only applies to consecutive invalid transfers, which are rare.
         .linked_invalid_probability = 100,
@@ -274,7 +276,12 @@ pub fn main() !void {
     state_checker = try allocator.create(StateChecker);
     defer allocator.destroy(state_checker);
 
-    state_checker.* = try StateChecker.init(allocator, cluster.replicas, conductor.clients);
+    state_checker.* = try StateChecker.init(
+        allocator,
+        cluster_id,
+        cluster.replicas,
+        conductor.clients,
+    );
     defer state_checker.deinit();
 
     // The minimum number of healthy replicas required for a crashed replica to be able to recover.

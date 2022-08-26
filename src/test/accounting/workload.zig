@@ -11,7 +11,7 @@
 //!
 //! Transfer Encoding:
 //!
-//! * Transfer ids are an permutation of an ascending index.
+//! * Transfer ids are a deterministic, reversible permutation of an ascending index.
 //! * Using the transfer index as a seed, the Workload knows the eventual outcome of the transfer.
 //! * `Transfer.user_data` is set to the checksum of the remainder of the transfer's data
 //!   (excluding `timestamp` and `user_data` itself). This helps `on_lookup_transfers` to
@@ -30,7 +30,6 @@ const Auditor = accounting_auditor.AccountingAuditor;
 const accounts_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Account));
 const transfers_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Transfer));
 
-// TODO Test balance limits.
 // TODO Test linked create_accounts.
 // TODO Weight the first few messages toward `create_accounts` so that early `create_transfers`
 //      don't just fail.
@@ -53,8 +52,15 @@ const TransferOutcome = enum {
 const TransferPlan = struct {
     /// When false, send invalid payments that are guaranteed to be rejected with an error.
     valid: bool,
+
+    /// When `limit` is set, at least one of the following is true:
+    ///
+    /// * the debit account has debits_must_not_exceed_credits
+    /// * the credit account has credits_must_not_exceed_debits
+    ///
+    limit: bool,
+
     method: Method,
-    // TODO: limits
 
     const Method = enum {
         single_phase,
@@ -65,6 +71,7 @@ const TransferPlan = struct {
 
     fn outcome(self: TransferPlan) TransferOutcome {
         if (!self.valid) return .failure;
+        if (self.limit) return .unknown;
         return switch (self.method) {
             .single_phase, .pending => .success,
             .post_pending, .void_pending => .unknown,
@@ -82,28 +89,59 @@ const TransferTemplate = struct {
     const DebitAccount = struct {
         created: ?bool = true,
     };
-    const CreditAccount = struct { created: ?bool = true, distinct: ?bool = true };
+
+    const CreditAccount = struct {
+        created: ?bool = true,
+        distinct: ?bool = true,
+    };
 };
 
-const transfer_templates = [_]TransferTemplate{
-    template(true, .single_phase, .{}, .{}, 123, .{ .ok = true }),
-    template(true, .pending, .{}, .{}, 123, .{ .ok = true }),
-    template(true, .post_pending, .{}, .{}, 123, .{
+// TODO Test that this is exhaustive at comptime.
+const transfer_templates = table: {
+    const _0 = false;
+    const _1 = true;
+    const SNGL = TransferPlan.Method.single_phase;
+    const PEND = TransferPlan.Method.pending;
+    const POST = TransferPlan.Method.post_pending;
+    const VOID = TransferPlan.Method.void_pending;
+    const Result = accounting_auditor.CreateTransferResultSet;
+    const result = Result.init;
+
+    const two_phase_ok = .{
         .ok = true,
         .pending_transfer_already_posted = true,
         .pending_transfer_already_voided = true,
         .pending_transfer_expired = true,
-    }),
-    template(true, .void_pending, .{}, .{}, 123, .{
-        .ok = true,
-        .pending_transfer_already_posted = true,
-        .pending_transfer_already_voided = true,
-        .pending_transfer_expired = true,
-    }),
-    template(false, .single_phase, .{}, .{}, 0, .{ .ledger_must_not_be_zero = true }),
-    template(false, .pending, .{}, .{}, 0, .{ .ledger_must_not_be_zero = true }),
-    template(false, .post_pending, .{}, .{}, 9, .{ .pending_transfer_has_different_ledger = true }),
-    template(false, .void_pending, .{}, .{}, 9, .{ .pending_transfer_has_different_ledger = true }),
+    };
+    const limits = result(.{
+        .exceeds_credits = true,
+        .exceeds_debits = true,
+    });
+
+    const either = struct {
+        fn either(a: Result, b: Result) Result {
+            var c = a;
+            c.setUnion(b);
+            return c;
+        }
+    }.either;
+
+    break :table [_]TransferTemplate{
+        // valid, limit, method, debit_account, credit_account, ledger, result
+        template(_1, _0, SNGL, .{}, .{}, 1, result(.{ .ok = true })),
+        template(_1, _0, PEND, .{}, .{}, 1, result(.{ .ok = true })),
+        template(_1, _0, POST, .{}, .{}, 1, result(two_phase_ok)),
+        template(_1, _0, VOID, .{}, .{}, 1, result(two_phase_ok)),
+        template(_0, _0, SNGL, .{}, .{}, 0, result(.{ .ledger_must_not_be_zero = true })),
+        template(_0, _0, PEND, .{}, .{}, 0, result(.{ .ledger_must_not_be_zero = true })),
+        template(_0, _0, POST, .{}, .{}, 9, result(.{ .pending_transfer_has_different_ledger = true })),
+        template(_0, _0, VOID, .{}, .{}, 9, result(.{ .pending_transfer_has_different_ledger = true })),
+
+        template(_1, _1, SNGL, .{}, .{}, 1, either(limits, result(.{ .ok = true }))),
+        template(_1, _1, PEND, .{}, .{}, 1, either(limits, result(.{ .ok = true }))),
+        template(_1, _1, POST, .{}, .{}, 1, either(limits, result(two_phase_ok))),
+        template(_1, _1, VOID, .{}, .{}, 1, either(limits, result(two_phase_ok))),
+    };
 };
 
 ///// OnePhaseValid creates "imminent" transfers: the workload knows they will succeed
@@ -135,6 +173,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
 
             create_account_invalid_probability: u8, // ≤ 100
             create_transfer_invalid_probability: u8, // ≤ 100
+            create_transfer_limit_probability: u8, // ≤ 100
             create_transfer_pending_probability: u8, // ≤ 100
             create_transfer_post_probability: u8, // ≤ 100
             create_transfer_void_probability: u8, // ≤ 100
@@ -150,6 +189,8 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             // size of timespan for querying, measured in transfers
             lookup_transfer_span_min: usize,
             lookup_transfer_span_mean: usize,
+
+            account_limit_probability: u8, // ≤ 100
 
             /// This probability is only checked for consecutive guaranteed-successful transfers.
             linked_valid_probability: u8,
@@ -184,6 +225,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
         pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Self {
             assert(options.create_account_invalid_probability <= 100);
             assert(options.create_transfer_invalid_probability <= 100);
+            assert(options.create_transfer_limit_probability <= 100);
             assert(options.create_transfer_pending_probability <= 100);
             assert(options.create_transfer_post_probability <= 100);
             assert(options.create_transfer_void_probability <= 100);
@@ -191,6 +233,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
 
             assert(options.lookup_transfer_span_min > 0);
             assert(options.lookup_transfer_span_min <= options.lookup_transfer_span_mean);
+            assert(options.account_limit_probability <= 100);
             assert(options.linked_valid_probability <= 100);
             assert(options.linked_invalid_probability <= 100);
             assert(options.pending_timeout_min > 0);
@@ -211,13 +254,18 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             //var transfers_imminent = std.AutoHashSetUnmanaged(u128).init();
             //errdefer transfers_imminent
 
-            // TODO: Balance limits: debits_must_not_exceed_credits, credits_must_not_exceed_debits
             for (auditor.accounts) |*account, i| {
                 account.* = std.mem.zeroInit(tb.Account, .{
                     .id = auditor.account_index_to_id(i),
-                    .ledger = 123,
+                    .ledger = 1,
                     .code = 123,
                 });
+
+                if (chance(random, options.account_limit_probability)) {
+                    const b = random.boolean();
+                    account.flags.debits_must_not_exceed_credits = b;
+                    account.flags.credits_must_not_exceed_debits = !b;
+                }
             }
 
             return Self{
@@ -369,6 +417,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                         // link it to the current transfer — it will still fail.
                         _ = self.build_transfer(transfers[i - 1].id, .{
                             .valid = true,
+                            .limit = false,
                             .method = .single_phase,
                         }, &transfers[i - 1]);
                         transfers[i - 1].flags.linked = true;
@@ -391,7 +440,9 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
         fn build_lookup_accounts(self: *Self, lookup_ids: []u128) usize {
             for (lookup_ids) |*id| {
                 if (chance(self.random, self.options.lookup_account_invalid_probability)) {
-                    id.* = self.random.int(u128);
+                    // Pick an account with valid index (rather than "random.int(u128)") because the
+                    // Auditor must decode the id to check for a matching account.
+                    id.* = self.auditor.account_index_to_id(self.random.int(usize));
                 } else {
                     id.* = self.auditor.accounts[self.random.uintLessThanBiased(usize, self.auditor.accounts.len)].id;
                 }
@@ -467,12 +518,19 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                 if (transfer_plan.valid == t.plan.valid and method == t.plan.method) break t;
             } else unreachable;
 
+            const limit_debits = transfer_template.plan.limit and self.random.boolean();
+            const limit_credits = transfer_template.plan.limit and (self.random.boolean() or !limit_debits);
+
             const debit_account = self.auditor.pick_account(.{
                 .created = transfer_template.debit_account.created,
+                .debits_must_not_exceed_credits = limit_debits,
+                .credits_must_not_exceed_debits = null,
             }) orelse return null;
 
             const credit_account = self.auditor.pick_account(.{
                 .created = transfer_template.credit_account.created,
+                .debits_must_not_exceed_credits = null,
+                .credits_must_not_exceed_debits = limit_credits,
                 .exclude = if (transfer_template.credit_account.distinct == true) debit_account.id else null,
             }) orelse return null;
 
@@ -578,6 +636,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             };
             return .{
                 .valid = !chance(random, self.options.create_transfer_invalid_probability),
+                .limit = chance(random, self.options.create_transfer_limit_probability),
                 .method = method,
             };
         }
@@ -704,20 +763,22 @@ fn chance(random: std.rand.Random, p: u8) bool {
 
 fn template(
     valid: bool,
+    limit: bool,
     method: TransferPlan.Method,
     debit_account: TransferTemplate.DebitAccount,
     credit_account: TransferTemplate.CreditAccount,
     ledger: u32,
-    result: std.enums.EnumFieldStruct(tb.CreateTransferResult, bool, false),
+    result: accounting_auditor.CreateTransferResultSet,
 ) TransferTemplate {
     return .{
         .plan = .{
             .valid = valid,
+            .limit = limit,
             .method = method,
         },
         .debit_account = debit_account,
         .credit_account = credit_account,
         .ledger = ledger,
-        .result = accounting_auditor.CreateTransferResultSet.init(result),
+        .result = result,
     };
 }
