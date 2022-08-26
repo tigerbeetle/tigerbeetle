@@ -26,7 +26,7 @@ namespace TigerBeetle.Benchmarks
             Console.WriteLine($"Benchmarking dotnet");
 
             var queue = new TimedQueue();
-            var client = new Client(0, new IPEndPoint[] { IPEndPoint.Parse("127.0.0.1:3001") }, maxConcurrency: 45);
+            using var client = new Client(0, new IPEndPoint[] { IPEndPoint.Parse("127.0.0.1:3001") }, maxConcurrency: 45);
 
             WaitForConnect();
 
@@ -163,10 +163,9 @@ namespace TigerBeetle.Benchmarks
 
             var result = (long)((transfers.Length * 1000) / queue.TotalTime);
 
-            Console.WriteLine($"{transfers.Length} {queue.TotalTime} {result} transfers per second\n");
+            Console.WriteLine($"{result} transfers per second");
             Console.WriteLine($"create_transfers max p100 latency per {TRANSFERS_PER_BATCH} transfers = {queue.MaxTransfersLatency}ms");
-
-            Console.ReadLine();
+            Console.WriteLine($"total {transfers.Length} transfers in {queue.TotalTime}ms");
         }
 
         private static void WaitForConnect()
