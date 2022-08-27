@@ -25,6 +25,8 @@ namespace TigerBeetle
 
         public UInt128(ReadOnlySpan<byte> bytes)
         {
+            if (bytes.Length != SIZE) throw new ArgumentException(nameof(bytes));
+
             var values = MemoryMarshal.Cast<byte, ulong>(bytes);
             _0 = values[0];
             _1 = values[1];
@@ -40,8 +42,11 @@ namespace TigerBeetle
 
         public UInt128(long a, long b = 0)
         {
-            _0 = (ulong)a;
-            _1 = (ulong)b;
+            unchecked
+            {
+                _0 = (ulong)a;
+                _1 = (ulong)b;
+            }
         }
 
         public UInt128(ulong a, ulong b = 0)
@@ -58,13 +63,13 @@ namespace TigerBeetle
 
         public (long, long) ToInt64()
         {
-            return ((long)_0, (long)_1);
+            unchecked
+            {
+                return ((long)_0, (long)_1);
+            }
         }
 
-        public (ulong, ulong) ToUInt64()
-        {
-            return (_0, _1);
-        }
+        public (ulong, ulong) ToUInt64() => (_0, _1);
 
         internal Span<T> AsSpan<T>()
         {
@@ -77,7 +82,7 @@ namespace TigerBeetle
             }
         }
 
-        internal void FromGuid(Guid guid) => guid.TryWriteBytes(AsSpan<byte>());
+        internal void FromGuid(Guid guid) => _ = guid.TryWriteBytes(AsSpan<byte>());
 
         public override bool Equals([NotNullWhen(true)] object? obj)
         {
@@ -95,55 +100,25 @@ namespace TigerBeetle
 
         public bool Equals(UInt128 other) => _0 == other._0 && _1 == other._1;
 
-        public override int GetHashCode()
-        {
-            return HashCode.Combine(_0, _1);
-        }
+        public override int GetHashCode() => HashCode.Combine(_0, _1);
+        
+        public override string ToString() => ToGuid().ToString();
+        
+        public static bool operator ==(UInt128 left, UInt128 right) => left.Equals(right);
+        
+        public static bool operator !=(UInt128 left, UInt128 right) => !left.Equals(right);
 
-        public override string ToString()
-        {
-            return ToGuid().ToString();
-        }
+        public static implicit operator Guid(UInt128 value) => value.ToGuid();
+        
+        public static implicit operator UInt128(Guid guid) => new UInt128(guid);
+        
+        public static implicit operator UInt128(long value) => new UInt128(value, 0);
+        
+        public static implicit operator UInt128(ulong value) => new UInt128(value, 0);
 
-        public static bool operator ==(UInt128 left, UInt128 right)
-        {
-            return left.Equals(right);
-        }
-
-        public static bool operator !=(UInt128 left, UInt128 right)
-        {
-            return !(left == right);
-        }
-
-        public static implicit operator Guid(UInt128 value)
-        {
-            return value.ToGuid();
-        }
-
-        public static implicit operator UInt128(Guid guid)
-        {
-            return new UInt128(guid);
-        }
-
-        public static implicit operator UInt128(long value)
-        {
-            return new UInt128(value, 0);
-        }
-
-        public static implicit operator UInt128(ulong value)
-        {
-            return new UInt128(value, 0);
-        }
-
-        public static implicit operator UInt128(int value)
-        {
-            return new UInt128(value, 0);
-        }
-
-        public static implicit operator UInt128(uint value)
-        {
-            return new UInt128(value, 0);
-        }
+        public static implicit operator UInt128(int value) => new UInt128(value, 0);
+        
+        public static implicit operator UInt128(uint value) => new UInt128(value, 0);
 
         public ReadOnlySpan<byte> AsReadOnlySpan()
         {
