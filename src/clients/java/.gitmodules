@@ -1,0 +1,3 @@
+[submodule "src/zig/libs/jui"]
+	path = src/zig/libs/jui
+	url = https://github.com/batiati/jui.git
