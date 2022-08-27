@@ -17,7 +17,7 @@ namespace TigerBeetle
     {
         #region Fields
 
-        private const int DEFAULT_MAX_CONCURRENCY = 45;
+        private const int DEFAULT_MAX_CONCURRENCY = 32;
 
         private IntPtr handle;
         private readonly uint clusterID;
@@ -106,10 +106,10 @@ namespace TigerBeetle
             return CallRequest<CreateAccountsResult, Account>(Operation.CreateAccounts, batch);
         }
 
-        public async Task<CreateAccountResult> CreateAccountAsync(Account account)
+        public Task<CreateAccountResult> CreateAccountAsync(Account account)
         {
-            var result = await CallRequestAsync<CreateAccountsResult, Account>(Operation.CreateAccounts, new[] { account });
-            return result.Length == 0 ? CreateAccountResult.Ok : result[0].Result;
+            return CallRequestAsync<CreateAccountsResult, Account>(Operation.CreateAccounts, new[] { account })
+            .ContinueWith(x => x.Result.Length == 0 ? CreateAccountResult.Ok : x.Result[0].Result);
         }
 
         public Task<CreateAccountsResult[]> CreateAccountsAsync(Account[] batch)
@@ -128,10 +128,10 @@ namespace TigerBeetle
             return CallRequest<CreateTransfersResult, Transfer>(Operation.CreateTransfers, batch);
         }
 
-        public async Task<CreateTransferResult> CreateTransferAsync(Transfer transfer)
+        public Task<CreateTransferResult> CreateTransferAsync(Transfer transfer)
         {
-            var result = await CallRequestAsync<CreateTransfersResult, Transfer>(Operation.CreateTransfers, new[] { transfer });
-            return result.Length == 0 ? CreateTransferResult.Ok : result[0].Result;
+            return CallRequestAsync<CreateTransfersResult, Transfer>(Operation.CreateTransfers, new[] { transfer })
+            .ContinueWith(x => x.Result.Length == 0 ? CreateTransferResult.Ok : x.Result[0].Result);
         }
 
         public Task<CreateTransfersResult[]> CreateTransfersAsync(Transfer[] batch)
@@ -150,10 +150,10 @@ namespace TigerBeetle
             return CallRequest<Account, UInt128>(Operation.LookupAccounts, ids);
         }
 
-        public async Task<Account?> LookupAccountAsync(UInt128 id)
+        public Task<Account?> LookupAccountAsync(UInt128 id)
         {
-            var result = await CallRequestAsync<Account, UInt128>(Operation.LookupAccounts, new[] { id });
-            return result.Length == 0 ? null : result[0];
+            return CallRequestAsync<Account, UInt128>(Operation.LookupAccounts, new[] { id })
+            .ContinueWith(x => x.Result.Length == 0 ? (Account?)null : x.Result[0]);
         }
 
         public Task<Account[]> LookupAccountsAsync(UInt128[] ids)
@@ -172,10 +172,10 @@ namespace TigerBeetle
             return CallRequest<Transfer, UInt128>(Operation.LookupTransfers, ids);
         }
 
-        public async Task<Transfer?> LookupTransferAsync(UInt128 id)
+        public Task<Transfer?> LookupTransferAsync(UInt128 id)
         {
-            var result = await CallRequestAsync<Transfer, UInt128>(Operation.LookupTransfers, new[] { id });
-            return result.Length == 0 ? null : result[0];
+            return CallRequestAsync<Transfer, UInt128>(Operation.LookupTransfers, new[] { id })
+            .ContinueWith(x => x.Result.Length == 0 ? (Transfer?)null : x.Result[0]);
         }
 
         public Task<Transfer[]> LookupTransfersAsync(UInt128[] ids)
@@ -202,7 +202,7 @@ namespace TigerBeetle
             var asyncRequest = new AsyncRequest<TResult, TBody>(this, packet);
 
             asyncRequest.Submit(operation, batch);
-            return await asyncRequest.Wait();
+            return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
         }
 
         public void Dispose()

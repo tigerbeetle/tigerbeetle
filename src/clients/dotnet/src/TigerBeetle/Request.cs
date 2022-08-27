@@ -133,7 +133,7 @@ namespace TigerBeetle
 
             #endregion Comments
 
-            this.completionSource = new TaskCompletionSource<TResult[]>(TaskCreationOptions.RunContinuationsAsynchronously | TaskCreationOptions.AttachedToParent);
+            this.completionSource = new TaskCompletionSource<TResult[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
         #endregion Constructor
