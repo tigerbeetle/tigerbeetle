@@ -26,6 +26,7 @@ namespace TigerBeetle
             public IntPtr data;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
         public unsafe struct TBPacketList
         {
             public TBPacket* head;
