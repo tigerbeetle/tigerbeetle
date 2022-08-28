@@ -13,10 +13,10 @@
   </PropertyGroup>
 
 	<Target Name="BuildZig" BeforeTargets="CoreCompile"  Condition="'$(OS)'=='Windows'">
-		<Exec Command=".\tigerbeetle\zig\zig.exe build tb_client_dyn -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../"/>
+		<Exec Command=".\tigerbeetle\zig\zig.exe build tb_client -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../"/>
 	</Target>
 	<Target Name="BuildZig" BeforeTargets="CoreCompile"  Condition="'$(OS)'!='Windows'">
-		<Exec Command="tigerbeetle/zig/zig build tb_client_dyn -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../"/>
+		<Exec Command="tigerbeetle/zig/zig build tb_client -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../"/>
 	</Target>	
 	<ItemGroup>
       <None Include="native/win-x64/tb_client.dll" 
