@@ -34,13 +34,13 @@ namespace TigerBeetle
 
         public UInt128(Guid guid)
         {
-            _0 = 0;
-            _1 = 0;
+            _0 = 0LU;
+            _1 = 0LU;
 
             FromGuid(guid);
         }
 
-        public UInt128(long a, long b = 0)
+        public UInt128(long a, long b = 0L)
         {
             unchecked
             {
@@ -49,7 +49,7 @@ namespace TigerBeetle
             }
         }
 
-        public UInt128(ulong a, ulong b = 0)
+        public UInt128(ulong a, ulong b = 0LU)
         {
             _0 = a;
             _1 = b;
@@ -112,13 +112,25 @@ namespace TigerBeetle
         
         public static implicit operator UInt128(Guid guid) => new UInt128(guid);
         
-        public static implicit operator UInt128(long value) => new UInt128(value, 0);
+        public static implicit operator UInt128(long value)
+        {
+            unchecked
+            {
+                return new UInt128((ulong)value, 0LU);
+            }
+        }
         
-        public static implicit operator UInt128(ulong value) => new UInt128(value, 0);
+        public static implicit operator UInt128(ulong value) => new UInt128(value, 0LU);
 
-        public static implicit operator UInt128(int value) => new UInt128(value, 0);
+        public static implicit operator UInt128(int value)
+        {
+            unchecked
+            {
+                return new UInt128((ulong)value, 0LU);
+            }
+        } 
         
-        public static implicit operator UInt128(uint value) => new UInt128(value, 0);
+        public static implicit operator UInt128(uint value) => new UInt128((ulong)value, 0LU);
 
         public ReadOnlySpan<byte> AsReadOnlySpan()
         {
