@@ -1,5 +1,6 @@
 const std = @import("std");
 const jui = @import("jui");
+const tb_client = @import("tb_client.zig");
 
 const Reflector = jui.Reflector;
 const String = Reflector.String;
@@ -19,6 +20,9 @@ fn onUnload(vm: *jui.JavaVM) void {
 fn greet(env: *jui.JNIEnv, this_object: jui.jobject, string: String) !jui.jstring {
     _ = this_object;
 
+    const tb_client_init = tb_client.tb_client_init;
+    _ = tb_client_init;
+
     defer string.release();
 
     var buf: [256]u8 = undefined;
@@ -29,7 +33,6 @@ fn greet(env: *jui.JNIEnv, this_object: jui.jobject, string: String) !jui.jstrin
 
 comptime {
     const wrapped = struct {
-
         pub const JavaVM = jui.JavaVM;
 
         pub fn onLoadWrapped(vm: *JavaVM) callconv(.C) jui.jint {
