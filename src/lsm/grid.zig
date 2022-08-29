@@ -401,13 +401,13 @@ pub fn GridType(comptime Storage: type) type {
 
             const header_bytes = iop.block[0..@sizeOf(vsr.Header)];
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
-            const body = iop.block[@sizeOf(vsr.Header)..header.size];
 
             const address = iop.reads.peek().?.address;
             const checksum = iop.reads.peek().?.checksum;
 
             const checksum_valid = header.valid_checksum();
-            const checksum_body_valid = header.valid_checksum_body(body);
+            const checksum_body_valid = checksum_valid and
+                header.valid_checksum_body(iop.block[@sizeOf(vsr.Header)..header.size]);
             const checksum_match = header.checksum == checksum;
 
             if (checksum_valid and checksum_body_valid and checksum_match) {
@@ -426,8 +426,8 @@ pub fn GridType(comptime Storage: type) type {
                     log.err("invalid checksum body at address {}", .{address});
                 } else if (!checksum_match) {
                     log.err(
-                        "valid checksum {} at address {} does not match expected checksum {}",
-                        .{ header.checksum, address, checksum },
+                        "expected address={} checksum={}, found address={} checksum={}",
+                        .{ address, checksum, header.op, header.checksum },
                     );
                 } else {
                     unreachable;
