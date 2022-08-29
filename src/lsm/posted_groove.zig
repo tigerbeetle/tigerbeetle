@@ -260,9 +260,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 context.groove.prefetch_ids.clearRetainingCapacity();
                 assert(context.groove.prefetch_ids.count() == 0);
 
-                const callback = context.callback;
-                context.* = undefined;
-                callback(context);
+                context.callback(context);
             }
         };
 
@@ -274,12 +272,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             /// Returns false if there are no more IDs to prefetch.
             fn lookup_start_next(worker: *PrefetchWorker) void {
                 const id = worker.context.id_iterator.next() orelse {
-                    // Since worker_finished() may cause the entire prefetch to finish and call
-                    // the provided callback, we must not set worker to undefined after calling
-                    // worker_finished() as the memory may already be used for something else.
-                    const context = worker.context;
-                    worker.* = undefined;
-                    context.worker_finished();
+                    worker.context.worker_finished();
                     return;
                 };
 
