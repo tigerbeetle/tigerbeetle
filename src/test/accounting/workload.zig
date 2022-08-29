@@ -26,14 +26,15 @@ const tb = @import("../../tigerbeetle.zig");
 const vsr = @import("../../vsr.zig");
 const accounting_auditor = @import("./auditor.zig");
 const Auditor = accounting_auditor.AccountingAuditor;
+const IdPermutation = @import("../id.zig").IdPermutation;
+
+// TODO(zig) This won't be necessary in Zig 0.10.
+const PriorityQueue = @import("../priority_queue.zig").PriorityQueue;
 
 const accounts_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Account));
 const transfers_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Transfer));
 
 // TODO Test linked create_accounts.
-// TODO Weight the first few messages toward `create_accounts` so that early `create_transfers`
-//      don't just fail.
-// TODO Test lookup of "imminent" transfers (sent but not yet delivered).
 
 const TransferOutcome = enum {
     /// The transfer is guaranteed to commit.
@@ -84,6 +85,22 @@ const TransferTemplate = struct {
     result: accounting_auditor.CreateTransferResultSet,
 };
 
+const TransferBatchQueue = PriorityQueue(TransferBatch, void, struct {
+    /// Ascending order.
+    fn compare(_: void, a: TransferBatch, b: TransferBatch) std.math.Order {
+        assert(a.min != b.min);
+        assert(a.max != b.max);
+        return std.math.order(a.min, b.min);
+    }
+}.compare);
+
+const TransferBatch = struct {
+    /// Index of the first transfer in the batch.
+    min: usize,
+    /// Index of the last transfer in the batch.
+    max: usize,
+};
+
 /// Indexes: [valid:bool][limit:bool][method]
 const transfer_templates = table: {
     const SNGL = @enumToInt(TransferPlan.Method.single_phase);
@@ -99,6 +116,7 @@ const transfer_templates = table: {
         .pending_transfer_already_voided = true,
         .pending_transfer_expired = true,
     };
+
     const limits = result(.{
         .exceeds_credits = true,
         .exceeds_debits = true,
@@ -113,10 +131,10 @@ const transfer_templates = table: {
     }.either;
 
     const template = struct {
-        fn template(ledger: u32, result: Result) TransferTemplate {
+        fn template(ledger: u32, transfer_result: Result) TransferTemplate {
             return .{
                 .ledger = ledger,
-                .result = result,
+                .result = transfer_result,
             };
         }
     }.template;
@@ -148,14 +166,6 @@ const transfer_templates = table: {
     break :table templates;
 };
 
-///// OnePhaseValid creates "imminent" transfers: the workload knows they will succeed
-///// eventually, but until they do they must be tracked so that `lookup_transfers` knows
-///// not to expect them yet.
-//const ImminentTransferRange = struct {
-//    index: usize,
-//    count: usize,
-//};
-
 pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
     const Operation = AccountingStateMachine.Operation;
 
@@ -171,7 +181,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
 
         pub const Options = struct {
             auditor_options: Auditor.Options,
-            transfer_id_permutation: accounting_auditor.IdPermutation,
+            transfer_id_permutation: IdPermutation,
 
             operations: std.enums.EnumFieldStruct(Action, usize, null),
 
@@ -214,6 +224,11 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
         auditor: Auditor,
         options: Options,
 
+        transfer_plan_seed: u64,
+
+        /// Whether a `create_accounts` message has ever been sent.
+        accounts_sent: bool = false,
+
         /// The index of the next transfer to send.
         transfers_sent: usize = 0,
 
@@ -221,10 +236,9 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
         /// to `create_accounts`.
         transfers_delivered: []usize,
 
-        // TODO store index instead
-        //transfers_imminent: std.AutoHashSetUnmanaged(u128),
-
-        transfer_plan_seed: u64,
+        /// Track index ranges of `create_transfers` batches that have committed but are greater
+        /// than `transfers_delivering_min` (which is still in-flight).
+        transfers_delivered_recently: TransferBatchQueue,
 
         pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Self {
             assert(options.create_account_invalid_probability <= 100);
@@ -255,8 +269,11 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             errdefer allocator.free(transfers_delivered);
             std.mem.set(usize, transfers_delivered, 0);
 
-            //var transfers_imminent = std.AutoHashSetUnmanaged(u128).init();
-            //errdefer transfers_imminent
+            var transfers_delivered_recently = TransferBatchQueue.init(allocator, {});
+            errdefer transfers_delivered_recently.deinit();
+            try transfers_delivered_recently.ensureTotalCapacity(
+                options.auditor_options.client_count * config.client_request_queue_max,
+            );
 
             for (auditor.accounts) |*account, i| {
                 account.* = std.mem.zeroInit(tb.Account, .{
@@ -276,15 +293,16 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                 .random = random,
                 .auditor = auditor,
                 .options = options,
-                .transfers_delivered = transfers_delivered,
                 .transfer_plan_seed = random.int(u64),
+                .transfers_delivered = transfers_delivered,
+                .transfers_delivered_recently = transfers_delivered_recently,
             };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.auditor.deinit(allocator);
             allocator.free(self.transfers_delivered);
-            //self.transfers_imminent.deinit(allocator);
+            self.transfers_delivered_recently.deinit();
         }
 
         /// A client may build multiple requests to queue up while another is in-flight.
@@ -295,11 +313,19 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             assert(client_index < self.auditor.options.client_count);
             assert(body.len == config.message_size_max - @sizeOf(vsr.Header));
 
-            const action = switch (sample_distribution(self.random, self.options.operations)) {
-                .create_accounts => Action.create_accounts,
-                .create_transfers => Action.create_transfers,
-                .lookup_accounts => Action.lookup_accounts,
-                .lookup_transfers => Action.lookup_transfers,
+            const action = action: {
+                if (!self.accounts_sent and self.random.boolean()) {
+                    // Early in the test make sure some accounts get created.
+                    self.accounts_sent = true;
+                    break :action .create_accounts;
+                }
+
+                break :action switch (sample_distribution(self.random, self.options.operations)) {
+                    .create_accounts => Action.create_accounts,
+                    .create_transfers => Action.create_transfers,
+                    .lookup_accounts => Action.lookup_accounts,
+                    .lookup_transfers => Action.lookup_transfers,
+                };
             };
 
             const size = switch (action) {
@@ -666,10 +692,24 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             results_sparse: []const tb.CreateTransfersResult,
         ) void {
             self.auditor.on_create_transfers(client_index, timestamp, transfers, results_sparse);
+            if (transfers.len == 0) return;
 
-            if (transfers.len > 0) {
-                self.transfers_delivered[client_index] =
-                    self.transfer_id_to_index(transfers[transfers.len - 1].id);
+            const transfer_index_min = self.transfer_id_to_index(transfers[0].id);
+            const transfer_index_max = self.transfer_id_to_index(transfers[transfers.len - 1].id);
+            assert(transfer_index_min <= transfer_index_max);
+
+            self.transfers_delivered[client_index] = transfer_index_max;
+            self.transfers_delivered_recently.add(.{
+                .min = transfer_index_min,
+                .max = transfer_index_max,
+            }) catch unreachable;
+
+            var delivering_min = self.transfers_delivering_min();
+            while (self.transfers_delivered_recently.peek()) |delivered| {
+                assert(delivered.min >= delivering_min);
+                if (delivered.min != delivering_min) break;
+                _ = self.transfers_delivered_recently.remove();
+                delivering_min = 1 + delivered.max;
             }
         }
 
@@ -711,8 +751,17 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                             // The transfer was delivered; it must exist.
                             assert(result != null);
                         } else {
-                            // TODO Track the ranges of `create_transfers` that are in-flight, so we know
-                            // whether or not `transfer_index` must exist at this point.
+                            for (self.transfers_delivered_recently.items) |delivered| {
+                                if (transfer_index >= delivered.min and
+                                    transfer_index <= delivered.max)
+                                {
+                                    // The transfer was delivered recently; it must exist.
+                                    assert(result != null);
+                                }
+                            } else {
+                                // The `create_transfers` has not committed (it may be in-flight).
+                                assert(result == null);
+                            }
                         }
                     },
                     // An invalid transfer is never persisted.

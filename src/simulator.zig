@@ -19,6 +19,7 @@ const MessageBus = @import("test/message_bus.zig").MessageBus;
 const auditor = @import("test/accounting/auditor.zig");
 const Workload = @import("test/accounting/workload.zig").AccountingWorkloadType(StateMachine);
 const Conductor = @import("test/conductor.zig").ConductorType(Client, MessageBus, StateMachine, Workload);
+const IdPermutation = @import("test/id.zig").IdPermutation;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
 const output = std.log.scoped(.state_checker);
@@ -161,7 +162,7 @@ pub fn main() !void {
             .create_accounts = 1 + random.uintLessThan(usize, 10),
             .create_transfers = 1 + random.uintLessThan(usize, 100),
             .lookup_accounts = 1 + random.uintLessThan(usize, 20),
-            .lookup_transfers = 1 + random.uintLessThan(usize, 100),
+            .lookup_transfers = 1 + random.uintLessThan(usize, 20),
         },
         .create_account_invalid_probability = 1,
         .create_transfer_invalid_probability = 1,
@@ -436,7 +437,7 @@ fn random_partition_mode(random: std.rand.Random) PartitionMode {
     return @intToEnum(PartitionMode, enumAsInt);
 }
 
-fn random_id_permutation(random: std.rand.Random) auditor.IdPermutation {
+fn random_id_permutation(random: std.rand.Random) IdPermutation {
     return switch (random.uintLessThan(usize, 4)) {
         0 => .{ .identity = {} },
         1 => .{ .reflect = {} },
