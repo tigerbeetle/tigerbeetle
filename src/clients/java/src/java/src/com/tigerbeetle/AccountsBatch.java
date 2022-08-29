@@ -4,7 +4,7 @@ import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
-public final class AccountsBatch 
+public final class AccountsBatch extends Batch
 {
     private static final class Struct
     {
@@ -12,23 +12,24 @@ public final class AccountsBatch
         public static final byte[] RESERVED = new byte[48];
     }
 
-    private ByteBuffer buffer;
     private int lenght;
     private final int capacity;
 
     public AccountsBatch(int capacity)
     {
-        this.buffer = ByteBuffer.allocateDirect(capacity * Struct.SIZE);
+        super(Batch.CREATE_ACCOUNTS, capacity * Struct.SIZE);
+
         this.lenght = 0;
         this.capacity = capacity;
     }
 
     public AccountsBatch(Account[] accounts)
     {
+        super(Batch.CREATE_ACCOUNTS, accounts.length * Struct.SIZE);
+
         this.lenght = accounts.length;
         this.capacity = accounts.length;
-        this.buffer = ByteBuffer.allocateDirect(capacity * Struct.SIZE);
-
+ 
         for(int i=0; i<accounts.length;i++)
         {
             Set(i, accounts[i]);
