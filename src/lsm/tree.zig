@@ -285,12 +285,6 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
             callback: fn (*Tree.LookupContext, ?*const Value) void,
 
-            fn finish(context: *LookupContext, value: ?*const Value) void {
-                const callback = context.callback;
-                context.* = undefined;
-                callback(context, value);
-            }
-
             fn read_index_block(context: *LookupContext) void {
                 assert(context.data_block == null);
                 assert(context.index_block < context.index_block_count);
@@ -356,7 +350,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 assert(context.index_block_count <= config.lsm_levels);
 
                 if (Table.data_block_search(data_block, context.key)) |value| {
-                    context.finish(unwrap_tombstone(value));
+                    context.callback(context, unwrap_tombstone(value));
                 } else {
                     // The key is not present in this table, check the next level.
                     context.advance_to_next_level();
@@ -371,7 +365,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
                 context.index_block += 1;
                 if (context.index_block == context.index_block_count) {
-                    context.finish(null);
+                    context.callback(context, null);
                     return;
                 }
                 assert(context.index_block < context.index_block_count);
@@ -508,7 +502,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         fn compact_start(tree: *Tree, callback: fn (*Tree) void, op: u64) void {
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
-            
+
             if (op > 0) assert(op > tree.compaction_op);
             tree.compaction_op = op;
             tree.compaction_callback = callback;

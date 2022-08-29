@@ -125,9 +125,7 @@ pub const Storage = struct {
 
         const target = read.target();
         if (target.len == 0) {
-            const callback = read.callback;
-            read.* = undefined;
-            callback(read);
+            read.callback(read);
             return;
         }
 
@@ -309,9 +307,7 @@ pub const Storage = struct {
         write.buffer = write.buffer[bytes_written..];
 
         if (write.buffer.len == 0) {
-            const callback = write.callback;
-            write.* = undefined;
-            callback(write);
+            write.callback(write);
             return;
         }
 

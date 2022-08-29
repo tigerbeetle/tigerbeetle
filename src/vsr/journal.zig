@@ -1827,10 +1827,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.lock_sectors(@fieldParentPtr(Self.Write, "range", waiting));
             }
 
-            // The callback may set range, so we can't set range to undefined after the callback.
-            const callback = range.callback;
-            range.* = undefined;
-            callback(write);
+            range.callback(write);
         }
 
         pub fn writing(self: *Self, op: u64, checksum: u128) bool {

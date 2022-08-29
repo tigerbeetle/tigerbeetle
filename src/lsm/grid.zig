@@ -72,13 +72,6 @@ pub fn GridType(comptime Storage: type) type {
 
             /// Link for the write_queue linked list.
             next: ?*Write = null,
-
-            /// Call the user's callback, finishing the write.
-            fn finish(write: *Write) void {
-                const callback = write.callback;
-                write.* = undefined;
-                callback(write);
-            }
         };
 
         const WriteIOP = struct {
@@ -94,14 +87,6 @@ pub fn GridType(comptime Storage: type) type {
 
             /// Link for read_queue/read_recovery_queue/ReadIOP.reads linked lists.
             next: ?*Read = null,
-
-            /// Call the user's callback, finishing the read.
-            /// May be called by Replica after recovering the block over the network.
-            fn finish(read: *Read, block: BlockPtrConst) void {
-                const callback = read.callback;
-                read.* = undefined;
-                callback(read, block);
-            }
         };
 
         const ReadIOP = struct {
@@ -302,8 +287,8 @@ pub fn GridType(comptime Storage: type) type {
             grid.write_iops.release(iop);
 
             // Start a queued write if possible *before* calling the completed
-            // write's callback through write.finish(). This ensures that if the
-            // callback calls Grid.write_block() it doesn't preempt the queue.
+            // write's callback. This ensures that if the callback calls
+            // Grid.write_block() it doesn't preempt the queue.
             if (grid.write_queue.pop()) |queued_write| {
                 const initial_iops_available = grid.write_iops.available();
                 assert(initial_iops_available > 0);
@@ -314,7 +299,7 @@ pub fn GridType(comptime Storage: type) type {
             // This call must come after releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
-            completed_write.finish();
+            completed_write.callback(completed_write);
         }
 
         /// This function transparently handles recovery if the checksum fails.
@@ -370,7 +355,7 @@ pub fn GridType(comptime Storage: type) type {
                 assert(!grid.read_recursion_guard);
                 grid.read_recursion_guard = true;
                 defer grid.read_recursion_guard = false;
-                read.finish(block);
+                read.callback(read, block);
                 return;
             }
 
@@ -432,7 +417,7 @@ pub fn GridType(comptime Storage: type) type {
                 while (iop.reads.pop()) |read| {
                     assert(read.address == address);
                     assert(read.checksum == checksum);
-                    read.finish(iop.block);
+                    read.callback(read, iop.block);
                 }
             } else {
                 if (!checksum_valid) {
