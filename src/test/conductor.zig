@@ -9,6 +9,7 @@ const log = std.log.scoped(.test_conductor);
 
 const vsr = @import("../vsr.zig");
 const config = @import("../config.zig");
+const IdPermutation = @import("id.zig").IdPermutation;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 
@@ -50,6 +51,7 @@ pub fn ConductorType(
         random: std.rand.Random,
         workload: *Workload,
         options: Options,
+        client_id_permutation: IdPermutation,
 
         clients: []Client,
         client_pools: []MessagePool,
@@ -117,11 +119,17 @@ pub fn ConductorType(
             var clients = try allocator.alloc(Client, options.client_count);
             errdefer allocator.free(clients);
 
+            // Always use UUIDs because the simulator network expects client ids to never collide
+            // with replica indices.
+            var client_id_permutation = IdPermutation{ .random = undefined };
+            random.bytes(&client_id_permutation.random);
+
             for (clients) |*client, i| {
                 errdefer for (clients[0..i]) |*c| c.deinit(allocator);
                 client.* = try Client.init(
                     allocator,
-                    random.int(u128),
+                    // +1 so that index=0 is encoded as a valid id.
+                    client_id_permutation.encode(i + 1),
                     options.cluster,
                     options.replica_count,
                     &client_pools[i],
@@ -139,6 +147,7 @@ pub fn ConductorType(
                 .random = random,
                 .workload = workload,
                 .options = options,
+                .client_id_permutation = client_id_permutation,
                 .clients = clients,
                 .client_pools = client_pools,
                 .message_pool = message_pool,
@@ -271,11 +280,9 @@ pub fn ConductorType(
             assert(reply_message.header.command == .reply);
             assert(reply_message.header.operation == request_message.header.operation);
 
-            // TODO Use IdPermutation to avoid having to search clients.
-            const client_index = for (self.clients) |*c, i| {
-                if (client == c) break i;
-            } else unreachable;
-
+            const client_id = reply_message.header.client;
+            // -1 because id=0 is not valid, so index=0→id=1.
+            const client_index = @intCast(usize, self.client_id_permutation.decode(client_id) - 1);
             self.stalled_queue.add(.{
                 .client_index = client_index,
                 .request = self.clone_message(request_message),

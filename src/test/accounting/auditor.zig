@@ -10,6 +10,7 @@ const config = @import("../../config.zig");
 const tb = @import("../../tigerbeetle.zig");
 const vsr = @import("../../vsr.zig");
 const RingBuffer = @import("../../ring_buffer.zig").RingBuffer;
+const IdPermutation = @import("../id.zig").IdPermutation;
 
 // TODO(zig) This won't be necessary in Zig 0.10.
 const PriorityQueue = @import("../priority_queue.zig").PriorityQueue;
@@ -479,71 +480,4 @@ pub fn IteratorForLookup(comptime Result: type) type {
             }
         }
     };
-}
-
-/// Permuting indexes (or other encoded data) into ids:
-///
-/// * tests different patterns of ids (e.g. random, ascending, descending), and
-/// * allows the original index to recovered from the id, enabling less stateful testing.
-///
-pub const IdPermutation = union(enum) {
-    /// Ascending indexes become ascending ids.
-    identity: void,
-    /// Ascending indexes become descending ids.
-    reflect: void,
-    /// Ascending indexes alternate between ascending/descending (e.g. 1,100,3,98,…).
-    zigzag: void,
-    /// Ascending indexes become UUIDs.
-    random: [32]u8,
-
-    pub fn encode(self: *const IdPermutation, data: u128) u128 {
-        return switch (self.*) {
-            .identity => data,
-            .reflect => std.math.maxInt(u128) - data,
-            .zigzag => {
-                if (data % 2 == 0) {
-                    return data;
-                } else {
-                    // -1 to stay odd.
-                    return std.math.maxInt(u128) - data - 1;
-                }
-            },
-            .random => |seed| {
-                var id: u128 = undefined;
-                std.crypto.stream.chacha.ChaCha8IETF.xor(
-                    std.mem.asBytes(&id),
-                    std.mem.asBytes(&data),
-                    0,
-                    seed,
-                    [_]u8{0} ** 12,
-                );
-                return id;
-            },
-        };
-    }
-
-    pub fn decode(self: *const IdPermutation, id: u128) u128 {
-        return self.encode(id);
-    }
-};
-
-test "IdPermutation" {
-    var prng = std.rand.DefaultPrng.init(123);
-    const random = prng.random();
-
-    for ([_]IdPermutation{
-        .{ .identity = {} },
-        .{ .reflect = {} },
-        .{ .zigzag = {} },
-        .{ .random = [_]u8{3} ** 32 },
-    }) |permutation| {
-        var i: u128 = 0;
-        while (i < 20) : (i += 1) {
-            const r = random.int(u128);
-            try std.testing.expectEqual(r, permutation.decode(permutation.encode(r)));
-            try std.testing.expectEqual(r, permutation.encode(permutation.decode(r)));
-            try std.testing.expectEqual(i, permutation.decode(permutation.encode(i)));
-            try std.testing.expectEqual(i, permutation.encode(permutation.decode(i)));
-        }
-    }
 }
