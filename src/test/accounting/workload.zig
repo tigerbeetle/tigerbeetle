@@ -578,7 +578,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                 .code = 123,
                 .flags = .{},
                 // +1 to avoid `.amount_must_not_be_zero`.
-                .amount = 1 + self.random.int(u8),
+                .amount = 1 + @as(u64, self.random.int(u8)),
             };
 
             switch (method) {

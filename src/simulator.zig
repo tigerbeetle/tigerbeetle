@@ -94,7 +94,10 @@ pub fn main() !void {
     const request_probability = 1 + random.uintLessThan(u8, 99);
     const idle_on_probability = random.uintLessThan(u8, 20);
     const idle_off_probability = 10 + random.uintLessThan(u8, 10);
-    const committed_requests_max = config.journal_slot_count / 2;
+
+    // TODO: When block recovery and state transfer are implemented, remove this flag to allow
+    // crashes to coexist with WAL wraps.
+    const committed_requests_max: usize = config.journal_slot_count * 3;
 
     const cluster_options: ClusterOptions = .{
         .cluster = cluster_id,
@@ -181,8 +184,12 @@ pub fn main() !void {
         .linked_valid_probability = random.uintLessThan(u8, 101),
         // 100% chance because this only applies to consecutive invalid transfers, which are rare.
         .linked_invalid_probability = 100,
-        .pending_timeout_min = 1,
-        .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
+        // TODO(Timeouts): When timeouts are implemented in the StateMachine, change these to the
+        // (commented out) values so that timeouts can actually trigger..
+        .pending_timeout_min = 1_000_000_000 * 10,
+        .pending_timeout_mean = 1_000_000_000 * 10,
+        // .pending_timeout_min = 1,
+        // .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
         .accounts_batch_size_min = 0,
         .accounts_batch_size_span = 1 + random.uintLessThan(usize, accounts_batch_size_max),
         .transfers_batch_size_min = 0,
