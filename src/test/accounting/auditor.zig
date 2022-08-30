@@ -170,6 +170,10 @@ pub const AccountingAuditor = struct {
             assert(!dr.credits_exceed_debits(0));
             assert(!cr.debits_exceed_credits(0));
             assert(!cr.credits_exceed_debits(0));
+
+            // TODO(Timeouts): When timeouts are implemented in the StateMachine, remove this panic.
+            // In the mean time, if the VOPR hits this error, just ignore it.
+            @panic("tick_to_timestamp: timeouts are not implemented in the StateMachine yet");
         }
 
         self.timestamp = timestamp;
