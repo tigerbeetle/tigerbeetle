@@ -35,7 +35,7 @@ public class AccountsBatchTest {
         account2.setDebitsPosted(20);
         account2.setCreditsPending(30);
         account2.setCreditsPosted(40);
-        account2.setTimestamp(99);    
+        account2.setTimestamp(99);
     }
 
     @Test
@@ -47,7 +47,7 @@ public class AccountsBatchTest {
 
         batch.Add(account1);
         assertEquals(batch.getLenght(), 1);
-        
+
         batch.Add(account2);
         assertEquals(batch.getLenght(), 2);
 
@@ -79,9 +79,9 @@ public class AccountsBatchTest {
 
         // Set index 1
         batch.Set(1, account1);
-        assertEquals(batch.getLenght(), 2);        
+        assertEquals(batch.getLenght(), 2);
 
-        //Replace same index 0
+        // Replace same index 0
         batch.Set(0, account2);
         assertEquals(batch.getLenght(), 2);
 
@@ -101,18 +101,18 @@ public class AccountsBatchTest {
     public void testFromArray() {
 
         Account[] array = new Account[] { account1, account2 };
-        
+
         AccountsBatch batch = new AccountsBatch(array);
         assertEquals(batch.getLenght(), 2);
         assertEquals(batch.getCapacity(), 2);
 
         assertAccounts(account1, batch.Get(0));
         assertAccounts(account2, batch.Get(1));
-    }    
+    }
 
     @Test
     public void testToArray() {
-        
+
         AccountsBatch batch = new AccountsBatch(10);
         assertEquals(batch.getLenght(), 0);
         assertEquals(batch.getCapacity(), 10);
@@ -123,10 +123,9 @@ public class AccountsBatchTest {
         Account[] array = batch.toArray();
         assertAccounts(account1, array[0]);
         assertAccounts(account2, array[1]);
-    }      
+    }
 
-    private static void assertAccounts(Account account1, Account account2)
-    {
+    private static void assertAccounts(Account account1, Account account2) {
         assertEquals(account1.getId(), account2.getId());
         assertEquals(account1.getUserData(), account2.getUserData());
         assertEquals(account1.getLedger(), account2.getLedger());

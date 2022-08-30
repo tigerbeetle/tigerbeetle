@@ -22,7 +22,7 @@ public final class Account {
     }
 
     public void setCode(int code) {
-        this.code = (short)code;
+        this.code = (short) code;
     }
 
     public AccountFlags getFlags() {
@@ -88,7 +88,7 @@ public final class Account {
     public void setUserData(UUID userData) {
         this.userData = userData;
     }
-    
+
     public int getLedger() {
         return ledger;
     }

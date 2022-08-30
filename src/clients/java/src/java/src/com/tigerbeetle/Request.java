@@ -4,16 +4,14 @@ import java.nio.ByteBuffer;
 
 class Request {
 
-    public final static class Operations
-    {
+    public final static class Operations {
         public final static byte CREATE_ACCOUNTS = 3;
         public final static byte CREATE_TRANSFERS = 4;
         public final static byte LOOKUP_ACCOUNTS = 5;
         public final static byte LOOKUP_TRANSFERS = 6;
     }
 
-    private final static class Status
-    {
+    private final static class Status {
         public final static byte UNINITIALIZED = -1;
         public final static byte OK = 0;
         public final static byte TOO_MUCH_DATA = 1;
@@ -31,50 +29,41 @@ class Request {
 
     @SuppressWarnings("unused")
     private final long bodyLen;
-    
+
     private Object result = null;
     private final byte operation;
     private byte status = Status.UNINITIALIZED;
 
-    public Request(Client client, byte operation, Batch batch)
-    {
+    public Request(Client client, byte operation, Batch batch) {
         this.client = client;
         this.operation = operation;
         this.body = batch.buffer;
         this.bodyLen = batch.getBufferLen();
     }
 
-    public void endRequest(ByteBuffer buffer, byte status)
-    {
-        synchronized(this)
-        {
+    public void endRequest(ByteBuffer buffer, byte status) {
+        synchronized (this) {
             this.status = status;
-            if (status == Status.OK)
-            {
-                switch(operation)
-                {
-                    case Operations.CREATE_ACCOUNTS:
-                    {
+            if (status == Status.OK) {
+                switch (operation) {
+                    case Operations.CREATE_ACCOUNTS: {
                         var batch = new CreateAccountsResultBatch(buffer.asReadOnlyBuffer());
                         result = batch.toArray();
                         break;
-                    }   
-                    
-                    case Operations.CREATE_TRANSFERS:
-                    {
+                    }
+
+                    case Operations.CREATE_TRANSFERS: {
                         result = null;
                         break;
                     }
-                    
-                    case Operations.LOOKUP_ACCOUNTS: 
-                    {
+
+                    case Operations.LOOKUP_ACCOUNTS: {
                         var batch = new AccountsBatch(buffer.asReadOnlyBuffer());
                         result = batch.toArray();
                         break;
                     }
-                    
-                    case Operations.LOOKUP_TRANSFERS:
-                    {
+
+                    case Operations.LOOKUP_TRANSFERS: {
                         result = null;
                         break;
                     }
@@ -85,17 +74,14 @@ class Request {
         }
     }
 
-
-    public Object waitForResult() throws Exception, InterruptedException
-    {
-        synchronized(this)
-        {
-            while(result == null && status == Status.UNINITIALIZED)
-            {
+    public Object waitForResult() throws Exception, InterruptedException {
+        synchronized (this) {
+            while (result == null && status == Status.UNINITIALIZED) {
                 wait();
             }
 
-            if (result == null) throw new Exception("Result = " + status);
+            if (result == null)
+                throw new Exception("Result = " + status);
             return result;
         }
     }

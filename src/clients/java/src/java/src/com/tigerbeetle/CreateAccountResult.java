@@ -30,9 +30,10 @@ public enum CreateAccountResult {
     ExistsWithDifferentCreditsPosted,
     Exists;
 
-    public static CreateAccountResult fromValue(int value) {       
+    public static CreateAccountResult fromValue(int value) {
         var values = CreateAccountResult.values();
-        if (value < 0 || value >= values.length) throw new IllegalArgumentException();
+        if (value < 0 || value >= values.length)
+            throw new IllegalArgumentException();
 
         return values[value];
     }

@@ -4,10 +4,8 @@ import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
-public final class AccountsBatch extends Batch
-{
-    private static final class Struct
-    {
+public final class AccountsBatch extends Batch {
+    private static final class Struct {
         public static final int SIZE = 128;
         public static final byte[] RESERVED = new byte[48];
     }
@@ -15,43 +13,38 @@ public final class AccountsBatch extends Batch
     private int lenght;
     private final int capacity;
 
-    public AccountsBatch(int capacity)
-    {
+    public AccountsBatch(int capacity) {
         super(capacity * Struct.SIZE);
 
         this.lenght = 0;
         this.capacity = capacity;
     }
 
-    public AccountsBatch(Account[] accounts)
-    {
+    public AccountsBatch(Account[] accounts) {
         super(accounts.length * Struct.SIZE);
 
         this.lenght = accounts.length;
         this.capacity = accounts.length;
- 
-        for(int i=0; i<accounts.length;i++)
-        {
+
+        for (int i = 0; i < accounts.length; i++) {
             Set(i, accounts[i]);
         }
     }
 
-    AccountsBatch(ByteBuffer buffer)
-    {
+    AccountsBatch(ByteBuffer buffer) {
         super(buffer);
 
         this.capacity = buffer.capacity() / Struct.SIZE;
         this.lenght = capacity;
     }
 
-    public void Add(Account account) throws IndexOutOfBoundsException
-    {
+    public void Add(Account account) throws IndexOutOfBoundsException {
         Set(lenght, account);
     }
 
-    public Account Get(int index) throws IndexOutOfBoundsException, BufferUnderflowException
-    {
-        if (index < 0 || index >= capacity) throw new IndexOutOfBoundsException();
+    public Account Get(int index) throws IndexOutOfBoundsException, BufferUnderflowException {
+        if (index < 0 || index >= capacity)
+            throw new IndexOutOfBoundsException();
 
         Account account = new Account();
 
@@ -72,56 +65,54 @@ public final class AccountsBatch extends Batch
 
     }
 
-    public void Set(int index, Account account) throws IndexOutOfBoundsException, NullPointerException
-    {
-        if (index < 0 || index >= capacity) throw new IndexOutOfBoundsException();
-        if (account == null) throw new NullPointerException();
+    public void Set(int index, Account account) throws IndexOutOfBoundsException, NullPointerException {
+        if (index < 0 || index >= capacity)
+            throw new IndexOutOfBoundsException();
+        if (account == null)
+            throw new NullPointerException();
 
         final int start = index * Struct.SIZE;
         ByteBuffer ptr = buffer.position(start);
 
         ptr
-        .putLong(account.getId().getMostSignificantBits())
-        .putLong(account.getId().getLeastSignificantBits())
-        .putLong(account.getUserData().getMostSignificantBits())
-        .putLong(account.getUserData().getLeastSignificantBits())
-        .put(Struct.RESERVED)
-        .putInt(account.getLedger())
-        .putShort(account.getCode())
-        .putShort(account.getFlags().value)
-        .putLong(account.getDebitsPending())
-        .putLong(account.getDebitsPosted())
-        .putLong(account.getCreditsPending())
-        .putLong(account.getCreditsPosted())
-        .putLong(account.getTimestamp());
+                .putLong(account.getId().getMostSignificantBits())
+                .putLong(account.getId().getLeastSignificantBits())
+                .putLong(account.getUserData().getMostSignificantBits())
+                .putLong(account.getUserData().getLeastSignificantBits())
+                .put(Struct.RESERVED)
+                .putInt(account.getLedger())
+                .putShort(account.getCode())
+                .putShort(account.getFlags().value)
+                .putLong(account.getDebitsPending())
+                .putLong(account.getDebitsPosted())
+                .putLong(account.getCreditsPending())
+                .putLong(account.getCreditsPosted())
+                .putLong(account.getTimestamp());
 
-        if (ptr.position() - start != Struct.SIZE) throw new IndexOutOfBoundsException("Unexpected account size");
-        if (index >= lenght) lenght = index + 1;
-    }    
+        if (ptr.position() - start != Struct.SIZE)
+            throw new IndexOutOfBoundsException("Unexpected account size");
+        if (index >= lenght)
+            lenght = index + 1;
+    }
 
-    public int getLenght()
-    {
+    public int getLenght() {
         return this.lenght;
     }
 
-    public int getCapacity()
-    {
+    public int getCapacity() {
         return this.capacity;
     }
 
-    public Account[] toArray() throws BufferUnderflowException
-    {
+    public Account[] toArray() throws BufferUnderflowException {
         Account[] array = new Account[lenght];
-        for(int i=0; i<lenght;i++)
-        {
+        for (int i = 0; i < lenght; i++) {
             array[i] = Get(i);
         }
         return array;
     }
 
     @Override
-    public long getBufferLen()
-    {
+    public long getBufferLen() {
         return lenght * Struct.SIZE;
     }
 }
