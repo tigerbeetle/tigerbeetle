@@ -17,7 +17,7 @@ public final class AccountsBatch extends Batch
 
     public AccountsBatch(int capacity)
     {
-        super(Batch.CREATE_ACCOUNTS, capacity * Struct.SIZE);
+        super(capacity * Struct.SIZE);
 
         this.lenght = 0;
         this.capacity = capacity;
@@ -25,7 +25,7 @@ public final class AccountsBatch extends Batch
 
     public AccountsBatch(Account[] accounts)
     {
-        super(Batch.CREATE_ACCOUNTS, accounts.length * Struct.SIZE);
+        super(accounts.length * Struct.SIZE);
 
         this.lenght = accounts.length;
         this.capacity = accounts.length;
@@ -34,6 +34,14 @@ public final class AccountsBatch extends Batch
         {
             Set(i, accounts[i]);
         }
+    }
+
+    AccountsBatch(ByteBuffer buffer)
+    {
+        super(buffer);
+
+        this.capacity = buffer.capacity() / Struct.SIZE;
+        this.lenght = capacity;
     }
 
     public void Add(Account account) throws IndexOutOfBoundsException
@@ -111,4 +119,9 @@ public final class AccountsBatch extends Batch
         return array;
     }
 
+    @Override
+    public long getBufferLen()
+    {
+        return lenght * Struct.SIZE;
+    }
 }

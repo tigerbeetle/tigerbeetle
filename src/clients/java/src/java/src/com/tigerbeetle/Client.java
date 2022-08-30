@@ -1,6 +1,7 @@
 package com.tigerbeetle;
 
 import java.util.StringJoiner;
+import java.util.UUID;
 
 public final class Client implements AutoCloseable {
     static {
@@ -38,7 +39,7 @@ public final class Client implements AutoCloseable {
     public void close() throws Exception {
         if (clientHandle != 0)
         {
-            clientDeinit(clientHandle);
+            clientDeinit();
             clientHandle = 0;
             packetsHead = 0;
             packetsTail = 0;
@@ -46,9 +47,10 @@ public final class Client implements AutoCloseable {
     }
 
     private native int clientInit(int clusterID, String addresses, int maxConcurrency);
-    private native void clientDeinit(long clientHandle);
+    private native void clientDeinit();
+    private native void submit(Request request);
 
-    public CreateAccountResult CreateAccount(Account account)
+    public CreateAccountResult CreateAccount(Account account) throws InterruptedException, Exception
     {
         var batch = new AccountsBatch(1);
         batch.Add(account);
@@ -64,13 +66,17 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public CreateAccountsResult[] CreateAccounts(AccountsBatch batch)
+    public CreateAccountsResult[] CreateAccounts(AccountsBatch batch) throws InterruptedException, Exception
     {
-        // TODO:
-        return null;
+        var request = new Request(this, Request.Operations.CREATE_ACCOUNTS, batch);
+
+        submit(request);
+            
+        return (CreateAccountsResult[])request.waitForResult();
+        
     }
 
-    public CreateAccountsResult[] CreateAccounts(Account[] batch)
+    public CreateAccountsResult[] CreateAccounts(Account[] batch) throws InterruptedException, Exception
     {
         return CreateAccounts(new AccountsBatch(batch));
     }
@@ -78,8 +84,25 @@ public final class Client implements AutoCloseable {
     public static void main(String[] args) {
         try (var client = new Client(0, new String[] { "127.0.0.1:3001" }, 32)) {
             
-            System.out.printf("Connected to cluster {}", client.clusterID);
+            var batch = new AccountsBatch(10);
+            
+            var account1 = new Account();
+            account1.setId(new UUID(100, 100));
+            account1.setCode(100);
+            account1.setLedger(720);
+            batch.Add(account1);
 
+            var account2 = new Account();
+            account2.setId(new UUID(201, 200));
+            account2.setCode(200);
+            account2.setLedger(720);            
+            batch.Add(account2);
+        
+            var results = client.CreateAccounts(batch);
+            for (var result : results) {
+                System.out.printf("Index=%d Value=%s\n", result.index, result.result);
+            }
+            
         } catch (Exception e) {
             System.out.println("Big bad Zig error handled in Java >:(");
             e.printStackTrace();

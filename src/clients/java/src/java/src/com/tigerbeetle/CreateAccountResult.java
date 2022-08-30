@@ -29,4 +29,11 @@ public enum CreateAccountResult {
     ExistsWithDifferentCreditsPending,
     ExistsWithDifferentCreditsPosted,
     Exists;
+
+    public static CreateAccountResult fromValue(int value) {       
+        var values = CreateAccountResult.values();
+        if (value < 0 || value >= values.length) throw new IllegalArgumentException();
+
+        return values[value];
+    }
 }

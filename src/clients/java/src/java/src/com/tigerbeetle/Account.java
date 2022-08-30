@@ -4,16 +4,18 @@ import java.util.UUID;
 
 public final class Account {
 
-    private UUID id;
-    private UUID userData;
-    private int ledger;
-    private short code;
-    private AccountFlags flags;
-    private long creditsPosted;
-    private long creditsPending;
-    private long debitsPosted;
-    private long debitsPending;
-    private long timestamp;
+    private static final UUID ZERO = new UUID(0, 0);
+
+    private UUID id = ZERO;
+    private UUID userData = ZERO;
+    private int ledger = 0;
+    private short code = 0;
+    private AccountFlags flags = AccountFlags.None;
+    private long creditsPosted = 0;
+    private long creditsPending = 0;
+    private long debitsPosted = 0;
+    private long debitsPending = 0;
+    private long timestamp = 0;
 
     public short getCode() {
         return code;
