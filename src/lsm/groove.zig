@@ -49,6 +49,12 @@ const IdTreeValue = extern struct {
     timestamp: u64,
     padding: u64 = 0,
 
+    comptime {
+        // Assert that there is no implicit padding.
+        assert(@sizeOf(IdTreeValue) == 32);
+        assert(@bitSizeOf(IdTreeValue) == 32 * 8);
+    }
+
     inline fn compare_keys(a: u128, b: u128) std.math.Order {
         return std.math.order(a, b);
     }
@@ -78,7 +84,7 @@ fn IndexCompositeKeyType(comptime Field: type) type {
         .Enum => |e| {
             return switch (@bitSizeOf(e.tag_type)) {
                 0...@bitSizeOf(u64) => u64,
-                @bitSizeOf(u64)...@bitSizeOf(u128) => u128,
+                @bitSizeOf(u65)...@bitSizeOf(u128) => u128,
                 else => @compileError("Unsupported enum tag for index: " ++ @typeName(e.tag_type)),
             };
         },
@@ -88,7 +94,7 @@ fn IndexCompositeKeyType(comptime Field: type) type {
             }
             return switch (@bitSizeOf(Field)) {
                 0...@bitSizeOf(u64) => u64,
-                @bitSizeOf(u64)...@bitSizeOf(u128) => u128,
+                @bitSizeOf(u65)...@bitSizeOf(u128) => u128,
                 else => @compileError("Unsupported int type for index: " ++ @typeName(Field)),
             };
         },
@@ -600,12 +606,10 @@ pub fn GrooveType(
                 // but `context` is required for the last loop condition check.
                 context.workers_busy += 1;
 
-                // -1 to ignore the extra worker.
-                while (context.workers_busy - 1 < context.workers.len) {
-                    const worker = &context.workers[context.workers_busy - 1];
+                for (context.workers) |*worker| {
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
-                    if (!worker.lookup_start()) break;
+                    worker.lookup_start_next();
                 }
 
                 assert(context.workers_busy >= 1);
@@ -619,12 +623,12 @@ pub fn GrooveType(
 
             fn finish(context: *PrefetchContext) void {
                 assert(context.workers_busy == 0);
-                assert(context.groove.prefetch_ids.count() == 0);
-                assert(context.id_iterator.next() == null);
 
-                const callback = context.callback;
-                context.* = undefined;
-                callback(context);
+                assert(context.id_iterator.next() == null);
+                context.groove.prefetch_ids.clearRetainingCapacity();
+                assert(context.groove.prefetch_ids.count() == 0);
+
+                context.callback(context);
             }
         };
 
@@ -636,34 +640,27 @@ pub fn GrooveType(
             lookup_id: IdTree.LookupContext = undefined,
             lookup_object: ObjectTree.LookupContext = undefined,
 
-            /// Returns true if asynchronous I/O has been started.
-            /// Returns false if there are no more IDs to prefetch.
-            fn lookup_start(worker: *PrefetchWorker) bool {
-                const groove = worker.context.groove;
-
+            fn lookup_start_next(worker: *PrefetchWorker) void {
                 const id = worker.context.id_iterator.next() orelse {
-                    groove.prefetch_ids.clearRetainingCapacity();
-                    assert(groove.prefetch_ids.count() == 0);
                     worker.context.worker_finished();
-                    return false;
+                    return;
                 };
 
                 if (config.verify) {
                     // This is checked in prefetch_enqueue()
-                    assert(groove.ids.get_cached(id.*) == null);
+                    assert(worker.context.groove.ids.get_cached(id.*) == null);
                 }
 
                 // If not in the LSM tree's cache, the object must be read from disk and added
                 // to the auxiliary prefetch_objects hash map.
                 // TODO: this LSM tree function needlessly checks the LSM tree's cache a
                 // second time. Adding API to the LSM tree to avoid this may be worthwhile.
-                groove.ids.lookup(
+                worker.context.groove.ids.lookup(
                     lookup_id_callback,
                     &worker.lookup_id,
                     snapshot_latest,
                     id.*,
                 );
-                return true;
             }
 
             fn lookup_id_callback(
@@ -681,10 +678,10 @@ pub fn GrooveType(
                             id_tree_value.timestamp,
                         );
                     } else {
-                        worker.lookup_finish();
+                        worker.lookup_start_next();
                     }
                 } else {
-                    worker.lookup_finish();
+                    worker.lookup_start_next();
                 }
             }
 
@@ -699,13 +696,7 @@ pub fn GrooveType(
                 assert(!ObjectTreeHelpers(Object).tombstone(object));
 
                 worker.context.groove.prefetch_objects.putAssumeCapacityNoClobber(object.*, {});
-                worker.lookup_finish();
-            }
-
-            fn lookup_finish(worker: *PrefetchWorker) void {
-                if (!worker.lookup_start()) {
-                    worker.* = undefined;
-                }
+                worker.lookup_start_next();
             }
         };
 

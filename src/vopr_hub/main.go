@@ -182,6 +182,11 @@ func (output *vopr_output) hash_stack_trace(message *vopr_message) {
 func (output *vopr_output) create_issue_markdown(message vopr_message) string {
 	branches := get_branch_names(hex.EncodeToString(message.commit[:]), message.hash[:])
 
+	start := time.Now()
+	run_vopr_ReleaseSafe(message)
+	t := time.Now()
+	duration := t.Sub(start).Round(time.Second)
+
 	// Limit set here to avoid writing only a few characters for any particular section.
 	const min_useful_length = 100
 
@@ -259,6 +264,10 @@ func (output *vopr_output) create_issue_markdown(message vopr_message) string {
 	} else {
 		body += "<strong>Branches:</strong> (unknown branch)<br><br>"
 	}
+	body += fmt.Sprintf(
+		"<strong>Duration to run seed in ReleaseSafe mode:</strong> %s<br><br>",
+		duration,
+	)
 	if len(parameters) > 0 {
 		body += fmt.Sprintf(
 			"<strong>Parameters:</strong><br>%s<br>",
@@ -379,6 +388,25 @@ func get_branch_names(commit_sha string, message_hash []byte) string {
 	}
 
 	return ""
+}
+
+func run_vopr_ReleaseSafe(message vopr_message) {
+	// Runs in ReleaseSafe mode
+	log_info("Running the VOPR in ReleaseSafe mode...", message.hash[:])
+	cmd := exec.Command(
+		"zig/zig",
+		"build",
+		"vopr",
+		"--",
+		fmt.Sprintf("--seed=%d", message.seed),
+		"--build-mode=ReleaseSafe",
+	)
+	cmd.Dir = tigerbeetle_directory
+	err := cmd.Run()
+	if err != nil {
+		log_error("Failed to run the VOPR in ReleaseSafe mode", message.hash[:])
+		panic(err.Error())
+	}
 }
 
 func get_bug_name(bug bug_type) string {
@@ -748,8 +776,8 @@ func run_vopr(seed uint64, output *vopr_output, message_hash []byte) {
 	// The channel monitors if the VOPR completes before the maximum output is reached.
 	vopr_completed := make(chan error)
 
-	// Runs in debug mode
-	log_info("Running the VOPR...", message_hash)
+	// Runs in Debug mode
+	log_info("Running the VOPR in Debug mode...", message_hash)
 	cmd := exec.Command(
 		"zig/zig",
 		"build",
@@ -762,7 +790,7 @@ func run_vopr(seed uint64, output *vopr_output, message_hash []byte) {
 	// Start() runs asynchronously but is used because it allows a process to be killed.
 	error := cmd.Start()
 	if error != nil {
-		log_error("Failed to start the VOPR", message_hash)
+		log_error("Failed to start the VOPR in Debug mode", message_hash)
 		panic(error.Error())
 	}
 

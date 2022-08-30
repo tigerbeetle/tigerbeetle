@@ -42,6 +42,8 @@ pub fn TableInfoType(comptime Table: type) type {
         comptime {
             assert(@sizeOf(TableInfo) == 48 + Table.key_size * 2);
             assert(@alignOf(TableInfo) == 16);
+            // Assert that there is no implicit padding in the struct.
+            assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
         }
 
         pub fn visible(table: *const TableInfo, snapshot: u64) bool {

@@ -981,7 +981,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const max = std.math.min(message.buffer.len, headers_size - offset);
             assert(max % config.sector_size == 0);
             assert(max % @sizeOf(Header) == 0);
-            return @alignCast(@alignOf(Header), message.buffer[0..max]);
+            return message.buffer[0..max];
         }
 
         fn recover_prepares(self: *Self, slot: Slot) void {
@@ -1827,10 +1827,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.lock_sectors(@fieldParentPtr(Self.Write, "range", waiting));
             }
 
-            // The callback may set range, so we can't set range to undefined after the callback.
-            const callback = range.callback;
-            range.* = undefined;
-            callback(write);
+            range.callback(write);
         }
 
         pub fn writing(self: *Self, op: u64, checksum: u128) bool {
@@ -2236,14 +2233,14 @@ test "format_journal" {
     };
 
     for (write_sizes) |write_size_max| {
-        var wal_data = try std.testing.allocator.alloc(u8, config.journal_size_max);
+        const wal_data = try std.testing.allocator.alignedAlloc(u8, @alignOf(Header), config.journal_size_max);
         defer std.testing.allocator.free(wal_data);
 
-        var write_data = try std.testing.allocator.alloc(u8, write_size_max);
+        const write_data = try std.testing.allocator.alloc(u8, write_size_max);
         defer std.testing.allocator.free(write_data);
 
-        var headers_ring = std.mem.bytesAsSlice(Header, @alignCast(@alignOf(Header), wal_data[0..config.journal_size_headers]));
-        var prepare_ring = std.mem.bytesAsSlice([config.message_size_max]u8, wal_data[config.journal_size_headers..]);
+        const headers_ring = std.mem.bytesAsSlice(Header, wal_data[0..config.journal_size_headers]);
+        const prepare_ring = std.mem.bytesAsSlice([config.message_size_max]u8, wal_data[config.journal_size_headers..]);
         try std.testing.expectEqual(@as(usize, config.journal_slot_count), headers_ring.len);
         try std.testing.expectEqual(@as(usize, config.journal_slot_count), prepare_ring.len);
 

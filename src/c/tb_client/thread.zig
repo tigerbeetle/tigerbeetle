@@ -98,7 +98,8 @@ pub fn ThreadType(
             errdefer self.allocator.free(self.packets);
 
             log.debug("init: parsing vsr addresses.", .{});
-            self.addresses = vsr.parse_addresses(self.allocator, addresses) catch |err| {
+            const address_limit = std.mem.count(u8, addresses, ",") + 1;
+            self.addresses = vsr.parse_addresses(self.allocator, addresses, address_limit) catch |err| {
                 log.err("failed to parse addresses: {}.", .{err});
                 return Error.InvalidAddress;
             };
