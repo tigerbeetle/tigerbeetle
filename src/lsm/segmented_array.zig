@@ -950,6 +950,7 @@ test "SegmentedArray" {
     comptime {
         assert(@sizeOf(TableInfo) == 48 + @sizeOf(u128) * 2);
         assert(@alignOf(TableInfo) == 16);
+        assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
     }
 
     const Options = struct {

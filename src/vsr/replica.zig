@@ -2773,10 +2773,7 @@ pub fn ReplicaType(
                 op_max,
                 std.mem.bytesAsSlice(
                     Header,
-                    @alignCast(
-                        @alignOf(Header),
-                        message.buffer[@sizeOf(Header)..][0..body_size_max],
-                    ),
+                    message.buffer[@sizeOf(Header)..][0..body_size_max],
                 ),
             );
 
@@ -3636,10 +3633,7 @@ pub fn ReplicaType(
         fn message_body_as_headers(_: *Self, message: *const Message) []Header {
             // TODO Assert message commands that we expect this to be called for.
             assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
-            return std.mem.bytesAsSlice(
-                Header,
-                @alignCast(@alignOf(Header), message.buffer[@sizeOf(Header)..message.header.size]),
-            );
+            return std.mem.bytesAsSlice(Header, message.body());
         }
 
         /// Panics if immediate neighbors in the same view would have a broken hash chain.

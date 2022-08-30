@@ -239,9 +239,7 @@ pub const Storage = struct {
             }
         }
 
-        const callback = read.callback;
-        read.* = undefined;
-        callback(read);
+        read.callback(read);
     }
 
     pub fn write_sectors(
@@ -293,9 +291,7 @@ pub const Storage = struct {
             }
         }
 
-        const callback = write.callback;
-        write.* = undefined;
-        callback(write);
+        write.callback(write);
     }
 
     fn assert_bounds_and_alignment(storage: *const Storage, buffer: []const u8, offset: u64) void {

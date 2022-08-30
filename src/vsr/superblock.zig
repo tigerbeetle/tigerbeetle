@@ -109,6 +109,8 @@ pub const SuperBlockSector = extern struct {
 
         comptime {
             assert(@sizeOf(VSRState) == 24);
+            // Assert that there is no implicit padding in the struct.
+            assert(@bitSizeOf(VSRState) == @sizeOf(VSRState) * 8);
         }
 
         pub fn internally_consistent(state: VSRState) bool {
@@ -163,11 +165,15 @@ pub const SuperBlockSector = extern struct {
 
         comptime {
             assert(@sizeOf(Snapshot) == 24);
+            // Assert that there is no implicit padding in the struct.
+            assert(@bitSizeOf(Snapshot) == @sizeOf(Snapshot) * 8);
         }
     };
 
     comptime {
         assert(@sizeOf(SuperBlockSector) == config.sector_size);
+        // Assert that there is no implicit padding in the struct.
+        assert(@bitSizeOf(SuperBlockSector) == @sizeOf(SuperBlockSector) * 8);
     }
 
     pub fn calculate_checksum(superblock: *const SuperBlockSector) u128 {

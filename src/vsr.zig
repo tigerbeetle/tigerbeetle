@@ -126,6 +126,8 @@ pub const Operation = enum(u8) {
 pub const Header = extern struct {
     comptime {
         assert(@sizeOf(Header) == 128);
+        // Assert that there is no implicit padding in the struct.
+        assert(@bitSizeOf(Header) == @sizeOf(Header) * 8);
     }
     /// A checksum covering only the remainder of this header.
     /// This allows the header to be trusted without having to recv() or read() the associated body.
