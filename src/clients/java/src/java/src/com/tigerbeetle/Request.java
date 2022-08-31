@@ -53,7 +53,8 @@ class Request {
                     }
 
                     case Operations.CREATE_TRANSFERS: {
-                        result = null;
+                        var batch = new CreateTransfersResultBatch(buffer.asReadOnlyBuffer());
+                        result = batch.toArray();
                         break;
                     }
 
@@ -64,7 +65,8 @@ class Request {
                     }
 
                     case Operations.LOOKUP_TRANSFERS: {
-                        result = null;
+                        var batch = new TransfersBatch(buffer.asReadOnlyBuffer());
+                        result = batch.toArray();
                         break;
                     }
                 }

@@ -9,6 +9,8 @@ pub fn build(b: *std.build.Builder) void {
 
     const tb_client = b.addStaticLibrary("tb_client", "libs/tigerbeetle/src/c/tb_client.zig");
     tb_client.setMainPkgPath("libs/tigerbeetle/src");
+    tb_client.setTarget(target);
+    tb_client.setBuildMode(mode);    
 
     const lib = b.addSharedLibrary("tb_jniclient", "src/client.zig", .unversioned);
     lib.addPackagePath("jui", "libs/jui/src/jui.zig");

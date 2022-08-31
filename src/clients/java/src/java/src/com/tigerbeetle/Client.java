@@ -54,11 +54,11 @@ public final class Client implements AutoCloseable {
 
     private native void submit(Request request);
 
-    public CreateAccountResult CreateAccount(Account account) throws InterruptedException, Exception {
+    public CreateAccountResult createAccount(Account account) throws InterruptedException, Exception {
         var batch = new AccountsBatch(1);
         batch.Add(account);
 
-        CreateAccountsResult[] results = CreateAccounts(batch);
+        CreateAccountsResult[] results = createAccounts(batch);
         if (results.length == 0) {
             return CreateAccountResult.Ok;
         } else {
@@ -66,11 +66,11 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public CreateAccountsResult[] CreateAccounts(Account[] batch) throws InterruptedException, Exception {
-        return CreateAccounts(new AccountsBatch(batch));
+    public CreateAccountsResult[] createAccounts(Account[] batch) throws InterruptedException, Exception {
+        return createAccounts(new AccountsBatch(batch));
     }
 
-    public CreateAccountsResult[] CreateAccounts(AccountsBatch batch) throws InterruptedException, Exception {
+    public CreateAccountsResult[] createAccounts(AccountsBatch batch) throws InterruptedException, Exception {
         var request = new Request(this, Request.Operations.CREATE_ACCOUNTS, batch);
 
         submit(request);
@@ -79,11 +79,11 @@ public final class Client implements AutoCloseable {
 
     }
 
-    public Account LookupAccount(UUID uuid) throws InterruptedException, Exception {
+    public Account lookupAccount(UUID uuid) throws InterruptedException, Exception {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
-        Account[] results = LookupAccounts(batch);
+        Account[] results = lookupAccounts(batch);
         if (results.length == 0) {
             return null;
         } else {
@@ -91,11 +91,11 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public Account[] LookupAccounts(UUID[] batch) throws InterruptedException, Exception {
-        return LookupAccounts(new UUIDsBatch(batch));
+    public Account[] lookupAccounts(UUID[] batch) throws InterruptedException, Exception {
+        return lookupAccounts(new UUIDsBatch(batch));
     }
 
-    public Account[] LookupAccounts(UUIDsBatch batch) throws InterruptedException, Exception {
+    public Account[] lookupAccounts(UUIDsBatch batch) throws InterruptedException, Exception {
         var request = new Request(this, Request.Operations.LOOKUP_ACCOUNTS, batch);
 
         submit(request);
@@ -103,41 +103,125 @@ public final class Client implements AutoCloseable {
         return (Account[]) request.waitForResult();
     }
 
+    public CreateTransferResult createTransfer(Transfer transfer) throws InterruptedException, Exception {
+        var batch = new TransfersBatch(1);
+        batch.Add(transfer);
+
+        CreateTransfersResult[] results = createTransfers(batch);
+        if (results.length == 0) {
+            return CreateTransferResult.Ok;
+        } else {
+            return results[0].result;
+        }
+    }
+
+    public CreateTransfersResult[] createTransfers(Transfer[] batch) throws InterruptedException, Exception {
+        return createTransfers(new TransfersBatch(batch));
+    }
+
+    public CreateTransfersResult[] createTransfers(TransfersBatch batch) throws InterruptedException, Exception {
+        var request = new Request(this, Request.Operations.CREATE_TRANSFERS, batch);
+
+        submit(request);
+
+        return (CreateTransfersResult[]) request.waitForResult();
+    }
+
+    public Transfer lookupTransfer(UUID uuid) throws InterruptedException, Exception {
+        var batch = new UUIDsBatch(1);
+        batch.Add(uuid);
+
+        Transfer[] results = lookupTransfers(batch);
+        if (results.length == 0) {
+            return null;
+        } else {
+            return results[0];
+        }
+    }
+
+    public Transfer[] lookupTransfers(UUID[] batch) throws InterruptedException, Exception {
+        return lookupTransfers(new UUIDsBatch(batch));
+    }
+
+    public Transfer[] lookupTransfers(UUIDsBatch batch) throws InterruptedException, Exception {
+        var request = new Request(this, Request.Operations.LOOKUP_TRANSFERS, batch);
+
+        submit(request);
+
+        return (Transfer[]) request.waitForResult();
+    }
+
     public static void main(String[] args) {
         try (var client = new Client(0, new String[] { "127.0.0.1:3001" }, 32)) {
 
-            var batch = new AccountsBatch(10);
-
-            var id1 = UUID.randomUUID();
-            var id2 = UUID.randomUUID();
+            var accounts = new AccountsBatch(2);
 
             var account1 = new Account();
-            account1.setId(id1);
+            account1.setId(UUID.randomUUID());
             account1.setCode(100);
             account1.setLedger(720);
-            batch.Add(account1);
+            accounts.Add(account1);
 
             var account2 = new Account();
-            account2.setId(id2);
+            account2.setId(UUID.randomUUID());
             account2.setCode(200);
             account2.setLedger(720);
-            batch.Add(account2);
+            accounts.Add(account2);
 
-            var results = client.CreateAccounts(batch);
-            for (var result : results) {
-                System.out.printf("Index=%d Value=%s\n", result.index, result.result);
+            var results = client.createAccounts(accounts);
+            if (results.length > 0)
+                throw new Exception("Unexpected createAccount results");
+
+            final int max_batches = 3;
+            final int max_transfers_per_batch = 8191; // config.message_size_max - @sizeOf(vsr.Header)
+            var batches = new TransfersBatch[3];
+            for (int i = 0; i < max_batches; i++) {
+                var batch = new TransfersBatch(max_transfers_per_batch);
+                for (int j = 0; j < max_transfers_per_batch; j++) {
+                    var transfer = new Transfer();
+                    transfer.setId(new UUID(i + 1, j + 1));
+                    transfer.setCreditAccountId(account1.getId());
+                    transfer.setDebitAccountId(account2.getId());
+                    transfer.setCode((short) 1);
+                    transfer.setLedger(720);
+                    transfer.setAmount(100);
+                    batch.Add(transfer);
+                }
+
+                batches[i] = batch;
             }
 
-            var accounts = client.LookupAccounts(new UUID[] { id1, id2 });
+            long totalTime = 0;
+            long maxTransferLatency = 0;
 
-            for (var account : accounts) {
-                System.out.printf("ID=%s Code=%d Ledger=%d\n", account.getId(), account.getCode(), account.getLedger());
+            for (var batch : batches) {
+
+                var now = System.currentTimeMillis();
+
+                var transferResults = client.createTransfers(batch);
+                if (transferResults.length > 0)
+                    throw new Exception("Unexpected transfer results");
+
+                var elapsed = System.currentTimeMillis() - now;
+
+                totalTime += elapsed;
+                if (elapsed > maxTransferLatency)
+                    maxTransferLatency = elapsed;
             }
+
+            System.out.println("============================================");
+
+            var result = (long) (max_batches * max_transfers_per_batch * 1000) / totalTime;
+
+            System.out.printf("%d transfers per second\n", result);
+            System.out.printf("create_transfers max p100 latency per %d transfers = %dms\n", max_transfers_per_batch,
+                    maxTransferLatency);
+            System.out.printf("total %d transfers in %dms\n", max_batches * max_transfers_per_batch, totalTime);
 
             System.console().readLine();
 
         } catch (Exception e) {
-            System.out.println("Big bad Zig error handled in Java >:(");
+            System.out.println(e);
             e.printStackTrace();
         }
     }

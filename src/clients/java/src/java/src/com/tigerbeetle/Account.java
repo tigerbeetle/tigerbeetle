@@ -78,6 +78,8 @@ public final class Account {
     }
 
     public void setId(UUID id) {
+        if (id == null)
+            throw new NullPointerException();
         this.id = id;
     }
 
@@ -86,7 +88,11 @@ public final class Account {
     }
 
     public void setUserData(UUID userData) {
-        this.userData = userData;
+        if (userData == null) {
+            this.userData = ZERO;
+        } else {
+            this.userData = userData;
+        }
     }
 
     public int getLedger() {
