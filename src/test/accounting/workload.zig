@@ -232,12 +232,13 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
         /// The index of the next transfer to send.
         transfers_sent: usize = 0,
 
-        /// Per client, the index of the highest transfer for which the client has received a reply
-        /// to `create_accounts`.
-        transfers_delivered: []usize,
+        /// All transfers below this index have been delivered.
+        /// Any transfers above this index that have been delivered are stored in
+        /// `transfers_delivered_recently`.
+        transfers_delivered_past: usize = 0,
 
         /// Track index ranges of `create_transfers` batches that have committed but are greater
-        /// than `transfers_delivering_min` (which is still in-flight).
+        /// than or equal to `transfers_delivered_past` (which is still in-flight).
         transfers_delivered_recently: TransferBatchQueue,
 
         pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Self {
@@ -265,10 +266,6 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             var auditor = try Auditor.init(allocator, random, options.auditor_options);
             errdefer auditor.deinit(allocator);
 
-            var transfers_delivered = try allocator.alloc(usize, options.auditor_options.client_count);
-            errdefer allocator.free(transfers_delivered);
-            std.mem.set(usize, transfers_delivered, 0);
-
             var transfers_delivered_recently = TransferBatchQueue.init(allocator, {});
             errdefer transfers_delivered_recently.deinit();
             try transfers_delivered_recently.ensureTotalCapacity(
@@ -294,14 +291,12 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                 .auditor = auditor,
                 .options = options,
                 .transfer_plan_seed = random.int(u64),
-                .transfers_delivered = transfers_delivered,
                 .transfers_delivered_recently = transfers_delivered_recently,
             };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.auditor.deinit(allocator);
-            allocator.free(self.transfers_delivered);
             self.transfers_delivered_recently.deinit();
         }
 
@@ -482,15 +477,15 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn build_lookup_transfers(self: *const Self, lookup_ids: []u128) usize {
-            const delivering_min = self.transfers_delivering_min();
+            const delivered = self.transfers_delivered_past;
             const lookup_window = sample_distribution(self.random, self.options.lookup_transfer);
             const lookup_window_start = switch (lookup_window) {
-                // +1 to avoid an error when delivering_min=0.
-                .delivered => self.random.uintLessThanBiased(usize, delivering_min + 1),
-                // +1 to avoid an error when delivering_min=transfers_sent.
+                // +1 to avoid an error when delivered=0.
+                .delivered => self.random.uintLessThanBiased(usize, delivered + 1),
+                // +1 to avoid an error when delivered=transfers_sent.
                 .sending => self.random.intRangeLessThanBiased(
                     usize,
-                    delivering_min,
+                    delivered,
                     self.transfers_sent + 1,
                 ),
             };
@@ -673,18 +668,6 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             };
         }
 
-        /// Returns the index of the lowest transfer that is in-flight, across all clients.
-        /// (There may be transfers greater than this index that have been delivered by other clients.)
-        fn transfers_delivering_min(self: *const Self) usize {
-            var delivering_min: ?usize = null;
-            for (self.transfers_delivered) |delivered_by_client| {
-                if (delivering_min == null or delivering_min.? > delivered_by_client + 1) {
-                    delivering_min = delivered_by_client + 1;
-                }
-            }
-            return std.math.min(self.transfers_sent, delivering_min orelse 0);
-        }
-
         fn on_create_transfers(
             self: *Self,
             client_index: usize,
@@ -699,18 +682,19 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             const transfer_index_max = self.transfer_id_to_index(transfers[transfers.len - 1].id);
             assert(transfer_index_min <= transfer_index_max);
 
-            self.transfers_delivered[client_index] = transfer_index_max;
             self.transfers_delivered_recently.add(.{
                 .min = transfer_index_min,
                 .max = transfer_index_max,
             }) catch unreachable;
 
-            var delivering_min = self.transfers_delivering_min();
             while (self.transfers_delivered_recently.peek()) |delivered| {
-                assert(delivered.min >= delivering_min);
-                if (delivered.min != delivering_min) break;
-                _ = self.transfers_delivered_recently.remove();
-                delivering_min = 1 + delivered.max;
+                if (self.transfers_delivered_past == delivered.min) {
+                    self.transfers_delivered_past = delivered.max + 1;
+                    _ = self.transfers_delivered_recently.remove();
+                } else {
+                    assert(self.transfers_delivered_past < delivered.min);
+                    break;
+                }
             }
         }
 
@@ -723,7 +707,6 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
         ) void {
             self.auditor.on_lookup_transfers(client_index, timestamp, ids, results);
 
-            const transfers_delivering = self.transfers_delivering_min();
             var transfers = accounting_auditor.IteratorForLookup(tb.Transfer).init(results);
             for (ids) |transfer_id| {
                 const transfer_index = self.transfer_id_to_index(transfer_id);
@@ -748,7 +731,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
 
                 switch (transfer_outcome) {
                     .success => {
-                        if (transfer_index < transfers_delivering) {
+                        if (transfer_index < self.transfers_delivered_past) {
                             // The transfer was delivered; it must exist.
                             assert(result != null);
                         } else {
@@ -758,6 +741,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                                 {
                                     // The transfer was delivered recently; it must exist.
                                     assert(result != null);
+                                    break;
                                 }
                             } else {
                                 // The `create_transfers` has not committed (it may be in-flight).
