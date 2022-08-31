@@ -187,8 +187,8 @@ pub fn main() !void {
         .linked_invalid_probability = 100,
         // TODO(Timeouts): When timeouts are implemented in the StateMachine, change these to the
         // (commented out) values so that timeouts can actually trigger..
-        .pending_timeout_min = 1_000_000_000 * 10,
-        .pending_timeout_mean = 1_000_000_000 * 10,
+        .pending_timeout_min = std.math.maxInt(u64) / 2,
+        .pending_timeout_mean = std.math.maxInt(u64) / 2,
         // .pending_timeout_min = 1,
         // .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
         .accounts_batch_size_min = 0,
