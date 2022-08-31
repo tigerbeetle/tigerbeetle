@@ -340,39 +340,37 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
+            const direction = .ascending;
             const snapshots = [_]u64{snapshot};
             const manifest_level = &manifest.levels[level];
 
-            var count: u32 = 0;
-            var tables: [64]TableInfo = undefined;
+            var array: [64]TableInfo = undefined;
+            var buffer = TableInfoBufferType(Table, direction){ .array = &array };
             var it = manifest_level.iterator(
                 .invisible,
                 &snapshots,
-                .ascending,
+                direction,
                 KeyRange{ .key_min = key_min, .key_max = key_max },
             );
 
             while (it.next()) |table| {
                 assert(table.invisible(&snapshots));
-                assert(compare_keys(key_min, table.key_min) != .gt);
-                assert(compare_keys(key_max, table.key_max) != .lt);
+                assert(compare_keys(key_min, table.key_max) != .gt);
+                assert(compare_keys(key_max, table.key_min) != .lt);
 
                 // Append remove changes to the manifest log.
                 const log_level = @intCast(u7, level);
                 manifest.manifest_log.remove(log_level, table);
 
-                if (count > 0) {
-                    manifest_level.remove_tables(manifest.node_pool, &snapshots, tables[0..count]);
-                    count = 0;
+                if (buffer.full()) {
+                    manifest_level.remove_tables(manifest.node_pool, &snapshots, buffer.drain());
                 }
-
-                assert(count < tables.len);
-                tables[count] = table.*;
-                count += 1;
+                buffer.push(table);
             }
-
-            if (count > 0) {
-                manifest_level.remove_tables(manifest.node_pool, &snapshots, tables[0..count]);
+            
+            const tables = buffer.drain();
+            if (tables.len > 0) {
+                manifest_level.remove_tables(manifest.node_pool, &snapshots, tables);
             }
         }
 
