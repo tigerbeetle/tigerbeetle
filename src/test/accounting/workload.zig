@@ -393,6 +393,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             for (accounts) |*account, i| {
                 const account_index = self.random.uintLessThanBiased(usize, self.auditor.accounts.len);
                 account.* = self.auditor.accounts[account_index];
+                account.timestamp = 0;
                 results[i] = accounting_auditor.CreateAccountResultSet{};
 
                 if (chance(self.random, self.options.create_account_invalid_probability)) {
