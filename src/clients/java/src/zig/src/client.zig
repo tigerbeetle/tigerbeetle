@@ -78,6 +78,7 @@ const RequestReflection = struct {
             var erased = @intToPtr(*anyopaque, @ptrToInt(value.ptr));
             break :blk env.newDirectByteBuffer(erased, value.len) catch null;
         } else null;
+        defer if (buffer != null) env.deleteReference(.local, buffer);
 
         env.callMethod(
             .@"void",

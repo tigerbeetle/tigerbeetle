@@ -105,53 +105,47 @@ abstract class Request<T> implements Future<T[]> {
     }
 
     boolean waitForCompletion(long timeoutMillis) throws InterruptedException {
-        synchronized (this) {   
+        synchronized (this) {
             if (!isDone()) {
                 wait(timeoutMillis);
                 return isDone();
-            }
-            else
-            {
+            } else {
                 return true;
             }
         }
     }
 
-    // Since we just support a limited set of operations, it is safe to cast the result to T[]
+    // Since we just support a limited set of operations, it is safe to cast the
+    // result to T[]
     @SuppressWarnings("unchecked")
     T[] getResult() throws RequestException {
         if (status != Status.OK)
             throw new RequestException(status);
-        
-        return (T[])result;
-    }
 
+        return (T[]) result;
+    }
 
     @Override
     public T[] get() throws InterruptedException, ExecutionException {
-        
+
         waitForCompletion();
 
-        try
-        {
+        try {
             return getResult();
-        }
-        catch (RequestException exception) {
+        } catch (RequestException exception) {
             throw new ExecutionException(exception);
         }
     }
 
     @Override
     public T[] get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
-        
+
         if (!waitForCompletion(unit.convert(timeout, TimeUnit.MILLISECONDS)))
             throw new TimeoutException();
-        
-        try
-        {
+
+        try {
             return getResult();
-        }
-        catch (RequestException exception) {
+        } catch (RequestException exception) {
             throw new ExecutionException(exception);
         }
     }

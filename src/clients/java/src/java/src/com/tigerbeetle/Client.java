@@ -74,13 +74,13 @@ public final class Client implements AutoCloseable {
 
     public Future<CreateAccountsResult[]> createAccountsAsync(Account[] batch) throws InterruptedException {
         return createAccountsAsync(new AccountsBatch(batch));
-    }   
+    }
 
     public Future<CreateAccountsResult[]> createAccountsAsync(AccountsBatch batch) throws InterruptedException {
         var request = new CreateAccountsRequest(this, batch);
         submit(request);
         return request;
-    }    
+    }
 
     public Account lookupAccount(UUID uuid) throws InterruptedException, RequestException {
         var batch = new UUIDsBatch(1);
@@ -113,7 +113,7 @@ public final class Client implements AutoCloseable {
         var request = new LookupAccountsRequest(this, batch);
         submit(request);
         return request;
-    }    
+    }
 
     public CreateTransferResult createTransfer(Transfer transfer) throws InterruptedException, RequestException {
         var batch = new TransfersBatch(1);
@@ -146,7 +146,7 @@ public final class Client implements AutoCloseable {
         var request = new CreateTransfersRequest(this, batch);
         submit(request);
         return request;
-    }    
+    }
 
     public Transfer lookupTransfer(UUID uuid) throws InterruptedException, RequestException {
         var batch = new UUIDsBatch(1);
@@ -190,7 +190,6 @@ public final class Client implements AutoCloseable {
     // It uses only the underlying buffer and the operation enum.
     @SuppressWarnings("rawtypes")
     private native void submit(Request request);
-
 
     public static void main(String[] args) {
         try (var client = new Client(0, new String[] { "127.0.0.1:3001" }, 32)) {
@@ -239,8 +238,16 @@ public final class Client implements AutoCloseable {
 
                 var now = System.currentTimeMillis();
 
-                var transferResults = client.createTransfers(batch);
-                if (transferResults.length > 0)
+                // Async usage:
+                // Start the batch ...
+                var request = client.createTransfersAsync(batch);
+
+                // Register something on the application's side while tigerbeetle is processing
+                // it
+                // UPDATE FROM MyCustomer ...
+
+                var errors = request.get();
+                if (errors.length > 0)
                     throw new Exception("Unexpected transfer results");
 
                 var elapsed = System.currentTimeMillis() - now;

@@ -70,7 +70,7 @@ public enum CreateTransferResult {
     PendingTransferAlreadyPosted,
     PendingTransferAlreadyVoided,
 
-    PendingTransferExpired;    
+    PendingTransferExpired;
 
     public static CreateTransferResult fromValue(int value) {
         var values = CreateTransferResult.values();
@@ -78,5 +78,5 @@ public enum CreateTransferResult {
             throw new IllegalArgumentException();
 
         return values[value];
-    }    
+    }
 }

@@ -100,7 +100,7 @@ public final class Transfer {
         return flags;
     }
 
-    public void setFlags(short flags) {  
+    public void setFlags(short flags) {
         this.flags = flags;
     }
 

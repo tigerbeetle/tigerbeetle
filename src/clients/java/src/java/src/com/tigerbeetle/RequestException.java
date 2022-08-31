@@ -4,8 +4,7 @@ public final class RequestException extends Throwable {
 
     private final byte status;
 
-    public RequestException(byte status)
-    {
+    public RequestException(byte status) {
         this.status = status;
     }
 
@@ -19,7 +18,7 @@ public final class RequestException extends Throwable {
     }
 
     @Override
-    public String toString() {   
+    public String toString() {
         switch (status) {
 
             case Request.Status.TOO_MUCH_DATA:
@@ -35,9 +34,5 @@ public final class RequestException extends Throwable {
                 return "Unknown error status " + status;
         }
     }
-
-    
-    
-    
 
 }
