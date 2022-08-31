@@ -9,6 +9,7 @@ pub const log_level: std.log.Level = .err;
 const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
 
+const util = @import("util.zig");
 const Storage = @import("storage.zig").Storage;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
@@ -210,7 +211,8 @@ const TimedQueue = struct {
             const message = self.client.get_message();
             defer self.client.unref(message);
 
-            std.mem.copy(
+            util.copy_distinct(
+                .inexact,
                 u8,
                 message.buffer[@sizeOf(vsr.Header)..],
                 std.mem.sliceAsBytes(starting_batch.data),
@@ -277,7 +279,8 @@ const TimedQueue = struct {
             const message = self.client.get_message();
             defer self.client.unref(message);
 
-            std.mem.copy(
+            util.copy_distinct(
+                .inexact,
                 u8,
                 message.buffer[@sizeOf(vsr.Header)..],
                 std.mem.sliceAsBytes(next_batch.data),

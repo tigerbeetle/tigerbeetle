@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
+const util = @import("../util.zig");
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
@@ -138,7 +139,7 @@ pub const Network = struct {
         const network_message = network.message_pool.get_message();
         defer network.message_pool.unref(network_message);
 
-        std.mem.copy(u8, network_message.buffer, message.buffer);
+        util.copy_disjoint(.exact, u8, network_message.buffer, message.buffer);
 
         network.packet_simulator.submit_packet(
             .{
@@ -171,7 +172,7 @@ pub const Network = struct {
         const target_message = target_bus.get_message();
         defer target_bus.unref(target_message);
 
-        std.mem.copy(u8, target_message.buffer, packet.message.buffer);
+        util.copy_disjoint(.exact, u8, target_message.buffer, packet.message.buffer);
 
         const process_path = .{
             .source = raw_process_to_process(network.processes.items[path.source]),
