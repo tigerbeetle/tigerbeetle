@@ -1,17 +1,21 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
-class Request {
+abstract class Request<T> implements Future<T[]> {
 
-    public final static class Operations {
+    protected final static class Operations {
         public final static byte CREATE_ACCOUNTS = 3;
         public final static byte CREATE_TRANSFERS = 4;
         public final static byte LOOKUP_ACCOUNTS = 5;
         public final static byte LOOKUP_TRANSFERS = 6;
     }
 
-    private final static class Status {
+    protected final static class Status {
         public final static byte UNINITIALIZED = -1;
         public final static byte OK = 0;
         public final static byte TOO_MUCH_DATA = 1;
@@ -34,7 +38,7 @@ class Request {
     private final byte operation;
     private byte status = Status.UNINITIALIZED;
 
-    public Request(Client client, byte operation, Batch batch) {
+    protected Request(Client client, byte operation, Batch batch) {
         this.client = client;
         this.operation = operation;
         this.body = batch.buffer;
@@ -76,15 +80,79 @@ class Request {
         }
     }
 
-    public Object waitForResult() throws Exception, InterruptedException {
+    @Override
+    public boolean cancel(boolean mayInterruptIfRunning) {
+        // Cancel a tigerbeetle request is not supported
+        return false;
+    }
+
+    @Override
+    public boolean isCancelled() {
+        return false;
+    }
+
+    @Override
+    public boolean isDone() {
+        return status != Status.UNINITIALIZED;
+    }
+
+    void waitForCompletion() throws InterruptedException {
         synchronized (this) {
-            while (result == null && status == Status.UNINITIALIZED) {
+            while (!isDone()) {
                 wait();
             }
+        }
+    }
 
-            if (result == null)
-                throw new Exception("Result = " + status);
-            return result;
+    boolean waitForCompletion(long timeoutMillis) throws InterruptedException {
+        synchronized (this) {   
+            if (!isDone()) {
+                wait(timeoutMillis);
+                return isDone();
+            }
+            else
+            {
+                return true;
+            }
+        }
+    }
+
+    // Since we just support a limited set of operations, it is safe to cast the result to T[]
+    @SuppressWarnings("unchecked")
+    T[] getResult() throws RequestException {
+        if (status != Status.OK)
+            throw new RequestException(status);
+        
+        return (T[])result;
+    }
+
+
+    @Override
+    public T[] get() throws InterruptedException, ExecutionException {
+        
+        waitForCompletion();
+
+        try
+        {
+            return getResult();
+        }
+        catch (RequestException exception) {
+            throw new ExecutionException(exception);
+        }
+    }
+
+    @Override
+    public T[] get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+        
+        if (!waitForCompletion(unit.convert(timeout, TimeUnit.MILLISECONDS)))
+            throw new TimeoutException();
+        
+        try
+        {
+            return getResult();
+        }
+        catch (RequestException exception) {
+            throw new ExecutionException(exception);
         }
     }
 }

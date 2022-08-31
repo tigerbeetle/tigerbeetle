@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import java.util.StringJoiner;
 import java.util.UUID;
+import java.util.concurrent.Future;
 
 public final class Client implements AutoCloseable {
     static {
@@ -48,13 +49,7 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    private native int clientInit(int clusterID, String addresses, int maxConcurrency);
-
-    private native void clientDeinit();
-
-    private native void submit(Request request);
-
-    public CreateAccountResult createAccount(Account account) throws InterruptedException, Exception {
+    public CreateAccountResult createAccount(Account account) throws InterruptedException, RequestException {
         var batch = new AccountsBatch(1);
         batch.Add(account);
 
@@ -66,20 +61,28 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public CreateAccountsResult[] createAccounts(Account[] batch) throws InterruptedException, Exception {
+    public CreateAccountsResult[] createAccounts(Account[] batch) throws InterruptedException, RequestException {
         return createAccounts(new AccountsBatch(batch));
     }
 
-    public CreateAccountsResult[] createAccounts(AccountsBatch batch) throws InterruptedException, Exception {
-        var request = new Request(this, Request.Operations.CREATE_ACCOUNTS, batch);
-
+    public CreateAccountsResult[] createAccounts(AccountsBatch batch) throws InterruptedException, RequestException {
+        var request = new CreateAccountsRequest(this, batch);
         submit(request);
-
-        return (CreateAccountsResult[]) request.waitForResult();
-
+        request.waitForCompletion();
+        return request.getResult();
     }
 
-    public Account lookupAccount(UUID uuid) throws InterruptedException, Exception {
+    public Future<CreateAccountsResult[]> createAccountsAsync(Account[] batch) throws InterruptedException {
+        return createAccountsAsync(new AccountsBatch(batch));
+    }   
+
+    public Future<CreateAccountsResult[]> createAccountsAsync(AccountsBatch batch) throws InterruptedException {
+        var request = new CreateAccountsRequest(this, batch);
+        submit(request);
+        return request;
+    }    
+
+    public Account lookupAccount(UUID uuid) throws InterruptedException, RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -91,19 +94,28 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public Account[] lookupAccounts(UUID[] batch) throws InterruptedException, Exception {
+    public Account[] lookupAccounts(UUID[] batch) throws InterruptedException, RequestException {
         return lookupAccounts(new UUIDsBatch(batch));
     }
 
-    public Account[] lookupAccounts(UUIDsBatch batch) throws InterruptedException, Exception {
-        var request = new Request(this, Request.Operations.LOOKUP_ACCOUNTS, batch);
-
+    public Account[] lookupAccounts(UUIDsBatch batch) throws InterruptedException, RequestException {
+        var request = new LookupAccountsRequest(this, batch);
         submit(request);
-
-        return (Account[]) request.waitForResult();
+        request.waitForCompletion();
+        return request.getResult();
     }
 
-    public CreateTransferResult createTransfer(Transfer transfer) throws InterruptedException, Exception {
+    public Future<Account[]> lookupAccountsAsync(UUID[] batch) throws InterruptedException {
+        return lookupAccountsAsync(new UUIDsBatch(batch));
+    }
+
+    public Future<Account[]> lookupAccountsAsync(UUIDsBatch batch) throws InterruptedException {
+        var request = new LookupAccountsRequest(this, batch);
+        submit(request);
+        return request;
+    }    
+
+    public CreateTransferResult createTransfer(Transfer transfer) throws InterruptedException, RequestException {
         var batch = new TransfersBatch(1);
         batch.Add(transfer);
 
@@ -115,19 +127,28 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public CreateTransfersResult[] createTransfers(Transfer[] batch) throws InterruptedException, Exception {
+    public CreateTransfersResult[] createTransfers(Transfer[] batch) throws InterruptedException, RequestException {
         return createTransfers(new TransfersBatch(batch));
     }
 
-    public CreateTransfersResult[] createTransfers(TransfersBatch batch) throws InterruptedException, Exception {
-        var request = new Request(this, Request.Operations.CREATE_TRANSFERS, batch);
-
+    public CreateTransfersResult[] createTransfers(TransfersBatch batch) throws InterruptedException, RequestException {
+        var request = new CreateTransfersRequest(this, batch);
         submit(request);
-
-        return (CreateTransfersResult[]) request.waitForResult();
+        request.waitForCompletion();
+        return request.getResult();
     }
 
-    public Transfer lookupTransfer(UUID uuid) throws InterruptedException, Exception {
+    public Future<CreateTransfersResult[]> createTransfersAsync(Transfer[] batch) throws InterruptedException {
+        return createTransfersAsync(new TransfersBatch(batch));
+    }
+
+    public Future<CreateTransfersResult[]> createTransfersAsync(TransfersBatch batch) throws InterruptedException {
+        var request = new CreateTransfersRequest(this, batch);
+        submit(request);
+        return request;
+    }    
+
+    public Transfer lookupTransfer(UUID uuid) throws InterruptedException, RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -139,17 +160,37 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public Transfer[] lookupTransfers(UUID[] batch) throws InterruptedException, Exception {
+    public Transfer[] lookupTransfers(UUID[] batch) throws InterruptedException, RequestException {
         return lookupTransfers(new UUIDsBatch(batch));
     }
 
-    public Transfer[] lookupTransfers(UUIDsBatch batch) throws InterruptedException, Exception {
-        var request = new Request(this, Request.Operations.LOOKUP_TRANSFERS, batch);
-
+    public Transfer[] lookupTransfers(UUIDsBatch batch) throws InterruptedException, RequestException {
+        var request = new LookupTransfersRequest(this, batch);
         submit(request);
-
-        return (Transfer[]) request.waitForResult();
+        request.waitForCompletion();
+        return request.getResult();
     }
+
+    public Future<Transfer[]> lookupTransfersAsync(UUID[] batch) throws InterruptedException {
+        return lookupTransfersAsync(new UUIDsBatch(batch));
+    }
+
+    public Future<Transfer[]> lookupTransfersAsync(UUIDsBatch batch) throws InterruptedException {
+        var request = new LookupTransfersRequest(this, batch);
+        submit(request);
+        return request;
+    }
+
+    private native int clientInit(int clusterID, String addresses, int maxConcurrency);
+
+    private native void clientDeinit();
+
+    // It is safe to suppress the warning about using the raw type here
+    // The native method impl does not care about the <T> parameter
+    // It uses only the underlying buffer and the operation enum.
+    @SuppressWarnings("rawtypes")
+    private native void submit(Request request);
+
 
     public static void main(String[] args) {
         try (var client = new Client(0, new String[] { "127.0.0.1:3001" }, 32)) {
@@ -220,7 +261,7 @@ public final class Client implements AutoCloseable {
 
             System.console().readLine();
 
-        } catch (Exception e) {
+        } catch (Exception | RequestException e) {
             System.out.println(e);
             e.printStackTrace();
         }

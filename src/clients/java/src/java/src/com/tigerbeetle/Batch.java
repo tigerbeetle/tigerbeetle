@@ -17,5 +17,5 @@ public abstract class Batch {
         this.buffer = buffer.order(ByteOrder.LITTLE_ENDIAN);
     }
 
-    abstract long getBufferLen();
+    public abstract long getBufferLen();
 }
