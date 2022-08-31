@@ -29,6 +29,7 @@ const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
 const BlockType = @import("../lsm/grid.zig").BlockType;
+const util = @import("../util.zig");
 
 const log = std.log.scoped(.storage);
 
@@ -242,7 +243,7 @@ pub const Storage = struct {
         assert(storage.size == origin.size);
 
         storage.ticks = origin.ticks;
-        std.mem.copy(u8, storage.memory, origin.memory);
+        util.copy_disjoint(.exact, u8, storage.memory, origin.memory);
         storage.memory_occupied.toggleSet(storage.memory_occupied);
         storage.memory_occupied.toggleSet(origin.memory_occupied);
         storage.faults.toggleSet(storage.faults);
@@ -315,7 +316,12 @@ pub const Storage = struct {
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
         const offset_in_storage = read.zone.offset(read.offset);
-        mem.copy(u8, read.buffer, storage.memory[offset_in_storage..][0..read.buffer.len]);
+        util.copy_disjoint(
+            .exact,
+            u8,
+            read.buffer,
+            storage.memory[offset_in_storage..][0..read.buffer.len],
+        );
 
         if (storage.x_in_100(storage.options.read_fault_probability)) {
             storage.fault_faulty_sectors(read.zone, read.offset, read.buffer.len);
@@ -384,7 +390,12 @@ pub const Storage = struct {
 
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
         const offset_in_storage = write.zone.offset(write.offset);
-        mem.copy(u8, storage.memory[offset_in_storage..][0..write.buffer.len], write.buffer);
+        util.copy_disjoint(
+            .exact,
+            u8,
+            storage.memory[offset_in_storage..][0..write.buffer.len],
+            write.buffer,
+        );
 
         const sector_min = @divExact(offset_in_storage, config.sector_size);
         const sector_max = @divExact(offset_in_storage + write.buffer.len, config.sector_size);

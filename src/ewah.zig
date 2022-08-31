@@ -2,7 +2,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
-const div_ceil = @import("util.zig").div_ceil;
+const util = @import("util.zig");
+const div_ceil = util.div_ceil;
+const is_disjoint = util.is_disjoint;
 
 /// Encode or decode a bitset using Daniel Lemire's EWAH codec.
 /// ("Histogram-Aware Sorting for Enhanced Word-Aligned Compression in Bitmap Indexes")
@@ -75,7 +77,8 @@ pub fn ewah(comptime Word: type) type {
                     if (marker.uniform_bit == 1) ~@as(Word, 0) else 0,
                 );
                 target_index += marker.uniform_word_count;
-                std.mem.copy(
+                util.copy_disjoint(
+                    .exact,
                     Word,
                     target_words[target_index..][0..marker.literal_word_count],
                     source_words[source_index..][0..marker.literal_word_count],
@@ -126,7 +129,8 @@ pub fn ewah(comptime Word: type) type {
                     .literal_word_count = @intCast(MarkerLiteralCount, literal_word_count),
                 });
                 target_index += 1;
-                std.mem.copy(
+                util.copy_disjoint(
+                    .exact,
                     Word,
                     target_words[target_index..][0..literal_word_count],
                     source_words[source_index..][0..literal_word_count],
@@ -152,34 +156,6 @@ pub fn ewah(comptime Word: type) type {
             return word != 0 and word != ~@as(Word, 0);
         }
     };
-}
-
-fn is_disjoint(comptime A: type, comptime B: type, a: []const A, b: []const B) bool {
-    return @ptrToInt(a.ptr) + a.len * @sizeOf(A) <= @ptrToInt(b.ptr) or
-        @ptrToInt(b.ptr) + b.len * @sizeOf(B) <= @ptrToInt(a.ptr);
-}
-
-test "is_disjoint" {
-    const a = try std.testing.allocator.alignedAlloc(u8, @sizeOf(u32), 8 * @sizeOf(u32));
-    defer std.testing.allocator.free(a);
-
-    const b = try std.testing.allocator.alloc(u32, 8);
-    defer std.testing.allocator.free(b);
-
-    try std.testing.expectEqual(true, is_disjoint(u8, u32, a, b));
-    try std.testing.expectEqual(true, is_disjoint(u32, u8, b, a));
-
-    try std.testing.expectEqual(true, is_disjoint(u8, u8, a, a[0..0]));
-    try std.testing.expectEqual(true, is_disjoint(u32, u32, b, b[0..0]));
-
-    try std.testing.expectEqual(false, is_disjoint(u8, u8, a, a[0..1]));
-    try std.testing.expectEqual(false, is_disjoint(u8, u8, a, a[a.len - 1 .. a.len]));
-
-    try std.testing.expectEqual(false, is_disjoint(u32, u32, b, b[0..1]));
-    try std.testing.expectEqual(false, is_disjoint(u32, u32, b, b[b.len - 1 .. b.len]));
-
-    try std.testing.expectEqual(false, is_disjoint(u8, u32, a, std.mem.bytesAsSlice(u32, a)));
-    try std.testing.expectEqual(false, is_disjoint(u32, u8, b, std.mem.sliceAsBytes(b)));
 }
 
 test "ewah Word=u8 decode→encode→decode" {

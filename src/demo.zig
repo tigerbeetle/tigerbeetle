@@ -10,6 +10,7 @@ const Transfer = tb.Transfer;
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
+const util = @import("util.zig");
 const IO = @import("io.zig").IO;
 const Storage = @import("storage.zig").Storage;
 const MessagePool = @import("message_pool.zig").MessagePool;
@@ -61,7 +62,7 @@ pub fn request(
     defer client.unref(message);
 
     const body = std.mem.asBytes(&batch);
-    std.mem.copy(u8, message.buffer[@sizeOf(Header)..], body);
+    util.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(Header)..], body);
 
     client.request(
         0,

@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 const config = @import("../../config.zig");
 const log = std.log.scoped(.tb_client);
 
+const util = @import("../../util.zig");
 const vsr = @import("../../vsr.zig");
 const Header = vsr.Header;
 
@@ -268,7 +269,7 @@ pub fn ThreadType(
             }
 
             // Write the packet data to the message
-            std.mem.copy(u8, writable, readable);
+            util.copy_disjoint(.inexact, u8, writable, readable);
             const wrote = readable.len;
 
             // .. and submit the message for processing

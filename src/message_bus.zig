@@ -12,6 +12,7 @@ const log = std.log.scoped(.message_bus);
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
+const util = @import("util.zig");
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
@@ -738,7 +739,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 if (connection.recv_progress == header.size) return connection.recv_message.?.ref();
 
                 const message = bus.get_message();
-                mem.copy(u8, message.buffer, data[0..header.size]);
+                util.copy_disjoint(.inexact, u8, message.buffer, data[0..header.size]);
                 return message;
             }
 
@@ -830,7 +831,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     assert(connection.recv_progress > 0);
                     assert(connection.recv_parsed > 0);
                     const data = recv_message.buffer[connection.recv_parsed..connection.recv_progress];
-                    mem.copy(u8, new_message.buffer, data);
+                    util.copy_disjoint(.inexact, u8, new_message.buffer, data);
                     connection.recv_progress = data.len;
                     connection.recv_parsed = 0;
                 } else {
