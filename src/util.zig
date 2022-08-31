@@ -1,17 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-// TODO copy_left(), copy_right()
-// Inline wrappers for mem.copy() and mem.copyBackwards() that assert correctness IFF overlap.
-// It's otherwise too easy to silently use mem.copy() or mem.copyBackwards() incorrectly.
-// Does not assert that there is overlap, only what the direction of the copy should be if there is.
-//
-// TODO copy()
-// Asserts that there is no overlap, or else copy_left() or copy_right() should have been used.
-//
-// TODO copy_exact(), copy_exact_left(), copy_exact_right()
-// Even safer than the above, asserts that the source and target slices have the exact same length.
-
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
         switch (@typeInfo(@TypeOf(numerator))) {
@@ -48,4 +37,101 @@ test "div_ceil" {
     try std.testing.expectEqual(div_ceil(@as(u64, max), 2), max / 2 + 1);
     try std.testing.expectEqual(div_ceil(@as(u64, max) - 1, 2), max / 2);
     try std.testing.expectEqual(div_ceil(@as(u64, max) - 2, 2), max / 2);
+}
+
+pub const CopyPrecision = enum { exact, inexact };
+
+pub inline fn copy_left(
+    comptime precision: CopyPrecision,
+    comptime T: type,
+    destination: []T,
+    source: []const T,
+) void {
+    switch (precision) {
+        .exact => assert(destination.len == source.len),
+        .inexact => assert(destination.len >= source.len),
+    }
+
+    if (!is_disjoint(T, T, destination, source)) {
+        assert(@ptrToInt(destination.ptr) < @ptrToInt(source.ptr));
+    }
+    std.mem.copy(T, destination, source);
+}
+
+test "copy_left" {
+    const a = try std.testing.allocator.alloc(usize, 8);
+    defer std.testing.allocator.free(a);
+
+    for (a) |*v, i| v.* = i;
+    copy_left(.exact, usize, a[0..6], a[2..]);
+    try std.testing.expect(std.mem.eql(usize, a, &.{2, 3, 4, 5, 6, 7, 6, 7}));
+}
+
+pub inline fn copy_right(
+    comptime precision: CopyPrecision,
+    comptime T: type,
+    destination: []T,
+    source: []const T,
+) void {
+    switch (precision) {
+        .exact => assert(destination.len == source.len),
+        .inexact => assert(destination.len >= source.len),
+    }
+
+    if (!is_disjoint(T, T, destination, source)) {
+        assert(@ptrToInt(destination.ptr) > @ptrToInt(source.ptr));
+    }
+    std.mem.copyBackwards(T, destination, source);
+}
+
+test "copy_right" {
+    const a = try std.testing.allocator.alloc(usize, 8);
+    defer std.testing.allocator.free(a);
+
+    for (a) |*v, i| v.* = i;
+    copy_right(.exact, usize, a[2..], a[0..6]);
+    try std.testing.expect(std.mem.eql(usize, a, &.{0, 1, 0, 1, 2, 3, 4, 5}));
+}
+
+pub inline fn copy_disjoint(
+    comptime precision: CopyPrecision,
+    comptime T: type,
+    destination: []T,
+    source: []const T,
+) void {
+    switch (precision) {
+        .exact => assert(destination.len == source.len),
+        .inexact => assert(destination.len >= source.len),
+    }
+
+    assert(is_disjoint(T, T, destination, source));
+    std.mem.copy(T, destination, source);
+}
+
+pub inline fn is_disjoint(comptime A: type, comptime B: type, a: []const A, b: []const B) bool {
+    return @ptrToInt(a.ptr) + a.len * @sizeOf(A) <= @ptrToInt(b.ptr) or
+        @ptrToInt(b.ptr) + b.len * @sizeOf(B) <= @ptrToInt(a.ptr);
+}
+
+test "is_disjoint" {
+    const a = try std.testing.allocator.alignedAlloc(u8, @sizeOf(u32), 8 * @sizeOf(u32));
+    defer std.testing.allocator.free(a);
+
+    const b = try std.testing.allocator.alloc(u32, 8);
+    defer std.testing.allocator.free(b);
+
+    try std.testing.expectEqual(true, is_disjoint(u8, u32, a, b));
+    try std.testing.expectEqual(true, is_disjoint(u32, u8, b, a));
+
+    try std.testing.expectEqual(true, is_disjoint(u8, u8, a, a[0..0]));
+    try std.testing.expectEqual(true, is_disjoint(u32, u32, b, b[0..0]));
+
+    try std.testing.expectEqual(false, is_disjoint(u8, u8, a, a[0..1]));
+    try std.testing.expectEqual(false, is_disjoint(u8, u8, a, a[a.len - 1 .. a.len]));
+
+    try std.testing.expectEqual(false, is_disjoint(u32, u32, b, b[0..1]));
+    try std.testing.expectEqual(false, is_disjoint(u32, u32, b, b[b.len - 1 .. b.len]));
+
+    try std.testing.expectEqual(false, is_disjoint(u8, u32, a, std.mem.bytesAsSlice(u32, a)));
+    try std.testing.expectEqual(false, is_disjoint(u32, u8, b, std.mem.sliceAsBytes(b)));
 }

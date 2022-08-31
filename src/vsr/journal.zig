@@ -7,6 +7,7 @@ const math = std.math;
 const config = @import("../config.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
+const util = @import("../util.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const IOPS = @import("../iops.zig").IOPS;
@@ -1005,7 +1006,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             // that are invalid or corrupt). As the prepares are recovered, these will be replaced
             // or removed as necessary.
             const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
-            std.mem.copy(
+            util.copy_disjoint(
+                .exact,
                 Header,
                 self.headers_redundant[@divExact(offset, @sizeOf(Header))..][0..buffer_headers.len],
                 buffer_headers,
@@ -1216,8 +1218,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             for (cases) |case, index| self.recover_slot(Slot{ .index = index }, case);
             assert(cases.len == slot_count);
 
-            // TODO util.copy_exact
-            std.mem.copy(Header, self.headers_redundant, self.headers);
+            util.copy_disjoint(.exact, Header, self.headers_redundant, self.headers);
 
             log.debug("{}: recover_slots: dirty={} faulty={}", .{
                 self.replica,
@@ -2288,7 +2289,12 @@ test "format_wal" {
             while (true) {
                 const write_size = format_wal_headers(cluster, offset, write_data);
                 if (write_size == 0) break;
-                std.mem.copy(u8, headers_data[offset..][0..write_size], write_data[0..write_size]);
+                util.copy_disjoint(
+                    .exact,
+                    u8,
+                    headers_data[offset..][0..write_size],
+                    write_data[0..write_size],
+                );
                 offset += write_size;
             }
         }
@@ -2298,7 +2304,12 @@ test "format_wal" {
             while (true) {
                 const write_size = format_wal_prepares(cluster, offset, write_data);
                 if (write_size == 0) break;
-                std.mem.copy(u8, prepare_data[offset..][0..write_size], write_data[0..write_size]);
+                util.copy_disjoint(
+                    .exact,
+                    u8,
+                    prepare_data[offset..][0..write_size],
+                    write_data[0..write_size],
+                );
                 offset += write_size;
             }
         }

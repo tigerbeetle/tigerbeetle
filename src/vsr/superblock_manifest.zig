@@ -6,6 +6,7 @@ const log = std.log.scoped(.superblock_manifest);
 const mem = std.mem;
 
 const config = @import("../config.zig");
+const util = @import("../util.zig");
 
 /// SuperBlock.Manifest schema:
 /// │ [manifest.count]u128 │ Tree id (for the owner of the ManifestLog)
@@ -97,15 +98,30 @@ pub const Manifest = struct {
         var size: u64 = 0;
 
         const trees = target[size..][0 .. manifest.count * @sizeOf(u128)];
-        mem.copy(u128, mem.bytesAsSlice(u128, trees), manifest.trees[0..manifest.count]);
+        util.copy_disjoint(
+            .exact,
+            u128,
+            mem.bytesAsSlice(u128, trees),
+            manifest.trees[0..manifest.count],
+        );
         size += trees.len;
 
         const checksums = target[size..][0 .. manifest.count * @sizeOf(u128)];
-        mem.copy(u128, mem.bytesAsSlice(u128, checksums), manifest.checksums[0..manifest.count]);
+        util.copy_disjoint(
+            .exact,
+            u128,
+            mem.bytesAsSlice(u128, checksums),
+            manifest.checksums[0..manifest.count],
+        );
         size += checksums.len;
 
         const addresses = target[size..][0 .. manifest.count * @sizeOf(u64)];
-        mem.copy(u64, mem.bytesAsSlice(u64, addresses), manifest.addresses[0..manifest.count]);
+        util.copy_disjoint(
+            .exact,
+            u64,
+            mem.bytesAsSlice(u64, addresses),
+            manifest.addresses[0..manifest.count],
+        );
         size += addresses.len;
 
         mem.set(u8, target[size..], 0);
@@ -126,15 +142,30 @@ pub const Manifest = struct {
         var size: u64 = 0;
 
         const trees = source[size..][0 .. manifest.count * @sizeOf(u128)];
-        mem.copy(u128, manifest.trees[0..manifest.count], mem.bytesAsSlice(u128, trees));
+        util.copy_disjoint(
+            .exact,
+            u128,
+            manifest.trees[0..manifest.count],
+            mem.bytesAsSlice(u128, trees),
+        );
         size += trees.len;
 
         const checksums = source[size..][0 .. manifest.count * @sizeOf(u128)];
-        mem.copy(u128, manifest.checksums[0..manifest.count], mem.bytesAsSlice(u128, checksums));
+        util.copy_disjoint(
+            .exact,
+            u128,
+            manifest.checksums[0..manifest.count],
+            mem.bytesAsSlice(u128, checksums),
+        );
         size += checksums.len;
 
         const addresses = source[size..][0 .. manifest.count * @sizeOf(u64)];
-        mem.copy(u64, manifest.addresses[0..manifest.count], mem.bytesAsSlice(u64, addresses));
+        util.copy_disjoint(
+            .exact,
+            u64,
+            manifest.addresses[0..manifest.count],
+            mem.bytesAsSlice(u64, addresses),
+        );
         size += addresses.len;
 
         assert(size == source.len);
@@ -189,9 +220,9 @@ pub const Manifest = struct {
         manifest.verify_index_tree_checksum_address(index, tree, checksum, address);
 
         const tail = manifest.count - (index + 1);
-        mem.copy(u128, manifest.trees[index..], manifest.trees[index + 1 ..][0..tail]);
-        mem.copy(u128, manifest.checksums[index..], manifest.checksums[index + 1 ..][0..tail]);
-        mem.copy(u64, manifest.addresses[index..], manifest.addresses[index + 1 ..][0..tail]);
+        util.copy_left(.inexact, u128, manifest.trees[index..], manifest.trees[index + 1 ..][0..tail]);
+        util.copy_left(.inexact, u128, manifest.checksums[index..], manifest.checksums[index + 1 ..][0..tail]);
+        util.copy_left(.inexact, u64, manifest.addresses[index..], manifest.addresses[index + 1 ..][0..tail]);
         manifest.count -= 1;
 
         manifest.trees[manifest.count] = 0;

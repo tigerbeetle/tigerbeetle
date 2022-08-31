@@ -9,6 +9,7 @@ const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
+const util = @import("../util.zig");
 
 const log = std.log.scoped(.grid);
 
@@ -319,7 +320,7 @@ pub fn GridType(comptime Storage: type) type {
                 grid,
                 completed_write.address,
             );
-            mem.copy(u8, cached_block, completed_write.block);
+            util.copy_disjoint(.exact, u8, cached_block, completed_write.block);
 
             grid.write_iops.release(iop);
 
