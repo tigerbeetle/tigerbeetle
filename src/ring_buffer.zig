@@ -3,6 +3,8 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
+const util = @import("util.zig");
+
 /// A First In, First Out ring buffer holding at most `count_max` elements.
 pub fn RingBuffer(
     comptime T: type,
@@ -147,8 +149,8 @@ pub fn RingBuffer(
             const pre_wrap_count = math.min(items.len, self.buffer.len - pre_wrap_start);
             const post_wrap_count = items.len - pre_wrap_count;
 
-            mem.copy(T, self.buffer[pre_wrap_start..], items[0..pre_wrap_count]);
-            mem.copy(T, self.buffer[0..post_wrap_count], items[pre_wrap_count..]);
+            util.copy_disjoint(.inexact, T, self.buffer[pre_wrap_start..], items[0..pre_wrap_count]);
+            util.copy_disjoint(.exact, T, self.buffer[0..post_wrap_count], items[pre_wrap_count..]);
 
             self.count += items.len;
         }
