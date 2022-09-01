@@ -73,51 +73,16 @@ pub const Packet = extern struct {
             };
         }
 
-        pub fn push(self: *List, list: List) void {
+        pub fn push(self: *List, packet: *Packet) void {
             const prev = if (self.tail) |tail| &tail.next else &self.head;
-            prev.* = list.head orelse return;
-            self.tail = list.tail orelse unreachable;
-        }
-
-        pub fn peek(self: List) ?*Packet {
-            return self.head orelse {
-                assert(self.tail == null);
-                return null;
-            };
+            prev.* = packet;
+            self.tail = packet;
         }
 
         pub fn pop(self: *List) ?*Packet {
             const packet = self.head orelse return null;
             self.head = packet.next;
             if (self.head == null) self.tail = null;
-            return packet;
-        }
-    };
-
-    pub const Stack = struct {
-        pushed: Atomic(?*Packet) = Atomic(?*Packet).init(null),
-        popped: ?*Packet = null,
-
-        pub fn push(self: *Stack, list: List) void {
-            const head = list.head orelse return;
-            const tail = list.tail orelse unreachable;
-
-            var pushed = self.pushed.load(.Monotonic);
-            while (true) {
-                tail.next = pushed;
-                pushed = self.pushed.tryCompareAndSwap(
-                    pushed,
-                    head,
-                    .Release,
-                    .Monotonic,
-                ) orelse break;
-            }
-        }
-
-        pub fn pop(self: *Stack) ?*Packet {
-            if (self.popped == null) self.popped = self.pushed.swap(null, .Acquire);
-            const packet = self.popped orelse return null;
-            self.popped = packet.next;
             return packet;
         }
     };

@@ -55,7 +55,7 @@ const RequestReflection = struct {
         request_body_field_id = try env.getFieldId(class, "body", "Ljava/nio/ByteBuffer;");
         request_body_len_field_id = try env.getFieldId(class, "bodyLen", "J");
         request_operation_field_id = try env.getFieldId(class, "operation", "B");
-        request_end_request_method_id = try env.getMethodId(class, "endRequest", "(Ljava/nio/ByteBuffer;B)V");
+        request_end_request_method_id = try env.getMethodId(class, "endRequest", "(Ljava/nio/ByteBuffer;JB)V");
     }
 
     pub fn getBody(env: *jui.JNIEnv, this_object: jui.jobject) []u8 {
@@ -71,7 +71,7 @@ const RequestReflection = struct {
         return @bitCast(u8, env.getField(.byte, this_object, request_operation_field_id));
     }
 
-    pub fn endRequest(env: *jui.JNIEnv, this_object: jui.jobject, result: ?[]const u8, status: tb.Packet.Status) void {
+    pub fn endRequest(env: *jui.JNIEnv, this_object: jui.jobject, result: ?[]const u8, packet: *tb.Packet) void {
         var buffer: jui.jobject = if (result) |value| blk: {
             // force cast from *const to *anyopaque
             // it is ok here, since the result is always readonly
@@ -86,7 +86,8 @@ const RequestReflection = struct {
             request_end_request_method_id,
             &[_]jui.jvalue{
                 jui.jvalue.toJValue(buffer),
-                jui.jvalue.toJValue(@bitCast(jui.jbyte, status)),
+                jui.jvalue.toJValue(@bitCast(jui.jlong, @ptrToInt(packet))),
+                jui.jvalue.toJValue(@bitCast(jui.jbyte, packet.status)),
             },
         ) catch return;
     }
@@ -114,7 +115,7 @@ fn clientInit(
     env: *jui.JNIEnv,
     this_object: jui.jobject,
     cluster_id: u32,
-    addresses: [:0]const u8,
+    addresses: jui.jstring,
     max_concurrency: u32,
 ) !tb.TBStatus {
     var out_client: tb.Client = undefined;
@@ -122,12 +123,17 @@ fn clientInit(
 
     var jvm = try env.getJavaVM();
 
+    const addresses_len = @intCast(usize, env.getStringUTFLength(addresses));
+    var addresses_return = try jui.JNIEnv.getStringUTFChars(env, addresses);
+    var addresses_chars = std.meta.assumeSentinel(addresses_return.chars[0..addresses_len], 0);
+    defer env.releaseStringUTFChars(addresses, addresses_chars);
+
     var status = tb.tb_client_init(
         &out_client,
         &out_packets,
         cluster_id,
-        addresses.ptr,
-        @intCast(u32, addresses.len),
+        addresses_chars,
+        @intCast(u32, addresses_len),
         max_concurrency,
         @ptrToInt(jvm),
         onCompletion,
@@ -146,39 +152,39 @@ fn clientDeinit(env: *jui.JNIEnv, client_obj: jui.jobject) void {
     tb.tb_client_deinit(client);
 }
 
-fn submit(env: *jui.JNIEnv, client_obj: jui.jobject, request_obj: jui.jobject) void {
-    var packets = createPacketFromRequest(env, client_obj, request_obj);
-    const client = ClientReflection.getTbClient(env, client_obj);
+fn submit(env: *jui.JNIEnv, request_obj: jui.jobject, client_obj: jui.jobject, packet: *tb.Packet) void {
 
-    tb.tb_client_submit(client, &packets);
+    // Holds a global reference to prevent GC during the callback
+    var global_ref = env.newReference(.global, request_obj) catch unreachable;
+    errdefer env.deleteReference(.global, global_ref);
+
+    var body = RequestReflection.getBody(env, request_obj);
+
+    packet.operation = RequestReflection.getOperation(env, request_obj);
+    packet.user_data = @ptrToInt(global_ref);
+    packet.data = body.ptr;
+    packet.data_size = @intCast(u32, body.len);
+    packet.next = null;
+    packet.status = .ok;
+
+    var packet_list = tb.Packet.List.from(packet);
+    const client = ClientReflection.getTbClient(env, client_obj);
+    tb.tb_client_submit(client, &packet_list);
 }
 
-fn createPacketFromRequest(env: *jui.JNIEnv, client_obj: jui.jobject, request_obj: jui.jobject) tb.Packet.List {
-    var packets = ClientReflection.getPacketList(env, client_obj);
+fn popPacket(env: *jui.JNIEnv, client_obj: jui.jobject) *tb.Packet {
+    var packet_list = ClientReflection.getPacketList(env, client_obj);
+    return packet_list.pop() orelse {
 
-    if (packets.pop()) |head| {
+        // It is unexpeted to packet_list be empty
+        // The java side must syncronize how many threads call this function
+        @panic("No packets left");
+    };
+}
 
-        // Holds a global reference to prevent GC during the callback
-        var global_ref = env.newReference(.global, request_obj) catch unreachable;
-        errdefer env.deleteReference(.global, global_ref);
-
-        var body = RequestReflection.getBody(env, request_obj);
-
-        head.operation = RequestReflection.getOperation(env, request_obj);
-        head.user_data = @ptrToInt(global_ref);
-        head.data = body.ptr;
-        head.data_size = @intCast(u32, body.len);
-        head.next = null;
-        head.status = .ok;
-
-        return .{
-            .head = head,
-            .tail = head,
-        };
-    }
-
-    // TODO: Add wait here!
-    unreachable;
+fn pushPacket(env: *jui.JNIEnv, client_obj: jui.jobject, packet: *tb.Packet) void {
+    var packet_list = ClientReflection.getPacketList(env, client_obj);
+    packet_list.push(packet);
 }
 
 fn onCompletion(
@@ -206,7 +212,7 @@ fn onCompletion(
         else => null,
     };
 
-    RequestReflection.endRequest(env, request_obj, result, packet.status);
+    RequestReflection.endRequest(env, request_obj, result, packet);
 }
 
 /// Exports entrypoints to JNI
@@ -226,16 +232,13 @@ const exports = struct {
         addresses: jui.jstring,
         max_concurrency: jui.jint,
     ) callconv(.C) jui.jint {
-        var str = fromJString(env, addresses);
-        defer env.releaseStringUTFChars(addresses, str);
-
         var status = jui.wrapErrors(
             clientInit,
             .{
                 env,
                 this,
                 @bitCast(u32, cluster_id),
-                str,
+                addresses,
                 @bitCast(u32, max_concurrency),
             },
         );
@@ -253,29 +256,39 @@ const exports = struct {
         );
     }
 
-    pub fn submitExport(env: *jui.JNIEnv, this: jui.jobject, request: jui.jobject) callconv(.C) void {
+    pub fn submitExport(env: *jui.JNIEnv, this: jui.jobject, client_obj: jui.jobject, packet: jui.jlong) callconv(.C) void {
         jui.wrapErrors(
             submit,
             .{
                 env,
                 this,
-                request,
+                client_obj,
+                @intToPtr(*tb.Packet, @bitCast(usize, packet)),
             },
         );
     }
 
-    fn fromJString(env: *jui.JNIEnv, str: jui.jstring) [:0]const u8 {
-        const len = @intCast(usize, env.getStringUTFLength(str));
-
-        var ret = jui.wrapErrors(
-            jui.JNIEnv.getStringUTFChars,
+    pub fn popPacketExport(env: *jui.JNIEnv, this: jui.jobject) callconv(.C) jui.jlong {
+        var packet = jui.wrapErrors(
+            popPacket,
             .{
                 env,
-                str,
+                this,
             },
         );
 
-        return std.meta.assumeSentinel(ret.chars[0..len], 0);
+        return @bitCast(jui.jlong, @ptrToInt(packet));
+    }
+
+    pub fn pushPacketExport(env: *jui.JNIEnv, this: jui.jobject, packet: jui.jlong) callconv(.C) void {
+        jui.wrapErrors(
+            pushPacket,
+            .{
+                env,
+                this,
+                @intToPtr(*tb.Packet, @bitCast(usize, packet)),
+            },
+        );
     }
 };
 
@@ -285,6 +298,11 @@ comptime {
         .onUnload = exports.onUnloadExport,
         .clientInit = exports.clientInitExport,
         .clientDeinit = exports.clientDeinitExport,
+        .popPacket = exports.popPacketExport,
+        .pushPacket = exports.pushPacketExport,
+    });
+
+    jui.exportUnder("com.tigerbeetle.Request", .{
         .submit = exports.submitExport,
     });
 }

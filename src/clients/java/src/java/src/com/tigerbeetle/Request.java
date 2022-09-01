@@ -23,10 +23,6 @@ abstract class Request<T> implements Future<T[]> {
         public final static byte INVALID_DATA_SIZE = 3;
     }
 
-    // Used only by the JNI side
-    @SuppressWarnings("unused")
-    private final Client client;
-
     // Used ony by the JNI side
     @SuppressWarnings("unused")
     private final ByteBuffer body;
@@ -34,8 +30,9 @@ abstract class Request<T> implements Future<T[]> {
     @SuppressWarnings("unused")
     private final long bodyLen;
 
-    private Object result = null;
+    private final Client client;
     private final byte operation;
+    private Object result = null;
     private byte status = Status.UNINITIALIZED;
 
     protected Request(Client client, byte operation, Batch batch) {
@@ -45,40 +42,54 @@ abstract class Request<T> implements Future<T[]> {
         this.bodyLen = batch.getBufferLen();
     }
 
-    public void endRequest(ByteBuffer buffer, byte status) {
-        synchronized (this) {
-            this.status = status;
-            if (status == Status.OK) {
-                switch (operation) {
-                    case Operations.CREATE_ACCOUNTS: {
-                        var batch = new CreateAccountsResultBatch(buffer.asReadOnlyBuffer());
-                        result = batch.toArray();
-                        break;
-                    }
+    public void beginRequest() throws InterruptedException {
 
-                    case Operations.CREATE_TRANSFERS: {
-                        var batch = new CreateTransfersResultBatch(buffer.asReadOnlyBuffer());
-                        result = batch.toArray();
-                        break;
-                    }
+        long packet = client.adquirePacket();
+        submit(client, packet);
+    }
 
-                    case Operations.LOOKUP_ACCOUNTS: {
-                        var batch = new AccountsBatch(buffer.asReadOnlyBuffer());
-                        result = batch.toArray();
-                        break;
-                    }
+    void endRequest(ByteBuffer buffer, long packet, byte status) {
 
-                    case Operations.LOOKUP_TRANSFERS: {
-                        var batch = new TransfersBatch(buffer.asReadOnlyBuffer());
-                        result = batch.toArray();
-                        break;
-                    }
+        Object result = null;
+        if (status == Status.OK) {
+            switch (operation) {
+                case Operations.CREATE_ACCOUNTS: {
+                    var batch = new CreateAccountsResultBatch(buffer.asReadOnlyBuffer());
+                    result = batch.toArray();
+                    break;
+                }
+
+                case Operations.CREATE_TRANSFERS: {
+                    var batch = new CreateTransfersResultBatch(buffer.asReadOnlyBuffer());
+                    result = batch.toArray();
+                    break;
+                }
+
+                case Operations.LOOKUP_ACCOUNTS: {
+                    var batch = new AccountsBatch(buffer.asReadOnlyBuffer());
+                    result = batch.toArray();
+                    break;
+                }
+                case Operations.LOOKUP_TRANSFERS: {
+                    var batch = new TransfersBatch(buffer.asReadOnlyBuffer());
+                    result = batch.toArray();
+                    break;
                 }
             }
-
-            this.notify();
         }
+
+        client.returnPacket(packet);
+
+        // Notify the waiting thread
+        synchronized (this) {
+            this.status = status;
+            this.result = result;
+            this.notifyAll();
+        }
+
     }
+
+    private native void submit(Client client, long packet);
 
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {

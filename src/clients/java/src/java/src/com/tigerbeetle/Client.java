@@ -3,6 +3,7 @@ package com.tigerbeetle;
 import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 public final class Client implements AutoCloseable {
     static {
@@ -12,6 +13,7 @@ public final class Client implements AutoCloseable {
     private static final int DEFAULT_MAX_CONCURRENCY = 32;
 
     private final int clusterID;
+    private final Semaphore maxConcurrencySemaphore;
     private long clientHandle;
     private long packetsHead;
     private long packetsTail;
@@ -37,6 +39,8 @@ public final class Client implements AutoCloseable {
         int status = clientInit(clusterID, joiner.toString(), maxConcurrency);
         if (status != 0)
             throw new Exception("result " + status);
+
+        this.maxConcurrencySemaphore = new Semaphore(maxConcurrency);
     }
 
     @Override
@@ -67,7 +71,7 @@ public final class Client implements AutoCloseable {
 
     public CreateAccountsResult[] createAccounts(AccountsBatch batch) throws InterruptedException, RequestException {
         var request = new CreateAccountsRequest(this, batch);
-        submit(request);
+        request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
@@ -78,7 +82,7 @@ public final class Client implements AutoCloseable {
 
     public Future<CreateAccountsResult[]> createAccountsAsync(AccountsBatch batch) throws InterruptedException {
         var request = new CreateAccountsRequest(this, batch);
-        submit(request);
+        request.beginRequest();
         return request;
     }
 
@@ -100,7 +104,7 @@ public final class Client implements AutoCloseable {
 
     public Account[] lookupAccounts(UUIDsBatch batch) throws InterruptedException, RequestException {
         var request = new LookupAccountsRequest(this, batch);
-        submit(request);
+        request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
@@ -111,7 +115,7 @@ public final class Client implements AutoCloseable {
 
     public Future<Account[]> lookupAccountsAsync(UUIDsBatch batch) throws InterruptedException {
         var request = new LookupAccountsRequest(this, batch);
-        submit(request);
+        request.beginRequest();
         return request;
     }
 
@@ -133,7 +137,7 @@ public final class Client implements AutoCloseable {
 
     public CreateTransfersResult[] createTransfers(TransfersBatch batch) throws InterruptedException, RequestException {
         var request = new CreateTransfersRequest(this, batch);
-        submit(request);
+        request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
@@ -144,7 +148,7 @@ public final class Client implements AutoCloseable {
 
     public Future<CreateTransfersResult[]> createTransfersAsync(TransfersBatch batch) throws InterruptedException {
         var request = new CreateTransfersRequest(this, batch);
-        submit(request);
+        request.beginRequest();
         return request;
     }
 
@@ -166,7 +170,7 @@ public final class Client implements AutoCloseable {
 
     public Transfer[] lookupTransfers(UUIDsBatch batch) throws InterruptedException, RequestException {
         var request = new LookupTransfersRequest(this, batch);
-        submit(request);
+        request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
@@ -177,19 +181,38 @@ public final class Client implements AutoCloseable {
 
     public Future<Transfer[]> lookupTransfersAsync(UUIDsBatch batch) throws InterruptedException {
         var request = new LookupTransfersRequest(this, batch);
-        submit(request);
+        request.beginRequest();
         return request;
+    }
+
+    long adquirePacket() throws InterruptedException {
+
+        // Assure that only the max number of concurrent requests can adquire a packet
+        // It forces other threads to wait until a packet became available
+        maxConcurrencySemaphore.acquire();
+
+        synchronized (this) {
+            return popPacket();
+        }
+
+    }
+
+    void returnPacket(long packet) {
+        synchronized (this) {
+            pushPacket(packet);
+        }
+
+        // Releasing the packet to be used by another thread
+        maxConcurrencySemaphore.release();
     }
 
     private native int clientInit(int clusterID, String addresses, int maxConcurrency);
 
     private native void clientDeinit();
 
-    // It is safe to suppress the warning about using the raw type here
-    // The native method impl does not care about the <T> parameter
-    // It uses only the underlying buffer and the operation enum.
-    @SuppressWarnings("rawtypes")
-    private native void submit(Request request);
+    private native long popPacket();
+
+    private native void pushPacket(long packet);
 
     public static void main(String[] args) {
         try (var client = new Client(0, new String[] { "127.0.0.1:3001" }, 32)) {
