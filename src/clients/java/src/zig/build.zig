@@ -7,13 +7,13 @@ pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
-    const tb_client = b.addStaticLibrary("tb_client", "libs/tigerbeetle/src/c/tb_client.zig");
-    tb_client.setMainPkgPath("libs/tigerbeetle/src");
+    const tb_client = b.addStaticLibrary("tb_client", "lib/tigerbeetle/src/c/tb_client.zig");
+    tb_client.setMainPkgPath("lib/tigerbeetle/src");
     tb_client.setTarget(target);
     tb_client.setBuildMode(mode);
 
     const lib = b.addSharedLibrary("tb_jniclient", "src/client.zig", .unversioned);
-    lib.addPackagePath("jui", "libs/jui/src/jui.zig");
+    lib.addPackagePath("jui", "lib/jui/src/jui.zig");
     lib.linkLibrary(tb_client);
 
     const os_tag = target.os_tag orelse builtin.target.os.tag;
