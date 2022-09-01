@@ -609,9 +609,19 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
 
                     // If there were no pending ids, the method would have been changed.
                     const pending_id = previous.?;
-                    transfer.debit_account_id = 0;
-                    transfer.credit_account_id = 0;
-                    transfer.amount = 0;
+                    const pending_transfer = self.auditor.pending_transfers.getPtr(previous.?).?;
+                    const dr = pending_transfer.debit_account_index;
+                    const cr = pending_transfer.credit_account_index;
+                    // Don't use the default '0' parameters because the StateMachine overwrites 0s
+                    // with the pending transfer's values, invalidating the post/void transfer checksum.
+                    transfer.debit_account_id = self.auditor.account_index_to_id(dr);
+                    transfer.credit_account_id = self.auditor.account_index_to_id(cr);
+                    if (method == .post_pending) {
+                        // 1+rng for minimum amount of 1. This also makes the pending amount inclusive.
+                        transfer.amount = 1 + self.random.uintLessThanBiased(u64, pending_transfer.amount);
+                    } else {
+                        transfer.amount = pending_transfer.amount;
+                    }
                     transfer.pending_id = pending_id;
                     transfer.flags = .{
                         .post_pending_transfer = method == .post_pending,

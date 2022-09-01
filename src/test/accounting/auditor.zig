@@ -266,21 +266,22 @@ pub const AccountingAuditor = struct {
             if (result_actual != .ok) continue;
 
             if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
-                if (self.pending_transfers.get(transfer.pending_id)) |pending_transfer| {
-                    const dr = &self.accounts[pending_transfer.debit_account_index];
-                    const cr = &self.accounts[pending_transfer.credit_account_index];
-                    assert(self.accounts_created[pending_transfer.debit_account_index]);
-                    assert(self.accounts_created[pending_transfer.credit_account_index]);
+                if (self.pending_transfers.get(transfer.pending_id)) |p| {
+                    const dr = &self.accounts[p.debit_account_index];
+                    const cr = &self.accounts[p.credit_account_index];
+                    assert(self.accounts_created[p.debit_account_index]);
+                    assert(self.accounts_created[p.credit_account_index]);
 
                     assert(self.pending_transfers.remove(transfer.pending_id));
                     // The transfer may still be in `pending_expiries` — removal would be O(n),
                     // so don't bother.
 
-                    dr.debits_pending -= pending_transfer.amount;
-                    cr.credits_pending -= pending_transfer.amount;
+                    dr.debits_pending -= p.amount;
+                    cr.credits_pending -= p.amount;
                     if (transfer.flags.post_pending_transfer) {
-                        dr.debits_posted += transfer.amount;
-                        cr.credits_posted += transfer.amount;
+                        const amount = if (transfer.amount > 0) transfer.amount else p.amount;
+                        dr.debits_posted += amount;
+                        cr.credits_posted += amount;
                     }
 
                     assert(!dr.debits_exceed_credits(0));
