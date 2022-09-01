@@ -1,22 +1,58 @@
 package com.tigerbeetle;
 
+import java.nio.ByteBuffer;
 import java.util.UUID;
 
 public final class Transfer {
 
+    static final class Struct {
+        public static final int SIZE = 128;
+        public static final byte[] RESERVED = new byte[16];
+    }
+
     private static final UUID ZERO = new UUID(0, 0);
 
-    private UUID id = ZERO;
-    private UUID debitAccountId = ZERO;
-    private UUID creditAccountId = ZERO;
-    private UUID userData = ZERO;
-    private UUID pendingId = ZERO;
-    private long timeout = 0;
-    private int ledger = 0;
-    private short code = 0;
-    private short flags = TransferFlags.NONE;
+    private UUID id;
+    private UUID debitAccountId;
+    private UUID creditAccountId;
+    private UUID userData;
+    private UUID pendingId;
+    private long timeout;
+    private int ledger;
+    private short code;
+    private short flags;
     private long amount = 0;
-    private long timestamp = 0;
+    private long timestamp;
+
+    public Transfer() {
+        id = ZERO;
+        debitAccountId = ZERO;
+        creditAccountId = ZERO;
+        userData = ZERO;
+        pendingId = ZERO;
+        timeout = 0;
+        ledger = 0;
+        code = 0;
+        flags = TransferFlags.NONE;
+        amount = 0;
+        timestamp = 0;
+    }
+
+    Transfer(ByteBuffer ptr) {
+
+        id = new UUID(ptr.getLong(), ptr.getLong());
+        debitAccountId = new UUID(ptr.getLong(), ptr.getLong());
+        creditAccountId = new UUID(ptr.getLong(), ptr.getLong());
+        userData = new UUID(ptr.getLong(), ptr.getLong());
+        ptr = ptr.position(ptr.position() + Struct.RESERVED.length);
+        pendingId = new UUID(ptr.getLong(), ptr.getLong());
+        timeout = ptr.getLong();
+        ledger = ptr.getInt();
+        code = ptr.getShort();
+        flags = ptr.getShort();
+        amount = ptr.getLong();
+        timeout = ptr.getLong();
+    }
 
     public UUID getId() {
         return id;
@@ -118,6 +154,27 @@ public final class Transfer {
 
     public void setTimestamp(long timestamp) {
         this.timestamp = timestamp;
+    }
+
+    void save(ByteBuffer ptr) {
+        ptr
+                .putLong(id.getMostSignificantBits())
+                .putLong(id.getLeastSignificantBits())
+                .putLong(debitAccountId.getMostSignificantBits())
+                .putLong(debitAccountId.getLeastSignificantBits())
+                .putLong(creditAccountId.getMostSignificantBits())
+                .putLong(creditAccountId.getLeastSignificantBits())
+                .putLong(userData.getMostSignificantBits())
+                .putLong(userData.getLeastSignificantBits())
+                .put(Struct.RESERVED)
+                .putLong(pendingId.getMostSignificantBits())
+                .putLong(pendingId.getLeastSignificantBits())
+                .putLong(timeout)
+                .putInt(ledger)
+                .putShort(code)
+                .putShort(flags)
+                .putLong(amount)
+                .putLong(timeout);
     }
 
 }

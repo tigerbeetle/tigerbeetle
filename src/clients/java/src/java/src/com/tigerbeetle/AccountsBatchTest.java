@@ -45,16 +45,16 @@ public class AccountsBatchTest {
         assertEquals(batch.getLenght(), 0);
         assertEquals(batch.getCapacity(), 10);
 
-        batch.Add(account1);
+        batch.add(account1);
         assertEquals(batch.getLenght(), 1);
 
-        batch.Add(account2);
+        batch.add(account2);
         assertEquals(batch.getLenght(), 2);
 
-        Account getAccount1 = batch.Get(0);
+        Account getAccount1 = batch.get(0);
         assertNotNull(getAccount1);
 
-        Account getAccount2 = batch.Get(1);
+        Account getAccount2 = batch.get(1);
         assertNotNull(getAccount2);
 
         assertAccounts(account1, getAccount1);
@@ -69,29 +69,29 @@ public class AccountsBatchTest {
         assertEquals(batch.getCapacity(), 10);
 
         // Set inndex 0
-        batch.Set(0, account1);
+        batch.set(0, account1);
         assertEquals(batch.getLenght(), 1);
 
-        Account getAccount1 = batch.Get(0);
+        Account getAccount1 = batch.get(0);
         assertNotNull(getAccount1);
 
         assertAccounts(account1, getAccount1);
 
         // Set index 1
-        batch.Set(1, account1);
+        batch.set(1, account1);
         assertEquals(batch.getLenght(), 2);
 
         // Replace same index 0
-        batch.Set(0, account2);
+        batch.set(0, account2);
         assertEquals(batch.getLenght(), 2);
 
-        Account getAccount2 = batch.Get(0);
+        Account getAccount2 = batch.get(0);
         assertNotNull(getAccount2);
 
         assertAccounts(account2, getAccount2);
 
         // Assert if the index 1 remains unchanged
-        Account getAccount3 = batch.Get(1);
+        Account getAccount3 = batch.get(1);
         assertNotNull(getAccount3);
 
         assertAccounts(account1, getAccount3);
@@ -106,8 +106,8 @@ public class AccountsBatchTest {
         assertEquals(batch.getLenght(), 2);
         assertEquals(batch.getCapacity(), 2);
 
-        assertAccounts(account1, batch.Get(0));
-        assertAccounts(account2, batch.Get(1));
+        assertAccounts(account1, batch.get(0));
+        assertAccounts(account2, batch.get(1));
     }
 
     @Test
@@ -117,8 +117,8 @@ public class AccountsBatchTest {
         assertEquals(batch.getLenght(), 0);
         assertEquals(batch.getCapacity(), 10);
 
-        batch.Add(account1);
-        batch.Add(account2);
+        batch.add(account1);
+        batch.add(account2);
 
         Account[] array = batch.toArray();
         assertAccounts(account1, array[0]);

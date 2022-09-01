@@ -1,21 +1,55 @@
 package com.tigerbeetle;
 
+import java.nio.BufferUnderflowException;
+import java.nio.ByteBuffer;
 import java.util.UUID;
 
 public final class Account {
 
+    static final class Struct {
+        public static final int SIZE = 128;
+        public static final byte[] RESERVED = new byte[48];
+    }
+
     private static final UUID ZERO = new UUID(0, 0);
 
-    private UUID id = ZERO;
-    private UUID userData = ZERO;
-    private int ledger = 0;
-    private short code = 0;
-    private AccountFlags flags = AccountFlags.None;
-    private long creditsPosted = 0;
-    private long creditsPending = 0;
-    private long debitsPosted = 0;
-    private long debitsPending = 0;
-    private long timestamp = 0;
+    private UUID id;
+    private UUID userData;
+    private int ledger;
+    private short code;
+    private AccountFlags flags;
+    private long creditsPosted;
+    private long creditsPending;
+    private long debitsPosted;
+    private long debitsPending;
+    private long timestamp;
+
+    public Account() {
+        id = ZERO;
+        userData = ZERO;
+        ledger = 0;
+        code = 0;
+        flags = AccountFlags.None;
+        creditsPosted = 0;
+        creditsPending = 0;
+        debitsPosted = 0;
+        debitsPending = 0;
+        timestamp = 0;
+    }
+
+    Account(ByteBuffer ptr) {
+        id = new UUID(ptr.getLong(), ptr.getLong());
+        userData = new UUID(ptr.getLong(), ptr.getLong());
+        ptr = ptr.position(ptr.position() + Struct.RESERVED.length);
+        ledger = ptr.getInt();
+        code = ptr.getShort();
+        flags = AccountFlags.fromValue(ptr.getShort());
+        debitsPending = ptr.getLong();
+        debitsPosted = ptr.getLong();
+        creditsPending = ptr.getLong();
+        creditsPosted = ptr.getLong();
+        timestamp = ptr.getLong();
+    }
 
     public short getCode() {
         return code;
@@ -101,5 +135,23 @@ public final class Account {
 
     public void setLedger(int ledger) {
         this.ledger = ledger;
+    }
+
+    void save(ByteBuffer ptr) {
+
+        ptr
+                .putLong(id.getMostSignificantBits())
+                .putLong(id.getLeastSignificantBits())
+                .putLong(userData.getMostSignificantBits())
+                .putLong(userData.getLeastSignificantBits())
+                .put(Struct.RESERVED)
+                .putInt(ledger)
+                .putShort(code)
+                .putShort(flags.value)
+                .putLong(debitsPending)
+                .putLong(debitsPosted)
+                .putLong(creditsPending)
+                .putLong(creditsPosted)
+                .putLong(timestamp);
     }
 }

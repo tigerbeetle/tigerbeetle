@@ -5,40 +5,31 @@ import java.nio.ByteBuffer;
 
 class CreateAccountsResultBatch extends Batch {
 
-    private static final class Struct {
-        public static final int SIZE = 8;
-    }
-
     private final int lenght;
 
     public CreateAccountsResultBatch(ByteBuffer buffer) {
         super(buffer);
-        this.lenght = buffer.capacity() / Struct.SIZE;
+        this.lenght = buffer.capacity() / CreateAccountsResult.Struct.SIZE;
     }
 
-    public CreateAccountsResult Get(int index) throws IndexOutOfBoundsException, BufferUnderflowException {
+    public CreateAccountsResult get(int index) throws IndexOutOfBoundsException, BufferUnderflowException {
         if (index < 0 || index >= lenght)
             throw new IndexOutOfBoundsException();
 
-        ByteBuffer ptr = buffer.position(index * Struct.SIZE);
-        var resultIndex = ptr.getInt();
-        var resultValue = ptr.getInt();
-
-        return new CreateAccountsResult(
-                resultIndex,
-                CreateAccountResult.fromValue(resultValue));
+        ByteBuffer ptr = buffer.position(index * CreateAccountsResult.Struct.SIZE);
+        return new CreateAccountsResult(ptr);
     }
 
     public CreateAccountsResult[] toArray() throws BufferUnderflowException {
         CreateAccountsResult[] array = new CreateAccountsResult[lenght];
         for (int i = 0; i < lenght; i++) {
-            array[i] = Get(i);
+            array[i] = get(i);
         }
         return array;
     }
 
     @Override
     public long getBufferLen() {
-        return lenght * Struct.SIZE;
+        return lenght * CreateAccountsResult.Struct.SIZE;
     }
 }

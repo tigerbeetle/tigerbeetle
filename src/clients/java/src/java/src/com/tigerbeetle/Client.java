@@ -55,7 +55,7 @@ public final class Client implements AutoCloseable {
 
     public CreateAccountResult createAccount(Account account) throws InterruptedException, RequestException {
         var batch = new AccountsBatch(1);
-        batch.Add(account);
+        batch.add(account);
 
         CreateAccountsResult[] results = createAccounts(batch);
         if (results.length == 0) {
@@ -121,7 +121,7 @@ public final class Client implements AutoCloseable {
 
     public CreateTransferResult createTransfer(Transfer transfer) throws InterruptedException, RequestException {
         var batch = new TransfersBatch(1);
-        batch.Add(transfer);
+        batch.add(transfer);
 
         CreateTransfersResult[] results = createTransfers(batch);
         if (results.length == 0) {
@@ -223,13 +223,13 @@ public final class Client implements AutoCloseable {
             account1.setId(UUID.randomUUID());
             account1.setCode(100);
             account1.setLedger(720);
-            accounts.Add(account1);
+            accounts.add(account1);
 
             var account2 = new Account();
             account2.setId(UUID.randomUUID());
             account2.setCode(200);
             account2.setLedger(720);
-            accounts.Add(account2);
+            accounts.add(account2);
 
             var results = client.createAccounts(accounts);
             if (results.length > 0)
@@ -248,7 +248,7 @@ public final class Client implements AutoCloseable {
                     transfer.setCode((short) 1);
                     transfer.setLedger(720);
                     transfer.setAmount(100);
-                    batch.Add(transfer);
+                    batch.add(transfer);
                 }
 
                 batches[i] = batch;
@@ -266,13 +266,11 @@ public final class Client implements AutoCloseable {
                 var request = client.createTransfersAsync(batch);
 
                 // Register something on the application's side while tigerbeetle is processing
-                // it
                 // UPDATE FROM MyCustomer ...
 
                 var errors = request.get();
                 if (errors.length > 0)
                     throw new Exception("Unexpected transfer results");
-
                 var elapsed = System.currentTimeMillis() - now;
 
                 totalTime += elapsed;
