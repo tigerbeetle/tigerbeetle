@@ -121,8 +121,7 @@ pub fn ConductorType(
 
             // Always use UUIDs because the simulator network expects client ids to never collide
             // with replica indices.
-            var client_id_permutation = IdPermutation{ .random = undefined };
-            random.bytes(&client_id_permutation.random);
+            const client_id_permutation = IdPermutation{ .random = random.int(u64) };
 
             for (clients) |*client, i| {
                 errdefer for (clients[0..i]) |*c| c.deinit(allocator);

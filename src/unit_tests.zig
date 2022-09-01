@@ -23,6 +23,7 @@ test {
     _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/segmented_array.zig");
 
+    _ = @import("test/id.zig");
     _ = @import("test/accounting/auditor.zig");
     _ = @import("test/accounting/workload.zig");
 }

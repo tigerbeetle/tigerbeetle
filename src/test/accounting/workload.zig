@@ -454,9 +454,14 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                 }
                 assert(results[i].count() > 0);
 
-                transfers[i].user_data = vsr.checksum(std.mem.asBytes(&transfers[i]));
                 i += 1;
                 self.transfers_sent += 1;
+            }
+
+            // Checksum transfers only after the whole batch is ready.
+            // The opportunistic linking backtracks to modify transfers.
+            for (transfers[0..transfers_count]) |*transfer| {
+                transfer.user_data = vsr.checksum(std.mem.asBytes(transfer));
             }
             assert(transfers_count == i);
             assert(transfers_count <= transfers.len);
@@ -533,7 +538,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                 }
 
                 if (default == .post_pending or default == .void_pending) {
-                    if (self.auditor.pending_amounts.count() == 0) {
+                    if (self.auditor.pending_transfers.count() == 0) {
                         break :method .single_phase;
                     }
                 }
@@ -592,7 +597,7 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                     // Pick a random "target" key, then post/void the id it is nearest to.
                     const target = self.random.int(u128);
                     var previous: ?u128 = null;
-                    var iterator = self.auditor.pending_amounts.keyIterator();
+                    var iterator = self.auditor.pending_transfers.keyIterator();
                     while (iterator.next()) |id| {
                         if (previous == null or
                             std.math.max(target, id.*) - std.math.min(target, id.*) <

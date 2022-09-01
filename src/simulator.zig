@@ -451,11 +451,7 @@ fn random_id_permutation(random: std.rand.Random) IdPermutation {
         0 => .{ .identity = {} },
         1 => .{ .reflect = {} },
         2 => .{ .zigzag = {} },
-        3 => blk: {
-            var bytes: [32]u8 = undefined;
-            random.bytes(&bytes);
-            break :blk .{ .random = bytes };
-        },
+        3 => .{ .random = random.int(u64) },
         else => unreachable,
     };
 }

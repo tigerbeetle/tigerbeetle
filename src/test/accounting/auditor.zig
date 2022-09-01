@@ -33,11 +33,15 @@ const InFlight = union(enum) {
 /// Each client has a queue.
 const InFlightQueue = RingBuffer(InFlight, config.client_request_queue_max, .array);
 
+const PendingTransfer = struct {
+    amount: u64,
+    debit_account_index: usize,
+    credit_account_index: usize,
+};
+
 const PendingExpiry = struct {
     transfer: u128,
     timestamp: u64,
-    debit_account_index: usize,
-    credit_account_index: usize,
 };
 
 const PendingExpiryQueue = PriorityQueue(PendingExpiry, void, struct {
@@ -76,16 +80,16 @@ pub const AccountingAuditor = struct {
     /// Set to true when `create_accounts` returns `.ok` for an account.
     accounts_created: []bool,
 
-    /// Map pending transfers to the (pending) amount.
+    /// Map pending transfers to the (pending) amount and accounts.
     ///
     /// * Added in `on_create_transfers` for pending transfers.
     /// * Removed after a transfer is posted, voided, or timed out.
     ///
-    /// All entries in `pending_amounts` have a corresponding entry in `pending_expiries`.
-    pending_amounts: std.AutoHashMapUnmanaged(u128, u64),
+    /// All entries in `pending_transfers` have a corresponding entry in `pending_expiries`.
+    pending_transfers: std.AutoHashMapUnmanaged(u128, PendingTransfer),
 
     /// After a transfer is posted/voided, the entry in `pending_expiries` is untouched.
-    /// The timeout will not impact account balances (because the `pending_amounts` entry is
+    /// The timeout will not impact account balances (because the `pending_transfers` entry is
     /// removed), but until timeout the transfer still counts against `transfers_pending_max`.
     pending_expiries: PendingExpiryQueue,
 
@@ -106,9 +110,9 @@ pub const AccountingAuditor = struct {
         errdefer allocator.free(accounts_created);
         std.mem.set(bool, accounts_created, false);
 
-        var pending_amounts = std.AutoHashMapUnmanaged(u128, u64){};
-        errdefer pending_amounts.deinit(allocator);
-        try pending_amounts.ensureTotalCapacity(allocator, @intCast(u32, options.transfers_pending_max));
+        var pending_transfers = std.AutoHashMapUnmanaged(u128, PendingTransfer){};
+        errdefer pending_transfers.deinit(allocator);
+        try pending_transfers.ensureTotalCapacity(allocator, @intCast(u32, options.transfers_pending_max));
 
         var pending_expiries = PendingExpiryQueue.init(allocator, {});
         errdefer pending_expiries.deinit();
@@ -123,7 +127,7 @@ pub const AccountingAuditor = struct {
             .options = options,
             .accounts = accounts,
             .accounts_created = accounts_created,
-            .pending_amounts = pending_amounts,
+            .pending_transfers = pending_transfers,
             .pending_expiries = pending_expiries,
             .in_flight = in_flight,
         };
@@ -132,7 +136,7 @@ pub const AccountingAuditor = struct {
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         allocator.free(self.accounts);
         allocator.free(self.accounts_created);
-        self.pending_amounts.deinit(allocator);
+        self.pending_transfers.deinit(allocator);
         self.pending_expiries.deinit();
         allocator.free(self.in_flight);
     }
@@ -156,15 +160,15 @@ pub const AccountingAuditor = struct {
             defer _ = self.pending_expiries.remove();
 
             // Ignore the transfer if it was already posted/voided.
-            const pending_amount = self.pending_amounts.get(expiration.transfer) orelse continue;
-            assert(self.pending_amounts.remove(expiration.transfer));
-            assert(self.accounts_created[expiration.debit_account_index]);
-            assert(self.accounts_created[expiration.credit_account_index]);
+            const pending_transfer = self.pending_transfers.get(expiration.transfer) orelse continue;
+            assert(self.pending_transfers.remove(expiration.transfer));
+            assert(self.accounts_created[pending_transfer.debit_account_index]);
+            assert(self.accounts_created[pending_transfer.credit_account_index]);
 
-            const dr = &self.accounts[expiration.debit_account_index];
-            const cr = &self.accounts[expiration.credit_account_index];
-            dr.debits_pending -= pending_amount;
-            cr.credits_pending -= pending_amount;
+            const dr = &self.accounts[pending_transfer.debit_account_index];
+            const cr = &self.accounts[pending_transfer.credit_account_index];
+            dr.debits_pending -= pending_transfer.amount;
+            cr.credits_pending -= pending_transfer.amount;
 
             assert(!dr.debits_exceed_credits(0));
             assert(!dr.credits_exceed_debits(0));
@@ -261,51 +265,65 @@ pub const AccountingAuditor = struct {
 
             if (result_actual != .ok) continue;
 
-            const dr_index = self.account_id_to_index(transfer.debit_account_id);
-            const cr_index = self.account_id_to_index(transfer.credit_account_id);
-            const dr = &self.accounts[dr_index];
-            const cr = &self.accounts[cr_index];
-            assert(self.accounts_created[dr_index]);
-            assert(self.accounts_created[cr_index]);
-
             if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
-                if (self.pending_amounts.get(transfer.pending_id)) |pending_amount| {
-                    assert(self.pending_amounts.remove(transfer.pending_id));
+                if (self.pending_transfers.get(transfer.pending_id)) |pending_transfer| {
+                    const dr = &self.accounts[pending_transfer.debit_account_index];
+                    const cr = &self.accounts[pending_transfer.credit_account_index];
+                    assert(self.accounts_created[pending_transfer.debit_account_index]);
+                    assert(self.accounts_created[pending_transfer.credit_account_index]);
+
+                    assert(self.pending_transfers.remove(transfer.pending_id));
                     // The transfer may still be in `pending_expiries` — removal would be O(n),
                     // so don't bother.
 
-                    dr.debits_pending -= pending_amount;
-                    cr.credits_pending -= pending_amount;
+                    dr.debits_pending -= pending_transfer.amount;
+                    cr.credits_pending -= pending_transfer.amount;
                     if (transfer.flags.post_pending_transfer) {
                         dr.debits_posted += transfer.amount;
                         cr.credits_posted += transfer.amount;
                     }
+
+                    assert(!dr.debits_exceed_credits(0));
+                    assert(!dr.credits_exceed_debits(0));
+                    assert(!cr.debits_exceed_credits(0));
+                    assert(!cr.credits_exceed_debits(0));
                 } else {
                     // The transfer was already completed by another post/void or timeout.
                 }
-            } else if (transfer.flags.pending) {
-                self.pending_amounts.putAssumeCapacity(transfer.id, transfer.amount);
-                self.pending_expiries.add(.{
-                    .transfer = transfer.id,
-                    .timestamp = transfer_timestamp + transfer.timeout,
-                    .debit_account_index = dr_index,
-                    .credit_account_index = cr_index,
-                }) catch unreachable;
-                // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
-                // created more pending transfers than permitted.
-                assert(self.pending_expiries.len <= self.options.transfers_pending_max);
-
-                dr.debits_pending += transfer.amount;
-                cr.credits_pending += transfer.amount;
             } else {
-                dr.debits_posted += transfer.amount;
-                cr.credits_posted += transfer.amount;
-            }
+                const dr_index = self.account_id_to_index(transfer.debit_account_id);
+                const cr_index = self.account_id_to_index(transfer.credit_account_id);
+                const dr = &self.accounts[dr_index];
+                const cr = &self.accounts[cr_index];
+                assert(self.accounts_created[dr_index]);
+                assert(self.accounts_created[cr_index]);
 
-            assert(!dr.debits_exceed_credits(0));
-            assert(!dr.credits_exceed_debits(0));
-            assert(!cr.debits_exceed_credits(0));
-            assert(!cr.credits_exceed_debits(0));
+                if (transfer.flags.pending) {
+                    self.pending_transfers.putAssumeCapacity(transfer.id, .{
+                        .amount = transfer.amount,
+                        .debit_account_index = dr_index,
+                        .credit_account_index = cr_index,
+                    });
+                    self.pending_expiries.add(.{
+                        .transfer = transfer.id,
+                        .timestamp = transfer_timestamp + transfer.timeout,
+                    }) catch unreachable;
+                    // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
+                    // created more pending transfers than permitted.
+                    assert(self.pending_expiries.len <= self.options.transfers_pending_max);
+
+                    dr.debits_pending += transfer.amount;
+                    cr.credits_pending += transfer.amount;
+                } else {
+                    dr.debits_posted += transfer.amount;
+                    cr.credits_posted += transfer.amount;
+                }
+
+                assert(!dr.debits_exceed_credits(0));
+                assert(!dr.credits_exceed_debits(0));
+                assert(!cr.debits_exceed_credits(0));
+                assert(!cr.credits_exceed_debits(0));
+            }
         }
 
         if (transfers.len == 0) {
