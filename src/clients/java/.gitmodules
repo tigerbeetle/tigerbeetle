@@ -1,6 +1,0 @@
-[submodule "src/zig/libs/jui"]
-	path = src/zig/libs/jui
-	url = https://github.com/batiati/jui.git
-[submodule "src/zig/libs/tigerbeetle"]
-	path = src/zig/libs/tigerbeetle
-	url = https://github.com/coilhq/tigerbeetle.git
