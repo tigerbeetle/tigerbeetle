@@ -1,4 +1,4 @@
-package com.tigerbeetle;
+package com.tigerbeetle.tests;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -6,6 +6,10 @@ import static org.junit.Assert.assertNotNull;
 import java.util.UUID;
 
 import org.junit.Test;
+
+import com.tigerbeetle.Account;
+import com.tigerbeetle.AccountFlags;
+import com.tigerbeetle.AccountsBatch;
 
 public class AccountsBatchTest {
 

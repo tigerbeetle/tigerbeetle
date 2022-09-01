@@ -8,7 +8,45 @@ A Java client for [TigerBeetle](https://github.com/coilhq/tigerbeetle)
 
 ## Development Setup
 
-TODO:
+### 1. Install Java SDK for your platform
+
+Be sure to install the JDK not the JRE, example `java-17-openjdk-devel`.
+
+You can check by typing
+```bash
+javac -version
+```
+
+### 2. Clone this repository
+
+Clone loading the submodules
+
+```bash
+git clone --recurse-submodules https://github.com/batiati/tigerbeetle-java.git
+```
+
+Or initialize the submodules after cloning
+
+```bash
+git submodule init
+git submodule update 
+```
+### 3. Install Zig and Tigerbeetle
+
+**Linux and macOS**
+
+```bash
+cd tigerbeetle-java
+./scripts/install.sh
+```
+
+### 4. Run the benchmark
+
+**Linux and macOS**
+
+```bash
+./scripts/benchmark.sh
+```
 
 ## Other clients and documentation
 

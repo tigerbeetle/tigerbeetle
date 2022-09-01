@@ -283,11 +283,8 @@ public final class Client implements AutoCloseable {
             var result = (long) (max_batches * max_transfers_per_batch * 1000) / totalTime;
 
             System.out.printf("%d transfers per second\n", result);
-            System.out.printf("create_transfers max p100 latency per %d transfers = %dms\n", max_transfers_per_batch,
-                    maxTransferLatency);
+            System.out.printf("create_transfers max p100 latency per %d transfers = %dms\n", max_transfers_per_batch, maxTransferLatency);
             System.out.printf("total %d transfers in %dms\n", max_batches * max_transfers_per_batch, totalTime);
-
-            System.console().readLine();
 
         } catch (Exception | RequestException e) {
             System.out.println(e);
