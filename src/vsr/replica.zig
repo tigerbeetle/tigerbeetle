@@ -4072,9 +4072,16 @@ pub fn ReplicaType(
                     // break.
                     return false;
                 } else {
-                    // If the journal has wrapped, then err in favor of a break regardless of op
-                    // order:
-                    return true;
+                    if (header.op == self.op and header.op != next.op) {
+                        assert(header.op > next.op);
+                        // When repairing `self.op`, we expect the hash chain to the right to be
+                        // "broken" (due to a WAL wrap).
+                        return false;
+                    } else {
+                        // If the journal has wrapped, then err in favor of a break regardless of op
+                        // order:
+                        return true;
+                    }
                 }
             }
 
