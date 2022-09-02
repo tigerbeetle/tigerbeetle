@@ -17,7 +17,15 @@ pub fn build(b: *std.build.Builder) void {
     lib.linkLibrary(tb_client);
 
     const os_tag = target.os_tag orelse builtin.target.os.tag;
-    if (os_tag != .windows) {
+    if (os_tag == .windows) {
+
+        // This is a workarround
+        // The linker cannot resolve those dependencies from tb_client static library
+        // So we have to insert them manually here, or we are going to receive a "lld-link: error: undefined symbol"
+        lib.linkSystemLibrary("ws2_32");
+        lib.linkSystemLibrary("advapi32");
+
+    } else{
         tb_client.linkLibC();
         lib.linkLibC();
     }

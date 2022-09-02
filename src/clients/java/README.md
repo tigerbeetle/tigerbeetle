@@ -42,12 +42,25 @@ cd tigerbeetle-java
 ./scripts/install.sh
 ```
 
+**Windows**
+
+```cmd
+cd tigerbeetle-java
+.\scripts\install.bat
+```
+
 ### 4. Run the benchmark
 
 **Linux and macOS**
 
 ```bash
 ./scripts/benchmark.sh
+```
+
+**Windows**
+
+```cmd
+.\scripts\benchmark.bat
 ```
 
 ## Usage
