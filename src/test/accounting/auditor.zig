@@ -30,8 +30,11 @@ const InFlight = union(enum) {
     create_transfers: [transfers_batch_size_max]CreateTransferResultSet,
 };
 
-/// Each client has a queue.
-const InFlightQueue = RingBuffer(InFlight, config.client_request_queue_max, .array);
+const InFlightQueue = std.AutoHashMapUnmanaged(struct {
+    client_index: usize,
+    /// This index corresponds to Auditor.creates_sent/Auditor.creates_delivered.
+    client_request: usize,
+}, InFlight);
 
 const PendingTransfer = struct {
     amount: u64,
@@ -65,6 +68,14 @@ pub const AccountingAuditor = struct {
         /// NOTE: Transfers that have posted/voided successfully (or not) that have _not_ yet
         /// reached their expiry are still included in this count — see `pending_expiries`.
         transfers_pending_max: usize,
+
+        /// From the Auditor's point-of-view, all stalled requests are still in-flight, even if
+        /// their reply has actually arrived at the Conductor.
+        ///
+        /// A request stops being "in-flight" when `on_reply` is called.
+        ///
+        /// This should equal the Conductor's `stalled_queue_capacity`.
+        in_flight_max: usize,
     };
 
     random: std.rand.Random,
@@ -96,7 +107,14 @@ pub const AccountingAuditor = struct {
     /// Track the expected result of the in-flight request for each client.
     /// Each member queue corresponds to entries of the client's request queue, but omits
     /// `register` messages.
-    in_flight: []InFlightQueue,
+    in_flight: InFlightQueue,
+
+    /// The number of `create_accounts`/`create_transfers` sent, per client. Keyed by client index.
+    creates_sent: []usize,
+
+    /// The number of `create_accounts`/`create_transfers` delivered (i.e. replies received),
+    /// per client. Keyed by client index.
+    creates_delivered: []usize,
 
     pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Self {
         assert(options.accounts_max >= 2);
@@ -118,9 +136,17 @@ pub const AccountingAuditor = struct {
         errdefer pending_expiries.deinit();
         try pending_expiries.ensureTotalCapacity(options.transfers_pending_max);
 
-        var in_flight = try allocator.alloc(InFlightQueue, options.client_count);
-        errdefer allocator.free(in_flight);
-        std.mem.set(InFlightQueue, in_flight, .{});
+        var in_flight = InFlightQueue{};
+        errdefer in_flight.deinit(allocator);
+        try in_flight.ensureTotalCapacity(allocator, @intCast(u32, options.in_flight_max));
+
+        var creates_sent = try allocator.alloc(usize, options.client_count);
+        errdefer allocator.free(creates_sent);
+        std.mem.set(usize, creates_sent, 0);
+
+        var creates_delivered = try allocator.alloc(usize, options.client_count);
+        errdefer allocator.free(creates_delivered);
+        std.mem.set(usize, creates_delivered, 0);
 
         return Self{
             .random = random,
@@ -130,6 +156,8 @@ pub const AccountingAuditor = struct {
             .pending_transfers = pending_transfers,
             .pending_expiries = pending_expiries,
             .in_flight = in_flight,
+            .creates_sent = creates_sent,
+            .creates_delivered = creates_delivered,
         };
     }
 
@@ -138,17 +166,33 @@ pub const AccountingAuditor = struct {
         allocator.free(self.accounts_created);
         self.pending_transfers.deinit(allocator);
         self.pending_expiries.deinit();
-        allocator.free(self.in_flight);
+        self.in_flight.deinit(allocator);
+        allocator.free(self.creates_sent);
+        allocator.free(self.creates_delivered);
     }
 
     pub fn expect_create_accounts(self: *Self, client_index: usize) []CreateAccountResultSet {
-        self.in_flight[client_index].push_assume_capacity(.{ .create_accounts = undefined });
-        return self.in_flight[client_index].tail_ptr().?.create_accounts[0..];
+        const result = self.in_flight.getOrPutAssumeCapacity(.{
+            .client_index = client_index,
+            .client_request = self.creates_sent[client_index],
+        });
+        assert(!result.found_existing);
+
+        self.creates_sent[client_index] += 1;
+        result.value_ptr.* = .{ .create_accounts = undefined };
+        return result.value_ptr.*.create_accounts[0..];
     }
 
     pub fn expect_create_transfers(self: *Self, client_index: usize) []CreateTransferResultSet {
-        self.in_flight[client_index].push_assume_capacity(.{ .create_transfers = undefined });
-        return self.in_flight[client_index].tail_ptr().?.create_transfers[0..];
+        const result = self.in_flight.getOrPutAssumeCapacity(.{
+            .client_index = client_index,
+            .client_request = self.creates_sent[client_index],
+        });
+        assert(!result.found_existing);
+
+        self.creates_sent[client_index] += 1;
+        result.value_ptr.* = .{ .create_transfers = undefined };
+        return result.value_ptr.*.create_transfers[0..];
     }
 
     /// Expire pending tranfers that have not been posted or voided.
@@ -194,7 +238,7 @@ pub const AccountingAuditor = struct {
         assert(self.timestamp < timestamp);
         defer assert(self.timestamp == timestamp);
 
-        const results_expect = &self.in_flight[client_index].pop().?.create_accounts;
+        const results_expect = self.take_in_flight(client_index).create_accounts;
         var results_iterator = IteratorForCreate(tb.CreateAccountsResult).init(results);
         defer assert(results_iterator.results.len == 0);
 
@@ -243,7 +287,7 @@ pub const AccountingAuditor = struct {
         assert(self.timestamp < timestamp);
         defer assert(self.timestamp == timestamp);
 
-        const results_expect = &self.in_flight[client_index].pop().?.create_transfers;
+        const results_expect = self.take_in_flight(client_index).create_transfers;
         var results_iterator = IteratorForCreate(tb.CreateTransfersResult).init(results);
         defer assert(results_iterator.results.len == 0);
 
@@ -456,6 +500,18 @@ pub const AccountingAuditor = struct {
     pub fn account_index_to_id(self: *const Self, index: usize) u128 {
         // +1 so that index=0 is encoded as a valid id.
         return self.options.account_id_permutation.encode(index + 1);
+    }
+
+    fn take_in_flight(self: *Self, client_index: usize) InFlight {
+        const key = .{
+            .client_index = client_index,
+            .client_request = self.creates_delivered[client_index],
+        };
+        self.creates_delivered[client_index] += 1;
+
+        const in_flight = self.in_flight.get(key).?;
+        assert(self.in_flight.remove(key));
+        return in_flight;
     }
 };
 

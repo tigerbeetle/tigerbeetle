@@ -16,14 +16,6 @@ const Message = MessagePool.Message;
 // TODO(zig) This won't be necessary in Zig 0.10.
 const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
 
-/// Reply messages (from cluster to client) may be reordered during transit.
-/// The Conductor must reassemble them in the original order (ascending op/commit number) before
-/// handing them off to the Workload for verification.
-///
-/// `Conduction.stalled_queue` hold replies (and corresponding requests) that are waiting to be
-/// processed.
-const stalled_queue_capacity = config.clients_max * 4;
-
 /// Both messages belong to the Conductor's `MessagePool`.
 const PendingReply = struct {
     client_index: usize,
@@ -47,6 +39,14 @@ pub fn ConductorType(
 ) type {
     return struct {
         const Self = @This();
+
+        /// Reply messages (from cluster to client) may be reordered during transit.
+        /// The Conductor must reassemble them in the original order (ascending op/commit
+        /// number) before handing them off to the Workload for verification.
+        ///
+        /// `Conduction.stalled_queue` hold replies (and corresponding requests) that are
+        /// waiting to be processed.
+        pub const stalled_queue_capacity = config.clients_max * config.client_request_queue_max * 2;
 
         random: std.rand.Random,
         workload: *Workload,

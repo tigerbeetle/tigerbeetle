@@ -160,6 +160,7 @@ pub fn main() !void {
             .account_id_permutation = random_id_permutation(random),
             .client_count = client_count,
             .transfers_pending_max = 256,
+            .in_flight_max = Conductor.stalled_queue_capacity,
         },
         .transfer_id_permutation = random_id_permutation(random),
         .operations = .{
