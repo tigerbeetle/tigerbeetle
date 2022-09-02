@@ -45,9 +45,7 @@ scripts/install.sh
 **Windows**
 ```cmd
 cd tigerbeetle
-scripts\install_zig.bat
-.\zig\zig.exe build install -Drelease-safe
-mv .\zig-out\bin\tigerbeetle.exe .
+scripts\install.bat
 ```
 
 ### 4. Test
@@ -64,8 +62,14 @@ dotnet test
 
 On `tigerbeetle-dotnet` folder, run the `benchmark.sh` script.
 
+**Linux/MacOS**
 ```bash
-./scripts/benchmark.sh
+scripts/benchmark.sh
+```
+
+**Windows**
+```bash
+scripts\benchmark.bat
 ```
 
 ## Usage

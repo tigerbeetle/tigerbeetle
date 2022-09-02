@@ -7,4 +7,4 @@ src/TigerBeetle/native/**/*.o
 src/TigerBeetle/native/**/*.lib
 src/TigerBeetle/native/**/*.obj
 src/TigerBeetle/native/**/*.pdb
-
+*tigerbeetle.benchmark
