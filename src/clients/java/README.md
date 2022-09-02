@@ -8,6 +8,8 @@ A Java client for [TigerBeetle](https://github.com/coilhq/tigerbeetle)
 
 ## Development Setup
 
+[![asciicast](https://asciinema.org/a/518508.svg)](https://asciinema.org/a/518508)
+
 ### 1. Install Java SDK for your platform
 
 Be sure to install the JDK not the JRE, example `java-17-openjdk-devel`.
