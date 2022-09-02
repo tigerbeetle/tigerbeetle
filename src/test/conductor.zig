@@ -179,6 +179,7 @@ pub fn ConductorType(
                 if (client.request_queue.count > 0) return false;
             }
 
+            assert(self.workload.done());
             return true;
         }
 

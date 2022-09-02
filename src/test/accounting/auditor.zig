@@ -171,6 +171,19 @@ pub const AccountingAuditor = struct {
         allocator.free(self.creates_delivered);
     }
 
+    pub fn done(self: *const Self) bool {
+        if (self.pending_transfers.count() != 0) return false;
+        // Don't check pending_expiries: it still contains any posted/voided transfers.
+
+        if (self.in_flight.count() != 0) return false;
+
+        for (self.creates_sent) |sent, client_index| {
+            if (sent != self.creates_delivered[client_index]) return false;
+        }
+
+        return true;
+    }
+
     pub fn expect_create_accounts(self: *Self, client_index: usize) []CreateAccountResultSet {
         const result = self.in_flight.getOrPutAssumeCapacity(.{
             .client_index = client_index,

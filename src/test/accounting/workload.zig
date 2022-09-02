@@ -300,6 +300,11 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             self.transfers_delivered_recently.deinit();
         }
 
+        pub fn done(self: *const Self) bool {
+            if (self.transfers_delivered_recently.len != 0) return false;
+            return self.auditor.done();
+        }
+
         /// A client may build multiple requests to queue up while another is in-flight.
         pub fn build_request(self: *Self, client_index: usize, body: []align(@alignOf(vsr.Header)) u8) struct {
             operation: Operation,
