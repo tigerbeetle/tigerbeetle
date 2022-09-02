@@ -40,10 +40,10 @@ public final class InitializationException extends Throwable {
                 return "Invalid addresses";
 
             case Status.SYSTEM_RESOURCES:
-                return "System Resources";  
-                
+                return "System Resources";
+
             case Status.NETWORK_SUBSYSTEM:
-                return "Network subsystem";                  
+                return "Network subsystem";
 
             default:
                 return "Unknown error status " + status;

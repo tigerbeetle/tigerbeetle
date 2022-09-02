@@ -27,7 +27,7 @@ abstract class Request<T> implements Future<T[]> {
     private final Client client;
     private final byte operation;
     private Object result = null;
-    private byte status =  UNINITIALIZED;
+    private byte status = UNINITIALIZED;
 
     protected Request(Client client, byte operation, Batch batch) {
         this.client = client;
