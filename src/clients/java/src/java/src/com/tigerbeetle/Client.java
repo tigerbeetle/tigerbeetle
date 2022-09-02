@@ -18,12 +18,17 @@ public final class Client implements AutoCloseable {
     private long packetsHead;
     private long packetsTail;
 
-    public Client(int clusterID, String[] addresses, int maxConcurrency)
+    public Client(int clusterID, String[] replicaAddresses)
+            throws IllegalArgumentException, InitializationException {
+        this(clusterID, replicaAddresses, DEFAULT_MAX_CONCURRENCY);
+    }
+
+    public Client(int clusterID, String[] replicaAddresses, int maxConcurrency)
             throws IllegalArgumentException, InitializationException {
         if (clusterID < 0)
             throw new IllegalArgumentException("clusterID must be positive");
-        if (addresses == null || addresses.length == 0)
-            throw new IllegalArgumentException("Invalid addresses");
+        if (replicaAddresses == null || replicaAddresses.length == 0)
+            throw new IllegalArgumentException("Invalid replica addresses");
 
         // Cap the maximum amount of packets
         if (maxConcurrency <= 0)
@@ -32,7 +37,7 @@ public final class Client implements AutoCloseable {
             maxConcurrency = 4096;
 
         var joiner = new StringJoiner(",");
-        for (var address : addresses) {
+        for (var address : replicaAddresses) {
             joiner.add(address);
         }
 
