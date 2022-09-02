@@ -18,7 +18,8 @@ public final class Client implements AutoCloseable {
     private long packetsHead;
     private long packetsTail;
 
-    public Client(int clusterID, String[] addresses, int maxConcurrency) throws IllegalArgumentException, InitializationException {
+    public Client(int clusterID, String[] addresses, int maxConcurrency)
+            throws IllegalArgumentException, InitializationException {
         if (clusterID < 0)
             throw new IllegalArgumentException("clusterID must be positive");
         if (addresses == null || addresses.length == 0)
@@ -53,7 +54,8 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public CreateAccountResult createAccount(Account account) throws InterruptedException, RequestException {
+    public CreateAccountResult createAccount(Account account)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         var batch = new AccountsBatch(1);
         batch.add(account);
 
@@ -65,28 +67,32 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public CreateAccountsResult[] createAccounts(Account[] batch) throws InterruptedException, RequestException {
+    public CreateAccountsResult[] createAccounts(Account[] batch)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         return createAccounts(new AccountsBatch(batch));
     }
 
-    public CreateAccountsResult[] createAccounts(AccountsBatch batch) throws InterruptedException, RequestException {
+    public CreateAccountsResult[] createAccounts(AccountsBatch batch)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         var request = new CreateAccountsRequest(this, batch);
         request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
 
-    public Future<CreateAccountsResult[]> createAccountsAsync(Account[] batch) throws InterruptedException {
+    public Future<CreateAccountsResult[]> createAccountsAsync(Account[] batch)
+            throws IllegalArgumentException, InterruptedException {
         return createAccountsAsync(new AccountsBatch(batch));
     }
 
-    public Future<CreateAccountsResult[]> createAccountsAsync(AccountsBatch batch) throws InterruptedException {
+    public Future<CreateAccountsResult[]> createAccountsAsync(AccountsBatch batch)
+            throws IllegalArgumentException, InterruptedException {
         var request = new CreateAccountsRequest(this, batch);
         request.beginRequest();
         return request;
     }
 
-    public Account lookupAccount(UUID uuid) throws InterruptedException, RequestException {
+    public Account lookupAccount(UUID uuid) throws IllegalArgumentException, InterruptedException, RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -98,28 +104,32 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public Account[] lookupAccounts(UUID[] batch) throws InterruptedException, RequestException {
+    public Account[] lookupAccounts(UUID[] batch)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         return lookupAccounts(new UUIDsBatch(batch));
     }
 
-    public Account[] lookupAccounts(UUIDsBatch batch) throws InterruptedException, RequestException {
+    public Account[] lookupAccounts(UUIDsBatch batch)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         var request = new LookupAccountsRequest(this, batch);
         request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
 
-    public Future<Account[]> lookupAccountsAsync(UUID[] batch) throws InterruptedException {
+    public Future<Account[]> lookupAccountsAsync(UUID[] batch) throws IllegalArgumentException, InterruptedException {
         return lookupAccountsAsync(new UUIDsBatch(batch));
     }
 
-    public Future<Account[]> lookupAccountsAsync(UUIDsBatch batch) throws InterruptedException {
+    public Future<Account[]> lookupAccountsAsync(UUIDsBatch batch)
+            throws IllegalArgumentException, InterruptedException {
         var request = new LookupAccountsRequest(this, batch);
         request.beginRequest();
         return request;
     }
 
-    public CreateTransferResult createTransfer(Transfer transfer) throws InterruptedException, RequestException {
+    public CreateTransferResult createTransfer(Transfer transfer)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         var batch = new TransfersBatch(1);
         batch.add(transfer);
 
@@ -131,28 +141,32 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public CreateTransfersResult[] createTransfers(Transfer[] batch) throws InterruptedException, RequestException {
+    public CreateTransfersResult[] createTransfers(Transfer[] batch)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         return createTransfers(new TransfersBatch(batch));
     }
 
-    public CreateTransfersResult[] createTransfers(TransfersBatch batch) throws InterruptedException, RequestException {
+    public CreateTransfersResult[] createTransfers(TransfersBatch batch)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         var request = new CreateTransfersRequest(this, batch);
         request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
 
-    public Future<CreateTransfersResult[]> createTransfersAsync(Transfer[] batch) throws InterruptedException {
+    public Future<CreateTransfersResult[]> createTransfersAsync(Transfer[] batch)
+            throws IllegalArgumentException, InterruptedException {
         return createTransfersAsync(new TransfersBatch(batch));
     }
 
-    public Future<CreateTransfersResult[]> createTransfersAsync(TransfersBatch batch) throws InterruptedException {
+    public Future<CreateTransfersResult[]> createTransfersAsync(TransfersBatch batch)
+            throws IllegalArgumentException, InterruptedException {
         var request = new CreateTransfersRequest(this, batch);
         request.beginRequest();
         return request;
     }
 
-    public Transfer lookupTransfer(UUID uuid) throws InterruptedException, RequestException {
+    public Transfer lookupTransfer(UUID uuid) throws IllegalArgumentException, InterruptedException, RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -164,22 +178,25 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public Transfer[] lookupTransfers(UUID[] batch) throws InterruptedException, RequestException {
+    public Transfer[] lookupTransfers(UUID[] batch)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         return lookupTransfers(new UUIDsBatch(batch));
     }
 
-    public Transfer[] lookupTransfers(UUIDsBatch batch) throws InterruptedException, RequestException {
+    public Transfer[] lookupTransfers(UUIDsBatch batch)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         var request = new LookupTransfersRequest(this, batch);
         request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
 
-    public Future<Transfer[]> lookupTransfersAsync(UUID[] batch) throws InterruptedException {
+    public Future<Transfer[]> lookupTransfersAsync(UUID[] batch) throws IllegalArgumentException, InterruptedException {
         return lookupTransfersAsync(new UUIDsBatch(batch));
     }
 
-    public Future<Transfer[]> lookupTransfersAsync(UUIDsBatch batch) throws InterruptedException {
+    public Future<Transfer[]> lookupTransfersAsync(UUIDsBatch batch)
+            throws IllegalArgumentException, InterruptedException {
         var request = new LookupTransfersRequest(this, batch);
         request.beginRequest();
         return request;
@@ -283,10 +300,11 @@ public final class Client implements AutoCloseable {
             var result = (long) (max_batches * max_transfers_per_batch * 1000) / totalTime;
 
             System.out.printf("%d transfers per second\n", result);
-            System.out.printf("create_transfers max p100 latency per %d transfers = %dms\n", max_transfers_per_batch, maxTransferLatency);
+            System.out.printf("create_transfers max p100 latency per %d transfers = %dms\n", max_transfers_per_batch,
+                    maxTransferLatency);
             System.out.printf("total %d transfers in %dms\n", max_batches * max_transfers_per_batch, totalTime);
 
-        } catch (InitializationException | RequestException | Exception  e) {
+        } catch (InitializationException | RequestException | Exception e) {
             System.out.println(e);
             e.printStackTrace();
         }

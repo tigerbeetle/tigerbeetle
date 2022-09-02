@@ -29,11 +29,14 @@ abstract class Request<T> implements Future<T[]> {
     private Object result = null;
     private byte status = UNINITIALIZED;
 
-    protected Request(Client client, byte operation, Batch batch) {
+    protected Request(Client client, byte operation, Batch batch) throws IllegalArgumentException {
         this.client = client;
         this.operation = operation;
         this.body = batch.buffer;
         this.bodyLen = batch.getBufferLen();
+
+        if (this.bodyLen == 0)
+            throw new IllegalArgumentException("Empty batch");
     }
 
     public void beginRequest() throws InterruptedException {
