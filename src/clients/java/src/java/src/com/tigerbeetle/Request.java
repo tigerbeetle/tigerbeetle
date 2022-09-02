@@ -15,13 +15,7 @@ abstract class Request<T> implements Future<T[]> {
         public final static byte LOOKUP_TRANSFERS = 6;
     }
 
-    protected final static class Status {
-        public final static byte UNINITIALIZED = -1;
-        public final static byte OK = 0;
-        public final static byte TOO_MUCH_DATA = 1;
-        public final static byte INVALID_OPERATION = 2;
-        public final static byte INVALID_DATA_SIZE = 3;
-    }
+    private final static byte UNINITIALIZED = -1;
 
     // Used ony by the JNI side
     @SuppressWarnings("unused")
@@ -33,7 +27,7 @@ abstract class Request<T> implements Future<T[]> {
     private final Client client;
     private final byte operation;
     private Object result = null;
-    private byte status = Status.UNINITIALIZED;
+    private byte status =  UNINITIALIZED;
 
     protected Request(Client client, byte operation, Batch batch) {
         this.client = client;
@@ -51,7 +45,7 @@ abstract class Request<T> implements Future<T[]> {
     void endRequest(ByteBuffer buffer, long packet, byte status) {
 
         Object result = null;
-        if (status == Status.OK) {
+        if (status == RequestException.Status.OK) {
             switch (operation) {
                 case Operations.CREATE_ACCOUNTS: {
                     var batch = new CreateAccountsResultBatch(buffer.asReadOnlyBuffer());
@@ -104,7 +98,7 @@ abstract class Request<T> implements Future<T[]> {
 
     @Override
     public boolean isDone() {
-        return status != Status.UNINITIALIZED;
+        return status != UNINITIALIZED;
     }
 
     void waitForCompletion() throws InterruptedException {
@@ -130,7 +124,7 @@ abstract class Request<T> implements Future<T[]> {
     // result to T[]
     @SuppressWarnings("unchecked")
     T[] getResult() throws RequestException {
-        if (status != Status.OK)
+        if (status != RequestException.Status.OK)
             throw new RequestException(status);
 
         return (T[]) result;

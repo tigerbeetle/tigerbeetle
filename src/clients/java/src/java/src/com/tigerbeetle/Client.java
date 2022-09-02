@@ -18,7 +18,7 @@ public final class Client implements AutoCloseable {
     private long packetsHead;
     private long packetsTail;
 
-    public Client(int clusterID, String[] addresses, int maxConcurrency) throws IllegalArgumentException, Exception {
+    public Client(int clusterID, String[] addresses, int maxConcurrency) throws IllegalArgumentException, InitializationException {
         if (clusterID < 0)
             throw new IllegalArgumentException("clusterID must be positive");
         if (addresses == null || addresses.length == 0)
@@ -38,7 +38,7 @@ public final class Client implements AutoCloseable {
         this.clusterID = clusterID;
         int status = clientInit(clusterID, joiner.toString(), maxConcurrency);
         if (status != 0)
-            throw new Exception("result " + status);
+            throw new InitializationException(status);
 
         this.maxConcurrencySemaphore = new Semaphore(maxConcurrency);
     }
@@ -286,7 +286,7 @@ public final class Client implements AutoCloseable {
             System.out.printf("create_transfers max p100 latency per %d transfers = %dms\n", max_transfers_per_batch, maxTransferLatency);
             System.out.printf("total %d transfers in %dms\n", max_batches * max_transfers_per_batch, totalTime);
 
-        } catch (Exception | RequestException e) {
+        } catch (InitializationException | RequestException | Exception  e) {
             System.out.println(e);
             e.printStackTrace();
         }
