@@ -60,6 +60,14 @@ During the build, the `tb_client` library will be built and embedded into the do
 dotnet test
 ```
 
+### 5. Benchmark
+
+On `tigerbeetle-dotnet` folder, run the `benchmark.sh` script.
+
+```bash
+./scripts/benchmark.sh
+```
+
 ## Usage
 
 A client needs to be configured with a `clusterID` and `replicaAddresses`.
