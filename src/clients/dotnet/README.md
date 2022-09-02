@@ -8,6 +8,8 @@ A C# client for [TigerBeetle](https://github.com/coilhq/tigerbeetle)
 
 ## Development Setup
 
+[![asciicast](https://asciinema.org/a/518513.svg)](https://asciinema.org/a/518513)
+
 ### 1. Install [dotnet 6](https://dotnet.microsoft.com/en-us/download)
 
 It is needed to build and run the tests, this library can be used from any [.Net Standard 2.1 compatible runtime](https://docs.microsoft.com/en-us/dotnet/standard/net-standard) (.Net Framework 4.8, .Net Core, Xamarin, etc)
