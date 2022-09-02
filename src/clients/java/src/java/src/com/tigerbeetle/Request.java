@@ -47,31 +47,40 @@ abstract class Request<T> implements Future<T[]> {
 
     void endRequest(ByteBuffer buffer, long packet, byte status) {
 
+        // TODO: Add asserts to check the received opertation byte
+        // and check the request and result len have the same amount of elements.
+
         Object result = null;
         if (status == RequestException.Status.OK) {
-            switch (operation) {
-                case Operations.CREATE_ACCOUNTS: {
-                    var batch = new CreateAccountsResultBatch(buffer.asReadOnlyBuffer());
-                    result = batch.toArray();
-                    break;
-                }
+            try {
+                switch (operation) {
+                    case Operations.CREATE_ACCOUNTS: {
+                        var batch = new CreateAccountsResultBatch(buffer.asReadOnlyBuffer());
+                        result = batch.toArray();
+                        break;
+                    }
 
-                case Operations.CREATE_TRANSFERS: {
-                    var batch = new CreateTransfersResultBatch(buffer.asReadOnlyBuffer());
-                    result = batch.toArray();
-                    break;
-                }
+                    case Operations.CREATE_TRANSFERS: {
+                        var batch = new CreateTransfersResultBatch(buffer.asReadOnlyBuffer());
+                        result = batch.toArray();
+                        break;
+                    }
 
-                case Operations.LOOKUP_ACCOUNTS: {
-                    var batch = new AccountsBatch(buffer.asReadOnlyBuffer());
-                    result = batch.toArray();
-                    break;
+                    case Operations.LOOKUP_ACCOUNTS: {
+                        var batch = new AccountsBatch(buffer.asReadOnlyBuffer());
+                        result = batch.toArray();
+                        break;
+                    }
+                    case Operations.LOOKUP_TRANSFERS: {
+                        var batch = new TransfersBatch(buffer.asReadOnlyBuffer());
+                        result = batch.toArray();
+                        break;
+                    }
                 }
-                case Operations.LOOKUP_TRANSFERS: {
-                    var batch = new TransfersBatch(buffer.asReadOnlyBuffer());
-                    result = batch.toArray();
-                    break;
-                }
+            } catch (RequestException requestException) {
+                // The amount of data received can be incorrect and cause a INVALID_DATA_SIZE
+                status = requestException.getStatus();
+                result = null;
             }
         }
 

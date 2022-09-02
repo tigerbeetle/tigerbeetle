@@ -7,9 +7,16 @@ class CreateAccountsResultBatch extends Batch {
 
     private final int lenght;
 
-    public CreateAccountsResultBatch(ByteBuffer buffer) {
+    public CreateAccountsResultBatch(ByteBuffer buffer) throws RequestException {
         super(buffer);
-        this.lenght = buffer.capacity() / CreateAccountsResult.Struct.SIZE;
+
+        final var bufferLen = buffer.capacity();
+
+        // Make sure the completion handler is giving us valid data
+        if (bufferLen % CreateAccountsResult.Struct.SIZE != 0)
+            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+
+        this.lenght = bufferLen / CreateAccountsResult.Struct.SIZE;
     }
 
     public CreateAccountsResult get(int index) throws IndexOutOfBoundsException, BufferUnderflowException {

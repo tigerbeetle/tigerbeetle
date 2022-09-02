@@ -31,10 +31,16 @@ public class UUIDsBatch extends Batch {
         }
     }
 
-    UUIDsBatch(ByteBuffer buffer) {
+    UUIDsBatch(ByteBuffer buffer) throws RequestException {
         super(buffer);
 
-        this.capacity = buffer.capacity() / Struct.SIZE;
+        final var bufferLen = buffer.capacity();
+
+        // Make sure the completion handler is giving us valid data
+        if (bufferLen % Struct.SIZE != 0)
+            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+                    
+        this.capacity = bufferLen / Struct.SIZE;
         this.lenght = capacity;
     }
 

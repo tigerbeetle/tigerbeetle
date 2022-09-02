@@ -7,9 +7,16 @@ class CreateTransfersResultBatch extends Batch {
 
     private final int lenght;
 
-    public CreateTransfersResultBatch(ByteBuffer buffer) {
+    public CreateTransfersResultBatch(ByteBuffer buffer) throws RequestException {
         super(buffer);
-        this.lenght = buffer.capacity() / CreateTransfersResult.Struct.SIZE;
+
+        final var bufferLen = buffer.capacity();
+
+        // Make sure the completion handler is giving us valid data
+        if (bufferLen % CreateTransfersResult.Struct.SIZE != 0)
+            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+
+        this.lenght = bufferLen / CreateTransfersResult.Struct.SIZE;
     }
 
     public CreateTransfersResult get(int index) throws IndexOutOfBoundsException, BufferUnderflowException {

@@ -26,10 +26,16 @@ public final class AccountsBatch extends Batch {
         }
     }
 
-    AccountsBatch(ByteBuffer buffer) {
+    AccountsBatch(ByteBuffer buffer) throws RequestException {
         super(buffer);
 
-        this.capacity = buffer.capacity() / Account.Struct.SIZE;
+        final var bufferLen = buffer.capacity();
+
+        // Make sure the completion handler is giving us valid data
+        if (bufferLen % Account.Struct.SIZE != 0)
+            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+
+        this.capacity = bufferLen/ Account.Struct.SIZE;
         this.lenght = capacity;
     }
 

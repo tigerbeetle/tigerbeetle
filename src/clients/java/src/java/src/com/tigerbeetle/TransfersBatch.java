@@ -26,10 +26,16 @@ public final class TransfersBatch extends Batch {
         }
     }
 
-    TransfersBatch(ByteBuffer buffer) {
+    TransfersBatch(ByteBuffer buffer) throws RequestException {
         super(buffer);
 
-        this.capacity = buffer.capacity() / Transfer.Struct.SIZE;
+        final var bufferLen = buffer.capacity();
+
+        // Make sure the completion handler is giving us valid data
+        if (bufferLen % Transfer.Struct.SIZE != 0)
+            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);        
+
+        this.capacity = bufferLen / Transfer.Struct.SIZE;
         this.lenght = capacity;
     }
 
