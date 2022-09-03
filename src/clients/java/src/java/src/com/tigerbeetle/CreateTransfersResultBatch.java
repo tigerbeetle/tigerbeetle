@@ -7,7 +7,8 @@ class CreateTransfersResultBatch extends Batch {
 
     private final int lenght;
 
-    public CreateTransfersResultBatch(ByteBuffer buffer) throws RequestException {
+    public CreateTransfersResultBatch(ByteBuffer buffer)
+            throws RequestException {
         super(buffer);
 
         final var bufferLen = buffer.capacity();
@@ -19,16 +20,18 @@ class CreateTransfersResultBatch extends Batch {
         this.lenght = bufferLen / CreateTransfersResult.Struct.SIZE;
     }
 
-    public CreateTransfersResult get(int index) throws IndexOutOfBoundsException, BufferUnderflowException {
+    public CreateTransfersResult get(int index)
+            throws IndexOutOfBoundsException, BufferUnderflowException {
         if (index < 0 || index >= lenght)
             throw new IndexOutOfBoundsException();
 
-        ByteBuffer ptr = buffer.position(index * CreateTransfersResult.Struct.SIZE);
+        var ptr = buffer.position(index * CreateTransfersResult.Struct.SIZE);
         return new CreateTransfersResult(ptr);
     }
 
-    public CreateTransfersResult[] toArray() throws BufferUnderflowException {
-        CreateTransfersResult[] array = new CreateTransfersResult[lenght];
+    public CreateTransfersResult[] toArray()
+            throws BufferUnderflowException {
+        var array = new CreateTransfersResult[lenght];
         for (int i = 0; i < lenght; i++) {
             array[i] = get(i);
         }

@@ -144,7 +144,8 @@ public final class Transfer {
         return amount;
     }
 
-    public void setAmount(long amount) throws IllegalArgumentException {
+    public void setAmount(long amount)
+            throws IllegalArgumentException {
         if (amount < 0) 
             throw new IllegalArgumentException();
         this.amount = amount;

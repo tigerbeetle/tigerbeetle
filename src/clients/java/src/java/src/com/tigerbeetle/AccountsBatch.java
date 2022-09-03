@@ -26,7 +26,8 @@ public final class AccountsBatch extends Batch {
         }
     }
 
-    AccountsBatch(ByteBuffer buffer) throws RequestException {
+    AccountsBatch(ByteBuffer buffer)
+            throws RequestException {
         super(buffer);
 
         final var bufferLen = buffer.capacity();
@@ -35,15 +36,17 @@ public final class AccountsBatch extends Batch {
         if (bufferLen % Account.Struct.SIZE != 0)
             throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
 
-        this.capacity = bufferLen/ Account.Struct.SIZE;
+        this.capacity = bufferLen / Account.Struct.SIZE;
         this.lenght = capacity;
     }
 
-    public void add(Account account) throws IndexOutOfBoundsException {
+    public void add(Account account)
+            throws IndexOutOfBoundsException {
         set(lenght, account);
     }
 
-    public Account get(int index) throws IndexOutOfBoundsException {
+    public Account get(int index)
+            throws IndexOutOfBoundsException {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
@@ -51,7 +54,8 @@ public final class AccountsBatch extends Batch {
         return new Account(ptr);
     }
 
-    public void set(int index, Account account) throws IndexOutOfBoundsException, NullPointerException {
+    public void set(int index, Account account)
+            throws IndexOutOfBoundsException, NullPointerException {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
         if (account == null)
@@ -76,7 +80,8 @@ public final class AccountsBatch extends Batch {
         return this.capacity;
     }
 
-    public Account[] toArray() throws BufferUnderflowException {
+    public Account[] toArray()
+            throws BufferUnderflowException {
         Account[] array = new Account[lenght];
         for (int i = 0; i < lenght; i++) {
             array[i] = get(i);

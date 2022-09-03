@@ -2,7 +2,6 @@ package com.tigerbeetle;
 
 import java.util.StringJoiner;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 
@@ -53,7 +52,8 @@ public final class Client implements AutoCloseable {
     }
 
     @Override
-    public void close() throws Exception {
+    public void close()
+            throws Exception {
         if (clientHandle != 0) {
 
             // Acquire all permits, forcing to wait for any processing thread to release
@@ -104,7 +104,8 @@ public final class Client implements AutoCloseable {
         return request;
     }
 
-    public Account lookupAccount(UUID uuid) throws IllegalArgumentException, InterruptedException, RequestException {
+    public Account lookupAccount(UUID uuid)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -129,7 +130,8 @@ public final class Client implements AutoCloseable {
         return request.getResult();
     }
 
-    public Future<Account[]> lookupAccountsAsync(UUID[] batch) throws IllegalArgumentException, InterruptedException {
+    public Future<Account[]> lookupAccountsAsync(UUID[] batch)
+            throws IllegalArgumentException, InterruptedException {
         return lookupAccountsAsync(new UUIDsBatch(batch));
     }
 
@@ -178,7 +180,8 @@ public final class Client implements AutoCloseable {
         return request;
     }
 
-    public Transfer lookupTransfer(UUID uuid) throws IllegalArgumentException, InterruptedException, RequestException {
+    public Transfer lookupTransfer(UUID uuid)
+            throws IllegalArgumentException, InterruptedException, RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -203,7 +206,8 @@ public final class Client implements AutoCloseable {
         return request.getResult();
     }
 
-    public Future<Transfer[]> lookupTransfersAsync(UUID[] batch) throws IllegalArgumentException, InterruptedException {
+    public Future<Transfer[]> lookupTransfersAsync(UUID[] batch)
+            throws IllegalArgumentException, InterruptedException {
         return lookupTransfersAsync(new UUIDsBatch(batch));
     }
 
@@ -214,7 +218,8 @@ public final class Client implements AutoCloseable {
         return request;
     }
 
-    long adquirePacket() throws InterruptedException {
+    long adquirePacket()
+            throws InterruptedException {
 
         // Assure that only the max number of concurrent requests can adquire a packet
         // It forces other threads to wait until a packet became available

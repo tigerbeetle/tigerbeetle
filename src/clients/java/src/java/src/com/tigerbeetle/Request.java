@@ -29,7 +29,8 @@ abstract class Request<T> implements Future<T[]> {
     private Object result = null;
     private byte status = UNINITIALIZED;
 
-    protected Request(Client client, byte operation, Batch batch) throws IllegalArgumentException {
+    protected Request(Client client, byte operation, Batch batch)
+            throws IllegalArgumentException {
         this.client = client;
         this.operation = operation;
         this.body = batch.buffer;
@@ -39,7 +40,8 @@ abstract class Request<T> implements Future<T[]> {
             throw new IllegalArgumentException("Empty batch");
     }
 
-    public void beginRequest() throws InterruptedException {
+    public void beginRequest()
+            throws InterruptedException {
 
         long packet = client.adquirePacket();
         submit(client, packet);
@@ -113,7 +115,8 @@ abstract class Request<T> implements Future<T[]> {
         return status != UNINITIALIZED;
     }
 
-    void waitForCompletion() throws InterruptedException {
+    void waitForCompletion()
+            throws InterruptedException {
         synchronized (this) {
             while (!isDone()) {
                 wait();
@@ -121,7 +124,8 @@ abstract class Request<T> implements Future<T[]> {
         }
     }
 
-    boolean waitForCompletion(long timeoutMillis) throws InterruptedException {
+    boolean waitForCompletion(long timeoutMillis)
+            throws InterruptedException {
         synchronized (this) {
             if (!isDone()) {
                 wait(timeoutMillis);
@@ -135,7 +139,8 @@ abstract class Request<T> implements Future<T[]> {
     // Since we just support a limited set of operations, it is safe to cast the
     // result to T[]
     @SuppressWarnings("unchecked")
-    T[] getResult() throws RequestException {
+    T[] getResult()
+            throws RequestException {
         if (status != RequestException.Status.OK)
             throw new RequestException(status);
 
@@ -143,7 +148,8 @@ abstract class Request<T> implements Future<T[]> {
     }
 
     @Override
-    public T[] get() throws InterruptedException, ExecutionException {
+    public T[] get()
+            throws InterruptedException, ExecutionException {
 
         waitForCompletion();
 
@@ -155,7 +161,8 @@ abstract class Request<T> implements Future<T[]> {
     }
 
     @Override
-    public T[] get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+    public T[] get(long timeout, TimeUnit unit)
+            throws InterruptedException, ExecutionException, TimeoutException {
 
         if (!waitForCompletion(unit.convert(timeout, TimeUnit.MILLISECONDS)))
             throw new TimeoutException();

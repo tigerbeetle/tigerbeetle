@@ -31,7 +31,8 @@ public class UUIDsBatch extends Batch {
         }
     }
 
-    UUIDsBatch(ByteBuffer buffer) throws RequestException {
+    UUIDsBatch(ByteBuffer buffer)
+            throws RequestException {
         super(buffer);
 
         final var bufferLen = buffer.capacity();
@@ -39,31 +40,34 @@ public class UUIDsBatch extends Batch {
         // Make sure the completion handler is giving us valid data
         if (bufferLen % Struct.SIZE != 0)
             throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
-                    
+
         this.capacity = bufferLen / Struct.SIZE;
         this.lenght = capacity;
     }
 
-    public void Add(UUID uuid) throws IndexOutOfBoundsException {
+    public void Add(UUID uuid)
+            throws IndexOutOfBoundsException {
         Set(lenght, uuid);
     }
 
-    public UUID Get(int index) throws IndexOutOfBoundsException, BufferUnderflowException {
+    public UUID Get(int index)
+            throws IndexOutOfBoundsException, BufferUnderflowException {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
-        ByteBuffer ptr = buffer.position(index * Struct.SIZE);
+        var ptr = buffer.position(index * Struct.SIZE);
         return new UUID(ptr.getLong(), ptr.getLong());
     }
 
-    public void Set(int index, UUID uuid) throws IndexOutOfBoundsException, NullPointerException {
+    public void Set(int index, UUID uuid)
+            throws IndexOutOfBoundsException, NullPointerException {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
         if (uuid == null)
             throw new NullPointerException();
 
         final int start = index * Struct.SIZE;
-        ByteBuffer ptr = buffer.position(start);
+        var ptr = buffer.position(start);
 
         ptr
                 .putLong(uuid.getMostSignificantBits())
@@ -83,8 +87,9 @@ public class UUIDsBatch extends Batch {
         return this.capacity;
     }
 
-    public UUID[] toArray() throws BufferUnderflowException {
-        UUID[] array = new UUID[lenght];
+    public UUID[] toArray()
+            throws BufferUnderflowException {
+        var array = new UUID[lenght];
         for (int i = 0; i < lenght; i++) {
             array[i] = Get(i);
         }
