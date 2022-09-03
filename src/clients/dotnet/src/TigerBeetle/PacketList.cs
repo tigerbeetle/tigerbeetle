@@ -1,14 +1,5 @@
 ﻿using System;
-using System.Buffers;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
-using System.Net;
-using System.Net.WebSockets;
-using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -16,120 +7,154 @@ using static TigerBeetle.TBClient;
 
 namespace TigerBeetle
 {
-    internal sealed class PacketList
-    {
-        #region Fields
+	internal sealed class PacketList : IDisposable
+	{
+		#region Fields
 
-        private readonly Client client;
-        private unsafe TBPacketList packetList;
+		private IntPtr client;
+		private unsafe TBPacketList packetList;
+		private readonly int maxConcurrency;
+		private readonly SemaphoreSlim maxConcurrencySemaphore;
 
-        private readonly SemaphoreSlim maxConcurrencySemaphore;
+		#endregion Fields
 
-        #endregion Fields
+		#region Constructor
 
-        #region Constructor
+		public unsafe PacketList(IntPtr client, TBPacketList packetList, int maxConcurrency)
+		{
+			this.client = client;
+			this.packetList = packetList;
+			this.maxConcurrency = maxConcurrency;
+			this.maxConcurrencySemaphore = new(maxConcurrency, maxConcurrency);
+		}
 
-        public unsafe PacketList(Client client, TBPacketList packetList, int maxConcurrency)
-        {
-            this.client = client;
-            this.packetList = packetList;
+		#endregion Constructor
 
-            maxConcurrencySemaphore = new(maxConcurrency, maxConcurrency);
-        }
+		#region Properties
 
-        #endregion Constructor
+		public IntPtr Client => client;
 
-        #region Properties
+		#endregion Properties
 
-        public Client Client => client;
+		#region Methods
 
-        #endregion Properties
+		public Packet Rent()
+		{
+			while (!maxConcurrencySemaphore.Wait(millisecondsTimeout: 5))
+			{
+				// This client can be disposed
+				if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(Client));
+			}
 
-        #region Methods
+			unsafe
+			{
+				var packet = Pop();
+				return new Packet(packet);
+			}
+		}
 
-        public Packet Rent()
-        {
-            maxConcurrencySemaphore.Wait();
-            unsafe
-            {
-                var packet = RemoveFromHead();
-                return new Packet(packet);
-            }
-        }
+		public async ValueTask<Packet> RentAsync()
+		{
+			while (!await maxConcurrencySemaphore.WaitAsync(millisecondsTimeout: 5))
+			{
+				// This client can be disposed
+				if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(Client));
+			}
 
-        public async ValueTask<Packet> RentAsync()
-        {
-            await maxConcurrencySemaphore.WaitAsync();
-            unsafe
-            {
-                var packet = RemoveFromHead();
-                return new Packet(packet);
-            }
-        }
+			unsafe
+			{
+				var packet = Pop();
+				return new Packet(packet);
+			}
+		}
 
-        private unsafe TBPacket* RemoveFromHead()
-        {
-            lock (this)
-            {
-                var packet = packetList.head;
-                if (packet == null) throw new InvalidOperationException();
+		public void Return(Packet packet)
+		{
+			Push(packet);
+			maxConcurrencySemaphore.Release();
+		}
 
-                if (packet == packetList.tail)
-                {
-                    packetList.head = null;
-                    packetList.tail = null;
-                }
-                else
-                {
-                    packetList.head = packet->next;
-                }
+		public void Submit(Packet packet)
+		{
+			unsafe
+			{
+				var data = packet.Data;
+				var packetList = new TBPacketList
+				{
+					head = data,
+					tail = data,
+				};
 
-                packet->next = null;
-                return packet;
-            }
-        }
+				// It is unexpected for the client to be disposed here
+				// Since we wait for all acquired packets to be submited and returned before disposing
+				Debug.Assert(client != IntPtr.Zero);
 
-        public void Submit(Packet packet)
-        {
-            unsafe
-            {
-                var data = packet.Data;
-                var packetList = new TBPacketList
-                {
-                    head = data,
-                    tail = data,
-                };
+				tb_client_submit(client, &packetList);
+			}
+		}
 
-                var clientHandle = Client.Handle;
-                TBClient.tb_client_submit(clientHandle, &packetList);
-            }
-        }
+		private unsafe TBPacket* Pop()
+		{
+			lock (this)
+			{
+				var packet = packetList.head;
+				if (packet == null) throw new InvalidOperationException();
 
-        public void Return(Packet packet)
-        {
-            lock (this)
-            {
-                unsafe
-                {
-                    var tail = packet.Data;
-                    tail->next = null;
+				if (packet == packetList.tail)
+				{
+					packetList.head = null;
+					packetList.tail = null;
+				}
+				else
+				{
+					packetList.head = packet->next;
+				}
 
-                    if (packetList.tail == null)
-                    {
-                        packetList.head = tail;
-                        packetList.tail = tail;
-                    }
-                    else
-                    {
-                        packetList.tail->next = tail;
-                        packetList.tail = tail;
-                    }
-                }
-            }
+				packet->next = null;
+				return packet;
+			}
+		}
 
-            maxConcurrencySemaphore.Release(1);
-        }
+		private void Push(Packet packet)
+		{
+			lock (this)
+			{
+				unsafe
+				{
+					var tail = packet.Data;
+					tail->next = null;
 
-        #endregion Methods
-    }
+					if (packetList.tail == null)
+					{
+						packetList.head = tail;
+						packetList.tail = tail;
+					}
+					else
+					{
+						packetList.tail->next = tail;
+						packetList.tail = tail;
+					}
+				}
+			}
+		}
+
+		public void Dispose()
+		{
+			if (client != IntPtr.Zero)
+			{
+				for (int i = 0; i < maxConcurrency; i++)
+				{
+					maxConcurrencySemaphore.Wait();
+				}
+
+				lock (this)
+				{
+					tb_client_deinit(client);
+					client = IntPtr.Zero;
+				}
+			}
+		}
+
+		#endregion Methods
+	}
 }
