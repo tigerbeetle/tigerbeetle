@@ -39,6 +39,11 @@ class CreateAccountsResultBatch extends Batch {
     }
 
     @Override
+    public int getLenght() {
+        return lenght;
+    }
+
+    @Override
     public long getBufferLen() {
         return lenght * CreateAccountsResult.Struct.SIZE;
     }

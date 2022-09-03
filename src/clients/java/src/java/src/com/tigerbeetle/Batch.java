@@ -18,4 +18,6 @@ public abstract class Batch {
     }
 
     public abstract long getBufferLen();
+
+    public abstract int getLenght();
 }

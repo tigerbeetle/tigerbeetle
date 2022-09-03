@@ -19,13 +19,14 @@ abstract class Request<T> implements Future<T[]> {
 
     // Used ony by the JNI side
     @SuppressWarnings("unused")
-    private final ByteBuffer body;
+    private final ByteBuffer buffer;
 
     @SuppressWarnings("unused")
-    private final long bodyLen;
+    private final long bufferLen;
 
     private final Client client;
     private final byte operation;
+    private final int requestLen;
     private Object result = null;
     private byte status = UNINITIALIZED;
 
@@ -33,10 +34,11 @@ abstract class Request<T> implements Future<T[]> {
             throws IllegalArgumentException {
         this.client = client;
         this.operation = operation;
-        this.body = batch.buffer;
-        this.bodyLen = batch.getBufferLen();
+        this.requestLen = batch.getLenght();
+        this.buffer = batch.buffer;
+        this.bufferLen = batch.getBufferLen();
 
-        if (this.bodyLen == 0)
+        if (this.bufferLen == 0 || this.requestLen == 0)
             throw new IllegalArgumentException("Empty batch");
     }
 
@@ -47,13 +49,21 @@ abstract class Request<T> implements Future<T[]> {
         submit(client, packet);
     }
 
-    void endRequest(ByteBuffer buffer, long packet, byte status) {
+    void endRequest(byte receivedOperation, ByteBuffer buffer, long packet, byte status) {
 
-        // TODO: Add asserts to check the received opertation byte
-        // and check the request and result len have the same amount of elements.
+        // This method is called from the JNI side, on the tb_client thread
+        // We don't want to throw any exception here, any event must be stored and
+        // handled from the user's thread
 
         Object result = null;
-        if (status == RequestException.Status.OK) {
+        if (receivedOperation != operation) {
+
+            // This is a protocol error,
+            // it is expected to receive the same operation on the reply
+            status = RequestException.Status.INVALID_OPERATION;
+
+        } else if (status == RequestException.Status.OK) {
+
             try {
                 switch (operation) {
                     case Operations.CREATE_ACCOUNTS: {
@@ -80,6 +90,7 @@ abstract class Request<T> implements Future<T[]> {
                     }
                 }
             } catch (RequestException requestException) {
+
                 // The amount of data received can be incorrect and cause a INVALID_DATA_SIZE
                 status = requestException.getStatus();
                 result = null;
@@ -144,7 +155,13 @@ abstract class Request<T> implements Future<T[]> {
         if (status != RequestException.Status.OK)
             throw new RequestException(status);
 
-        return (T[]) result;
+        var result = (T[])this.result;
+
+        // Make sure the amount of results at least matches the amount of requests
+        if (result.length > requestLen)
+                throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+
+        return result;
     }
 
     @Override

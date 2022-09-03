@@ -72,6 +72,7 @@ public final class TransfersBatch extends Batch {
             lenght = index + 1;
     }
 
+    @Override
     public int getLenght() {
         return this.lenght;
     }

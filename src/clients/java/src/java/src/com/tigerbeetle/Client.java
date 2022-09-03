@@ -4,6 +4,7 @@ import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 public final class Client implements AutoCloseable {
     static {
@@ -54,15 +55,22 @@ public final class Client implements AutoCloseable {
     @Override
     public void close()
             throws Exception {
+
         if (clientHandle != 0) {
+
+            final var handle = clientHandle;
+            
+            // Sinalize that this client is going to close by setting the handles to 0
+            synchronized(this) {
+                clientHandle = 0;
+                packetsHead = 0;
+                packetsTail = 0;
+            }
 
             // Acquire all permits, forcing to wait for any processing thread to release
             this.maxConcurrencySemaphore.acquire(maxConcurrency);
 
-            clientDeinit();
-            clientHandle = 0;
-            packetsHead = 0;
-            packetsTail = 0;
+            clientDeinit(handle);
         }
     }
 
@@ -219,11 +227,14 @@ public final class Client implements AutoCloseable {
     }
 
     long adquirePacket()
-            throws InterruptedException {
+            throws InterruptedException, IllegalStateException {
 
         // Assure that only the max number of concurrent requests can adquire a packet
         // It forces other threads to wait until a packet became available
-        maxConcurrencySemaphore.acquire();
+        final int TIMEOUT = 5;
+        while (!maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS)) {
+            if (clientHandle == 0) throw new IllegalStateException();
+        }
 
         synchronized (this) {
             return popPacket();
@@ -233,7 +244,10 @@ public final class Client implements AutoCloseable {
 
     void returnPacket(long packet) {
         synchronized (this) {
-            pushPacket(packet);
+            // Check if the client is closing
+            if (clientHandle != 0) {
+                pushPacket(packet);
+            }
         }
 
         // Releasing the packet to be used by another thread
@@ -242,7 +256,7 @@ public final class Client implements AutoCloseable {
 
     private native int clientInit(int clusterID, String addresses, int maxConcurrency);
 
-    private native void clientDeinit();
+    private native void clientDeinit(long clientHandle);
 
     private native long popPacket();
 

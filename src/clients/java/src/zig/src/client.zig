@@ -3,6 +3,8 @@ const builtin = @import("builtin");
 const jui = @import("jui");
 const tb = @import("tb_client.zig");
 
+const assert = std.debug.assert;
+
 const ClientReflection = struct {
     var class: jui.jclass = undefined;
 
@@ -45,26 +47,26 @@ const ClientReflection = struct {
 const RequestReflection = struct {
     var class: jui.jclass = undefined;
 
-    var request_body_field_id: jui.jfieldID = undefined;
-    var request_body_len_field_id: jui.jfieldID = undefined;
+    var request_buffer_field_id: jui.jfieldID = undefined;
+    var request_buffer_len_field_id: jui.jfieldID = undefined;
     var request_operation_field_id: jui.jfieldID = undefined;
     var request_end_request_method_id: jui.jmethodID = undefined;
 
     pub fn load(env: *jui.JNIEnv) !void {
         class = try env.findClass("com/tigerbeetle/Request");
-        request_body_field_id = try env.getFieldId(class, "body", "Ljava/nio/ByteBuffer;");
-        request_body_len_field_id = try env.getFieldId(class, "bodyLen", "J");
+        request_buffer_field_id = try env.getFieldId(class, "buffer", "Ljava/nio/ByteBuffer;");
+        request_buffer_len_field_id = try env.getFieldId(class, "bufferLen", "J");
         request_operation_field_id = try env.getFieldId(class, "operation", "B");
-        request_end_request_method_id = try env.getMethodId(class, "endRequest", "(Ljava/nio/ByteBuffer;JB)V");
+        request_end_request_method_id = try env.getMethodId(class, "endRequest", "(BLjava/nio/ByteBuffer;JB)V");
     }
 
-    pub fn getBody(env: *jui.JNIEnv, this_object: jui.jobject) []u8 {
-        var body_obj = env.getField(.object, this_object, request_body_field_id);
-        var body_len = env.getField(.long, this_object, request_body_len_field_id);
-        var address = env.getDirectBufferAddress(body_obj);
+    pub fn getBuffer(env: *jui.JNIEnv, this_object: jui.jobject) []u8 {
+        var buffer_obj = env.getField(.object, this_object, request_buffer_field_id);
+        var buffer_len = env.getField(.long, this_object, request_buffer_len_field_id);
+        var address = env.getDirectBufferAddress(buffer_obj);
 
         // The buffer can be larger than the actual message content,
-        return address[0..@intCast(usize, body_len)];
+        return address[0..@intCast(usize, buffer_len)];
     }
 
     pub fn getOperation(env: *jui.JNIEnv, this_object: jui.jobject) u8 {
@@ -85,11 +87,14 @@ const RequestReflection = struct {
             this_object,
             request_end_request_method_id,
             &[_]jui.jvalue{
+                jui.jvalue.toJValue(@bitCast(jui.jbyte, packet.operation)),
                 jui.jvalue.toJValue(buffer),
                 jui.jvalue.toJValue(@bitCast(jui.jlong, @ptrToInt(packet))),
                 jui.jvalue.toJValue(@bitCast(jui.jbyte, packet.status)),
             },
-        ) catch return;
+        )
+        // This method isn't expected to throw any exception,
+        catch unreachable;
     }
 };
 
@@ -147,8 +152,7 @@ fn clientInit(
     return status;
 }
 
-fn clientDeinit(env: *jui.JNIEnv, client_obj: jui.jobject) void {
-    const client = ClientReflection.getTbClient(env, client_obj);
+fn clientDeinit(client: tb.Client) void {
     tb.tb_client_deinit(client);
 }
 
@@ -158,12 +162,12 @@ fn submit(env: *jui.JNIEnv, request_obj: jui.jobject, client_obj: jui.jobject, p
     var global_ref = env.newReference(.global, request_obj) catch unreachable;
     errdefer env.deleteReference(.global, global_ref);
 
-    var body = RequestReflection.getBody(env, request_obj);
+    var buffer = RequestReflection.getBuffer(env, request_obj);
 
     packet.operation = RequestReflection.getOperation(env, request_obj);
     packet.user_data = @ptrToInt(global_ref);
-    packet.data = body.ptr;
-    packet.data_size = @intCast(u32, body.len);
+    packet.data = buffer.ptr;
+    packet.data_size = @intCast(u32, buffer.len);
     packet.next = null;
     packet.status = .ok;
 
@@ -222,7 +226,7 @@ const exports = struct {
     }
 
     pub fn onUnloadExport(vm: *jui.JavaVM) callconv(.C) void {
-        return jui.wrapErrors(onUnload, .{vm});
+        onUnload(vm);
     }
 
     pub fn clientInitExport(
@@ -246,48 +250,38 @@ const exports = struct {
         return @bitCast(jui.jint, status);
     }
 
-    pub fn clientDeinitExport(env: *jui.JNIEnv, this: jui.jobject) callconv(.C) void {
-        jui.wrapErrors(
-            clientDeinit,
-            .{
-                env,
-                this,
-            },
-        );
+    pub fn clientDeinitExport(env: *jui.JNIEnv, this: jui.jobject, client_handle: jui.jlong) callconv(.C) void {
+        _ = env;
+        _ = this;
+        assert(client_handle != 0);
+        clientDeinit(@intToPtr(tb.Client, @bitCast(usize, client_handle)));
     }
 
     pub fn submitExport(env: *jui.JNIEnv, this: jui.jobject, client_obj: jui.jobject, packet: jui.jlong) callconv(.C) void {
-        jui.wrapErrors(
-            submit,
-            .{
-                env,
-                this,
-                client_obj,
-                @intToPtr(*tb.Packet, @bitCast(usize, packet)),
-            },
+        assert(packet != 0);
+        submit(
+            env,
+            this,
+            client_obj,
+            @intToPtr(*tb.Packet, @bitCast(usize, packet)),
         );
     }
 
     pub fn popPacketExport(env: *jui.JNIEnv, this: jui.jobject) callconv(.C) jui.jlong {
-        var packet = jui.wrapErrors(
-            popPacket,
-            .{
-                env,
-                this,
-            },
+        var packet = popPacket(
+            env,
+            this,
         );
 
         return @bitCast(jui.jlong, @ptrToInt(packet));
     }
 
     pub fn pushPacketExport(env: *jui.JNIEnv, this: jui.jobject, packet: jui.jlong) callconv(.C) void {
-        jui.wrapErrors(
-            pushPacket,
-            .{
-                env,
-                this,
-                @intToPtr(*tb.Packet, @bitCast(usize, packet)),
-            },
+        assert(packet != 0);
+        pushPacket(
+            env,
+            this,
+            @intToPtr(*tb.Packet, @bitCast(usize, packet)),
         );
     }
 };

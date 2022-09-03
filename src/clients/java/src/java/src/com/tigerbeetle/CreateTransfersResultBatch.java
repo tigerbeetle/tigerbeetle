@@ -39,6 +39,11 @@ class CreateTransfersResultBatch extends Batch {
     }
 
     @Override
+    public int getLenght() {
+        return lenght;
+    }    
+
+    @Override
     public long getBufferLen() {
         return lenght * CreateTransfersResult.Struct.SIZE;
     }

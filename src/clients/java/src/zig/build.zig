@@ -24,8 +24,7 @@ pub fn build(b: *std.build.Builder) void {
         // So we have to insert them manually here, or we are going to receive a "lld-link: error: undefined symbol"
         lib.linkSystemLibrary("ws2_32");
         lib.linkSystemLibrary("advapi32");
-
-    } else{
+    } else {
         tb_client.linkLibC();
         lib.linkLibC();
     }

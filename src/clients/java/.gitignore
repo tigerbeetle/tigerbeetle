@@ -3,3 +3,4 @@ zig-out/
 lib/*.jar
 src/java/build/com
 *tigerbeetle.benchmark
+*.log
