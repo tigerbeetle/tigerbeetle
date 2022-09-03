@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import java.util.StringJoiner;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 
@@ -13,6 +14,7 @@ public final class Client implements AutoCloseable {
     private static final int DEFAULT_MAX_CONCURRENCY = 32;
 
     private final int clusterID;
+    private final int maxConcurrency;
     private final Semaphore maxConcurrencySemaphore;
     private long clientHandle;
     private long packetsHead;
@@ -46,12 +48,17 @@ public final class Client implements AutoCloseable {
         if (status != 0)
             throw new InitializationException(status);
 
+        this.maxConcurrency = maxConcurrency;
         this.maxConcurrencySemaphore = new Semaphore(maxConcurrency);
     }
 
     @Override
     public void close() throws Exception {
         if (clientHandle != 0) {
+
+            // Acquire all permits, forcing to wait for any processing thread to release
+            this.maxConcurrencySemaphore.acquire(maxConcurrency);
+
             clientDeinit();
             clientHandle = 0;
             packetsHead = 0;
