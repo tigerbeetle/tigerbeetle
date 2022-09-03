@@ -51,7 +51,7 @@ public final class Transfer {
         code = ptr.getShort();
         flags = ptr.getShort();
         amount = ptr.getLong();
-        timeout = ptr.getLong();
+        timestamp = ptr.getLong();
     }
 
     public UUID getId() {
@@ -177,7 +177,7 @@ public final class Transfer {
                 .putShort(code)
                 .putShort(flags)
                 .putLong(amount)
-                .putLong(timeout);
+                .putLong(timestamp);
     }
 
 }
