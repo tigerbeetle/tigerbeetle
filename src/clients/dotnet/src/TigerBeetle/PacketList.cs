@@ -40,11 +40,11 @@ namespace TigerBeetle
 
 		public Packet Rent()
 		{
-			while (!maxConcurrencySemaphore.Wait(millisecondsTimeout: 5))
+			do
 			{
 				// This client can be disposed
 				if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(Client));
-			}
+			} while (!maxConcurrencySemaphore.Wait(millisecondsTimeout: 5));
 
 			unsafe
 			{
@@ -55,11 +55,11 @@ namespace TigerBeetle
 
 		public async ValueTask<Packet> RentAsync()
 		{
-			while (!await maxConcurrencySemaphore.WaitAsync(millisecondsTimeout: 5))
+			do 
 			{
 				// This client can be disposed
 				if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(Client));
-			}
+			} while (!await maxConcurrencySemaphore.WaitAsync(millisecondsTimeout: 5));
 
 			unsafe
 			{
