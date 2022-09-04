@@ -52,28 +52,6 @@ public final class Client implements AutoCloseable {
         this.maxConcurrencySemaphore = new Semaphore(maxConcurrency);
     }
 
-    @Override
-    public void close()
-            throws Exception {
-
-        if (clientHandle != 0) {
-
-            final var handle = clientHandle;
-            
-            // Sinalize that this client is going to close by setting the handles to 0
-            synchronized(this) {
-                clientHandle = 0;
-                packetsHead = 0;
-                packetsTail = 0;
-            }
-
-            // Acquire all permits, forcing to wait for any processing thread to release
-            this.maxConcurrencySemaphore.acquire(maxConcurrency);
-
-            clientDeinit(handle);
-        }
-    }
-
     public CreateAccountResult createAccount(Account account)
             throws IllegalArgumentException, InterruptedException, RequestException {
         var batch = new AccountsBatch(1);
@@ -231,15 +209,15 @@ public final class Client implements AutoCloseable {
 
         // Assure that only the max number of concurrent requests can adquire a packet
         // It forces other threads to wait until a packet became available
+        // We also assure that the clientHandle will be zeroed only after all permits have been released
         final int TIMEOUT = 5;
-        while (!maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS)) {
+        do {
             if (clientHandle == 0) throw new IllegalStateException();
-        }
+        } while (!maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS));
 
         synchronized (this) {
             return popPacket();
         }
-
     }
 
     void returnPacket(long packet) {
@@ -254,9 +232,29 @@ public final class Client implements AutoCloseable {
         maxConcurrencySemaphore.release();
     }
 
+    @Override
+    public void close()
+            throws Exception {
+
+        if (clientHandle != 0) {
+
+            // Acquire all permits, forcing to wait for any processing thread to release
+            this.maxConcurrencySemaphore.acquire(maxConcurrency);
+
+            // Deinit and sinalize that this client is closed by setting the handles to 0
+            synchronized(this) {
+                clientDeinit();
+
+                clientHandle = 0;
+                packetsHead = 0;
+                packetsTail = 0;
+            }
+        }
+    }    
+
     private native int clientInit(int clusterID, String addresses, int maxConcurrency);
 
-    private native void clientDeinit(long clientHandle);
+    private native void clientDeinit();
 
     private native long popPacket();
 

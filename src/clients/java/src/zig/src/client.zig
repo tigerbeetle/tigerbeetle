@@ -152,7 +152,8 @@ fn clientInit(
     return status;
 }
 
-fn clientDeinit(client: tb.Client) void {
+fn clientDeinit(env: *jui.JNIEnv, client_obj: jui.jobject) void {
+    var client = ClientReflection.getTbClient(env, client_obj);
     tb.tb_client_deinit(client);
 }
 
@@ -250,11 +251,11 @@ const exports = struct {
         return @bitCast(jui.jint, status);
     }
 
-    pub fn clientDeinitExport(env: *jui.JNIEnv, this: jui.jobject, client_handle: jui.jlong) callconv(.C) void {
-        _ = env;
-        _ = this;
-        assert(client_handle != 0);
-        clientDeinit(@intToPtr(tb.Client, @bitCast(usize, client_handle)));
+    pub fn clientDeinitExport(env: *jui.JNIEnv, this: jui.jobject) callconv(.C) void {
+        clientDeinit(
+            env,
+            this,
+        );
     }
 
     pub fn submitExport(env: *jui.JNIEnv, this: jui.jobject, client_obj: jui.jobject, packet: jui.jlong) callconv(.C) void {
