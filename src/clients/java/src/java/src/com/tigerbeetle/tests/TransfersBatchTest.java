@@ -7,9 +7,6 @@ import java.util.UUID;
 
 import org.junit.Test;
 
-import com.tigerbeetle.Account;
-import com.tigerbeetle.AccountFlags;
-import com.tigerbeetle.AccountsBatch;
 import com.tigerbeetle.Transfer;
 import com.tigerbeetle.TransferFlags;
 import com.tigerbeetle.TransfersBatch;
@@ -26,7 +23,7 @@ public class TransfersBatchTest {
         transfer1.setDebitAccountId(UUID.randomUUID());
         transfer1.setUserData(UUID.randomUUID());
         transfer1.setAmount(1000);
-        transfer1.setCode((short)10);
+        transfer1.setCode((short) 10);
         transfer1.setLedger(720);
 
         transfer2 = new Transfer();
@@ -35,7 +32,7 @@ public class TransfersBatchTest {
         transfer2.setDebitAccountId(UUID.randomUUID());
         transfer2.setUserData(UUID.randomUUID());
         transfer2.setAmount(200);
-        transfer2.setCode((short)20);
+        transfer2.setCode((short) 20);
         transfer2.setLedger(100);
         transfer2.setFlags(new TransferFlags().setPending(true).setLinked(true).getValue());
         transfer2.setPendingId(transfer1.getId());
@@ -133,7 +130,7 @@ public class TransfersBatchTest {
     private static void assertTransfers(Transfer transfer1, Transfer transfer2) {
         assertEquals(transfer1.getId(), transfer2.getId());
         assertEquals(transfer1.getCreditAccountId(), transfer2.getCreditAccountId());
-        assertEquals(transfer1.getDebitAccountId(), transfer2.getDebitAccountId());        
+        assertEquals(transfer1.getDebitAccountId(), transfer2.getDebitAccountId());
         assertEquals(transfer1.getUserData(), transfer2.getUserData());
         assertEquals(transfer1.getLedger(), transfer2.getLedger());
         assertEquals(transfer1.getCode(), transfer2.getCode());

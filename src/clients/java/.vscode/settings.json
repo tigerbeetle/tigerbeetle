@@ -2,5 +2,9 @@
     "java.project.sourcePaths": [
         "src/java/src"
     ],
-    "java.debug.settings.vmArgs": "-Djava.library.path=src/zig/zig-out/lib"
+    "java.debug.settings.vmArgs": "-Djava.library.path=src/zig/zig-out/lib",
+    "java.test.config": {
+        "workingDirectory": "${workspaceFolder}",
+        "vmArgs": [ "-Djava.library.path=src/zig/zig-out/lib" ]
+    }
 }

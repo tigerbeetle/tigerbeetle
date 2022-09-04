@@ -1,5 +1,6 @@
 package com.tigerbeetle;
 
+import java.lang.annotation.Native;
 import java.nio.ByteBuffer;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -18,10 +19,10 @@ abstract class Request<T> implements Future<T[]> {
     private final static byte UNINITIALIZED = -1;
 
     // Used ony by the JNI side
-    @SuppressWarnings("unused")
+    @Native
     private final ByteBuffer buffer;
 
-    @SuppressWarnings("unused")
+    @Native
     private final long bufferLen;
 
     private final Client client;
