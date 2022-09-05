@@ -6,18 +6,23 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 import javax.management.OperationsException;
 
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import com.tigerbeetle.Client;
 import com.tigerbeetle.CreateTransferResult;
 import com.tigerbeetle.InitializationException;
+import com.tigerbeetle.RequestException;
 import com.tigerbeetle.Transfer;
 import com.tigerbeetle.TransferFlags;
 import com.tigerbeetle.Account;
@@ -54,11 +59,11 @@ public class IntegrationTest {
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-            } catch (Exception any) {
+            } catch (Throwable any) {
                 throw any;
             }
 
-        } catch (InitializationException | Exception any) {
+        } catch (Throwable any) {
             throw any;
         }
     }
@@ -93,11 +98,11 @@ public class IntegrationTest {
                 Assert.assertEquals(lookupAccounts[1].getDebitsPosted(), transfer.getAmount());
                 Assert.assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
 
-            } catch (Exception any) {
+            } catch (Throwable any) {
                 throw any;
             }
 
-        } catch (InitializationException | Exception any) {
+        } catch (Throwable any) {
             throw any;
         }
     }
@@ -165,11 +170,11 @@ public class IntegrationTest {
                 Assert.assertEquals(lookupAccounts[1].getDebitsPending(), (long) 0);
                 Assert.assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
 
-            } catch (Exception any) {
+            } catch (Throwable any) {
                 throw any;
             }
 
-        } catch (InitializationException | Exception any) {
+        } catch (Throwable any) {
             throw any;
         }
     }
@@ -237,11 +242,11 @@ public class IntegrationTest {
                 Assert.assertEquals(lookupAccounts[1].getDebitsPending(), (long) 0);
                 Assert.assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
 
-            } catch (Exception any) {
+            } catch (Throwable any) {
                 throw any;
             }
 
-        } catch (InitializationException | Exception any) {
+        } catch (Throwable any) {
             throw any;
         }
     }
@@ -290,11 +295,121 @@ public class IntegrationTest {
                 Assert.assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
                 Assert.assertEquals(lookupAccounts[1].getDebitsPending(), (long) 0);
 
-            } catch (Exception any) {
+            } catch (Throwable any) {
                 throw any;
             }
 
-        } catch (InitializationException | Exception any) {
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+    @Test
+    @Ignore
+    public void testConcurrentTasks() throws Throwable {
+
+        class TransferTask extends Thread {
+
+            public final Client client;
+            public CreateTransferResult result;
+            public boolean isFaulted;
+
+            public TransferTask(Client client) {
+                this.client = client;
+            }
+
+            @Override
+            public void run() {
+                var transfer = new Transfer();
+                transfer.setId(UUID.randomUUID());
+                transfer.setCreditAccountId(account1.getId());
+                transfer.setDebitAccountId(account2.getId());
+                transfer.setLedger(720);
+                transfer.setCode((short) 1);
+                transfer.setAmount(100);
+
+                try {
+                    result = client.createTransfer(transfer);
+                } catch (Throwable e) {
+                    isFaulted = true;
+                }
+            }
+        }
+        
+        try (var server = new Server()) {
+
+            var random = new Random();
+            final int tasks_qty = 12;
+            final int max_concurrency = random.nextInt(tasks_qty / 2) + 1;
+
+            try (var client = new Client(0, new String[] { Server.TB_PORT }, max_concurrency)) {
+
+                var errors = client.createAccounts(new Account[] { account1, account2 });
+                Assert.assertTrue(errors.length == 0);
+
+                var list = new TransferTask[tasks_qty];
+                for (int i = 0; i < tasks_qty; i++) {
+                    list[i] = new TransferTask(client);
+                    list[i].start();
+                }
+
+                // Wait for all threads
+                for (int i = 0; i < tasks_qty; i++) {
+                    list[i].join();
+                    Assert.assertFalse(list[i].isFaulted);
+                    Assert.assertEquals(list[i].result, CreateTransferResult.Ok);
+                }
+
+                var lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                assertAccounts(account1, lookupAccounts[0]);
+                assertAccounts(account2, lookupAccounts[1]);
+
+                Assert.assertEquals(lookupAccounts[0].getCreditsPosted(), (long) (100 * tasks_qty));
+                Assert.assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
+
+                Assert.assertEquals(lookupAccounts[1].getDebitsPosted(), (long) (100 * tasks_qty));
+                Assert.assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+    // Skip this test for now
+    @Ignore
+    @Test
+    public void testTimeoutClient() throws Throwable {
+
+        try (var server = new Server()) {
+            try (var client = new Client(0, new String[] { Server.TB_PORT })) {
+
+                var errors = client.createAccounts(new Account[] { account1, account2 });
+                Assert.assertTrue(errors.length == 0);
+
+                // Closes the server
+                server.close();
+
+                try {
+                    // Client will submit the request, but it is not going to complete
+                    @SuppressWarnings("unused")
+                    var accounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+
+                    // It is not expceted to lookupAccounts to finish
+                    Assert.assertTrue(false);
+
+                } catch (InterruptedException timeout) {
+                    Assert.assertTrue(true);
+                }
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
             throw any;
         }
     }
