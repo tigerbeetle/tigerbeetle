@@ -982,7 +982,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                             } else {
                                 // A newer replica connection may even leapfrog this connection and
                                 // then be terminated and set to null before we can get here:
-                                assert(bus.replicas[connection.peer.replica] != null or
+                                assert(bus.replicas[connection.peer.replica] != connection or
                                     bus.replicas[connection.peer.replica] == null);
                             }
                         },
