@@ -2,7 +2,7 @@
 
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
-**Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous)**
+**Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/tigerbeetledb/viewstamped-replication-made-famous)**
 
 Watch an introduction to TigerBeetle on [Zig SHOWTIME](https://www.youtube.com/watch?v=BH2jvJ74npM) for our design decisions regarding performance, safety, and financial accounting primitives:
 
@@ -12,7 +12,7 @@ Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the problem of 
 
 ## TigerBeetle (under active development)
 
-TigerBeetle is not yet production-ready. The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/coilhq/tigerbeetle/projects?type=classic) provides a glimpse of where we want to go.
+TigerBeetle is not yet production-ready. The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/tigerbeetledb/tigerbeetle/projects?type=classic) provides a glimpse of where we want to go.
 
 ## QuickStart
 
@@ -21,13 +21,13 @@ This section assumes you have Docker.
 First provision TigerBeetle's data directory.
 
 ```
-$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
 ```
 
 Then run the server:
 
 ```
-$ docker run -p 3000:3000 -v $(pwd):/data ghcr.io/coilhq/tigerbeetle start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+$ docker run -p 3000:3000 -v $(pwd):/data ghcr.io/tigerbeetledb/tigerbeetle start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 0.0.0.0:3000
 
@@ -67,23 +67,12 @@ For further reading:
 
 ## Clients
 
-* [tigerbeetle-node](https://github.com/coilhq/tigerbeetle-node) is a TigerBeetle Node.js client written in TypeScript (and Zig with [Node's N-API](https://nodejs.org/api/n-api.html) for ABI stability).
-
-* [client.zig](./src/vr/client.zig) is a TigerBeetle Zig client.
-
-* [demo.zig](./src/demo.zig) is a lightweight TigerBeetle client for demonstration purposes only, which we used to create [six demos you can work your way through and modify](./docs/DEEP_DIVE.md) to explore TigerBeetle's commands.
+* For Node.js: [tigerbeetle-node](https://github.com/tigerbeetledb/tigerbeetle-node)
+* For Golang: [tigerbeetle-go](https://github.com/tigerbeetledb/tigerbeetle-go)
 
 ## Community
 
 [Join the TigerBeetle community in Discord.](https://discord.com/invite/uWCGp46uG5)
-
-## Benchmark
-
-With TigerBeetle installed, you are ready to benchmark!
-
-```bash
-scripts/benchmark.sh
-```
 
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
