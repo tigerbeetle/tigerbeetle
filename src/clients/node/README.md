@@ -115,7 +115,7 @@ This creates a journal entry between two accounts.
 ```js
 const transfer = {
     id: 1n, // u128
-    pending: 0n, // u128
+    pending_id: 0n, // u128
     // Double-entry accounting:
     debit_account_id: 1n,  // u128
     credit_account_id: 2n, // u128
