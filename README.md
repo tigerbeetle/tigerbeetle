@@ -34,13 +34,20 @@ info(main): 0: cluster=0: listening on 0.0.0.0:3000
 ... and so on ...
 ```
 
-### Try out the Node client in the Node CLI
+### Use Node as a CLI
 
-If you want, you can try entering in some accounts and transfers with
-the Node client and the Node CLI.
+Try entering in some accounts and transfers with the Node client and
+the Node CLI.
+
+First install the client using npm or yarn.
 
 ```javascript
 $ yarn add tigerbeetle-node # or npm install
+```
+
+Then create a client.
+
+```javascript
 $ node
 Welcome to Node.js v16.14.0.
 Type ".help" for more information.
@@ -49,7 +56,7 @@ Type ".help" for more information.
 info(message_bus): connected to replica 0
 ```
 
-Now let's create two accounts. (Don't worry about the details, you can
+Now create two accounts. (Don't worry about the details, you can
 read about them later.)
 
 ```javascript
@@ -86,7 +93,7 @@ read about them later.)
 > 
 ```
 
-Now let's create a transfer of `10` of some amount between the two accounts.
+Now create a transfer of `10` (of some amount/currency) between the two accounts.
 
 ```javascript
 > errors = await client.createTransfers([
@@ -98,8 +105,8 @@ Now let's create a transfer of `10` of some amount between the two accounts.
     user_data: 0n,
     reserved: 0n,
     timeout: 0n,
-    ledger: 718,
-    code: 1,
+    ledger: 1,
+    code: 718,
     flags: 0,
     amount: 10n,
     timestamp: 0n,
@@ -109,7 +116,7 @@ Now let's create a transfer of `10` of some amount between the two accounts.
 
 Now, the amount of `10` has been credited to account `2` and debited
 from account `1`. Let's query TigerBeetle for these two accounts to
-see!
+verify!
 
 ```
 > let accounts = await client.lookupAccounts([1n, 2n]);
@@ -143,6 +150,10 @@ see!
   }
 ]
 ```
+
+And indeed you can see that account `1` has `debits_posted` as `10`
+and account `2` has `credits_posted` as `10`. The `10` amount is fully
+accounted for!
 
 For further reading:
 
