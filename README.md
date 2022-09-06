@@ -76,6 +76,10 @@ For further reading:
 
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
+## Contributing
+
+Read [docs/HACKING.md] for basic local setup, testing and benchmarking instructions.
+
 ## Performance Demos
 
 Along the way, we also put together a series of performance demos and sketches to get you comfortable building TigerBeetle, show how low-level code can sometimes be easier than high-level code, help you understand some of the key components within TigerBeetle, and enable back-of-the-envelope calculations to motivate design decisions.
