@@ -503,6 +503,7 @@ pub fn TableType(
                 assert(values_max.len == data.value_count_max);
 
                 const values = values_max[0..builder.value];
+                const key_max = key_from_value(&values[values.len - 1]);
 
                 if (config.verify) {
                     var a = &values[0];
@@ -533,6 +534,7 @@ pub fn TableType(
                 const block_padding = block[data.padding_offset..][0..data.padding_size];
                 mem.set(u8, values_padding, 0);
                 mem.set(u8, block_padding, 0);
+                assert(compare_keys(key_from_value(&values[values.len - 1]), key_max) == .eq);
 
                 const header_bytes = block[0..@sizeOf(vsr.Header)];
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
@@ -541,14 +543,12 @@ pub fn TableType(
                     .cluster = options.cluster,
                     .op = options.address,
                     .request = @intCast(u32, values.len),
-                    .size = block_size - @intCast(u32, values_padding.len - block_padding.len),
+                    .size = block_size - @intCast(u32, values_padding.len + block_padding.len),
                     .command = .block,
                 };
 
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
-
-                const key_max = key_from_value(&values[values.len - 1]);
 
                 const current = builder.data_block_count;
                 index_data_keys(builder.index_block)[current] = key_max;
@@ -559,7 +559,7 @@ pub fn TableType(
                 builder.key_max = key_max;
 
                 if (current == 0 and values.len == 1) {
-                    assert(compare_keys(builder.key_min, builder.key_max) != .gt);
+                    assert(compare_keys(builder.key_min, builder.key_max) == .eq);
                 } else {
                     assert(compare_keys(builder.key_min, builder.key_max) == .lt);
                 }
@@ -764,14 +764,6 @@ pub fn TableType(
             return slice[0..index_filter_blocks_used(index_block)];
         }
 
-        inline fn index_snapshot_min(index_block: BlockPtrConst) u32 {
-            const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-            const value = @intCast(u32, header.offset);
-            assert(value > 0);
-            assert(value < snapshot_latest);
-            return value;
-        }
-
         inline fn index_blocks_used(index_block: BlockPtrConst) u32 {
             return index_block_count + index_filter_blocks_used(index_block) +
                 index_data_blocks_used(index_block);
@@ -794,7 +786,7 @@ pub fn TableType(
         }
 
         /// Returns the zero-based index of the data block that may contain the key.
-        /// May be called on an index block only when the key is already in range of the table.
+        /// May be called on an index block only when the key is in range of the table.
         inline fn index_data_block_for_key(index_block: BlockPtrConst, key: Key) u32 {
             // Because we store key_max in the index block we can use the raw binary search
             // here and avoid the extra comparison. If the search finds an exact match, we
@@ -819,7 +811,7 @@ pub fn TableType(
         };
 
         /// Returns all data stored in the index block relating to a given key.
-        /// May be called on an index block only when the key is already in range of the table.
+        /// May be called on an index block only when the key is in range of the table.
         pub inline fn index_blocks_for_key(index_block: BlockPtrConst, key: Key) IndexBlocks {
             const d = Table.index_data_block_for_key(index_block, key);
             const f = @divFloor(d, filter.data_block_count_max);
