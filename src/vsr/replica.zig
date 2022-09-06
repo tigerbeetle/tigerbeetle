@@ -4570,8 +4570,11 @@ pub fn ReplicaType(
         }
 
         fn reset_quorum_prepare_ok(self: *Self) void {
-            // "prepare_ok"s from prior views are not valid, even if the pipeline entry is reused
-            // after a cycle of view changes.
+            // "prepare_ok"s from previous views are not valid, even if the pipeline entry is reused
+            // after a cycle of view changes. In other words, when a view change cycles around, so
+            // that the original primary becomes a primary of a new view, pipeline entries may be
+            // reused. However, the pipeline's prepare_ok quorums must not be reused, since the
+            // replicas that sent them may have swapped them out during a previous view change.
             var iterator = self.pipeline.iterator_mutable();
             while (iterator.next_ptr()) |prepare| {
                 prepare.ok_quorum_received = false;
@@ -5283,6 +5286,8 @@ pub fn ReplicaType(
         }
 
         fn verify_pipeline(self: *Self) void {
+            assert(self.status == .view_change);
+
             var op = self.commit_max + 1;
             var parent = self.journal.header_with_op(self.commit_max).?.checksum;
 
