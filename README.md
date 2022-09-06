@@ -8,7 +8,7 @@ Watch an introduction to TigerBeetle on [Zig SHOWTIME](https://www.youtube.com/w
 
 [![A million financial transactions per second in Zig](https://img.youtube.com/vi/BH2jvJ74npM/0.jpg)](https://www.youtube.com/watch?v=BH2jvJ74npM)
 
-Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the problem of balance tracking at scale and the solution of a purpose-built financial accounting database.
+Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the problem of balance tracking at scale, and the solution of a purpose-built financial accounting database.
 
 ## TigerBeetle (under active development)
 
