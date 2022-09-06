@@ -12,7 +12,7 @@ Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the problem of 
 
 ## TigerBeetle (under active development)
 
-The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/coilhq/tigerbeetle/projects?type=classic) provides a glimpse of where we want to go.
+TigerBeetle is not yet production-ready. The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/coilhq/tigerbeetle/projects?type=classic) provides a glimpse of where we want to go.
 
 ## QuickStart
 
