@@ -20,6 +20,8 @@ With TigerBeetle installed, you are ready to benchmark!
 scripts/benchmark.sh
 ```
 
+*If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
+
 ## Running the server
 
 Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:

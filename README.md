@@ -153,8 +153,6 @@ For further reading:
 
 [Join the TigerBeetle community in Discord.](https://discord.com/invite/uWCGp46uG5)
 
-*If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
-
 ## Benchmarks
 
 First grab the sources and run the setup script:
@@ -170,6 +168,8 @@ With TigerBeetle installed, you are ready to benchmark!
 ```bash
 $ scripts/benchmark.sh
 ```
+
+*If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
 ## Contributing
 
