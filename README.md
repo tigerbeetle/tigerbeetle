@@ -90,7 +90,6 @@ read about them later.)
 ]);
 > errors
 []
-> 
 ```
 
 Now create a transfer of `10` (of some amount/currency) between the two accounts.
