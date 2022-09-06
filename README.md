@@ -119,31 +119,17 @@ verify!
 
 ```
 > let accounts = await client.lookupAccounts([1n, 2n]);
-> console.log(accounts);
+> console.log(accounts.map(a => ({ id: a.id, debits_posted: a.debits_posted, credits_posted: a.credits_posted, timestamp: a.timestamp })));
 [
   {
     id: 1n,
-    user_data: 0n,
-    reserved: <Buffer 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00>,
-    ledger: 1,
-    code: 718,
-    flags: 0,
-    debits_pending: 0n,
     debits_posted: 10n,
-    credits_pending: 0n,
     credits_posted: 0n,
     timestamp: 1662489240014463675n
   },
   {
     id: 2n,
-    user_data: 0n,
-    reserved: <Buffer 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00>,
-    ledger: 1,
-    code: 718,
-    flags: 0,
-    debits_pending: 0n,
     debits_posted: 0n,
-    credits_pending: 0n,
     credits_posted: 10n,
     timestamp: 1662489240014463676n
   }
