@@ -159,9 +159,25 @@ For further reading:
 
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
+## Benchmarks
+
+First grab the sources and run the setup script:
+
+```bash
+$ git clone https://github.com/coilhq/tigerbeetle.git
+$ cd tigerbeetle
+$ scripts/install.sh
+```
+
+With TigerBeetle installed, you are ready to benchmark!
+
+```bash
+$ scripts/benchmark.sh
+```
+
 ## Contributing
 
-Read [docs/HACKING.md] for basic local setup, testing and benchmarking instructions.
+Read [docs/HACKING.md](docs/HACKING.md).
 
 ## Performance Demos
 
