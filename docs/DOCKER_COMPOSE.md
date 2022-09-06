@@ -1,0 +1,66 @@
+# Running a 3-node TigerBeetle cluster locally with Docker Compose
+
+First, provision the data file for each node:
+
+```
+$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle format --cluster=0 --replica=1 /data/0_1.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle format --cluster=0 --replica=2 /data/0_2.tigerbeetle
+```
+
+Then create a docker-compose.yml file:
+
+```docker-compose
+version: "3.7"
+
+##
+# Note: this example might only work with linux + using `network_mode:host` because of 2 reasons:
+# 
+# 1. When specifying an internal docker network, other containers are only available using dns based routing:
+#    e.g. from tigerbeetle_0, the other replicas are available at `tigerbeetle_1:3002` and
+#    `tigerbeetle_2:3003` respectively.
+#
+# 2. Tigerbeetle performs some validation of the ip address provided in the `--addresses` parameter
+#    and won't let us specify a custom domain name.
+#
+# The workaround for now is to use `network_mode:host` in the containers instead of specifying our
+# own internal docker network
+##
+
+services:
+  tigerbeetle_0:
+    container_name: tigerbeetle_0
+    image: ghcr.io/coilhq/tigerbeetle
+    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
+    ports:
+      - "3001"
+    network_mode: host
+    volumes:
+      - ./data:/data
+
+  tigerbeetle_1:
+    container_name: tigerbeetle_1
+    image: ghcr.io/coilhq/tigerbeetle
+    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 0_1.tigerbeetle"
+    ports:
+      - "3002"
+    network_mode: host
+    volumes:
+      - ./data:/data
+
+  tigerbeetle_2:
+    container_name: tigerbeetle_2
+    image: ghcr.io/coilhq/tigerbeetle
+    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 0_2.tigerbeetle"
+    ports:
+      - "3003"
+    network_mode: host
+    volumes:
+      - ./data:./data
+```
+
+And run it:
+
+```
+$ docker-compose up
+```
