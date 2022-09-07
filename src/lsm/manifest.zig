@@ -24,6 +24,10 @@ pub fn TableInfoType(comptime Table: type) type {
     return extern struct {
         const TableInfo = @This();
 
+        pub fn BufferType(comptime sort_direction: ?Direction) type {
+            return TableInfoBufferType(Table, sort_direction);
+        }
+
         checksum: u128,
         address: u64,
         flags: u64 = 0,
@@ -144,7 +148,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         const Manifest = @This();
 
         pub const TableInfo = TableInfoType(Table);
-        const TableInfoBuffer = TableInfoBufferType(Table, null);
+        const TableInfoBuffer = TableInfo.BufferType(null);
 
         const Grid = GridType(Storage);
         const Callback = fn (*Manifest) void;
