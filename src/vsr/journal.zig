@@ -727,6 +727,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (self.header_with_op_and_checksum(op, checksum)) |exact| {
                 if (exact.size == @sizeOf(Header)) {
                     message.header.* = exact.*;
+                    std.mem.set(u8, message.buffer[@sizeOf(Header)..config.sector_size], 0);
                     callback(replica, message, destination_replica);
                     return;
                 }
