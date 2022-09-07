@@ -123,7 +123,13 @@ pub fn ReplicaType(
         /// The current status, either normal, view_change, or recovering:
         status: Status = .recovering,
 
-        /// The op number assigned to the most recently prepared operation:
+        /// The op number assigned to the most recently prepared operation.
+        ///
+        /// Invariants (not applicable during status=recovering):
+        /// * `replica.op` exists in the Journal.
+        /// * `replica.op ≥ replica.commit_min`.
+        /// * `replica.op ≤ replica.op_checkpoint_trigger`: don't wrap the WAL until we are sure
+        ///   that the overwritten entry will not be required for recovery.
         // TODO: When recovery protocol is removed, load the `op` from the WAL, and verify that it is ≥op_checkpoint.
         // Also verify that a corresponding header exists in the WAL.
         op: u64,
@@ -134,14 +140,29 @@ pub fn ReplicaType(
 
         /// The op number of the latest committed and executed operation (according to the replica):
         /// The replica may have to wait for repairs to complete before commit_min reaches commit_max.
+        ///
+        /// Invariants (not applicable during status=recovering):
+        /// * `replica.commit_min` exists in the Journal.
+        /// * `replica.commit_min ≤ replica.op`
+        /// * `replica.commit_min ≥ replica.op_checkpoint`.
+        /// * never decreases
         commit_min: u64,
 
         /// The op number of the latest committed operation (according to the cluster):
         /// This is the commit number in terms of the VRR paper.
+        ///
+        /// Invariants:
+        /// * `replica.commit_max ≥ replica.commit_min`.
+        /// * never decreases
         commit_max: u64,
 
-        /// Whether we are reading a prepare from storage in order to commit.
         /// Guards against concurrent commits.
+        ///
+        /// Set while:
+        /// * prefetching from storage, in preparation for a commit
+        /// * reading a prepare from storage in order to commit
+        /// * compacting storage
+        /// * checkpointing
         committing: bool = false,
 
         /// Whether we are reading a prepare from storage in order to push to the pipeline.
@@ -554,6 +575,9 @@ pub fn ReplicaType(
                     // The data file is brand new — no messages have ever been written.
                     // Transition to normal status; no need to run the VSR recovery protocol.
                     assert(self.journal.faulty.count == 0);
+                    assert(self.commit_min == 0);
+                    assert(self.commit_max == 0);
+                    assert(self.op_checkpoint == 0);
                     assert(self.op == 0);
                     self.transition_to_normal_from_recovering_status(0);
                     assert(self.status == .normal);
@@ -1040,6 +1064,7 @@ pub fn ReplicaType(
 
             if (self.journal.has_clean(message.header)) {
                 log.debug("{}: on_repair: ignoring (duplicate)", .{self.replica});
+
                 self.send_prepare_ok(message.header);
                 defer self.flush_loopback_queue();
                 return;
@@ -1215,6 +1240,16 @@ pub fn ReplicaType(
                 k = self.commit_min;
             }
 
+            if (latest.op > self.op_checkpoint_trigger()) {
+                // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
+                // last checkpoint. If we wrap now, we overwrite un-checkpointed transfers in the WAL,
+                // precluding recovery.
+                //
+                // TODO State transfer. Currently this is unreachable because the
+                // leader won't checkpoint until all replicas are caught up.
+                unreachable;
+            }
+
             self.set_latest_op_and_k(&latest, k.?, "on_do_view_change");
 
             // Now that we have the latest op in place, repair any other headers:
@@ -1256,6 +1291,16 @@ pub fn ReplicaType(
         /// advance their commit number, and update the information in their client table.
         fn on_start_view(self: *Self, message: *const Message) void {
             if (self.ignore_view_change_message(message)) return;
+
+            if (message.header.op > self.op_checkpoint_trigger()) {
+                // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
+                // last checkpoint. If we wrap now, we overwrite un-checkpointed transfers in the WAL,
+                // precluding recovery.
+                //
+                // TODO State transfer. Currently this is unreachable because the
+                // leader won't checkpoint until all replicas are caught up.
+                unreachable;
+            }
 
             assert(self.status == .view_change or self.status == .normal);
             assert(message.header.view >= self.view);
@@ -3944,6 +3989,9 @@ pub fn ReplicaType(
         /// with an older view number may be committed instead of an op with a newer view number:
         /// http://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf.
         ///
+        /// * Do not replace an op belonging to the current WAL wrap with an op belonging to a
+        ///   previous wrap. In other words, don't repair checkpointed ops.
+        ///
         fn repair_header(self: *Self, header: *const Header) bool {
             assert(header.valid_checksum());
             assert(header.invalid() == null);
@@ -3971,6 +4019,20 @@ pub fn ReplicaType(
                     log.debug("{}: repair_header: false (changes self.op={})", .{
                         self.replica,
                         self.op,
+                    });
+                    return false;
+                }
+            }
+
+            if (header.op <= self.op_checkpoint) {
+                if (header.op == 0 and self.op_checkpoint == 0) {
+                    // Repairing the root op is allowed until the first checkpoint.
+                } else {
+                    // Otherwise don't repair checkpointed ops, since their slots now belong to
+                    // the next wrap of the WAL.
+                    log.debug("{}: repair_header: false (precedes self.op_checkpoint={})", .{
+                        self.replica,
+                        self.op_checkpoint,
                     });
                     return false;
                 }
@@ -4041,8 +4103,6 @@ pub fn ReplicaType(
                 });
                 return false;
             }
-
-            // TODO Snapshots: Skip if this header is already snapshotted.
 
             assert(header.op < self.op or
                 self.journal.header_with_op(self.op).?.checksum == header.checksum);
@@ -5001,6 +5061,7 @@ pub fn ReplicaType(
             assert(latest.op >= self.commit_max);
             assert(latest.op >= latest.commit);
             assert(latest.op >= k);
+            assert(latest.op <= self.op_checkpoint_trigger());
             // We expect that `commit_max` (and `commit_min`) may be greater than `latest.commit`
             // because `latest.commit` is the commit number at the time the `latest.op` prepared.
             // We expect that `commit_max` (and `commit_min`) may also be greater even than `k`
@@ -5435,6 +5496,12 @@ pub fn ReplicaType(
             assert(message.header.command == .prepare);
             assert(message.header.view <= self.view);
             assert(message.header.op <= self.op);
+
+            if (message.header.op == self.op_checkpoint) {
+                assert(message.header.op == 0);
+            } else {
+                assert(message.header.op > self.op_checkpoint);
+            }
 
             if (!self.journal.has(message.header)) {
                 log.debug("{}: write_prepare: ignoring op={} checksum={} (header changed)", .{
