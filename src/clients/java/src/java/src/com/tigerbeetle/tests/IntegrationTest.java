@@ -300,63 +300,43 @@ public class IntegrationTest {
         }
     }
 
+    /**
+     * This test asserts that parallel threads will respect client's maxConcurrency,
+     * 
+     * @throws Throwable
+     */
     @Test
     public void testConcurrentTasks() throws Throwable {
 
-        class TransferTask extends Thread {
-
-            public final Client client;
-            public CreateTransferResult result;
-            public boolean isFaulted;
-
-            public TransferTask(Client client) {
-                this.client = client;
-                this.result = CreateTransferResult.Ok;
-                this.isFaulted = false;
-            }
-
-            @Override
-            public synchronized void run() {
-                var transfer = new Transfer();
-                transfer.setId(UUID.randomUUID());
-                transfer.setCreditAccountId(account1.getId());
-                transfer.setDebitAccountId(account2.getId());
-                transfer.setLedger(720);
-                transfer.setCode((short) 1);
-                transfer.setAmount(100);
-
-                try {
-                    result = client.createTransfer(transfer);
-                } catch (Throwable e) {
-                    isFaulted = true;
-                }
-            }
-        }
-        
         try (var server = new Server()) {
 
+            // Defining a ratio between concurrent threads and client's maxConcurrency
+            // The goal here is to force to have more threads than the client can process
+            // simultaneously
             var random = new Random();
             final int tasks_qty = 12;
-            final int max_concurrency = random.nextInt(tasks_qty / 2) + 1;
+            final int max_concurrency = random.nextInt(tasks_qty - 1) + 1;
 
             try (var client = new Client(0, new String[] { Server.TB_PORT }, max_concurrency)) {
 
                 var errors = client.createAccounts(new Account[] { account1, account2 });
                 Assert.assertTrue(errors.length == 0);
 
-                var list = new TransferTask[tasks_qty];
+                var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
-                    list[i] = new TransferTask(client);
-                    list[i].start();
+                    // Starting multiple threads submiting transfers,
+                    tasks[i] = new TransferTask(client);
+                    tasks[i].start();
                 }
 
                 // Wait for all threads
                 for (int i = 0; i < tasks_qty; i++) {
-                    list[i].join();
-                    Assert.assertFalse(list[i].isFaulted);
-                    Assert.assertEquals(list[i].result, CreateTransferResult.Ok);
+                    tasks[i].join();
+                    Assert.assertFalse(tasks[i].isFaulted);
+                    Assert.assertEquals(tasks[i].result, CreateTransferResult.Ok);
                 }
 
+                // Asserting if all transfers were submited correctly
                 var lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
@@ -376,7 +356,71 @@ public class IntegrationTest {
         }
     }
 
-    // Skip this test for now
+    /**
+     * This test asserts that client.close() will wait for all ongoing request to
+     * complete
+     * And new threads trying to submit a request after the client was closed will
+     * fail with IllegalStateException
+     * 
+     * @throws Throwable
+     */
+    @Test
+    public void testCloseWithConcurrentTasks() throws Throwable {
+
+        try (var server = new Server()) {
+
+            var random = new Random();
+
+            // Defining a ratio between concurrent threads and client's maxConcurrency
+            // The goal here is to force to have way more threads than the client can
+            // process simultaneously
+            final int tasks_qty = 12;
+            final int max_concurrency = random.nextInt(tasks_qty / 4) + 1;
+
+            try (var client = new Client(0, new String[] { Server.TB_PORT }, max_concurrency)) {
+
+                var errors = client.createAccounts(new Account[] { account1, account2 });
+                Assert.assertTrue(errors.length == 0);
+
+                var tasks = new TransferTask[tasks_qty];
+                for (int i = 0; i < tasks_qty; i++) {
+
+                    // Starting multiple threads submiting transfers,
+                    tasks[i] = new TransferTask(client);
+                    tasks[i].start();
+                }
+
+                // Wait just for one thread to complete
+                tasks[0].join();
+
+                // And them close the client while several threads are still working
+                // Some of them have already submited the request, others are waiting due to the
+                // maxConcurrency limit
+                client.close();
+
+                for (int i = 0; i < tasks_qty; i++) {
+
+                    // The client.close must wait until all submited requests have completed
+                    // Asserting that either the task succeeded or failed while waiting
+                    tasks[i].join();
+                    Assert.assertTrue(tasks[i].isFaulted || tasks[i].result == CreateTransferResult.Ok);
+                }
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+    /**
+     * This test asserts that a client disconnected from any replica can handle
+     * timeouts correctly
+     * 
+     * @throws Throwable
+     */
     @Ignore
     @Test
     public void testTimeoutClient() throws Throwable {
@@ -387,11 +431,11 @@ public class IntegrationTest {
                 var errors = client.createAccounts(new Account[] { account1, account2 });
                 Assert.assertTrue(errors.length == 0);
 
-                // Closes the server
+                // Closes the server, disconnecting the client
                 server.close();
 
                 try {
-                    // Client will submit the request, but it is not going to complete
+                    // Client will submit a request, but it is not going to complete
                     @SuppressWarnings("unused")
                     var accounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
 
@@ -417,6 +461,36 @@ public class IntegrationTest {
         assertEquals(account1.getLedger(), account2.getLedger());
         assertEquals(account1.getCode(), account2.getCode());
         assertEquals(account1.getFlags(), account2.getFlags());
+    }
+
+    private class TransferTask extends Thread {
+
+        public final Client client;
+        public CreateTransferResult result;
+        public boolean isFaulted;
+
+        public TransferTask(Client client) {
+            this.client = client;
+            this.result = CreateTransferResult.Ok;
+            this.isFaulted = false;
+        }
+
+        @Override
+        public synchronized void run() {
+            var transfer = new Transfer();
+            transfer.setId(UUID.randomUUID());
+            transfer.setCreditAccountId(account1.getId());
+            transfer.setDebitAccountId(account2.getId());
+            transfer.setLedger(720);
+            transfer.setCode((short) 1);
+            transfer.setAmount(100);
+
+            try {
+                result = client.createTransfer(transfer);
+            } catch (Throwable e) {
+                isFaulted = true;
+            }
+        }
     }
 
     private class Server implements AutoCloseable {
