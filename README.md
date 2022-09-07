@@ -2,153 +2,178 @@
 
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
-**Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous)**
+**Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/tigerbeetledb/viewstamped-replication-made-famous)**
 
 Watch an introduction to TigerBeetle on [Zig SHOWTIME](https://www.youtube.com/watch?v=BH2jvJ74npM) for our design decisions regarding performance, safety, and financial accounting primitives:
 
 [![A million financial transactions per second in Zig](https://img.youtube.com/vi/BH2jvJ74npM/0.jpg)](https://www.youtube.com/watch?v=BH2jvJ74npM)
 
-## The Problem - Realtime Processing of Balance Updates
-
-Processing events that impact the balance of an account must be done serially, in the correct order and reliably. For this reason, despite the trend to scale modern applications by distributing work across parallel threads/processes/machines, it remains difficult to scale a ledger or accounting system without sacrificing performance or safety.
-
-For example, processing a balance update event involves:
-
-1. validating the event,
-2. processing any business rules that must consider the current balance before processing the event and the new balance after the event,
-3. updating the balance
-4. persisting the updated balance, and
-5. notifying subscribers of the updated balance and that the event has been processed.
-
-While investigating a few existing systems it became clear that the majority of architectures cobble together generic databases (relational or NoSQL, on-disk or in-memory) with business logic enforced in the application code. This separation between data and code, persistence and logic, invites the worst of distributed system problems: network delays, multiple roundtrips for a single balance update, clock skew, or cache incoherency etc.
-
-Furthermore, these systems may achieve performance but at the expense of reliability, especially in the face of hardware failure, corruption and misdirected writes, a compromise that is unacceptable for a system-of-record for financial accounts.
-
-## The Solution - A Purpose-Built Financial Accounting Database
-
-Our survey led us to conclude that, while there are mechanisms available to shard account balances to parallelize updates and improve performance, there are still significant performance gains to be had in designing a database that is purpose built for storing balances and processing updates in a reliable manner.
-
-## ProtoBeetle - 400,000 Transfers per Second
-
-In the month of July 2020, we developed a prototype of TigerBeetle in Node as a performance sketch to measure the basic components of the design (batching, TCP protocol, cryptographic checksums everywhere, fsync journalling, in-memory business logic and hash table operations). **ProtoBeetle ran at 200,000 two-phase transfers per second on our office laptops**, supporting our back-of-the-envelope numbers.
-
-We then integrated ProtoBeetle into [Mojaloop](https://mojaloop.io/) and our reference minimum deployment cluster of **Mojaloop went from 76 TPS on MySQL to 1757 TPS on ProtoBeetle**. A single stateless Mojaloop pod was unable to saturate ProtoBeetle. Most of the throughput was spent converting Mojaloop's individual HTTP requests into TCP batches.
-
-**[Watch a 10-minute talk introducing ProtoBeetle.](https://youtu.be/QOC6PHFPtAM?t=324)**
-
-## AlphaBeetle - 800,000 Transfers per Second
-
-After ProtoBeetle, from September through October 2020, we knuckled down and rewrote TigerBeetle in C/Zig to create the alpha version of TigerBeetle, using [io_uring](https://kernel.dk/io_uring.pdf) as a foundation for fast I/O.
-
-TigerBeetle's Zig implementation of io_uring was [submitted](https://github.com/ziglang/zig/pull/6356) for addition to the Zig standard library.
-
-**[Watch a presentation of TigerBeetle given to the Interledger community on 25 November 2020.](https://www.youtube.com/watch?v=J1OaBRTV2vs)**
-
-## BetaBeetle - High Availability
-
-BetaBeetle, the beta distributed version of TigerBeetle, was developed from January 2021 through August 2021, for strict serializability, fault tolerance and automated leader election with the pioneering [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus protocol, plus the CTRL protocol from [Protocol-Aware Recovery for Consensus-Based Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs).
+Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the problem of balance tracking at scale, and the solution of a purpose-built financial accounting database.
 
 ## TigerBeetle (under active development)
 
-The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/coilhq/tigerbeetle/projects?type=classic) provides a glimpse of where we want to go.
+TigerBeetle is not yet production-ready. The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/tigerbeetledb/tigerbeetle/projects?type=classic) provides a glimpse of where we want to go.
 
 ## QuickStart
 
-**Prerequisites:** The current beta version of TigerBeetle targets macOS and Linux and takes advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via [io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on macOS or on recent versions of Linux with an updated kernel.
+This section assumes you have Docker.
 
-```bash
-git clone https://github.com/coilhq/tigerbeetle.git
-cd tigerbeetle
-scripts/install.sh
-```
-
-## Benchmark
-
-With TigerBeetle installed, you are ready to benchmark!
-
-```bash
-scripts/benchmark.sh
-```
-
-*If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
-
-## Tests
-
-### Unit Tests
-
-To run the unit tests:
-
-```bash
-zig/zig build test
-```
-
-The [QuickStart](#quickstart) step above will install Zig for you to the root of the `tigerbeetle` directory.
-
-### Simulation Tests
-
-To run TigerBeetle's long-running simulation, called *The VOPR*:
-
-```bash
-zig/zig build vopr
-```
-
-Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR Hub](src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create GitHub issues as needed.
-
-```bash
-zig/zig build vopr -- --send
-```
-
-Run the VOPR using a specific seed. This will run in `Debug` mode by default but you can also include `--build-mode` to run in ReleaseSafe mode.
-
-```bash
-zig/zig build vopr -- --seed=123 --build-mode=ReleaseSafe
-```
-
-To view all the available command line arguments simply use the `--help` flag.
-
-```bash
-zig/zig build vopr -- --help
-```
-
-*The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames, by our love of fuzzing over the years, by [Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
-
-*The VOPR* is [a deterministic simulator](src/simulator.zig) that can fuzz many clusters of TigerBeetle servers and clients interacting through TigerBeetle's Viewstamped Replication consensus protocol, but all within a single developer machine process, with [a network simulator](src/test/packet_simulator.zig) to simulate all kinds of network faults, and with an in-memory [storage simulator](src/test/storage.zig) to simulate all kinds of storage faults, to explore and test TigerBeetle against huge state spaces in a short amount of time, by literally speeding up the passing of time within the simulation itself.
-
-Beyond being a deterministic simulator, *The VOPR* also features [a state checker](src/test/state_checker.zig) that can hook into all the replicas, and check all their state transitions the instant they take place, using cryptographic hash chaining to prove causality and check that all interim state transitions are valid, based on any of the set of inflight client requests at the time, without divergent states, and then check for convergence to the highest state at the end of the simulation, to distinguish between correctness or liveness bugs.
-
-Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr) bug bounty challenge repository for more details on how to run *The VOPR* and interpret its output.
-
-## Launch a Local Cluster
-
-Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
+First provision TigerBeetle's data directory.
 
 ```
-./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=1 0_1.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=2 0_2.tigerbeetle
-
-./tigerbeetle start --addresses=3001,3002,3003 0_0.tigerbeetle
-./tigerbeetle start --addresses=3001,3002,3003 0_1.tigerbeetle
-./tigerbeetle start --addresses=3001,3002,3003 0_2.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
 ```
 
-Run the TigerBeetle binary to see all command line arguments:
+Then run the server:
 
-```bash
-./tigerbeetle --help
 ```
+$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+info(io): opening "0_0.tigerbeetle"...
+info(main): 0: cluster=0: listening on 0.0.0.0:3000
+
+... and so on ...
+```
+
+### Use Node as a CLI
+
+Try entering in some accounts and transfers with the Node client and
+the Node CLI.
+
+First install the client using npm or yarn.
+
+```javascript
+$ yarn add tigerbeetle-node # or npm install
+```
+
+Then create a client.
+
+```javascript
+$ node
+Welcome to Node.js v16.14.0.
+Type ".help" for more information.
+> let { createClient } = require('tigerbeetle-node');
+> let client = createClient({ cluster_id: 0, replica_addresses: ['3000'] });
+info(message_bus): connected to replica 0
+```
+
+Now create two accounts. (Don't worry about the details, you can
+read about them later.)
+
+```javascript
+> let errors = await client.createAccounts([
+  {
+    id: 1n,
+    ledger: 1,
+    code: 718,
+    user_data: 0n,
+    reserved: Buffer.alloc(48, 0),
+    flags: 0,
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    timestamp: 0n,
+  },
+  {
+    id: 2n,
+    ledger: 1,
+    code: 718,
+    user_data: 0n,
+    reserved: Buffer.alloc(48, 0),
+    flags: 0,
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    timestamp: 0n,
+  },
+]);
+> errors
+[]
+```
+
+Now create a transfer of `10` (of some amount/currency) between the two accounts.
+
+```javascript
+> errors = await client.createTransfers([
+  {
+    id: 1n,
+    debit_account_id: 1n,
+    credit_account_id: 2n,
+    pending_id: 0n,
+    user_data: 0n,
+    reserved: 0n,
+    timeout: 0n,
+    ledger: 1,
+    code: 718,
+    flags: 0,
+    amount: 10n,
+    timestamp: 0n,
+  }
+]);
+```
+
+Now, the amount of `10` has been credited to account `2` and debited
+from account `1`. Let's query TigerBeetle for these two accounts to
+verify!
+
+```
+> let accounts = await client.lookupAccounts([1n, 2n]);
+> console.log(accounts.map(a => ({ id: a.id, debits_posted: a.debits_posted, credits_posted: a.credits_posted, timestamp: a.timestamp })));
+[
+  {
+    id: 1n,
+    debits_posted: 10n,
+    credits_posted: 0n,
+    timestamp: 1662489240014463675n
+  },
+  {
+    id: 2n,
+    debits_posted: 0n,
+    credits_posted: 10n,
+    timestamp: 1662489240014463676n
+  }
+]
+```
+
+And indeed you can see that account `1` has `debits_posted` as `10`
+and account `2` has `credits_posted` as `10`. The `10` amount is fully
+accounted for!
+
+For further reading:
+
+* [Running a 3-node cluster locally with docker-compose](./docs/DOCKER_COMPOSE.md)
 
 ## Clients
 
-* [tigerbeetle-node](https://github.com/coilhq/tigerbeetle-node) is a TigerBeetle Node.js client written in TypeScript (and Zig with [Node's N-API](https://nodejs.org/api/n-api.html) for ABI stability).
-
-* [client.zig](./src/vr/client.zig) is a TigerBeetle Zig client.
-
-* [demo.zig](./src/demo.zig) is a lightweight TigerBeetle client for demonstration purposes only, which we used to create [six demos you can work your way through and modify](./docs/DEEP_DIVE.md) to explore TigerBeetle's commands.
+* For Node.js: [tigerbeetle-node](https://github.com/tigerbeetledb/tigerbeetle-node)
+* For Golang: [tigerbeetle-go](https://github.com/tigerbeetledb/tigerbeetle-go)
 
 ## Community
 
 [Join the TigerBeetle community in Discord.](https://discord.com/invite/uWCGp46uG5)
+
+## Benchmarks
+
+First grab the sources and run the setup script:
+
+```bash
+$ git clone https://github.com/coilhq/tigerbeetle.git
+$ cd tigerbeetle
+$ scripts/install.sh
+```
+
+With TigerBeetle installed, you are ready to benchmark!
+
+```bash
+$ scripts/benchmark.sh
+```
+
+*If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
+
+## Contributing
+
+Read [docs/HACKING.md](docs/HACKING.md).
 
 ## Performance Demos
 
