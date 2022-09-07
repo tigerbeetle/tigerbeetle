@@ -1,9 +1,14 @@
+///! Java Native Interfaces for TigerBeetle Client
+///! Please refer to the JNI Best Practice Guide
+///! https://developer.ibm.com/articles/j-jni/
+
 const std = @import("std");
 const builtin = @import("builtin");
 const jui = @import("jui");
 const tb = @import("tb_client.zig");
 
 const assert = std.debug.assert;
+const jni_version = jui.JNIVersion{ .major = 10, .minor = 0 };
 
 const ClientReflection = struct {
     var class: jui.jclass = undefined;
@@ -13,34 +18,32 @@ const ClientReflection = struct {
     var packets_tail_field_id: jui.jfieldID = undefined;
 
     pub fn load(env: *jui.JNIEnv) !void {
-        class = try env.findClass("com/tigerbeetle/Client");
+        class = class: {
+            var local_ref = try env.findClass("com/tigerbeetle/Client");
+            assert(local_ref != null);
+            defer env.deleteReference(.local, local_ref);
+
+            break :class try env.newReference(.global, local_ref);
+        };
+
+        assert(class != null);
+
         client_handle_field_id = try env.getFieldId(class, "clientHandle", "J");
         packets_head_field_id = try env.getFieldId(class, "packetsHead", "J");
         packets_tail_field_id = try env.getFieldId(class, "packetsTail", "J");
+    }
+
+    pub fn unload(env: *jui.JNIEnv) void {
+        env.deleteReference(.global, class);
     }
 
     pub inline fn setTbClient(env: *jui.JNIEnv, this_object: jui.jobject, client: tb.Client) void {
         env.setField(.long, this_object, client_handle_field_id, @bitCast(jui.jlong, @ptrToInt(client)));
     }
 
-    pub inline fn getTbClient(env: *jui.JNIEnv, this_object: jui.jobject) tb.Client {
-        var ptr = env.getField(.long, this_object, client_handle_field_id);
-        return @intToPtr(tb.Client, @bitCast(usize, ptr));
-    }
-
-    pub inline fn setPacketList(env: *jui.JNIEnv, this_object: jui.jobject, packet_list: tb.Packet.List) void {
+    pub inline fn setPacketList(env: *jui.JNIEnv, this_object: jui.jobject, packet_list: *const tb.Packet.List) void {
         env.setField(.long, this_object, packets_head_field_id, @bitCast(jui.jlong, @ptrToInt(packet_list.head)));
         env.setField(.long, this_object, packets_tail_field_id, @bitCast(jui.jlong, @ptrToInt(packet_list.tail)));
-    }
-
-    pub inline fn getPacketList(env: *jui.JNIEnv, this_object: jui.jobject) tb.Packet.List {
-        var head = env.getField(.long, this_object, packets_head_field_id);
-        var tail = env.getField(.long, this_object, packets_tail_field_id);
-
-        return .{
-            .head = @intToPtr(?*tb.Packet, @bitCast(usize, head)),
-            .tail = @intToPtr(?*tb.Packet, @bitCast(usize, tail)),
-        };
     }
 };
 
@@ -53,15 +56,32 @@ const RequestReflection = struct {
     var request_end_request_method_id: jui.jmethodID = undefined;
 
     pub fn load(env: *jui.JNIEnv) !void {
-        class = try env.findClass("com/tigerbeetle/Request");
+        class = class: {
+            var local_ref = try env.findClass("com/tigerbeetle/Request");
+            assert(local_ref != null);
+            defer env.deleteReference(.local, local_ref);
+
+            break :class try env.newReference(.global, local_ref);
+        };
+
         request_buffer_field_id = try env.getFieldId(class, "buffer", "Ljava/nio/ByteBuffer;");
         request_buffer_len_field_id = try env.getFieldId(class, "bufferLen", "J");
         request_operation_field_id = try env.getFieldId(class, "operation", "B");
         request_end_request_method_id = try env.getMethodId(class, "endRequest", "(BLjava/nio/ByteBuffer;JB)V");
     }
 
+    pub fn unload(env: *jui.JNIEnv) void {
+        env.deleteReference(.global, class);
+    }
+
     pub fn getBuffer(env: *jui.JNIEnv, this_object: jui.jobject) []u8 {
+        assert(this_object != null);
+
         var buffer_obj = env.getField(.object, this_object, request_buffer_field_id);
+        defer env.deleteReference(.local, buffer_obj);
+
+        assert(buffer_obj != null);
+
         var buffer_len = env.getField(.long, this_object, request_buffer_len_field_id);
         var address = env.getDirectBufferAddress(buffer_obj);
 
@@ -70,17 +90,27 @@ const RequestReflection = struct {
     }
 
     pub fn getOperation(env: *jui.JNIEnv, this_object: jui.jobject) u8 {
+        assert(this_object != null);
         return @bitCast(u8, env.getField(.byte, this_object, request_operation_field_id));
     }
 
     pub fn endRequest(env: *jui.JNIEnv, this_object: jui.jobject, result: ?[]const u8, packet: *tb.Packet) void {
-        var buffer: jui.jobject = if (result) |value| blk: {
+        assert(this_object != null);
+
+        var buffer_obj: jui.jobject = if (result) |value| blk: {
             // force cast from *const to *anyopaque
             // it is ok here, since the result is always readonly
             var erased = @intToPtr(*anyopaque, @ptrToInt(value.ptr));
-            break :blk env.newDirectByteBuffer(erased, value.len) catch null;
+            var buffer = env.newDirectByteBuffer(erased, value.len) catch {
+                std.log.err("JNI Request.endRequest newDirectByteBuffer len={}", .{value.len});
+                env.describeException();
+                unreachable;
+            };
+
+            assert(buffer != null);
+            break :blk buffer;
         } else null;
-        defer if (buffer != null) env.deleteReference(.local, buffer);
+        defer if (buffer_obj != null) env.deleteReference(.local, buffer_obj);
 
         env.callMethod(
             .@"void",
@@ -88,50 +118,55 @@ const RequestReflection = struct {
             request_end_request_method_id,
             &[_]jui.jvalue{
                 jui.jvalue.toJValue(@bitCast(jui.jbyte, packet.operation)),
-                jui.jvalue.toJValue(buffer),
+                jui.jvalue.toJValue(buffer_obj),
                 jui.jvalue.toJValue(@bitCast(jui.jlong, @ptrToInt(packet))),
                 jui.jvalue.toJValue(@bitCast(jui.jbyte, packet.status)),
             },
-        )
-        // This method isn't expected to throw any exception,
-        catch unreachable;
+        ) catch {
+            // This method isn't expected to throw any exception,
+            std.log.err("JNI: Request.endRequest callMethod", .{});
+            env.describeException();
+            unreachable;
+        };
     }
 };
 
 /// On JVM loads this library
 fn onLoad(vm: *jui.JavaVM) !jui.jint {
-    const version = jui.JNIVersion{ .major = 10, .minor = 0 };
-    var env = try vm.getEnv(version);
+    var env = try vm.getEnv(jni_version);
 
     try ClientReflection.load(env);
     try RequestReflection.load(env);
 
-    return @bitCast(jui.jint, version);
+    return @bitCast(jui.jint, jni_version);
 }
 
 /// On JVM unloads this library
-fn onUnload(vm: *jui.JavaVM) void {
-    _ = vm;
+fn onUnload(vm: *jui.JavaVM) !void {
+    var env = try vm.getEnv(jni_version);
+    ClientReflection.unload(env);
+    RequestReflection.unload(env);
 }
 
-/// Called from JNI
-/// Initialize tb_client
 fn clientInit(
     env: *jui.JNIEnv,
     this_object: jui.jobject,
     cluster_id: u32,
-    addresses: jui.jstring,
+    addresses_object: jui.jstring,
     max_concurrency: u32,
 ) !tb.TBStatus {
+    assert(this_object != null);
+    assert(addresses_object != null);
+
     var out_client: tb.Client = undefined;
     var out_packets: tb.Packet.List = undefined;
 
     var jvm = try env.getJavaVM();
 
-    const addresses_len = @intCast(usize, env.getStringUTFLength(addresses));
-    var addresses_return = try jui.JNIEnv.getStringUTFChars(env, addresses);
+    const addresses_len = @intCast(usize, env.getStringUTFLength(addresses_object));
+    var addresses_return = try jui.JNIEnv.getStringUTFChars(env, addresses_object);
     var addresses_chars = std.meta.assumeSentinel(addresses_return.chars[0..addresses_len], 0);
-    defer env.releaseStringUTFChars(addresses, addresses_chars);
+    defer env.releaseStringUTFChars(addresses_object, addresses_chars);
 
     var status = tb.tb_client_init(
         &out_client,
@@ -146,21 +181,32 @@ fn clientInit(
 
     if (status == .success) {
         ClientReflection.setTbClient(env, this_object, out_client);
-        ClientReflection.setPacketList(env, this_object, out_packets);
+        ClientReflection.setPacketList(env, this_object, &out_packets);
     }
 
     return status;
 }
 
-fn clientDeinit(env: *jui.JNIEnv, client_obj: jui.jobject) void {
-    var client = ClientReflection.getTbClient(env, client_obj);
+fn clientDeinit(client: tb.Client) void {
     tb.tb_client_deinit(client);
 }
 
-fn submit(env: *jui.JNIEnv, request_obj: jui.jobject, client_obj: jui.jobject, packet: *tb.Packet) void {
+fn submit(
+    env: *jui.JNIEnv,
+    request_obj: jui.jobject,
+    client: tb.Client,
+    packet: *tb.Packet,
+) void {
+    assert(request_obj != null);
 
     // Holds a global reference to prevent GC during the callback
-    var global_ref = env.newReference(.global, request_obj) catch unreachable;
+    var global_ref = env.newReference(.global, request_obj) catch |err| {
+        std.log.err("JNI: Request.submit newReference {s}", .{@errorName(err)});
+        env.describeException();
+        unreachable;
+    };
+
+    assert(global_ref != null);
     errdefer env.deleteReference(.global, global_ref);
 
     var buffer = RequestReflection.getBuffer(env, request_obj);
@@ -173,23 +219,7 @@ fn submit(env: *jui.JNIEnv, request_obj: jui.jobject, client_obj: jui.jobject, p
     packet.status = .ok;
 
     var packet_list = tb.Packet.List.from(packet);
-    const client = ClientReflection.getTbClient(env, client_obj);
     tb.tb_client_submit(client, &packet_list);
-}
-
-fn popPacket(env: *jui.JNIEnv, client_obj: jui.jobject) *tb.Packet {
-    var packet_list = ClientReflection.getPacketList(env, client_obj);
-    return packet_list.pop() orelse {
-
-        // It is unexpeted to packet_list be empty
-        // The java side must syncronize how many threads call this function
-        @panic("No packets left");
-    };
-}
-
-fn pushPacket(env: *jui.JNIEnv, client_obj: jui.jobject, packet: *tb.Packet) void {
-    var packet_list = ClientReflection.getPacketList(env, client_obj);
-    packet_list.push(packet);
 }
 
 fn onCompletion(
@@ -203,12 +233,14 @@ fn onCompletion(
 
     var jvm = @intToPtr(*jui.JavaVM, context);
     var env = jvm.attachCurrentThreadAsDaemon() catch {
-        // There is no way to recover here, just @panic
+        // There is no way to recover here
         // since we can't access the JNIEnv, we can't throw a proper Exception.
-        @panic("Cannot attach client thread as a JVM daemon");
+        std.log.err("JNI: Request.onCompletion attachCurrentThreadAsDaemon", .{});
+        unreachable;
     };
 
     // Retrieves the request instance, and drops the GC reference
+    assert(packet.user_data != 0);
     var request_obj = @intToPtr(jui.jobject, packet.user_data);
     defer env.deleteReference(.global, request_obj);
 
@@ -220,6 +252,35 @@ fn onCompletion(
     RequestReflection.endRequest(env, request_obj, result, packet);
 }
 
+fn popPacket(
+    env: *jui.JNIEnv,
+    client_obj: jui.jobject,
+    packet_list: *tb.Packet.List,
+) *tb.Packet {
+    assert(client_obj != null);
+
+    var packet = packet_list.pop() orelse {
+
+        // It is unexpeted to packet_list be empty
+        // The java side must syncronize how many threads call this function
+        std.log.err("JNI: Client.popPacket empty", .{});
+        unreachable;
+    };
+    ClientReflection.setPacketList(env, client_obj, packet_list);
+    
+    return packet;
+}
+
+fn pushPacket(
+    env: *jui.JNIEnv,
+    client_obj: jui.jobject,
+    packet_list: *tb.Packet.List,
+    packet: *tb.Packet,
+) void {
+    packet_list.push(packet);
+    ClientReflection.setPacketList(env, client_obj, packet_list);
+}
+
 /// Exports entrypoints to JNI
 const exports = struct {
     pub fn onLoadExport(vm: *jui.JavaVM) callconv(.C) jui.jint {
@@ -227,7 +288,7 @@ const exports = struct {
     }
 
     pub fn onUnloadExport(vm: *jui.JavaVM) callconv(.C) void {
-        onUnload(vm);
+        jui.wrapErrors(onUnload, .{vm});
     }
 
     pub fn clientInitExport(
@@ -251,37 +312,54 @@ const exports = struct {
         return @bitCast(jui.jint, status);
     }
 
-    pub fn clientDeinitExport(env: *jui.JNIEnv, this: jui.jobject) callconv(.C) void {
-        clientDeinit(
-            env,
-            this,
-        );
+    pub fn clientDeinitExport(env: *jui.JNIEnv, this: jui.jobject, client_handle: jui.jlong) callconv(.C) void {
+        _ = env;
+        _ = this;
+        clientDeinit(@intToPtr(tb.Client, @bitCast(usize, client_handle)));
     }
 
-    pub fn submitExport(env: *jui.JNIEnv, this: jui.jobject, client_obj: jui.jobject, packet: jui.jlong) callconv(.C) void {
+    pub fn submitExport(env: *jui.JNIEnv, this: jui.jobject, client_handle: jui.jlong, request_obj: jui.jobject, packet: jui.jlong) callconv(.C) void {
+        _ = this;
+        assert(client_handle != 0);
         assert(packet != 0);
+
         submit(
             env,
-            this,
-            client_obj,
+            request_obj,
+            @intToPtr(tb.Client, @bitCast(usize, client_handle)),
             @intToPtr(*tb.Packet, @bitCast(usize, packet)),
         );
     }
 
-    pub fn popPacketExport(env: *jui.JNIEnv, this: jui.jobject) callconv(.C) jui.jlong {
+    pub fn popPacketExport(env: *jui.JNIEnv, this: jui.jobject, packets_head: jui.jlong, packets_tail: jui.jlong) callconv(.C) jui.jlong {
+        _ = env;
+        _ = this;
+
+        var packet_list = tb.Packet.List{
+            .head = @intToPtr(?*tb.Packet, @bitCast(usize, packets_head)),
+            .tail = @intToPtr(?*tb.Packet, @bitCast(usize, packets_tail)),
+        };
+
         var packet = popPacket(
             env,
             this,
+            &packet_list,
         );
-
         return @bitCast(jui.jlong, @ptrToInt(packet));
     }
 
-    pub fn pushPacketExport(env: *jui.JNIEnv, this: jui.jobject, packet: jui.jlong) callconv(.C) void {
+    pub fn pushPacketExport(env: *jui.JNIEnv, this: jui.jobject, packets_head: jui.jlong, packets_tail: jui.jlong, packet: jui.jlong) callconv(.C) void {
         assert(packet != 0);
+
+        var packet_list = tb.Packet.List{
+            .head = @intToPtr(?*tb.Packet, @bitCast(usize, packets_head)),
+            .tail = @intToPtr(?*tb.Packet, @bitCast(usize, packets_tail)),
+        };
+
         pushPacket(
             env,
             this,
+            &packet_list,
             @intToPtr(*tb.Packet, @bitCast(usize, packet)),
         );
     }
@@ -295,9 +373,6 @@ comptime {
         .clientDeinit = exports.clientDeinitExport,
         .popPacket = exports.popPacketExport,
         .pushPacket = exports.pushPacketExport,
-    });
-
-    jui.exportUnder("com.tigerbeetle.Request", .{
         .submit = exports.submitExport,
     });
 }

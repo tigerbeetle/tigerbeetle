@@ -6,11 +6,9 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 import javax.management.OperationsException;
@@ -21,8 +19,6 @@ import org.junit.Test;
 
 import com.tigerbeetle.Client;
 import com.tigerbeetle.CreateTransferResult;
-import com.tigerbeetle.InitializationException;
-import com.tigerbeetle.RequestException;
 import com.tigerbeetle.Transfer;
 import com.tigerbeetle.TransferFlags;
 import com.tigerbeetle.Account;
@@ -305,7 +301,6 @@ public class IntegrationTest {
     }
 
     @Test
-    @Ignore
     public void testConcurrentTasks() throws Throwable {
 
         class TransferTask extends Thread {
@@ -316,10 +311,12 @@ public class IntegrationTest {
 
             public TransferTask(Client client) {
                 this.client = client;
+                this.result = CreateTransferResult.Ok;
+                this.isFaulted = false;
             }
 
             @Override
-            public void run() {
+            public synchronized void run() {
                 var transfer = new Transfer();
                 transfer.setId(UUID.randomUUID());
                 transfer.setCreditAccountId(account1.getId());

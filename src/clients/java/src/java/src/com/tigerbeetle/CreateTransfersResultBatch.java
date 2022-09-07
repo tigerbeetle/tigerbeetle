@@ -25,7 +25,7 @@ class CreateTransfersResultBatch extends Batch {
         if (index < 0 || index >= lenght)
             throw new IndexOutOfBoundsException();
 
-        var ptr = buffer.position(index * CreateTransfersResult.Struct.SIZE);
+        var ptr = getBuffer().position(index * CreateTransfersResult.Struct.SIZE);
         return new CreateTransfersResult(ptr);
     }
 

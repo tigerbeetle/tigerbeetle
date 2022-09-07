@@ -5,6 +5,8 @@
     "java.debug.settings.vmArgs": "-Djava.library.path=src/zig/zig-out/lib",
     "java.test.config": {
         "workingDirectory": "${workspaceFolder}",
-        "vmArgs": [ "-Djava.library.path=src/zig/zig-out/lib" ]
+        "vmArgs": [ 
+            "-Djava.library.path=src/zig/zig-out/lib",
+         ]
     }
 }

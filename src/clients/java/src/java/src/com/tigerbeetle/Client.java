@@ -49,7 +49,7 @@ public final class Client implements AutoCloseable {
             throw new InitializationException(status);
 
         this.maxConcurrency = maxConcurrency;
-        this.maxConcurrencySemaphore = new Semaphore(maxConcurrency);
+        this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
     }
 
     public CreateAccountResult createAccount(Account account)
@@ -204,7 +204,13 @@ public final class Client implements AutoCloseable {
         return request;
     }
 
-    long adquirePacket()
+    void submit(Request<?> request)
+            throws IllegalStateException, InterruptedException {
+        long packet = adquirePacket();
+        submit(clientHandle, request, packet);
+    }
+
+    private long adquirePacket()
             throws InterruptedException, IllegalStateException {
 
         // Assure that only the max number of concurrent requests can adquire a packet
@@ -212,11 +218,11 @@ public final class Client implements AutoCloseable {
         // We also assure that the clientHandle will be zeroed only after all permits have been released
         final int TIMEOUT = 5;
         do {
-            if (clientHandle == 0) throw new IllegalStateException();
+            if (clientHandle == 0) throw new IllegalStateException("Client is closed");
         } while (!maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS));
 
         synchronized (this) {
-            return popPacket();
+            return popPacket(packetsHead, packetsTail);
         }
     }
 
@@ -224,7 +230,7 @@ public final class Client implements AutoCloseable {
         synchronized (this) {
             // Check if the client is closing
             if (clientHandle != 0) {
-                pushPacket(packet);
+                pushPacket(packetsHead, packetsTail, packet);
             }
         }
 
@@ -239,11 +245,11 @@ public final class Client implements AutoCloseable {
         if (clientHandle != 0) {
 
             // Acquire all permits, forcing to wait for any processing thread to release
-            this.maxConcurrencySemaphore.acquire(maxConcurrency);
+            this.maxConcurrencySemaphore.acquireUninterruptibly(maxConcurrency);
 
             // Deinit and sinalize that this client is closed by setting the handles to 0
             synchronized(this) {
-                clientDeinit();
+                clientDeinit(clientHandle);
 
                 clientHandle = 0;
                 packetsHead = 0;
@@ -252,13 +258,15 @@ public final class Client implements AutoCloseable {
         }
     }    
 
+    private native void submit(long clientHandle, Request<?> request, long packet);
+
     private native int clientInit(int clusterID, String addresses, int maxConcurrency);
 
-    private native void clientDeinit();
+    private native void clientDeinit(long clientHandle);
 
-    private native long popPacket();
+    private native long popPacket(long packetHead, long packetTail);
 
-    private native void pushPacket(long packet);
+    private native void pushPacket(long packetHead, long packetTail, long packet);
 
     public static void main(String[] args) {
         try (var client = new Client(0, new String[] { "127.0.0.1:3001" }, 32)) {

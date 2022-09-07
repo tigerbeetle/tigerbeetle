@@ -25,7 +25,7 @@ class CreateAccountsResultBatch extends Batch {
         if (index < 0 || index >= lenght)
             throw new IndexOutOfBoundsException();
 
-        ByteBuffer ptr = buffer.position(index * CreateAccountsResult.Struct.SIZE);
+        ByteBuffer ptr = getBuffer().position(index * CreateAccountsResult.Struct.SIZE);
         return new CreateAccountsResult(ptr);
     }
 

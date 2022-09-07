@@ -36,7 +36,7 @@ abstract class Request<T> implements Future<T[]> {
         this.client = client;
         this.operation = operation;
         this.requestLen = batch.getLenght();
-        this.buffer = batch.buffer;
+        this.buffer = batch.getBuffer();
         this.bufferLen = batch.getBufferLen();
 
         if (this.bufferLen == 0 || this.requestLen == 0)
@@ -45,9 +45,7 @@ abstract class Request<T> implements Future<T[]> {
 
     public void beginRequest()
             throws InterruptedException {
-
-        long packet = client.adquirePacket();
-        submit(client, packet);
+        client.submit(this);
     }
 
     void endRequest(byte receivedOperation, ByteBuffer buffer, long packet, byte status) {
@@ -64,6 +62,9 @@ abstract class Request<T> implements Future<T[]> {
             status = RequestException.Status.INVALID_OPERATION;
 
         } else if (status == RequestException.Status.OK) {
+
+            if (buffer == null)
+                throw new IllegalArgumentException("buffer");
 
             try {
                 switch (operation) {
@@ -106,10 +107,7 @@ abstract class Request<T> implements Future<T[]> {
             this.result = result;
             this.notifyAll();
         }
-
     }
-
-    private native void submit(Client client, long packet);
 
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
@@ -156,11 +154,14 @@ abstract class Request<T> implements Future<T[]> {
         if (status != RequestException.Status.OK)
             throw new RequestException(status);
 
-        var result = (T[])this.result;
+        if (result == null)
+            throw new IllegalStateException("Null result is unexpected when Status=OK");
+
+        var result = (T[]) this.result;
 
         // Make sure the amount of results at least matches the amount of requests
         if (result.length > requestLen)
-                throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
 
         return result;
     }

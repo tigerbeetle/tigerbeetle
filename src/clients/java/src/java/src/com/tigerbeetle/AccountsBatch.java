@@ -50,7 +50,7 @@ public final class AccountsBatch extends Batch {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
-        var ptr = buffer.position(index * Account.Struct.SIZE);
+        var ptr = getBuffer().position(index * Account.Struct.SIZE);
         return new Account(ptr);
     }
 
@@ -62,7 +62,7 @@ public final class AccountsBatch extends Batch {
             throw new NullPointerException();
 
         final int start = index * Account.Struct.SIZE;
-        var ptr = buffer.position(start);
+        var ptr = getBuffer().position(start);
         account.save(ptr);
 
         if (ptr.position() - start != Account.Struct.SIZE)

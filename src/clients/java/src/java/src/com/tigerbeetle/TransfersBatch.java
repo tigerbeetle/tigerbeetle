@@ -50,7 +50,7 @@ public final class TransfersBatch extends Batch {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
-        var ptr = buffer.position(index * Transfer.Struct.SIZE);
+        var ptr = getBuffer().position(index * Transfer.Struct.SIZE);
         return new Transfer(ptr);
     }
 
@@ -62,7 +62,7 @@ public final class TransfersBatch extends Batch {
             throw new NullPointerException();
 
         final int start = index * Transfer.Struct.SIZE;
-        var ptr = buffer.position(start);
+        var ptr = getBuffer().position(start);
         transfer.save(ptr);
 
         if (ptr.position() - start != Transfer.Struct.SIZE)

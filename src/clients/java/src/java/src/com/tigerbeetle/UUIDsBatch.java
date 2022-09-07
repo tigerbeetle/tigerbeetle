@@ -55,7 +55,7 @@ public class UUIDsBatch extends Batch {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
-        var ptr = buffer.position(index * Struct.SIZE);
+        var ptr = getBuffer().position(index * Struct.SIZE);
         return new UUID(ptr.getLong(), ptr.getLong());
     }
 
@@ -67,7 +67,7 @@ public class UUIDsBatch extends Batch {
             throw new NullPointerException();
 
         final int start = index * Struct.SIZE;
-        var ptr = buffer.position(start);
+        var ptr = getBuffer().position(start);
 
         ptr
                 .putLong(uuid.getMostSignificantBits())
