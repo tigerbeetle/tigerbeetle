@@ -4550,7 +4550,7 @@ pub fn ReplicaType(
                 assert(replica < self.replica_count);
             }
 
-            counter.setIntersection(quorum_counter_null);
+            counter.* = quorum_counter_null;
             assert(counter.count() == 0);
 
             var replica: usize = 0;
@@ -4567,6 +4567,20 @@ pub fn ReplicaType(
         fn reset_quorum_nack_prepare(self: *Self) void {
             self.reset_quorum_counter(&self.nack_prepare_from_other_replicas);
             self.nack_prepare_op = null;
+        }
+
+        fn reset_quorum_prepare_ok(self: *Self) void {
+            // "prepare_ok"s from previous views are not valid, even if the pipeline entry is reused
+            // after a cycle of view changes. In other words, when a view change cycles around, so
+            // that the original primary becomes a primary of a new view, pipeline entries may be
+            // reused. However, the pipeline's prepare_ok quorums must not be reused, since the
+            // replicas that sent them may have swapped them out during a previous view change.
+            var iterator = self.pipeline.iterator_mutable();
+            while (iterator.next_ptr()) |prepare| {
+                prepare.ok_quorum_received = false;
+                prepare.ok_from_all_replicas = quorum_counter_null;
+                assert(prepare.ok_from_all_replicas.count() == 0);
+            }
         }
 
         fn reset_quorum_start_view_change(self: *Self) void {
@@ -5126,6 +5140,7 @@ pub fn ReplicaType(
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
+            self.reset_quorum_prepare_ok();
 
             assert(self.start_view_change_quorum == false);
             assert(self.do_view_change_quorum == false);
@@ -5165,6 +5180,7 @@ pub fn ReplicaType(
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
+            self.reset_quorum_prepare_ok();
 
             assert(self.start_view_change_quorum == false);
             assert(self.do_view_change_quorum == false);
@@ -5270,12 +5286,16 @@ pub fn ReplicaType(
         }
 
         fn verify_pipeline(self: *Self) void {
+            assert(self.status == .view_change);
+
             var op = self.commit_max + 1;
             var parent = self.journal.header_with_op(self.commit_max).?.checksum;
 
             var iterator = self.pipeline.iterator();
             while (iterator.next_ptr()) |prepare| {
                 assert(prepare.message.header.command == .prepare);
+                assert(!prepare.ok_quorum_received);
+                assert(prepare.ok_from_all_replicas.count() == 0);
 
                 log.debug("{}: verify_pipeline: op={} checksum={x} parent={x}", .{
                     self.replica,
