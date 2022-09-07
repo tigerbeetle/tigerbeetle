@@ -550,10 +550,10 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                 break :method default;
             };
 
-            const transfer_template = &transfer_templates
-                [@boolToInt(transfer_plan.valid)]
-                [@boolToInt(transfer_plan.limit)]
-                [@enumToInt(method)];
+            const index_valid = @boolToInt(transfer_plan.valid);
+            const index_limit = @boolToInt(transfer_plan.limit);
+            const index_method = @enumToInt(method);
+            const transfer_template = &transfer_templates[index_valid][index_limit][index_method];
 
             const limit_debits = transfer_plan.limit and self.random.boolean();
             const limit_credits = transfer_plan.limit and (self.random.boolean() or !limit_debits);
