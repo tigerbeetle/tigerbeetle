@@ -21,13 +21,13 @@ This section assumes you have Docker.
 First provision TigerBeetle's data directory.
 
 ```
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
 ```
 
 Then run the server:
 
 ```
-$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 0.0.0.0:3000
 
