@@ -35,7 +35,7 @@ cd .\src\zig
 cd ..\..
 echo "Building TigerBeetle Java Client"
 cd .\src\java
-javac -sourcepath ./src -d ./build ./src/com/tigerbeetle/*.java
+javac -sourcepath ./src -d ./build ./src/Benchmark.java ./src/com/tigerbeetle/*.java
 cd ..\..
 
 for /l %%i in (0, 1, 0) do (
@@ -56,5 +56,5 @@ timeout /t 2
 
 echo.
 echo Benchmarking...
-java -Djava.library.path="./src/zig/zig-out/lib/" -cp ./src/java/build com.tigerbeetle.Client
+java -Djava.library.path="./src/zig/zig-out/lib/" -cp ./src/java/build Benchmark
 exit /b %errorlevel%
