@@ -23,7 +23,7 @@ preference.
 
 First provision TigerBeetle's data directory.
 
-```
+```bash
 $ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle \
     format --cluster=0 --replica=0 /data/0_0.tigerbeetle
 info(io): creating "0_0.tigerbeetle"...
@@ -32,13 +32,11 @@ info(io): allocating 660.140625MiB...
 
 Then run the server.
 
-```
+```bash
 $ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle \
     start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 0.0.0.0:3000
-
-... and so on ...
 ```
 
 ### From Source
@@ -56,7 +54,7 @@ directory. No global changes.
 
 Then create the TigerBeetle data file.
 
-```
+```bash
 $ ./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
@@ -64,7 +62,7 @@ info(io): allocating 660.140625MiB...
 
 And start the server.
 
-```
+```bash
 $ ./tigerbeetle start --addresses=3000 0_0.tigerbeetle
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 127.0.0.1:3000
