@@ -601,9 +601,10 @@ pub fn GrooveType(
 
                 // Track an extra "worker" that will finish after the loop.
                 //
-                // This prevents `context.finish()` from being called within the loop body when every
-                // worker finishes synchronously. `context.finish()` sets the `context` to undefined,
-                // but `context` is required for the last loop condition check.
+                // This prevents `context.finish()` from being called within the loop body when
+                // every worker finishes synchronously. `context.finish()` calls the user-provided
+                // callback which may re-use the memory of this `PrefetchContext`. However, we
+                // rely on `context` being well-defined for the loop condition.
                 context.workers_busy += 1;
 
                 for (context.workers) |*worker| {
