@@ -16,36 +16,72 @@ TigerBeetle is not yet production-ready. The production version of **TigerBeetle
 
 ## QuickStart
 
-This section assumes you have Docker.
+TigerBeetle is easy to run with and without Docker, depending on your
+preference.
+
+### With Docker
 
 First provision TigerBeetle's data directory.
 
 ```
-$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle \
+    format --cluster=0 --replica=0 /data/0_0.tigerbeetle
+info(io): creating "0_0.tigerbeetle"...
+info(io): allocating 660.140625MiB...
 ```
 
-Then run the server:
+Then run the server.
 
 ```
-$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle \
+    start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 0.0.0.0:3000
 
 ... and so on ...
 ```
 
-### Use Node as a CLI
+### From Source
 
-Try entering in some accounts and transfers with the Node client and
-the Node CLI.
+To build from source, clone the repo and run the install script.
 
-First install the client using npm or yarn.
-
-```javascript
-$ yarn add tigerbeetle-node # or npm install
+```bash
+$ git clone https://github.com/coilhq/tigerbeetle.git
+$ cd tigerbeetle
+$ scripts/install.sh
 ```
 
-Then create a client.
+Don't worry, this will only make changes within the `tigerbeetle`
+directory. No global changes.
+
+Then create the TigerBeetle data file.
+
+```
+$ ./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
+info(io): creating "0_0.tigerbeetle"...
+info(io): allocating 660.140625MiB...
+```
+
+And start the server.
+
+```
+$ ./tigerbeetle start --addresses=3000 0_0.tigerbeetle
+info(io): opening "0_0.tigerbeetle"...
+info(main): 0: cluster=0: listening on 127.0.0.1:3000
+```
+
+### Use Node as a CLI
+
+Now that you've got the server running with or without Docker, let's
+connect to the running server and do some accounting!
+
+First install the Node client.
+
+```javascript
+$ npm install -g tigerbeetle-node
+```
+
+Then create a client connection.
 
 ```javascript
 $ node
@@ -117,9 +153,14 @@ Now, the amount of `10` has been credited to account `2` and debited
 from account `1`. Let's query TigerBeetle for these two accounts to
 verify!
 
-```
+```javascript
 > let accounts = await client.lookupAccounts([1n, 2n]);
-> console.log(accounts.map(a => ({ id: a.id, debits_posted: a.debits_posted, credits_posted: a.credits_posted, timestamp: a.timestamp })));
+> console.log(accounts.map(a => ({
+    id: a.id,
+	debits_posted: a.debits_posted,
+	credits_posted: a.credits_posted,
+	timestamp: a.timestamp,
+  })));
 [
   {
     id: 1n,
