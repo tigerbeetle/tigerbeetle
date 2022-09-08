@@ -44,7 +44,7 @@ info(main): 0: cluster=0: listening on 0.0.0.0:3000
 To build from source, clone the repo and run the install script.
 
 ```bash
-$ git clone https://github.com/coilhq/tigerbeetle.git
+$ git clone https://github.com/tigerbeetledb/tigerbeetle.git
 $ cd tigerbeetle
 $ scripts/install.sh
 ```
@@ -197,7 +197,7 @@ For further reading:
 First grab the sources and run the setup script:
 
 ```bash
-$ git clone https://github.com/coilhq/tigerbeetle.git
+$ git clone https://github.com/tigerbeetledb/tigerbeetle.git
 $ cd tigerbeetle
 $ scripts/install.sh
 ```
