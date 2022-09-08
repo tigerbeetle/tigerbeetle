@@ -17,15 +17,15 @@ jobs:
     - name: Build tigerbeetle
       run: ./scripts/install.sh
 
+    - name: Store current tag
+      run: echo "GIT_TAG=`git tag --points-at HEAD`" >> $GITHUB_ENV
+
     # Note: this only creates builds on the platform being built. So
     # this does not build for M1 Macs. Maybe in the future we could
     # use Zig's cross-platform builds instead of relying on the
     # current platform and different Github Actions runners.
     - name: Create zip of release build
       run: zip -9 tigerbeetle-$RUNNER_OS-x64-$GIT_TAG.zip tigerbeetle
-
-    - name: Store current tag
-      run: echo "GIT_TAG=`git tag --points-at HEAD`" >> $GITHUB_ENV
 
     - run: ls -lah
       name: "Debug files"
