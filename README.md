@@ -16,7 +16,7 @@ TigerBeetle is not yet production-ready. The production version of **TigerBeetle
 
 ## QuickStart
 
-TigerBeetle is easy to run with and without Docker, depending on your
+TigerBeetle is easy to run with or without Docker, depending on your
 preference.
 
 ### With Docker
