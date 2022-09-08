@@ -280,11 +280,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // TODO Verify that tables can be found exactly before returning.
         }
 
+        /// Updates the snapshot_max on the provide tables for the given level.
+        /// The tables provided are mutable to allow their snapshots to be updated.
         pub fn update_tables(
             manifest: *Manifest,
             level: u8,
             snapshot: u64,
-            tables: []const TableInfo,
+            tables: []TableInfo,
         ) void {
             assert(tables.len > 0);
 
