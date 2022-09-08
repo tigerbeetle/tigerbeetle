@@ -27,6 +27,9 @@ jobs:
     - name: Store current tag
       run: echo "GIT_TAG=`git tag --points-at HEAD`" >> $GITHUB_ENV
 
+    - run: ls -lah
+      name: "Debug files"
+
     - name: Get Github ID for tag
       run: |
         echo "RELEASE_ID=`curl -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' https://api.github.com/repos/tigerbeetledb/tigerbeetle/releases/tags/$GIT_TAG | jq '.id'`" >> $GITHUB_ENV
