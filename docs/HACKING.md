@@ -7,7 +7,7 @@
 First grab the sources and run the setup script:
 
 ```bash
-$ git clone https://github.com/coilhq/tigerbeetle.git
+$ git clone https://github.com/tigerbeetledb/tigerbeetle.git
 $ cd tigerbeetle
 $ scripts/install.sh
 ```
