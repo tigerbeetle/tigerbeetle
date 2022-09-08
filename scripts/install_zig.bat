@@ -86,7 +86,11 @@ if exist %ZIG_DIRECTORY%\ (
 
 :: Extract and then remove the downloaded tarball:
 echo Extracting %ZIG_TARBALL%...
-powershell -Command "Expand-Archive %ZIG_TARBALL% -DestinationPath ."
+
+:: Hiding Powershell's progress bar during the extraction
+SET PS_DISABLE_PROGRESS="$ProgressPreference=[System.Management.Automation.ActionPreference]::SilentlyContinue"
+powershell -Command "%PS_DISABLE_PROGRESS%;Expand-Archive %ZIG_TARBALL% -DestinationPath ."
+
 if not exist %ZIG_TARBALL% (
   echo Failed to extract zip file.
   exit 1
