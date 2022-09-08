@@ -35,5 +35,5 @@ jobs:
         curl --fail \
           -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
           -H "Content-Type: application/zip" \
-          --data-binary @./tigerbeetle-linux-x64-$GIT_TAG.zip \
-          "https://uploads.github.com/repos/tigerbeetledb/tigerbeetle/releases/$RELEASE_ID/assets?name=tigerbeetle-linux-x64-$GIT_TAG.zip"
+          --data-binary @./tigerbeetle-$RUNNER_OS-x64-$GIT_TAG.zip \
+          "https://uploads.github.com/repos/tigerbeetledb/tigerbeetle/releases/$RELEASE_ID/assets?name=tigerbeetle-$RUNNER_OS-x64-$GIT_TAG.zip"
