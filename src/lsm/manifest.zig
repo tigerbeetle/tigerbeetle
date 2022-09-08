@@ -293,8 +293,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             // Appends update changes to the manifest log
             for (tables) |*table| {
+                var updated_table = table.*;
+                updated_table.snapshot_max = snapshot;
+
                 const log_level = @intCast(u7, level);
-                manifest.manifest_log.insert(log_level, table);
+                manifest.manifest_log.insert(log_level, &updated_table);
             }
         }
 
