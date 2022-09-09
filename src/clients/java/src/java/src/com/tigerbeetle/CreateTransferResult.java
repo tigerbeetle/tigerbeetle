@@ -75,7 +75,7 @@ public enum CreateTransferResult {
     public static CreateTransferResult fromValue(int value) {
         var values = CreateTransferResult.values();
         if (value < 0 || value >= values.length)
-            throw new IllegalArgumentException(String.format("Protocol error, invalid CreateTransferResult=%d", value));
+            throw new AssertionError("Invalid CreateTransferResult: value=%d", value);
 
         return values[value];
     }

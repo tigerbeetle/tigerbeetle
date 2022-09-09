@@ -28,25 +28,28 @@ public final class AccountsBatch extends Batch {
 
     AccountsBatch(ByteBuffer buffer)
             throws RequestException {
+
         super(buffer);
 
         final var bufferLen = buffer.capacity();
 
         // Make sure the completion handler is giving us valid data
         if (bufferLen % Account.Struct.SIZE != 0)
-            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+            throw new AssertionError(
+                    "Invalid data received from completion handler: bufferLen=%d, sizeOf(Account)=%d.",
+                    bufferLen,
+                    Account.Struct.SIZE);
 
         this.capacity = bufferLen / Account.Struct.SIZE;
         this.lenght = capacity;
     }
 
-    public void add(Account account)
-            throws IndexOutOfBoundsException {
+    public void add(Account account) {
         set(lenght, account);
     }
 
-    public Account get(int index)
-            throws IndexOutOfBoundsException {
+    public Account get(int index) {
+
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
@@ -54,10 +57,11 @@ public final class AccountsBatch extends Batch {
         return new Account(ptr);
     }
 
-    public void set(int index, Account account)
-            throws IndexOutOfBoundsException, NullPointerException {
+    public void set(int index, Account account) {
+
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
+
         if (account == null)
             throw new NullPointerException();
 
@@ -66,7 +70,10 @@ public final class AccountsBatch extends Batch {
         account.save(ptr);
 
         if (ptr.position() - start != Account.Struct.SIZE)
-            throw new IndexOutOfBoundsException("Unexpected account size");
+            throw new AssertionError("Unexpected position: ptr.position()=%d, start=%d, sizeOf(Account)=%d.",
+                    ptr.position(),
+                    start,
+                    Account.Struct.SIZE);
 
         if (index >= lenght)
             lenght = index + 1;
@@ -81,12 +88,12 @@ public final class AccountsBatch extends Batch {
         return this.capacity;
     }
 
-    public Account[] toArray()
-            throws BufferUnderflowException {
+    public Account[] toArray() {
         Account[] array = new Account[lenght];
         for (int i = 0; i < lenght; i++) {
             array[i] = get(i);
         }
+
         return array;
     }
 

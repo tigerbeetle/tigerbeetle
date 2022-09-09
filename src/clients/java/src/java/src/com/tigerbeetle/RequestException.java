@@ -1,6 +1,6 @@
 package com.tigerbeetle;
 
-public final class RequestException extends Throwable {
+public final class RequestException extends Exception {
 
     public final static class Status {
         public final static byte OK = 0;

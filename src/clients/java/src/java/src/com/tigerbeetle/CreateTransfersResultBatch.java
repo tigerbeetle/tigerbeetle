@@ -1,6 +1,5 @@
 package com.tigerbeetle;
 
-import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 
 class CreateTransfersResultBatch extends Batch {
@@ -15,13 +14,15 @@ class CreateTransfersResultBatch extends Batch {
 
         // Make sure the completion handler is giving us valid data
         if (bufferLen % CreateTransfersResult.Struct.SIZE != 0)
-            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+            throw new AssertionError(
+                    "Invalid data received from completion handler. bufferLen=%d, sizeOf(CreateTransfersResult)=%d.",
+                    bufferLen, 
+                    CreateTransfersResult.Struct.SIZE);
 
         this.lenght = bufferLen / CreateTransfersResult.Struct.SIZE;
     }
 
-    public CreateTransfersResult get(int index)
-            throws IndexOutOfBoundsException, BufferUnderflowException {
+    public CreateTransfersResult get(int index) {
         if (index < 0 || index >= lenght)
             throw new IndexOutOfBoundsException();
 
@@ -29,8 +30,7 @@ class CreateTransfersResultBatch extends Batch {
         return new CreateTransfersResult(ptr);
     }
 
-    public CreateTransfersResult[] toArray()
-            throws BufferUnderflowException {
+    public CreateTransfersResult[] toArray() {
         var array = new CreateTransfersResult[lenght];
         for (int i = 0; i < lenght; i++) {
             array[i] = get(i);
@@ -41,7 +41,7 @@ class CreateTransfersResultBatch extends Batch {
     @Override
     public int getLenght() {
         return lenght;
-    }    
+    }
 
     @Override
     public long getBufferLen() {
