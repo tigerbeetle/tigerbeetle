@@ -222,10 +222,11 @@ pub fn ManifestLevelType(
 
         /// Set snapshot_max for the given tables in the ManifestLevel.
         /// The tables slice must be sorted by table min/max key.
+        /// The tables slice is mutable so that this function can update their snapshots.
         /// Asserts that the tables currently have snapshot_max of math.maxInt(u64).
         /// Asserts that all tables in the ManifestLevel in the key range tables[0].key_min
         /// to tables[tables.len - 1].key_max are present in the tables slice.
-        pub fn set_snapshot_max(level: *Self, snapshot: u64, tables: []const TableInfo) void {
+        pub fn set_snapshot_max(level: *Self, snapshot: u64, tables: []TableInfo) void {
             assert(snapshot < lsm.snapshot_latest);
             assert(tables.len > 0);
             assert(level.table_count_visible >= tables.len);
@@ -261,6 +262,11 @@ pub fn ManifestLevelType(
                 assert(table.equal(&tables[i]));
 
                 assert(table.snapshot_max == math.maxInt(u64));
+                table.snapshot_max = snapshot;
+            }
+
+            // Don't forget to update the original tables provided.
+            for (tables) |*table| {
                 table.snapshot_max = snapshot;
             }
 
@@ -952,9 +958,6 @@ pub fn TestContext(
             const snapshot = context.take_snapshot();
 
             context.level.set_snapshot_max(snapshot, context.reference.items[index..][0..count]);
-            for (context.reference.items[index..][0..count]) |*table| {
-                table.snapshot_max = snapshot;
-            }
             for (context.snapshot_tables.slice()) |tables| {
                 for (tables.items) |*table| {
                     for (context.reference.items[index..][0..count]) |modified| {

@@ -296,7 +296,7 @@ pub fn CompactionType(
         fn update_manifest(compaction: *Compaction, buffer: *TableInfoBuffer) void {
             assert(buffer == &compaction.update_level_b or buffer == &compaction.insert_level_b);
 
-            const tables: []const TableInfo = buffer.drain();
+            const tables: []TableInfo = buffer.drain();
             if (tables.len == 0) return;
 
             for (tables) |table| {
