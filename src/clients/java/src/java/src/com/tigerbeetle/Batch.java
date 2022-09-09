@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.UUID;
 
 public abstract class Batch {
 
@@ -27,4 +28,10 @@ public abstract class Batch {
     public abstract long getBufferLen();
 
     public abstract int getLenght();
+
+    protected static UUID uuidFromBuffer(ByteBuffer buffer) {
+        long leastSignificantBits = buffer.getLong();
+        long mostSignificantBits = buffer.getLong();
+        return new UUID(mostSignificantBits, leastSignificantBits);
+    }
 }

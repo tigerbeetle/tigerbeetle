@@ -1,4 +1,4 @@
-package com.tigerbeetle.tests;
+package com.tigerbeetle;
 
 import static org.junit.Assert.assertEquals;
 
@@ -17,12 +17,9 @@ import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 
-import com.tigerbeetle.Client;
-import com.tigerbeetle.CreateTransferResult;
-import com.tigerbeetle.Transfer;
-import com.tigerbeetle.TransferFlags;
-import com.tigerbeetle.Account;
-
+/**
+ * Integration tests using a tigerbeetle instance
+ */
 public class IntegrationTest {
 
     private static Account account1;

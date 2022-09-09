@@ -15,4 +15,9 @@ public final class CreateAccountsResult {
         index = ptr.getInt();
         result = CreateAccountResult.fromValue(ptr.getInt());
     }
+
+    CreateAccountsResult(int index, CreateAccountResult result) {
+        this.index = index;
+        this.result = result;
+    }
 }

@@ -16,7 +16,7 @@ public final class Account {
     private UUID userData;
     private int ledger;
     private short code;
-    private AccountFlags flags;
+    private short flags;
     private long creditsPosted;
     private long creditsPending;
     private long debitsPosted;
@@ -28,7 +28,7 @@ public final class Account {
         userData = ZERO;
         ledger = 0;
         code = 0;
-        flags = AccountFlags.None;
+        flags = AccountFlags.NONE;
         creditsPosted = 0;
         creditsPending = 0;
         debitsPosted = 0;
@@ -37,12 +37,12 @@ public final class Account {
     }
 
     Account(ByteBuffer ptr) {
-        id = new UUID(ptr.getLong(), ptr.getLong());
-        userData = new UUID(ptr.getLong(), ptr.getLong());
+        id = Batch.uuidFromBuffer(ptr);
+        userData = Batch.uuidFromBuffer(ptr);
         ptr = ptr.position(ptr.position() + Struct.RESERVED.length);
         ledger = ptr.getInt();
         code = ptr.getShort();
-        flags = AccountFlags.fromValue(ptr.getShort());
+        flags = ptr.getShort();
         debitsPending = ptr.getLong();
         debitsPosted = ptr.getLong();
         creditsPending = ptr.getLong();
@@ -55,15 +55,21 @@ public final class Account {
     }
 
     public void setCode(int code) {
+        if (code < 0 || code > Character.MAX_VALUE)
+            throw new IllegalArgumentException("Code must be a unsigned 16 bits value");
+
         this.code = (short) code;
     }
 
-    public AccountFlags getFlags() {
+    public short getFlags() {
         return flags;
     }
 
-    public void setFlags(AccountFlags flags) {
-        this.flags = flags;
+    public void setFlags(int flags) {
+        if (flags < 0 || flags > Character.MAX_VALUE)
+            throw new IllegalArgumentException("Flags must be a unsigned 16 bits value");
+
+        this.flags = (short) flags;
     }
 
     public long getDebitsPending() {
@@ -139,14 +145,14 @@ public final class Account {
     void save(ByteBuffer ptr) {
 
         ptr
-                .putLong(id.getMostSignificantBits())
                 .putLong(id.getLeastSignificantBits())
-                .putLong(userData.getMostSignificantBits())
+                .putLong(id.getMostSignificantBits())
                 .putLong(userData.getLeastSignificantBits())
+                .putLong(userData.getMostSignificantBits())
                 .put(Struct.RESERVED)
                 .putInt(ledger)
                 .putShort(code)
-                .putShort(flags.value)
+                .putShort(flags)
                 .putLong(debitsPending)
                 .putLong(debitsPosted)
                 .putLong(creditsPending)

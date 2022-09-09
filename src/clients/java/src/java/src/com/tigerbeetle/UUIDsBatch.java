@@ -56,7 +56,7 @@ public class UUIDsBatch extends Batch {
             throw new IndexOutOfBoundsException();
 
         var ptr = getBuffer().position(index * Struct.SIZE);
-        return new UUID(ptr.getLong(), ptr.getLong());
+        return uuidFromBuffer(ptr);
     }
 
     public void Set(int index, UUID uuid)
@@ -70,8 +70,8 @@ public class UUIDsBatch extends Batch {
         var ptr = getBuffer().position(start);
 
         ptr
-                .putLong(uuid.getMostSignificantBits())
-                .putLong(uuid.getLeastSignificantBits());
+                .putLong(uuid.getLeastSignificantBits())
+                .putLong(uuid.getMostSignificantBits());
 
         if (ptr.position() - start != Struct.SIZE)
             throw new IndexOutOfBoundsException("Unexpected account size");

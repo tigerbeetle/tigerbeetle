@@ -40,12 +40,12 @@ public final class Transfer {
 
     Transfer(ByteBuffer ptr) {
 
-        id = new UUID(ptr.getLong(), ptr.getLong());
-        debitAccountId = new UUID(ptr.getLong(), ptr.getLong());
-        creditAccountId = new UUID(ptr.getLong(), ptr.getLong());
-        userData = new UUID(ptr.getLong(), ptr.getLong());
+        id = Batch.uuidFromBuffer(ptr);
+        debitAccountId = Batch.uuidFromBuffer(ptr);
+        creditAccountId = Batch.uuidFromBuffer(ptr);
+        userData = Batch.uuidFromBuffer(ptr);
         ptr = ptr.position(ptr.position() + Struct.RESERVED.length);
-        pendingId = new UUID(ptr.getLong(), ptr.getLong());
+        pendingId = Batch.uuidFromBuffer(ptr);
         timeout = ptr.getLong();
         ledger = ptr.getInt();
         code = ptr.getShort();
@@ -128,26 +128,32 @@ public final class Transfer {
         return code;
     }
 
-    public void setCode(short code) {
-        this.code = code;
+    public void setCode(int code) {
+        if (code < 0 || code > Character.MAX_VALUE)
+            throw new IllegalArgumentException("Code must be a unsigned 16 bits value");
+
+        this.code = (short) code;
     }
 
     public short getFlags() {
         return flags;
     }
 
-    public void setFlags(short flags) {
-        this.flags = flags;
+    public void setFlags(int flags) {
+        if (flags < 0 || flags > Character.MAX_VALUE)
+            throw new IllegalArgumentException("Flags must be a unsigned 16 bits value");
+
+        this.flags = (short) flags;
     }
 
     public long getAmount() {
         return amount;
     }
 
-    public void setAmount(long amount)
-            throws IllegalArgumentException {
-        if (amount < 0) 
+    public void setAmount(long amount) {
+        if (amount < 0)
             throw new IllegalArgumentException();
+
         this.amount = amount;
     }
 
@@ -161,17 +167,17 @@ public final class Transfer {
 
     void save(ByteBuffer ptr) {
         ptr
-                .putLong(id.getMostSignificantBits())
                 .putLong(id.getLeastSignificantBits())
-                .putLong(debitAccountId.getMostSignificantBits())
+                .putLong(id.getMostSignificantBits())
                 .putLong(debitAccountId.getLeastSignificantBits())
-                .putLong(creditAccountId.getMostSignificantBits())
+                .putLong(debitAccountId.getMostSignificantBits())
                 .putLong(creditAccountId.getLeastSignificantBits())
-                .putLong(userData.getMostSignificantBits())
+                .putLong(creditAccountId.getMostSignificantBits())
                 .putLong(userData.getLeastSignificantBits())
+                .putLong(userData.getMostSignificantBits())
                 .put(Struct.RESERVED)
-                .putLong(pendingId.getMostSignificantBits())
                 .putLong(pendingId.getLeastSignificantBits())
+                .putLong(pendingId.getMostSignificantBits())
                 .putLong(timeout)
                 .putInt(ledger)
                 .putShort(code)
