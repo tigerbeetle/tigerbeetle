@@ -27,9 +27,6 @@ jobs:
     - name: Create zip of release build
       run: zip -9 tigerbeetle-$RUNNER_OS-x64-$GIT_TAG.zip tigerbeetle
 
-    - run: ls -lah
-      name: "Debug files"
-
     - name: Get Github ID for tag
       run: |
         echo "RELEASE_ID=`curl -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' https://api.github.com/repos/tigerbeetledb/tigerbeetle/releases/tags/$GIT_TAG | jq '.id'`" >> $GITHUB_ENV
