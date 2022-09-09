@@ -356,31 +356,31 @@ pub fn CompactionType(
             if (compaction.iterator_b.tick()) compaction.io_start();
             
             // Start writing blocks prepared by the merge iterator from a previous compact_tick().
-            inline for ([_][]const u8{ "data", "filter", "index" }) |field| {
-                const write_callback = struct {
-                    fn callback(write: *Grid.Write) void {
-                        const block_write = @fieldParentPtr(BlockWrite, "write", write);
-                        const _compaction = @fieldParentPtr(Compaction, field, block_write);
+            compaction.io_write_start("data");
+            compaction.io_write_start("filter");
+            compaction.io_write_start("index");
+        }
 
-                        log.debug("0x{x} write finished pending={}", .{@ptrToInt(_compaction), _compaction.io_pending});
-                        _compaction.io_finish();
-                    }
-                }.callback;
-
-                const block_write: *BlockWrite = &@field(compaction, field);
-                if (block_write.ready) {
-                    block_write.ready = false;
-
-                    compaction.io_start();
-                    log.debug("0x{x} write started pending={}", .{@ptrToInt(compaction), compaction.io_pending});
-
-                    compaction.grid.write_block(
-                        write_callback,
-                        &block_write.write,
-                        block_write.block,
-                        Table.block_address(block_write.block),
-                    );
+        fn io_write_start(compaction: *Compaction, comptime field: []const u8) void {
+            const write_callback = struct {
+                fn callback(write: *Grid.Write) void {
+                    const block_write = @fieldParentPtr(BlockWrite, "write", write);
+                    const _compaction = @fieldParentPtr(Compaction, field, block_write);
+                    _compaction.io_finish();
                 }
+            }.callback;
+
+            const block_write: *BlockWrite = &@field(compaction, field);
+            if (block_write.ready) {
+                block_write.ready = false;
+
+                compaction.io_start();
+                compaction.grid.write_block(
+                    write_callback,
+                    &block_write.write,
+                    block_write.block,
+                    Table.block_address(block_write.block),
+                );
             }
         }
 
@@ -564,33 +564,18 @@ pub fn CompactionType(
             compaction.status = .done;
         }
 
-        /// Must be called after the compact_tick() callback has completed.
-        /// Returns true if the Compaction has, or was, reset by this call.
-        /// Returns false if the Compaction is still currently processing
-        /// (meaning another compact_tick() should be called to drive the Compaction).
-        pub fn reset(compaction: *Compaction) bool {
+        pub fn reset(compaction: *Compaction) void {
+            assert(compaction.status == .done);
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
-
-            // Compaction has already been reset() or was never start()'ed.
-            if (compaction.status == .idle) return true;
-
-            // Compaction was start()'ed but hasn't fully completed. Call compact_tick() again to finish.
-            if (compaction.status == .processing) {
-                assert(compaction.merge_status != .done);
-                return false;
-            }
-
-            // Compaction was completed. Double check that manifest updates have been made
-            // then reset everything so it can be start()'ed again.
-            assert(compaction.status == .done);
             assert(compaction.merge_status == .done);
+
+            // Double check that manifest updates have been applied.
             assert(compaction.update_level_b.drain().len == 0);
             assert(compaction.insert_level_b.drain().len == 0);
 
             compaction.status = .idle;
             compaction.merge_status = .idle;
-            return true;
         }
     };
 }
