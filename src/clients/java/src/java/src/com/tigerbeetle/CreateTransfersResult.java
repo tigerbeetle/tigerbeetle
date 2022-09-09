@@ -15,4 +15,9 @@ public final class CreateTransfersResult {
         index = ptr.getInt();
         result = CreateTransferResult.fromValue(ptr.getInt());
     }
+
+    CreateTransfersResult(int index, CreateTransferResult result) {
+        this.index = index;
+        this.result = result;
+    }    
 }
