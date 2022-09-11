@@ -20,15 +20,13 @@ public final class Client implements AutoCloseable {
     private long packetsHead;
     private long packetsTail;
 
-    public Client(int clusterID, String[] replicaAddresses)
-            throws InitializationException {
+    public Client(int clusterID, String[] replicaAddresses) {
         this(clusterID, replicaAddresses, DEFAULT_MAX_CONCURRENCY);
     }
 
-    public Client(int clusterID, String[] replicaAddresses, int maxConcurrency)
-            throws InitializationException {
+    public Client(int clusterID, String[] replicaAddresses, int maxConcurrency) {
         if (clusterID < 0)
-            throw new IllegalArgumentException("clusterID must be positive");
+            throw new IllegalArgumentException("ClusterID must be positive");
 
         if (replicaAddresses == null || replicaAddresses.length == 0)
             throw new IllegalArgumentException("Invalid replica addresses");
@@ -48,6 +46,10 @@ public final class Client implements AutoCloseable {
 
         this.clusterID = clusterID;
         int status = clientInit(clusterID, joiner.toString(), maxConcurrency);
+
+        if (status == InitializationException.Status.INVALID_ADDRESS)
+            throw new IllegalArgumentException("Replica addresses format is invalid.");
+
         if (status != 0)
             throw new InitializationException(status);
 
@@ -74,27 +76,25 @@ public final class Client implements AutoCloseable {
     }
 
     public CreateAccountsResult[] createAccounts(AccountsBatch batch)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         var request = new CreateAccountsRequest(this, batch);
         request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
 
-    public Future<CreateAccountsResult[]> createAccountsAsync(Account[] batch)
-            throws InterruptedException {
+    public Future<CreateAccountsResult[]> createAccountsAsync(Account[] batch) {
         return createAccountsAsync(new AccountsBatch(batch));
     }
 
-    public Future<CreateAccountsResult[]> createAccountsAsync(AccountsBatch batch)
-            throws InterruptedException {
+    public Future<CreateAccountsResult[]> createAccountsAsync(AccountsBatch batch) {
         var request = new CreateAccountsRequest(this, batch);
         request.beginRequest();
         return request;
     }
 
     public Account lookupAccount(UUID uuid)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -107,32 +107,30 @@ public final class Client implements AutoCloseable {
     }
 
     public Account[] lookupAccounts(UUID[] batch)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         return lookupAccounts(new UUIDsBatch(batch));
     }
 
     public Account[] lookupAccounts(UUIDsBatch batch)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         var request = new LookupAccountsRequest(this, batch);
         request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
 
-    public Future<Account[]> lookupAccountsAsync(UUID[] batch)
-            throws InterruptedException {
+    public Future<Account[]> lookupAccountsAsync(UUID[] batch) {
         return lookupAccountsAsync(new UUIDsBatch(batch));
     }
 
-    public Future<Account[]> lookupAccountsAsync(UUIDsBatch batch)
-            throws InterruptedException {
+    public Future<Account[]> lookupAccountsAsync(UUIDsBatch batch) {
         var request = new LookupAccountsRequest(this, batch);
         request.beginRequest();
         return request;
     }
 
     public CreateTransferResult createTransfer(Transfer transfer)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         var batch = new TransfersBatch(1);
         batch.add(transfer);
 
@@ -145,32 +143,30 @@ public final class Client implements AutoCloseable {
     }
 
     public CreateTransfersResult[] createTransfers(Transfer[] batch)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         return createTransfers(new TransfersBatch(batch));
     }
 
     public CreateTransfersResult[] createTransfers(TransfersBatch batch)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         var request = new CreateTransfersRequest(this, batch);
         request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
 
-    public Future<CreateTransfersResult[]> createTransfersAsync(Transfer[] batch)
-            throws InterruptedException {
+    public Future<CreateTransfersResult[]> createTransfersAsync(Transfer[] batch) {
         return createTransfersAsync(new TransfersBatch(batch));
     }
 
-    public Future<CreateTransfersResult[]> createTransfersAsync(TransfersBatch batch)
-            throws InterruptedException {
+    public Future<CreateTransfersResult[]> createTransfersAsync(TransfersBatch batch) {
         var request = new CreateTransfersRequest(this, batch);
         request.beginRequest();
         return request;
     }
 
     public Transfer lookupTransfer(UUID uuid)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -183,48 +179,55 @@ public final class Client implements AutoCloseable {
     }
 
     public Transfer[] lookupTransfers(UUID[] batch)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         return lookupTransfers(new UUIDsBatch(batch));
     }
 
     public Transfer[] lookupTransfers(UUIDsBatch batch)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         var request = new LookupTransfersRequest(this, batch);
         request.beginRequest();
         request.waitForCompletion();
         return request.getResult();
     }
 
-    public Future<Transfer[]> lookupTransfersAsync(UUID[] batch)
-            throws InterruptedException {
+    public Future<Transfer[]> lookupTransfersAsync(UUID[] batch) {
         return lookupTransfersAsync(new UUIDsBatch(batch));
     }
 
-    public Future<Transfer[]> lookupTransfersAsync(UUIDsBatch batch)
-            throws InterruptedException {
+    public Future<Transfer[]> lookupTransfersAsync(UUIDsBatch batch) {
         var request = new LookupTransfersRequest(this, batch);
         request.beginRequest();
         return request;
     }
 
-    void submit(Request<?> request)
-            throws InterruptedException {
+    void submit(Request<?> request) {
         long packet = adquirePacket();
         submit(clientHandle, request, packet);
     }
 
-    private long adquirePacket()
-            throws InterruptedException, IllegalStateException {
+    private long adquirePacket() {
 
         // Assure that only the max number of concurrent requests can adquire a packet
         // It forces other threads to wait until a packet became available
         // We also assure that the clientHandle will be zeroed only after all permits
         // have been released
         final int TIMEOUT = 5;
+        boolean adquired = false;
         do {
+
             if (clientHandle == 0)
                 throw new IllegalStateException("Client is closed");
-        } while (!maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS));
+
+            try {
+                adquired = maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException interruptedException) {
+
+                // This exception should never exposed by the API to be handled by the user
+                throw new AssertionError(interruptedException, "Unexpected thread interruption on adquiring a packet.");
+            }
+
+        } while (!adquired);
 
         synchronized (this) {
             return popPacket(packetsHead, packetsTail);

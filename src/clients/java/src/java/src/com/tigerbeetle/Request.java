@@ -44,11 +44,12 @@ abstract class Request<T> implements Future<T[]> {
             throw new IllegalArgumentException("Empty batch");
     }
 
-    public void beginRequest()
-            throws InterruptedException {
+    public void beginRequest() {
         client.submit(this);
     }
 
+    // Used only by the JNI side
+    @SuppressWarnings("unused")
     private void endRequest(byte receivedOperation, ByteBuffer buffer, long packet, byte status) {
 
         // This method is called from the JNI side, on the tb_client thread
@@ -119,7 +120,7 @@ abstract class Request<T> implements Future<T[]> {
 
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
-        // Cancel a tigerbeetle request is not supported
+        // Canceling a request is not supported
         return false;
     }
 
@@ -133,21 +134,36 @@ abstract class Request<T> implements Future<T[]> {
         return result != null;
     }
 
-    void waitForCompletion()
-            throws InterruptedException {
+    void waitForCompletion() {
         synchronized (this) {
             while (!isDone()) {
-                wait();
+
+                try {
+                    wait();
+                } catch (InterruptedException interruptedException) {
+
+                    // Since we don't support canceling an ongoing request
+                    // this exception should never exposed by the API to be handled by the user
+                    throw new AssertionError(interruptedException, "Unexpected thread interruption.");
+                }
             }
         }
     }
 
-    boolean waitForCompletion(long timeoutMillis)
-            throws InterruptedException {
+    boolean waitForCompletion(long timeoutMillis) {
         synchronized (this) {
             if (!isDone()) {
-                wait(timeoutMillis);
+
+                try {
+                    wait(timeoutMillis);
+                } catch (InterruptedException interruptedException) {
+                    // Since we don't support canceling an ongoing request
+                    // this exception should never exposed by the API to be handled by the user
+                    // It is safe to just ignore here and just act like it was a timeout
+                }
+
                 return isDone();
+
             } else {
                 return true;
             }

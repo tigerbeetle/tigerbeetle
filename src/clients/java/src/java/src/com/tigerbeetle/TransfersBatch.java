@@ -1,6 +1,5 @@
 package com.tigerbeetle;
 
-import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 
 public final class TransfersBatch extends Batch {
