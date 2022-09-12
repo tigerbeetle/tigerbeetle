@@ -95,7 +95,8 @@ pub const connections_max = replicas_max + clients_max;
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const message_size_max = switch (deployment_environment) {
     // Use a small message size during the simulator for improved performance.
-    .simulation => sector_size,
+    // (*2 so that there is room for pipeline_max headers in the DVC).
+    .simulation => sector_size * 2,
     else => 1 * 1024 * 1024,
 };
 
