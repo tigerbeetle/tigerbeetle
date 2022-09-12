@@ -58,7 +58,7 @@ public final class Client implements AutoCloseable {
     }
 
     public CreateAccountResult createAccount(Account account)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         var batch = new AccountsBatch(1);
         batch.add(account);
 
@@ -71,7 +71,7 @@ public final class Client implements AutoCloseable {
     }
 
     public CreateAccountsResult[] createAccounts(Account[] batch)
-            throws InterruptedException, RequestException {
+            throws RequestException {
         return createAccounts(new AccountsBatch(batch));
     }
 
@@ -79,7 +79,7 @@ public final class Client implements AutoCloseable {
             throws RequestException {
         var request = new CreateAccountsRequest(this, batch);
         request.beginRequest();
-        request.waitForCompletion();
+        request.waitForCompletionUninterruptibly();
         return request.getResult();
     }
 
@@ -115,7 +115,7 @@ public final class Client implements AutoCloseable {
             throws RequestException {
         var request = new LookupAccountsRequest(this, batch);
         request.beginRequest();
-        request.waitForCompletion();
+        request.waitForCompletionUninterruptibly();
         return request.getResult();
     }
 
@@ -151,7 +151,7 @@ public final class Client implements AutoCloseable {
             throws RequestException {
         var request = new CreateTransfersRequest(this, batch);
         request.beginRequest();
-        request.waitForCompletion();
+        request.waitForCompletionUninterruptibly();
         return request.getResult();
     }
 
@@ -187,7 +187,7 @@ public final class Client implements AutoCloseable {
             throws RequestException {
         var request = new LookupTransfersRequest(this, batch);
         request.beginRequest();
-        request.waitForCompletion();
+        request.waitForCompletionUninterruptibly();
         return request.getResult();
     }
 

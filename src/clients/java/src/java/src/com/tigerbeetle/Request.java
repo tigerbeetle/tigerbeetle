@@ -134,36 +134,33 @@ abstract class Request<T> implements Future<T[]> {
         return result != null;
     }
 
-    void waitForCompletion() {
+    void waitForCompletionUninterruptibly() {
+        try {
+            waitForCompletion();
+        } catch (InterruptedException interruptedException) {
+            // Since we don't support canceling an ongoing request
+            // this exception should never exposed by the API to be handled by the user
+            throw new AssertionError(interruptedException, "Unexpected thread interruption on waitForCompletion.");
+        }
+    }
+
+    void waitForCompletion()
+            throws InterruptedException {
+
         synchronized (this) {
             while (!isDone()) {
-
-                try {
-                    wait();
-                } catch (InterruptedException interruptedException) {
-
-                    // Since we don't support canceling an ongoing request
-                    // this exception should never exposed by the API to be handled by the user
-                    throw new AssertionError(interruptedException, "Unexpected thread interruption.");
-                }
+                wait();
             }
         }
     }
 
-    boolean waitForCompletion(long timeoutMillis) {
+    boolean waitForCompletion(long timeoutMillis)
+            throws InterruptedException {
+
         synchronized (this) {
             if (!isDone()) {
-
-                try {
-                    wait(timeoutMillis);
-                } catch (InterruptedException interruptedException) {
-                    // Since we don't support canceling an ongoing request
-                    // this exception should never exposed by the API to be handled by the user
-                    // It is safe to just ignore here and just act like it was a timeout
-                }
-
+                wait(timeoutMillis);
                 return isDone();
-
             } else {
                 return true;
             }
