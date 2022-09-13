@@ -1083,7 +1083,10 @@ const TestContext = struct {
         );
         errdefer ctx.storage.deinit(allocator);
 
-        ctx.message_pool = .{ .free_list = null };
+        ctx.message_pool = .{
+            .free_list = null,
+            .messages_max = 0,
+        };
 
         ctx.superblock = try SuperBlock.init(allocator, &ctx.storage, &ctx.message_pool);
         errdefer ctx.superblock.deinit(allocator);
