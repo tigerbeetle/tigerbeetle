@@ -22,6 +22,7 @@ the account back to a row in a SQL database.
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
+* Must not be zero or `2^128 - 1`
 * Must be unique
 
 ### `user_data`
@@ -60,7 +61,7 @@ Constraints:
 
 ### `code`
 
-Reason for the transfer.
+A user-defined enum representing the type of the account.
 
 As an example, you might use `1` to represent deposits and `2` to
 represent settlements.
@@ -68,6 +69,7 @@ represent settlements.
 Constraints:
 
 * Type is 16-bit unsigned integer (2 bytes)
+* Must not be zero
 
 ### `flag`
 
@@ -113,6 +115,9 @@ Constraints:
 
 Time the account was created. This is set by TigerBeetle. The format
 is UNIX timestamp in nanoseconds.
+
+It is set by TigerBeetle the moment the account is committed (created
+by consensus).
 
 Constraints:
 
