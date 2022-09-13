@@ -68,6 +68,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             cache_size_accounts: u32,
             cache_size_transfers: u32,
             cache_size_posted: u32,
+            commit_count_max_accounts: u32,
+            commit_count_max_transfers: u32,
+            commit_count_max_posted: u32,
         };
 
         prepare_timestamp: u64,
@@ -95,15 +98,15 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .{
                     .accounts = .{
                         .cache_size = options.cache_size_accounts,
-                        .commit_count_max = 8191,
+                        .commit_count_max = options.commit_count_max_accounts,
                     },
                     .transfers = .{
                         .cache_size = options.cache_size_transfers,
-                        .commit_count_max = 8191 * 2,
+                        .commit_count_max = options.commit_count_max_transfers,
                     },
                     .posted = .{
                         .cache_size = options.cache_size_posted,
-                        .commit_count_max = 8191 * 2,
+                        .commit_count_max = options.commit_count_max_posted,
                     },
                 },
             );
@@ -368,7 +371,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         pub fn tick(self: *StateMachine) void {
-            self.forest.tick();
+            _ = self;
         }
 
         pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
@@ -970,7 +973,11 @@ const TestContext = struct {
     grid: Grid,
     state_machine: StateMachine,
 
-    fn init(ctx: *TestContext, allocator: mem.Allocator, options: StateMachine.Options) !void {
+    fn init(ctx: *TestContext, allocator: mem.Allocator, options: struct {
+        cache_size_accounts: u32,
+        cache_size_transfers: u32,
+        cache_size_posted: u32,
+    }) !void {
         ctx.storage = try Storage.init(
             allocator,
             4096,
@@ -999,7 +1006,16 @@ const TestContext = struct {
         ctx.grid = try Grid.init(allocator, &ctx.superblock);
         errdefer ctx.grid.deinit(allocator);
 
-        ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, options);
+        ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
+            .lsm_forest_node_count = 1,
+            .cache_size_accounts = options.cache_size_accounts,
+            .cache_size_transfers = options.cache_size_transfers,
+            .cache_size_posted = options.cache_size_posted,
+            // Overestimate the commit_count_max values because the test never compacts.
+            .commit_count_max_accounts = 1000,
+            .commit_count_max_transfers = 1000,
+            .commit_count_max_posted = 1000,
+        });
         errdefer ctx.state_machine.deinit(allocator);
     }
 
@@ -1365,7 +1381,6 @@ test "create/lookup/rollback accounts" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .lsm_forest_node_count = 1,
         .cache_size_accounts = vectors.len,
         .cache_size_transfers = 0,
         .cache_size_posted = 0,
@@ -1431,7 +1446,6 @@ test "linked accounts" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .lsm_forest_node_count = 1,
         .cache_size_accounts = accounts_max,
         .cache_size_transfers = transfers_max,
         .cache_size_posted = transfers_pending_max,
@@ -1519,7 +1533,6 @@ test "create/lookup/rollback transfers" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .lsm_forest_node_count = 1,
         .cache_size_accounts = accounts.len,
         .cache_size_transfers = 1,
         .cache_size_posted = 0,
@@ -2199,7 +2212,6 @@ test "create/lookup/rollback 2-phase transfers" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .lsm_forest_node_count = 1,
         .cache_size_accounts = accounts.len,
         .cache_size_transfers = 100,
         .cache_size_posted = 1,

@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const tigerbeetle = @import("tigerbeetle.zig");
 
 const Environment = enum {
     development,
@@ -64,6 +65,16 @@ pub const transfers_max = switch (deployment_environment) {
 /// The maximum number of two-phase transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const transfers_pending_max = transfers_max;
+
+// TODO Move these to a separate "internal computed constants" file.
+/// The maximum number of objects that may be changed by a commit.
+/// See `Groove.init`'s `commit_count_max` for more detail.
+// 128 == @sizeOf(Header)
+// *2 because creating a transfer will update 2 accounts.
+pub const commit_count_max_accounts = 2 * @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Account));
+// *2 because creating a post/void-transfer queries the post/void transfer and the pending transfer.
+pub const commit_count_max_transfers = 2 * @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Transfer));
+pub const commit_count_max_posted = @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Transfer));
 
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
@@ -235,8 +246,11 @@ pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size
 pub const lsm_trees = 30;
 
 /// The number of levels in an LSM tree.
+/// Higher levels increases read amplification, but increase total storage capacity.
 pub const lsm_levels = 7;
 
+/// The number of tables at level i (0≤i<lsm_levels) is `pow(lsm_growth_factor, i+1)`.
+/// A higher growth factor increases write amplification, but decreases read amplification.
 pub const lsm_growth_factor = 8;
 
 /// The maximum key size for an LSM tree in bytes.
@@ -308,7 +322,7 @@ pub const verify = true;
 pub const journal_size_headers = journal_slot_count * 128; // 128 == @sizeOf(Header)
 pub const journal_size_prepares = journal_slot_count * message_size_max;
 
- // TODO Move these into a separate `config_valid.zig` which we import here:
+// TODO Move these into a separate `config_valid.zig` which we import here:
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
@@ -341,8 +355,20 @@ comptime {
     assert(message_size_max % sector_size == 0);
     assert(message_size_max >= sector_size);
 
+    // ManifestLog serializes the level as a u7.
+    assert(lsm_levels > 0);
+    assert(lsm_levels <= std.math.maxInt(u7));
+
+    assert(block_size % sector_size == 0);
+    assert(lsm_table_size_max % sector_size == 0);
+    assert(lsm_table_size_max % block_size == 0);
+
     // The LSM tree uses half-measures to balance compaction.
     assert(lsm_batch_multiple % 2 == 0);
+
+    assert(commit_count_max_accounts > 0);
+    assert(commit_count_max_transfers > 0);
+    assert(commit_count_max_posted > 0);
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.

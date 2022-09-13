@@ -1,3 +1,5 @@
+//! SuperBlock.Manifest maintains an on-disk registry of all ManifestLog blocks.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.superblock_manifest);
@@ -5,7 +7,15 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 
+/// SuperBlock.Manifest schema:
+/// │ [manifest.count]u128 │ Tree id (for the owner of the ManifestLog)
+/// │ [manifest.count]u128 │ ManifestLog block checksum
+/// │ [manifest.count]u64  │ ManifestLog block address
+/// Entries are ordered from oldest to newest.
 pub const Manifest = struct {
+    // This is a struct-of-arrays of `BlockReference`s.
+    // Only the first `manifest.count` entries are valid.
+    // Entries are ordered from oldest to newest.
     trees: []u128,
     checksums: []u128,
     addresses: []u64,
@@ -25,8 +35,8 @@ pub const Manifest = struct {
     compaction_set: std.AutoHashMapUnmanaged(u64, void),
 
     pub const TableExtent = struct {
-        block: u64,
-        entry: u32,
+        block: u64, // ManifestLog block address
+        entry: u32, // index within the ManifestLog Label/TableInfo arrays
     };
 
     pub fn init(
@@ -200,7 +210,7 @@ pub const Manifest = struct {
         }
     }
 
-    pub fn index_for_address(manifest: *const Manifest, address: u64) ?u32 {
+    fn index_for_address(manifest: *const Manifest, address: u64) ?u32 {
         assert(address > 0);
 
         var index: u32 = 0;
@@ -293,6 +303,7 @@ pub const Manifest = struct {
         }
     }
 
+    /// Reference to a ManifestLog block.
     pub const BlockReference = struct {
         tree: u128,
         checksum: u128,

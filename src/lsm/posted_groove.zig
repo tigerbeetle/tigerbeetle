@@ -69,11 +69,11 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             Value.tombstone_from_key,
         );
 
-        const Tree = TreeType(Table, Storage, "groove");
+        const Tree = TreeType(Table, Storage, "posted_groove");
         const Grid = GridType(Storage);
 
         const PrefetchIDs = std.AutoHashMapUnmanaged(u128, void);
-        const PrefetchObjects = std.AutoHashMapUnmanaged(u128, bool);
+        const PrefetchObjects = std.AutoHashMapUnmanaged(u128, bool); // true:posted, false:voided
 
         cache: *Tree.ValueCache,
         tree: Tree,
@@ -90,7 +90,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         /// sufficient to query this hashmap alone to know the state of the LSM trees.
         prefetch_objects: PrefetchObjects,
 
-        /// This field is necessary to expose the same open()/compact_cpu()/compact_io() function
+        /// This field is necessary to expose the same open()/compact()/checkpoint() function
         /// signatures as the real Groove type.
         callback: ?fn (*PostedGroove) void = null,
 
@@ -120,7 +120,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             // some of these accounts may exist, requiring a remove/put to update the index.
             commit_count_max: u32,
         ) !PostedGroove {
-            // Cache is dynamically allocated to pass a pointer into the Object tree.
+            // Cache is heap-allocated to pass a pointer into the Object tree.
             const cache = try allocator.create(Tree.ValueCache);
             errdefer allocator.destroy(cache);
 
@@ -160,8 +160,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         }
 
         pub fn deinit(groove: *PostedGroove, allocator: mem.Allocator) void {
-            assert(groove.callback == null);
-
             groove.tree.deinit(allocator);
             groove.cache.deinit(allocator);
             allocator.destroy(groove.cache);

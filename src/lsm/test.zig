@@ -42,7 +42,7 @@ const Forest = ForestType(Storage, .{
 const Environment = struct {
     const cluster = 32;
     const replica = 4;
-    const size_max = (512 + 64) * 1024 * 1024;
+    const size_max = vsr.Zone.superblock.size().? + vsr.Zone.wal.size().? + (512 + 64) * 1024 * 1024;
 
     const node_count = 1024;
     const cache_size = 2 * 1024 * 1024;
@@ -50,10 +50,12 @@ const Environment = struct {
         .transfers = .{
             .cache_size = cache_size,
             .commit_count_max = 8191 * 2,
+            .prefetch_count_max = 8191 * 2,
         },
         .accounts = .{
             .cache_size = cache_size,
             .commit_count_max = 8191,
+            .prefetch_count_max = 8191,
         },
     };
 

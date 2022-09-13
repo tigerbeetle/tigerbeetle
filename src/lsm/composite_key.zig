@@ -27,6 +27,8 @@ pub fn CompositeKey(comptime Field: type) type {
             comptime {
                 assert(@sizeOf(Value) == @sizeOf(Field) * 2);
                 assert(@alignOf(Value) == @alignOf(Field));
+                // Assert that there is no implicit padding in the struct.
+                assert(@sizeOf(Value) * 8 == @bitSizeOf(Value));
             }
         };
 
@@ -38,6 +40,8 @@ pub fn CompositeKey(comptime Field: type) type {
         comptime {
             assert(@sizeOf(Self) == @sizeOf(Field) * 2);
             assert(@alignOf(Self) == @alignOf(Field));
+            // Assert that there is no implicit padding in the struct.
+            assert(@sizeOf(Self) * 8 == @bitSizeOf(Self));
         }
 
         pub inline fn compare_keys(a: Self, b: Self) math.Order {

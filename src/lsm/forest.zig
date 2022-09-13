@@ -40,27 +40,11 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         commit_count_max: u32,
     };
 
-    var all_groove_options_fields: []const std.builtin.TypeInfo.StructField = &.{};
-    for (std.meta.fields(@TypeOf(groove_config))) |field| {
-        all_groove_options_fields = all_groove_options_fields ++ [_]std.builtin.TypeInfo.StructField{
-            .{
-                .name = field.name,
-                .field_type = GrooveOptions,
-                .default_value = null,
-                .is_comptime = false,
-                .alignment = @alignOf(GrooveOptions),
-            },
-        };
-    }
-
-    const AllGrooveOptions = @Type(.{
-        .Struct = .{
-            .layout = .Auto,
-            .fields = all_groove_options_fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
+    const AllGrooveOptions = std.enums.EnumFieldStruct(
+        std.meta.FieldEnum(@TypeOf(groove_config)),
+        GrooveOptions,
+        null,
+    );
 
     return struct {
         const Forest = @This();
@@ -86,7 +70,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             allocator: mem.Allocator,
             grid: *Grid,
             node_count: u32,
-            // (e.g.) .{ .transfers = .{ cache_size = 128, com_count_max = n }, .accounts = same }
+            // (e.g.) .{ .transfers = .{ .cache_size = 128, .commit_count_max = n }, .accounts = same }
             all_groove_options: AllGrooveOptions,
         ) !Forest {
             // NodePool must be allocated to pass in a stable address for the Grooves.
@@ -135,10 +119,6 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
             forest.node_pool.deinit(allocator);
             allocator.destroy(forest.node_pool);
-        }
-
-        pub fn tick(forest: *Forest) void {
-            forest.grid.superblock.storage.tick();
         }
 
         fn JoinType(comptime join_op: JoinOp) type {
