@@ -13,7 +13,7 @@ echo "Building TigerBeetle..."
 echo "Building TigerBeetle JNI interface..."
 (cd ./src/zig && ./lib/tigerbeetle/zig/zig build -Drelease-safe)
 echo "Building TigerBeetle Java Client"
-(cd src/java && javac -sourcepath ./src -d ./build ./src/Benchmark.java ./src/com/tigerbeetle/*.java)
+(cd src/tigerbeetle-java && javac -sourcepath ./src -d ./build ./src/main/java/Benchmark.java ./src/main/java/com/tigerbeetle/*.java)
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -58,7 +58,7 @@ sleep 1
 
 echo ""
 echo "Benchmarking..."
-java -Djava.library.path="./src/zig/zig-out/lib/" -cp ./src/java/build Benchmark
+java -Djava.library.path="./src/zig/zig-out/lib/" -cp ./src/tigerbeetle-java/build Benchmark
 echo ""
 
 for I in 0

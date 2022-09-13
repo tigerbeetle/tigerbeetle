@@ -1,8 +1,10 @@
 zig-cache/
 zig-out/
-src/tigerbeetle-java/src/main/resources/lib/**/*.o
-src/tigerbeetle-java/src/main/resources/lib/**/*.so
 src/tigerbeetle-java/build
 src/tigerbeetle-java/target
+src/tigerbeetle-java/src/main/resources/lib/**/*.o
+src/tigerbeetle-java/src/main/resources/lib/**/*.so
+src/tigerbeetle-java/src/main/resources/lib/**/*.dylib
+src/tigerbeetle-java/src/main/resources/lib/**/*.dll
 *tigerbeetle.benchmark
 *.log

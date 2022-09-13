@@ -8,9 +8,9 @@ pub fn build(b: *std.build.Builder) void {
     // Zig cross-target x java os-arch names
     const platforms = .{
         .{ "x86_64-linux-gnu", "linux-x86_64" },
-        //.{ "aarch64-linux-gnu", "linux-aarch_64" },
         .{ "x86_64-macos", "macos-x86_64" },
-        .{ "aarch64-macos", "macos-aarch64" },
+        //.{ "aarch64-linux-gnu", "linux-aarch_64" }, // Needs https://github.com/zig-java/jui/pull/3
+        //.{ "aarch64-macos", "macos-aarch64" },
     } ++
         // This is a workarround
         // Cross compiling to windows is failing
@@ -33,11 +33,13 @@ pub fn build(b: *std.build.Builder) void {
         const lib = b.addSharedLibrary("tb_jniclient", "src/client.zig", .unversioned);
         lib.addPackagePath("jui", "lib/jui/src/jui.zig");
         lib.setOutputDir("../tigerbeetle-java/src/main/resources/lib/" ++ platform[1]);
+        lib.setTarget(cross_target);
+        lib.setBuildMode(mode);
 
         if (cross_target.os_tag.? == .windows) {
 
-            // This is a workarround
-            // Compiling from Windows, the linker cannot resolve those dependencies from tb_client static library
+            // This is another workarround
+            // Compiling on Windows, the linker cannot resolve those dependencies from tb_client static library
             // So we have to insert them manually here, or we are going to receive a "lld-link: error: undefined symbol"
             if (builtin.target.os.tag == .windows) {
                 lib.linkSystemLibrary("ws2_32");
