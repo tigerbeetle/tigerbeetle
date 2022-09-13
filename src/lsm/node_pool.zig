@@ -41,6 +41,10 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
         }
 
         pub fn deinit(pool: *Self, allocator: mem.Allocator) void {
+            // If the NodePool is being deinitialized, all nodes should have already been
+            // released to the pool.
+            assert(pool.free.count() == pool.free.bit_length);
+
             allocator.free(pool.buffer);
             pool.free.deinit(allocator);
         }
