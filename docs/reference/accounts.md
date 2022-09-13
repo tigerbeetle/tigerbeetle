@@ -14,7 +14,7 @@ TigerBeetle as transfers move money to and from an account.
 
 ### `id`
 
-This is the identifier, the primary key, of the account.
+This is the unique identifier, the primary key, of the account.
 
 As an example, you might use a UUID (encoded as an integer) that ties
 the account back to a row in a SQL database.
