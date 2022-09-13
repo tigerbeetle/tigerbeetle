@@ -1,5 +1,13 @@
-# VOPR Hub Setup
-* Follow these instructions to setup the VOPR Hub, along with several full-time VOPR simulators, on a dedicated testing machine.*
+# VOPR Server Setup
+
+*The VOPR Server is a dedicated testing machine. It continually runs VOPR simulators (performing deterministic fuzz testing) as well as another program, called the VOPR Hub (that listens out for bug reports). When a VOPR finds a bug, it creates a report and sends it to the VOPR Hub. When a report comes in the hub has an additional, dedicated VOPR to use to rerun the test. The hub then automatically creates a GitHub issue with the collected debug logs and stack trace.*
+
+*To ensure the latest code is always being tested, the VOPRs restart after running only a few seeds. Before restarting, the scheduler is responsible for fetching the latest code and checking out the relevant commit for that VOPR. At least one VOPR will always run on main. Other VOPRs can be assigned to test pull requests with the `vopr` label. The latest pull requests are always favored if there are too many to test.*
+
+*Follow these instructions to set up the VOPR Hub, along with several full-time VOPRs.*
+
+## Server Setup
+
 Install Go:
 ```bash
 sudo add-apt-repository ppa:longsleep/golang-backports
@@ -29,7 +37,7 @@ su - voprhub
 
 Clone `tigerbeetle`:
 ```bash
-git clone https://github.com/coilhq/tigerbeetle.git
+git clone https://github.com/tigerbeetledb/tigerbeetle.git
 ```
 
 Install Zig:
@@ -59,7 +67,7 @@ Description=Continously runs the VOPR Hub.
 
 User=voprhub
 WorkingDirectory=/home/voprhub/hub/tigerbeetle/src/vopr_hub
-Environment="REPOSITORY_URL=https://api.github.com/repos/coilhq/tigerbeetle"
+Environment="REPOSITORY_URL=https://api.github.com/repos/tigerbeetledb/tigerbeetle"
 Environment="TIGERBEETLE_DIRECTORY=/home/voprhub/tigerbeetle"
 Environment="VOPR_HUB_ADDRESS=<address>"
 Environment="ISSUE_DIRECTORY=/home/voprhub"
@@ -93,7 +101,7 @@ Become the `voprrunner` user:
 su - voprrunner
 ```
 
-Create a script that will be used by the service to pull the latest code and run the VOPR:
+Create a script that will be used by the service to fetch the latest code and run the VOPR:
 ```bash
 sudo nano vopr_runner.sh
 ```
@@ -105,7 +113,7 @@ set -e
 
 # Checkout the correct branch
 export TIGERBEETLE_DIRECTORY="/home/voprrunner/tigerbeetle"
-export REPOSITORY_URL="https://api.github.com/repos/coilhq/tigerbeetle"
+export REPOSITORY_URL="https://api.github.com/repos/tigerbeetledb/tigerbeetle"
 export DEVELOPER_TOKEN="******"
 export NUM_VOPRS="4"
 export CURRENT_VOPR=$1
@@ -126,7 +134,7 @@ Note that the number of directories corresponds to the number of service instanc
 
 Ideally, this number should be increased/decreased to be two less than the number of CPU cores available. The simulators burn CPU, and so this allocation leaves a core available for the rest of the system, plus a core for the hub itself.
 ```bash
-git clone https://github.com/coilhq/tigerbeetle.git
+git clone https://github.com/tigerbeetledb/tigerbeetle.git
 # Install Zig:
 cd ./tigerbeetle
 ./scripts/install_zig.sh
