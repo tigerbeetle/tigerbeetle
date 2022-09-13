@@ -11,6 +11,7 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
+/// A LevelIterator sequentially iterates the values of every table in the level.
 pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -63,6 +64,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
         manifest_iterated: bool = false,
 
+        /// Buffered values that precede the iterators in `tables`.
         values: ValuesRingBuffer,
         tables: TablesRingBuffer,
 
@@ -144,6 +146,8 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             assert(it.tables.empty());
         }
 
+        /// Returns true if an IO operation was started. If this returns true, then `callback()`
+        /// will be called on completion.
         pub fn tick(it: *LevelIterator) bool {
             if (it.buffered_enough_values()) return false;
 
@@ -206,7 +210,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         }
 
         fn next_table_iterator(it: *LevelIterator) *TableIterator {
-            if (it.tables.next_tail_ptr() == null) {
+            if (it.tables.full()) {
                 const table = &it.tables.head_ptr().?.table_iterator;
                 while (table.peek() != null) {
                     it.values.push(table.pop()) catch unreachable;

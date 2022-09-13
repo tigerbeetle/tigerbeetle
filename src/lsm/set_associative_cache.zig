@@ -19,6 +19,8 @@ pub const Layout = struct {
     value_alignment: ?u29 = null,
 };
 
+/// An n-way set-associative cache may store each Value in one of n locations.
+/// The Value's possible locations are determined by its Key.
 pub fn SetAssociativeCache(
     comptime Key: type,
     comptime Value: type,
@@ -86,9 +88,29 @@ pub fn SetAssociativeCache(
         const Clock = meta.Int(.unsigned, clock_hand_bits);
 
         sets: u64,
+
+        /// A short, partial hash of a Key, corresponding to a Value.
+        /// Because the tag is short, collisions are possible:
+        /// `tag(v₁) = tag(v₂)` does not imply `v₁ = v₂`.
         tags: []Tag,
+
+        /// When the corresponding Count is zero, the Value is absent.
         values: []align(value_alignment) Value,
+
+        /// Each value has a Count, which tracks the number of recent reads.
+        ///
+        /// * A Count is incremented when the value is accessed by `get`.
+        /// * A Count is decremented when a cache write to the value's Set misses.
+        /// * The value is evicted when its Count reaches zero.
+        ///
         counts: PackedUnsignedIntegerArray(Count),
+
+        /// Each set has a Clock: a counter that cycles between each of the set's members (i.e. ways).
+        /// The clock ensures that entries are not evicted more/less often depending on their index
+        /// within `values`.
+        ///
+        /// On cache write, entries are checked for occupancy (or eviction) beginning from the
+        /// clock's position, wrapping around.
         clocks: PackedUnsignedIntegerArray(Clock),
 
         pub fn init(allocator: mem.Allocator, value_count_max: u64) !Self {
@@ -177,7 +199,7 @@ pub fn SetAssociativeCache(
         }
 
         /// If the key is present in the set, returns the way. Otherwise returns null.
-        inline fn search(self: *Self, set: Set, key: Key) ?usize {
+        inline fn search(self: *const Self, set: Set, key: Key) ?usize {
             const ways = search_tags(set.tags, set.tag);
 
             var it = BitIterator(Ways){ .bits = ways };
@@ -194,7 +216,7 @@ pub fn SetAssociativeCache(
         /// Where each set bit represents the index of a way that has the same tag.
         const Ways = meta.Int(.unsigned, layout.ways);
 
-        inline fn search_tags(tags: *[layout.ways]Tag, tag: Tag) Ways {
+        inline fn search_tags(tags: *const [layout.ways]Tag, tag: Tag) Ways {
             const x: Vector(layout.ways, Tag) = tags.*;
             const y: Vector(layout.ways, Tag) = @splat(layout.ways, tag);
 

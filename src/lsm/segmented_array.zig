@@ -9,11 +9,14 @@ const binary_search_values_raw = @import("binary_search.zig").binary_search_valu
 const binary_search_keys = @import("binary_search.zig").binary_search_keys;
 const Direction = @import("direction.zig").Direction;
 
-pub const Cursor = struct {
-    node: u32,
-    relative_index: u32,
-};
-
+/// A "segmented array" is an array with efficient (amortized) random-insert/remove operations.
+///
+/// The structure consists of an arraylist of "nodes". Each node is a non-empty array of T.
+/// When a node fills, it is split into two adjacent, partially-full nodes.
+/// When a node empties, it is joined with a nearby node.
+///
+/// An absolute index is offset from the start of the segmented array.
+/// A relative index is offset from the start of the node.
 pub fn SegmentedArray(
     comptime T: type,
     comptime NodePool: type,
@@ -45,6 +48,11 @@ fn SegmentedArrayType(
     return struct {
         const Self = @This();
 
+        pub const Cursor = struct {
+            node: u32,
+            relative_index: u32,
+        };
+
         // We can't use @divExact() here as we store TableInfo structs of various sizes in this
         // data structure. This means that there may be padding at the end of the node.
         pub const node_capacity = blk: {
@@ -73,7 +81,7 @@ fn SegmentedArrayType(
         };
 
         node_count: u32 = 0,
-        /// This is the segmented array, the first key_node_count pointers are non-null.
+        /// This is the segmented array. The first node_count pointers are non-null.
         /// The rest are null. We only use optional pointers here to get safety checks.
         nodes: *[node_count_max]?*[node_capacity]T,
         /// Since nodes in a segmented array are usually not full, computing the absolute index

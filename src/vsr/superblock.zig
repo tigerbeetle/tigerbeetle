@@ -52,6 +52,7 @@ pub const SuperBlockSector = extern struct {
     size: u64,
 
     /// The maximum size of the data file.
+    // TODO Actually limit the file to this size.
     size_max: u64,
 
     /// A monotonically increasing counter to locate the latest superblock at startup.
@@ -509,8 +510,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(!superblock.opened);
 
             assert(options.replica < config.replicas_max);
-            // TODO Assert that size_max exceeds the minimum comptime size of storage zones.
-            assert(options.size_max > superblock_zone_size);
+            assert(options.size_max >= data_file_size_min);
             assert(options.size_max % config.sector_size == 0);
 
             // This working copy provides the parent checksum, and will not be written to disk.
@@ -716,6 +716,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (superblock.free_set.highest_address_acquired()) |address| {
                 staging.size += address * config.block_size;
             }
+            assert(staging.size <= staging.size_max);
 
             staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
@@ -904,6 +905,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.writing.cluster == superblock.staging.cluster);
             assert(superblock.writing.replica == superblock.working.replica);
             assert(superblock.writing.replica == superblock.staging.replica);
+
+            assert(superblock.writing.size >= data_file_size_min);
+            assert(superblock.writing.size <= superblock.writing.size_max);
 
             assert(context.copy < superblock_copies_max);
             assert(context.copy >= starting_copy_for_sequence(superblock.writing.sequence));
@@ -1144,6 +1148,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock manifest lost");
             } else {
+                log.debug("open: read_manifest: broken copy={}", .{ context.copy });
                 context.copy += 1;
                 superblock.read_manifest(context);
             }
@@ -1208,6 +1213,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock free set lost");
             } else {
+                log.debug("open: read_free_set: broken copy={}", .{ context.copy });
                 context.copy += 1;
                 superblock.read_free_set(context);
             }
@@ -1277,6 +1283,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock client table lost");
             } else {
+                log.debug("open: read_client_table: broken copy={}", .{ context.copy });
                 context.copy += 1;
                 superblock.read_client_table(context);
             }
@@ -1325,6 +1332,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 if (superblock.working.manifest_size > 0) {
                     assert(superblock.manifest.count > 0);
                 }
+                // TODO Make the FreeSet encoding format not dependant on the word size.
                 if (superblock.working.free_set_size > @sizeOf(usize)) {
                     assert(superblock.free_set.count_acquired() > 0);
                 }

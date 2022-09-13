@@ -130,6 +130,12 @@ const Command = struct {
                 .cache_size_accounts = config.accounts_max,
                 .cache_size_transfers = config.transfers_max,
                 .cache_size_posted = config.transfers_pending_max,
+                .commit_count_max_accounts = config.commit_count_max_accounts,
+                .commit_count_max_transfers = config.commit_count_max_transfers,
+                .commit_count_max_posted = config.commit_count_max_posted,
+                .prefetch_count_max_accounts = config.prefetch_count_max_accounts,
+                .prefetch_count_max_transfers = config.prefetch_count_max_transfers,
+                .prefetch_count_max_posted = config.prefetch_count_max_posted,
             },
             .message_bus_options = .{
                 .configuration = addresses,
@@ -148,6 +154,7 @@ const Command = struct {
 
         while (true) {
             replica.tick();
+            command.storage.tick();
             try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
     }

@@ -45,7 +45,7 @@ pub const ClientTable = struct {
         try entries.ensureTotalCapacity(allocator, @intCast(u32, config.clients_max));
         assert(entries.capacity() >= config.clients_max);
 
-        const sorted = try allocator.alloc(*const Entry, entries.capacity());
+        const sorted = try allocator.alloc(*const Entry, config.clients_max);
         errdefer allocator.free(sorted);
 
         return ClientTable{
@@ -229,7 +229,7 @@ pub const ClientTable = struct {
     }
 
     pub fn capacity(client_table: *const ClientTable) usize {
-        return client_table.entries.capacity();
+        return client_table.sorted.len;
     }
 
     pub fn get(client_table: *ClientTable, client: u128) ?*Entry {

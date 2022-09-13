@@ -1,3 +1,51 @@
+//! A ManifestLevel is an in-memory collection of the table metadata for a single level of a tree.
+//!
+//! For a given level and snapshot, there may be gaps in the key ranges of the visible tables,
+//! but the key ranges are disjoint.
+//!
+//! A level's tables can be visualized in 2D as a partitioned rectangle.
+//! For example, given the ManifestLevel tables (with values chosen for visualization, not realism):
+//!
+//!          label   A   B   C   D   E   F   G   H   I   J   K   L   M
+//!        key_min   0   4  12  16   4   8  12  26   4  25   4  16  24
+//!        key_max   3  11  15  19   7  11  15  27   7  27  11  19  27
+//!   snapshot_min   1   1   1   1   3   3   3   3   5   5   7   7   7
+//!   snapshot_max   9   3   3   7   5   7   9   5   7   7   9   9   9
+//!
+//!     0         1         2
+//!     0   4   8   2   6   0   4   8
+//!   9┌───┬───────┬───┬───┬───┬───┐
+//!    │   │   K   │   │ L │###│ M │
+//!   7│   ├───┬───┤   ├───┤###└┬──┤
+//!    │   │ I │   │ G │   │####│ J│
+//!   5│ A ├───┤ F │   │   │####└┬─┤
+//!    │   │ E │   │   │ D │#####│H│
+//!   3│   ├───┴───┼───┤   │#####└─┤
+//!    │   │   B   │ C │   │#######│
+//!   1└───┴───────┴───┴───┴───────┘
+//!
+//! Example iterations:
+//!
+//!   visibility  snapshots   direction  key_min  key_max  tables
+//!      visible          2   ascending        0       28  A, B, C, D
+//!      visible          4   ascending        0       28  A, E, F, G, D, H
+//!      visible          6  descending       12       28  J, D, G
+//!      visible          8   ascending        0       28  A, K, G, L, M
+//!    invisible    2, 4, 6   ascending        0       28  K, L, M
+//!
+//! Legend:
+//!
+//! * "#" represents a gap — no tables cover these keys during the snapshot.
+//! * The horizontal axis represents the key range.
+//! * The vertical axis represents the snapshot range.
+//! * Each rectangle is a table within the manifest level.
+//! * The sides of each rectangle depict:
+//!   * left:   table.key_min (the diagram is inclusive, and the table.key_min is inclusive)
+//!   * right:  table.key_max (the diagram is EXCLUSIVE, but the table.key_max is INCLUSIVE)
+//!   * bottom: table.snapshot_min (exclusive)
+//!   * top:    table.snapshot_max (exclusive)
+//! * (Not depicted: tables may have `table.key_min == table.key_max`.)
+//!
 const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
@@ -12,7 +60,6 @@ const binary_search_keys_raw = binary_search.binary_search_keys_raw;
 const Direction = @import("direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SortedSegmentedArray = @import("segmented_array.zig").SortedSegmentedArray;
-const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
 pub fn ManifestLevelType(
     comptime NodePool: type,
@@ -42,6 +89,8 @@ pub fn ManifestLevelType(
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
         // and corresponding TableInfo are the same. However, the number of nodes, node index, and
         // relative index into the node differ as the elements per node are different.
+        //
+        // Ordered by ascending (maximum) key. Keys may repeat due to snapshots.
         keys: Keys,
         tables: Tables,
 
@@ -81,8 +130,10 @@ pub fn ManifestLevelType(
         }
 
         /// Set snapshot_max for the given table in the ManifestLevel.
-        /// The table is mutable so that this function can update its snapshot_max.
-        /// Asserts that the table currently has snapshot_max of math.maxInt(u64).
+        ///
+        /// * The table is mutable so that this function can update its snapshot.
+        /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
+        /// * Asserts that the table exists in the manifest.
         pub fn set_snapshot_max(level: *Self, snapshot: u64, table: *TableInfo) void {
             assert(snapshot < lsm.snapshot_latest);
             assert(table.snapshot_max == math.maxInt(u64));
@@ -115,7 +166,7 @@ pub fn ManifestLevelType(
         }
 
         /// Remove the given table from the ManifestLevel, asserting that it is not visible
-        /// by any snapshot in snapshots or by lsm.snapshot_latest.
+        /// by any snapshot in `snapshots` or by `lsm.snapshot_latest`.
         pub fn remove_table(
             level: *Self,
             node_pool: *NodePool,
@@ -152,8 +203,8 @@ pub fn ManifestLevelType(
         };
 
         pub const KeyRange = struct {
-            key_min: Key,
-            key_max: Key,
+            key_min: Key, // inclusive
+            key_max: Key, // inclusive
         };
 
         pub fn iterator(
@@ -276,7 +327,7 @@ pub fn ManifestLevelType(
             }
         };
 
-        /// Returns the table segmented array cursor at which iteration should be started.
+        /// Returns the keys segmented array cursor at which iteration should be started.
         /// May return null if there is nothing to iterate because we know for sure that the key
         /// range is disjoint with the tables stored in this level.
         ///
@@ -288,7 +339,7 @@ pub fn ManifestLevelType(
             key_min: Key,
             key_max: Key,
             direction: Direction,
-        ) ?SegmentedArrayCursor {
+        ) ?Keys.Cursor {
             assert(compare_keys(key_min, key_max) != .gt);
             assert(level.keys.len() == level.tables.len());
 
@@ -322,11 +373,15 @@ pub fn ManifestLevelType(
 
         /// This function exists because there may be tables in the level with the same
         /// key_max but non-overlapping snapshot visibility.
+        ///
+        /// Put differently, there may be several tables with different snapshots but the same
+        /// `key_max`, and `iterator_start`'s binary search (`key_cursor`) may have landed in the
+        /// middle of them.
         fn iterator_start_boundary(
             level: Self,
-            key_cursor: SegmentedArrayCursor,
+            key_cursor: Keys.Cursor,
             direction: Direction,
-        ) SegmentedArrayCursor {
+        ) Keys.Cursor {
             var reverse = level.keys.iterator_from_cursor(key_cursor, direction.reverse());
             assert(meta.eql(reverse.cursor, key_cursor));
 
@@ -365,65 +420,38 @@ pub fn TestContext(
 
         const log = false;
 
+        const Value = struct {
+            key: Key,
+            tombstone: bool,
+        };
+
         inline fn compare_keys(a: Key, b: Key) math.Order {
             return math.order(a, b);
         }
 
-        // TODO Import this type from lsm/tree.zig.
-        const TableInfo = extern struct {
-            checksum: u128,
-            address: u64,
-            flags: u64 = 0,
+        inline fn key_from_value(value: *const Value) Key {
+            return value.key;
+        }
 
-            /// The minimum snapshot that can see this table (with exclusive bounds).
-            /// This value is set to the current snapshot tick on table creation.
-            snapshot_min: u64,
+        inline fn tombstone_from_key(key: Key) Value {
+            return .{ .key = key, .tombstone = true };
+        }
 
-            /// The maximum snapshot that can see this table (with exclusive bounds).
-            /// This value is set to the current snapshot tick on table deletion.
-            snapshot_max: u64 = math.maxInt(u64),
+        inline fn tombstone(value: *const Value) bool {
+            return value.tombstone;
+        }
 
-            key_min: Key,
-            key_max: Key,
+        const Table = @import("table.zig").TableType(
+            Key,
+            Value,
+            compare_keys,
+            key_from_value,
+            std.math.maxInt(Key),
+            tombstone,
+            tombstone_from_key,
+        );
 
-            comptime {
-                assert(@sizeOf(TableInfo) == 48 + @sizeOf(Key) * 2);
-                assert(@alignOf(TableInfo) == 16);
-                assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
-            }
-
-            pub fn visible(table: *const @This(), snapshot: u64) bool {
-                assert(table.address != 0);
-                assert(table.snapshot_min < table.snapshot_max);
-                assert(snapshot <= lsm.snapshot_latest);
-
-                assert(snapshot != table.snapshot_min);
-                assert(snapshot != table.snapshot_max);
-
-                return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
-            }
-
-            pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
-                if (table.visible(lsm.snapshot_latest)) return false;
-                for (snapshots) |snapshot| if (table.visible(snapshot)) return false;
-                return true;
-            }
-
-            pub fn equal(table: *const TableInfo, other: *const TableInfo) bool {
-                // TODO since the layout of TableInfo is well defined, a direct memcmp might
-                // be faster here. However, it's not clear if we can make the assumption that
-                // compare_keys() will return .eq exactly when the memory of the keys are
-                // equal. Consider defining the API to allow this and check the generated code.
-                return table.checksum == other.checksum and
-                    table.address == other.address and
-                    table.flags == other.flags and
-                    table.snapshot_min == other.snapshot_min and
-                    table.snapshot_max == other.snapshot_max and
-                    compare_keys(table.key_min, other.key_min) == .eq and
-                    compare_keys(table.key_max, other.key_max) == .eq;
-            }
-        };
-
+        const TableInfo = @import("manifest.zig").TableInfoType(Table);
         const NodePool = @import("node_pool.zig").NodePool;
 
         const TestPool = NodePool(node_size, @alignOf(TableInfo));

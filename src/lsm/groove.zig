@@ -160,13 +160,13 @@ pub fn GrooveType(
     comptime var index_fields: []const std.builtin.TypeInfo.StructField = &.{};
 
     // Generate index LSM trees from the struct fields.
-    inline for (std.meta.fields(Object)) |field| {
+    for (std.meta.fields(Object)) |field| {
         // See if we should ignore this field from the options.
         //
         // By default, we ignore the "timestamp" field since it's a special identifier.
         // Since the "timestamp" is ignored by default, it shouldn't be provided in options.ignored.
         comptime var ignored = mem.eql(u8, field.name, "timestamp") or mem.eql(u8, field.name, "id");
-        inline for (options.ignored) |ignored_field_name| {
+        for (options.ignored) |ignored_field_name| {
             comptime assert(!std.mem.eql(u8, ignored_field_name, "timestamp"));
             comptime assert(!std.mem.eql(u8, ignored_field_name, "id"));
             ignored = ignored or std.mem.eql(u8, field.name, ignored_field_name);
@@ -187,9 +187,9 @@ pub fn GrooveType(
         }
     }
 
-    // Generiate IndexTrees for fields derived from the Value in options.
+    // Generate IndexTrees for fields derived from the Value in options.
     const derived_fields = std.meta.fields(@TypeOf(options.derived));
-    inline for (derived_fields) |field| {
+    for (derived_fields) |field| {
         // Get the function info for the derived field.
         const derive_func = @field(options.derived, field.name);
         const derive_func_info = @typeInfo(@TypeOf(derive_func)).Fn;
@@ -273,7 +273,7 @@ pub fn GrooveType(
         const IndexTree = @TypeOf(@field(@as(IndexTrees, undefined), field.name));
         const hash: []const u128 = &.{IndexTree.hash};
 
-        assert(std.mem.containsAtLeast(u128, hashes, 0, hash));
+        assert(std.mem.indexOf(u128, hashes, hash) == null);
         hashes = hashes ++ hash;
     }
 
@@ -426,7 +426,7 @@ pub fn GrooveType(
             // some of these accounts may exist, requiring a remove/put to update the index.
             commit_count_max: u32,
         ) !Groove {
-            // Cache is dynamically allocated to pass a pointer into the Object tree.
+            // Cache is heap-allocated to pass a pointer into the Object tree.
             const objects_cache = try allocator.create(ObjectTree.ValueCache);
             errdefer allocator.destroy(objects_cache);
 
@@ -446,7 +446,7 @@ pub fn GrooveType(
             );
             errdefer object_tree.deinit(allocator);
 
-            // Cache is dynamically allocated to pass a pointer into the ID tree.
+            // Cache is heap-allocated to pass a pointer into the ID tree.
             const ids_cache = try allocator.create(IdTree.ValueCache);
             errdefer allocator.destroy(ids_cache);
 
@@ -515,10 +515,6 @@ pub fn GrooveType(
         }
 
         pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {
-            assert(groove.join_op == null);
-            assert(groove.join_pending == 0);
-            assert(groove.join_callback == null);
-
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(groove.indexes, field.name).deinit(allocator);
             }
@@ -786,7 +782,7 @@ pub fn GrooveType(
             assert(groove.prefetch_objects.removeAdapted(object.id, PrefetchObjectsAdapter{}));
         }
 
-        /// Maximum number of pending sync callbacks (ObjecTree + IdTree + IndexTrees).
+        /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
         const join_pending_max = 2 + std.meta.fields(IndexTrees).len;
 
         fn JoinType(comptime join_op: JoinOp) type {

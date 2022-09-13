@@ -12,8 +12,47 @@ const div_ceil = @import("../util.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
+const BlockOperation = @import("grid.zig").BlockOperation;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 
+/// A table is a set of blocks:
+///
+/// * Index block (1)
+/// * Filter blocks (at most `filter_block_count_max`)
+///   Each filter block summarizes the keys for several adjacent (in terms of key range) data blocks.
+/// * Data blocks (at most `data_block_count_max`)
+///   Store the actual keys/values, along with a small index of the keys to optimize lookups.
+///
+///
+/// Every block begins with a `vsr.Header` that includes:
+///
+/// * `checksum`, `checksum_body` verify the data integrity.
+/// * `cluster` is the cluster id.
+/// * `command` is `.block`.
+/// * `op` is the block address.
+/// * `size` is the block size excluding padding.
+///
+/// Index block schema:
+/// │ vsr.Header                   │ commit=filter_block_count,
+/// │                              │ request=data_block_count,
+/// │                              │ timestamp=snapshot_min
+/// │ [filter_block_count_max]u128 │ checksums of filter blocks
+/// │ [data_block_count_max]u128   │ checksums of data blocks
+/// │ [data_block_count_max]Key    │ the maximum/last key in the respective data block
+/// │ [filter_block_count_max]u64  │ addresses of filter blocks
+/// │ [data_block_count_max]u64    │ addresses of data blocks
+/// │ […]u8{0}                     │ padding (to end of block)
+///
+/// Filter block schema:
+/// │ vsr.Header │
+/// │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
+/// │            │   `filter_data_block_count_max` data blocks.
+///
+/// Data block schema:
+/// │ vsr.Header               │
+/// │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
+/// │ [≤value_count_max]Value  │ At least one value (no empty tables).
+/// │ […]u8{0}                 │ padding (to end of block)
 pub fn TableType(
     comptime TableKey: type,
     comptime TableValue: type,
@@ -84,7 +123,7 @@ pub fn TableType(
         const table_block_count_max = @divExact(table_size_max, block_size);
         const block_body_size = block_size - @sizeOf(vsr.Header);
 
-        pub const layout = blk: {
+        pub const layout = layout: {
             assert(block_size % config.sector_size == 0);
             assert(math.isPowerOfTwo(table_size_max));
             assert(math.isPowerOfTwo(block_size));
@@ -158,15 +197,18 @@ pub fn TableType(
                 block_value_count_max * filter_bytes_per_key,
             );
 
+            // Compute the number of data and filter blocks by solving the constraints:
+            // * the filter and data blocks' metadata must fix in the index block
+            // * the filter blocks must index all data blocks
+            // * minimize the number of filter blocks
+            // * maximize the number of data blocks
             var data_blocks = table_block_count_max - index_block_count;
-            var data_index_size = 0;
             var filter_blocks = 0;
-            var filter_index_size = 0;
             while (true) : (data_blocks -= 1) {
-                data_index_size = data_index_entry_size * data_blocks;
-
                 filter_blocks = div_ceil(data_blocks, filter_data_block_count_max);
-                filter_index_size = filter_index_entry_size * filter_blocks;
+
+                const data_index_size = data_index_entry_size * data_blocks;
+                const filter_index_size = filter_index_entry_size * filter_blocks;
 
                 const index_size = @sizeOf(vsr.Header) + data_index_size + filter_index_size;
                 const table_block_count = index_block_count + filter_blocks + data_blocks;
@@ -178,14 +220,18 @@ pub fn TableType(
             const table_block_count = index_block_count + filter_blocks + data_blocks;
             assert(table_block_count <= table_block_count_max);
 
-            break :blk .{
+            break :layout .{
+                // The number of keys per data block.
                 .block_key_count = block_key_count,
+                // The number of bytes used by the keys in the data block.
                 .block_key_layout_size = block_key_layout_size,
+                // The maximum number of values in a data block.
                 .block_value_count_max = block_value_count_max,
 
                 .data_block_count_max = data_blocks,
                 .filter_block_count_max = filter_blocks,
 
+                // The number of data blocks covered by a single filter block.
                 .filter_data_block_count_max = filter_data_block_count_max,
             };
         };
@@ -397,21 +443,11 @@ pub fn TableType(
             }
         }
 
-        fn blocks_used(table: *Table) u32 {
-            assert(!table.free);
-            return Table.index_blocks_used(&table.blocks[0]);
-        }
-
-        fn filter_blocks_used(table: *Table) u32 {
-            assert(!table.free);
-            return Table.index_filter_blocks_used(&table.blocks[0]);
-        }
-
         pub const Builder = struct {
             const TableInfo = TableInfoType(Table);
 
-            key_min: Key = undefined,
-            key_max: Key = undefined,
+            key_min: Key = undefined, // inclusive
+            key_max: Key = undefined, // inclusive
 
             index_block: BlockPtr,
             filter_block: BlockPtr,
@@ -496,6 +532,7 @@ pub fn TableType(
                 // For each block we write the sorted values, initialize the Eytzinger layout,
                 // complete the block header, and add the block's max key to the table index.
 
+                assert(options.address > 0);
                 assert(builder.value > 0);
 
                 const block = builder.data_block;
@@ -545,6 +582,7 @@ pub fn TableType(
                     .request = @intCast(u32, values.len),
                     .size = block_size - @intCast(u32, values_padding.len + block_padding.len),
                     .command = .block,
+                    .operation = BlockOperation.data.operation(),
                 };
 
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
@@ -587,6 +625,7 @@ pub fn TableType(
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
                 assert(!builder.filter_block_empty());
+                assert(options.address > 0);
 
                 const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
@@ -595,6 +634,7 @@ pub fn TableType(
                     .op = options.address,
                     .size = block_size - filter.padding_size,
                     .command = .block,
+                    .operation = BlockOperation.filter.operation(),
                 };
 
                 const body = builder.filter_block[@sizeOf(vsr.Header)..header.size];
@@ -626,6 +666,7 @@ pub fn TableType(
             };
 
             pub fn index_block_finish(builder: *Builder, options: IndexFinishOptions) TableInfo {
+                assert(options.address > 0);
                 assert(builder.data_block_count > 0);
                 assert(builder.value == 0);
                 assert(builder.data_blocks_in_filter == 0);
@@ -658,6 +699,7 @@ pub fn TableType(
                     .timestamp = options.snapshot_min,
                     .size = index.size,
                     .command = .block,
+                    .operation = BlockOperation.index.operation(),
                 };
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
