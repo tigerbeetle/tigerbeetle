@@ -764,6 +764,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
+            var message_size: usize = config.message_size_max;
+
             // If the header is in-memory, we can skip the read from the disk.
             if (self.header_with_op_and_checksum(op, checksum)) |exact| {
                 if (exact.size == @sizeOf(Header)) {
@@ -773,6 +775,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     std.mem.set(u8, message.buffer[@sizeOf(Header)..config.sector_size], 0);
                     callback(replica, message, destination_replica);
                     return;
+                } else {
+                    message_size = vsr.sector_ceil(exact.size);
+                    assert(message_size <= config.message_size_max);
                 }
             }
 
@@ -792,7 +797,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .destination_replica = destination_replica,
             };
 
-            const buffer: []u8 = message.buffer[0..config.message_size_max];
+            const buffer: []u8 = message.buffer[0..message_size];
 
             // Memory must not be owned by `self.headers` as these may be modified concurrently:
             assert(@ptrToInt(buffer.ptr) < @ptrToInt(self.headers.ptr) or
