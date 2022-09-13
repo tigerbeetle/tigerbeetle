@@ -54,9 +54,9 @@ pub fn TableInfoType(comptime Table: type) type {
             assert(table.address != 0);
             assert(table.snapshot_min < table.snapshot_max);
             assert(snapshot <= snapshot_latest);
-
-            assert(snapshot != table.snapshot_min);
-            assert(snapshot != table.snapshot_max);
+                
+            // assert(snapshot != table.snapshot_min);
+            // assert(snapshot != table.snapshot_max);
 
             return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
         }
