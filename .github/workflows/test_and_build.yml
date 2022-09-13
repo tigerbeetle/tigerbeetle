@@ -62,9 +62,20 @@ jobs:
       - run: zig/zig build test
       - run: ./scripts/install.sh
 
-  build-and-push:
+  # This is just a canary to make sure that the simulator compiles
+  # (and passes for at least a single seed).
+  simulator:
+    name: 'Simulator canary'
     runs-on: ubuntu-latest
-    needs: [test_on_linux, test_on_macos]
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig run -OReleaseSafe src/simulator.zig
+
+  build-and-push:
+    name: 'Build and push Docker image'
+    runs-on: ubuntu-latest
+    needs: [test_on_linux, test_on_macos, simulator]
     permissions:
       contents: read
       packages: write
@@ -142,6 +153,7 @@ jobs:
 
   # Keep this around because Github CI looks for this job of this name.
   test:
+    name: 'Unit tests'
     runs-on: ubuntu-latest
     needs: [test_format, test_on_linux]
     steps:
