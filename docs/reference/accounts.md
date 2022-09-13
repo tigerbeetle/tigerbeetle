@@ -123,3 +123,10 @@ Constraints:
 
 * Type is 64-bit unsigned integer (8 bytes)
 * User sets to zero on creation
+
+## Internals
+
+If you're curious and want to learn more, you can find the source code
+for this struct in
+[src/tigerbeetle.zig](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/tigerbeetle.zig). Search
+for `const Account = extern struct {`.
