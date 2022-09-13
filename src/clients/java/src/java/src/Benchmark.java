@@ -77,7 +77,7 @@ public class Benchmark {
                     maxTransferLatency);
             System.out.printf("total %d transfers in %dms\n", max_batches * max_transfers_per_batch, totalTime);
 
-        } catch (InitializationException | RequestException | Exception e) {
+        } catch (Exception e) {
             System.out.println(e);
             e.printStackTrace();
         }

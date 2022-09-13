@@ -119,6 +119,7 @@ public final class Account {
     public void setId(UUID id) {
         if (id == null)
             throw new NullPointerException();
+
         this.id = id;
     }
 

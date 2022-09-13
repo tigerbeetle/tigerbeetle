@@ -1,6 +1,6 @@
 package com.tigerbeetle;
 
-public final class InitializationException extends Throwable {
+public final class InitializationException extends RuntimeException {
 
     public static final class Status {
         public static final int SUCCESS = 0;

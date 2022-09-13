@@ -61,6 +61,7 @@ public final class Transfer {
     public void setId(UUID id) {
         if (id == null)
             throw new NullPointerException();
+
         this.id = id;
     }
 
@@ -71,6 +72,7 @@ public final class Transfer {
     public void setDebitAccountId(UUID debitAccountId) {
         if (debitAccountId == null)
             throw new NullPointerException();
+
         this.debitAccountId = debitAccountId;
     }
 
@@ -81,6 +83,7 @@ public final class Transfer {
     public void setCreditAccountId(UUID creditAccountId) {
         if (creditAccountId == null)
             throw new NullPointerException();
+
         this.creditAccountId = creditAccountId;
     }
 

@@ -1,6 +1,5 @@
 package com.tigerbeetle;
 
-import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
@@ -39,19 +38,19 @@ public class UUIDsBatch extends Batch {
 
         // Make sure the completion handler is giving us valid data
         if (bufferLen % Struct.SIZE != 0)
-            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+            throw new AssertionError("Invalid data received from completion handler. bufferLen=%d, sizeOf(UUID)=%d.",
+                    bufferLen,
+                    Struct.SIZE);
 
         this.capacity = bufferLen / Struct.SIZE;
         this.lenght = capacity;
     }
 
-    public void Add(UUID uuid)
-            throws IndexOutOfBoundsException {
+    public void Add(UUID uuid) {
         Set(lenght, uuid);
     }
 
-    public UUID Get(int index)
-            throws IndexOutOfBoundsException, BufferUnderflowException {
+    public UUID Get(int index) {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
@@ -59,10 +58,10 @@ public class UUIDsBatch extends Batch {
         return uuidFromBuffer(ptr);
     }
 
-    public void Set(int index, UUID uuid)
-            throws IndexOutOfBoundsException, NullPointerException {
+    public void Set(int index, UUID uuid) {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
+
         if (uuid == null)
             throw new NullPointerException();
 
@@ -74,7 +73,11 @@ public class UUIDsBatch extends Batch {
                 .putLong(uuid.getMostSignificantBits());
 
         if (ptr.position() - start != Struct.SIZE)
-            throw new IndexOutOfBoundsException("Unexpected account size");
+            throw new AssertionError("Unexpected position: ptr.position()=%d, start=%d, sizeOf(UUID)=%d.",
+                    ptr.position(),
+                    start,
+                    Struct.SIZE);
+
         if (index >= lenght)
             lenght = index + 1;
     }
@@ -88,8 +91,7 @@ public class UUIDsBatch extends Batch {
         return this.capacity;
     }
 
-    public UUID[] toArray()
-            throws BufferUnderflowException {
+    public UUID[] toArray() {
         var array = new UUID[lenght];
         for (int i = 0; i < lenght; i++) {
             array[i] = Get(i);

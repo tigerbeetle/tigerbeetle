@@ -1,6 +1,5 @@
 package com.tigerbeetle;
 
-import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 
 public final class TransfersBatch extends Batch {
@@ -28,25 +27,27 @@ public final class TransfersBatch extends Batch {
 
     TransfersBatch(ByteBuffer buffer)
             throws RequestException {
+
         super(buffer);
 
         final var bufferLen = buffer.capacity();
 
         // Make sure the completion handler is giving us valid data
         if (bufferLen % Transfer.Struct.SIZE != 0)
-            throw new RequestException(RequestException.Status.INVALID_DATA_SIZE);
+            throw new AssertionError(
+                    "Invalid data received from completion handler: bufferLen=%d, sizeOf(Transfer)=%d.",
+                    bufferLen,
+                    Transfer.Struct.SIZE);
 
         this.capacity = bufferLen / Transfer.Struct.SIZE;
         this.lenght = capacity;
     }
 
-    public void add(Transfer transfer)
-            throws IndexOutOfBoundsException {
+    public void add(Transfer transfer) {
         set(lenght, transfer);
     }
 
-    public Transfer get(int index)
-            throws IndexOutOfBoundsException, BufferUnderflowException {
+    public Transfer get(int index) {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
@@ -54,10 +55,10 @@ public final class TransfersBatch extends Batch {
         return new Transfer(ptr);
     }
 
-    public void set(int index, Transfer transfer)
-            throws IndexOutOfBoundsException, NullPointerException {
+    public void set(int index, Transfer transfer) {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
+
         if (transfer == null)
             throw new NullPointerException();
 
@@ -66,7 +67,10 @@ public final class TransfersBatch extends Batch {
         transfer.save(ptr);
 
         if (ptr.position() - start != Transfer.Struct.SIZE)
-            throw new IndexOutOfBoundsException("Unexpected account size");
+            throw new AssertionError("Unexpected position: ptr.position()=%d, start=%d, sizeOf(Transfer)=%d.",
+                    ptr.position(),
+                    start,
+                    Account.Struct.SIZE);
 
         if (index >= lenght)
             lenght = index + 1;
@@ -81,8 +85,7 @@ public final class TransfersBatch extends Batch {
         return this.capacity;
     }
 
-    public Transfer[] toArray()
-            throws BufferUnderflowException {
+    public Transfer[] toArray() {
         var array = new Transfer[lenght];
         for (int i = 0; i < lenght; i++) {
             array[i] = get(i);

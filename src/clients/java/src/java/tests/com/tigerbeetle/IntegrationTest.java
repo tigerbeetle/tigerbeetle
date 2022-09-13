@@ -431,17 +431,12 @@ public class IntegrationTest {
                 // Closes the server, disconnecting the client
                 server.close();
 
-                try {
-                    // Client will submit a request, but it is not going to complete
-                    @SuppressWarnings("unused")
-                    var accounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                // Client will submit a request, but it is not going to complete
+                @SuppressWarnings("unused")
+                var accounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
 
-                    // It is not expceted to lookupAccounts to finish
-                    Assert.assertTrue(false);
-
-                } catch (InterruptedException timeout) {
-                    Assert.assertTrue(true);
-                }
+                // It is not expceted to lookupAccounts to finish
+                Assert.assertTrue(false);
 
             } catch (Throwable any) {
                 throw any;
