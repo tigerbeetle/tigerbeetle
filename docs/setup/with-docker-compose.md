@@ -1,4 +1,4 @@
-# Running a 3-node TigerBeetle cluster locally with Docker Compose
+# 3-node cluster with Docker Compose
 
 First, provision the data file for each node:
 
@@ -81,4 +81,7 @@ tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
 ... and so on ...
 ```
 
-Now you can connect to TigerBeetle with any TigerBeetle client.
+
+Now you can connect to the running server with any client. For a quick
+start, try [creating accounts and transfers in the Node
+CLI](/usage/node-cli).
