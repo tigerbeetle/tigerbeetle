@@ -490,7 +490,7 @@ public class IntegrationTest {
         public static final String TB_EXE = "tigerbeetle";
         public static final String TB_PORT = "3001";
         public static final String TB_FILE = "./java-tests.tigerbeetle";
-        public static final String TB_PATH = "src/zig/lib/tigerbeetle/";
+        public static final String TB_PATH = "../zig/lib/tigerbeetle/";
         public static final String TB_SERVER = TB_PATH + "/" + TB_EXE;
 
         private Process process;

@@ -8,7 +8,13 @@ import java.util.concurrent.TimeUnit;
 
 public final class Client implements AutoCloseable {
     static {
-        System.loadLibrary("tb_jniclient");
+        try {
+            // Tries to load the library bundled into the jar
+            JNILoader.loadFromJar();
+        } catch (Throwable any) {
+            // Fallback to the JVM Path
+            System.loadLibrary(JNILoader.libName);    
+        }
     }
 
     private static final int DEFAULT_MAX_CONCURRENCY = 32;

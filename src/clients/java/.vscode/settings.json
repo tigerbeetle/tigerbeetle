@@ -1,13 +1,14 @@
 {
     "java.project.sourcePaths": [
-        "src/java/src",
-        "src/java/tests"
+        "src/tigerbeetle-java/src/main/java",
+        "src/tigerbeetle-java/src/test/java",
     ],
     "java.debug.settings.vmArgs": "-Djava.library.path=src/zig/zig-out/lib",
     "java.test.config": {
-        "workingDirectory": "${workspaceFolder}",
+        "workingDirectory": "${workspaceFolder}/src/tigerbeetle-java/",
         "vmArgs": [ 
-            "-Djava.library.path=src/zig/zig-out/lib",
+            "-Djava.library.path=src/main/resources/lib/linux-x86_64",
          ]
-    }
+    },
+    "java.configuration.updateBuildConfiguration": "automatic"
 }
