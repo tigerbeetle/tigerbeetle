@@ -67,14 +67,23 @@ pub const transfers_max = switch (deployment_environment) {
 pub const transfers_pending_max = transfers_max;
 
 // TODO Move these to a separate "internal computed constants" file.
+// 128 == @sizeOf(Header)
+const message_body_accounts = @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Account));
+const message_body_transfers = @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Transfer));
+
 /// The maximum number of objects that may be changed by a commit.
 /// See `Groove.init`'s `commit_count_max` for more detail.
-// 128 == @sizeOf(Header)
 // *2 because creating a transfer will update 2 accounts.
-pub const commit_count_max_accounts = 2 * @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Account));
+pub const commit_count_max_accounts = 2 * message_body_accounts;
 // *2 because creating a post/void-transfer queries the post/void transfer and the pending transfer.
-pub const commit_count_max_transfers = 2 * @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Transfer));
-pub const commit_count_max_posted = @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Transfer));
+pub const commit_count_max_transfers = 2 * message_body_transfers;
+pub const commit_count_max_posted = message_body_transfers;
+
+// *2 to fetch a transfer's debit/credit accounts.
+pub const prefetch_count_max_accounts = 2 * message_body_accounts;
+// *2 to fetch pending and post/void transfer.
+pub const prefetch_count_max_transfers = 2 * message_body_transfers;
+pub const prefetch_count_max_posted = message_body_transfers;
 
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
