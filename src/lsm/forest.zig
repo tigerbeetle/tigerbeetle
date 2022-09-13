@@ -12,6 +12,7 @@ const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size
 
 pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type {
     var groove_fields: []const std.builtin.TypeInfo.StructField = &.{};
+    var groove_options_fields: []const std.builtin.TypeInfo.StructField = &.{};
 
     for (std.meta.fields(@TypeOf(groove_config))) |field| {
         const Groove = @field(groove_config, field.name);
@@ -19,6 +20,16 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             .{
                 .name = field.name,
                 .field_type = Groove,
+                .default_value = null,
+                .is_comptime = false,
+                .alignment = @alignOf(Groove),
+            },
+        };
+
+        groove_options_fields = groove_options_fields ++ [_]std.builtin.TypeInfo.StructField{
+            .{
+                .name = field.name,
+                .field_type = Groove.Options,
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(Groove),
@@ -35,16 +46,20 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         },
     });
 
-    const GrooveOptions = struct {
-        cache_size: u32,
-        commit_count_max: u32,
-    };
+    const AllGrooveOptions = @Type(.{
+        .Struct = .{
+            .layout = .Auto,
+            .fields = groove_options_fields,
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
 
-    const AllGrooveOptions = std.enums.EnumFieldStruct(
-        std.meta.FieldEnum(@TypeOf(groove_config)),
-        GrooveOptions,
-        null,
-    );
+    //const AllGrooveOptions = std.enums.EnumFieldStruct(
+    //    std.meta.FieldEnum(@TypeOf(groove_config)),
+    //    GrooveOptions,
+    //    null,
+    //);
 
     return struct {
         const Forest = @This();
@@ -91,15 +106,15 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             };
 
             inline for (std.meta.fields(Grooves)) |groove_field| {
-                const groove_options: GrooveOptions = @field(all_groove_options, groove_field.name);
                 const groove = &@field(grooves, groove_field.name);
+                const Groove = @TypeOf(groove.*);
+                const groove_options: Groove.Options = @field(all_groove_options, groove_field.name);
 
-                groove.* = try @TypeOf(groove.*).init(
+                groove.* = try Groove.init(
                     allocator,
                     node_pool,
                     grid,
-                    groove_options.cache_size,
-                    groove_options.commit_count_max,
+                    groove_options,
                 );
 
                 grooves_initialized += 1;

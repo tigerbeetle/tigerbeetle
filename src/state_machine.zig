@@ -71,6 +71,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             commit_count_max_accounts: u32,
             commit_count_max_transfers: u32,
             commit_count_max_posted: u32,
+            prefetch_count_max_accounts: u32,
+            prefetch_count_max_transfers: u32,
+            prefetch_count_max_posted: u32,
         };
 
         prepare_timestamp: u64,
@@ -99,14 +102,17 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .accounts = .{
                         .cache_size = options.cache_size_accounts,
                         .commit_count_max = options.commit_count_max_accounts,
+                        .prefetch_count_max = options.prefetch_count_max_accounts,
                     },
                     .transfers = .{
                         .cache_size = options.cache_size_transfers,
                         .commit_count_max = options.commit_count_max_transfers,
+                        .prefetch_count_max = options.prefetch_count_max_transfers,
                     },
                     .posted = .{
                         .cache_size = options.cache_size_posted,
                         .commit_count_max = options.commit_count_max_posted,
+                        .prefetch_count_max = options.prefetch_count_max_posted,
                     },
                 },
             );
@@ -1015,6 +1021,9 @@ const TestContext = struct {
             .commit_count_max_accounts = 1000,
             .commit_count_max_transfers = 1000,
             .commit_count_max_posted = 1000,
+            .prefetch_count_max_accounts = 1000,
+            .prefetch_count_max_transfers = 1000,
+            .prefetch_count_max_posted = 1000,
         });
         errdefer ctx.state_machine.deinit(allocator);
     }
