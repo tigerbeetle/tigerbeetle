@@ -140,7 +140,7 @@ Events are **immutable data structures** that **instantiate or mutate state data
                 reserved: 48 bytes (384-bit) [reserved for future accounting policy primitives]
                   ledger:  4 bytes ( 32-bit) [required, to enforce isolation by ensuring that all transfers are between accounts of the same ledger]
                     code:  2 bytes ( 16-bit) [required, an opaque chart of accounts code describing the reason for the transfer, e.g. deposit, settlement]
-                   flags:  4 bytes ( 16-bit) [optional, net balance limits: e.g. debits_must_not_exceed_credits or credits_must_not_exceed_debits]
+                   flags:  2 bytes ( 16-bit) [optional, net balance limits: e.g. debits_must_not_exceed_credits or credits_must_not_exceed_debits]
           debits_pending:  8 bytes ( 64-bit)
            debits_posted:  8 bytes ( 64-bit)
          credits_pending:  8 bytes ( 64-bit)
