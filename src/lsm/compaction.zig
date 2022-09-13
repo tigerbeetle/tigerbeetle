@@ -30,7 +30,7 @@ pub fn CompactionType(
         const BlockPtrConst = Grid.BlockPtrConst;
         const BlockWrite = struct {
             write: Grid.Write = undefined,
-            block: BlockPtr,
+            block: BlockPtr = undefined,
             ready: bool = false,
         };
 
@@ -130,15 +130,6 @@ pub fn CompactionType(
             var table_builder = try Table.Builder.init(allocator);
             errdefer table_builder.deinit(allocator);
 
-            const index = BlockWrite{ .block = try allocate_block(allocator) };
-            errdefer allocator.free(index.block);
-
-            const filter = BlockWrite{ .block = try allocate_block(allocator) };
-            errdefer allocator.free(filter.block);
-
-            const data = BlockWrite{ .block = try allocate_block(allocator) };
-            errdefer allocator.free(data.block);
-
             // The average number of tables involved in a compaction is the 1 table from level A,
             // plus the growth_factor number of tables from level B, plus 1 on either side,
             // since the overlap may not be perfectly aligned to table boundaries.
@@ -167,9 +158,9 @@ pub fn CompactionType(
                 .merge_iterator = undefined, // Assigned by start()
 
                 .table_builder = table_builder,
-                .index = index,
-                .filter = filter,
-                .data = data,
+                .index = .{},
+                .filter = .{},
+                .data = .{},
 
                 // Assigned by start()
                 .manifest = undefined,
@@ -179,18 +170,10 @@ pub fn CompactionType(
             };
         }
 
-        fn allocate_block(allocator: mem.Allocator) !BlockPtr {
-            const block = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
-            return block[0..config.block_size];
-        }
-
         pub fn deinit(compaction: *Compaction, allocator: mem.Allocator) void {
             compaction.insert_level_b.deinit(allocator);
             compaction.update_level_b.deinit(allocator);
 
-            allocator.free(compaction.data.block);
-            allocator.free(compaction.filter.block);
-            allocator.free(compaction.index.block);
             compaction.table_builder.deinit(allocator);
 
             compaction.iterator_b.deinit(allocator);
@@ -283,10 +266,7 @@ pub fn CompactionType(
             assert(compaction.merge_status != .done);
 
             // Tables discovered by iterator_b that are visible
-            if (table.visible(compaction.snapshot)) {
-                compaction.queue_manifest_update(&compaction.update_level_b, table);
-                return;
-            }
+            compaction.queue_manifest_update(&compaction.update_level_b, table);
 
             // TODO: Release the table's block addresses in the Grid if its invisible to Compaction.
             _ = table;
@@ -365,6 +345,8 @@ pub fn CompactionType(
             const write_callback = struct {
                 fn callback(write: *Grid.Write) void {
                     const block_write = @fieldParentPtr(BlockWrite, "write", write);
+                    block_write.block = undefined;
+
                     const _compaction = @fieldParentPtr(Compaction, field, block_write);
                     _compaction.io_finish();
                 }
@@ -466,14 +448,6 @@ pub fn CompactionType(
                     assert(tombstones_dropped > 0);
                     break :blk;
                 }
-                
-                // The merge iterator having pending values should mean the data block was filled up.
-                if (!compaction.merge_iterator.empty()) {
-                    const block = compaction.table_builder.data_block;
-                    const values_used = Table.data_block_values_used(block).len;
-                    assert(values_used == Table.data.value_count_max);
-                    assert(compaction.table_builder.data_block_full());
-                }
 
                 compaction.table_builder.data_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
@@ -481,9 +455,15 @@ pub fn CompactionType(
                 });
 
                 // Mark the finished data block as ready to write for the next compact_tick() call.
-                mem.swap(BlockPtr, &compaction.data.block, &compaction.table_builder.data_block);
+                compaction.data.block = compaction.table_builder.data_block;
                 assert(!compaction.data.ready);
                 compaction.data.ready = true;
+
+                // The merge iterator having pending values should mean the data block is full.
+                if (!compaction.merge_iterator.empty()) {
+                    const values_used = Table.data_block_values_used(compaction.data.block).len;
+                    assert(values_used == Table.data.value_count_max);
+                }
             }
 
             // Finalize the filter block if it (or the index block) are full or if there's no more values.
@@ -504,7 +484,7 @@ pub fn CompactionType(
                 });
 
                 // Mark the finished filter block as ready to write for the next compact_tick() call.
-                mem.swap(BlockPtr, &compaction.filter.block, &compaction.table_builder.filter_block);
+                compaction.filter.block = compaction.table_builder.filter_block;
                 assert(!compaction.filter.ready);
                 compaction.filter.ready = true;
             }
@@ -529,7 +509,7 @@ pub fn CompactionType(
                 compaction.queue_manifest_update(&compaction.insert_level_b, &table);
 
                 // Mark the finished index block as ready to write for the next compact_tick() call.
-                mem.swap(BlockPtr, &compaction.index.block, &compaction.table_builder.index_block);
+                compaction.index.block = compaction.table_builder.index_block;
                 assert(!compaction.index.ready);
                 compaction.index.ready = true;
             }
