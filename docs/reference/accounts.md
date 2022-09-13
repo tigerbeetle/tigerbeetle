@@ -63,8 +63,9 @@ Constraints:
 
 A user-defined enum representing the type of the account.
 
-As an example, you might use `1` to represent deposits and `2` to
-represent settlements.
+As an example, you might use codes `1000`-`3340` to indicate asset
+accounts in general, where `1001` is Bank Account and `1002` is Money
+Market Account and `2003` is Motor Vehicles and so on.
 
 Constraints:
 
