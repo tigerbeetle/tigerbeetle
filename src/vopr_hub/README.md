@@ -49,10 +49,10 @@ If no duplicate issue has been found then the hub will replay the seed in `Debug
 
 ### Create an Issue
 
-Once the simulation has completed the stack trace is extracted and parsed to remove the local directory structure and any local memory addresses so that it is not only deterministic across machines, but also anonymized. This way it can be hashed and used to dedupe any crash bugs that may have already been reported. While crash bugs include a hash of the stack trace in their filename to deduplicate assertion crashes for the same call graph, we do not do this for correctness bugs, since these are always detected by the same set of panics in the simulator, at the same call site, but there may be different causes for them.
+Once the simulation has completed, the stack trace is extracted and parsed to remove the local directory structure and any local memory addresses. This ensures that it is not only deterministic across machines, but also anonymized. Now the stack trace can be hashed and used to dedupe any crash bugs that may have already been reported. While crash bugs include a hash of the stack trace in their filename, to deduplicate assertion crashes for the same call graph, we do not do this for correctness bugs, since these are always detected by the same set of panics in the simulator, at the same call site, but there may be different causes for them.
 
 A copy of the issue is written to disk and a GitHub issue is also automatically generated. The issue contains the bug type, seed, commit hash, parameters of the VOPR, stack trace (if there is one), and debug logs.
 
 If the VOPR Hub replays a seed and it passes unexpectedly then, to err on the safe side, a GitHub issue will still be created with a warning explaining that the seed passed.
 
-The VOPR Hub may only have up to GitHub issues open at any time. These issues are identified by the `vopr` label that is attached to them as they are created. If there are 6 open issues and the VOPR Hub finds an additional issue then it is simply logged locally on the machine.
+The VOPR Hub may only have up to 6 GitHub issues open at any time. These issues are identified by the `seed` label that is attached to them as they are created. If there are 6 open issues and the VOPR Hub finds an additional issue then it is simply logged locally on the machine.
