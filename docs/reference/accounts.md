@@ -1,29 +1,120 @@
 # Accounts
 
-TigerBeetle uses fixed-size data structures to represent all data,
-including accounts.
+TigerBeetle uses the same data structures internally and
+externally. This means that sometimes you need to set temporary values
+for fields that TigerBeetle, not you (the user), are responsible.
 
-This means that sometimes you need to set temporary values for fields
-that TigerBeetle, not you (the user), are responsible.
+### Updates
 
-Account fields cannot be changed by the user after creation. However,
-debits and credits fields are modified by TigerBeetle as transfers
-happen to and from the account.
+Account fields *cannot be changed by the user* after
+creation. However, debits and credits fields are updated by
+TigerBeetle as transfers happen to and from the account.
 
-| Field           | Description                                                      | Size     | Set by      | Additional constraints                                                | Example                                                        |
-|-----------------|------------------------------------------------------------------|----------|-------------|-----------------------------------------------------------------------|----------------------------------------------------------------|
-| id              | Identifier for this account, defined by the user.                | 16 bytes | User        | Must be unique                                                        | An integer-encoded UUIDv4 or any other unique 128-bit integer. |
-| user_data       | Secondary identifier to link this account to an external entity. | 16 bytes | User        | May be zero                                                           | An integer-encoded UUIDv4 or any other unique 128-bit integer. |
-| reserved        | Internal-only field.                                             | 48 bytes | TigerBeetle | User must set to zero on write                                        |                                                                |
-| ledger          | Identifier used to enforce transfers between the same ledger.    | 4 bytes  | User        | None                                                                  | `0` for USD and `1` for EUR.                                   |
-| code            | Reason for the transfer.                                         | 2 bytes  | User        | None                                                                  | `0` for deposit, `1` for settlement.                           |
-| flags           | Specifies behavior during transfers.                             | 2 bytes  | User        | See below for all flags                                               | `0b0100000000000000` to force debts not to exceed credits.     |
-| debits_pending  | Amount of pending debits.                                        | 8 bytes  | TigerBeetle | User must set to zero on write, always a positive integer on read     | `500`                                                          |
-| debits_posted   | Amount of non-pending debits.                                    | 8 bytes  | TigerBeetle | User must set to zero on write, always a positive integer on read     | `400`                                                          |
-| credits_pending | Amount of pending credits.                                       | 8 bytes  | TigerBeetle | User must set to zero on write, always a positive integer on read     | `800`                                                          |
-| credits_posted  | Amount of non-pending credits.                                   | 8 bytes  | TigerBeetle | User must set to zero on write, always a positive integer on read     | `200`                                                          |
-| timestamp       | Time account was created.                                        | 8 bytes  | TigerBeetle | User must set to zero on write, UNIX timestamp in nanoseconds on read | `1662489240014463675`                                          |
+## Fields
 
-## Account flags
+### `id`
 
-The Account flags field is a bit field.
+This is the identifier, the primary key, of the account.
+
+As an example, you might use a UUID (encoded as an integer) that ties
+the account back to a row in a SQL database.
+
+Constraints:
+
+* Type is 128-bit unsigned integer (16 bytes)
+* Must be unique
+
+### `user_data`
+
+This is an optional second identifier to link this account to an
+external entity.
+
+As an example, you might use a UUID (encoded as an integer) that
+ties together a group of accounts.
+
+Constraints:
+
+* Type is 128-bit unsigned integer (16 bytes)
+* May be zero
+
+### `reserved`
+
+Reserved for future use.
+
+Constraints:
+
+* Type is 48 bytes
+* Must be zero
+
+### `ledger`
+
+Identifier used to enforce transfers between the same ledger.
+
+As an example, you might use `1` to represent USD and `2` to represent
+EUR.
+
+Constraints:
+
+* Type is 32-bit unsigned integer (4 bytes)
+* Must not be zero
+
+### `code`
+
+Reason for the transfer.
+
+As an example, you might use `1` to represent deposits and `2` to
+represent settlements.
+
+Constraints:
+
+* Type is 16-bit unsigned integer (2 bytes)
+
+### `flag`
+
+Specifies behavior during transfers.
+
+Constraints:
+
+* Type is 16-bit unsigned integer (2 bytes)
+
+### `debits_pending`
+
+Amount of pending debits.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+
+### `debits_posted`
+
+Amount of posted debits.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+
+### `credits_pending`
+
+Amount of pending credits.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+
+### `credits_posted`
+
+Amount of posted credits.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+
+### `timestamp`
+
+Time the account was created. This is set by TigerBeetle. The format
+is UNIX timestamp in nanoseconds.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+* User sets to zero on creation
