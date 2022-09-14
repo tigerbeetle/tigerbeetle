@@ -31,7 +31,7 @@ cd ..\..\..\..
 
 echo "Building TigerBeetle Java Client"
 cd .\src\tigerbeetle-java
-mvn compile javac -sourcepath ./src -d ./build ./src/main/java/Benchmark.java ./src/main/java/com/tigerbeetle/*.java
+cmd /d /c "mvn -B compile --quiet"
 cd ..\..
 
 for /l %%i in (0, 1, 0) do (

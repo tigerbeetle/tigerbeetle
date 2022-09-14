@@ -10,7 +10,7 @@ import java.nio.file.StandardCopyOption;
 final class JNILoader {
 
     private enum OS {
-        windows,
+        win,
         linux,
         macos,
     }
@@ -64,7 +64,7 @@ final class JNILoader {
 
                 return String.format("%s/lib%s.dylib", jniResources, libName);
 
-            case windows:
+            case win:
 
                 if (arch == Arch.x86_64)
                     return String.format("%s/%s.dll", jniResources, libName);
@@ -78,7 +78,7 @@ final class JNILoader {
     private static OS getOS() {
         String osName = System.getProperty("os.name").toLowerCase();
         if (osName.startsWith("win")) {
-            return OS.windows;
+            return OS.win;
         } else if (osName.startsWith("macos") || osName.startsWith("osx")
                 || osName.startsWith("darwin")) {
             return OS.macos;
