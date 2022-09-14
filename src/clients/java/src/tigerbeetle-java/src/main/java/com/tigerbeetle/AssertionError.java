@@ -7,5 +7,5 @@ public final class AssertionError extends java.lang.AssertionError {
 
     AssertionError(Throwable cause, String format, Object... args) {
         super(String.format(format, args), cause);
-    }    
+    }
 }

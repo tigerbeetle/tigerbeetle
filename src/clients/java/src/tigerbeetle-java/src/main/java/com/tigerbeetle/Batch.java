@@ -14,7 +14,8 @@ public abstract class Batch {
 
     protected Batch(ByteBuffer buffer) {
 
-        if (buffer == null) throw new IllegalArgumentException("buffer");
+        if (buffer == null)
+            throw new IllegalArgumentException("buffer");
 
         // We require little-endian architectures everywhere for efficient network
         // deserialization:

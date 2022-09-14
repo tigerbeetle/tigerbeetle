@@ -20,13 +20,11 @@ final class JNILoader {
         aarch64,
     }
 
-    private JNILoader() {
-    }
+    private JNILoader() {}
 
     public static final String libName = "tb_jniclient";
 
-    public static void loadFromJar()
-            throws IOException {
+    public static void loadFromJar() throws IOException {
 
         final String jniResourcesPath = getResourcesPath();
         final String fileName = Paths.get(jniResourcesPath).getFileName().toString();
@@ -42,7 +40,8 @@ final class JNILoader {
             Files.copy(stream, temp.toPath(), StandardCopyOption.REPLACE_EXISTING);
 
         } catch (IOException ioException) {
-            throw new AssertionError(ioException, "Tigerbeetle jni %s could not be extracted from jar.", fileName);
+            throw new AssertionError(ioException,
+                    "Tigerbeetle jni %s could not be extracted from jar.", fileName);
         }
 
         System.load(temp.getAbsolutePath());
@@ -80,7 +79,8 @@ final class JNILoader {
         String osName = System.getProperty("os.name").toLowerCase();
         if (osName.startsWith("win")) {
             return OS.windows;
-        } else if (osName.startsWith("macos") || osName.startsWith("osx") || osName.startsWith("darwin")) {
+        } else if (osName.startsWith("macos") || osName.startsWith("osx")
+                || osName.startsWith("darwin")) {
             return OS.macos;
         } else if (osName.startsWith("linux")) {
             return OS.linux;

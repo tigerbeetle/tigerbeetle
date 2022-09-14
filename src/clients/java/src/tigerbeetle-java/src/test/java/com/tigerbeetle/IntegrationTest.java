@@ -43,12 +43,13 @@ public class IntegrationTest {
     public void testCreateAccounts() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] { Server.TB_PORT })) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                var errors = client.createAccounts(new Account[] { account1, account2 });
+                var errors = client.createAccounts(new Account[] {account1, account2});
                 Assert.assertTrue(errors.length == 0);
 
-                var lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                var lookupAccounts =
+                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
@@ -65,9 +66,9 @@ public class IntegrationTest {
     public void testCreateTransfers() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] { Server.TB_PORT })) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                var errors = client.createAccounts(new Account[] { account1, account2 });
+                var errors = client.createAccounts(new Account[] {account1, account2});
                 Assert.assertTrue(errors.length == 0);
 
                 var transfer = new Transfer();
@@ -81,7 +82,8 @@ public class IntegrationTest {
                 var result = client.createTransfer(transfer);
                 Assert.assertTrue(result == CreateTransferResult.Ok);
 
-                var lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                var lookupAccounts =
+                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
@@ -104,9 +106,9 @@ public class IntegrationTest {
     public void testCreatePendingTransfers() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] { Server.TB_PORT })) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                var errors = client.createAccounts(new Account[] { account1, account2 });
+                var errors = client.createAccounts(new Account[] {account1, account2});
                 Assert.assertTrue(errors.length == 0);
 
                 var transfer = new Transfer();
@@ -122,7 +124,8 @@ public class IntegrationTest {
                 var result = client.createTransfer(transfer);
                 Assert.assertTrue(result == CreateTransferResult.Ok);
 
-                var lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                var lookupAccounts =
+                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
@@ -149,7 +152,8 @@ public class IntegrationTest {
                 var postResult = client.createTransfer(postTransfer);
                 Assert.assertTrue(postResult == CreateTransferResult.Ok);
 
-                lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                lookupAccounts =
+                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
@@ -176,9 +180,9 @@ public class IntegrationTest {
     public void testCreatePendingTransfersAndVoid() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] { Server.TB_PORT })) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                var errors = client.createAccounts(new Account[] { account1, account2 });
+                var errors = client.createAccounts(new Account[] {account1, account2});
                 Assert.assertTrue(errors.length == 0);
 
                 var transfer = new Transfer();
@@ -194,7 +198,8 @@ public class IntegrationTest {
                 var result = client.createTransfer(transfer);
                 Assert.assertTrue(result == CreateTransferResult.Ok);
 
-                var lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                var lookupAccounts =
+                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
@@ -221,7 +226,8 @@ public class IntegrationTest {
                 var postResult = client.createTransfer(postTransfer);
                 Assert.assertTrue(postResult == CreateTransferResult.Ok);
 
-                lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                lookupAccounts =
+                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
@@ -248,9 +254,9 @@ public class IntegrationTest {
     public void testCreateLinkedTransfers() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] { Server.TB_PORT })) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                var errors = client.createAccounts(new Account[] { account1, account2 });
+                var errors = client.createAccounts(new Account[] {account1, account2});
                 Assert.assertTrue(errors.length == 0);
 
                 var transfer1 = new Transfer();
@@ -271,10 +277,11 @@ public class IntegrationTest {
                 transfer2.setAmount(49);
                 transfer2.setFlags(TransferFlags.NONE);
 
-                var transfersErrors = client.createTransfers(new Transfer[] { transfer1, transfer2 });
+                var transfersErrors = client.createTransfers(new Transfer[] {transfer1, transfer2});
                 Assert.assertTrue(transfersErrors.length == 0);
 
-                var lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                var lookupAccounts =
+                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
@@ -299,7 +306,7 @@ public class IntegrationTest {
 
     /**
      * This test asserts that parallel threads will respect client's maxConcurrency,
-     * 
+     *
      * @throws Throwable
      */
     @Test
@@ -314,9 +321,9 @@ public class IntegrationTest {
             final int tasks_qty = 12;
             final int max_concurrency = random.nextInt(tasks_qty - 1) + 1;
 
-            try (var client = new Client(0, new String[] { Server.TB_PORT }, max_concurrency)) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
-                var errors = client.createAccounts(new Account[] { account1, account2 });
+                var errors = client.createAccounts(new Account[] {account1, account2});
                 Assert.assertTrue(errors.length == 0);
 
                 var tasks = new TransferTask[tasks_qty];
@@ -334,7 +341,8 @@ public class IntegrationTest {
                 }
 
                 // Asserting if all transfers were submited correctly
-                var lookupAccounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                var lookupAccounts =
+                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
@@ -354,11 +362,10 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that client.close() will wait for all ongoing request to
-     * complete
-     * And new threads trying to submit a request after the client was closed will
-     * fail with IllegalStateException
-     * 
+     * This test asserts that client.close() will wait for all ongoing request to complete And new
+     * threads trying to submit a request after the client was closed will fail with
+     * IllegalStateException
+     *
      * @throws Throwable
      */
     @Test
@@ -374,9 +381,9 @@ public class IntegrationTest {
             final int tasks_qty = 12;
             final int max_concurrency = random.nextInt(tasks_qty / 4) + 1;
 
-            try (var client = new Client(0, new String[] { Server.TB_PORT }, max_concurrency)) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
-                var errors = client.createAccounts(new Account[] { account1, account2 });
+                var errors = client.createAccounts(new Account[] {account1, account2});
                 Assert.assertTrue(errors.length == 0);
 
                 var tasks = new TransferTask[tasks_qty];
@@ -400,7 +407,8 @@ public class IntegrationTest {
                     // The client.close must wait until all submited requests have completed
                     // Asserting that either the task succeeded or failed while waiting
                     tasks[i].join();
-                    Assert.assertTrue(tasks[i].isFaulted || tasks[i].result == CreateTransferResult.Ok);
+                    Assert.assertTrue(
+                            tasks[i].isFaulted || tasks[i].result == CreateTransferResult.Ok);
                 }
 
             } catch (Throwable any) {
@@ -413,9 +421,8 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that a client disconnected from any replica can handle
-     * timeouts correctly
-     * 
+     * This test asserts that a client disconnected from any replica can handle timeouts correctly
+     *
      * @throws Throwable
      */
     @Ignore
@@ -423,9 +430,9 @@ public class IntegrationTest {
     public void testTimeoutClient() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] { Server.TB_PORT })) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                var errors = client.createAccounts(new Account[] { account1, account2 });
+                var errors = client.createAccounts(new Account[] {account1, account2});
                 Assert.assertTrue(errors.length == 0);
 
                 // Closes the server, disconnecting the client
@@ -433,7 +440,8 @@ public class IntegrationTest {
 
                 // Client will submit a request, but it is not going to complete
                 @SuppressWarnings("unused")
-                var accounts = client.lookupAccounts(new UUID[] { account1.getId(), account2.getId() });
+                var accounts =
+                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
 
                 // It is not expceted to lookupAccounts to finish
                 Assert.assertTrue(false);
@@ -495,13 +503,12 @@ public class IntegrationTest {
 
         private Process process;
 
-        public Server()
-                throws IOException, OperationsException, InterruptedException {
+        public Server() throws IOException, OperationsException, InterruptedException {
 
             cleanUp();
 
-            var format = Runtime.getRuntime()
-                    .exec(new String[] { TB_SERVER, "format", "--cluster=0", "--replica=0", TB_FILE });
+            var format = Runtime.getRuntime().exec(
+                    new String[] {TB_SERVER, "format", "--cluster=0", "--replica=0", TB_FILE});
             if (format.waitFor() != 0) {
                 var reader = new BufferedReader(new InputStreamReader(format.getErrorStream()));
                 var error = reader.lines().collect(Collectors.joining(". "));
@@ -509,14 +516,13 @@ public class IntegrationTest {
             }
 
             this.process = Runtime.getRuntime()
-                    .exec(new String[] { TB_SERVER, "start", "--addresses=" + TB_PORT, TB_FILE });
+                    .exec(new String[] {TB_SERVER, "start", "--addresses=" + TB_PORT, TB_FILE});
             if (process.waitFor(100, TimeUnit.MICROSECONDS))
                 throw new OperationsException("Start server failed");
         }
 
         @Override
-        public void close()
-                throws Exception {
+        public void close() throws Exception {
             cleanUp();
         }
 

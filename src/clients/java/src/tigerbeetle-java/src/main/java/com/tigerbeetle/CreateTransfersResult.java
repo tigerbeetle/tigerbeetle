@@ -19,5 +19,5 @@ public final class CreateTransfersResult {
     CreateTransfersResult(int index, CreateTransferResult result) {
         this.index = index;
         this.result = result;
-    }    
+    }
 }

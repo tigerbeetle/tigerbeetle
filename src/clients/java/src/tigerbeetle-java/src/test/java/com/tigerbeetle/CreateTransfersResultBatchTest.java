@@ -55,7 +55,8 @@ public class CreateTransfersResultBatchTest {
         assertResults(result2, array[1]);
     }
 
-    private static void assertResults(CreateTransfersResult result1, CreateTransfersResult result2) {
+    private static void assertResults(CreateTransfersResult result1,
+            CreateTransfersResult result2) {
         assertEquals(result1.index, result2.index);
         assertEquals(result1.result, result2.result);
     }

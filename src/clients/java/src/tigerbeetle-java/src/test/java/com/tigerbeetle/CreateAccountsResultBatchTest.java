@@ -58,5 +58,5 @@ public class CreateAccountsResultBatchTest {
     private static void assertResults(CreateAccountsResult result1, CreateAccountsResult result2) {
         assertEquals(result1.index, result2.index);
         assertEquals(result1.result, result2.result);
-    }     
+    }
 }

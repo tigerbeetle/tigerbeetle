@@ -6,8 +6,7 @@ class CreateTransfersResultBatch extends Batch {
 
     private final int lenght;
 
-    public CreateTransfersResultBatch(ByteBuffer buffer)
-            throws RequestException {
+    public CreateTransfersResultBatch(ByteBuffer buffer) throws RequestException {
         super(buffer);
 
         final var bufferLen = buffer.capacity();
@@ -16,8 +15,7 @@ class CreateTransfersResultBatch extends Batch {
         if (bufferLen % CreateTransfersResult.Struct.SIZE != 0)
             throw new AssertionError(
                     "Invalid data received from completion handler. bufferLen=%d, sizeOf(CreateTransfersResult)=%d.",
-                    bufferLen, 
-                    CreateTransfersResult.Struct.SIZE);
+                    bufferLen, CreateTransfersResult.Struct.SIZE);
 
         this.lenght = bufferLen / CreateTransfersResult.Struct.SIZE;
     }

@@ -13,7 +13,7 @@ public final class Client implements AutoCloseable {
             JNILoader.loadFromJar();
         } catch (Throwable any) {
             // Fallback to the JVM Path
-            System.loadLibrary(JNILoader.libName);    
+            System.loadLibrary(JNILoader.libName);
         }
     }
 
@@ -63,8 +63,7 @@ public final class Client implements AutoCloseable {
         this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
     }
 
-    public CreateAccountResult createAccount(Account account)
-            throws RequestException {
+    public CreateAccountResult createAccount(Account account) throws RequestException {
         var batch = new AccountsBatch(1);
         batch.add(account);
 
@@ -76,13 +75,11 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public CreateAccountsResult[] createAccounts(Account[] batch)
-            throws RequestException {
+    public CreateAccountsResult[] createAccounts(Account[] batch) throws RequestException {
         return createAccounts(new AccountsBatch(batch));
     }
 
-    public CreateAccountsResult[] createAccounts(AccountsBatch batch)
-            throws RequestException {
+    public CreateAccountsResult[] createAccounts(AccountsBatch batch) throws RequestException {
         var request = new CreateAccountsRequest(this, batch);
         request.beginRequest();
         request.waitForCompletionUninterruptibly();
@@ -99,8 +96,7 @@ public final class Client implements AutoCloseable {
         return request;
     }
 
-    public Account lookupAccount(UUID uuid)
-            throws RequestException {
+    public Account lookupAccount(UUID uuid) throws RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -112,13 +108,11 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public Account[] lookupAccounts(UUID[] batch)
-            throws RequestException {
+    public Account[] lookupAccounts(UUID[] batch) throws RequestException {
         return lookupAccounts(new UUIDsBatch(batch));
     }
 
-    public Account[] lookupAccounts(UUIDsBatch batch)
-            throws RequestException {
+    public Account[] lookupAccounts(UUIDsBatch batch) throws RequestException {
         var request = new LookupAccountsRequest(this, batch);
         request.beginRequest();
         request.waitForCompletionUninterruptibly();
@@ -135,8 +129,7 @@ public final class Client implements AutoCloseable {
         return request;
     }
 
-    public CreateTransferResult createTransfer(Transfer transfer)
-            throws RequestException {
+    public CreateTransferResult createTransfer(Transfer transfer) throws RequestException {
         var batch = new TransfersBatch(1);
         batch.add(transfer);
 
@@ -148,13 +141,11 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public CreateTransfersResult[] createTransfers(Transfer[] batch)
-            throws RequestException {
+    public CreateTransfersResult[] createTransfers(Transfer[] batch) throws RequestException {
         return createTransfers(new TransfersBatch(batch));
     }
 
-    public CreateTransfersResult[] createTransfers(TransfersBatch batch)
-            throws RequestException {
+    public CreateTransfersResult[] createTransfers(TransfersBatch batch) throws RequestException {
         var request = new CreateTransfersRequest(this, batch);
         request.beginRequest();
         request.waitForCompletionUninterruptibly();
@@ -171,8 +162,7 @@ public final class Client implements AutoCloseable {
         return request;
     }
 
-    public Transfer lookupTransfer(UUID uuid)
-            throws RequestException {
+    public Transfer lookupTransfer(UUID uuid) throws RequestException {
         var batch = new UUIDsBatch(1);
         batch.Add(uuid);
 
@@ -184,13 +174,11 @@ public final class Client implements AutoCloseable {
         }
     }
 
-    public Transfer[] lookupTransfers(UUID[] batch)
-            throws RequestException {
+    public Transfer[] lookupTransfers(UUID[] batch) throws RequestException {
         return lookupTransfers(new UUIDsBatch(batch));
     }
 
-    public Transfer[] lookupTransfers(UUIDsBatch batch)
-            throws RequestException {
+    public Transfer[] lookupTransfers(UUIDsBatch batch) throws RequestException {
         var request = new LookupTransfersRequest(this, batch);
         request.beginRequest();
         request.waitForCompletionUninterruptibly();
@@ -230,7 +218,8 @@ public final class Client implements AutoCloseable {
             } catch (InterruptedException interruptedException) {
 
                 // This exception should never exposed by the API to be handled by the user
-                throw new AssertionError(interruptedException, "Unexpected thread interruption on adquiring a packet.");
+                throw new AssertionError(interruptedException,
+                        "Unexpected thread interruption on adquiring a packet.");
             }
 
         } while (!adquired);
@@ -253,8 +242,7 @@ public final class Client implements AutoCloseable {
     }
 
     @Override
-    public void close()
-            throws Exception {
+    public void close() throws Exception {
 
         if (clientHandle != 0) {
 
