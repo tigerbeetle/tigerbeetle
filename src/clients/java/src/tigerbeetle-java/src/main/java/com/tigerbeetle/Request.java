@@ -30,8 +30,7 @@ abstract class Request<T> implements Future<T[]> {
     // This request must finish either with a result or an exception
     private Object result;
 
-    protected Request(Client client, byte operation, Batch batch)
-            throws IllegalArgumentException {
+    protected Request(Client client, byte operation, Batch batch) throws IllegalArgumentException {
         this.client = client;
         this.operation = operation;
         this.requestLen = batch.getLenght();
@@ -60,8 +59,7 @@ abstract class Request<T> implements Future<T[]> {
         if (receivedOperation != operation) {
 
             result = new AssertionError("Unexpected callback operation: expected=%d, actual=%d",
-                    operation,
-                    receivedOperation);
+                    operation, receivedOperation);
 
         } else if (buffer == null) {
 
@@ -140,12 +138,12 @@ abstract class Request<T> implements Future<T[]> {
         } catch (InterruptedException interruptedException) {
             // Since we don't support canceling an ongoing request
             // this exception should never exposed by the API to be handled by the user
-            throw new AssertionError(interruptedException, "Unexpected thread interruption on waitForCompletion.");
+            throw new AssertionError(interruptedException,
+                    "Unexpected thread interruption on waitForCompletion.");
         }
     }
 
-    void waitForCompletion()
-            throws InterruptedException {
+    void waitForCompletion() throws InterruptedException {
 
         synchronized (this) {
             while (!isDone()) {
@@ -154,8 +152,7 @@ abstract class Request<T> implements Future<T[]> {
         }
     }
 
-    boolean waitForCompletion(long timeoutMillis)
-            throws InterruptedException {
+    boolean waitForCompletion(long timeoutMillis) throws InterruptedException {
 
         synchronized (this) {
             if (!isDone()) {
@@ -170,8 +167,7 @@ abstract class Request<T> implements Future<T[]> {
     // Since we just support a limited set of operations, it is safe to cast the
     // result to T[]
     @SuppressWarnings("unchecked")
-    T[] getResult()
-            throws RequestException {
+    T[] getResult() throws RequestException {
 
         if (result == null)
             throw new AssertionError("Unexpected request result: result=null");
@@ -199,16 +195,14 @@ abstract class Request<T> implements Future<T[]> {
             if (result.length > requestLen)
                 throw new AssertionError(
                         "Amount of results is greater than the amount of requests: resultLen=%d, requestLen=%d",
-                        result.length,
-                        requestLen);
+                        result.length, requestLen);
 
             return result;
         }
     }
 
     @Override
-    public T[] get()
-            throws InterruptedException, ExecutionException {
+    public T[] get() throws InterruptedException, ExecutionException {
 
         waitForCompletion();
 

@@ -6,8 +6,7 @@ class CreateAccountsResultBatch extends Batch {
 
     private final int lenght;
 
-    public CreateAccountsResultBatch(ByteBuffer buffer)
-            throws RequestException {
+    public CreateAccountsResultBatch(ByteBuffer buffer) throws RequestException {
 
         super(buffer);
 
@@ -17,8 +16,7 @@ class CreateAccountsResultBatch extends Batch {
         if (bufferLen % CreateAccountsResult.Struct.SIZE != 0)
             throw new AssertionError(
                     "Invalid data received from completion handler. bufferLen=%d, sizeOf(CreateAccountsResult)=%d.",
-                    bufferLen,
-                    CreateAccountsResult.Struct.SIZE);
+                    bufferLen, CreateAccountsResult.Struct.SIZE);
 
         this.lenght = bufferLen / CreateAccountsResult.Struct.SIZE;
     }

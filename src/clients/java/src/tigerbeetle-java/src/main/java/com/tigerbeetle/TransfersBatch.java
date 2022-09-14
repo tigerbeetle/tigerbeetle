@@ -25,8 +25,7 @@ public final class TransfersBatch extends Batch {
         }
     }
 
-    TransfersBatch(ByteBuffer buffer)
-            throws RequestException {
+    TransfersBatch(ByteBuffer buffer) throws RequestException {
 
         super(buffer);
 
@@ -36,8 +35,7 @@ public final class TransfersBatch extends Batch {
         if (bufferLen % Transfer.Struct.SIZE != 0)
             throw new AssertionError(
                     "Invalid data received from completion handler: bufferLen=%d, sizeOf(Transfer)=%d.",
-                    bufferLen,
-                    Transfer.Struct.SIZE);
+                    bufferLen, Transfer.Struct.SIZE);
 
         this.capacity = bufferLen / Transfer.Struct.SIZE;
         this.lenght = capacity;
@@ -67,10 +65,9 @@ public final class TransfersBatch extends Batch {
         transfer.save(ptr);
 
         if (ptr.position() - start != Transfer.Struct.SIZE)
-            throw new AssertionError("Unexpected position: ptr.position()=%d, start=%d, sizeOf(Transfer)=%d.",
-                    ptr.position(),
-                    start,
-                    Account.Struct.SIZE);
+            throw new AssertionError(
+                    "Unexpected position: ptr.position()=%d, start=%d, sizeOf(Transfer)=%d.",
+                    ptr.position(), start, Account.Struct.SIZE);
 
         if (index >= lenght)
             lenght = index + 1;

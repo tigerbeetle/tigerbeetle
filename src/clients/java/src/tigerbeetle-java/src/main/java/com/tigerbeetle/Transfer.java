@@ -169,23 +169,22 @@ public final class Transfer {
     }
 
     void save(ByteBuffer ptr) {
-        ptr
-                .putLong(id.getLeastSignificantBits())
-                .putLong(id.getMostSignificantBits())
-                .putLong(debitAccountId.getLeastSignificantBits())
-                .putLong(debitAccountId.getMostSignificantBits())
-                .putLong(creditAccountId.getLeastSignificantBits())
-                .putLong(creditAccountId.getMostSignificantBits())
-                .putLong(userData.getLeastSignificantBits())
-                .putLong(userData.getMostSignificantBits())
-                .put(Struct.RESERVED)
-                .putLong(pendingId.getLeastSignificantBits())
-                .putLong(pendingId.getMostSignificantBits())
-                .putLong(timeout)
-                .putInt(ledger)
-                .putShort(code)
-                .putShort(flags)
-                .putLong(amount)
+        ptr.putLong(id.getLeastSignificantBits()) //
+                .putLong(id.getMostSignificantBits()) //
+                .putLong(debitAccountId.getLeastSignificantBits()) //
+                .putLong(debitAccountId.getMostSignificantBits()) //
+                .putLong(creditAccountId.getLeastSignificantBits()) //
+                .putLong(creditAccountId.getMostSignificantBits()) //
+                .putLong(userData.getLeastSignificantBits()) //
+                .putLong(userData.getMostSignificantBits()) //
+                .put(Struct.RESERVED) //
+                .putLong(pendingId.getLeastSignificantBits()) //
+                .putLong(pendingId.getMostSignificantBits()) //
+                .putLong(timeout) //
+                .putInt(ledger) //
+                .putShort(code) //
+                .putShort(flags) //
+                .putLong(amount) //
                 .putLong(timestamp);
     }
 

@@ -30,17 +30,16 @@ public class UUIDsBatch extends Batch {
         }
     }
 
-    UUIDsBatch(ByteBuffer buffer)
-            throws RequestException {
+    UUIDsBatch(ByteBuffer buffer) throws RequestException {
         super(buffer);
 
         final var bufferLen = buffer.capacity();
 
         // Make sure the completion handler is giving us valid data
         if (bufferLen % Struct.SIZE != 0)
-            throw new AssertionError("Invalid data received from completion handler. bufferLen=%d, sizeOf(UUID)=%d.",
-                    bufferLen,
-                    Struct.SIZE);
+            throw new AssertionError(
+                    "Invalid data received from completion handler. bufferLen=%d, sizeOf(UUID)=%d.",
+                    bufferLen, Struct.SIZE);
 
         this.capacity = bufferLen / Struct.SIZE;
         this.lenght = capacity;
@@ -68,15 +67,12 @@ public class UUIDsBatch extends Batch {
         final int start = index * Struct.SIZE;
         var ptr = getBuffer().position(start);
 
-        ptr
-                .putLong(uuid.getLeastSignificantBits())
-                .putLong(uuid.getMostSignificantBits());
+        ptr.putLong(uuid.getLeastSignificantBits()).putLong(uuid.getMostSignificantBits());
 
         if (ptr.position() - start != Struct.SIZE)
-            throw new AssertionError("Unexpected position: ptr.position()=%d, start=%d, sizeOf(UUID)=%d.",
-                    ptr.position(),
-                    start,
-                    Struct.SIZE);
+            throw new AssertionError(
+                    "Unexpected position: ptr.position()=%d, start=%d, sizeOf(UUID)=%d.",
+                    ptr.position(), start, Struct.SIZE);
 
         if (index >= lenght)
             lenght = index + 1;

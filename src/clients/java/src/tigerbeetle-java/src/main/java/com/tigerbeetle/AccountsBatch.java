@@ -25,8 +25,7 @@ public final class AccountsBatch extends Batch {
         }
     }
 
-    AccountsBatch(ByteBuffer buffer)
-            throws RequestException {
+    AccountsBatch(ByteBuffer buffer) throws RequestException {
 
         super(buffer);
 
@@ -36,8 +35,7 @@ public final class AccountsBatch extends Batch {
         if (bufferLen % Account.Struct.SIZE != 0)
             throw new AssertionError(
                     "Invalid data received from completion handler: bufferLen=%d, sizeOf(Account)=%d.",
-                    bufferLen,
-                    Account.Struct.SIZE);
+                    bufferLen, Account.Struct.SIZE);
 
         this.capacity = bufferLen / Account.Struct.SIZE;
         this.lenght = capacity;
@@ -69,10 +67,9 @@ public final class AccountsBatch extends Batch {
         account.save(ptr);
 
         if (ptr.position() - start != Account.Struct.SIZE)
-            throw new AssertionError("Unexpected position: ptr.position()=%d, start=%d, sizeOf(Account)=%d.",
-                    ptr.position(),
-                    start,
-                    Account.Struct.SIZE);
+            throw new AssertionError(
+                    "Unexpected position: ptr.position()=%d, start=%d, sizeOf(Account)=%d.",
+                    ptr.position(), start, Account.Struct.SIZE);
 
         if (index >= lenght)
             lenght = index + 1;

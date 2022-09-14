@@ -5,7 +5,7 @@ import com.tigerbeetle.*;
 public class Benchmark {
 
     public static void main(String[] args) {
-        try (var client = new Client(0, new String[] { "127.0.0.1:3001" }, 32)) {
+        try (var client = new Client(0, new String[] {"127.0.0.1:3001"}, 32)) {
 
             var accounts = new AccountsBatch(2);
 
@@ -26,7 +26,8 @@ public class Benchmark {
                 throw new Exception("Unexpected createAccount results");
 
             final int max_batches = 3;
-            final int max_transfers_per_batch = 8191; // config.message_size_max - @sizeOf(vsr.Header)
+            final int max_transfers_per_batch = 8191; // config.message_size_max -
+                                                      // @sizeOf(vsr.Header)
             var batches = new TransfersBatch[max_batches];
             for (int i = 0; i < max_batches; i++) {
                 var batch = new TransfersBatch(max_transfers_per_batch);
@@ -73,9 +74,10 @@ public class Benchmark {
             var result = (long) (max_batches * max_transfers_per_batch * 1000) / totalTime;
 
             System.out.printf("%d transfers per second\n", result);
-            System.out.printf("create_transfers max p100 latency per %d transfers = %dms\n", max_transfers_per_batch,
-                    maxTransferLatency);
-            System.out.printf("total %d transfers in %dms\n", max_batches * max_transfers_per_batch, totalTime);
+            System.out.printf("create_transfers max p100 latency per %d transfers = %dms\n",
+                    max_transfers_per_batch, maxTransferLatency);
+            System.out.printf("total %d transfers in %dms\n", max_batches * max_transfers_per_batch,
+                    totalTime);
 
         } catch (Exception e) {
             System.out.println(e);
