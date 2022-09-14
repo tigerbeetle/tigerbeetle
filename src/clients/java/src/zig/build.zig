@@ -9,8 +9,8 @@ pub fn build(b: *std.build.Builder) void {
     const platforms = .{
         .{ "x86_64-linux-gnu", "linux-x86_64" },
         .{ "x86_64-macos", "macos-x86_64" },
-        //.{ "aarch64-linux-gnu", "linux-aarch_64" }, // Needs https://github.com/zig-java/jui/pull/3
-        //.{ "aarch64-macos", "macos-aarch64" },
+        .{ "aarch64-linux-gnu", "linux-aarch_64" },
+        .{ "aarch64-macos", "macos-aarch64" },
     } ++
         // This is a workarround
         // Cross compiling to windows is failing
