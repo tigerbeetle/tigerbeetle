@@ -2700,7 +2700,7 @@ pub fn ReplicaType(
                     self.journal.header_with_op(self.commit_min).?.checksum);
             }
 
-            log.debug("{}: commit_op: executing view={} {} op={} checksum={} ({s})", .{
+            log.debug("{}: commit_op: executing view={} leader={} op={} checksum={} ({s})", .{
                 self.replica,
                 self.view,
                 self.leader_index(self.view) == self.replica,
@@ -3317,7 +3317,7 @@ pub fn ReplicaType(
             // Verify that the new request will fit in the WAL.
             // The message's op hasn't been assigned yet, but it will be `self.op + 1`.
             if (self.op == self.op_checkpoint_trigger()) {
-                log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
+                log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint_trigger={})", .{
                     self.replica,
                     self.op + 1,
                     self.op_checkpoint,

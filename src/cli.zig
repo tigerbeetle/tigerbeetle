@@ -46,6 +46,7 @@ const usage = fmt.comptimePrint(
     \\        Either the IPv4 address or port number (but not both) may be omitted,
     \\        in which case a default of {[default_address]s} or {[default_port]d}
     \\        will be used.
+    \\        "addresses[i]" corresponds to replica "i".
     \\
     \\Examples:
     \\

@@ -2,9 +2,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 
-const binary_search = @import("./binary_search.zig").binary_search;
+const binary_search_keys_raw = @import("./binary_search.zig").binary_search_keys_raw;
+const binary_search_values_raw = @import("./binary_search.zig").binary_search_values_raw;
 const eytzinger = @import("./eytzinger.zig").eytzinger;
-const perf = @import("./benchmarks/perf.zig");
 
 const GiB = 1 << 30;
 const searches = 500_000;
@@ -53,7 +53,7 @@ pub fn main() !void {
     defer arena.deinit();
 
     const blob_size = GiB;
-    var blob = try arena.allocator.alloc(u8, blob_size);
+    var blob = try arena.allocator().alloc(u8, blob_size);
 
     inline for (kv_types) |kv| {
         inline for (values_per_page) |values_count, v| {
@@ -65,13 +65,13 @@ pub fn main() !void {
                     .keys_count = keys_count,
                     .values_count = values_count,
                     .searches = searches,
-                }, blob, &prng.random);
+                }, blob, prng.random());
             }
         }
     }
 }
 
-fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) !void {
+fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !void {
     assert(blob.len == layout.blob_size);
     const Eytzinger = eytzinger(layout.keys_count - 1, layout.values_count);
     const V = Value(layout);
@@ -88,7 +88,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
 
     // Generate 1GiB worth of 24KiB pages.
     var blob_alloc = std.heap.FixedBufferAllocator.init(blob);
-    var pages = try blob_alloc.allocator.alloc(Page, page_count);
+    var pages = try blob_alloc.allocator().alloc(Page, page_count);
     random.bytes(std.mem.sliceAsBytes(pages));
     for (pages) |*page| {
         for (page.values) |*value, i| value.key = i;
@@ -105,7 +105,15 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
             const target = value_picker[v % value_picker.len];
             const page = &pages[page_index];
             const bounds = Eytzinger.search_values(K, V, V.key_compare, &page.keys, &page.values, target);
-            const hit = bounds[binary_search(K, V, V.key_from_value, V.key_compare, bounds, target, .{})];
+            const hit = bounds[binary_search_values_raw(
+                K,
+                V,
+                V.key_from_value,
+                V.key_compare,
+                bounds,
+                target,
+                .{},
+            )];
 
             assert(hit.key == target);
             if (i % pages.len == 0) v += 1;
@@ -136,7 +144,15 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: *std.rand.Random) 
         while (i < layout.searches) : (i += 1) {
             const target = value_picker[v % value_picker.len];
             const page = &pages[page_picker[i % page_picker.len]];
-            const hit = page.values[binary_search(K, V, V.key_from_value, V.key_compare, page.values[0..], target, .{})];
+            const hit = page.values[binary_search_values_raw(
+                K,
+                V,
+                V.key_from_value,
+                V.key_compare,
+                page.values[0..],
+                target,
+                .{},
+            )];
 
             assert(hit.key == target);
             if (i % pages.len == 0) v += 1;
@@ -182,12 +198,8 @@ fn Value(comptime layout: Layout) type {
             assert(@sizeOf(Self) == layout.value_size);
         }
 
-        inline fn key_from_value(self: Self) Key {
+        inline fn key_from_value(self: *const Self) Key {
             return self.key;
-        }
-
-        inline fn key_from_key(x: Key) Key {
-            return x;
         }
 
         inline fn key_compare(a: Key, b: Key) math.Order {
@@ -206,9 +218,7 @@ const BenchmarkResult = struct {
     branch_misses: usize,
 };
 
-const PERF = perf.PERF;
-const perf_event_attr = perf.perf_event_attr;
-const perf_event_open = perf.perf_event_open;
+const PERF = std.os.linux.PERF;
 const perf_counters = [_]PERF.COUNT.HW{
     PERF.COUNT.HW.CPU_CYCLES,
     PERF.COUNT.HW.INSTRUCTIONS,
@@ -223,10 +233,9 @@ const Benchmark = struct {
     perf_fds: [perf_counters.len]std.os.fd_t,
 
     fn begin() !Benchmark {
-        const flags = PERF.FLAG.FD_NO_GROUP;
         var perf_fds = [1]std.os.fd_t{-1} ** perf_counters.len;
         for (perf_counters) |counter, i| {
-            var attr: perf_event_attr = .{
+            var attr: std.os.linux.perf_event_attr = .{
                 .type = PERF.TYPE.HARDWARE,
                 .config = @enumToInt(counter),
                 .flags = .{
@@ -235,7 +244,7 @@ const Benchmark = struct {
                     .exclude_hv = true,
                 },
             };
-            perf_fds[i] = try perf_event_open(&attr, 0, -1, perf_fds[0], PERF.FLAG.FD_CLOEXEC);
+            perf_fds[i] = try std.os.perf_event_open(&attr, 0, -1, perf_fds[0], PERF.FLAG.FD_CLOEXEC);
         }
         const err = std.os.linux.ioctl(perf_fds[0], PERF.EVENT_IOC.ENABLE, PERF.IOC_FLAG_GROUP);
         if (err == -1) return error.Unexpected;
@@ -274,7 +283,7 @@ const Benchmark = struct {
 };
 
 // shuffle([0,1,…,n-1])
-fn shuffled_index(comptime n: usize, rand: *std.rand.Random) [n]usize {
+fn shuffled_index(comptime n: usize, rand: std.rand.Random) [n]usize {
     var indices: [n]usize = undefined;
     for (indices) |*i, j| i.* = j;
     rand.shuffle(usize, indices[0..]);
@@ -307,7 +316,7 @@ fn binary_search_keys(
     assert(keys.len == layout.keys_count);
     assert(values.len == layout.values_count);
 
-    const key_index = binary_search(Key, Key, V.key_from_key, compare_keys, keys, key, .{});
+    const key_index = binary_search_keys_raw(Key, compare_keys, keys, key, .{});
     const key_stride = layout.values_count / layout.keys_count;
     const high = key_index * key_stride;
     if (key_index < keys.len and keys[key_index] == key) {
