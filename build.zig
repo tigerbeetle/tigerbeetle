@@ -48,40 +48,6 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
-        const benchmark = b.addExecutable("eytzinger_benchmark", "src/eytzinger_benchmark.zig");
-        benchmark.setTarget(target);
-        benchmark.setBuildMode(.ReleaseSafe);
-        const run_cmd = benchmark.run();
-
-        const step = b.step("eytzinger_benchmark", "Benchmark array search");
-        step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const benchmark = b.addExecutable("benchmark_ewah", "src/ewah_benchmark.zig");
-        benchmark.setTarget(target);
-        benchmark.setBuildMode(.ReleaseSafe);
-        const run_cmd = benchmark.run();
-
-        const step = b.step("benchmark_ewah", "Benchmark EWAH codec");
-        step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const benchmark = b.addExecutable(
-            "benchmark_segmented_array",
-            "src/lsm/segmented_array_benchmark.zig",
-        );
-        benchmark.setTarget(target);
-        benchmark.setBuildMode(.ReleaseSafe);
-        benchmark.setMainPkgPath("src/");
-        const run_cmd = benchmark.run();
-
-        const step = b.step("benchmark_segmented_array", "Benchmark SegmentedArray search");
-        step.dependOn(&run_cmd.step);
-    }
-
-    {
         const tb_client = b.addStaticLibrary("tb_client", "src/c/tb_client.zig");
         tb_client.setMainPkgPath("src");
         tb_client.setTarget(target);
@@ -215,5 +181,35 @@ pub fn build(b: *std.build.Builder) void {
 
         const run_step = b.step("fuzz_vsr_superblock", "Fuzz the SuperBlock. Args: [--seed <seed>]");
         run_step.dependOn(&run_cmd.step);
+    }
+
+    inline for (.{
+        .{
+            .name = "benchmark_ewah",
+            .file = "src/ewah_benchmark.zig",
+            .description = "EWAH codec",
+        },
+        .{
+            .name = "benchmark_eytzinger",
+            .file = "src/lsm/eytzinger_benchmark.zig",
+            .description = "array search",
+        },
+        .{
+            .name = "benchmark_segmented_array",
+            .file = "src/lsm/segmented_array_benchmark.zig",
+            .description = "SegmentedArray search",
+        },
+    }) |benchmark| {
+        const exe = b.addExecutable(benchmark.name, benchmark.file);
+        exe.setTarget(target);
+        exe.setBuildMode(.ReleaseSafe);
+        exe.setMainPkgPath("src");
+
+        const build_step = b.step("build_" ++ benchmark.name, "Build " ++ benchmark.description ++ " benchmark");
+        build_step.dependOn(&exe.step);
+
+        const run_cmd = exe.run();
+        const step = b.step(benchmark.name, "Benchmark " ++ benchmark.description);
+        step.dependOn(&run_cmd.step);
     }
 }
