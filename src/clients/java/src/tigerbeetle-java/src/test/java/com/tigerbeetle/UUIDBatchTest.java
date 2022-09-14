@@ -52,7 +52,7 @@ public class UUIDBatchTest {
     @Test
     public void testFromArray() throws RequestException {
 
-        UUIDsBatch batch = new UUIDsBatch(new UUID[] { uuid1, uuid2 });
+        UUIDsBatch batch = new UUIDsBatch(new UUID[] {uuid1, uuid2});
         assertEquals(batch.getLenght(), 2);
 
         assertBuffer(dummyStream, batch.getBuffer());

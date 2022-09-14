@@ -153,7 +153,7 @@ public class TransfersBatchTest {
     @Test
     public void testFromArray() {
 
-        Transfer[] array = new Transfer[] { transfer1, transfer2 };
+        Transfer[] array = new Transfer[] {transfer1, transfer2};
 
         TransfersBatch batch = new TransfersBatch(array);
         assertEquals(batch.getLenght(), 2);

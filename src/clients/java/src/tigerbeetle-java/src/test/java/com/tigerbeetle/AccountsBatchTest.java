@@ -154,7 +154,7 @@ public class AccountsBatchTest {
     @Test
     public void testFromArray() {
 
-        Account[] array = new Account[] { account1, account2 };
+        Account[] array = new Account[] {account1, account2};
 
         AccountsBatch batch = new AccountsBatch(array);
         assertEquals(2, batch.getLenght());
