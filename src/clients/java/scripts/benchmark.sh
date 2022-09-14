@@ -11,7 +11,7 @@ echo "Building TigerBeetle..."
 (cd ./src/zig/lib/tigerbeetle && ./zig/zig build -Dcpu=baseline -Drelease-safe)
 (cd ./src/zig/lib/tigerbeetle && mv ./zig-out/bin/tigerbeetle .)
 echo "Building TigerBeetle Java Client"
-(cd src/tigerbeetle-java && mvn compile)
+(cd src/tigerbeetle-java && mvn -B compile --quiet)
 
 function onerror {
     if [ "$?" == "0" ]; then
