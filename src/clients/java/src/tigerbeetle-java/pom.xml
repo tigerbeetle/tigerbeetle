@@ -38,7 +38,7 @@
   </dependencies>
 
   <build>
-    <pluginManagement><!-- lock down plugins versions to avoid using Maven defaults (may be moved to parent pom) -->
+    <pluginManagement>
       <plugins>
         <plugin>
           <artifactId>maven-clean-plugin</artifactId>
@@ -96,7 +96,16 @@
           <groupId>org.jacoco</groupId>
           <artifactId>jacoco-maven-plugin</artifactId>
           <version>0.8.8</version>
-        </plugin>        
+        </plugin>
+        <plugin>
+          <groupId>net.revelc.code.formatter</groupId>
+          <artifactId>formatter-maven-plugin</artifactId>
+          <version>2.19.0</version>
+          <configuration>
+            <lineEnding>LF</lineEnding>
+            <configFile>${project.basedir}/formatter.xml</configFile>
+          </configuration>                
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -125,6 +134,28 @@
             </arguments>
         </configuration>        
       </plugin>
+
+      <!-- Formatter -->
+      <plugin>
+        <groupId>net.revelc.code.formatter</groupId>
+        <artifactId>formatter-maven-plugin</artifactId>      
+        <executions>
+          <execution>
+            <id>format</id>
+            <phase>validate</phase>
+            <goals>
+              <goal>format</goal>
+            </goals>
+          </execution>
+          <execution>
+            <!-- Format linter -->
+            <id>format-validate</id>
+            <goals>
+              <goal>validate</goal>
+            </goals>
+          </execution>          
+        </executions>
+      </plugin>      
 
       <!-- Code Coverage report generation using JaCoCo -->
       <plugin>
@@ -161,6 +192,11 @@
           </execution>
         </executions>
       </plugin>      
+
+
+
+
+
     </plugins>
   </build>
   

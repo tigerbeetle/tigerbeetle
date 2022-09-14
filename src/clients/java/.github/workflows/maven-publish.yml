@@ -27,17 +27,21 @@ jobs:
         server-id: github
         settings-path: ${{ github.workspace }}
 
+    - name: Format linter
+      working-directory: src/tigerbeetle-java
+      run: mvn -B formatter:validate --file pom.xml
+
     - name: Install Zig
       run: |
         git submodule init
         git submodule update
         ./scripts/install.sh
 
-    - name: Build with Maven
+    - name: Build
       working-directory: src/tigerbeetle-java
       run: mvn -B package --file pom.xml
 
-    - name: Publish to GitHub Packages Apache Maven
+    - name: Publish
       working-directory: src/tigerbeetle-java
       run: mvn deploy -s $GITHUB_WORKSPACE/settings.xml
       env:
