@@ -72,6 +72,18 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig run -OReleaseSafe src/simulator.zig
 
+  # Verify that these build without errors:
+  build-tools:
+    name: 'Verify build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build tb_client
+      - run: zig/zig build build_benchmark_ewah
+      - run: zig/zig build build_benchmark_eytzinger
+      - run: zig/zig build build_benchmark_segmented_array
+
   build-and-push:
     name: 'Build and push Docker image'
     runs-on: ubuntu-latest
