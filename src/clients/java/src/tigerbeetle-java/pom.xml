@@ -51,6 +51,14 @@
         <plugin>
           <artifactId>maven-jar-plugin</artifactId>
           <version>3.0.2</version>
+          <configuration>
+            <!-- Excludes object files created during zig compilation  -->
+            <excludes>
+              <exclude>**/*.o</exclude>
+              <exclude>**/*.obj</exclude>
+              <exclude>**/*.pdb</exclude>
+            </excludes>
+          </configuration>          
         </plugin>
         <plugin>
           <artifactId>maven-install-plugin</artifactId>
@@ -80,77 +88,77 @@
         </plugin>        
       </plugins>
     </pluginManagement>
+
     <plugins>
+      <!-- Zig build -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <execution>
+            <?m2e ignore?>
+            <id>zig-build</id>
+            <phase>validate</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+            <workingDirectory>${project.basedir}/../zig</workingDirectory>
+            <executable>${project.basedir}/../zig/lib/tigerbeetle/zig/zig</executable>
+            <arguments>
+                <argument>build</argument>
+                <argument>-Drelease-safe</argument>
+            </arguments>
+        </configuration>        
+      </plugin>
 
-        <!-- Zig build -->
-        <plugin>
-          <groupId>org.codehaus.mojo</groupId>
-          <artifactId>exec-maven-plugin</artifactId>
-          <version>3.1.0</version>
+      <!-- Code Coverage report generation using JaCoCo -->
+      <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
           <executions>
-            <execution>
-              <?m2e execute onConfiguration,onIncremental?>
-              <id>zig-build</id>
-              <phase>compile</phase>
-              <goals>
-                <goal>exec</goal>
-              </goals>
-            </execution>
+              <execution>
+                  <id>jacoco-initialize</id>
+                  <goals>
+                      <goal>prepare-agent</goal>
+                  </goals>
+              </execution>
+              <!-- could be replaced by a online tool such as codecov -->
+              <execution>
+                  <id>jacoco-report</id>
+                  <phase>test</phase>
+                  <goals>
+                      <goal>report</goal>
+                  </goals>
+              </execution>
           </executions>
-          <configuration>
-              <workingDirectory>${project.basedir}/../zig</workingDirectory>
-              <executable>${project.basedir}/../zig/lib/tigerbeetle/zig/zig</executable>
-              <arguments>
-                  <argument>build</argument>
-                  <argument>-Drelease-safe</argument>
-              </arguments>
-          </configuration>        
-        </plugin>
+      </plugin>
 
-        <!-- Code Coverage report generation using JaCoCo -->
-        <plugin>
-            <groupId>org.jacoco</groupId>
-            <artifactId>jacoco-maven-plugin</artifactId>
-            <executions>
-                <execution>
-                    <id>jacoco-initialize</id>
-                    <goals>
-                        <goal>prepare-agent</goal>
-                    </goals>
-                </execution>
-                <!-- could be replaced by a online tool such as codecov -->
-                <execution>
-                    <id>jacoco-report</id>
-                    <phase>test</phase>
-                    <goals>
-                        <goal>report</goal>
-                    </goals>
-                </execution>
-            </executions>
-        </plugin>
-
-        <!-- Javadoc -->
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-javadoc-plugin</artifactId>
-          <executions>
-            <execution>
-              <id>attach-javadocs</id>
-              <goals>
-                <goal>jar</goal>
-              </goals>
-            </execution>
-          </executions>
-        </plugin>      
+      <!-- Javadoc -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>      
     </plugins>
   </build>
   
-	<distributionManagement>
-		<repository>
-			<id>github</id>
-			<name>TigerBeetle Java client</name>
-			<url>https://maven.pkg.github.com/batiati/tigerbeetle-java</url>
-		</repository>
-	</distributionManagement>
+  <distributionManagement>
+    <repository>
+      <id>github</id>
+      <name>TigerBeetle Java client</name>
+      <url>https://maven.pkg.github.com/batiati/tigerbeetle-java</url>
+    </repository>
+  </distributionManagement>
 
 </project>

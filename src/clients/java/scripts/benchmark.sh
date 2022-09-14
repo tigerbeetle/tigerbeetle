@@ -10,10 +10,8 @@ COLOR_END='\033[0m'
 echo "Building TigerBeetle..."
 (cd ./src/zig/lib/tigerbeetle && ./zig/zig build -Dcpu=baseline -Drelease-safe)
 (cd ./src/zig/lib/tigerbeetle && mv ./zig-out/bin/tigerbeetle .)
-echo "Building TigerBeetle JNI interface..."
-(cd ./src/zig && ./lib/tigerbeetle/zig/zig build -Drelease-safe)
 echo "Building TigerBeetle Java Client"
-(cd src/tigerbeetle-java && javac -sourcepath ./src -d ./build ./src/main/java/Benchmark.java ./src/main/java/com/tigerbeetle/*.java)
+(cd src/tigerbeetle-java && mvn compile)
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -58,7 +56,7 @@ sleep 1
 
 echo ""
 echo "Benchmarking..."
-java -Djava.library.path="./src/zig/zig-out/lib/" -cp ./src/tigerbeetle-java/build Benchmark
+java -cp ./src/tigerbeetle-java/target/classes Benchmark
 echo ""
 
 for I in 0

@@ -8,5 +8,3 @@ git submodule update
 echo "Building TigerBeetle..."
 (cd ./src/zig/lib/tigerbeetle && ./zig/zig build -Dcpu=baseline -Drelease-safe)
 (cd ./src/zig/lib/tigerbeetle && mv ./zig-out/bin/tigerbeetle .)
-echo "Building TigerBeetle JNI interface..."
-(cd ./src/zig && ./lib/tigerbeetle/zig/zig build -Drelease-safe)

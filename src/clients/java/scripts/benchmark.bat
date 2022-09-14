@@ -29,13 +29,9 @@ cd .\src\zig\lib\tigerbeetle
 move .\zig-out\bin\tigerbeetle.exe .
 cd ..\..\..\..
 
-echo "Building TigerBeetle JNI interface..."
-cd .\src\zig
-.\lib\tigerbeetle\zig\zig.exe build -Drelease-safe
-cd ..\..
 echo "Building TigerBeetle Java Client"
 cd .\src\tigerbeetle-java
-javac -sourcepath ./src -d ./build ./src/main/java/Benchmark.java ./src/main/java/com/tigerbeetle/*.java
+mvn compile javac -sourcepath ./src -d ./build ./src/main/java/Benchmark.java ./src/main/java/com/tigerbeetle/*.java
 cd ..\..
 
 for /l %%i in (0, 1, 0) do (
@@ -56,5 +52,5 @@ timeout /t 2
 
 echo.
 echo Benchmarking...
-java -Djava.library.path="./src/zig/zig-out/lib/" -cp ./src/tigerbeele-java/build Benchmark
+java -cp ./src/tigerbeetle-java/target/classes Benchmark
 exit /b %errorlevel%
