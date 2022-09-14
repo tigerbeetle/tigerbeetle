@@ -144,19 +144,18 @@ public final class Account {
     }
 
     void save(ByteBuffer ptr) {
-
-        ptr.putLong(id.getLeastSignificantBits()) //
-                .putLong(id.getMostSignificantBits()) //
-                .putLong(userData.getLeastSignificantBits()) //
-                .putLong(userData.getMostSignificantBits()) //
-                .put(Struct.RESERVED) //
-                .putInt(ledger) //
-                .putShort(code) //
-                .putShort(flags) //
-                .putLong(debitsPending) //
-                .putLong(debitsPosted) //
-                .putLong(creditsPending) //
-                .putLong(creditsPosted) //
-                .putLong(timestamp);
+        ptr.putLong(id.getLeastSignificantBits());
+        ptr.putLong(id.getMostSignificantBits());
+        ptr.putLong(userData.getLeastSignificantBits());
+        ptr.putLong(userData.getMostSignificantBits());
+        ptr.put(Struct.RESERVED);
+        ptr.putInt(ledger);
+        ptr.putShort(code);
+        ptr.putShort(flags);
+        ptr.putLong(debitsPending);
+        ptr.putLong(debitsPosted);
+        ptr.putLong(creditsPending);
+        ptr.putLong(creditsPosted);
+        ptr.putLong(timestamp);
     }
 }

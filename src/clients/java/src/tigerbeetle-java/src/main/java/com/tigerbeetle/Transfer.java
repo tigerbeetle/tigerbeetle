@@ -169,23 +169,23 @@ public final class Transfer {
     }
 
     void save(ByteBuffer ptr) {
-        ptr.putLong(id.getLeastSignificantBits()) //
-                .putLong(id.getMostSignificantBits()) //
-                .putLong(debitAccountId.getLeastSignificantBits()) //
-                .putLong(debitAccountId.getMostSignificantBits()) //
-                .putLong(creditAccountId.getLeastSignificantBits()) //
-                .putLong(creditAccountId.getMostSignificantBits()) //
-                .putLong(userData.getLeastSignificantBits()) //
-                .putLong(userData.getMostSignificantBits()) //
-                .put(Struct.RESERVED) //
-                .putLong(pendingId.getLeastSignificantBits()) //
-                .putLong(pendingId.getMostSignificantBits()) //
-                .putLong(timeout) //
-                .putInt(ledger) //
-                .putShort(code) //
-                .putShort(flags) //
-                .putLong(amount) //
-                .putLong(timestamp);
+        ptr.putLong(id.getLeastSignificantBits());
+        ptr.putLong(id.getMostSignificantBits());
+        ptr.putLong(debitAccountId.getLeastSignificantBits());
+        ptr.putLong(debitAccountId.getMostSignificantBits());
+        ptr.putLong(creditAccountId.getLeastSignificantBits());
+        ptr.putLong(creditAccountId.getMostSignificantBits());
+        ptr.putLong(userData.getLeastSignificantBits());
+        ptr.putLong(userData.getMostSignificantBits());
+        ptr.put(Struct.RESERVED);
+        ptr.putLong(pendingId.getLeastSignificantBits());
+        ptr.putLong(pendingId.getMostSignificantBits());
+        ptr.putLong(timeout);
+        ptr.putInt(ledger);
+        ptr.putShort(code);
+        ptr.putShort(flags);
+        ptr.putLong(amount);
+        ptr.putLong(timestamp);
     }
 
 }
