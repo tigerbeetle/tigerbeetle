@@ -117,6 +117,7 @@ pub fn CompactionType(
 
         manifest: *Manifest,
         level_b: u8,
+        remove_level_a: ?TableInfo,
         update_level_b: TableInfoBuffer,
         insert_level_b: TableInfoBuffer,
 
@@ -165,6 +166,7 @@ pub fn CompactionType(
                 // Assigned by start()
                 .manifest = undefined,
                 .level_b = undefined,
+                .remove_level_a = null,
                 .update_level_b = update_level_b,
                 .insert_level_b = insert_level_b,
             };
@@ -183,6 +185,7 @@ pub fn CompactionType(
         pub fn start(
             compaction: *Compaction,
             grid: *Grid,
+            table: ?*const TableInfo,
             range: Manifest.CompactionRange,
             snapshot: u64,
             manifest: *Manifest,
@@ -221,6 +224,7 @@ pub fn CompactionType(
 
                 .manifest = manifest,
                 .level_b = level_b,
+                .remove_level_a = if (table) |level_a_table| level_a_table.* else null,
                 .update_level_b = compaction.update_level_b,
                 .insert_level_b = compaction.insert_level_b,
             };
@@ -538,9 +542,19 @@ pub fn CompactionType(
             assert(compaction.iterator_b.peek() == null);
 
             // Apply any pending manifest changes queued up during the merge.
-            // TODO handle compaction.remove_level_a
             compaction.apply_manifest_updates(&compaction.update_level_b);
             compaction.apply_manifest_updates(&compaction.insert_level_b);
+
+            // Remove the level_a table if it was provided given it's now been merged into level_b.
+            // TODO: Release the grid blocks associated with level_a as well
+            if (compaction.level_b != 0) {
+                const level_a = compaction.level_b - 1;
+
+                if (compaction.remove_level_a) |*level_a_table| {
+                    const tables = @as(*[1]TableInfo, level_a_table);
+                    compaction.manifest.update_tables(level_a, compaction.snapshot, tables);
+                }
+            }
 
             // Finally, mark Compaction as officially complete and ready to be reset().
             compaction.merge_status = .done;
