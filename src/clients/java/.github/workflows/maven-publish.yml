@@ -42,6 +42,7 @@ jobs:
       run: mvn -B package --file pom.xml
 
     - name: Publish
+      if: ${{ github.event_name == 'push' }}
       working-directory: src/tigerbeetle-java
       run: mvn deploy -s $GITHUB_WORKSPACE/settings.xml
       env:
