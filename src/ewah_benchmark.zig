@@ -35,15 +35,16 @@ pub fn main() !void {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
 
+        const allocator = arena.allocator();
         var i: usize = 0;
         var bitsets: [samples][]usize = undefined;
         var bitsets_encoded: [samples][]align(@alignOf(usize)) u8 = undefined;
         var bitsets_decoded: [samples][]usize = undefined;
         var bitset_lengths: [samples]usize = undefined;
         while (i < samples) : (i += 1) {
-            bitsets[i] = try make_bitset(&arena.allocator, config);
-            bitsets_encoded[i] = try arena.allocator.alignedAlloc(u8, @alignOf(usize), ewah.encode_size_max(bitsets[0].len));
-            bitsets_decoded[i] = try arena.allocator.alloc(usize, config.words);
+            bitsets[i] = try make_bitset(allocator, config);
+            bitsets_encoded[i] = try allocator.alignedAlloc(u8, @alignOf(usize), ewah.encode_size_max(bitsets[0].len));
+            bitsets_decoded[i] = try allocator.alloc(usize, config.words);
         }
 
         // Benchmark encoding.
@@ -96,16 +97,14 @@ pub fn main() !void {
     }
 }
 
-fn make_bitset(allocator: *std.mem.Allocator, config: BitSetConfig) ![]usize {
+fn make_bitset(allocator: std.mem.Allocator, config: BitSetConfig) ![]usize {
     var words = try allocator.alloc(usize, config.words);
     var w: usize = 0;
-    var run: bool = true;
     var literal: usize = 1;
     while (w < words.len) : (w += 1) {
-        const start = w;
-        const run_length = prng.random.uintLessThan(usize, 2 * config.run_length_e);
-        const literals_length = prng.random.uintLessThan(usize, 2 * config.literals_length_e);
-        const run_bit = prng.random.boolean();
+        const run_length = prng.random().uintLessThan(usize, 2 * config.run_length_e);
+        const literals_length = prng.random().uintLessThan(usize, 2 * config.literals_length_e);
+        const run_bit = prng.random().boolean();
 
         const run_end = std.math.min(w + run_length, words.len);
         while (w < run_end) : (w += 1) {
