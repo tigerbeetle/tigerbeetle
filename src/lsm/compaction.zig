@@ -268,9 +268,12 @@ pub fn CompactionType(
             // Tables discovered by iterator_b that are visible
             compaction.queue_manifest_update(&compaction.update_level_b, table);
 
-            // TODO: Release the table's block addresses in the Grid if its invisible to Compaction.
-            _ = table;
-            _ = index_block;
+            // Release the table's block addresses in the Grid as it will be made invisible.
+            // This is safe to do so as iterator_b makes a copy of the block before calling us.
+            const grid = compaction.grid;
+            for (Table.index_data_addresses_used(index_block)) |address| grid.release(address);
+            for (Table.index_filter_addresses_used(index_block)) |address| grid.release(address);
+            grid.release(Table.index_block_address(index_block));
         }
 
         /// Enqueues the table to be applied to the manifest on the given table buffer.
