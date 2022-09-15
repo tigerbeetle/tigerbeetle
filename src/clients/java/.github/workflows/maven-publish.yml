@@ -46,4 +46,4 @@ jobs:
       working-directory: src/tigerbeetle-java
       run: mvn deploy -s $GITHUB_WORKSPACE/settings.xml
       env:
-        GITHUB_TOKEN: ${{ secrets.MAVEN_PUBLISH }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
