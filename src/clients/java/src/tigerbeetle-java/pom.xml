@@ -204,7 +204,7 @@
     <repository>
       <id>github</id>
       <name>TigerBeetle Java client</name>
-      <url>https://maven.pkg.github.com/batiati/tigerbeetle-java</url>
+      <url>https://maven.pkg.github.com/tigerbeetledb/tigerbeetle-java</url>
     </repository>
   </distributionManagement>
 
