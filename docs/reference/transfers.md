@@ -144,7 +144,7 @@ not complete until a transaction with the same id is sent with the
 `post_pending_transfer` or `void_pending_transfer` flag set (both
 described below).
 
-When this flag is on, the [`timeout`](timeout) field must be non-zero.
+When this flag is on, the [`timeout`](#timeout) field must be non-zero.
 
 #### `post_pending_transfer` flag
 
