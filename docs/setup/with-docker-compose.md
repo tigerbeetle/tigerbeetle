@@ -84,4 +84,4 @@ tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
 
 Now you can connect to the running server with any client. For a quick
 start, try [creating accounts and transfers in the Node
-CLI](/usage/node-cli).
+CLI](../usage/node-cli).
