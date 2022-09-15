@@ -1,5 +1,5 @@
 # tigerbeetle-go
-[TigerBeetle](https://github.com/coilhq/tigerbeetle) client for Go.
+[TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle) client for Go.
 
 ## Development Setup
 
@@ -33,4 +33,4 @@ zgo.bat test # on windows
 
 ## Other clients and documentation
 
-- [Tigerbeetle Node](https://github.com/coilhq/tigerbeetle-node)
+- [Tigerbeetle Node](https://github.com/tigerbeetledb/tigerbeetle-node)
