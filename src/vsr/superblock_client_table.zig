@@ -111,7 +111,6 @@ pub const ClientTable = struct {
                 assert(entries_count < client_table.sorted.len);
                 assert(entry.reply.header.command == .reply);
                 client_table.sorted[entries_count] = entry;
-                entries_count += 1;
             }
         }
 
