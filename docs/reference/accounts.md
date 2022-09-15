@@ -8,7 +8,8 @@ for fields that TigerBeetle, not you (the user), are responsible.
 
 Account fields *cannot be changed by the user* after
 creation. However, debits and credits fields are updated by
-TigerBeetle as transfers move money to and from an account.
+TigerBeetle as transfers move money to and from an account. And the
+`timestamp` field is set by TigerBeetle after the create request.
 
 ## Fields
 
@@ -74,11 +75,45 @@ Constraints:
 
 ### `flag`
 
-Specifies behavior during transfers.
+A bitfield that toggles additional behavior.
 
 Constraints:
 
 * Type is 16-bit unsigned integer (2 bytes)
+
+#### `linked` flag
+
+When the linked flag is specified, it links an account with the next
+account in the batch, to create a chain of account, of arbitrary
+length, which all succeed or fail in creation together. The tail of a
+chain is denoted by the first account without this flag. The last
+account in a batch may therefore never have the `linked` flag set as
+this would leave a chain open-ended.
+
+Multiple chains or individual accounts may coexist within a batch to
+succeed or fail independently. Accounts within a chain are executed
+within order, or are rolled back on error, so that the effect of each
+account in the chain is visible to the next, and so that the chain is
+either visible or invisible as a unit to subsequent accounts after the
+chain. The account that was the first to break the chain will have a
+unique error result. Other accounts in the chain will have their error
+result set to `linked_event_failed`.
+
+#### `debits_must_not_exceed_credits` flag
+
+When set, transfers will be rejected that would cause this account's
+debits to exceed credits. Specifically when `account.debits_pending +
+account.debits_posted + transfer.amount > account.credits_posted`.
+
+This cannot be set when `credits_must_not_exceed_debits` is also set.
+
+#### `credits_must_not_exceed_debits` flag
+
+When set, transfers will be rejected that would cause this account's
+credits to exceed debits. Specifically when `account.credits_pending +
+account.credits_posted + transfer.amount > account.debits_posted`.
+
+This cannot be set when `debits_must_not_exceed_credits` is also set.
 
 ### `debits_pending`
 
