@@ -207,7 +207,8 @@ pub fn GridType(comptime Storage: type) type {
             {
                 var it = grid.read_iops.iterate();
                 while (it.next()) |iop| {
-                    assert(address != iop.reads.peek().?.address);
+                    const iop_read = iop.reads.peek() orelse continue;
+                    assert(address != iop_read.address);
                     assert(block != iop.block);
                 }
             }
@@ -340,8 +341,9 @@ pub fn GridType(comptime Storage: type) type {
             {
                 var it = grid.read_iops.iterate();
                 while (it.next()) |iop| {
-                    if (iop.reads.peek().?.address == read.address) {
-                        assert(iop.reads.peek().?.checksum == read.checksum);
+                    const iop_read = iop.reads.peek() orelse continue;
+                    if (iop_read.address == read.address) {
+                        assert(iop_read.checksum == read.checksum);
                         iop.reads.push(read);
                         return;
                     }
